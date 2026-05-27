@@ -1,0 +1,324 @@
+@page "/cms-builder/editor/{PageKey}"
+@rendermode InteractiveServer
+@using GwsBusinessSuite.Application.CmsBuilder
+@inject IReactPageBuilderService ReactPageBuilderService
+@inject ILogger<CmsBuilderEditor> Logger
+@inject NavigationManager Navigation
+
+<PageTitle>CMS Visual Builder</PageTitle>
+
+<div class="page-header d-flex justify-content-between align-items-start gap-3">
+    <div>
+        <h1><i class="bi bi-braces-asterisk me-2 text-primary"></i>Visual Builder</h1>
+        <p class="mb-1">Edit React page <span class="font-monospace">@PageKey</span> using drag-and-drop elements.</p>
+        @if (!string.IsNullOrWhiteSpace(RoutePath))
+        {
+            <p class="small text-secondary mb-0">Route: <span class="font-monospace">@RoutePath</span></p>
+        }
+        @if (!string.IsNullOrWhiteSpace(FilePath))
+        {
+            <p class="small text-secondary mb-0">File: <a href="@BuildFileOpenLink(FilePath)">@FilePath</a></p>
+        }
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <button class="btn btn-outline-secondary" @onclick="BackToList">Back To Pages</button>
+        <button class="btn btn-primary" @onclick="SaveAsync" disabled="@IsBusy">Save</button>
+        <button class="btn btn-outline-success" @onclick="PublishAsync" disabled="@IsBusy">Publish Changes</button>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger">@ErrorMessage</div>
+}
+
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-info">@StatusMessage</div>
+}
+
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-header bg-white border-bottom py-2 d-flex justify-content-between align-items-center">
+        <span class="fw-semibold">Git Publish</span>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="RefreshPublishStatusAsync" disabled="@IsBusy">Refresh
+            Status</button>
+        </div>
+        <div class="card-body">
+            <div class="small text-secondary mb-2">Current branch: <span class="font-monospace">@PublishBranchName</span>
+            </div>
+            <label class="form-label small">Commit Message</label>
+            <input class="form-control mb-3" @bind="PublishCommitMessage" placeholder="cms-builder publish updates" />
+
+            @if (ChangedFiles.Count == 0)
+            {
+                <div class="text-secondary small">No React app changes detected for publishing.</div>
+            }
+            else
+            {
+                <div class="small fw-semibold mb-2">Pending files</div>
+                <ul class="small text-secondary mb-0">
+                    @foreach (var changedFile in ChangedFiles)
+                    {
+                        <li><span class="font-monospace">@changedFile</span></li>
+                    }
+                </ul>
+            }
+        </div>
+    </div>
+
+<div class="row g-3">
+    <div class="col-lg-3">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-2 d-flex justify-content-between align-items-center">
+                <span class="fw-semibold">Elements</span>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="ToggleSidebar">
+                    @(SidebarCollapsed ? "Expand" : "Collapse")
+                </button>
+            </div>
+            @if (!SidebarCollapsed)
+            {
+                <div class="card-body d-grid gap-2">
+                    @foreach (var elementType in ElementTypes)
+                    {
+                        <button class="btn btn-outline-primary text-start" draggable="true"
+                                @ondragstart="() => StartDragElementType(elementType)" @onclick="() => AddElement(elementType)">
+                            + @elementType
+                        </button>
+                    }
+                    <div class="small text-secondary mt-2">Drag an element button into the canvas or click to add.</div>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="col-lg-9">
+        <div class="card border-0 shadow-sm" @ondragover:preventDefault="true" @ondrop="DropElementIntoCanvas">
+            <div class="card-header bg-white border-bottom py-2">
+                <span class="fw-semibold">Page Canvas</span>
+            </div>
+            <div class="card-body">
+                @if (Elements.Count == 0)
+                {
+                    <div class="text-secondary">Drag or add elements from the sidebar to start building.</div>
+                }
+                else
+                {
+                    @foreach (var element in Elements)
+                    {
+                        <div class="border rounded-3 p-3 mb-3 bg-body-tertiary">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="badge text-bg-primary">@element.ElementType</span>
+                                <button class="btn btn-sm btn-outline-danger"
+                                        @onclick="() => RemoveElement(element.Id)">Delete</button>
+                            </div>
+                            <div class="row g-2">
+                                <div class="col-md-8">
+                                    <label class="form-label small">Text / Content</label>
+                                    <input class="form-control" value="@element.Text"
+                                           @oninput="(e) => UpdateElementText(element.Id, e.Value?.ToString() ?? string.Empty)" />
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label small">CSS Class</label>
+                                    <input class="form-control" value="@element.CssClass"
+                                           @oninput="(e) => UpdateElementCss(element.Id, e.Value?.ToString() ?? string.Empty)" />
+                                </div>
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string PageKey { get; set; } = string.Empty;
+
+    private static readonly string[] ElementTypes = ["heading", "paragraph", "button", "image"];
+
+    private List<VisualBuilderElement> Elements { get; set; } = new();
+    private string DraggingElementType { get; set; } = string.Empty;
+    private bool SidebarCollapsed { get; set; }
+    private bool IsBusy { get; set; }
+    private string StatusMessage { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+    private string RoutePath { get; set; } = string.Empty;
+    private string FilePath { get; set; } = string.Empty;
+    private string PublishCommitMessage { get; set; } = "cms-builder publish updates";
+    private string PublishBranchName { get; set; } = "unknown";
+    private List<string> ChangedFiles { get; set; } = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadEditorAsync();
+    }
+
+    private async Task LoadEditorAsync()
+    {
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+
+        try
+        {
+            var state = await ReactPageBuilderService.LoadEditorStateAsync(PageKey);
+            if (state is null)
+            {
+                ErrorMessage = $"Page '{PageKey}' was not found in the active React app.";
+                return;
+            }
+
+            Elements = state.Elements.ToList();
+            RoutePath = state.RoutePath;
+            FilePath = state.FilePath;
+            StatusMessage = $"Loaded visual builder for {state.PageKey}.";
+            await RefreshPublishStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load visual builder state for page {PageKey}.", PageKey);
+            ErrorMessage = $"Unable to load page editor. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void ToggleSidebar()
+    {
+        SidebarCollapsed = !SidebarCollapsed;
+    }
+
+    private void StartDragElementType(string elementType)
+    {
+        DraggingElementType = elementType;
+    }
+
+    private void DropElementIntoCanvas(DragEventArgs _)
+    {
+        if (string.IsNullOrWhiteSpace(DraggingElementType))
+        {
+            return;
+        }
+
+        AddElement(DraggingElementType);
+        DraggingElementType = string.Empty;
+    }
+
+    private void AddElement(string elementType)
+    {
+        Elements.Add(new VisualBuilderElement
+        {
+            ElementType = elementType,
+            Text = elementType switch
+            {
+                "heading" => "Heading text",
+                "button" => "Click me",
+                "image" => "https://via.placeholder.com/1200x630",
+                _ => "Paragraph text"
+            },
+            CssClass = string.Empty
+        });
+    }
+
+    private void RemoveElement(string id)
+    {
+        var index = Elements.FindIndex(x => x.Id == id);
+        if (index >= 0)
+        {
+            Elements.RemoveAt(index);
+        }
+    }
+
+    private void UpdateElementText(string id, string value)
+    {
+        var element = Elements.FirstOrDefault(x => x.Id == id);
+        if (element is not null)
+        {
+            element.Text = value;
+        }
+    }
+
+    private void UpdateElementCss(string id, string value)
+    {
+        var element = Elements.FirstOrDefault(x => x.Id == id);
+        if (element is not null)
+        {
+            element.CssClass = value;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+
+        try
+        {
+            var result = await ReactPageBuilderService.SaveAsync(new ReactPageSaveRequest
+            {
+                PageKey = PageKey,
+                Elements = Elements,
+                PerformedBy = "cms-builder-ui"
+            });
+
+            StatusMessage = result.GitSummary;
+            await RefreshPublishStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to save visual builder page {PageKey}.", PageKey);
+            ErrorMessage = $"Unable to save changes. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void BackToList()
+    {
+        Navigation.NavigateTo("/cms-builder");
+    }
+
+    private static string BuildFileOpenLink(string filePath)
+    {
+        return $"vscode://file/{Uri.EscapeDataString(filePath)}";
+    }
+
+    private async Task RefreshPublishStatusAsync()
+    {
+        var status = await ReactPageBuilderService.GetPublishStatusAsync();
+        PublishBranchName = status.CurrentBranch;
+        ChangedFiles = status.ChangedFiles;
+    }
+
+    private async Task PublishAsync()
+    {
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+
+        try
+        {
+            var result = await ReactPageBuilderService.PublishAsync(new ReactPublishRequest
+            {
+                CommitMessage = PublishCommitMessage,
+                IncludeOnlyReactAppChanges = true
+            });
+
+            StatusMessage = result.Summary;
+            await RefreshPublishStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to publish changes for page {PageKey}.", PageKey);
+            ErrorMessage = $"Unable to publish changes. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+}

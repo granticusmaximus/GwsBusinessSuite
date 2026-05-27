@@ -21,6 +21,7 @@ public static class DependencyInjection
         var connectionString = configuration.GetConnectionString("DefaultConnection") ?? "Data Source=gws-suite.db";
         services.AddDataProtection();
         services.Configure<ContentStudioOptions>(configuration.GetSection(ContentStudioOptions.SectionName));
+        services.Configure<CmsBuilderOptions>(configuration.GetSection(CmsBuilderOptions.SectionName));
         services.Configure<SanityOptions>(configuration.GetSection(SanityOptions.SectionName));
         services.AddDbContextFactory<ApplicationDbContext>(options => options.UseSqlite(connectionString));
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
@@ -47,6 +48,7 @@ public static class DependencyInjection
         services.AddScoped<ICjAdsService, CjAdsService>();
         services.AddScoped<IAffiliateOfferScoringService, AffiliateOfferScoringService>();
         services.AddScoped<ICmsBuilderService, CmsBuilderService>();
+        services.AddScoped<IReactPageBuilderService, ReactPageBuilderService>();
         services.AddScoped<ICmsKnowledgeService, CmsKnowledgeService>();
         services.AddScoped<IContentStudioService, ContentStudioService>();
         services.AddScoped<ICrmService, CrmService>();

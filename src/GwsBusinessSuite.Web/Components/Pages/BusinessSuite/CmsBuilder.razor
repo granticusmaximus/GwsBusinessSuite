@@ -1,15 +1,15 @@
 @page "/cms-builder"
 @rendermode InteractiveServer
 @using GwsBusinessSuite.Application.CmsBuilder
-@using GwsBusinessSuite.Domain.Entities
-@inject ICmsBuilderService CmsBuilderService
+@inject IReactPageBuilderService ReactPageBuilderService
+@inject NavigationManager Navigation
 @inject ILogger<CmsBuilder> Logger
 
 <PageTitle>CMS Builder</PageTitle>
 
 <div class="page-header">
   <h1><i class="bi bi-window-stack me-2 text-primary"></i>CMS Builder</h1>
-  <p>Create and manage CMS sites, page routes, and block JSON content from one local workspace.</p>
+    <p>Manage live React pages and open each page in the visual builder workspace.</p>
 </div>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
@@ -28,368 +28,66 @@
   </div>
 }
 
-<div class="row g-4">
-    <div class="col-lg-4">
-        <div class="card border-0 shadow-sm h-100">
-            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
-                <span class="fw-semibold">Sites</span>
-                <button class="btn btn-sm btn-outline-primary" @onclick="CreateNewSite" disabled="@IsBusy">
-                    <i class="bi bi-plus-lg me-1"></i>New Site
-                </button>
-            </div>
-            <div class="card-body p-0">
-                @if (Sites.Count == 0)
-                {
-                    <div class="p-4 text-secondary">
-                        <p class="mb-0">No CMS sites yet. Create the first site to begin building pages.</p>
-                    </div>
-                }
-                else
-                {
-                    <div class="list-group list-group-flush">
-                        @foreach (var site in Sites)
-                        {
-                            <button type="button"
-                                    class="list-group-item list-group-item-action d-flex justify-content-between align-items-start gap-2 @(SelectedSiteId == site.Id ? "active" : string.Empty)"
-                                    @onclick="() => OpenSiteAsync(site.Id)" disabled="@IsBusy">
-                                <div>
-                                    <div class="fw-semibold">@site.Name</div>
-                                    <div class="small @(SelectedSiteId == site.Id ? "text-white-50" : "text-secondary")">@site.Slug</div>
-                                </div>
-                                <span class="badge @(SelectedSiteId == site.Id ? "text-bg-light" : "text-bg-secondary")">@site.Theme</span>
-                            </button>
-                        }
-                    </div>
-                }
-            </div>
-        </div>
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
+        <span class="fw-semibold">Active React Pages</span>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="LoadPagesAsync" disabled="@IsBusy">
+            <i class="bi bi-arrow-repeat me-1"></i>Refresh
+        </button>
     </div>
-
-    <div class="col-lg-8">
-        <div class="card border-0 shadow-sm mb-4">
-            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
-                <span class="fw-semibold">Site Editor</span>
-                <span class="badge @(SelectedSiteId.HasValue ? "text-bg-primary" : "text-bg-secondary")">@(SelectedSiteId.HasValue ? "Editing Existing Site" : "New Site")</span>
+    <div class="card-body">
+        @if (ReactPages.Count == 0)
+        {
+            <p class="text-secondary mb-0">No React pages were discovered from the connected app.</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Page</th>
+                            <th>Route</th>
+                            <th>React File</th>
+                            <th class="text-end">Builder</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var reactPage in ReactPages)
+                        {
+                            <tr>
+                                <td class="fw-semibold">@reactPage.DisplayName</td>
+                                <td class="font-monospace">@reactPage.RoutePath</td>
+                                <td class="small text-secondary">
+                                    <a href="@BuildFileOpenLink(reactPage.FilePath)">@reactPage.FilePath</a>
+                                </td>
+                                <td class="text-end">
+                                    <button class="btn btn-sm btn-primary"
+                                            @onclick="() => OpenVisualBuilder(reactPage.PageKey)">
+                                        Open Visual Builder
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
             </div>
-            <div class="card-body">
-                <EditForm Model="SiteEditor" OnValidSubmit="SaveSiteAsync">
-                    <DataAnnotationsValidator />
-                    <ValidationSummary />
-
-                    <div class="row g-3">
-                        <div class="col-md-6">
-                            <label class="form-label fw-semibold small">Name</label>
-                            <InputText class="form-control" @bind-Value="SiteEditor.Name" placeholder="Website name" />
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label fw-semibold small">Slug</label>
-                            <InputText class="form-control" @bind-Value="SiteEditor.Slug" placeholder="site-slug" />
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label fw-semibold small">Theme</label>
-                            <InputText class="form-control" @bind-Value="SiteEditor.Theme" placeholder="Default" />
-                        </div>
-                    </div>
-
-                    <div class="mt-3 d-flex flex-wrap gap-2">
-                        <button type="submit" class="btn btn-primary" disabled="@IsBusy">
-                            <i class="bi bi-floppy-fill me-1"></i>Save Site
-                        </button>
-                        <button type="button" class="btn btn-outline-secondary" @onclick="CreateNewSite" disabled="@IsBusy">Reset</button>
-                        <button type="button" class="btn btn-outline-danger" @onclick="DeleteSelectedSiteAsync" disabled="@(IsBusy || !SelectedSiteId.HasValue)">Delete</button>
-                    </div>
-                </EditForm>
-            </div>
-        </div>
-
-        <div class="card border-0 shadow-sm mb-4">
-            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
-                <span class="fw-semibold">Pages</span>
-                <span class="badge text-bg-light">@Pages.Count</span>
-            </div>
-            <div class="card-body">
-                @if (!SelectedSiteId.HasValue)
-                {
-                    <p class="text-secondary mb-0">Select a site to manage its pages.</p>
-                }
-                else
-                {
-                    <div class="d-flex justify-content-end mb-3">
-                        <button class="btn btn-sm btn-outline-primary" @onclick="CreateNewPage" disabled="@IsBusy">
-                            <i class="bi bi-plus-lg me-1"></i>New Page
-                        </button>
-                    </div>
-
-                    @if (Pages.Count == 0)
-                    {
-                        <p class="text-secondary mb-0">No pages yet for @SelectedSiteName. Add the home page or a route to start building.</p>
-                    }
-                    else
-                    {
-                        <div class="table-responsive">
-                            <table class="table align-middle mb-0">
-                                <thead>
-                                    <tr>
-                                        <th>Page</th>
-                                        <th>Slug</th>
-                                        <th>Updated</th>
-                                        <th class="text-end">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                      @foreach (var cmsPage in Pages)
-                                    {
-                        <tr class="@(SelectedPageId == cmsPage.Id ? "table-primary" : string.Empty)">
-                          <td class="fw-semibold">@cmsPage.Title</td>
-                          <td class="font-monospace">@cmsPage.Slug</td>
-                          <td>@(cmsPage.UpdatedAt ?? cmsPage.CreatedAt).ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
-                                            <td class="text-end">
-                            <button class="btn btn-sm btn-outline-secondary me-2" @onclick="() => OpenPageAsync(cmsPage.Id)"
-                                    disabled="@IsBusy">Edit</button>
-                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeletePageAsync(cmsPage.Id)"
-                                    disabled="@IsBusy">Delete</button>
-                                            </td>
-                                        </tr>
-                                    }
-                                </tbody>
-                            </table>
-                        </div>
-                    }
-                }
-            </div>
-        </div>
-
-        <div class="card border-0 shadow-sm">
-            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
-                <span class="fw-semibold">Page Editor</span>
-                <span class="badge @(SelectedPageId.HasValue ? "text-bg-primary" : "text-bg-secondary")">@(SelectedPageId.HasValue ? "Editing Existing Page" : "New Page")</span>
-            </div>
-            <div class="card-body">
-                @if (!SelectedSiteId.HasValue)
-                {
-                    <p class="text-secondary mb-0">Create or select a site before editing page content.</p>
-                }
-                else
-                {
-                    <EditForm Model="PageEditor" OnValidSubmit="SavePageAsync">
-                        <DataAnnotationsValidator />
-                        <ValidationSummary />
-
-                        <div class="row g-3">
-                            <div class="col-md-7">
-                                <label class="form-label fw-semibold small">Title</label>
-                                <InputText class="form-control" @bind-Value="PageEditor.Title" placeholder="Home page" />
-                            </div>
-                            <div class="col-md-5">
-                                <label class="form-label fw-semibold small">Slug</label>
-                                <InputText class="form-control" @bind-Value="PageEditor.Slug" placeholder="home" />
-                            </div>
-                            <div class="col-12">
-                                <label class="form-label fw-semibold small">Blocks JSON</label>
-                                <InputTextArea class="form-control font-monospace" rows="10" @bind-Value="PageEditor.BlocksJson"
-                                               placeholder="[{&quot;type&quot;:&quot;hero&quot;,&quot;title&quot;:&quot;Welcome&quot;}]" />
-                            </div>
-                        </div>
-
-                        <div class="mt-3 d-flex flex-wrap gap-2">
-                            <button type="submit" class="btn btn-primary" disabled="@IsBusy">
-                                <i class="bi bi-floppy-fill me-1"></i>Save Page
-                            </button>
-                            <button type="button" class="btn btn-outline-secondary" @onclick="CreateNewPage" disabled="@IsBusy">Reset</button>
-                            <button type="button" class="btn btn-outline-danger" @onclick="DeleteSelectedPageAsync" disabled="@(IsBusy || !SelectedPageId.HasValue)">Delete</button>
-                        </div>
-                    </EditForm>
-
-                                    <div class="card border-0 bg-body-tertiary mt-4">
-                                        <div class="card-header bg-transparent border-0 pt-3 px-3 pb-0">
-                                            <span class="fw-semibold">Workflow Blueprints</span>
-                                        </div>
-                                        <div class="card-body">
-                                            @if (WorkflowBlueprints.Count == 0)
-                                            {
-                                                <p class="text-secondary mb-0">No workflow blueprints are available yet.</p>
-                                            }
-                                            else
-                                            {
-                                                <div class="row g-2">
-                                                    <div class="col-md-8">
-                                                        <select class="form-select" @bind="SelectedWorkflowBlueprintKey">
-                                                            @foreach (var blueprint in WorkflowBlueprints)
-                                                            {
-                                                                <option value="@blueprint.Key">@blueprint.Name (@blueprint.Category)</option>
-                                                            }
-                                                        </select>
-                                                        @if (!string.IsNullOrWhiteSpace(SelectedWorkflowBlueprintKey))
-                                                        {
-                                                            var selectedBlueprint = WorkflowBlueprints.FirstOrDefault(x => x.Key ==
-                                                SelectedWorkflowBlueprintKey);
-                                                            if (selectedBlueprint is not null)
-                                                            {
-                                                                <div class="small text-secondary mt-2">@selectedBlueprint.Description</div>
-                                                            }
-                                                        }
-                                                    </div>
-                                                    <div class="col-md-4 d-grid gap-2">
-                                                        <button class="btn btn-outline-primary"
-                                                                @onclick="() => ApplySelectedWorkflowBlueprintAsync(false)"
-                                                                disabled="@(IsBusy || !SelectedPageId.HasValue)">
-                                                            Append Blueprint
-                                                        </button>
-                                                        <button class="btn btn-outline-warning"
-                                                                @onclick="() => ApplySelectedWorkflowBlueprintAsync(true)"
-                                                                disabled="@(IsBusy || !SelectedPageId.HasValue)">
-                                                            Replace Blocks
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                                <div class="small text-secondary mt-2">
-                                                    Inspired by common CMS workflows and implemented as clean-room templates.
-                                                </div>
-                                            }
-                                        </div>
-                                    </div>
-
-                    <div class="card border-0 bg-body-tertiary mt-4">
-                        <div class="card-header bg-transparent border-0 pt-3 px-3 pb-0">
-                            <span class="fw-semibold">Block Preview</span>
-                        </div>
-                        <div class="card-body">
-                            @if (string.IsNullOrWhiteSpace(PageEditor.BlocksJson))
-                            {
-                                <p class="text-secondary mb-0">Enter block JSON to preview the page structure.</p>
-                            }
-                            else
-                            {
-                                <pre class="mb-0 p-3 rounded-3 border bg-white" style="white-space: pre-wrap;">@PageEditor.BlocksJson</pre>
-                            }
-                        </div>
-                    </div>
-                }
-            </div>
-        </div>
+        }
     </div>
 </div>
 
 @code {
-    private List<CmsWorkflowBlueprintSummary> WorkflowBlueprints { get; set; } = new();
-    private string SelectedWorkflowBlueprintKey { get; set; } = string.Empty;
-    private List<CmsSite> Sites { get; set; } = new();
-    private List<CmsPage> Pages { get; set; } = new();
-    private CmsSiteEditorModel SiteEditor { get; set; } = new();
-    private CmsPageEditorModel PageEditor { get; set; } = new();
-    private Guid? SelectedSiteId { get; set; }
-    private Guid? SelectedPageId { get; set; }
+    private List<ReactPageReference> ReactPages { get; set; } = new();
     private bool IsBusy { get; set; }
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
 
-    private string SelectedSiteName => Sites.FirstOrDefault(site => site.Id == SelectedSiteId)?.Name ?? string.Empty;
-
     protected override async Task OnInitializedAsync()
     {
-        await LoadWorkflowBlueprintsAsync();
-        await LoadSitesAsync(selectFirstSite: true);
+        await LoadPagesAsync();
     }
 
-    private async Task LoadWorkflowBlueprintsAsync()
-    {
-        WorkflowBlueprints = (await CmsBuilderService.ListWorkflowBlueprintsAsync()).ToList();
-        if (WorkflowBlueprints.Count > 0 && string.IsNullOrWhiteSpace(SelectedWorkflowBlueprintKey))
-        {
-            SelectedWorkflowBlueprintKey = WorkflowBlueprints[0].Key;
-        }
-    }
-
-    private async Task LoadSitesAsync(bool selectFirstSite)
-    {
-        try
-        {
-            Sites = (await CmsBuilderService.ListSitesAsync()).ToList();
-
-            if (Sites.Count == 0)
-            {
-                CreateNewSite();
-                return;
-            }
-
-            if (selectFirstSite && (!SelectedSiteId.HasValue || Sites.All(site => site.Id != SelectedSiteId.Value)))
-            {
-                await OpenSiteAsync(Sites[0].Id);
-                return;
-            }
-
-            if (SelectedSiteId.HasValue)
-            {
-                await LoadPagesForSelectedSiteAsync(selectFirstPage: false);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Unable to load CMS sites.");
-            ErrorMessage = $"Unable to load CMS sites. {ex.Message}";
-        }
-    }
-
-    private async Task LoadPagesForSelectedSiteAsync(bool selectFirstPage)
-    {
-        if (!SelectedSiteId.HasValue)
-        {
-            Pages = new List<CmsPage>();
-            return;
-        }
-
-        Pages = (await CmsBuilderService.ListPagesAsync(SelectedSiteId)).ToList();
-
-        if (selectFirstPage && Pages.Count > 0)
-        {
-            await OpenPageAsync(Pages[0].Id);
-        }
-    }
-
-    private void CreateNewSite()
-    {
-        SelectedSiteId = null;
-        SelectedPageId = null;
-        SiteEditor = new CmsSiteEditorModel();
-        PageEditor = new CmsPageEditorModel();
-        Pages = new List<CmsPage>();
-        StatusMessage = "Ready to create a new CMS site.";
-        ErrorMessage = string.Empty;
-    }
-
-    private async Task OpenSiteAsync(Guid siteId)
-    {
-        try
-        {
-            var site = await CmsBuilderService.GetSiteAsync(siteId);
-            if (site is null)
-            {
-                StatusMessage = "The selected CMS site no longer exists.";
-                return;
-            }
-
-            SelectedSiteId = site.Id;
-            SiteEditor = new CmsSiteEditorModel
-            {
-                SiteId = site.Id,
-                Name = site.Name,
-                Slug = site.Slug,
-                Theme = site.Theme
-            };
-            SelectedPageId = null;
-            PageEditor = new CmsPageEditorModel { SiteId = site.Id };
-            await LoadPagesForSelectedSiteAsync(selectFirstPage: true);
-            StatusMessage = $"Opened CMS site '{site.Name}'.";
-            ErrorMessage = string.Empty;
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Unable to open CMS site {SiteId}.", siteId);
-            ErrorMessage = $"Unable to open CMS site. {ex.Message}";
-        }
-    }
-
-    private async Task SaveSiteAsync()
+    private async Task LoadPagesAsync()
     {
         IsBusy = true;
         ErrorMessage = string.Empty;
@@ -397,23 +95,13 @@
 
         try
         {
-            var saved = await CmsBuilderService.SaveSiteAsync(SiteEditor);
-            SelectedSiteId = saved.Id;
-            SiteEditor = new CmsSiteEditorModel
-            {
-                SiteId = saved.Id,
-                Name = saved.Name,
-                Slug = saved.Slug,
-                Theme = saved.Theme
-            };
-            PageEditor.SiteId = saved.Id;
-            StatusMessage = $"Saved CMS site '{saved.Name}'.";
-            await LoadSitesAsync(selectFirstSite: false);
+            ReactPages = (await ReactPageBuilderService.ListReactPagesAsync()).ToList();
+            StatusMessage = $"Loaded {ReactPages.Count} React pages from the active app.";
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Unable to save CMS site.");
-            ErrorMessage = $"Unable to save CMS site. {ex.Message}";
+            Logger.LogError(ex, "Unable to load React pages for CMS Builder.");
+            ErrorMessage = $"Unable to load React pages. {ex.Message}";
         }
         finally
         {
@@ -421,195 +109,13 @@
         }
     }
 
-    private async Task DeleteSelectedSiteAsync()
+    private void OpenVisualBuilder(string pageKey)
     {
-        if (SelectedSiteId is not { } siteId)
-        {
-            return;
-        }
-
-        IsBusy = true;
-        ErrorMessage = string.Empty;
-        StatusMessage = string.Empty;
-
-        try
-        {
-            await CmsBuilderService.DeleteSiteAsync(siteId);
-            StatusMessage = "CMS site deleted.";
-            CreateNewSite();
-            await LoadSitesAsync(selectFirstSite: true);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Unable to delete CMS site {SiteId}.", siteId);
-            ErrorMessage = $"Unable to delete CMS site. {ex.Message}";
-        }
-        finally
-        {
-            IsBusy = false;
-        }
+        Navigation.NavigateTo($"/cms-builder/editor/{Uri.EscapeDataString(pageKey)}");
     }
 
-    private void CreateNewPage()
+    private static string BuildFileOpenLink(string filePath)
     {
-        if (!SelectedSiteId.HasValue)
-        {
-            StatusMessage = "Select a CMS site before creating a page.";
-            return;
-        }
-
-        SelectedPageId = null;
-        PageEditor = new CmsPageEditorModel
-        {
-            SiteId = SelectedSiteId,
-            BlocksJson = "[]"
-        };
-        StatusMessage = $"Ready to create a new page for {SelectedSiteName}.";
-        ErrorMessage = string.Empty;
-    }
-
-    private async Task OpenPageAsync(Guid pageId)
-    {
-        try
-        {
-            var page = await CmsBuilderService.GetPageAsync(pageId);
-            if (page is null)
-            {
-                StatusMessage = "The selected CMS page no longer exists.";
-                return;
-            }
-
-            SelectedPageId = page.Id;
-            PageEditor = new CmsPageEditorModel
-            {
-                PageId = page.Id,
-                SiteId = page.SiteId,
-                Title = page.Title,
-                Slug = page.Slug,
-                BlocksJson = page.BlocksJson
-            };
-            StatusMessage = $"Opened CMS page '{page.Title}'.";
-            ErrorMessage = string.Empty;
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Unable to open CMS page {PageId}.", pageId);
-            ErrorMessage = $"Unable to open CMS page. {ex.Message}";
-        }
-    }
-
-    private async Task SavePageAsync()
-    {
-        IsBusy = true;
-        ErrorMessage = string.Empty;
-        StatusMessage = string.Empty;
-
-        try
-        {
-            var saved = await CmsBuilderService.SavePageAsync(PageEditor);
-            SelectedPageId = saved.Id;
-            PageEditor = new CmsPageEditorModel
-            {
-                PageId = saved.Id,
-                SiteId = saved.SiteId,
-                Title = saved.Title,
-                Slug = saved.Slug,
-                BlocksJson = saved.BlocksJson
-            };
-            StatusMessage = $"Saved CMS page '{saved.Title}'.";
-            await LoadPagesForSelectedSiteAsync(selectFirstPage: false);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Unable to save CMS page.");
-            ErrorMessage = $"Unable to save CMS page. {ex.Message}";
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-    }
-
-    private async Task DeletePageAsync(Guid pageId)
-    {
-        IsBusy = true;
-        ErrorMessage = string.Empty;
-        StatusMessage = string.Empty;
-
-        try
-        {
-            await CmsBuilderService.DeletePageAsync(pageId);
-            StatusMessage = "CMS page deleted.";
-            SelectedPageId = null;
-            PageEditor = new CmsPageEditorModel { SiteId = SelectedSiteId, BlocksJson = "[]" };
-            await LoadPagesForSelectedSiteAsync(selectFirstPage: true);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Unable to delete CMS page {PageId}.", pageId);
-            ErrorMessage = $"Unable to delete CMS page. {ex.Message}";
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-    }
-
-  private async Task DeleteSelectedPageAsync()
-  {
-    if (SelectedPageId is not { } pageId)
-    {
-      return;
-    }
-
-    await DeletePageAsync(pageId);
-  }
-
-    private async Task ApplySelectedWorkflowBlueprintAsync(bool replaceExistingBlocks)
-    {
-        if (SelectedPageId is not { } pageId)
-        {
-            StatusMessage = "Save the page first before applying workflow blueprints.";
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(SelectedWorkflowBlueprintKey))
-        {
-            StatusMessage = "Select a workflow blueprint before applying.";
-            return;
-        }
-
-        IsBusy = true;
-        ErrorMessage = string.Empty;
-        StatusMessage = string.Empty;
-
-        try
-        {
-            var updated = await CmsBuilderService.ApplyWorkflowBlueprintAsync(pageId, SelectedWorkflowBlueprintKey,
-replaceExistingBlocks);
-            PageEditor = new CmsPageEditorModel
-            {
-                PageId = updated.Id,
-                SiteId = updated.SiteId,
-                Title = updated.Title,
-                Slug = updated.Slug,
-                BlocksJson = updated.BlocksJson
-            };
-
-            await LoadPagesForSelectedSiteAsync(selectFirstPage: false);
-            StatusMessage = replaceExistingBlocks
-                    ? "Workflow blueprint applied by replacing all existing blocks."
-                    : "Workflow blueprint appended to existing blocks.";
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Unable to apply workflow blueprint '{BlueprintKey}' to page {PageId}.",
-SelectedWorkflowBlueprintKey, pageId);
-            ErrorMessage = $"Unable to apply workflow blueprint. {ex.Message}";
-        }
-        finally
-        {
-            IsBusy = false;
-        }
+        return $"vscode://file/{Uri.EscapeDataString(filePath)}";
     }
 }
