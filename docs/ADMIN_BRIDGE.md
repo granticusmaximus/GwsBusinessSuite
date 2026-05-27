@@ -2,6 +2,8 @@
 
 This document explains how to bridge `GwsBusinessSuite` as an admin/backend suite for an existing public site without changing public frontend code.
 
+The React public site now includes a client-side `/admin` route that forwards users to the Blazor admin workspace. By default it targets `https://admin.grantwatson.dev/admin`, and you can override that with `VITE_ADMIN_APP_BASE_URL` in the React build environment.
+
 ## Goal
 
 - Public site remains unchanged.
@@ -17,6 +19,8 @@ This document explains how to bridge `GwsBusinessSuite` as an admin/backend suit
 
 - `Hosting:PathBase`
 
+`apps/public-site/src/App.jsx` and `apps/public-site/src/pages/AdminRedirect.jsx` now handle `/admin` in the React app and forward to the Blazor host.
+
 ## Recommended deployment topology
 
 1. Deploy `GwsBusinessSuite.Web` to its own host, for example:
@@ -29,6 +33,8 @@ This document explains how to bridge `GwsBusinessSuite` as an admin/backend suit
 ## Frontend host bridge without code changes
 
 Use your frontend host dashboard routing/redirects.
+
+If you want the browser to jump straight from Netlify to the admin host instead of loading the React redirect page first, add a host-level redirect for `/admin` and `/admin/*` in Netlify later.
 
 ### Option A (most reliable): redirect
 
