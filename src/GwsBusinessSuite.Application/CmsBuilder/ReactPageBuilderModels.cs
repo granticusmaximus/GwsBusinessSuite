@@ -8,6 +8,15 @@ public sealed class ReactPageReference
     public string DisplayName { get; set; } = string.Empty;
 }
 
+public sealed class PageUiFile
+{
+    public string FilePath { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string FileType { get; set; } = string.Empty;
+    public string RelativePath { get; set; } = string.Empty;
+    public bool IsThemeFile { get; set; }
+}
+
 public sealed class VisualBuilderElement
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
@@ -22,6 +31,7 @@ public sealed class ReactPageEditorState
     public string RoutePath { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;
     public List<VisualBuilderElement> Elements { get; set; } = new();
+    public List<PageUiFile> UiFiles { get; set; } = new();
 }
 
 public sealed class ReactPageSaveRequest

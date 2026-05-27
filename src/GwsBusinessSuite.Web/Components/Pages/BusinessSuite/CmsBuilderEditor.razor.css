@@ -20,6 +20,7 @@
     justify-content: flex-end;
     gap: 0.75rem;
     flex-wrap: wrap;
+    flex-shrink: 0;
 }
 
 .studio-pills {
@@ -432,4 +433,94 @@
         min-height: 560px;
         padding: 1rem;
     }
+}
+
+/* ── UI File items ─────────────────────────────────── */
+
+.studio-ui-file-item {
+    cursor: pointer;
+}
+
+.studio-file-icon.is-css {
+    background: linear-gradient(145deg, #0f5132, #198754);
+}
+
+.studio-file-icon.is-jsx {
+    background: linear-gradient(145deg, #0d1b2a, #0d6efd);
+}
+
+.studio-file-icon.is-js {
+    background: linear-gradient(145deg, #664d03, #ffc107);
+    color: #1a1a1a;
+}
+
+/* ── File editor panel ─────────────────────────────── */
+
+.studio-file-editor-stack {
+    display: grid;
+    gap: 0.85rem;
+}
+
+.studio-file-editor-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.studio-file-editor-path {
+    font-size: 0.76rem;
+    color: #475569;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
+
+.studio-file-type-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.25rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    flex-shrink: 0;
+}
+
+.studio-file-type-badge-css {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.studio-file-type-badge-scss,
+.studio-file-type-badge-sass,
+.studio-file-type-badge-less {
+    background: #fce7f3;
+    color: #9d174d;
+}
+
+.studio-file-type-badge-jsx,
+.studio-file-type-badge-tsx {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.studio-file-type-badge-js,
+.studio-file-type-badge-ts {
+    background: #fef9c3;
+    color: #713f12;
+}
+
+.studio-file-editor-textarea {
+    min-height: 380px;
+    resize: vertical;
+    font-size: 0.8rem;
+    line-height: 1.7;
+    tab-size: 2;
+    white-space: pre;
+    overflow-x: auto;
 }

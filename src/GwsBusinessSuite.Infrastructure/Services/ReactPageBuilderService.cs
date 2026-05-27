@@ -109,7 +109,8 @@ public sealed class ReactPageBuilderService(
             PageKey = target.PageKey,
             RoutePath = target.RoutePath,
             FilePath = target.FilePath,
-            Elements = elements
+            Elements = elements,
+            UiFiles = await DiscoverPageUiFilesAsync(target.FilePath, cancellationToken)
         };
     }
 
@@ -547,6 +548,148 @@ public sealed class ReactPageBuilderService(
     private static string EscapeCommitMessage(string message)
     {
         return message.Replace("\"", "\\\"", StringComparison.Ordinal);
+    }
+
+    private static readonly Regex JsxImportRegex = new(
+        @"^import\s+.*?from\s+['""](?<path>[^'""]+)['""]",
+        RegexOptions.Compiled | RegexOptions.Multiline);
+
+    private static readonly string[] GlobalThemeRelativePaths =
+    [
+        "src/index.css",
+        "src/App.css",
+        "src/theme.js",
+        "src/theme.ts",
+        "src/styles/index.css",
+        "src/styles/variables.css",
+        "src/styles/theme.css",
+        "src/styles/global.css",
+    ];
+
+    private static readonly string[] StyleFileExtensions = [".css", ".scss", ".sass", ".less"];
+    private static readonly string[] SourceFileExtensions = [".jsx", ".tsx", ".js", ".ts"];
+
+    public async Task<string> ReadFileContentAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+        {
+            return string.Empty;
+        }
+
+        return await File.ReadAllTextAsync(filePath, cancellationToken);
+    }
+
+    public async Task SaveFileContentAsync(string filePath, string content, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+
+        var directory = Path.GetDirectoryName(filePath);
+        if (!string.IsNullOrWhiteSpace(directory) && !Directory.Exists(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        await File.WriteAllTextAsync(filePath, content, cancellationToken);
+    }
+
+    private async Task<List<PageUiFile>> DiscoverPageUiFilesAsync(string pageFilePath, CancellationToken cancellationToken)
+    {
+        var reactAppRoot = GetReactAppRoot();
+        var discovered = new Dictionary<string, PageUiFile>(StringComparer.OrdinalIgnoreCase);
+
+        void TryAdd(string absolutePath, bool isTheme = false)
+        {
+            if (string.IsNullOrWhiteSpace(absolutePath) || discovered.ContainsKey(absolutePath))
+            {
+                return;
+            }
+
+            if (!File.Exists(absolutePath))
+            {
+                return;
+            }
+
+            var ext = Path.GetExtension(absolutePath).ToLowerInvariant();
+            var fileType = ext switch
+            {
+                ".css" or ".scss" or ".sass" or ".less" => "css",
+                ".jsx" => "jsx",
+                ".tsx" => "tsx",
+                ".js" => "js",
+                ".ts" => "ts",
+                _ => "file"
+            };
+
+            discovered[absolutePath] = new PageUiFile
+            {
+                FilePath = absolutePath,
+                FileName = Path.GetFileName(absolutePath),
+                FileType = fileType,
+                RelativePath = Path.GetRelativePath(reactAppRoot, absolutePath).Replace('\\', '/'),
+                IsThemeFile = isTheme
+            };
+        }
+
+        // Co-located CSS files (same name as page file, e.g. HomePage.css / HomePage.module.css)
+        var pageDir = Path.GetDirectoryName(pageFilePath) ?? string.Empty;
+        var pageKey = Path.GetFileNameWithoutExtension(pageFilePath);
+        foreach (var cssExt in new[] { ".css", ".module.css", ".scss", ".module.scss" })
+        {
+            TryAdd(Path.Combine(pageDir, pageKey + cssExt));
+        }
+
+        // Parse import statements from the page source
+        if (File.Exists(pageFilePath))
+        {
+            var source = await File.ReadAllTextAsync(pageFilePath, cancellationToken);
+            foreach (Match match in JsxImportRegex.Matches(source))
+            {
+                var importPath = match.Groups["path"].Value;
+                if (!importPath.StartsWith('.'))
+                {
+                    continue;
+                }
+
+                var resolvedBase = Path.GetFullPath(Path.Combine(pageDir, importPath));
+
+                // Try the path as-is (might already have extension)
+                TryAdd(resolvedBase);
+
+                // Try appending style extensions for bare paths like './HomePage.module'
+                foreach (var ext in StyleFileExtensions)
+                {
+                    TryAdd(resolvedBase + ext);
+                }
+
+                // Try appending source extensions for component imports
+                foreach (var ext in SourceFileExtensions)
+                {
+                    TryAdd(resolvedBase + ext);
+                }
+
+                // Try index file for directory imports
+                TryAdd(Path.Combine(resolvedBase, "index.jsx"));
+                TryAdd(Path.Combine(resolvedBase, "index.js"));
+            }
+        }
+
+        // Global theme / style files
+        foreach (var relativePath in GlobalThemeRelativePaths)
+        {
+            TryAdd(Path.Combine(reactAppRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)), isTheme: true);
+        }
+
+        // Discover all CSS files under src/styles/ directory
+        var stylesDir = Path.Combine(reactAppRoot, "src", "styles");
+        if (Directory.Exists(stylesDir))
+        {
+            foreach (var cssFile in Directory.GetFiles(stylesDir, "*.css", SearchOption.TopDirectoryOnly))
+            {
+                TryAdd(cssFile, isTheme: true);
+            }
+        }
+
+        return [.. discovered.Values.OrderBy(f => f.IsThemeFile).ThenBy(f => f.FileType).ThenBy(f => f.FileName)];
     }
 
     private bool IsInsideReactApp(string relativePath)

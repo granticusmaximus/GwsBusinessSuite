@@ -7,4 +7,6 @@ public interface IReactPageBuilderService
     Task<ReactPageSaveResult> SaveAsync(ReactPageSaveRequest request, CancellationToken cancellationToken = default);
     Task<ReactPublishStatus> GetPublishStatusAsync(CancellationToken cancellationToken = default);
     Task<ReactPublishResult> PublishAsync(ReactPublishRequest request, CancellationToken cancellationToken = default);
+    Task<string> ReadFileContentAsync(string filePath, CancellationToken cancellationToken = default);
+    Task SaveFileContentAsync(string filePath, string content, CancellationToken cancellationToken = default);
 }

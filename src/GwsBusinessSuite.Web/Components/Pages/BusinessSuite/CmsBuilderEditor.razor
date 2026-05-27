@@ -107,6 +107,40 @@
                         </div>
             }
         </div>
+
+            <div class="studio-panel-section">
+                <div class="studio-panel-header">
+                    <div>
+                        <span class="studio-section-eyebrow">Theme &amp; Styles</span>
+                        <h2>UI Files</h2>
+                    </div>
+                </div>
+
+                @if (UiFiles.Count == 0)
+                {
+                    <div class="studio-empty-card">
+                        <p>No UI files were discovered for this page.</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="studio-layer-list">
+                        @foreach (var uiFile in UiFiles)
+                        {
+                            <button class="studio-layer-item studio-ui-file-item @(SelectedUiFile?.FilePath == uiFile.FilePath ? "is-active" : string.Empty)"
+                                    @onclick="() => SelectUiFileAsync(uiFile)">
+                                <span class="studio-layer-icon studio-file-icon @GetFileTypeIconModifier(uiFile.FileType)">
+                                    <i class="@GetFileTypeIconClass(uiFile.FileType)"></i>
+                                </span>
+                                <span class="studio-layer-copy">
+                                    <strong>@uiFile.FileName</strong>
+                                    <small>@(uiFile.IsThemeFile ? "Global theme" : uiFile.RelativePath)</small>
+                                </span>
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
             </aside>
 
             <section class="studio-stage-panel studio-panel" @ondragover:preventDefault="true" @ondrop="DropElementIntoCanvas">
@@ -190,58 +224,104 @@
                 <div class="studio-panel-section">
                     <div class="studio-panel-header">
                         <div>
-                            <span class="studio-section-eyebrow">Inspector</span>
-                            <h2>Selected element</h2>
+                            <span class="studio-section-eyebrow">@(RightPanelMode == "file-editor" ? "File Editor" : "Inspector")</span>
+                            <h2>@(RightPanelMode == "file-editor" ? "Edit UI File" : "Selected element")</h2>
                         </div>
+                        @if (RightPanelMode == "file-editor")
+                        {
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="CloseFileEditor">
+                                <i class="bi bi-x-lg me-1"></i>Close
+                            </button>
+                        }
                     </div>
 
-                    @if (SelectedElement is null)
-                {
-                        <div class="studio-empty-card">
-                            <p>Select a block in the preview or layers panel to edit its content and placement.</p>
-                        </div>
-                }
-                else
-                {
-                        <div class="studio-inspector-stack">
-                            <div>
-                                <label class="form-label small">Element type</label>
-                                <select class="form-select" value="@SelectedElement.ElementType"
-                                        @onchange="UpdateSelectedElementType">
-                                    @foreach (var elementType in ElementTypes)
-                                    {
-                                        <option value="@elementType">@GetElementTitle(elementType)</option>
-                                    }
-                                </select>
+                    @if (RightPanelMode == "file-editor" && SelectedUiFile is not null)
+                    {
+                        <div class="studio-file-editor-stack">
+                            <div class="studio-file-editor-meta">
+                                <span class="studio-file-type-badge studio-file-type-badge-@SelectedUiFile.FileType">@SelectedUiFile.FileType.ToUpperInvariant()</span>
+                                <span class="studio-file-editor-path font-monospace">@SelectedUiFile.RelativePath</span>
+                                @if (SelectedUiFile.IsThemeFile)
+                                {
+                                    <span class="studio-pill studio-pill-subtle ms-1">Global theme</span>
+                                }
                             </div>
 
-                            <div>
-                                <label class="form-label small">@GetContentLabel(SelectedElement.ElementType)</label>
-                                <textarea class="form-control studio-inspector-textarea" value="@SelectedElement.Text"
-                                          @oninput="(e) => UpdateElementText(SelectedElement.Id, e.Value?.ToString() ?? string.Empty)"></textarea>
-                            </div>
+                            @if (!string.IsNullOrWhiteSpace(FileStatusMessage))
+                            {
+                                <div class="alert alert-info py-2 px-3 small">@FileStatusMessage</div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(FileErrorMessage))
+                            {
+                                <div class="alert alert-danger py-2 px-3 small">@FileErrorMessage</div>
+                            }
 
-                            <div>
-                                <label class="form-label small">CSS class</label>
-                                <input class="form-control" value="@SelectedElement.CssClass"
-                                       @oninput="(e) => UpdateElementCss(SelectedElement.Id, e.Value?.ToString() ?? string.Empty)" />
-                            </div>
+                            <textarea class="form-control studio-file-editor-textarea font-monospace"
+                                      @bind="FileEditorContent"
+                                      @bind:event="oninput"
+                                      spellcheck="false"
+                                      placeholder="File content will appear here..."></textarea>
 
                             <div class="studio-action-row">
-                                <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedUp"
-                                        disabled="@(!CanMoveSelectedUp)">
-                                    <i class="bi bi-arrow-up"></i>
+                                <button class="btn btn-sm btn-primary" @onclick="SaveFileAsync" disabled="@IsFileBusy">
+                                    <i class="bi bi-floppy me-1"></i>Save File
                                 </button>
-                                <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedDown"
-                                        disabled="@(!CanMoveSelectedDown)">
-                                    <i class="bi bi-arrow-down"></i>
-                                </button>
-                                <button class="btn btn-sm btn-outline-secondary" @onclick="DuplicateSelected"
-                                        disabled="@(SelectedElement is null)">Duplicate</button>
-                                <button class="btn btn-sm btn-outline-danger" @onclick="DeleteSelected"
-                                        disabled="@(SelectedElement is null)">Delete</button>
+                                <a class="btn btn-sm btn-outline-secondary" href="@BuildFileOpenLink(SelectedUiFile.FilePath)">
+                                    <i class="bi bi-box-arrow-up-right me-1"></i>Open in VS Code
+                                </a>
                             </div>
                         </div>
+                    }
+                    else
+                    {
+                        @if (SelectedElement is null)
+                    {
+                            <div class="studio-empty-card">
+                                <p>Select a block in the preview or layers panel to edit its content and placement.</p>
+                            </div>
+                    }
+                    else
+                    {
+                            <div class="studio-inspector-stack">
+                                <div>
+                                    <label class="form-label small">Element type</label>
+                                    <select class="form-select" value="@SelectedElement.ElementType"
+                                            @onchange="UpdateSelectedElementType">
+                                        @foreach (var elementType in ElementTypes)
+                                        {
+                                            <option value="@elementType">@GetElementTitle(elementType)</option>
+                                        }
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label class="form-label small">@GetContentLabel(SelectedElement.ElementType)</label>
+                                    <textarea class="form-control studio-inspector-textarea" value="@SelectedElement.Text"
+                                              @oninput="(e) => UpdateElementText(SelectedElement.Id, e.Value?.ToString() ?? string.Empty)"></textarea>
+                                </div>
+
+                                <div>
+                                    <label class="form-label small">CSS class</label>
+                                    <input class="form-control" value="@SelectedElement.CssClass"
+                                           @oninput="(e) => UpdateElementCss(SelectedElement.Id, e.Value?.ToString() ?? string.Empty)" />
+                                </div>
+
+                                <div class="studio-action-row">
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedUp"
+                                            disabled="@(!CanMoveSelectedUp)">
+                                        <i class="bi bi-arrow-up"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedDown"
+                                            disabled="@(!CanMoveSelectedDown)">
+                                        <i class="bi bi-arrow-down"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="DuplicateSelected"
+                                            disabled="@(SelectedElement is null)">Duplicate</button>
+                                    <button class="btn btn-sm btn-outline-danger" @onclick="DeleteSelected"
+                                            disabled="@(SelectedElement is null)">Delete</button>
+                                </div>
+                            </div>
+                        }
                     }
                 </div>
 
@@ -285,6 +365,13 @@
     private static readonly string[] ElementTypes = ["heading", "paragraph", "button", "image"];
 
     private List<VisualBuilderElement> Elements { get; set; } = new();
+    private List<PageUiFile> UiFiles { get; set; } = new();
+    private PageUiFile? SelectedUiFile { get; set; }
+    private string FileEditorContent { get; set; } = string.Empty;
+    private string FileStatusMessage { get; set; } = string.Empty;
+    private string FileErrorMessage { get; set; } = string.Empty;
+    private string RightPanelMode { get; set; } = "inspector";
+    private bool IsFileBusy { get; set; }
     private string DraggingElementType { get; set; } = string.Empty;
     private bool SidebarCollapsed { get; set; }
     private bool IsBusy { get; set; }
@@ -329,6 +416,7 @@
             }
 
             Elements = state.Elements.ToList();
+            UiFiles = state.UiFiles.ToList();
             RoutePath = state.RoutePath;
             FilePath = state.FilePath;
             SelectedElementId = Elements.FirstOrDefault()?.Id ?? string.Empty;
@@ -538,6 +626,61 @@ string.Empty;
         }
     }
 
+    private async Task SelectUiFileAsync(PageUiFile file)
+    {
+        SelectedUiFile = file;
+        RightPanelMode = "file-editor";
+        FileStatusMessage = string.Empty;
+        FileErrorMessage = string.Empty;
+
+        try
+        {
+            FileEditorContent = await ReactPageBuilderService.ReadFileContentAsync(file.FilePath);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to read UI file {FilePath}.", file.FilePath);
+            FileErrorMessage = $"Unable to read file. {ex.Message}";
+        }
+    }
+
+    private void CloseFileEditor()
+    {
+        RightPanelMode = "inspector";
+        SelectedUiFile = null;
+        FileEditorContent = string.Empty;
+        FileStatusMessage = string.Empty;
+        FileErrorMessage = string.Empty;
+    }
+
+    private async Task SaveFileAsync()
+    {
+        if (SelectedUiFile is null)
+        {
+            return;
+        }
+
+        IsFileBusy = true;
+        FileStatusMessage = string.Empty;
+        FileErrorMessage = string.Empty;
+
+        try
+        {
+            await ReactPageBuilderService.SaveFileContentAsync(SelectedUiFile.FilePath, FileEditorContent);
+            FileStatusMessage = $"Saved {SelectedUiFile.FileName} successfully.";
+            await RefreshPublishStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to save UI file {FilePath}.", SelectedUiFile.FilePath);
+            FileErrorMessage = $"Unable to save file. {ex.Message}";
+        }
+        finally
+        {
+            IsFileBusy = false;
+        }
+    }
+
     private void BackToList()
     {
         Navigation.NavigateTo("/cms-builder");
@@ -629,6 +772,27 @@ string.Empty;
             "image" => "Image URL",
             "button" => "Button label",
             _ => "Content"
+        };
+    }
+
+    private static string GetFileTypeIconClass(string fileType)
+    {
+        return fileType.ToLowerInvariant() switch
+        {
+            "css" or "scss" or "sass" or "less" => "bi bi-filetype-css",
+            "jsx" or "tsx" => "bi bi-filetype-jsx",
+            "js" or "ts" => "bi bi-filetype-js",
+            _ => "bi bi-file-earmark-code"
+        };
+    }
+
+    private static string GetFileTypeIconModifier(string fileType)
+    {
+        return fileType.ToLowerInvariant() switch
+        {
+            "css" or "scss" or "sass" or "less" => "is-css",
+            "jsx" or "tsx" => "is-jsx",
+            _ => "is-js"
         };
     }
 
