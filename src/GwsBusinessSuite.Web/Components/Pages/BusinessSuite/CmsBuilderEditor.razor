@@ -13,36 +13,36 @@
         <h1><i class="bi bi-braces-asterisk me-2 text-primary"></i>Visual Builder</h1>
         <p class="mb-1">Shape the managed React page in a live preview workspace with insert, layout, inspect, save, and
             publish controls.</p>
-        @if (!string.IsNullOrWhiteSpace(RoutePath))
-        {
-            <p class="small text-secondary mb-0">Route: <span class="font-monospace">@RoutePath</span></p>
-        }
-        @if (!string.IsNullOrWhiteSpace(FilePath))
-        {
-            <p class="small text-secondary mb-0">File: <a href="@BuildFileOpenLink(FilePath)">@FilePath</a></p>
-        }
-    </div>
+            @if (!string.IsNullOrWhiteSpace(RoutePath))
+            {
+                <p class="small text-secondary mb-0">Route: <span class="font-monospace">@RoutePath</span></p>
+            }
+            @if (!string.IsNullOrWhiteSpace(FilePath))
+            {
+                <p class="small text-secondary mb-0">File: <a href="@BuildFileOpenLink(FilePath)">@FilePath</a></p>
+            }
+        </div>
 
         <div class="studio-header-actions">
             <div class="studio-pills">
                 <span class="studio-pill">@Elements.Count element@(Elements.Count == 1 ? string.Empty : "s")</span>
                 <span class="studio-pill studio-pill-subtle">@GetViewportLabel()</span>
             </div>
-        <button class="btn btn-outline-secondary" @onclick="BackToList">Back To Pages</button>
-        <button class="btn btn-primary" @onclick="SaveAsync" disabled="@IsBusy">Save</button>
-        <button class="btn btn-outline-success" @onclick="PublishAsync" disabled="@IsBusy">Publish Changes</button>
+            <button class="btn btn-outline-secondary" @onclick="BackToList">Back To Pages</button>
+            <button class="btn btn-primary" @onclick="SaveAsync" disabled="@IsBusy">Save</button>
+            <button class="btn btn-outline-success" @onclick="PublishAsync" disabled="@IsBusy">Publish Changes</button>
+        </div>
     </div>
-</div>
 
-@if (!string.IsNullOrWhiteSpace(ErrorMessage))
-{
-    <div class="alert alert-danger">@ErrorMessage</div>
-}
+    @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+    {
+        <div class="alert alert-danger">@ErrorMessage</div>
+    }
 
-@if (!string.IsNullOrWhiteSpace(StatusMessage))
-{
-    <div class="alert alert-info">@StatusMessage</div>
-}
+    @if (!string.IsNullOrWhiteSpace(StatusMessage))
+    {
+        <div class="alert alert-info">@StatusMessage</div>
+    }
 
     <div class="studio-workspace">
         <aside class="studio-panel studio-panel-left">
@@ -58,13 +58,12 @@
                 </div>
 
                 @if (!SidebarCollapsed)
-            {
+                {
                     <div class="studio-widget-grid">
                         @foreach (var elementType in ElementTypes)
                         {
                             <button class="studio-widget-card" draggable="true"
-                                    @ondragstart="() => StartDragElementType(elementType)"
-                                    @ondragend="CancelDrag"
+                                    @ondragstart="() => StartDragElementType(elementType)" @ondragend="CancelDrag"
                                     @onclick="() => AddElement(elementType)">
                                 <span class="studio-widget-icon"><i class="@GetElementIconClass(elementType)"></i></span>
                                 <span class="studio-widget-copy">
@@ -90,12 +89,12 @@
                     <div class="studio-empty-card">
                         <p>No layers yet. Add a widget to start composing the page.</p>
                     </div>
-            }
-            else
-            {
+                }
+                else
+                {
                     <div class="studio-layer-list">
                         @foreach (var element in Elements)
-                    {
+                        {
                             <button class="studio-layer-item @(element.Id == SelectedElementId ? "is-active" : string.Empty)"
                                     @onclick="() => SelectElement(element.Id)">
                                 <span class="studio-layer-icon"><i
@@ -105,44 +104,45 @@
                                         <small>@GetLayerSummary(element)</small>
                                     </span>
                                 </button>
-                    }
+                            }
                         </div>
-            }
-        </div>
-
-            <div class="studio-panel-section">
-                <div class="studio-panel-header">
-                    <div>
-                        <span class="studio-section-eyebrow">Theme &amp; Styles</span>
-                        <h2>UI Files</h2>
-                    </div>
+                    }
                 </div>
 
-                @if (UiFiles.Count == 0)
-                {
-                    <div class="studio-empty-card">
-                        <p>No UI files were discovered for this page.</p>
+                <div class="studio-panel-section">
+                    <div class="studio-panel-header">
+                        <div>
+                            <span class="studio-section-eyebrow">Theme &amp; Styles</span>
+                            <h2>UI Files</h2>
+                        </div>
                     </div>
-                }
-                else
-                {
-                    <div class="studio-layer-list">
-                        @foreach (var uiFile in UiFiles)
-                        {
-                            <button class="studio-layer-item studio-ui-file-item @(SelectedUiFile?.FilePath == uiFile.FilePath ? "is-active" : string.Empty)"
+
+                    @if (UiFiles.Count == 0)
+                    {
+                        <div class="studio-empty-card">
+                            <p>No UI files were discovered for this page.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="studio-layer-list">
+                            @foreach (var uiFile in UiFiles)
+                            {
+                                <button
+                                    class="studio-layer-item studio-ui-file-item @(SelectedUiFile?.FilePath == uiFile.FilePath ? "is-active" : string.Empty)"
                                     @onclick="() => SelectUiFileAsync(uiFile)">
-                                <span class="studio-layer-icon studio-file-icon @GetFileTypeIconModifier(uiFile.FileType)">
-                                    <i class="@GetFileTypeIconClass(uiFile.FileType)"></i>
-                                </span>
-                                <span class="studio-layer-copy">
-                                    <strong>@uiFile.FileName</strong>
-                                    <small>@(uiFile.IsThemeFile ? "Global theme" : uiFile.RelativePath)</small>
-                                </span>
-                            </button>
-                        }
-                    </div>
-                }
-            </div>
+                                    <span class="studio-layer-icon studio-file-icon @GetFileTypeIconModifier(uiFile.FileType)">
+                                        <i class="@GetFileTypeIconClass(uiFile.FileType)"></i>
+                                    </span>
+                                    <span class="studio-layer-copy">
+                                        <strong>@uiFile.FileName</strong>
+                                        <small>@(uiFile.IsThemeFile ? "Global theme" : uiFile.RelativePath)</small>
+                                    </span>
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
             </aside>
 
             <section class="studio-stage-panel studio-panel" @ondragover:preventDefault="true" @ondrop="DropElementIntoCanvas">
@@ -153,23 +153,24 @@
                     </div>
 
                     <div class="d-flex align-items-center gap-2">
-                        <button class="btn btn-sm btn-outline-secondary" @onclick="ReloadPreview" title="Reload the live preview iframe">
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="ReloadPreview"
+                                title="Reload the live preview iframe">
                             <i class="bi bi-arrow-clockwise me-1"></i>Reload Preview
                         </button>
                         <div class="studio-device-switcher">
-                        <button class="studio-device-button @(PreviewViewport == "desktop" ? "is-active" : string.Empty)"
-                                @onclick='() => SetPreviewViewport("desktop")'>
-                            <i class="bi bi-laptop"></i>
-                        </button>
-                        <button class="studio-device-button @(PreviewViewport == "tablet" ? "is-active" : string.Empty)"
-                                @onclick='() => SetPreviewViewport("tablet")'>
-                            <i class="bi bi-tablet-landscape"></i>
-                        </button>
-                        <button class="studio-device-button @(PreviewViewport == "mobile" ? "is-active" : string.Empty)"
-                                @onclick='() => SetPreviewViewport("mobile")'>
-                            <i class="bi bi-phone"></i>
-                        </button>
-                    </div>
+                            <button class="studio-device-button @(PreviewViewport == "desktop" ? "is-active" : string.Empty)"
+                                    @onclick='() => SetPreviewViewport("desktop")'>
+                                <i class="bi bi-laptop"></i>
+                            </button>
+                            <button class="studio-device-button @(PreviewViewport == "tablet" ? "is-active" : string.Empty)"
+                                    @onclick='() => SetPreviewViewport("tablet")'>
+                                <i class="bi bi-tablet-landscape"></i>
+                            </button>
+                            <button class="studio-device-button @(PreviewViewport == "mobile" ? "is-active" : string.Empty)"
+                                    @onclick='() => SetPreviewViewport("mobile")'>
+                                <i class="bi bi-phone"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -186,9 +187,7 @@
                                     title="Live preview for @PageKey"></iframe>
                             @if (_isDragging)
                             {
-                                <div class="studio-drag-overlay"
-                                     @ondragover:preventDefault="true"
-                                     @ondrop="DropElementIntoCanvas">
+                                <div class="studio-drag-overlay" @ondragover:preventDefault="true" @ondrop="DropElementIntoCanvas">
                                     <div class="studio-drag-overlay-hint">
                                         <i class="bi bi-plus-circle-dotted me-2"></i>Drop to add element
                                     </div>
@@ -203,140 +202,139 @@
                 <div class="studio-panel-section">
                     <div class="studio-panel-header">
                         <div>
-                            <span class="studio-section-eyebrow">@(RightPanelMode == "file-editor" ? "File Editor" : "Inspector")</span>
-                            <h2>@(RightPanelMode == "file-editor" ? "Edit UI File" : "Selected element")</h2>
-                        </div>
-                        @if (RightPanelMode == "file-editor")
-                        {
-                            <button class="btn btn-sm btn-outline-secondary" @onclick="CloseFileEditor">
-                                <i class="bi bi-x-lg me-1"></i>Close
-                            </button>
-                        }
-                    </div>
-
-                    @if (RightPanelMode == "file-editor" && SelectedUiFile is not null)
-                    {
-                        <div class="studio-file-editor-stack">
-                            <div class="studio-file-editor-meta">
-                                <span class="studio-file-type-badge studio-file-type-badge-@SelectedUiFile.FileType">@SelectedUiFile.FileType.ToUpperInvariant()</span>
-                                <span class="studio-file-editor-path font-monospace">@SelectedUiFile.RelativePath</span>
-                                @if (SelectedUiFile.IsThemeFile)
-                                {
-                                    <span class="studio-pill studio-pill-subtle ms-1">Global theme</span>
-                                }
+                            <span class="studio-section-eyebrow">@(RightPanelMode == "file-editor" ? "File Editor" :
+                                                                                                                                                                                                                                                                                                                                                                     "Inspector")</span>
+                                <h2>@(RightPanelMode == "file-editor" ? "Edit UI File" : "Selected element")</h2>
                             </div>
-
-                            @if (!string.IsNullOrWhiteSpace(FileStatusMessage))
+                            @if (RightPanelMode == "file-editor")
                             {
-                                <div class="alert alert-info py-2 px-3 small">@FileStatusMessage</div>
-                            }
-                            @if (!string.IsNullOrWhiteSpace(FileErrorMessage))
-                            {
-                                <div class="alert alert-danger py-2 px-3 small">@FileErrorMessage</div>
-                            }
-
-                            <textarea class="form-control studio-file-editor-textarea font-monospace"
-                                      @bind="FileEditorContent"
-                                      @bind:event="oninput"
-                                      spellcheck="false"
-                                      placeholder="File content will appear here..."></textarea>
-
-                            <div class="studio-action-row">
-                                <button class="btn btn-sm btn-primary" @onclick="SaveFileAsync" disabled="@IsFileBusy">
-                                    <i class="bi bi-floppy me-1"></i>Save File
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="CloseFileEditor">
+                                    <i class="bi bi-x-lg me-1"></i>Close
                                 </button>
-                                <a class="btn btn-sm btn-outline-secondary" href="@BuildFileOpenLink(SelectedUiFile.FilePath)">
-                                    <i class="bi bi-box-arrow-up-right me-1"></i>Open in VS Code
-                                </a>
-                            </div>
+                            }
                         </div>
-                    }
-                    else
-                    {
-                        @if (SelectedElement is null)
-                    {
-                            <div class="studio-empty-card">
-                                <p>Select a block in the preview or layers panel to edit its content and placement.</p>
-                            </div>
-                    }
-                    else
-                    {
-                            <div class="studio-inspector-stack">
-                                <div>
-                                    <label class="form-label small">Element type</label>
-                                    <select class="form-select" value="@SelectedElement.ElementType"
-                                            @onchange="UpdateSelectedElementType">
-                                        @foreach (var elementType in ElementTypes)
-                                        {
-                                            <option value="@elementType">@GetElementTitle(elementType)</option>
-                                        }
-                                    </select>
+
+                        @if (RightPanelMode == "file-editor" && SelectedUiFile is not null)
+                        {
+                            <div class="studio-file-editor-stack">
+                                <div class="studio-file-editor-meta">
+                                    <span
+                                    class="studio-file-type-badge studio-file-type-badge-@SelectedUiFile.FileType">@SelectedUiFile.FileType.ToUpperInvariant()</span>
+                                    <span class="studio-file-editor-path font-monospace">@SelectedUiFile.RelativePath</span>
+                                    @if (SelectedUiFile.IsThemeFile)
+                                    {
+                                        <span class="studio-pill studio-pill-subtle ms-1">Global theme</span>
+                                    }
                                 </div>
 
-                                <div>
-                                    <label class="form-label small">@GetContentLabel(SelectedElement.ElementType)</label>
-                                    <textarea class="form-control studio-inspector-textarea" value="@SelectedElement.Text"
-                                              @oninput="(e) => UpdateElementText(SelectedElement.Id, e.Value?.ToString() ?? string.Empty)"></textarea>
-                                </div>
+                                @if (!string.IsNullOrWhiteSpace(FileStatusMessage))
+                                {
+                                    <div class="alert alert-info py-2 px-3 small">@FileStatusMessage</div>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(FileErrorMessage))
+                                {
+                                    <div class="alert alert-danger py-2 px-3 small">@FileErrorMessage</div>
+                                }
 
-                                <div>
-                                    <label class="form-label small">CSS class</label>
-                                    <input class="form-control" value="@SelectedElement.CssClass"
-                                           @oninput="(e) => UpdateElementCss(SelectedElement.Id, e.Value?.ToString() ?? string.Empty)" />
-                                </div>
+                                <textarea class="form-control studio-file-editor-textarea font-monospace" @bind="FileEditorContent"
+                                          @bind:event="oninput" spellcheck="false" placeholder="File content will appear here..."></textarea>
 
                                 <div class="studio-action-row">
-                                    <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedUp"
-                                            disabled="@(!CanMoveSelectedUp)">
-                                        <i class="bi bi-arrow-up"></i>
+                                    <button class="btn btn-sm btn-primary" @onclick="SaveFileAsync" disabled="@IsFileBusy">
+                                        <i class="bi bi-floppy me-1"></i>Save File
                                     </button>
-                                    <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedDown"
-                                            disabled="@(!CanMoveSelectedDown)">
-                                        <i class="bi bi-arrow-down"></i>
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-secondary" @onclick="DuplicateSelected"
-                                            disabled="@(SelectedElement is null)">Duplicate</button>
-                                    <button class="btn btn-sm btn-outline-danger" @onclick="DeleteSelected"
-                                            disabled="@(SelectedElement is null)">Delete</button>
+                                    <a class="btn btn-sm btn-outline-secondary" href="@BuildFileOpenLink(SelectedUiFile.FilePath)">
+                                        <i class="bi bi-box-arrow-up-right me-1"></i>Open in VS Code
+                                    </a>
                                 </div>
                             </div>
                         }
-                    }
-                </div>
-
-                <div class="studio-panel-section">
-                    <div class="studio-panel-header">
-                        <div>
-                            <span class="studio-section-eyebrow">Publish</span>
-                            <h2>Git workflow</h2>
-                        </div>
-                        <button class="btn btn-sm btn-outline-secondary" @onclick="RefreshPublishStatusAsync"
-                                disabled="@IsBusy">Refresh</button>
-                    </div>
-
-                    <div class="studio-publish-meta">Current branch: <span class="font-monospace">@PublishBranchName</span>
-                    </div>
-                    <label class="form-label small">Commit message</label>
-                    <input class="form-control mb-3" @bind="PublishCommitMessage" placeholder="cms-builder publish updates" />
-
-                    @if (ChangedFiles.Count == 0)
-                    {
-                        <div class="studio-empty-card">
-                            <p>No React app changes are currently staged for a publish commit.</p>
-                        </div>
-                    }
-                    else
-                    {
-                        <div class="studio-changes-list">
-                            @foreach (var changedFile in ChangedFiles)
+                        else
+                        {
+                            @if (SelectedElement is null)
                             {
-                                <div class="studio-change-item"><span class="font-monospace">@changedFile</span></div>
+                                <div class="studio-empty-card">
+                                    <p>Select a block in the preview or layers panel to edit its content and placement.</p>
+                                </div>
                             }
+                            else
+                            {
+                                <div class="studio-inspector-stack">
+                                    <div>
+                                        <label class="form-label small">Element type</label>
+                                        <select class="form-select" value="@SelectedElement.ElementType"
+                                                @onchange="UpdateSelectedElementType">
+                                            @foreach (var elementType in ElementTypes)
+                                            {
+                                                <option value="@elementType">@GetElementTitle(elementType)</option>
+                                            }
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label class="form-label small">@GetContentLabel(SelectedElement.ElementType)</label>
+                                        <textarea class="form-control studio-inspector-textarea" value="@SelectedElement.Text"
+                                                  @oninput="(e) => UpdateElementText(SelectedElement.Id, e.Value?.ToString() ?? string.Empty)"></textarea>
+                                    </div>
+
+                                    <div>
+                                        <label class="form-label small">CSS class</label>
+                                        <input class="form-control" value="@SelectedElement.CssClass"
+                                               @oninput="(e) => UpdateElementCss(SelectedElement.Id, e.Value?.ToString() ?? string.Empty)" />
+                                    </div>
+
+                                    <div class="studio-action-row">
+                                        <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedUp"
+                                                disabled="@(!CanMoveSelectedUp)">
+                                            <i class="bi bi-arrow-up"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedDown"
+                                                disabled="@(!CanMoveSelectedDown)">
+                                            <i class="bi bi-arrow-down"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-secondary" @onclick="DuplicateSelected"
+                                                disabled="@(SelectedElement is null)">Duplicate</button>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="DeleteSelected"
+                                                disabled="@(SelectedElement is null)">Delete</button>
+                                    </div>
+                                </div>
+                            }
+                        }
+                    </div>
+
+                    <div class="studio-panel-section">
+                        <div class="studio-panel-header">
+                            <div>
+                                <span class="studio-section-eyebrow">Publish</span>
+                                <h2>Git workflow</h2>
+                            </div>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="RefreshPublishStatusAsync"
+                                    disabled="@IsBusy">Refresh</button>
                         </div>
-                    }
-                </div>
-            </aside>
-</div>
+
+                        <div class="studio-publish-meta">Current branch: <span class="font-monospace">@PublishBranchName</span>
+                        </div>
+                        <label class="form-label small">Commit message</label>
+                        <input class="form-control mb-3" @bind="PublishCommitMessage" placeholder="cms-builder publish updates" />
+
+                        @if (ChangedFiles.Count == 0)
+                        {
+                            <div class="studio-empty-card">
+                                <p>No React app changes are currently staged for a publish commit.</p>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="studio-changes-list">
+                                @foreach (var changedFile in ChangedFiles)
+                                {
+                                    <div class="studio-change-item"><span class="font-monospace">@changedFile</span></div>
+                                }
+                            </div>
+                        }
+                    </div>
+                </aside>
+            </div>
 
 @code {
     [Parameter] public string PageKey { get; set; } = string.Empty;
