@@ -1,6 +1,9 @@
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.CmsBuilder;
+using GwsBusinessSuite.Application.Crm;
 using GwsBusinessSuite.Application.CjAds;
 using GwsBusinessSuite.Application.ContentStudio;
+using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
@@ -38,7 +41,10 @@ public static class DependencyInjection
         services.AddScoped<IDockerDeploymentService, DockerDeploymentService>();
         services.AddScoped<ICjAdsService, CjAdsService>();
         services.AddScoped<IAffiliateOfferScoringService, AffiliateOfferScoringService>();
+        services.AddScoped<ICmsBuilderService, CmsBuilderService>();
         services.AddScoped<IContentStudioService, ContentStudioService>();
+        services.AddScoped<ICrmService, CrmService>();
+        services.AddScoped<IWikiService, WikiService>();
 
         return services;
     }

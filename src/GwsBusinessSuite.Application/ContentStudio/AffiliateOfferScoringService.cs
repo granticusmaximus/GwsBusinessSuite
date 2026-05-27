@@ -38,11 +38,11 @@ public sealed class AffiliateOfferScoringService(IAppDbContext db) : IAffiliateO
             })
             .ToDictionaryAsync(x => x.AdvertiserId, x => (x.Impressions, x.Clicks), StringComparer.OrdinalIgnoreCase, cancellationToken);
 
-        var scored = offers
+        var scored = SelectOffersForScoring(offers)
             .Select(offer => new
             {
                 Offer = offer,
-                Score = ScoreOffer(offer.LinkName, offer.AdvertiserName, offer.Category, terms, performance)
+                Score = ScoreOffer(offer.AdvertiserId, offer.AdvertiserName, offer.Category, terms, performance)
             })
             .OrderByDescending(x => x.Score)
             .ThenByDescending(x => x.Offer.UpdatedAt ?? x.Offer.CreatedAt)
@@ -50,7 +50,7 @@ public sealed class AffiliateOfferScoringService(IAppDbContext db) : IAffiliateO
             .Take(maxOffers)
             .Select(x => new ScoredAffiliateOfferView
             {
-                AdvertiserId = x.Offer.LinkName,
+                AdvertiserId = x.Offer.AdvertiserId,
                 AdvertiserName = x.Offer.AdvertiserName,
                 Category = x.Offer.Category ?? string.Empty,
                 TrackingUrl = x.Offer.TrackingUrl ?? string.Empty,
@@ -101,6 +101,23 @@ public sealed class AffiliateOfferScoringService(IAppDbContext db) : IAffiliateO
         }
 
         return score + ScorePerformance(advertiserId, performance);
+    }
+
+    private static IReadOnlyList<AffiliateOffer> SelectOffersForScoring(IReadOnlyList<AffiliateOffer> offers)
+    {
+        return offers
+            .GroupBy(offer => offer.AdvertiserId, StringComparer.OrdinalIgnoreCase)
+            .SelectMany(group =>
+            {
+                var catalogOffers = group.Where(IsCatalogOffer).ToList();
+                return catalogOffers.Count > 0 ? catalogOffers : group.ToList();
+            })
+            .ToList();
+    }
+
+    private static bool IsCatalogOffer(AffiliateOffer offer)
+    {
+        return !string.Equals(offer.LinkName, offer.AdvertiserId, StringComparison.OrdinalIgnoreCase);
     }
 
     private static double ScorePerformance(

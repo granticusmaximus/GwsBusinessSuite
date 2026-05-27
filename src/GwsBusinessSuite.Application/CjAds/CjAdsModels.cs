@@ -16,8 +16,38 @@ public sealed class CjPartnerView
     public string RelationshipStatus { get; init; } = string.Empty;
     public string Country { get; init; } = string.Empty;
     public string PrimaryCategory { get; init; } = string.Empty;
+    public int OfferCount { get; init; }
     public string DetailsUrl { get; init; } = string.Empty;
     public DateTimeOffset UpdatedAt { get; init; }
+}
+
+public sealed class CjAffiliateOfferView
+{
+    public string AdvertiserId { get; init; } = string.Empty;
+    public string AdvertiserName { get; init; } = string.Empty;
+    public string LinkName { get; init; } = string.Empty;
+    public string Category { get; init; } = string.Empty;
+    public string TrackingUrl { get; init; } = string.Empty;
+    public DateTimeOffset? PromotionEndsAt { get; init; }
+    public bool IsImportedCatalogOffer { get; init; }
+    public DateTimeOffset UpdatedAt { get; init; }
+}
+
+public sealed class CjOfferImportRequest
+{
+    public string AdvertiserId { get; init; } = string.Empty;
+    public string AdvertiserName { get; init; } = string.Empty;
+    public string Payload { get; init; } = string.Empty;
+    public string Format { get; init; } = "Auto";
+    public bool ReplaceExistingOffers { get; init; } = true;
+}
+
+public sealed class CjOfferImportResult
+{
+    public int Imported { get; init; }
+    public int Updated { get; init; }
+    public int Deleted { get; init; }
+    public IReadOnlyList<CjAffiliateOfferView> Offers { get; init; } = Array.Empty<CjAffiliateOfferView>();
 }
 
 public sealed class CjPartnerSyncResult

@@ -1,13 +1,258 @@
 @page "/crm"
+@rendermode InteractiveServer
+@using GwsBusinessSuite.Application.Crm
+@using GwsBusinessSuite.Domain.Entities
+@inject ICrmService CrmService
+@inject ILogger<Crm> Logger
 
 <PageTitle>CRM</PageTitle>
 
-<h1>CRM</h1>
-
-<p class="lead">
-    Track leads, contacts, companies, notes, opportunities, and future client work.
-</p>
-
-<div class="workspace-card">
-    <p>CRM module placeholder. Next step: add lead/contact CRUD with SQLite.</p>
+<div class="page-header">
+    <h1><i class="bi bi-people-fill me-2 text-primary"></i>CRM</h1>
+    <p>Track leads and contacts with local SQLite persistence.</p>
 </div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@ErrorMessage</div>
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
+        <i class="bi bi-check-circle-fill flex-shrink-0"></i>
+        <div>@StatusMessage</div>
+    </div>
+}
+
+<div class="row g-4">
+    <div class="col-lg-4">
+        <div class="card border-0 shadow-sm h-100">
+            <div
+                class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
+                <span class="fw-semibold">Contacts</span>
+                <button class="btn btn-sm btn-outline-primary" @onclick="CreateNewContact" disabled="@IsBusy">
+                    <i class="bi bi-plus-lg me-1"></i>New Contact
+                </button>
+            </div>
+            <div class="card-body p-0">
+                @if (Contacts.Count == 0)
+                {
+                    <div class="p-4 text-secondary">
+                        <p class="mb-0">No contacts yet. Add your first lead or customer to get started.</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="list-group list-group-flush">
+                        @foreach (var contact in Contacts)
+                        {
+                            <button type="button"
+                                    class="list-group-item list-group-item-action d-flex justify-content-between align-items-start gap-2 @(SelectedContactId == contact.Id ? "active" : string.Empty)"
+                                    @onclick="() => OpenContactAsync(contact.Id)" disabled="@IsBusy">
+                                <div>
+                                    <div class="fw-semibold">@contact.FullName</div>
+                                    <div class="small @(SelectedContactId == contact.Id ? "text-white-50" : "text-secondary")">
+                                        @(!string.IsNullOrWhiteSpace(contact.Company) ? contact.Company : "No company")
+                                    </div>
+                                </div>
+                                <span class="badge @(SelectedContactId == contact.Id ? "text-bg-light" : "text-bg-secondary")">
+                                    @contact.Status
+                                </span>
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-8">
+        <div class="card border-0 shadow-sm">
+            <div
+                class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
+                <span class="fw-semibold">@EditorHeader</span>
+                <span class="badge @(SelectedContactId.HasValue ? "text-bg-primary" : "text-bg-secondary")">
+                    @(SelectedContactId.HasValue ? "Editing Existing Contact" : "New Contact")
+                </span>
+            </div>
+            <div class="card-body">
+                <EditForm Model="Editor" OnValidSubmit="SaveContactAsync">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary />
+
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold small">Full Name</label>
+                            <InputText class="form-control" @bind-Value="Editor.FullName" placeholder="Contact name" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold small">Status</label>
+                            <InputSelect class="form-select" @bind-Value="Editor.Status">
+                                @foreach (var option in ContactStatusOptions)
+                                {
+                                    <option value="@option">@option</option>
+                                }
+                            </InputSelect>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold small">Email</label>
+                            <InputText class="form-control" @bind-Value="Editor.Email" placeholder="name@example.com" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold small">Company</label>
+                            <InputText class="form-control" @bind-Value="Editor.Company" placeholder="Company name" />
+                        </div>
+                    </div>
+
+                    <div class="mt-3 d-flex flex-wrap gap-2">
+                        <button type="submit" class="btn btn-primary" disabled="@IsBusy">
+                            <i class="bi bi-floppy-fill me-1"></i>Save Contact
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" @onclick="CreateNewContact"
+                                disabled="@IsBusy">
+                            Reset
+                        </button>
+                        <button type="button" class="btn btn-outline-danger" @onclick="DeleteSelectedContactAsync"
+                                disabled="@(IsBusy || !SelectedContactId.HasValue)">
+                            Delete
+                        </button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private static readonly string[] ContactStatusOptions = ["Lead", "Prospect", "Customer", "Inactive"];
+
+    private List<Contact> Contacts { get; set; } = new();
+    private ContactEditorModel Editor { get; set; } = new();
+    private Guid? SelectedContactId { get; set; }
+    private bool IsBusy { get; set; }
+    private string StatusMessage { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+
+    private string EditorHeader => SelectedContactId.HasValue ? "Edit Contact" : "Create Contact";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadContactsAsync();
+    }
+
+    private async Task LoadContactsAsync()
+    {
+        try
+        {
+            Contacts = (await CrmService.ListContactsAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load CRM contacts.");
+            ErrorMessage = $"Unable to load contacts. {ex.Message}";
+        }
+    }
+
+    private void CreateNewContact()
+    {
+        SelectedContactId = null;
+        Editor = new ContactEditorModel();
+        StatusMessage = "Ready to create a new contact.";
+        ErrorMessage = string.Empty;
+    }
+
+    private async Task OpenContactAsync(Guid contactId)
+    {
+        try
+        {
+            var contact = await CrmService.GetContactAsync(contactId);
+            if (contact is null)
+            {
+                StatusMessage = "The selected contact no longer exists.";
+                return;
+            }
+
+            SelectedContactId = contact.Id;
+            Editor = new ContactEditorModel
+            {
+                ContactId = contact.Id,
+                FullName = contact.FullName,
+                Email = contact.Email,
+                Company = contact.Company,
+                Status = contact.Status
+            };
+            StatusMessage = $"Opened contact '{contact.FullName}'.";
+            ErrorMessage = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to open CRM contact {ContactId}.", contactId);
+            ErrorMessage = $"Unable to open contact. {ex.Message}";
+        }
+    }
+
+    private async Task SaveContactAsync()
+    {
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+
+        try
+        {
+            var saved = await CrmService.SaveContactAsync(Editor);
+            SelectedContactId = saved.Id;
+            Editor = new ContactEditorModel
+            {
+                ContactId = saved.Id,
+                FullName = saved.FullName,
+                Email = saved.Email,
+                Company = saved.Company,
+                Status = saved.Status
+            };
+            StatusMessage = $"Saved contact '{saved.FullName}'.";
+            await LoadContactsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to save CRM contact.");
+            ErrorMessage = $"Unable to save contact. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task DeleteSelectedContactAsync()
+    {
+        if (SelectedContactId is not { } contactId)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+
+        try
+        {
+            await CrmService.DeleteContactAsync(contactId);
+            StatusMessage = "Contact deleted.";
+            CreateNewContact();
+            await LoadContactsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to delete CRM contact {ContactId}.", contactId);
+            ErrorMessage = $"Unable to delete contact. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+}

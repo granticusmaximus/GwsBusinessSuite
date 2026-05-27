@@ -53,6 +53,198 @@ public sealed class CjAdsServiceTests
         Assert.Equal("legacy-plain", settings!.DeveloperKey);
     }
 
+    [Fact]
+    public async Task GetOffersForAdvertiserAsync_ShouldReturnMatchingCJOffersOnly()
+    {
+        await using var db = await CreateDbAsync();
+        db.AffiliateOffers.AddRange(
+            new GwsBusinessSuite.Domain.Entities.AffiliateOffer
+            {
+                Network = "CJ",
+                AdvertiserId = "northwind-1",
+                AdvertiserName = "Northwind",
+                LinkName = "northwind-1",
+                Category = "Software",
+                TrackingUrl = "https://example.com/northwind-1",
+                CreatedBy = "test"
+            },
+            new GwsBusinessSuite.Domain.Entities.AffiliateOffer
+            {
+                Network = "CJ",
+                AdvertiserId = "northwind-1",
+                AdvertiserName = "Northwind",
+                LinkName = "Laptop Deal",
+                Category = "Deals",
+                TrackingUrl = "https://example.com/northwind-2",
+                CreatedBy = "test"
+            },
+            new GwsBusinessSuite.Domain.Entities.AffiliateOffer
+            {
+                Network = "Other",
+                AdvertiserId = "northwind-1",
+                AdvertiserName = "Northwind",
+                LinkName = "northwind-other",
+                Category = "Ignored",
+                TrackingUrl = "https://example.com/ignore",
+                CreatedBy = "test"
+            });
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, new FakeSecretProtector());
+
+        var offers = await service.GetOffersForAdvertiserAsync("northwind-1", "Northwind");
+
+        Assert.Single(offers);
+        Assert.All(offers, offer => Assert.Equal("Northwind", offer.AdvertiserName));
+        Assert.Equal("northwind-1", offers[0].AdvertiserId);
+        Assert.Equal("Laptop Deal", offers[0].LinkName);
+        Assert.True(offers[0].IsImportedCatalogOffer);
+    }
+
+    [Fact]
+    public async Task ImportOffersAsync_ShouldAddCatalogRowsAndKeepPartnerListingDeduped()
+    {
+        await using var db = await CreateDbAsync();
+        db.AffiliateOffers.Add(new GwsBusinessSuite.Domain.Entities.AffiliateOffer
+        {
+            Network = "CJ",
+            AdvertiserId = "northwind-1",
+            AdvertiserName = "Northwind",
+            LinkName = "northwind-1",
+            Category = "Joined",
+            TrackingUrl = "https://example.com/partner",
+            CreatedBy = "cj-sync"
+        });
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, new FakeSecretProtector());
+
+        var result = await service.ImportOffersAsync(new CjOfferImportRequest
+        {
+            AdvertiserId = "northwind-1",
+            AdvertiserName = "Northwind",
+            Format = "CSV",
+            ReplaceExistingOffers = true,
+            Payload = "offerName,category,trackingUrl,promotionEndsAt\nLaptop Deal,Electronics,https://example.com/laptop,2026-12-31\nServer Bundle,Infrastructure,https://example.com/server,2027-01-31"
+        });
+
+        Assert.Equal(2, result.Imported);
+        Assert.Equal(0, result.Updated);
+        Assert.Equal(0, result.Deleted);
+
+        var partners = await service.ListPartnersAsync();
+        Assert.Single(partners);
+        Assert.Equal("northwind-1", partners[0].AdvertiserId);
+        Assert.Equal(2, partners[0].OfferCount);
+
+        var offers = await service.GetOffersForAdvertiserAsync("northwind-1", "Northwind");
+        Assert.Equal(2, offers.Count);
+        Assert.DoesNotContain(offers, offer => offer.LinkName == "northwind-1");
+        Assert.All(offers, offer => Assert.True(offer.IsImportedCatalogOffer));
+    }
+
+    [Fact]
+    public async Task ImportOffersAsync_ShouldReplaceExistingImportedCatalogRowsOnly()
+    {
+        await using var db = await CreateDbAsync();
+        db.AffiliateOffers.AddRange(
+            new GwsBusinessSuite.Domain.Entities.AffiliateOffer
+            {
+                Network = "CJ",
+                AdvertiserId = "northwind-1",
+                AdvertiserName = "Northwind",
+                LinkName = "northwind-1",
+                Category = "Joined",
+                TrackingUrl = "https://example.com/partner",
+                CreatedBy = "cj-sync"
+            },
+            new GwsBusinessSuite.Domain.Entities.AffiliateOffer
+            {
+                Network = "CJ",
+                AdvertiserId = "northwind-1",
+                AdvertiserName = "Northwind",
+                LinkName = "Old Deal",
+                Category = "Old",
+                TrackingUrl = "https://example.com/old",
+                CreatedBy = "cj-import"
+            });
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, new FakeSecretProtector());
+
+        var result = await service.ImportOffersAsync(new CjOfferImportRequest
+        {
+            AdvertiserId = "northwind-1",
+            AdvertiserName = "Northwind",
+            Format = "JSON",
+            ReplaceExistingOffers = true,
+            Payload = "[{\"offerName\":\"Fresh Deal\",\"category\":\"New\",\"trackingUrl\":\"https://example.com/fresh\"}]"
+        });
+
+        Assert.Equal(1, result.Imported);
+        Assert.Equal(0, result.Updated);
+        Assert.Equal(1, result.Deleted);
+
+        var offers = await service.GetOffersForAdvertiserAsync("northwind-1", "Northwind");
+        Assert.Single(offers);
+        Assert.Equal("Fresh Deal", offers[0].LinkName);
+    }
+
+    [Fact]
+    public async Task SyncPartnersAsync_ShouldKeepJoinedAdvertisersAndRemoveStaleRows()
+    {
+        await using var db = await CreateDbAsync();
+        db.AffiliateOffers.AddRange(
+            new GwsBusinessSuite.Domain.Entities.AffiliateOffer
+            {
+                Network = "CJ",
+                AdvertiserId = "old-1",
+                AdvertiserName = "Old Advertiser",
+                LinkName = "old-1",
+                Category = "Legacy",
+                TrackingUrl = "https://example.com/old",
+                CreatedBy = "cj-sync"
+            },
+            new GwsBusinessSuite.Domain.Entities.AffiliateOffer
+            {
+                Network = "CJ",
+                AdvertiserId = "stale-import",
+                AdvertiserName = "Stale Import",
+                LinkName = "Imported Deal",
+                Category = "Legacy",
+                TrackingUrl = "https://example.com/stale",
+                CreatedBy = "cj-import"
+            });
+        await db.SaveChangesAsync();
+
+        var service = new CjAdsService(
+            db,
+            new FakeCjAffiliateService(
+            [
+                new CjPartnerRecord("joined-1", "Joined One", "joined", "US", "Software", "https://example.com/joined-1"),
+                new CjPartnerRecord("joined-2", "Joined Two", "approved", "US", "Hosting", "https://example.com/joined-2"),
+                new CjPartnerRecord("pending-1", "Pending One", "pending", "US", "Other", "https://example.com/pending-1")
+            ]),
+            new FakeSecretProtector(),
+            NullLogger<CjAdsService>.Instance);
+
+        var result = await service.SyncPartnersAsync(new CjPartnerSyncRequest
+        {
+            DeveloperKey = "key",
+            PublisherId = "pub",
+            EndpointUrl = "https://commissions.api.cj.com/query",
+            MaxResults = 100
+        });
+
+        Assert.Equal(2, result.TotalReceived);
+
+        var partners = await service.ListPartnersAsync();
+        Assert.Equal(2, partners.Count);
+        Assert.DoesNotContain(partners, partner => partner.AdvertiserId == "pending-1");
+        Assert.DoesNotContain(partners, partner => partner.AdvertiserId == "old-1");
+        Assert.DoesNotContain(await db.AffiliateOffers.ToListAsync(), row => row.AdvertiserId == "stale-import");
+    }
+
     private static CjAdsService CreateService(ApplicationDbContext db, ISecretProtector secretProtector)
     {
         return new CjAdsService(
@@ -101,6 +293,18 @@ public sealed class CjAdsServiceTests
 
     private sealed class FakeCjAffiliateService : ICjAffiliateService
     {
+        private readonly IReadOnlyCollection<CjPartnerRecord> partners;
+
+        public FakeCjAffiliateService()
+            : this(Array.Empty<CjPartnerRecord>())
+        {
+        }
+
+        public FakeCjAffiliateService(IReadOnlyCollection<CjPartnerRecord> partners)
+        {
+            this.partners = partners;
+        }
+
         public Task<CjConnectionValidationResult> ValidateConnectionAsync(CjConnectionRequest request, CancellationToken ct = default)
         {
             return Task.FromResult(new CjConnectionValidationResult(true, "ok", 0));
@@ -108,7 +312,7 @@ public sealed class CjAdsServiceTests
 
         public Task<CjPartnerFetchResult> FetchPartnersAsync(CjConnectionRequest request, CancellationToken ct = default)
         {
-            return Task.FromResult(new CjPartnerFetchResult(Array.Empty<CjPartnerRecord>(), "ok"));
+            return Task.FromResult(new CjPartnerFetchResult(partners, "ok"));
         }
     }
 }

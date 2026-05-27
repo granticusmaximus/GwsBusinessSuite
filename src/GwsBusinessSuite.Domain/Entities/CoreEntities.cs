@@ -79,6 +79,7 @@ public sealed class CjConnectorSettings : AuditableEntity
 public sealed class AffiliateOffer : AuditableEntity
 {
     public required string Network { get; set; }
+    public required string AdvertiserId { get; set; }
     public required string AdvertiserName { get; set; }
     public required string LinkName { get; set; }
     public string? Category { get; set; }
