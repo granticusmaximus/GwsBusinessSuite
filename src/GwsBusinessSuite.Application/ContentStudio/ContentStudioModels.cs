@@ -24,6 +24,13 @@ public sealed class DraftDecisionRequest
     public string PerformedBy { get; init; } = "content-studio";
 }
 
+public sealed class DraftPublishRequest
+{
+    public Guid DraftId { get; init; }
+    public string Notes { get; init; } = string.Empty;
+    public string PerformedBy { get; init; } = "content-studio";
+}
+
 public sealed class DraftHeroImageRegenerationRequest
 {
     public Guid DraftId { get; init; }

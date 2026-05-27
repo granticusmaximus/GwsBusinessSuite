@@ -1,9 +1,15 @@
+using GwsBusinessSuite.Application.ContentStudio;
+
 namespace GwsBusinessSuite.Application.Abstractions;
 
 public interface ICjAffiliateService
 {
     Task<CjConnectionValidationResult> ValidateConnectionAsync(CjConnectionRequest request, CancellationToken ct = default);
     Task<CjPartnerFetchResult> FetchPartnersAsync(CjConnectionRequest request, CancellationToken ct = default);
+}
+public interface ISanityPublisher
+{
+    Task<SanityPublishResult> PublishDraftAsync(ArticleGenerationResult draft, CancellationToken ct = default);
 }
 public interface ICloudflareService { Task<string> CreateSubdomainRouteAsync(string subdomain, int port, CancellationToken ct = default); }
 public interface IDigitalOceanService { Task<string> GetDropletsAsync(CancellationToken ct = default); }
@@ -51,3 +57,10 @@ public sealed record CjPartnerRecord(
     string Country,
     string PrimaryCategory,
     string DetailsUrl);
+
+public sealed record SanityPublishResult(
+    bool IsSuccess,
+    string Message,
+    string DocumentId,
+    string Revision,
+    string DocumentUrl);

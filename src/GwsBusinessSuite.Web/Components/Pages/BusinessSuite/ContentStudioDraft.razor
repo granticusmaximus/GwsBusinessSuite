@@ -155,6 +155,11 @@ else
                             <i class="bi bi-check-circle-fill"></i>
                             <span>Approve Draft</span>
                         </button>
+                        <button class="btn btn-primary d-inline-flex align-items-center gap-2" @onclick="PublishToSanity"
+                                disabled="@IsBusy || !IsApproved">
+                            <i class="bi bi-cloud-upload"></i>
+                            <span>Publish to Sanity</span>
+                        </button>
                         <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2" @onclick="RequestRevision"
                                 disabled="@IsBusy">
                             <i class="bi bi-arrow-clockwise"></i>
@@ -363,7 +368,25 @@ else
                 PerformedBy = "content-studio-ui"
             }),
             "Saving approval decision and updating workflow history.",
-            "Draft approved. Sanity publishing fields are ready for review.");
+            "Draft approved. Publish to Sanity when ready.");
+    }
+
+    private async Task PublishToSanity()
+    {
+        if (CurrentDraft is null)
+        {
+            return;
+        }
+
+        await RunWorkflowAction(
+            async () => await ContentStudioService.PublishDraftToSanityAsync(new DraftPublishRequest
+            {
+                DraftId = CurrentDraft.DraftId,
+                Notes = RevisionNotes,
+                PerformedBy = "content-studio-ui"
+            }),
+            "Publishing the approved article to Sanity.",
+            "Draft published to Sanity successfully.");
     }
 
     private async Task RequestRevision()

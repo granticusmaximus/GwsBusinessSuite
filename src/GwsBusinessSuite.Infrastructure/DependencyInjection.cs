@@ -19,10 +19,12 @@ public static class DependencyInjection
         var connectionString = configuration.GetConnectionString("DefaultConnection") ?? "Data Source=gws-suite.db";
         services.AddDataProtection();
         services.Configure<ContentStudioOptions>(configuration.GetSection(ContentStudioOptions.SectionName));
+        services.Configure<SanityOptions>(configuration.GetSection(SanityOptions.SectionName));
         services.AddDbContextFactory<ApplicationDbContext>(options => options.UseSqlite(connectionString));
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
         services.AddScoped<ISecretProtector, DataProtectionSecretProtector>();
         services.AddHttpClient<ICjAffiliateService, CjAffiliateService>();
+        services.AddHttpClient<ISanityPublisher, SanityPublisher>();
         services.AddHttpClient<ICloudflareService, CloudflareService>();
         services.AddHttpClient<IDigitalOceanService, DigitalOceanService>();
         services.AddHttpClient<IOllamaService, OllamaService>((serviceProvider, client) =>

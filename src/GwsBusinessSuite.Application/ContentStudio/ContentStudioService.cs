@@ -11,6 +11,8 @@ public sealed class ContentStudioService(
     IOllamaService ollama,
     IAffiliateOfferScoringService offerScoringService,
     IOptions<ContentStudioOptions> options,
+    IOptions<SanityOptions> sanityOptions,
+    ISanityPublisher sanityPublisher,
     ILogger<ContentStudioService> logger) : IContentStudioService
 {
     private static readonly string[] AffiliateSlotTokens = ["{{CJ_AD_SLOT_1}}", "{{CJ_AD_SLOT_2}}", "{{CJ_AD_SLOT_3}}"];
@@ -41,11 +43,7 @@ public sealed class ContentStudioService(
     {
         await RecordDraftImpressionsAsync(draftId, "content-studio-preview", cancellationToken);
 
-        var draft = await db.SeoArticleDrafts
-            .AsNoTracking()
-            .Include(x => x.AffiliatePlacements)
-            .Include(x => x.WorkflowEvents)
-            .FirstOrDefaultAsync(x => x.Id == draftId, cancellationToken);
+        var draft = await LoadDraftSnapshotAsync(draftId, cancellationToken);
 
         if (draft is null)
         {
@@ -339,7 +337,69 @@ public sealed class ContentStudioService(
         DraftDecisionRequest request,
         CancellationToken cancellationToken = default)
     {
-        return await ApplyDecisionAsync(request, SeoArticleDraftStatuses.Approved, SeoArticleWorkflowEventTypes.Approved, cancellationToken);
+        var updated = await ApplyDecisionAsync(request, SeoArticleDraftStatuses.Approved, SeoArticleWorkflowEventTypes.Approved, cancellationToken);
+
+        if (updated is not null && sanityOptions.Value.AutoPublishOnApproval)
+        {
+            var published = await PublishDraftToSanityAsync(new DraftPublishRequest
+            {
+                DraftId = request.DraftId,
+                Notes = request.Notes,
+                PerformedBy = request.PerformedBy
+            }, cancellationToken);
+
+            return published ?? updated;
+        }
+
+        return updated;
+    }
+
+    public async Task<ArticleGenerationResult?> PublishDraftToSanityAsync(
+        DraftPublishRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var draft = await db.SeoArticleDrafts
+            .Include(x => x.AffiliatePlacements)
+            .Include(x => x.WorkflowEvents)
+            .FirstOrDefaultAsync(x => x.Id == request.DraftId, cancellationToken);
+
+        if (draft is null)
+        {
+            return null;
+        }
+
+        if (!string.Equals(draft.Status, SeoArticleDraftStatuses.Approved, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Only approved drafts can be published to Sanity.");
+        }
+
+        var draftView = MapDraft(draft, authorName: GetAuthorName(), siteBaseUrl: GetSiteBaseUrl());
+        var publishResult = await sanityPublisher.PublishDraftAsync(draftView, cancellationToken);
+
+        db.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent
+        {
+            SeoArticleDraftId = draft.Id,
+            EventType = SeoArticleWorkflowEventTypes.PublishedToSanity,
+            Notes = string.IsNullOrWhiteSpace(request.Notes)
+                ? publishResult.Message
+                : request.Notes.Trim(),
+            CreatedBy = request.PerformedBy
+        });
+
+        draft.UpdatedAt = DateTimeOffset.UtcNow;
+        draft.UpdatedBy = request.PerformedBy;
+
+        await db.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation(
+            "Published Content Studio draft {DraftId} to Sanity document {DocumentId}.",
+            draft.Id,
+            publishResult.DocumentId);
+
+        var publishedSnapshot = await LoadDraftSnapshotAsync(draft.Id, cancellationToken);
+        return publishedSnapshot is null
+            ? MapDraft(draft, authorName: GetAuthorName(), siteBaseUrl: GetSiteBaseUrl())
+            : MapDraft(publishedSnapshot, authorName: GetAuthorName(), siteBaseUrl: GetSiteBaseUrl());
     }
 
     public async Task<ArticleGenerationResult?> RejectDraftAsync(
@@ -929,6 +989,15 @@ public sealed class ContentStudioService(
         return impressions == 0
             ? 0
             : (double)clicks / impressions;
+    }
+
+    private async Task<SeoArticleDraft?> LoadDraftSnapshotAsync(Guid draftId, CancellationToken cancellationToken)
+    {
+        return await db.SeoArticleDrafts
+            .AsNoTracking()
+            .Include(x => x.AffiliatePlacements)
+            .Include(x => x.WorkflowEvents)
+            .FirstOrDefaultAsync(x => x.Id == draftId, cancellationToken);
     }
 
     private string GetAuthorName()

@@ -177,6 +177,89 @@ public sealed class ContentStudioServiceTests
     }
 
     [Fact]
+    public async Task PublishDraftToSanityAsync_ShouldPublishApprovedDraftAndRecordWorkflowEvent()
+    {
+        await using var db = await CreateDbAsync();
+        var ollama = new FakeOllamaService
+        {
+            GenerateTextResult = "# Initial draft",
+            GenerateImageResult = new OllamaImageGenerationResult(
+                DataUri: "data:image/png;base64,IMG",
+                MimeType: "image/png",
+                Model: "x/z-image-turbo"),
+            Models = new[] { "llama3.2:latest", "x/z-image-turbo" }
+        };
+        var sanity = new FakeSanityPublisher();
+        var service = CreateService(db, ollama, sanity);
+
+        var generated = await service.GenerateArticleAsync(new ArticleGenerationRequest
+        {
+            Topic = "Clean Architecture in Blazor",
+            TargetAudience = "Mid-level C# developers",
+            PrimaryKeyword = "Blazor clean architecture",
+            SecondaryKeywords = "ASP.NET Core, C#"
+        });
+
+        await service.ApproveDraftAsync(new DraftDecisionRequest
+        {
+            DraftId = generated.DraftId,
+            Notes = "Ready to publish.",
+            PerformedBy = "editor"
+        });
+
+        var published = await service.PublishDraftToSanityAsync(new DraftPublishRequest
+        {
+            DraftId = generated.DraftId,
+            Notes = "Publish approved article.",
+            PerformedBy = "publisher"
+        });
+
+        Assert.NotNull(published);
+        Assert.Equal("Approved", published!.Status);
+        Assert.Single(sanity.PublishedDrafts);
+        Assert.Equal(generated.DraftId, sanity.PublishedDrafts[0].DraftId);
+        Assert.Contains("seoArticle", sanity.LastPublishedType);
+        Assert.Contains("PublishedToSanity", published.WorkflowHistory.Select(x => x.EventType));
+    }
+
+    [Fact]
+    public async Task ApproveDraftAsync_ShouldAutoPublishToSanity_WhenEnabled()
+    {
+        await using var db = await CreateDbAsync();
+        var ollama = new FakeOllamaService
+        {
+            GenerateTextResult = "# Initial draft",
+            GenerateImageResult = new OllamaImageGenerationResult(
+                DataUri: "data:image/png;base64,IMG",
+                MimeType: "image/png",
+                Model: "x/z-image-turbo"),
+            Models = new[] { "llama3.2:latest", "x/z-image-turbo" }
+        };
+        var sanity = new FakeSanityPublisher();
+        var service = CreateService(db, ollama, sanity, new SanityOptions { AutoPublishOnApproval = true });
+
+        var generated = await service.GenerateArticleAsync(new ArticleGenerationRequest
+        {
+            Topic = "Clean Architecture in Blazor",
+            TargetAudience = "Mid-level C# developers",
+            PrimaryKeyword = "Blazor clean architecture",
+            SecondaryKeywords = "ASP.NET Core, C#"
+        });
+
+        var approved = await service.ApproveDraftAsync(new DraftDecisionRequest
+        {
+            DraftId = generated.DraftId,
+            Notes = "Ready to publish.",
+            PerformedBy = "editor"
+        });
+
+        Assert.NotNull(approved);
+        Assert.Equal("Approved", approved!.Status);
+        Assert.Single(sanity.PublishedDrafts);
+        Assert.Contains("PublishedToSanity", approved.WorkflowHistory.Select(x => x.EventType));
+    }
+
+    [Fact]
     public async Task RegenerateHeroImageAsync_ShouldRefreshImageWithoutChangingMarkdown()
     {
         await using var db = await CreateDbAsync();
@@ -328,7 +411,11 @@ public sealed class ContentStudioServiceTests
         return db;
     }
 
-    private static ContentStudioService CreateService(ApplicationDbContext db, IOllamaService ollama)
+    private static ContentStudioService CreateService(
+        ApplicationDbContext db,
+        IOllamaService ollama,
+        ISanityPublisher? sanityPublisher = null,
+        SanityOptions? sanityOptions = null)
     {
         var options = Options.Create(new ContentStudioOptions
         {
@@ -339,11 +426,15 @@ public sealed class ContentStudioServiceTests
             ImageSteps = 4
         });
 
+        var configuredSanityOptions = Options.Create(sanityOptions ?? new SanityOptions());
+
         return new ContentStudioService(
             db,
             ollama,
             new FakeAffiliateOfferScoringService(),
             options,
+            configuredSanityOptions,
+            sanityPublisher ?? new FakeSanityPublisher(),
             NullLogger<ContentStudioService>.Instance);
     }
 
@@ -386,6 +477,25 @@ public sealed class ContentStudioServiceTests
             }
 
             return Task.FromResult(GenerateImageResult with { Model = request.Model });
+        }
+    }
+
+    private sealed class FakeSanityPublisher : ISanityPublisher
+    {
+        public List<ArticleGenerationResult> PublishedDrafts { get; } = new();
+        public string LastPublishedType { get; private set; } = string.Empty;
+
+        public Task<SanityPublishResult> PublishDraftAsync(ArticleGenerationResult draft, CancellationToken ct = default)
+        {
+            PublishedDrafts.Add(draft);
+            LastPublishedType = "seoArticle";
+
+            return Task.FromResult(new SanityPublishResult(
+                true,
+                $"Published '{draft.Title}' to Sanity.",
+                $"gws-seo-{draft.DraftId:N}",
+                "tx-test",
+                "https://example.sanity.studio/desk/test"));
         }
     }
 }

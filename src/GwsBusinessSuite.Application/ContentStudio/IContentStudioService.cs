@@ -13,6 +13,9 @@ public interface IContentStudioService
     Task<ArticleGenerationResult?> ApproveDraftAsync(
         DraftDecisionRequest request,
         CancellationToken cancellationToken = default);
+    Task<ArticleGenerationResult?> PublishDraftToSanityAsync(
+        DraftPublishRequest request,
+        CancellationToken cancellationToken = default);
     Task<ArticleGenerationResult?> RejectDraftAsync(
         DraftDecisionRequest request,
         CancellationToken cancellationToken = default);
