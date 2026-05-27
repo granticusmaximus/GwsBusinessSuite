@@ -1,4 +1,4 @@
-@page "/cj-ads"
+@page "/admin/cj-ads"
 @rendermode InteractiveServer
 @using GwsBusinessSuite.Application.CjAds
 @inject ICjAdsService CjAdsService
@@ -10,71 +10,71 @@
   <h1><i class="bi bi-tags-fill me-2 text-primary"></i>CJ Ads Manager</h1>
   <p>Only your current CJ My Advertisers are shown below. Expand an advertiser to view active ads you can use in
     articles.</p>
-</div>
-
-@if (!string.IsNullOrWhiteSpace(ErrorMessage))
-{
-  <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
-    <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
-    <div>@ErrorMessage</div>
   </div>
-}
 
-@if (!string.IsNullOrWhiteSpace(StatusMessage))
-{
-  <div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
-    <i class="bi bi-info-circle-fill flex-shrink-0"></i>
-    <div>@StatusMessage</div>
-  </div>
-}
+  @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+  {
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+      <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+      <div>@ErrorMessage</div>
+    </div>
+  }
 
-<div class="card border-0 shadow-sm mb-4">
-  <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
-    <span class="fw-semibold">Connector</span>
-    <span class="badge @(IsConnected ? "text-bg-success" : "text-bg-secondary")">@(IsConnected ? "Connected" : "Not Connected")</span>
-  </div>
-  <div class="card-body">
-    <div class="d-flex flex-wrap gap-2">
+  @if (!string.IsNullOrWhiteSpace(StatusMessage))
+  {
+    <div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
+      <i class="bi bi-info-circle-fill flex-shrink-0"></i>
+      <div>@StatusMessage</div>
+    </div>
+  }
+
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
+      <span class="fw-semibold">Connector</span>
+      <span class="badge @(IsConnected ? "text-bg-success" : "text-bg-secondary")">@(IsConnected ? "Connected" : "Not Connected")</span>
+    </div>
+    <div class="card-body">
+      <div class="d-flex flex-wrap gap-2">
         <button class="btn btn-primary d-inline-flex align-items-center gap-2" @onclick="OpenConnectorModal"
                 disabled="@IsBusy">
-        <i class="bi bi-link-45deg"></i>
-        <span>Connect CJ Account</span>
-      </button>
+          <i class="bi bi-link-45deg"></i>
+          <span>Connect CJ Account</span>
+        </button>
         <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2" @onclick="LoadPartners"
                 disabled="@IsBusy">
-        <i class="bi bi-arrow-repeat"></i>
+          <i class="bi bi-arrow-repeat"></i>
           <span>Refresh My Advertisers</span>
-      </button>
+        </button>
+      </div>
+      @if (!string.IsNullOrWhiteSpace(LastSyncSummary))
+      {
+        <p class="text-secondary small mb-0 mt-3">@LastSyncSummary</p>
+      }
     </div>
-    @if (!string.IsNullOrWhiteSpace(LastSyncSummary))
-    {
-      <p class="text-secondary small mb-0 mt-3">@LastSyncSummary</p>
-    }
   </div>
-</div>
 
-<div class="card border-0 shadow-sm mb-4">
-  <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
       <span class="fw-semibold">My Advertisers (Joined/Active)</span>
-    <span class="badge text-bg-light">@FilteredPartners.Count</span>
-  </div>
-  <div class="card-body">
-    <div class="row g-3 mb-3">
+      <span class="badge text-bg-light">@FilteredPartners.Count</span>
+    </div>
+    <div class="card-body">
+      <div class="row g-3 mb-3">
         <div class="col-md-8">
           <label class="form-label fw-semibold small">Search My Advertisers</label>
           <input class="form-control" @bind="SearchTerm" @bind:event="oninput" placeholder="Advertiser name or ID" />
-      </div>
+        </div>
         <div class="col-md-4 d-flex align-items-end">
           <button class="btn btn-outline-secondary w-100" @onclick="ClearSearch">Clear Search</button>
+        </div>
       </div>
-    </div>
 
-    @if (FilteredPartners.Count == 0)
-    {
+      @if (FilteredPartners.Count == 0)
+      {
         <p class="text-secondary mb-0">No joined/active advertisers found for the current view.</p>
-    }
-    else
-    {
+      }
+      else
+      {
         <div class="accordion" id="cjAdvertiserAccordion">
           @foreach (var partner in FilteredPartners)
           {
@@ -163,16 +163,16 @@
     </div>
   </div>
 
-@if (ShowConnectorModal)
-{
-  <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
-    <div class="modal-dialog modal-lg" role="document">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title">Connect CJ.com Account</h5>
-          <button type="button" class="btn-close" aria-label="Close" @onclick="CloseConnectorModal"></button>
-        </div>
-        <div class="modal-body">
+  @if (ShowConnectorModal)
+  {
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+      <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Connect CJ.com Account</h5>
+            <button type="button" class="btn-close" aria-label="Close" @onclick="CloseConnectorModal"></button>
+          </div>
+          <div class="modal-body">
             <p class="text-secondary">Enter your CJ Developer Key and Publisher ID (CID). Website ID is optional and is only
               used as an additional filter.</p>
               <div class="row g-3">

@@ -1,4 +1,4 @@
-@page "/cms-builder"
+@page "/admin/cms-builder"
 @rendermode InteractiveServer
 @using GwsBusinessSuite.Application.CmsBuilder
 @inject IReactPageBuilderService ReactPageBuilderService
@@ -23,26 +23,26 @@
             <div class="cms-builder-metric">
                 <span>Routes connected</span>
                 <strong>@ReactPages.Select(page =>
-                                    page.RoutePath).Distinct(StringComparer.OrdinalIgnoreCase).Count()</strong>
+                                                        page.RoutePath).Distinct(StringComparer.OrdinalIgnoreCase).Count()</strong>
                 </div>
             </div>
-</div>
+        </div>
 
-@if (!string.IsNullOrWhiteSpace(ErrorMessage))
-{
-  <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
-    <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
-    <div>@ErrorMessage</div>
-  </div>
-}
+        @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+        {
+            <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+                <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+                <div>@ErrorMessage</div>
+            </div>
+        }
 
-@if (!string.IsNullOrWhiteSpace(StatusMessage))
-{
-  <div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
-    <i class="bi bi-info-circle-fill flex-shrink-0"></i>
-    <div>@StatusMessage</div>
-  </div>
-}
+        @if (!string.IsNullOrWhiteSpace(StatusMessage))
+        {
+            <div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
+                <i class="bi bi-info-circle-fill flex-shrink-0"></i>
+                <div>@StatusMessage</div>
+            </div>
+        }
 
         <div class="cms-builder-surface card border-0 shadow-sm">
             <div
@@ -64,7 +64,7 @@
 
                 <div class="card-body px-4 pb-4 pt-0">
                     @if (VisiblePages.Count == 0)
-        {
+                    {
                         <div class="cms-builder-empty-state">
                             <div class="cms-builder-empty-icon"><i class="bi bi-layout-wtf"></i></div>
                             <div>
@@ -72,9 +72,9 @@
                                 <p>Try a different search term or refresh the route discovery for the connected public site.</p>
                             </div>
                         </div>
-        }
-        else
-        {
+                    }
+                    else
+                    {
                         <div class="cms-page-grid">
                             @foreach (var reactPage in VisiblePages)
                             {
@@ -109,10 +109,10 @@
                                         </div>
                                     </article>
                                 }
-            </div>
-        }
-    </div>
-</div>
+                            </div>
+                        }
+                    </div>
+                </div>
 
 @code {
     private List<ReactPageReference> ReactPages { get; set; } = new();

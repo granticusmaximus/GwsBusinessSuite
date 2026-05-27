@@ -1,4 +1,4 @@
-@page "/cms-builder/editor/{PageKey}"
+@page "/admin/cms-builder/editor/{PageKey}"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using GwsBusinessSuite.Application.CmsBuilder
 @inject IReactPageBuilderService ReactPageBuilderService
@@ -677,7 +677,7 @@ string.Empty;
 
     private void BackToList()
     {
-        Navigation.NavigateTo("/cms-builder");
+        Navigation.NavigateTo("/admin/cms-builder");
     }
 
     private static string BuildFileOpenLink(string filePath)

@@ -22,8 +22,8 @@ builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
-        options.LoginPath = "/login";
-        options.AccessDeniedPath = "/login";
+        options.LoginPath = "/admin/login";
+        options.AccessDeniedPath = "/admin/login";
         options.SlidingExpiration = true;
         options.ExpireTimeSpan = TimeSpan.FromHours(8);
     });
@@ -54,8 +54,29 @@ if (!app.Environment.IsDevelopment())
     // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
-app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
-app.UseHttpsRedirection();
+app.UseStatusCodePagesWithReExecute("/admin/not-found", createScopeForStatusCodePages: true);
+// HTTP-only in Docker — remove HTTPS redirect so the container runs cleanly on port 8080
+
+// Rewrite public (non-admin) HTML navigation requests to React's index.html.
+// Static file requests (any path with a file extension) pass through unchanged.
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path;
+    var isAdmin = path.StartsWithSegments("/admin");
+    var isApi = path.StartsWithSegments("/auth")
+             || path.StartsWithSegments("/cms-preview")
+             || path.StartsWithSegments("/_blazor")
+             || path.StartsWithSegments("/_framework");
+    var isFile = path.Value?.Contains('.') == true;
+
+    if (!isAdmin && !isApi && !isFile)
+        context.Request.Path = "/index.html";
+
+    await next();
+});
+
+// Serve React static files (wwwroot/index.html, wwwroot/assets/*, etc.) before auth checks.
+app.UseStaticFiles();
 
 if (!string.IsNullOrWhiteSpace(normalizedPathBase))
 {
@@ -110,14 +131,14 @@ app.MapPost("/auth/login", async (HttpContext httpContext, IConfiguration config
 
     if (string.IsNullOrWhiteSpace(configuredUsername) || string.IsNullOrWhiteSpace(configuredPassword))
     {
-        return Results.LocalRedirect("/login?error=missing");
+        return Results.LocalRedirect("/admin/login?error=missing");
     }
 
     if (!string.Equals(username, configuredUsername, StringComparison.Ordinal) ||
         !string.Equals(password, configuredPassword, StringComparison.Ordinal))
     {
-        var safeReturnUrl = IsSafeLocalPath(returnUrl) ? returnUrl : "/";
-        return Results.LocalRedirect($"/login?error=invalid&returnUrl={Uri.EscapeDataString(safeReturnUrl)}");
+        var safeReturnUrl = IsSafeLocalPath(returnUrl) ? returnUrl : "/admin";
+        return Results.LocalRedirect($"/admin/login?error=invalid&returnUrl={Uri.EscapeDataString(safeReturnUrl)}");
     }
 
     var claims = new List<Claim>
@@ -131,18 +152,21 @@ app.MapPost("/auth/login", async (HttpContext httpContext, IConfiguration config
 
     await httpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
 
-    return Results.LocalRedirect(IsSafeLocalPath(returnUrl) ? returnUrl : "/");
+    return Results.LocalRedirect(IsSafeLocalPath(returnUrl) ? returnUrl : "/admin");
 }).AllowAnonymous();
 
 app.MapGet("/auth/logout", async (HttpContext httpContext) =>
 {
     await httpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-    return Results.LocalRedirect("/login");
+    return Results.LocalRedirect("/admin/login");
 }).AllowAnonymous();
 
 app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
+
+// Safety net: serve React index.html for any route that Blazor didn't handle.
+app.MapFallbackToFile("index.html").AllowAnonymous();
 
 app.Run();
 

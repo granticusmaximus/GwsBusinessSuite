@@ -31,3 +31,6 @@ secrets.json
 
 # OS files
 .DS_Store
+# Node / React
+node_modules/
+apps/public-site/dist/
