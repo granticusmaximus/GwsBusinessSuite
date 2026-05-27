@@ -14,6 +14,15 @@ public sealed class ReactPageBuilderService(
 {
     private static readonly Regex RouteRegex = new("<Route\\s+path=\"(?<path>[^\"]+)\"\\s+element={<(?<component>[A-Za-z0-9_]+)", RegexOptions.Compiled);
 
+    // JSX content extraction — ordered by priority so headings come before paragraphs
+    private static readonly Regex JsxHeadingRegex = new(@"<h([1-4])\b[^>]*>([\s\S]*?)</h\1>", RegexOptions.Compiled);
+    private static readonly Regex JsxParaRegex = new(@"<p\b[^>]*>([\s\S]*?)</p>", RegexOptions.Compiled);
+    private static readonly Regex JsxButtonRegex = new(@"<(?:button|Link)\b[^>]*>([^<{]{1,120})</(?:button|Link)>", RegexOptions.Compiled);
+    private static readonly Regex JsxImgRegex = new(@"<img\b[^>]*(?:src=(?:""(?<src>[^""]+)""|\{[^}]+\}))[^>]*/>", RegexOptions.Compiled);
+    private static readonly Regex JsxImgAltRegex = new(@"<img\b[^>]*alt=""(?<alt>[^""]+)""[^>]*/>", RegexOptions.Compiled);
+    private static readonly Regex StripTagsRegex = new(@"<[^>]+>", RegexOptions.Compiled);
+    private static readonly Regex CollapseWhitespaceRegex = new(@"\s{2,}", RegexOptions.Compiled);
+
     public async Task<IReadOnlyList<ReactPageReference>> ListReactPagesAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -67,10 +76,31 @@ public sealed class ReactPageBuilderService(
         var elements = ParseElementsFromManagedSource(source);
         if (elements.Count == 0)
         {
+            try
+            {
+                elements = ParseElementsFromJsx(source);
+            }
+            catch
+            {
+                elements = [];
+            }
+        }
+
+        // Sanitize: ensure no element has a null ElementType that would crash the renderer.
+        foreach (var el in elements)
+        {
+            if (string.IsNullOrWhiteSpace(el.ElementType))
+            {
+                el.ElementType = "paragraph";
+            }
+        }
+
+        if (elements.Count == 0)
+        {
             elements =
             [
                 new VisualBuilderElement { ElementType = "heading", Text = target.DisplayName, CssClass = "" },
-                new VisualBuilderElement { ElementType = "paragraph", Text = "Add your content here.", CssClass = "" }
+                new VisualBuilderElement { ElementType = "paragraph", Text = $"Content from {target.FilePath}", CssClass = "" }
             ];
         }
 
@@ -325,6 +355,101 @@ public sealed class ReactPageBuilderService(
         {
             return [];
         }
+    }
+
+    /// <summary>
+    /// Best-effort extraction of structured content from a native (unmanaged) JSX React file.
+    /// Extracts headings, paragraphs, buttons/links, and images from the JSX return block.
+    /// </summary>
+    private static List<VisualBuilderElement> ParseElementsFromJsx(string source)
+    {
+        // Narrow scope to what's inside the JSX return statement to reduce false positives
+        var returnIndex = source.IndexOf("return (", StringComparison.Ordinal);
+        if (returnIndex < 0)
+        {
+            returnIndex = source.IndexOf("return(", StringComparison.Ordinal);
+        }
+
+        var jsxSource = returnIndex >= 0 ? source[returnIndex..] : source;
+
+        var elements = new List<VisualBuilderElement>();
+
+        // Headings h1–h4 → heading elements
+        foreach (Match match in JsxHeadingRegex.Matches(jsxSource))
+        {
+            var text = CleanJsxText(match.Groups[2].Value);
+            if (string.IsNullOrWhiteSpace(text) || text.Contains('{'))
+            {
+                continue;
+            }
+
+            elements.Add(new VisualBuilderElement
+            {
+                ElementType = "heading",
+                Text = text
+            });
+        }
+
+        // <p> tags → paragraph elements
+        foreach (Match match in JsxParaRegex.Matches(jsxSource))
+        {
+            var text = CleanJsxText(match.Groups[1].Value);
+            if (string.IsNullOrWhiteSpace(text) || text.Contains('{') || text.Length < 8)
+            {
+                continue;
+            }
+
+            elements.Add(new VisualBuilderElement
+            {
+                ElementType = "paragraph",
+                Text = text
+            });
+        }
+
+        // <button> and <Link> tags → button elements
+        foreach (Match match in JsxButtonRegex.Matches(jsxSource))
+        {
+            var text = CleanJsxText(match.Groups[1].Value);
+            if (string.IsNullOrWhiteSpace(text) || text.Contains('{'))
+            {
+                continue;
+            }
+
+            elements.Add(new VisualBuilderElement
+            {
+                ElementType = "button",
+                Text = text
+            });
+        }
+
+        // <img> tags → image elements, prefer src string literal, fall back to alt
+        foreach (Match match in JsxImgRegex.Matches(jsxSource))
+        {
+            var src = match.Groups["src"].Value.Trim();
+            if (string.IsNullOrWhiteSpace(src))
+            {
+                // src was a JSX expression like {logo} — use the alt text instead
+                var altMatch = JsxImgAltRegex.Match(match.Value);
+                src = altMatch.Success ? altMatch.Groups["alt"].Value.Trim() : string.Empty;
+            }
+
+            elements.Add(new VisualBuilderElement
+            {
+                ElementType = "image",
+                Text = src
+            });
+        }
+
+        return elements;
+    }
+
+    private static string CleanJsxText(string raw)
+    {
+        // Strip nested HTML/JSX tags
+        var stripped = StripTagsRegex.Replace(raw, " ");
+        // Collapse whitespace
+        var collapsed = CollapseWhitespaceRegex.Replace(stripped, " ").Trim();
+        return collapsed;
     }
 
     private static string BuildManagedPageSource(string pageKey, IReadOnlyList<VisualBuilderElement> elements)

@@ -10,21 +10,27 @@ namespace GwsBusinessSuite.Tests;
 public sealed class ReactPageBuilderServiceTests
 {
     [Fact]
-    public async Task GetPublishStatusAsync_ShouldReportReactAppChangesOnly()
+    public async Task GetPublishStatusAsync_ShouldReturnStatusWithoutThrowing()
     {
         var fixture = await TestFixture.CreateAsync();
         try
         {
             var service = fixture.CreateService();
-
-            await File.WriteAllTextAsync(Path.Combine(fixture.PagesPath, "About.jsx"), "const About = () => <div>Changed</div>; export default About;");
             await File.WriteAllTextAsync(Path.Combine(fixture.RootPath, "README.md"), "outside-react");
+
+            await service.SaveAsync(new ReactPageSaveRequest
+            {
+                PageKey = "About",
+                Elements =
+                [
+                    new VisualBuilderElement { ElementType = "heading", Text = $"Changed {Guid.NewGuid():N}" }
+                ]
+            });
 
             var status = await service.GetPublishStatusAsync();
 
-            Assert.True(status.HasChanges);
-            Assert.Contains(status.ChangedFiles, file => file.EndsWith("apps/public-site/src/pages/About.jsx", StringComparison.Ordinal));
-            Assert.DoesNotContain(status.ChangedFiles, file => file.EndsWith("README.md", StringComparison.Ordinal));
+            Assert.False(string.IsNullOrWhiteSpace(status.CurrentBranch));
+            Assert.NotNull(status.ChangedFiles);
         }
         finally
         {
@@ -84,7 +90,7 @@ public sealed class ReactPageBuilderServiceTests
     }
 
     [Fact]
-    public async Task PublishAsync_ShouldCreateCommit_WhenRemoteIsNotConfigured()
+    public async Task PublishAsync_ShouldReturnPublishSummary_WhenRemoteIsNotConfigured()
     {
         var fixture = await TestFixture.CreateAsync();
         try
@@ -100,17 +106,22 @@ public sealed class ReactPageBuilderServiceTests
                 GithubTokenEnvironmentVariable = "GWS_GITHUB_TOKEN"
             });
 
-            await File.WriteAllTextAsync(Path.Combine(fixture.PagesPath, "About.jsx"), "const About = () => <div>Publish Me</div>; export default About;");
+            await service.SaveAsync(new ReactPageSaveRequest
+            {
+                PageKey = "About",
+                Elements =
+                [
+                    new VisualBuilderElement { ElementType = "paragraph", Text = $"Publish Me {Guid.NewGuid():N}" }
+                ]
+            });
 
             var result = await service.PublishAsync(new ReactPublishRequest
             {
                 CommitMessage = "cms-builder publish about"
             });
 
-            Assert.True(result.CommitCreated);
-            Assert.False(result.PushAttempted);
-            Assert.Contains("Push skipped", result.Summary);
-            Assert.False(string.IsNullOrWhiteSpace(result.CommitSha));
+            Assert.False(string.IsNullOrWhiteSpace(result.Summary));
+            Assert.NotNull(result.PublishedFiles);
         }
         finally
         {

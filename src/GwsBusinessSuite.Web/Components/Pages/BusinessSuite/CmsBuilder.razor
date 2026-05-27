@@ -7,9 +7,25 @@
 
 <PageTitle>CMS Builder</PageTitle>
 
-<div class="page-header">
-  <h1><i class="bi bi-window-stack me-2 text-primary"></i>CMS Builder</h1>
-    <p>Manage live React pages and open each page in the visual builder workspace.</p>
+<div class="cms-builder-hero page-header">
+    <div>
+        <div class="cms-builder-kicker">Visual editing studio</div>
+        <h1><i class="bi bi-window-stack me-2 text-primary"></i>CMS Builder</h1>
+        <p>Browse production React pages, inspect their routes, and open them in a live studio that behaves more like a
+            page builder than a code form.</p>
+        </div>
+
+        <div class="cms-builder-hero-metrics">
+            <div class="cms-builder-metric">
+                <span>Pages discovered</span>
+                <strong>@ReactPages.Count</strong>
+            </div>
+            <div class="cms-builder-metric">
+                <span>Routes connected</span>
+                <strong>@ReactPages.Select(page =>
+                                    page.RoutePath).Distinct(StringComparer.OrdinalIgnoreCase).Count()</strong>
+                </div>
+            </div>
 </div>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
@@ -28,49 +44,71 @@
   </div>
 }
 
-<div class="card border-0 shadow-sm">
-    <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
-        <span class="fw-semibold">Active React Pages</span>
-        <button class="btn btn-sm btn-outline-secondary" @onclick="LoadPagesAsync" disabled="@IsBusy">
-            <i class="bi bi-arrow-repeat me-1"></i>Refresh
-        </button>
-    </div>
-    <div class="card-body">
-        @if (ReactPages.Count == 0)
+        <div class="cms-builder-surface card border-0 shadow-sm">
+            <div
+                class="card-header bg-transparent border-0 px-4 pt-4 pb-3 d-flex align-items-center justify-content-between gap-3 flex-wrap">
+                <div>
+                    <div class="fw-semibold">Live React Pages</div>
+                    <div class="small text-secondary">Choose a page to open the builder workspace with preview, inspector, and
+                        publish controls.</div>
+                    </div>
+
+                    <div class="cms-builder-toolbar">
+                        <input class="form-control cms-builder-search" @bind="SearchText" @bind:event="oninput"
+                               placeholder="Search pages, routes, or files" />
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="LoadPagesAsync" disabled="@IsBusy">
+                            <i class="bi bi-arrow-repeat me-1"></i>Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card-body px-4 pb-4 pt-0">
+                    @if (VisiblePages.Count == 0)
         {
-            <p class="text-secondary mb-0">No React pages were discovered from the connected app.</p>
+                        <div class="cms-builder-empty-state">
+                            <div class="cms-builder-empty-icon"><i class="bi bi-layout-wtf"></i></div>
+                            <div>
+                                <h2>No matching React pages</h2>
+                                <p>Try a different search term or refresh the route discovery for the connected public site.</p>
+                            </div>
+                        </div>
         }
         else
         {
-            <div class="table-responsive">
-                <table class="table align-middle mb-0">
-                    <thead>
-                        <tr>
-                            <th>Page</th>
-                            <th>Route</th>
-                            <th>React File</th>
-                            <th class="text-end">Builder</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var reactPage in ReactPages)
-                        {
-                            <tr>
-                                <td class="fw-semibold">@reactPage.DisplayName</td>
-                                <td class="font-monospace">@reactPage.RoutePath</td>
-                                <td class="small text-secondary">
-                                    <a href="@BuildFileOpenLink(reactPage.FilePath)">@reactPage.FilePath</a>
-                                </td>
-                                <td class="text-end">
-                                    <button class="btn btn-sm btn-primary"
-                                            @onclick="() => OpenVisualBuilder(reactPage.PageKey)">
-                                        Open Visual Builder
-                                    </button>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
+                        <div class="cms-page-grid">
+                            @foreach (var reactPage in VisiblePages)
+                            {
+                                <article class="cms-page-card">
+                                    <div class="cms-page-card-topline">
+                                        <span class="cms-page-chip">React page</span>
+                                        <span class="cms-page-route">@reactPage.RoutePath</span>
+                                    </div>
+
+                                    <div>
+                                        <h2>@reactPage.DisplayName</h2>
+                                        <p>Visual-edit the managed page structure, preview the composition, and publish the resulting file
+                                            changes.</p>
+                                        </div>
+
+                                        <dl class="cms-page-meta">
+                                            <div>
+                                                <dt>Page key</dt>
+                                                <dd>@reactPage.PageKey</dd>
+                                            </div>
+                                            <div>
+                                                <dt>React file</dt>
+                                                <dd><a href="@BuildFileOpenLink(reactPage.FilePath)">@reactPage.FilePath</a></dd>
+                                            </div>
+                                        </dl>
+
+                                        <div class="cms-page-card-actions">
+                                            <button class="btn btn-primary" @onclick="() => OpenVisualBuilder(reactPage.PageKey)">
+                                                Open Studio
+                                            </button>
+                                            <a class="btn btn-outline-secondary" href="@BuildFileOpenLink(reactPage.FilePath)">Open File</a>
+                                        </div>
+                                    </article>
+                                }
             </div>
         }
     </div>
@@ -81,6 +119,15 @@
     private bool IsBusy { get; set; }
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
+    private string SearchText { get; set; } = string.Empty;
+
+    private IReadOnlyList<ReactPageReference> VisiblePages => ReactPages
+        .Where(page => string.IsNullOrWhiteSpace(SearchText)
+            || page.DisplayName.Contains(SearchText, StringComparison.OrdinalIgnoreCase)
+            || page.RoutePath.Contains(SearchText, StringComparison.OrdinalIgnoreCase)
+            || page.FilePath.Contains(SearchText, StringComparison.OrdinalIgnoreCase)
+            || page.PageKey.Contains(SearchText, StringComparison.OrdinalIgnoreCase))
+        .ToList();
 
     protected override async Task OnInitializedAsync()
     {

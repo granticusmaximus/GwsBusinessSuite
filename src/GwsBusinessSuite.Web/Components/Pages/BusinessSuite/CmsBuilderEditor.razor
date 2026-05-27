@@ -1,5 +1,5 @@
 @page "/cms-builder/editor/{PageKey}"
-@rendermode InteractiveServer
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using GwsBusinessSuite.Application.CmsBuilder
 @inject IReactPageBuilderService ReactPageBuilderService
 @inject ILogger<CmsBuilderEditor> Logger
@@ -7,10 +7,12 @@
 
 <PageTitle>CMS Visual Builder</PageTitle>
 
-<div class="page-header d-flex justify-content-between align-items-start gap-3">
+<div class="studio-header page-header">
     <div>
+        <div class="studio-kicker">Live page studio</div>
         <h1><i class="bi bi-braces-asterisk me-2 text-primary"></i>Visual Builder</h1>
-        <p class="mb-1">Edit React page <span class="font-monospace">@PageKey</span> using drag-and-drop elements.</p>
+        <p class="mb-1">Shape the managed React page in a live preview workspace with insert, layout, inspect, save, and
+            publish controls.</p>
         @if (!string.IsNullOrWhiteSpace(RoutePath))
         {
             <p class="small text-secondary mb-0">Route: <span class="font-monospace">@RoutePath</span></p>
@@ -20,7 +22,12 @@
             <p class="small text-secondary mb-0">File: <a href="@BuildFileOpenLink(FilePath)">@FilePath</a></p>
         }
     </div>
-    <div class="d-flex flex-wrap gap-2">
+
+        <div class="studio-header-actions">
+            <div class="studio-pills">
+                <span class="studio-pill">@Elements.Count element@(Elements.Count == 1 ? string.Empty : "s")</span>
+                <span class="studio-pill studio-pill-subtle">@GetViewportLabel()</span>
+            </div>
         <button class="btn btn-outline-secondary" @onclick="BackToList">Back To Pages</button>
         <button class="btn btn-primary" @onclick="SaveAsync" disabled="@IsBusy">Save</button>
         <button class="btn btn-outline-success" @onclick="PublishAsync" disabled="@IsBusy">Publish Changes</button>
@@ -37,98 +44,239 @@
     <div class="alert alert-info">@StatusMessage</div>
 }
 
-<div class="card border-0 shadow-sm mb-3">
-    <div class="card-header bg-white border-bottom py-2 d-flex justify-content-between align-items-center">
-        <span class="fw-semibold">Git Publish</span>
-        <button class="btn btn-sm btn-outline-secondary" @onclick="RefreshPublishStatusAsync" disabled="@IsBusy">Refresh
-            Status</button>
-        </div>
-        <div class="card-body">
-            <div class="small text-secondary mb-2">Current branch: <span class="font-monospace">@PublishBranchName</span>
-            </div>
-            <label class="form-label small">Commit Message</label>
-            <input class="form-control mb-3" @bind="PublishCommitMessage" placeholder="cms-builder publish updates" />
+    <div class="studio-workspace">
+        <aside class="studio-panel studio-panel-left">
+            <div class="studio-panel-section">
+                <div class="studio-panel-header">
+                    <div>
+                        <span class="studio-section-eyebrow">Insert</span>
+                        <h2>Widgets</h2>
+                    </div>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="ToggleSidebar">
+                        @(SidebarCollapsed ? "Expand" : "Collapse")
+                    </button>
+                </div>
 
-            @if (ChangedFiles.Count == 0)
+                @if (!SidebarCollapsed)
             {
-                <div class="text-secondary small">No React app changes detected for publishing.</div>
+                    <div class="studio-widget-grid">
+                        @foreach (var elementType in ElementTypes)
+                        {
+                            <button class="studio-widget-card" draggable="true"
+                                    @ondragstart="() => StartDragElementType(elementType)" @onclick="() => AddElement(elementType)">
+                                <span class="studio-widget-icon"><i class="@GetElementIconClass(elementType)"></i></span>
+                                <span class="studio-widget-copy">
+                                    <strong>@GetElementTitle(elementType)</strong>
+                                    <small>@GetElementTagline(elementType)</small>
+                                </span>
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="studio-panel-section">
+                <div class="studio-panel-header">
+                    <div>
+                        <span class="studio-section-eyebrow">Structure</span>
+                        <h2>Layers</h2>
+                    </div>
+                </div>
+
+                @if (Elements.Count == 0)
+                {
+                    <div class="studio-empty-card">
+                        <p>No layers yet. Add a widget to start composing the page.</p>
+                    </div>
             }
             else
             {
-                <div class="small fw-semibold mb-2">Pending files</div>
-                <ul class="small text-secondary mb-0">
-                    @foreach (var changedFile in ChangedFiles)
+                    <div class="studio-layer-list">
+                        @foreach (var element in Elements)
                     {
-                        <li><span class="font-monospace">@changedFile</span></li>
+                            <button class="studio-layer-item @(element.Id == SelectedElementId ? "is-active" : string.Empty)"
+                                    @onclick="() => SelectElement(element.Id)">
+                                <span class="studio-layer-icon"><i
+                                    class="@GetElementIconClass(element.ElementType ?? "paragraph")"></i></span>
+                                    <span class="studio-layer-copy">
+                                        <strong>@GetElementTitle(element.ElementType ?? "paragraph")</strong>
+                                        <small>@GetLayerSummary(element)</small>
+                                    </span>
+                                </button>
                     }
-                </ul>
+                        </div>
             }
         </div>
-    </div>
+            </aside>
 
-<div class="row g-3">
-    <div class="col-lg-3">
-        <div class="card border-0 shadow-sm">
-            <div class="card-header bg-white border-bottom py-2 d-flex justify-content-between align-items-center">
-                <span class="fw-semibold">Elements</span>
-                <button class="btn btn-sm btn-outline-secondary" @onclick="ToggleSidebar">
-                    @(SidebarCollapsed ? "Expand" : "Collapse")
-                </button>
-            </div>
-            @if (!SidebarCollapsed)
-            {
-                <div class="card-body d-grid gap-2">
-                    @foreach (var elementType in ElementTypes)
-                    {
-                        <button class="btn btn-outline-primary text-start" draggable="true"
-                                @ondragstart="() => StartDragElementType(elementType)" @onclick="() => AddElement(elementType)">
-                            + @elementType
+            <section class="studio-stage-panel studio-panel" @ondragover:preventDefault="true" @ondrop="DropElementIntoCanvas">
+                <div class="studio-stage-header">
+                    <div>
+                        <span class="studio-section-eyebrow">Preview</span>
+                        <h2>Live canvas</h2>
+                    </div>
+
+                    <div class="studio-device-switcher">
+                        <button class="studio-device-button @(PreviewViewport == "desktop" ? "is-active" : string.Empty)"
+                                @onclick='() => SetPreviewViewport("desktop")'>
+                            <i class="bi bi-laptop"></i>
                         </button>
-                    }
-                    <div class="small text-secondary mt-2">Drag an element button into the canvas or click to add.</div>
+                        <button class="studio-device-button @(PreviewViewport == "tablet" ? "is-active" : string.Empty)"
+                                @onclick='() => SetPreviewViewport("tablet")'>
+                            <i class="bi bi-tablet-landscape"></i>
+                        </button>
+                        <button class="studio-device-button @(PreviewViewport == "mobile" ? "is-active" : string.Empty)"
+                                @onclick='() => SetPreviewViewport("mobile")'>
+                            <i class="bi bi-phone"></i>
+                        </button>
+                    </div>
                 </div>
-            }
-        </div>
-    </div>
 
-    <div class="col-lg-9">
-        <div class="card border-0 shadow-sm" @ondragover:preventDefault="true" @ondrop="DropElementIntoCanvas">
-            <div class="card-header bg-white border-bottom py-2">
-                <span class="fw-semibold">Page Canvas</span>
-            </div>
-            <div class="card-body">
-                @if (Elements.Count == 0)
+                <div class="studio-stage-shell">
+                    <div class="studio-stage-frame @GetViewportClass()">
+                        <div class="studio-stage-browser">
+                            <span></span><span></span><span></span>
+                            <div class="studio-stage-route">@RoutePath</div>
+                        </div>
+
+                        <div class="studio-stage-canvas">
+                            @if (Elements.Count == 0)
+                            {
+                                <div class="studio-canvas-empty">
+                                    <div class="studio-empty-card studio-empty-card-center">
+                                        <h3>Drop blocks into the canvas</h3>
+                                        <p>The preview will update immediately as you add or edit managed React elements.</p>
+                                    </div>
+                                </div>
+                            }
+                            else
+                    {
+                                @foreach (var element in Elements)
+                                {
+                                    <button type="button" class="studio-preview-block @GetPreviewSelectionClass(element.Id)"
+                                            @onclick="() => SelectElement(element.Id)">
+                                        <div class="studio-preview-badge">@GetElementTitle(element.ElementType ?? "paragraph")</div>
+
+                                        @switch ((element.ElementType ?? "paragraph").ToLowerInvariant())
+                                        {
+                                            case "heading":
+                                                <h2 class="studio-preview-heading @(element.CssClass ?? string.Empty)">@element.Text</h2>
+                                                break;
+                                            case "button":
+                                                <div class="studio-preview-button-wrap">
+                                                    <span class="studio-preview-button @(element.CssClass ?? string.Empty)">@element.Text</span>
+                                                </div>
+                                                break;
+                                            case "image":
+                                                <div class="studio-preview-image-wrap">
+                                                    <img class="studio-preview-image @(element.CssClass ?? string.Empty)"
+                                                         src="@GetImageSource(element.Text)" alt="Preview image" />
+                                                </div>
+                                                break;
+                                            case "paragraph":
+                                            default:
+                                                <p class="studio-preview-paragraph @(element.CssClass ?? string.Empty)">@element.Text</p>
+                                                break;
+                                        }
+                                    </button>
+                                }
+                            }
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <aside class="studio-panel studio-panel-right">
+                <div class="studio-panel-section">
+                    <div class="studio-panel-header">
+                        <div>
+                            <span class="studio-section-eyebrow">Inspector</span>
+                            <h2>Selected element</h2>
+                        </div>
+                    </div>
+
+                    @if (SelectedElement is null)
                 {
-                    <div class="text-secondary">Drag or add elements from the sidebar to start building.</div>
+                        <div class="studio-empty-card">
+                            <p>Select a block in the preview or layers panel to edit its content and placement.</p>
+                        </div>
                 }
                 else
                 {
-                    @foreach (var element in Elements)
-                    {
-                        <div class="border rounded-3 p-3 mb-3 bg-body-tertiary">
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <span class="badge text-bg-primary">@element.ElementType</span>
-                                <button class="btn btn-sm btn-outline-danger"
-                                        @onclick="() => RemoveElement(element.Id)">Delete</button>
+                        <div class="studio-inspector-stack">
+                            <div>
+                                <label class="form-label small">Element type</label>
+                                <select class="form-select" value="@SelectedElement.ElementType"
+                                        @onchange="UpdateSelectedElementType">
+                                    @foreach (var elementType in ElementTypes)
+                                    {
+                                        <option value="@elementType">@GetElementTitle(elementType)</option>
+                                    }
+                                </select>
                             </div>
-                            <div class="row g-2">
-                                <div class="col-md-8">
-                                    <label class="form-label small">Text / Content</label>
-                                    <input class="form-control" value="@element.Text"
-                                           @oninput="(e) => UpdateElementText(element.Id, e.Value?.ToString() ?? string.Empty)" />
-                                </div>
-                                <div class="col-md-4">
-                                    <label class="form-label small">CSS Class</label>
-                                    <input class="form-control" value="@element.CssClass"
-                                           @oninput="(e) => UpdateElementCss(element.Id, e.Value?.ToString() ?? string.Empty)" />
-                                </div>
+
+                            <div>
+                                <label class="form-label small">@GetContentLabel(SelectedElement.ElementType)</label>
+                                <textarea class="form-control studio-inspector-textarea" value="@SelectedElement.Text"
+                                          @oninput="(e) => UpdateElementText(SelectedElement.Id, e.Value?.ToString() ?? string.Empty)"></textarea>
+                            </div>
+
+                            <div>
+                                <label class="form-label small">CSS class</label>
+                                <input class="form-control" value="@SelectedElement.CssClass"
+                                       @oninput="(e) => UpdateElementCss(SelectedElement.Id, e.Value?.ToString() ?? string.Empty)" />
+                            </div>
+
+                            <div class="studio-action-row">
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedUp"
+                                        disabled="@(!CanMoveSelectedUp)">
+                                    <i class="bi bi-arrow-up"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedDown"
+                                        disabled="@(!CanMoveSelectedDown)">
+                                    <i class="bi bi-arrow-down"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="DuplicateSelected"
+                                        disabled="@(SelectedElement is null)">Duplicate</button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="DeleteSelected"
+                                        disabled="@(SelectedElement is null)">Delete</button>
                             </div>
                         </div>
                     }
-                }
-            </div>
-        </div>
-    </div>
+                </div>
+
+                <div class="studio-panel-section">
+                    <div class="studio-panel-header">
+                        <div>
+                            <span class="studio-section-eyebrow">Publish</span>
+                            <h2>Git workflow</h2>
+                        </div>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="RefreshPublishStatusAsync"
+                                disabled="@IsBusy">Refresh</button>
+                    </div>
+
+                    <div class="studio-publish-meta">Current branch: <span class="font-monospace">@PublishBranchName</span>
+                    </div>
+                    <label class="form-label small">Commit message</label>
+                    <input class="form-control mb-3" @bind="PublishCommitMessage" placeholder="cms-builder publish updates" />
+
+                    @if (ChangedFiles.Count == 0)
+                    {
+                        <div class="studio-empty-card">
+                            <p>No React app changes are currently staged for a publish commit.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="studio-changes-list">
+                            @foreach (var changedFile in ChangedFiles)
+                            {
+                                <div class="studio-change-item"><span class="font-monospace">@changedFile</span></div>
+                            }
+                        </div>
+                    }
+                </div>
+            </aside>
 </div>
 
 @code {
@@ -144,9 +292,22 @@
     private string ErrorMessage { get; set; } = string.Empty;
     private string RoutePath { get; set; } = string.Empty;
     private string FilePath { get; set; } = string.Empty;
+    private string PreviewViewport { get; set; } = "desktop";
     private string PublishCommitMessage { get; set; } = "cms-builder publish updates";
     private string PublishBranchName { get; set; } = "unknown";
     private List<string> ChangedFiles { get; set; } = new();
+    private string SelectedElementId { get; set; } = string.Empty;
+
+    private VisualBuilderElement? SelectedElement => Elements.FirstOrDefault(x => x.Id == SelectedElementId);
+    private bool CanMoveSelectedUp => GetSelectedElementIndex() > 0;
+    private bool CanMoveSelectedDown
+    {
+        get
+        {
+            var index = GetSelectedElementIndex();
+            return index >= 0 && index < Elements.Count - 1;
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -170,17 +331,28 @@
             Elements = state.Elements.ToList();
             RoutePath = state.RoutePath;
             FilePath = state.FilePath;
+            SelectedElementId = Elements.FirstOrDefault()?.Id ?? string.Empty;
             StatusMessage = $"Loaded visual builder for {state.PageKey}.";
-            await RefreshPublishStatusAsync();
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Unable to load visual builder state for page {PageKey}.", PageKey);
-            ErrorMessage = $"Unable to load page editor. {ex.Message}";
+            Logger.LogError(ex, "[{ExType}] Unable to load visual builder state for page {PageKey}.", ex.GetType().Name, PageKey);
+            ErrorMessage = $"Unable to load page editor. [{ex.GetType().Name}] {ex.Message}";
         }
         finally
         {
             IsBusy = false;
+        }
+
+        // Refresh publish status separately so a git failure never blocks editor load.
+        try
+        {
+            await RefreshPublishStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Unable to load publish status for page {PageKey}.", PageKey);
+            PublishBranchName = "unavailable";
         }
     }
 
@@ -207,7 +379,7 @@
 
     private void AddElement(string elementType)
     {
-        Elements.Add(new VisualBuilderElement
+        var element = new VisualBuilderElement
         {
             ElementType = elementType,
             Text = elementType switch
@@ -218,7 +390,10 @@
                 _ => "Paragraph text"
             },
             CssClass = string.Empty
-        });
+        };
+
+        Elements.Add(element);
+        SelectedElementId = element.Id;
     }
 
     private void RemoveElement(string id)
@@ -227,7 +402,14 @@
         if (index >= 0)
         {
             Elements.RemoveAt(index);
+            SelectedElementId = Elements.ElementAtOrDefault(Math.Max(0, index - 1))?.Id ?? Elements.FirstOrDefault()?.Id ??
+string.Empty;
         }
+    }
+
+    private void SelectElement(string id)
+    {
+        SelectedElementId = id;
     }
 
     private void UpdateElementText(string id, string value)
@@ -246,6 +428,85 @@
         {
             element.CssClass = value;
         }
+    }
+
+    private void UpdateSelectedElementType(ChangeEventArgs args)
+    {
+        if (SelectedElement is null)
+        {
+            return;
+        }
+
+        var value = args.Value?.ToString();
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            SelectedElement.ElementType = value;
+        }
+    }
+
+    private void DeleteSelected()
+    {
+        if (!string.IsNullOrWhiteSpace(SelectedElementId))
+        {
+            RemoveElement(SelectedElementId);
+        }
+    }
+
+    private void DuplicateSelected()
+    {
+        if (SelectedElement is null)
+        {
+            return;
+        }
+
+        var index = GetSelectedElementIndex();
+        if (index < 0)
+        {
+            return;
+        }
+
+        var clone = new VisualBuilderElement
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            ElementType = SelectedElement.ElementType,
+            Text = SelectedElement.Text,
+            CssClass = SelectedElement.CssClass
+        };
+
+        Elements.Insert(index + 1, clone);
+        SelectedElementId = clone.Id;
+    }
+
+    private void MoveSelectedUp()
+    {
+        MoveSelected(-1);
+    }
+
+    private void MoveSelectedDown()
+    {
+        MoveSelected(1);
+    }
+
+    private void MoveSelected(int direction)
+    {
+        var index = GetSelectedElementIndex();
+        var targetIndex = index + direction;
+        if (index < 0 || targetIndex < 0 || targetIndex >= Elements.Count)
+        {
+            return;
+        }
+
+        (Elements[index], Elements[targetIndex]) = (Elements[targetIndex], Elements[index]);
+    }
+
+    private int GetSelectedElementIndex()
+    {
+        if (string.IsNullOrWhiteSpace(SelectedElementId))
+        {
+            return -1;
+        }
+
+        return Elements.FindIndex(element => element.Id == SelectedElementId);
     }
 
     private async Task SaveAsync()
@@ -285,6 +546,97 @@
     private static string BuildFileOpenLink(string filePath)
     {
         return $"vscode://file/{Uri.EscapeDataString(filePath)}";
+    }
+
+    private void SetPreviewViewport(string viewport)
+    {
+        PreviewViewport = viewport;
+    }
+
+    private string GetViewportClass()
+    {
+        return PreviewViewport switch
+        {
+            "tablet" => "is-tablet",
+            "mobile" => "is-mobile",
+            _ => "is-desktop"
+        };
+    }
+
+    private string GetViewportLabel()
+    {
+        return PreviewViewport switch
+        {
+            "tablet" => "Tablet preview",
+            "mobile" => "Mobile preview",
+            _ => "Desktop preview"
+        };
+    }
+
+    private static string GetElementIconClass(string elementType)
+    {
+        return elementType.ToLowerInvariant() switch
+        {
+            "heading" => "bi bi-type-h1",
+            "button" => "bi bi-hand-index-thumb",
+            "image" => "bi bi-image",
+            _ => "bi bi-text-paragraph"
+        };
+    }
+
+    private static string GetElementTitle(string elementType)
+    {
+        return elementType.ToLowerInvariant() switch
+        {
+            "heading" => "Heading",
+            "button" => "Button",
+            "image" => "Image",
+            _ => "Paragraph"
+        };
+    }
+
+    private static string GetElementTagline(string elementType)
+    {
+        return elementType.ToLowerInvariant() switch
+        {
+            "heading" => "Hero titles and section labels",
+            "button" => "Primary actions and CTAs",
+            "image" => "Product imagery and diagrams",
+            _ => "Supporting copy and descriptions"
+        };
+    }
+
+    private static string GetLayerSummary(VisualBuilderElement element)
+    {
+        var content = element.Text ?? string.Empty;
+        if (content.Length <= 48)
+        {
+            return content;
+        }
+
+        return content[..48] + "...";
+    }
+
+    private string GetPreviewSelectionClass(string elementId)
+    {
+        return elementId == SelectedElementId ? "is-selected" : string.Empty;
+    }
+
+    private static string GetContentLabel(string elementType)
+    {
+        return elementType.ToLowerInvariant() switch
+        {
+            "image" => "Image URL",
+            "button" => "Button label",
+            _ => "Content"
+        };
+    }
+
+    private static string GetImageSource(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? "https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=1200&q=80"
+            : value;
     }
 
     private async Task RefreshPublishStatusAsync()
