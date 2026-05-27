@@ -97,6 +97,7 @@ public sealed class CjAdsService(
             {
                 row.AdvertiserId = normalizedAdvertiserId;
                 row.AdvertiserName = partner.AdvertiserName;
+                row.RelationshipStatus = partner.RelationshipStatus;
                 row.Category = partner.PrimaryCategory;
                 row.TrackingUrl = partner.DetailsUrl;
                 row.PromotionEndsAt = null;
@@ -112,6 +113,7 @@ public sealed class CjAdsService(
                 AdvertiserId = normalizedAdvertiserId,
                 AdvertiserName = partner.AdvertiserName,
                 LinkName = normalizedAdvertiserId,
+                RelationshipStatus = partner.RelationshipStatus,
                 Category = partner.PrimaryCategory,
                 TrackingUrl = partner.DetailsUrl,
                 CreatedBy = "cj-sync"
@@ -166,7 +168,7 @@ public sealed class CjAdsService(
                 {
                     AdvertiserId = representative.AdvertiserId,
                     AdvertiserName = representative.AdvertiserName,
-                    RelationshipStatus = representative.Category ?? string.Empty,
+                    RelationshipStatus = representative.RelationshipStatus ?? string.Empty,
                     Country = string.Empty,
                     PrimaryCategory = representative.Category ?? string.Empty,
                     OfferCount = catalogOfferCount > 0 ? catalogOfferCount : group.Count(),

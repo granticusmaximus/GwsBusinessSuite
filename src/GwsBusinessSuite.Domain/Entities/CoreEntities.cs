@@ -82,6 +82,7 @@ public sealed class AffiliateOffer : AuditableEntity
     public required string AdvertiserId { get; set; }
     public required string AdvertiserName { get; set; }
     public required string LinkName { get; set; }
+    public string? RelationshipStatus { get; set; }
     public string? Category { get; set; }
     public string? TrackingUrl { get; set; }
     public DateTimeOffset? PromotionEndsAt { get; set; }

@@ -191,6 +191,44 @@ public sealed class CjAdsServiceTests
     }
 
     [Fact]
+    public async Task ListPartnersAsync_ShouldUseRelationshipStatusInsteadOfCategoryForFilters()
+    {
+        await using var db = await CreateDbAsync();
+        db.AffiliateOffers.AddRange(
+            new GwsBusinessSuite.Domain.Entities.AffiliateOffer
+            {
+                Network = "CJ",
+                AdvertiserId = "joined-1",
+                AdvertiserName = "Joined Advertiser",
+                LinkName = "joined-1",
+                RelationshipStatus = "joined",
+                Category = "Software",
+                TrackingUrl = "https://example.com/joined",
+                CreatedBy = "cj-sync"
+            },
+            new GwsBusinessSuite.Domain.Entities.AffiliateOffer
+            {
+                Network = "CJ",
+                AdvertiserId = "pending-1",
+                AdvertiserName = "Pending Advertiser",
+                LinkName = "pending-1",
+                RelationshipStatus = "pending",
+                Category = "Hosting",
+                TrackingUrl = "https://example.com/pending",
+                CreatedBy = "cj-sync"
+            });
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, new FakeSecretProtector());
+
+        var joined = await service.ListPartnersAsync("Joined");
+
+        Assert.Single(joined);
+        Assert.Equal("joined", joined[0].RelationshipStatus, ignoreCase: true);
+        Assert.Equal("Software", joined[0].PrimaryCategory);
+    }
+
+    [Fact]
     public async Task SyncPartnersAsync_ShouldKeepJoinedAdvertisersAndRemoveStaleRows()
     {
         await using var db = await CreateDbAsync();
