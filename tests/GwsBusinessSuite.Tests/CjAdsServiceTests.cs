@@ -262,7 +262,8 @@ public sealed class CjAdsServiceTests
                 new CjPartnerRecord("joined-1", "Joined One", "joined", "US", "Software", "https://example.com/joined-1"),
                 new CjPartnerRecord("joined-2", "Joined Two", "approved", "US", "Hosting", "https://example.com/joined-2"),
                 new CjPartnerRecord("pending-1", "Pending One", "pending", "US", "Other", "https://example.com/pending-1")
-            ]),
+            ],
+            isCompleteRoster: true),
             new FakeSecretProtector(),
             NullLogger<CjAdsService>.Instance);
 
@@ -281,6 +282,59 @@ public sealed class CjAdsServiceTests
         Assert.DoesNotContain(partners, partner => partner.AdvertiserId == "pending-1");
         Assert.DoesNotContain(partners, partner => partner.AdvertiserId == "old-1");
         Assert.DoesNotContain(await db.AffiliateOffers.ToListAsync(), row => row.AdvertiserId == "stale-import");
+    }
+
+    [Fact]
+    public async Task SyncPartnersAsync_ShouldNotRemoveStaleRows_WhenRosterIsPartial()
+    {
+        await using var db = await CreateDbAsync();
+        db.AffiliateOffers.AddRange(
+            new GwsBusinessSuite.Domain.Entities.AffiliateOffer
+            {
+                Network = "CJ",
+                AdvertiserId = "old-1",
+                AdvertiserName = "Old Advertiser",
+                LinkName = "old-1",
+                Category = "Legacy",
+                TrackingUrl = "https://example.com/old",
+                CreatedBy = "cj-sync"
+            },
+            new GwsBusinessSuite.Domain.Entities.AffiliateOffer
+            {
+                Network = "CJ",
+                AdvertiserId = "stale-import",
+                AdvertiserName = "Stale Import",
+                LinkName = "Imported Deal",
+                Category = "Legacy",
+                TrackingUrl = "https://example.com/stale",
+                CreatedBy = "cj-import"
+            });
+        await db.SaveChangesAsync();
+
+        var service = new CjAdsService(
+            db,
+            new FakeCjAffiliateService(
+            [
+                new CjPartnerRecord("joined-1", "Joined One", "joined", "US", "Software", "https://example.com/joined-1")
+            ],
+            isCompleteRoster: false),
+            new FakeSecretProtector(),
+            NullLogger<CjAdsService>.Instance);
+
+        var result = await service.SyncPartnersAsync(new CjPartnerSyncRequest
+        {
+            DeveloperKey = "key",
+            PublisherId = "pub",
+            EndpointUrl = "https://commissions.api.cj.com/query",
+            MaxResults = 100
+        });
+
+        Assert.Equal(1, result.TotalReceived);
+
+        var partners = await service.ListPartnersAsync();
+        Assert.Equal(3, partners.Count);
+        Assert.Contains(partners, partner => partner.AdvertiserId == "old-1");
+        Assert.Contains(partners, partner => partner.AdvertiserId == "stale-import");
     }
 
     [Fact]
@@ -380,15 +434,17 @@ public sealed class CjAdsServiceTests
     private sealed class FakeCjAffiliateService : ICjAffiliateService
     {
         private readonly IReadOnlyCollection<CjPartnerRecord> partners;
+        private readonly bool isCompleteRoster;
 
         public FakeCjAffiliateService()
             : this(Array.Empty<CjPartnerRecord>())
         {
         }
 
-        public FakeCjAffiliateService(IReadOnlyCollection<CjPartnerRecord> partners)
+        public FakeCjAffiliateService(IReadOnlyCollection<CjPartnerRecord> partners, bool isCompleteRoster = false)
         {
             this.partners = partners;
+            this.isCompleteRoster = isCompleteRoster;
         }
 
         public Task<CjConnectionValidationResult> ValidateConnectionAsync(CjConnectionRequest request, CancellationToken ct = default)
@@ -398,7 +454,7 @@ public sealed class CjAdsServiceTests
 
         public Task<CjPartnerFetchResult> FetchPartnersAsync(CjConnectionRequest request, CancellationToken ct = default)
         {
-            return Task.FromResult(new CjPartnerFetchResult(partners, "ok"));
+            return Task.FromResult(new CjPartnerFetchResult(partners, "ok", isCompleteRoster));
         }
     }
 }

@@ -98,7 +98,8 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
             {
                 return new CjPartnerFetchResult(
                     Partners: attempt.Partners,
-                    Message: $"Fetched {attempt.Partners.Count} CJ partners.");
+                    Message: $"Fetched {attempt.Partners.Count} CJ partners.",
+                    IsCompleteRoster: true);
             }
         }
 
@@ -216,7 +217,8 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
 
                     return new CjPartnerFetchResult(
                         Partners: merged,
-                        Message: $"Fetched {merged.Length} CJ advertisers by combining commissions data with active advertiser lookup.");
+                        Message: $"Fetched {merged.Length} CJ advertisers by combining commissions data with active advertiser lookup.",
+                        IsCompleteRoster: true);
                 }
             }
             catch (HttpRequestException ex) when (
@@ -392,7 +394,8 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
         {
             return new CjPartnerFetchResult(
                 Partners: final,
-                Message: $"Fetched {final.Length} active CJ advertisers.");
+                Message: $"Fetched {final.Length} active CJ advertisers.",
+                IsCompleteRoster: true);
         }
 
         if (lastStatusCode is not null && (int)lastStatusCode.Value >= 400)

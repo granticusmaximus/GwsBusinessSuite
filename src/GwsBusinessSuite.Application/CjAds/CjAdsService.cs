@@ -69,9 +69,11 @@ public sealed class CjAdsService(
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var staleRows = existing
-            .Where(x => !incomingAdvertiserIds.Contains(NormalizeAdvertiserId(x.AdvertiserId, x.AdvertiserName)))
-            .ToList();
+        var staleRows = fetched.IsCompleteRoster
+            ? existing
+                .Where(x => !incomingAdvertiserIds.Contains(NormalizeAdvertiserId(x.AdvertiserId, x.AdvertiserName)))
+                .ToList()
+            : [];
 
         if (staleRows.Count > 0)
         {

@@ -41,7 +41,8 @@ public sealed record CjConnectionValidationResult(
 
 public sealed record CjPartnerFetchResult(
     IReadOnlyCollection<CjPartnerRecord> Partners,
-    string Message);
+    string Message,
+    bool IsCompleteRoster = false);
 
 public sealed record CjPartnerRecord(
     string AdvertiserId,
