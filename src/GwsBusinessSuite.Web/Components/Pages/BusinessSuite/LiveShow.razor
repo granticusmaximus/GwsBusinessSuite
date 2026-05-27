@@ -1,0 +1,161 @@
+@page "/live-show"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+@inject ILogger<LiveShow> Logger
+@implements IAsyncDisposable
+
+<PageTitle>Live Show Studio</PageTitle>
+
+<div class="page-header">
+    <div class="studio-kicker">Broadcast studio</div>
+    <h1><i class="bi bi-camera-video-fill me-2 text-primary"></i>Live Show</h1>
+    <p class="mb-0">Open your camera and microphone for a live pre-broadcast preview — just like YouTube's studio.</p>
+</div>
+
+<div class="live-studio">
+    <div class="live-stage">
+        <div class="live-camera-shell @(IsStreaming ? "is-live" : string.Empty)">
+            @if (IsStreaming)
+            {
+                <div class="live-badge">
+                    <span class="live-dot"></span> LIVE PREVIEW
+                </div>
+            }
+
+            <video @ref="_videoRef"
+                   class="live-video"
+                   autoplay
+                   muted
+                   playsinline></video>
+
+            @if (!IsStreaming)
+            {
+                <div class="live-idle-overlay">
+                    <div class="live-idle-card">
+                        <div class="live-idle-icon">
+                            <i class="bi bi-camera-video"></i>
+                        </div>
+                        <h2>Ready to go live?</h2>
+                        <p>Click <strong>Start Live Show</strong> below to open your camera and microphone preview.</p>
+                    </div>
+                </div>
+            }
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+        {
+            <div class="alert alert-danger mt-3">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>@ErrorMessage
+            </div>
+        }
+    </div>
+
+    <div class="live-controls">
+        @if (!IsStreaming)
+        {
+            <button class="btn btn-primary live-start-btn" @onclick="StartAsync">
+                <i class="bi bi-broadcast me-2"></i>Start Live Show
+            </button>
+        }
+        else
+        {
+            <div class="live-control-row">
+                <button class="live-control-btn @(!IsMicOn ? "is-muted" : string.Empty)"
+                        @onclick="ToggleMic"
+                        title="@(IsMicOn ? "Mute microphone" : "Unmute microphone")">
+                    <i class="bi @(IsMicOn ? "bi-mic-fill" : "bi-mic-mute-fill")"></i>
+                    <span>@(IsMicOn ? "Mic On" : "Muted")</span>
+                </button>
+
+                <button class="live-control-btn @(!IsCameraOn ? "is-muted" : string.Empty)"
+                        @onclick="ToggleCamera"
+                        title="@(IsCameraOn ? "Turn off camera" : "Turn on camera")">
+                    <i class="bi @(IsCameraOn ? "bi-camera-video-fill" : "bi-camera-video-off-fill")"></i>
+                    <span>@(IsCameraOn ? "Camera On" : "Camera Off")</span>
+                </button>
+
+                <button class="live-control-btn is-stop" @onclick="StopAsync" title="End live show">
+                    <i class="bi bi-stop-circle-fill"></i>
+                    <span>End Show</span>
+                </button>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private ElementReference _videoRef;
+    private bool IsStreaming { get; set; }
+    private bool IsMicOn { get; set; } = true;
+    private bool IsCameraOn { get; set; } = true;
+    private string ErrorMessage { get; set; } = string.Empty;
+
+    protected override Task OnAfterRenderAsync(bool firstRender)
+    {
+        return base.OnAfterRenderAsync(firstRender);
+    }
+
+    private async Task StartAsync()
+    {
+        ErrorMessage = string.Empty;
+
+        try
+        {
+            await JS.InvokeVoidAsync("liveShow.start", _videoRef);
+            IsStreaming = true;
+            IsMicOn = true;
+            IsCameraOn = true;
+        }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "Camera access failed.");
+            ErrorMessage = ex.Message.Contains("denied")
+                ? "Camera or microphone access was denied. Please allow access in your browser settings and try again."
+                : $"Could not open camera: {ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unexpected error starting live show.");
+            ErrorMessage = $"Unexpected error: {ex.Message}";
+        }
+    }
+
+    private async Task StopAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("liveShow.stop");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Error stopping live show.");
+        }
+
+        IsStreaming = false;
+        IsMicOn = true;
+        IsCameraOn = true;
+        ErrorMessage = string.Empty;
+    }
+
+    private async Task ToggleMic()
+    {
+        IsMicOn = !IsMicOn;
+        await JS.InvokeVoidAsync("liveShow.toggleAudio", IsMicOn);
+    }
+
+    private async Task ToggleCamera()
+    {
+        IsCameraOn = !IsCameraOn;
+        await JS.InvokeVoidAsync("liveShow.toggleVideo", IsCameraOn);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (IsStreaming)
+        {
+            try { await JS.InvokeVoidAsync("liveShow.stop"); }
+            catch { /* best-effort cleanup on dispose */ }
+        }
+    }
+}
