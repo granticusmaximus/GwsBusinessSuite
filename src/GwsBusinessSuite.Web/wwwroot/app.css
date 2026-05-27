@@ -1,0 +1,380 @@
+/* ── Design tokens ───────────────────────────────────────── */
+:root {
+    --gws-sidebar-width: 240px;
+    --gws-sidebar-bg: #0f172a;
+    --gws-sidebar-hover: rgba(255, 255, 255, .06);
+    --gws-sidebar-active: rgba(255, 255, 255, .1);
+    --gws-sidebar-accent: #3b82f6;
+    --gws-topbar-height: 52px;
+    --gws-body-bg: #f1f5f9;
+}
+
+/* ── Base ────────────────────────────────────────────────── */
+html, body {
+    height: 100%;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    background: var(--gws-body-bg);
+    color: #0f172a;
+}
+
+h1:focus { outline: none; }
+
+/* ── App layout ──────────────────────────────────────────── */
+.gws-layout {
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+}
+
+.gws-sidebar {
+    width: var(--gws-sidebar-width);
+    min-width: var(--gws-sidebar-width);
+    background: var(--gws-sidebar-bg);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow-y: auto;
+    flex-shrink: 0;
+}
+
+.gws-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 0;
+}
+
+.gws-topbar {
+    height: var(--gws-topbar-height);
+    min-height: var(--gws-topbar-height);
+    background: #ffffff;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    align-items: center;
+    padding: 0 1.5rem;
+}
+
+.gws-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1.75rem 2rem;
+}
+
+/* ── Sidebar brand ───────────────────────────────────────── */
+.gws-brand {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    padding: 1.1rem 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, .06);
+    flex-shrink: 0;
+}
+
+.gws-brand-icon {
+    color: var(--gws-sidebar-accent);
+    font-size: 1.35rem;
+    line-height: 1;
+}
+
+.gws-brand-name {
+    font-size: .9rem;
+    font-weight: 700;
+    color: #f1f5f9;
+    letter-spacing: .01em;
+    line-height: 1.2;
+}
+
+.gws-brand-sub {
+    font-size: .65rem;
+    color: #475569;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+}
+
+/* ── Sidebar nav ─────────────────────────────────────────── */
+.gws-nav {
+    padding: .5rem .625rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex: 1;
+}
+
+.gws-nav-section {
+    font-size: .625rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: #334155;
+    padding: 1rem .5rem .2rem;
+}
+
+.gws-nav-link {
+    display: flex;
+    align-items: center;
+    gap: .625rem;
+    padding: .5rem .75rem;
+    border-radius: 5px;
+    color: #94a3b8;
+    text-decoration: none;
+    font-size: .84rem;
+    font-weight: 500;
+    transition: background .1s, color .1s, border-color .1s;
+    border-left: 2px solid transparent;
+    white-space: nowrap;
+}
+
+.gws-nav-link i {
+    font-size: .95rem;
+    flex-shrink: 0;
+    width: 1rem;
+    text-align: center;
+}
+
+.gws-nav-link:hover {
+    background: var(--gws-sidebar-hover);
+    color: #cbd5e1;
+}
+
+.gws-nav-link.active {
+    background: var(--gws-sidebar-active);
+    color: #f1f5f9;
+    border-left-color: var(--gws-sidebar-accent);
+}
+
+/* ── Page header ─────────────────────────────────────────── */
+.page-header {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.page-header h1 {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #0f172a;
+    margin-bottom: .2rem;
+}
+
+.page-header p {
+    color: #64748b;
+    font-size: .9rem;
+    margin-bottom: 0;
+}
+
+/* ── Dashboard cards ─────────────────────────────────────── */
+.gws-stat-icon {
+    width: 38px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+
+.gws-module-card {
+    transition: transform .14s ease, box-shadow .14s ease;
+    color: inherit;
+    text-decoration: none;
+}
+
+.gws-module-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, .09) !important;
+    color: inherit;
+}
+
+.gws-module-icon {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+
+/* ── Article editor ──────────────────────────────────────── */
+.article-editor {
+    min-height: 460px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: .85rem;
+    line-height: 1.75;
+}
+
+.hero-prompt-editor {
+    min-height: 220px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: .82rem;
+    line-height: 1.65;
+}
+
+.surface-panel {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, .05);
+}
+
+.article-preview {
+    min-height: 460px;
+    padding: 1.5rem;
+    overflow: auto;
+}
+
+.article-preview h1,
+.article-preview h2,
+.article-preview h3,
+.article-preview h4 {
+    color: #0f172a;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.article-preview h1 {
+    font-size: 2rem;
+    margin-bottom: 1rem;
+}
+
+.article-preview h2 {
+    font-size: 1.35rem;
+    margin-top: 2rem;
+    margin-bottom: .85rem;
+}
+
+.article-preview p,
+.article-preview li {
+    color: #334155;
+    line-height: 1.85;
+    font-size: .98rem;
+}
+
+.article-preview pre {
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 1rem;
+    border-radius: 12px;
+    overflow-x: auto;
+}
+
+.article-preview code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: .88em;
+}
+
+.article-preview blockquote {
+    border-left: 4px solid #38bdf8;
+    padding-left: 1rem;
+    color: #475569;
+    margin: 1.25rem 0;
+}
+
+.hero-preview-panel {
+    background: linear-gradient(180deg, rgba(15, 23, 42, .02), rgba(15, 23, 42, .06));
+    border: 1px solid #dbeafe;
+    border-radius: 18px;
+    padding: 1.25rem;
+}
+
+.hero-preview-image {
+    width: 100%;
+    display: block;
+    border-radius: 18px;
+    border: 1px solid rgba(15, 23, 42, .08);
+    box-shadow: 0 18px 32px rgba(15, 23, 42, .12);
+    background: #0f172a;
+}
+
+.hero-status-panel {
+    min-height: 280px;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.5rem;
+    border-radius: 18px;
+    border: 1px dashed #93c5fd;
+    background: linear-gradient(180deg, #eff6ff, #f8fafc);
+    color: #0f172a;
+}
+
+.hero-status-icon {
+    width: 64px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 16px;
+    background: #dbeafe;
+    color: #1d4ed8;
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.hero-chip {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: .35rem .8rem;
+    background: #dbeafe;
+    color: #1d4ed8;
+    font-size: .75rem;
+    font-weight: 700;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+}
+
+.hero-chip-secondary {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+/* ── Validation ──────────────────────────────────────────── */
+.valid.modified:not([type=checkbox]) { outline: 1px solid #22c55e; }
+.invalid { outline: 1px solid #ef4444; }
+.validation-message { color: #ef4444; font-size: .85rem; }
+
+/* ── Blazor error boundary ───────────────────────────────── */
+.blazor-error-boundary {
+    background: #fee2e2;
+    border: 1px solid #fecaca;
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    color: #991b1b;
+}
+
+.blazor-error-boundary::after {
+    content: "An error has occurred.";
+}
+
+/* ── Blazor error toast ──────────────────────────────────── */
+#blazor-error-ui {
+    background: #fffbeb;
+    border-top: 1px solid #f59e0b;
+    bottom: 0;
+    left: 0;
+    padding: .65rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1050;
+    display: none;
+    font-size: .875rem;
+    color: #92400e;
+}
+
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    position: absolute;
+    right: .75rem;
+    top: .55rem;
+}
+
+/* ── Responsive ──────────────────────────────────────────── */
+@media (max-width: 767.98px) {
+    .gws-sidebar { display: none; }
+    .gws-content { padding: 1.25rem; }
+}

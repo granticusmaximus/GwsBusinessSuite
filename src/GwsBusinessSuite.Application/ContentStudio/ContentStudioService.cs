@@ -1,0 +1,949 @@
+using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Domain.Entities;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+namespace GwsBusinessSuite.Application.ContentStudio;
+
+public sealed class ContentStudioService(
+    IAppDbContext db,
+    IOllamaService ollama,
+    IAffiliateOfferScoringService offerScoringService,
+    IOptions<ContentStudioOptions> options,
+    ILogger<ContentStudioService> logger) : IContentStudioService
+{
+    private static readonly string[] AffiliateSlotTokens = ["{{CJ_AD_SLOT_1}}", "{{CJ_AD_SLOT_2}}", "{{CJ_AD_SLOT_3}}"];
+
+    public async Task<IReadOnlyList<ContentStudioDraftSummary>> ListDraftsAsync(CancellationToken cancellationToken = default)
+    {
+        var drafts = await db.SeoArticleDrafts
+            .AsNoTracking()
+            .Select(x => new ContentStudioDraftSummary
+            {
+                DraftId = x.Id,
+                Topic = x.Topic,
+                Title = x.Title,
+                Status = x.Status,
+                RevisionNumber = x.RevisionNumber,
+                CreatedAt = x.CreatedAt,
+                UpdatedAt = x.UpdatedAt
+            })
+            .ToListAsync(cancellationToken);
+
+        return drafts
+            .OrderByDescending(x => x.CreatedAt)
+            .Take(20)
+            .ToList();
+    }
+
+    public async Task<ArticleGenerationResult?> GetDraftAsync(Guid draftId, CancellationToken cancellationToken = default)
+    {
+        await RecordDraftImpressionsAsync(draftId, "content-studio-preview", cancellationToken);
+
+        var draft = await db.SeoArticleDrafts
+            .AsNoTracking()
+            .Include(x => x.AffiliatePlacements)
+            .Include(x => x.WorkflowEvents)
+            .FirstOrDefaultAsync(x => x.Id == draftId, cancellationToken);
+
+        if (draft is null)
+        {
+            return null;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var currentWindowStart = now.AddDays(-7);
+        var previousWindowStart = now.AddDays(-14);
+
+        var interactions = await db.SeoArticleAffiliateInteractions
+            .AsNoTracking()
+            .Where(x => x.SeoArticleDraftId == draftId)
+            .Select(x => new { x.SlotToken, x.EventType, x.CreatedAt })
+            .ToListAsync(cancellationToken);
+
+        var metricsBySlot = interactions
+            .GroupBy(x => x.SlotToken, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group =>
+                {
+                    var impressions = group.Count(x => x.EventType == AffiliateInteractionEventTypes.Impression);
+                    var clicks = group.Count(x => x.EventType == AffiliateInteractionEventTypes.Click);
+
+                    var currentImpressions = group.Count(x =>
+                        x.EventType == AffiliateInteractionEventTypes.Impression &&
+                        x.CreatedAt >= currentWindowStart);
+                    var currentClicks = group.Count(x =>
+                        x.EventType == AffiliateInteractionEventTypes.Click &&
+                        x.CreatedAt >= currentWindowStart);
+
+                    var previousImpressions = group.Count(x =>
+                        x.EventType == AffiliateInteractionEventTypes.Impression &&
+                        x.CreatedAt >= previousWindowStart &&
+                        x.CreatedAt < currentWindowStart);
+                    var previousClicks = group.Count(x =>
+                        x.EventType == AffiliateInteractionEventTypes.Click &&
+                        x.CreatedAt >= previousWindowStart &&
+                        x.CreatedAt < currentWindowStart);
+
+                    var currentCtr = CalculateCtr(currentClicks, currentImpressions);
+                    var previousCtr = CalculateCtr(previousClicks, previousImpressions);
+
+                    return (
+                        Impressions: impressions,
+                        Clicks: clicks,
+                        CurrentCtr7Day: currentCtr,
+                        PreviousCtr7Day: previousCtr,
+                        Delta7Day: currentCtr - previousCtr);
+                },
+                StringComparer.Ordinal);
+
+        return MapDraft(draft, metricsBySlot, GetAuthorName(), GetSiteBaseUrl());
+    }
+
+    public async Task RecordAffiliatePlacementInteractionAsync(
+        AffiliatePlacementInteractionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request.DraftId == Guid.Empty)
+        {
+            throw new ArgumentException("Draft ID is required.", nameof(request));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.SlotToken))
+        {
+            throw new ArgumentException("Slot token is required.", nameof(request));
+        }
+
+        if (!string.Equals(request.EventType, AffiliateInteractionEventTypes.Impression, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(request.EventType, AffiliateInteractionEventTypes.Click, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Event type must be Impression or Click.", nameof(request));
+        }
+
+        var placement = await db.SeoArticleAffiliatePlacements
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.SeoArticleDraftId == request.DraftId && x.SlotToken == request.SlotToken,
+                cancellationToken);
+
+        if (placement is null)
+        {
+            return;
+        }
+
+        db.SeoArticleAffiliateInteractions.Add(new SeoArticleAffiliateInteraction
+        {
+            SeoArticleDraftId = placement.SeoArticleDraftId,
+            SlotToken = placement.SlotToken,
+            AdvertiserId = placement.AdvertiserId,
+            EventType = request.EventType,
+            CreatedBy = request.PerformedBy
+        });
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<ArticleGenerationResult> GenerateArticleAsync(
+        ArticleGenerationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Topic);
+
+        var scoredOffers = await offerScoringService.ScoreOffersAsync(request, maxOffers: AffiliateSlotTokens.Length, cancellationToken);
+        var prompt = BuildPrompt(request, scoredOffers);
+        var configuredOptions = options.Value;
+        var model = string.IsNullOrWhiteSpace(configuredOptions.Model)
+            ? ContentStudioOptions.DefaultModel
+            : configuredOptions.Model;
+        var imageModel = string.IsNullOrWhiteSpace(configuredOptions.ImageModel)
+            ? ContentStudioOptions.DefaultImageModel
+            : configuredOptions.ImageModel;
+        var imageWidth = configuredOptions.ImageWidth <= 0
+            ? ContentStudioOptions.DefaultImageWidth
+            : configuredOptions.ImageWidth;
+        var imageHeight = configuredOptions.ImageHeight <= 0
+            ? ContentStudioOptions.DefaultImageHeight
+            : configuredOptions.ImageHeight;
+        var imageSteps = configuredOptions.ImageSteps <= 0
+            ? ContentStudioOptions.DefaultImageSteps
+            : configuredOptions.ImageSteps;
+
+        logger.LogInformation(
+            "Generating Content Studio draft for topic '{Topic}' using Ollama model '{Model}'.",
+            request.Topic,
+            model);
+
+        var markdown = (await ollama.GenerateAsync(model, string.Empty, prompt, cancellationToken)).Trim();
+
+        if (string.IsNullOrWhiteSpace(markdown))
+        {
+            logger.LogWarning("Ollama returned an empty draft for topic '{Topic}'.", request.Topic);
+            throw new InvalidOperationException("Ollama returned an empty draft. Try again or switch models.");
+        }
+
+        var markdownWithAffiliateSlots = EnsureAffiliatePlaceholders(markdown);
+        var slug = CreateSlug(request.Topic);
+        var availableModels = await GetAvailableModelNamesAsync(cancellationToken);
+        var title = request.Topic.Trim();
+
+        var heroImagePrompt = ContentStudioImagePreviewFactory.BuildPrompt(request, title);
+        var heroImage = await GenerateHeroImageAsync(
+            request,
+            title,
+            model,
+            imageModel,
+            imageWidth,
+            imageHeight,
+            imageSteps,
+            availableModels,
+            null,
+            cancellationToken);
+
+        var draft = new SeoArticleDraft
+        {
+            Topic = request.Topic.Trim(),
+            TargetAudience = request.TargetAudience.Trim(),
+            PrimaryKeyword = request.PrimaryKeyword.Trim(),
+            SecondaryKeywords = request.SecondaryKeywords.Trim(),
+            Status = SeoArticleDraftStatuses.PendingReview,
+            Title = title,
+            MetaDescription = BuildMetaDescription(request),
+            Slug = slug,
+            EstimatedReadingTime = "8-10 minutes",
+            OutlineMarkdown = ExtractSection(markdownWithAffiliateSlots, "## Outline"),
+            ArticleMarkdown = markdownWithAffiliateSlots,
+            SeoChecklistMarkdown = BuildDefaultChecklist(request.PrimaryKeyword, request.SecondaryKeywords),
+            SourceNotesMarkdown = "Verify references against Microsoft Learn and official .NET docs before publishing.",
+            HeroImagePrompt = heroImagePrompt,
+            HeroImageAltText = heroImage.AltText,
+            HeroImageDataUri = heroImage.DataUri,
+            HeroImageThemeLabel = heroImage.ThemeLabel,
+            HeroImageAccentLabel = heroImage.AccentLabel,
+            HeroImageCaption = heroImage.Caption,
+            HeroImageProvider = heroImage.Provider,
+            HeroImageConfiguredModel = heroImage.ConfiguredModel,
+            HeroImageAvailableModelsSummary = heroImage.AvailableModelsSummary,
+            HeroImageStatusMessage = heroImage.StatusMessage,
+            IsHeroImageGeneratedByOllama = heroImage.IsGeneratedByOllama,
+            RevisionNumber = 0
+        };
+
+        db.SeoArticleDrafts.Add(draft);
+        foreach (var placement in BuildAffiliatePlacements(draft.Id, scoredOffers))
+        {
+            db.SeoArticleAffiliatePlacements.Add(placement);
+        }
+
+        db.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent
+        {
+            SeoArticleDraftId = draft.Id,
+            EventType = SeoArticleWorkflowEventTypes.Generated,
+            Notes = "Draft generated from article brief.",
+            CreatedBy = "content-studio"
+        });
+
+        await db.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation(
+            "Content Studio draft {DraftId} generated successfully for topic '{Topic}' with slug '{Slug}'.",
+            draft.Id,
+            request.Topic,
+            slug);
+
+        var saved = await GetDraftAsync(draft.Id, cancellationToken);
+        if (saved is null)
+        {
+            throw new InvalidOperationException("The generated draft could not be reloaded from persistence.");
+        }
+
+        return saved;
+    }
+
+    public async Task<ArticleGenerationResult?> RequestRevisionAsync(
+        DraftRevisionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var draft = await db.SeoArticleDrafts.FirstOrDefaultAsync(x => x.Id == request.DraftId, cancellationToken);
+        if (draft is null)
+        {
+            return null;
+        }
+
+        var revisionNotes = request.RequestedModifications.Trim();
+        if (string.IsNullOrWhiteSpace(revisionNotes))
+        {
+            throw new ArgumentException("Revision request cannot be empty.", nameof(request));
+        }
+
+        var baseRequest = new ArticleGenerationRequest
+        {
+            Topic = draft.Topic,
+            TargetAudience = draft.TargetAudience,
+            PrimaryKeyword = draft.PrimaryKeyword,
+            SecondaryKeywords = draft.SecondaryKeywords
+        };
+
+        var scoredOffers = await offerScoringService.ScoreOffersAsync(baseRequest, maxOffers: AffiliateSlotTokens.Length, cancellationToken);
+        var prompt = BuildPrompt(baseRequest, scoredOffers) + $"\n\nRequested revisions:\n- {revisionNotes}";
+
+        var configuredModel = string.IsNullOrWhiteSpace(options.Value.Model)
+            ? ContentStudioOptions.DefaultModel
+            : options.Value.Model;
+
+        var revisedMarkdown = (await ollama.GenerateAsync(configuredModel, string.Empty, prompt, cancellationToken)).Trim();
+        if (string.IsNullOrWhiteSpace(revisedMarkdown))
+        {
+            throw new InvalidOperationException("Ollama returned an empty revised draft.");
+        }
+
+        var revisedMarkdownWithAffiliateSlots = EnsureAffiliatePlaceholders(revisedMarkdown);
+
+        draft.ArticleMarkdown = revisedMarkdownWithAffiliateSlots;
+        draft.OutlineMarkdown = ExtractSection(revisedMarkdownWithAffiliateSlots, "## Outline");
+        draft.RequestedModifications = revisionNotes;
+        draft.Status = SeoArticleDraftStatuses.PendingReview;
+        draft.RevisionNumber += 1;
+        draft.UpdatedAt = DateTimeOffset.UtcNow;
+        draft.UpdatedBy = request.PerformedBy;
+
+        var existingPlacements = await db.SeoArticleAffiliatePlacements
+            .Where(x => x.SeoArticleDraftId == draft.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var existingPlacement in existingPlacements)
+        {
+            db.SeoArticleAffiliatePlacements.Remove(existingPlacement);
+        }
+
+        foreach (var placement in BuildAffiliatePlacements(draft.Id, scoredOffers))
+        {
+            db.SeoArticleAffiliatePlacements.Add(placement);
+        }
+
+        db.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent
+        {
+            SeoArticleDraftId = draft.Id,
+            EventType = SeoArticleWorkflowEventTypes.Revised,
+            Notes = revisionNotes,
+            CreatedBy = request.PerformedBy
+        });
+
+        await db.SaveChangesAsync(cancellationToken);
+
+        return await GetDraftAsync(draft.Id, cancellationToken);
+    }
+
+    public async Task<ArticleGenerationResult?> ApproveDraftAsync(
+        DraftDecisionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        return await ApplyDecisionAsync(request, SeoArticleDraftStatuses.Approved, SeoArticleWorkflowEventTypes.Approved, cancellationToken);
+    }
+
+    public async Task<ArticleGenerationResult?> RejectDraftAsync(
+        DraftDecisionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        return await ApplyDecisionAsync(request, SeoArticleDraftStatuses.Rejected, SeoArticleWorkflowEventTypes.Rejected, cancellationToken);
+    }
+
+    public async Task<ArticleGenerationResult?> RegenerateHeroImageAsync(
+        DraftHeroImageRegenerationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var draft = await db.SeoArticleDrafts.FirstOrDefaultAsync(x => x.Id == request.DraftId, cancellationToken);
+        if (draft is null)
+        {
+            return null;
+        }
+
+        var configuredOptions = options.Value;
+        var articleModel = string.IsNullOrWhiteSpace(configuredOptions.Model)
+            ? ContentStudioOptions.DefaultModel
+            : configuredOptions.Model;
+        var imageModel = string.IsNullOrWhiteSpace(configuredOptions.ImageModel)
+            ? ContentStudioOptions.DefaultImageModel
+            : configuredOptions.ImageModel;
+        var imageWidth = configuredOptions.ImageWidth <= 0
+            ? ContentStudioOptions.DefaultImageWidth
+            : configuredOptions.ImageWidth;
+        var imageHeight = configuredOptions.ImageHeight <= 0
+            ? ContentStudioOptions.DefaultImageHeight
+            : configuredOptions.ImageHeight;
+        var imageSteps = configuredOptions.ImageSteps <= 0
+            ? ContentStudioOptions.DefaultImageSteps
+            : configuredOptions.ImageSteps;
+
+        var generationRequest = new ArticleGenerationRequest
+        {
+            Topic = draft.Topic,
+            TargetAudience = draft.TargetAudience,
+            PrimaryKeyword = draft.PrimaryKeyword,
+            SecondaryKeywords = draft.SecondaryKeywords
+        };
+
+        var availableModels = await GetAvailableModelNamesAsync(cancellationToken);
+        var heroImage = await GenerateHeroImageAsync(
+            generationRequest,
+            draft.Title,
+            articleModel,
+            imageModel,
+            imageWidth,
+            imageHeight,
+            imageSteps,
+            availableModels,
+            request.Prompt,
+            cancellationToken);
+
+        draft.HeroImagePrompt = heroImage.Prompt;
+        draft.HeroImageAltText = heroImage.AltText;
+        draft.HeroImageDataUri = heroImage.DataUri;
+        draft.HeroImageThemeLabel = heroImage.ThemeLabel;
+        draft.HeroImageAccentLabel = heroImage.AccentLabel;
+        draft.HeroImageCaption = heroImage.Caption;
+        draft.HeroImageProvider = heroImage.Provider;
+        draft.HeroImageConfiguredModel = heroImage.ConfiguredModel;
+        draft.HeroImageAvailableModelsSummary = heroImage.AvailableModelsSummary;
+        draft.HeroImageStatusMessage = heroImage.StatusMessage;
+        draft.IsHeroImageGeneratedByOllama = heroImage.IsGeneratedByOllama;
+        draft.UpdatedAt = DateTimeOffset.UtcNow;
+        draft.UpdatedBy = request.PerformedBy;
+
+        db.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent
+        {
+            SeoArticleDraftId = draft.Id,
+            EventType = SeoArticleWorkflowEventTypes.HeroImageRegenerated,
+            Notes = string.IsNullOrWhiteSpace(request.Notes)
+                ? "Hero image regenerated independently from article text."
+                : request.Notes.Trim(),
+            CreatedBy = request.PerformedBy
+        });
+
+        await db.SaveChangesAsync(cancellationToken);
+        return await GetDraftAsync(draft.Id, cancellationToken);
+    }
+
+    public static string BuildPrompt(ArticleGenerationRequest request, IReadOnlyCollection<ScoredAffiliateOfferView>? scoredOffers = null)
+    {
+        var affiliatePromptBlock = BuildAffiliateOfferPromptContext(scoredOffers ?? Array.Empty<ScoredAffiliateOfferView>());
+
+        return $$"""
+        You are a senior technical writer with two master's degrees:
+        one in journalism and one in computer science with deep specialization
+        in professional software development using C#, .NET, ASP.NET Core, and Blazor.
+
+        You have written over 100 technical articles and books, worked with Fortune 500
+        companies, and built enterprise-level software systems.
+
+        Write a professional technical article.
+
+        Requirements:
+        - Topic: {{request.Topic}}
+        - Target audience: {{request.TargetAudience}}
+        - Primary SEO keyword: {{request.PrimaryKeyword}}
+        - Secondary keywords: {{request.SecondaryKeywords}}
+        - Author voice: clear, practical, authoritative, developer-friendly
+        - Format: GitHub-flavored Markdown
+        - Include a strong introduction hook
+        - Include useful headings
+        - Include practical C# examples where appropriate
+        - Follow modern C# conventions
+        - Avoid filler
+        - Keep the article useful for real developers
+        - Include a conclusion with next steps
+        - Do not invent citations
+        - Do not include fake links
+        - Keep reading time roughly 8 to 10 minutes
+        - If affiliate placeholders are provided, preserve them exactly (do not rename tokens)
+
+        Article structure:
+        # Title
+        ## Introduction
+        ## The Problem
+        ## The Practical Solution
+        ## C# Implementation
+        ## Common Mistakes
+        ## Best Practices
+        ## Final Thoughts
+
+        {{affiliatePromptBlock}}
+        """;
+    }
+
+    public static string CreateSlug(string value)
+    {
+        var allowed = value
+            .Trim()
+            .ToLowerInvariant()
+            .Where(character => char.IsLetterOrDigit(character) || char.IsWhiteSpace(character) || character == '-')
+            .ToArray();
+
+        return string.Join(
+            '-',
+            new string(allowed).Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private async Task<ArticleGenerationResult?> ApplyDecisionAsync(
+        DraftDecisionRequest request,
+        string status,
+        string workflowEventType,
+        CancellationToken cancellationToken)
+    {
+        var draft = await db.SeoArticleDrafts.FirstOrDefaultAsync(x => x.Id == request.DraftId, cancellationToken);
+        if (draft is null)
+        {
+            return null;
+        }
+
+        draft.Status = status;
+        draft.UpdatedAt = DateTimeOffset.UtcNow;
+        draft.UpdatedBy = request.PerformedBy;
+        draft.RequestedModifications = request.Notes.Trim();
+
+        if (status == SeoArticleDraftStatuses.Approved)
+        {
+            draft.ApprovedAt = DateTimeOffset.UtcNow;
+            draft.RejectedAt = null;
+        }
+        else if (status == SeoArticleDraftStatuses.Rejected)
+        {
+            draft.RejectedAt = DateTimeOffset.UtcNow;
+        }
+
+        db.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent
+        {
+            SeoArticleDraftId = draft.Id,
+            EventType = workflowEventType,
+            Notes = string.IsNullOrWhiteSpace(request.Notes)
+                ? $"Draft marked as {status}."
+                : request.Notes.Trim(),
+            CreatedBy = request.PerformedBy
+        });
+
+        await db.SaveChangesAsync(cancellationToken);
+
+        return await GetDraftAsync(draft.Id, cancellationToken);
+    }
+
+    private async Task<ArticleHeroImagePreview> GenerateHeroImageAsync(
+        ArticleGenerationRequest request,
+        string title,
+        string articleModel,
+        string imageModel,
+        int imageWidth,
+        int imageHeight,
+        int imageSteps,
+        IReadOnlyCollection<string> availableModels,
+        string? promptOverride,
+        CancellationToken cancellationToken)
+    {
+        var prompt = string.IsNullOrWhiteSpace(promptOverride)
+            ? ContentStudioImagePreviewFactory.BuildPrompt(request, title)
+            : promptOverride.Trim();
+        var configuredModel = imageModel.Trim();
+        var candidates = BuildImageModelCandidates(configuredModel, availableModels);
+
+        Exception? lastException = null;
+
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                var imageResult = await ollama.GenerateImageAsync(
+                    new OllamaImageGenerationRequest(
+                        candidate,
+                        prompt,
+                        imageWidth,
+                        imageHeight,
+                        imageSteps),
+                    cancellationToken);
+
+                if (!string.Equals(candidate, configuredModel, StringComparison.OrdinalIgnoreCase))
+                {
+                    logger.LogInformation(
+                        "Ollama hero image generation succeeded for topic '{Topic}' after fallback from configured model '{ConfiguredModel}' to local model '{ResolvedModel}'.",
+                        request.Topic,
+                        configuredModel,
+                        candidate);
+                }
+
+                return ContentStudioImagePreviewFactory.CreateGenerated(
+                    request,
+                    title,
+                    prompt,
+                    articleModel,
+                    imageResult.Model,
+                    availableModels,
+                    imageResult.DataUri);
+            }
+            catch (Exception ex)
+            {
+                lastException = ex;
+                logger.LogWarning(
+                    ex,
+                    "Unable to generate Ollama hero image for topic '{Topic}' using image model '{ImageModelCandidate}'.",
+                    request.Topic,
+                    candidate);
+            }
+        }
+
+        return ContentStudioImagePreviewFactory.CreateUnavailable(
+            request,
+            title,
+            prompt,
+            articleModel,
+            configuredModel,
+            availableModels,
+            lastException?.Message);
+    }
+
+    private static IReadOnlyList<string> BuildImageModelCandidates(string configuredModel, IReadOnlyCollection<string> availableModels)
+    {
+        var normalizedConfigured = (configuredModel ?? string.Empty).Trim();
+        var candidates = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(normalizedConfigured))
+        {
+            candidates.Add(normalizedConfigured);
+            if (!normalizedConfigured.Contains(':', StringComparison.Ordinal))
+            {
+                candidates.Add($"{normalizedConfigured}:latest");
+            }
+        }
+
+        var configuredBase = normalizedConfigured.Contains(':', StringComparison.Ordinal)
+            ? normalizedConfigured[..normalizedConfigured.IndexOf(':')]
+            : normalizedConfigured;
+
+        foreach (var model in availableModels)
+        {
+            if (string.IsNullOrWhiteSpace(model))
+            {
+                continue;
+            }
+
+            var candidate = model.Trim();
+            var candidateBase = candidate.Contains(':', StringComparison.Ordinal)
+                ? candidate[..candidate.IndexOf(':')]
+                : candidate;
+
+            if (!string.IsNullOrWhiteSpace(configuredBase) &&
+                !string.Equals(candidateBase, configuredBase, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            candidates.Add(candidate);
+        }
+
+        return candidates
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private async Task<IReadOnlyCollection<string>> GetAvailableModelNamesAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await ollama.ListModelsAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Unable to load available Ollama models for hero image generation status.");
+            return Array.Empty<string>();
+        }
+    }
+
+    private static string BuildMetaTitle(string topic)
+    {
+        var cleanTopic = topic.Trim();
+
+        return cleanTopic.Length <= 60
+            ? cleanTopic
+            : cleanTopic[..60].Trim();
+    }
+
+    private static string BuildMetaDescription(ArticleGenerationRequest request)
+    {
+        var description = $"Learn {request.Topic.Trim()} with practical C# guidance, clean architecture thinking, and real-world .NET development advice.";
+
+        return description.Length <= 155
+            ? description
+            : description[..155].Trim();
+    }
+
+    private static string BuildKeywords(ArticleGenerationRequest request)
+    {
+        return string.Join(", ",
+            new[]
+            {
+                request.PrimaryKeyword,
+                request.SecondaryKeywords,
+                "C#",
+                ".NET",
+                "ASP.NET Core",
+                "Blazor"
+            }.Where(value => !string.IsNullOrWhiteSpace(value)));
+    }
+
+    private static string BuildDefaultChecklist(string primaryKeyword, string secondaryKeywords) => $"""
+        - Primary keyword: {primaryKeyword}
+        - Secondary keywords: {secondaryKeywords}
+        - Title clearly reflects the core message.
+        - Code snippets are short, focused, and formatted as GitHub-flavored Markdown.
+        - Code examples follow modern C# naming conventions.
+        - Any claims requiring support are checked against Microsoft Learn or official docs before publishing.
+        - Article has a hook, body, conclusion, and references section.
+        - Estimated reading time stays under 8-10 minutes unless intentionally marked as a deep-dive.
+        """;
+
+    private static string ExtractSection(string markdown, string heading)
+    {
+        var start = markdown.IndexOf(heading, StringComparison.OrdinalIgnoreCase);
+
+        if (start < 0)
+        {
+            return string.Empty;
+        }
+
+        var next = markdown.IndexOf("\n## ", start + heading.Length, StringComparison.OrdinalIgnoreCase);
+
+        return next < 0
+            ? markdown[start..].Trim()
+            : markdown[start..next].Trim();
+    }
+
+    private static string BuildAffiliateOfferPromptContext(IReadOnlyCollection<ScoredAffiliateOfferView> scoredOffers)
+    {
+        if (scoredOffers.Count == 0)
+        {
+            return $"Affiliate placeholders to include exactly as written:\n- {AffiliateSlotTokens[0]}\n- {AffiliateSlotTokens[1]}\n- {AffiliateSlotTokens[2]}";
+        }
+
+        var offerLines = scoredOffers
+            .Select((offer, index) => $"- Offer {index + 1}: {offer.AdvertiserName} (ID: {offer.AdvertiserId}, Category: {offer.Category}, URL: {offer.TrackingUrl})")
+            .ToArray();
+
+        return $"CJ affiliate offers you may reference:\n{string.Join("\n", offerLines)}\n\nAffiliate placeholders to include exactly as written:\n- {AffiliateSlotTokens[0]}\n- {AffiliateSlotTokens[1]}\n- {AffiliateSlotTokens[2]}";
+    }
+
+    private static string EnsureAffiliatePlaceholders(string markdown)
+    {
+        var result = markdown.Trim();
+
+        foreach (var token in AffiliateSlotTokens)
+        {
+            if (!result.Contains(token, StringComparison.Ordinal))
+            {
+                result += $"\n\n{token}";
+            }
+        }
+
+        return result;
+    }
+
+    private static IReadOnlyList<SeoArticleAffiliatePlacement> BuildAffiliatePlacements(
+        Guid draftId,
+        IReadOnlyList<ScoredAffiliateOfferView> scoredOffers)
+    {
+        var placements = new List<SeoArticleAffiliatePlacement>();
+
+        for (var i = 0; i < AffiliateSlotTokens.Length && i < scoredOffers.Count; i += 1)
+        {
+            var offer = scoredOffers[i];
+
+            placements.Add(new SeoArticleAffiliatePlacement
+            {
+                SeoArticleDraftId = draftId,
+                SlotToken = AffiliateSlotTokens[i],
+                AdvertiserId = offer.AdvertiserId,
+                AdvertiserName = offer.AdvertiserName,
+                Category = offer.Category,
+                TrackingUrl = offer.TrackingUrl,
+                CallToActionText = "Explore Offer",
+                SortOrder = i + 1,
+                CreatedBy = "content-studio"
+            });
+        }
+
+        return placements;
+    }
+
+    private static string RenderAffiliatePlacements(string markdown, IReadOnlyList<ArticleAffiliatePlacementView> placements)
+    {
+        var rendered = markdown;
+
+        foreach (var placement in placements)
+        {
+            var card = BuildAffiliateCardMarkdown(placement);
+            rendered = rendered.Replace(placement.SlotToken, card, StringComparison.Ordinal);
+        }
+
+        foreach (var token in AffiliateSlotTokens)
+        {
+            rendered = rendered.Replace(token, string.Empty, StringComparison.Ordinal);
+        }
+
+        return rendered;
+    }
+
+    private static string BuildAffiliateCardMarkdown(ArticleAffiliatePlacementView placement)
+    {
+        var safeCategory = string.IsNullOrWhiteSpace(placement.Category) ? "General" : placement.Category;
+        var safeUrl = string.IsNullOrWhiteSpace(placement.TrackingUrl) ? "#" : placement.TrackingUrl;
+
+        return $"<div class=\"cj-ad-card\"><p><strong>Sponsored Pick: {placement.AdvertiserName}</strong></p><p>Category: {safeCategory}</p><p><a href=\"{safeUrl}\" target=\"_blank\" rel=\"noopener noreferrer nofollow sponsored\">{placement.CallToActionText}</a></p></div>";
+    }
+
+    private static ArticleGenerationResult MapDraft(
+        SeoArticleDraft draft,
+        IReadOnlyDictionary<string, (int Impressions, int Clicks, double CurrentCtr7Day, double PreviousCtr7Day, double Delta7Day)>? metricsBySlot = null,
+        string authorName = ContentStudioOptions.DefaultAuthorName,
+        string siteBaseUrl = ContentStudioOptions.DefaultSiteBaseUrl,
+        IReadOnlyCollection<SeoArticleWorkflowEvent>? workflowEvents = null)
+    {
+        var events = workflowEvents ?? draft.WorkflowEvents.ToArray();
+        var metrics = metricsBySlot ?? new Dictionary<string, (int Impressions, int Clicks, double CurrentCtr7Day, double PreviousCtr7Day, double Delta7Day)>(StringComparer.Ordinal);
+        var placements = draft.AffiliatePlacements
+            .OrderBy(x => x.SortOrder)
+            .Select(x =>
+            {
+                var interaction = metrics.TryGetValue(x.SlotToken, out var values)
+                    ? values
+                    : (Impressions: 0, Clicks: 0, CurrentCtr7Day: 0d, PreviousCtr7Day: 0d, Delta7Day: 0d);
+
+                var ctr = CalculateCtr(interaction.Clicks, interaction.Impressions);
+
+                return new ArticleAffiliatePlacementView
+                {
+                    SlotToken = x.SlotToken,
+                    AdvertiserId = x.AdvertiserId,
+                    AdvertiserName = x.AdvertiserName,
+                    Category = x.Category,
+                    TrackingUrl = x.TrackingUrl,
+                    CallToActionText = x.CallToActionText,
+                    SortOrder = x.SortOrder,
+                    Impressions = interaction.Impressions,
+                    Clicks = interaction.Clicks,
+                    ClickThroughRate = ctr,
+                    Current7DayClickThroughRate = interaction.CurrentCtr7Day,
+                    Previous7DayClickThroughRate = interaction.PreviousCtr7Day,
+                    ClickThroughRateDelta7Day = interaction.Delta7Day
+                };
+            })
+            .ToArray();
+
+        var renderedMarkdown = RenderAffiliatePlacements(draft.ArticleMarkdown, placements);
+
+        return new ArticleGenerationResult
+        {
+            DraftId = draft.Id,
+            Topic = draft.Topic,
+            TargetAudience = draft.TargetAudience,
+            PrimaryKeyword = draft.PrimaryKeyword,
+            SecondaryKeywords = draft.SecondaryKeywords,
+            Title = draft.Title,
+            Slug = draft.Slug,
+            Author = authorName,
+            Markdown = draft.ArticleMarkdown,
+            RenderedMarkdown = renderedMarkdown,
+            PublishMarkdown = renderedMarkdown,
+            MetaTitle = BuildMetaTitle(draft.Title),
+            MetaDescription = draft.MetaDescription,
+            Keywords = BuildKeywords(new ArticleGenerationRequest
+            {
+                Topic = draft.Topic,
+                TargetAudience = draft.TargetAudience,
+                PrimaryKeyword = draft.PrimaryKeyword,
+                SecondaryKeywords = draft.SecondaryKeywords
+            }),
+            CanonicalUrl = $"{siteBaseUrl}/blog/{draft.Slug}",
+            Status = draft.Status,
+            RequestedModifications = draft.RequestedModifications,
+            RevisionNumber = draft.RevisionNumber,
+            CreatedAt = draft.CreatedAt,
+            UpdatedAt = draft.UpdatedAt,
+            ApprovedAt = draft.ApprovedAt,
+            RejectedAt = draft.RejectedAt,
+            AffiliatePlacements = placements,
+            HeroImage = new ArticleHeroImagePreview
+            {
+                Prompt = draft.HeroImagePrompt,
+                AltText = draft.HeroImageAltText,
+                DataUri = draft.HeroImageDataUri,
+                ThemeLabel = draft.HeroImageThemeLabel,
+                AccentLabel = draft.HeroImageAccentLabel,
+                Caption = draft.HeroImageCaption,
+                Provider = draft.HeroImageProvider,
+                ConfiguredModel = draft.HeroImageConfiguredModel,
+                AvailableModelsSummary = draft.HeroImageAvailableModelsSummary,
+                StatusMessage = draft.HeroImageStatusMessage,
+                IsGeneratedByOllama = draft.IsHeroImageGeneratedByOllama
+            },
+            WorkflowHistory = events
+                .OrderByDescending(x => x.CreatedAt)
+                .Select(x => new ContentStudioWorkflowEntry
+                {
+                    EventType = x.EventType,
+                    Notes = x.Notes,
+                    PerformedBy = x.CreatedBy,
+                    OccurredAt = x.CreatedAt
+                })
+                .ToArray()
+        };
+    }
+
+    private async Task RecordDraftImpressionsAsync(Guid draftId, string performedBy, CancellationToken cancellationToken)
+    {
+        var placements = await db.SeoArticleAffiliatePlacements
+            .AsNoTracking()
+            .Where(x => x.SeoArticleDraftId == draftId)
+            .Select(x => new { x.SeoArticleDraftId, x.SlotToken, x.AdvertiserId })
+            .ToListAsync(cancellationToken);
+
+        if (placements.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var placement in placements)
+        {
+            db.SeoArticleAffiliateInteractions.Add(new SeoArticleAffiliateInteraction
+            {
+                SeoArticleDraftId = placement.SeoArticleDraftId,
+                SlotToken = placement.SlotToken,
+                AdvertiserId = placement.AdvertiserId,
+                EventType = AffiliateInteractionEventTypes.Impression,
+                CreatedBy = performedBy
+            });
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static double CalculateCtr(int clicks, int impressions)
+    {
+        return impressions == 0
+            ? 0
+            : (double)clicks / impressions;
+    }
+
+    private string GetAuthorName()
+    {
+        var configured = options.Value.AuthorName?.Trim();
+        return string.IsNullOrWhiteSpace(configured)
+            ? ContentStudioOptions.DefaultAuthorName
+            : configured;
+    }
+
+    private string GetSiteBaseUrl()
+    {
+        var configured = options.Value.SiteBaseUrl?.Trim();
+        return string.IsNullOrWhiteSpace(configured)
+            ? ContentStudioOptions.DefaultSiteBaseUrl
+            : configured.TrimEnd('/');
+    }
+}

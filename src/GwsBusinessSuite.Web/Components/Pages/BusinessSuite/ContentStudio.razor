@@ -1,0 +1,411 @@
+@page "/content-studio"
+@rendermode InteractiveServer
+@implements IDisposable
+@using GwsBusinessSuite.Application.ContentStudio
+@inject IContentStudioService ContentStudioService
+@inject NavigationManager Navigation
+@inject ILogger<ContentStudio> Logger
+
+<PageTitle>Content Studio</PageTitle>
+
+<div class="page-header">
+    <h1><i class="bi bi-pencil-square me-2 text-primary"></i>Content Studio</h1>
+    <p>Generate SEO-focused technical articles with Ollama and manage drafts from a list-first workflow.</p>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@ErrorMessage</div>
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
+        <i class="bi bi-check-circle-fill flex-shrink-0"></i>
+        <div>@StatusMessage</div>
+    </div>
+}
+
+@if (IsBusy)
+{
+    <div class="gws-busy-overlay" role="status" aria-live="polite" aria-busy="true">
+        <div class="gws-busy-panel shadow">
+            <div class="spinner-border text-primary" aria-hidden="true"></div>
+            <div class="fw-semibold mt-3">Working on your request</div>
+            <div class="text-secondary small mt-1">@BusyMessage</div>
+            <div class="text-muted small mt-2">@BusyElapsedText</div>
+        </div>
+    </div>
+}
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white border-bottom py-3 d-flex align-items-center gap-2">
+        <span class="badge bg-primary rounded-pill">1</span>
+        <span class="fw-semibold">Article Brief</span>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label fw-semibold small">Topic</label>
+                <input class="form-control" @bind="Topic"
+                       placeholder="e.g. Clean Architecture in Blazor applications" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label fw-semibold small">Target Audience</label>
+                <input class="form-control" @bind="TargetAudience" placeholder="e.g. mid-level C# developers" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label fw-semibold small">Primary Keyword</label>
+                <input class="form-control" @bind="PrimaryKeyword" placeholder="e.g. Blazor clean architecture" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label fw-semibold small">Secondary Keywords</label>
+                <input class="form-control" @bind="SecondaryKeywords"
+                       placeholder="e.g. ASP.NET Core, dependency injection" />
+            </div>
+        </div>
+
+        <div class="mt-4 d-flex flex-wrap gap-2">
+            <button class="btn btn-primary d-inline-flex align-items-center gap-2" @onclick="GenerateDraft"
+                    disabled="@IsBusy">
+                <i class="bi bi-stars"></i>
+                <span>Generate Draft With Ollama</span>
+            </button>
+            <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2"
+                    @onclick="RefreshDraftsClicked" disabled="@IsBusy">
+                <i class="bi bi-arrow-repeat"></i>
+                <span>Refresh Draft List</span>
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white border-bottom py-3 d-flex align-items-center gap-2">
+        <span class="badge bg-primary rounded-pill">2</span>
+        <span class="fw-semibold">Persisted Drafts</span>
+    </div>
+    <div class="card-body">
+        <div class="row g-3 mb-3">
+            <div class="col-md-4">
+                <label class="form-label fw-semibold small">Status Filter</label>
+                <select class="form-select" @bind="SelectedDraftStatus">
+                    @foreach (var status in DraftStatusOptions)
+                    {
+                        <option value="@status">@status</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold small">Search Topic</label>
+                <input class="form-control" @bind="DraftSearchTerm" @bind:event="oninput"
+                       placeholder="Filter by topic" />
+            </div>
+            <div class="col-md-4 d-flex align-items-end">
+                <button class="btn btn-outline-secondary w-100" @onclick="ClearDraftFilters">Clear Filters</button>
+            </div>
+        </div>
+
+        @if (FilteredDrafts.Count == 0)
+        {
+            <p class="text-secondary mb-0">No drafts found for the selected filter.</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Topic</th>
+                            <th>Status</th>
+                            <th>Revision</th>
+                            <th>Updated</th>
+                            <th class="text-end">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var draft in FilteredDrafts)
+                        {
+                            <tr>
+                                <td class="fw-semibold">@draft.Topic</td>
+                                <td><span class="badge @GetDraftStatusBadgeClass(draft.Status)">@draft.Status</span></td>
+                                <td>@draft.RevisionNumber</td>
+                                <td>@FormatDate(draft.UpdatedAt ?? draft.CreatedAt)</td>
+                                <td class="text-end">
+                                    <div class="d-inline-flex gap-2">
+                                        <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenDraft(draft.DraftId)"
+                                                disabled="@IsBusy">Open</button>
+                                        <button class="btn btn-sm btn-outline-danger"
+                                                @onclick="() => MarkDraftNotInterested(draft.DraftId)" disabled="@IsBusy">Not
+                                            Interested</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+@code {
+    private static readonly string[] DraftStatusOptions = ["All", "PendingReview", "Approved", "Rejected"];
+
+    private string Topic { get; set; } = string.Empty;
+    private string TargetAudience { get; set; } = "C# and ASP.NET developers";
+    private string PrimaryKeyword { get; set; } = string.Empty;
+    private string SecondaryKeywords { get; set; } = string.Empty;
+
+    private List<ContentStudioDraftSummary> Drafts { get; set; } = new();
+    private bool IsBusy { get; set; }
+    private string BusyMessage { get; set; } = "Working with Ollama and local workflow persistence.";
+    private DateTimeOffset? BusyStartedAt { get; set; }
+    private CancellationTokenSource? BusyTickerCts { get; set; }
+    private string StatusMessage { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+    private string SelectedDraftStatus { get; set; } = "All";
+    private string DraftSearchTerm { get; set; } = string.Empty;
+
+    private IReadOnlyList<ContentStudioDraftSummary> FilteredDrafts =>
+        Drafts
+            .Where(draft =>
+                string.Equals(SelectedDraftStatus, "All", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(draft.Status, SelectedDraftStatus, StringComparison.OrdinalIgnoreCase))
+            .Where(draft =>
+                string.IsNullOrWhiteSpace(DraftSearchTerm) ||
+                draft.Topic.Contains(DraftSearchTerm.Trim(), StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+    private string BusyElapsedText => BusyStartedAt is null
+        ? "Elapsed: 00:00"
+        : $"Elapsed: {FormatElapsed(DateTimeOffset.UtcNow - BusyStartedAt.Value)}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshDrafts();
+    }
+
+    private static string FormatDate(DateTimeOffset value)
+    {
+        return value.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+    }
+
+    private static string GetDraftStatusBadgeClass(string status)
+    {
+        return status switch
+        {
+            "PendingReview" => "text-bg-warning",
+            "Approved" => "text-bg-success",
+            "Rejected" => "text-bg-danger",
+            _ => "text-bg-secondary"
+        };
+    }
+
+    private void ClearDraftFilters()
+    {
+        SelectedDraftStatus = "All";
+        DraftSearchTerm = string.Empty;
+    }
+
+    private async Task RefreshDrafts(bool showOverlay = true)
+    {
+        if (showOverlay)
+        {
+            BeginBusy("Loading persisted drafts from local workflow storage.");
+        }
+
+        try
+        {
+            Drafts = (await ContentStudioService.ListDraftsAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load Content Studio drafts.");
+            ErrorMessage = $"Unable to load drafts. {ex.Message}";
+        }
+        finally
+        {
+            if (showOverlay)
+            {
+                EndBusy();
+            }
+        }
+    }
+
+    private async Task RefreshDraftsClicked()
+    {
+        await RefreshDrafts();
+    }
+
+    private void OpenDraft(Guid draftId)
+    {
+        Navigation.NavigateTo($"/content-studio/draft/{draftId}");
+    }
+
+    private async Task MarkDraftNotInterested(Guid draftId)
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        BeginBusy("Updating draft status and refreshing the draft list.");
+
+        try
+        {
+            var updated = await ContentStudioService.RejectDraftAsync(new DraftDecisionRequest
+            {
+                DraftId = draftId,
+                Notes = "Marked as no longer interested from draft list.",
+                PerformedBy = "content-studio-ui"
+            });
+
+            if (updated is null)
+            {
+                ErrorMessage = "Draft could not be found for this action.";
+                return;
+            }
+
+            await RefreshDrafts(showOverlay: false);
+            StatusMessage = $"Draft '{updated.Title}' marked as no longer interested. Use Open on any remaining draft to review and manage it on the detail page.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to mark draft {DraftId} as not interested.", draftId);
+            ErrorMessage = $"Unable to mark draft as not interested. {ex.Message}";
+        }
+        finally
+        {
+            EndBusy();
+        }
+    }
+
+    private async Task GenerateDraft()
+    {
+        if (string.IsNullOrWhiteSpace(Topic))
+        {
+            ErrorMessage = "Enter an article topic before generating a draft.";
+            StatusMessage = string.Empty;
+            return;
+        }
+
+        ErrorMessage = string.Empty;
+        StatusMessage = $"Generating a draft for '{Topic.Trim()}' with local Ollama...";
+        BeginBusy("Generating article content and scoring affiliate placements. This can take up to a minute.");
+        Logger.LogInformation("Content Studio generate button clicked for topic '{Topic}'.", Topic);
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var result = await ContentStudioService.GenerateArticleAsync(new ArticleGenerationRequest
+            {
+                Topic = Topic,
+                TargetAudience = TargetAudience,
+                PrimaryKeyword = PrimaryKeyword,
+                SecondaryKeywords = SecondaryKeywords
+            });
+
+            await RefreshDrafts(showOverlay: false);
+            StatusMessage = $"Draft generated successfully for '{result.Title}'. Use Open in the draft list to review and manage this draft on the detail page.";
+            Navigation.NavigateTo($"/content-studio/draft/{result.DraftId}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Content Studio draft generation failed for topic '{Topic}'.", Topic);
+            StatusMessage = string.Empty;
+            ErrorMessage = $"Unable to generate article. Make sure Ollama is running and the configured model is available. Details: {ex.Message}";
+        }
+        finally
+        {
+            EndBusy();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public void Dispose()
+    {
+        EndBusy();
+    }
+
+    private static string FormatElapsed(TimeSpan elapsed)
+    {
+        var safe = elapsed < TimeSpan.Zero ? TimeSpan.Zero : elapsed;
+        return safe.TotalHours >= 1
+            ? safe.ToString("hh\\:mm\\:ss")
+            : safe.ToString("mm\\:ss");
+    }
+
+    private void BeginBusy(string message)
+    {
+        BusyMessage = message;
+        BusyStartedAt = DateTimeOffset.UtcNow;
+        IsBusy = true;
+        StartBusyTicker();
+    }
+
+    private void EndBusy()
+    {
+        IsBusy = false;
+        BusyStartedAt = null;
+        StopBusyTicker();
+    }
+
+    private void StartBusyTicker()
+    {
+        StopBusyTicker();
+
+        var cts = new CancellationTokenSource();
+        BusyTickerCts = cts;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (!cts.Token.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        });
+    }
+
+    private void StopBusyTicker()
+    {
+        if (BusyTickerCts is null)
+        {
+            return;
+        }
+
+        BusyTickerCts.Cancel();
+        BusyTickerCts.Dispose();
+        BusyTickerCts = null;
+    }
+}
+
+<style>
+    .gws-busy-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 1085;
+        background: rgba(15, 23, 42, 0.38);
+        backdrop-filter: blur(2px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1rem;
+    }
+
+    .gws-busy-panel {
+        width: min(28rem, 100%);
+        background: #ffffff;
+        border-radius: 14px;
+        border: 1px solid #dbe6f3;
+        padding: 1.25rem;
+        text-align: center;
+    }
+</style>

@@ -1,0 +1,674 @@
+@page "/content-studio/draft/{DraftId:guid}"
+@rendermode InteractiveServer
+@implements IDisposable
+@using GwsBusinessSuite.Application.ContentStudio
+@using Markdig
+@inject IContentStudioService ContentStudioService
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+@inject ILogger<ContentStudioDraft> Logger
+
+<PageTitle>Content Studio Draft</PageTitle>
+
+<div class="page-header d-flex align-items-start justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-file-earmark-text me-2 text-primary"></i>Draft Workspace</h1>
+        <p>Review, revise, approve, and manage affiliate placements for this draft.</p>
+    </div>
+    <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2" @onclick="BackToStudio">
+        <i class="bi bi-arrow-left"></i>
+        <span>Back to Content Studio</span>
+    </button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@ErrorMessage</div>
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
+        <i class="bi bi-check-circle-fill flex-shrink-0"></i>
+        <div>@StatusMessage</div>
+    </div>
+}
+
+@if (IsBusy)
+{
+    <div class="gws-busy-overlay" role="status" aria-live="polite" aria-busy="true">
+        <div class="gws-busy-panel shadow">
+            <div class="spinner-border text-primary" aria-hidden="true"></div>
+            <div class="fw-semibold mt-3">Working on this draft</div>
+            <div class="text-secondary small mt-1">@BusyMessage</div>
+            <div class="text-muted small mt-2">@BusyElapsedText</div>
+        </div>
+    </div>
+}
+
+@if (CurrentDraft is null)
+{
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <p class="text-secondary mb-0">No draft loaded for this ID.</p>
+        </div>
+    </div>
+}
+else
+{
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white border-bottom py-3 d-flex align-items-center gap-2">
+            <span class="badge bg-primary rounded-pill">Draft</span>
+            <span class="fw-semibold">@CurrentDraft.Title</span>
+        </div>
+        <div class="card-body">
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <span class="badge @GetDraftStatusBadgeClass(CurrentDraft.Status)">Status: @CurrentDraft.Status</span>
+                <span class="badge text-bg-light">Revision: @CurrentDraft.RevisionNumber</span>
+                <span class="badge text-bg-light">Created: @FormatDate(CurrentDraft.CreatedAt)</span>
+            </div>
+
+            <div class="row g-4 mb-4">
+                <div class="col-xl-6">
+                    <label class="form-label fw-semibold small">Generated Article (Markdown)</label>
+                    <textarea class="form-control article-editor" readonly>@CurrentDraft.Markdown</textarea>
+                </div>
+                <div class="col-xl-6">
+                    <label class="form-label fw-semibold small">Rendered Draft Preview</label>
+                    <div class="article-preview surface-panel">
+                        @((MarkupString)RenderedDraftHtml)
+                    </div>
+                </div>
+            </div>
+
+            @if (CurrentDraft.HeroImage is not null)
+            {
+                <div class="hero-preview-panel mb-4">
+                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                        <div>
+                            <div class="form-label fw-semibold small mb-1">Ollama Hero Image Generation</div>
+                            <div class="text-secondary small">Shows persisted image-generation output and status metadata.</div>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2">
+                            <span class="hero-chip">@CurrentDraft.HeroImage.ThemeLabel</span>
+                            <span class="hero-chip hero-chip-secondary">@CurrentDraft.HeroImage.AccentLabel</span>
+                        </div>
+                    </div>
+
+                    <div class="row g-4 align-items-start">
+                        <div class="col-xl-7">
+                            @if (!string.IsNullOrWhiteSpace(CurrentDraft.HeroImage.DataUri))
+                            {
+                                <img class="hero-preview-image" src="@CurrentDraft.HeroImage.DataUri"
+                                     alt="@CurrentDraft.HeroImage.AltText" />
+                            }
+                            else
+                            {
+                                <div class="hero-status-panel">
+                                    <div class="hero-status-icon">
+                                        <i class="bi bi-image-alt"></i>
+                                    </div>
+                                    <div>
+                                        <div class="fw-semibold mb-2">No real Ollama-generated image is available.</div>
+                                        <p class="mb-2">@CurrentDraft.HeroImage.StatusMessage</p>
+                                        <p class="small text-secondary mb-0">@CurrentDraft.HeroImage.Caption</p>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                        <div class="col-xl-5">
+                            <label class="form-label fw-semibold small">Image Generation Prompt</label>
+                            <textarea class="form-control hero-prompt-editor mb-3" @bind="HeroImagePrompt"></textarea>
+                            <div class="small text-secondary mb-1"><strong>Provider:</strong> @CurrentDraft.HeroImage.Provider
+                            </div>
+                            <div class="small text-secondary mb-1"><strong>Configured image model:</strong>
+                                @CurrentDraft.HeroImage.ConfiguredModel</div>
+                                <div class="small text-secondary mb-0"><strong>Available local models:</strong>
+                                    @CurrentDraft.HeroImage.AvailableModelsSummary</div>
+                                    <div class="d-grid mt-3">
+                                        <button
+                                            class="btn btn-outline-primary d-inline-flex align-items-center justify-content-center gap-2"
+                                            @onclick="RegenerateHeroImage" disabled="@IsBusy">
+                                            <i class="bi bi-image"></i>
+                                            <span>Regenerate Hero Image</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    }
+
+                    <div class="row g-3 mb-4">
+                        <div class="col-12">
+                            <label class="form-label fw-semibold small">Revision Notes</label>
+                            <textarea class="form-control" rows="3" @bind="RevisionNotes"
+                                      placeholder="Describe what should be revised or explain decision notes."></textarea>
+                        </div>
+                    </div>
+
+                    <div class="d-flex flex-wrap gap-2 mb-4">
+                        <button class="btn btn-success d-inline-flex align-items-center gap-2" @onclick="ApproveDraft"
+                                disabled="@IsBusy">
+                            <i class="bi bi-check-circle-fill"></i>
+                            <span>Approve Draft</span>
+                        </button>
+                        <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2" @onclick="RequestRevision"
+                                disabled="@IsBusy">
+                            <i class="bi bi-arrow-clockwise"></i>
+                            <span>Request Revision</span>
+                        </button>
+                        <button class="btn btn-outline-danger d-inline-flex align-items-center gap-2" @onclick="RejectDraft"
+                                disabled="@IsBusy">
+                            <i class="bi bi-x-circle"></i>
+                            <span>Reject Draft</span>
+                        </button>
+                    </div>
+
+                    <h5 class="mb-3">Affiliate Placements</h5>
+                    @if (CurrentDraft.AffiliatePlacements.Count == 0)
+                    {
+                        <p class="text-secondary mb-0">No affiliate placements were selected for this draft.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive mb-4">
+                            <table class="table align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Slot</th>
+                                        <th>Advertiser</th>
+                                        <th>Category</th>
+                                        <th class="text-end">Impressions</th>
+                                        <th class="text-end">Clicks</th>
+                                        <th class="text-end">CTR</th>
+                                        <th class="text-end">Trend (7d)</th>
+                                        <th class="text-end">Offer Link</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var placement in CurrentDraft.AffiliatePlacements.OrderBy(x => x.SortOrder))
+                                    {
+                                        <tr>
+                                            <td class="font-monospace">@placement.SlotToken</td>
+                                            <td>
+                                                <div class="fw-semibold">@placement.AdvertiserName</div>
+                                                <div class="small text-secondary">ID: @placement.AdvertiserId</div>
+                                            </td>
+                                            <td>@(string.IsNullOrWhiteSpace(placement.Category) ? "General" : placement.Category)</td>
+                                            <td class="text-end">@placement.Impressions</td>
+                                            <td class="text-end">@placement.Clicks</td>
+                                            <td class="text-end">@FormatCtr(placement.ClickThroughRate)</td>
+                                            <td class="text-end">
+                                                <span class="@GetTrendChipClass(placement.ClickThroughRateDelta7Day)"
+                                                      data-bs-toggle="tooltip" data-bs-html="true"
+                                                      data-bs-custom-class="@GetTrendTooltipClass(placement.ClickThroughRateDelta7Day)"
+                                                      data-bs-title="@BuildTrendTooltipHtml(placement)">
+                                                    @GetTrendArrow(placement.ClickThroughRateDelta7Day)
+                                                    @FormatTrendDelta(placement.ClickThroughRateDelta7Day)
+                                                </span>
+                                            </td>
+                                            <td class="text-end">
+                                                @if (string.IsNullOrWhiteSpace(placement.TrackingUrl))
+                                                {
+                                                    <span class="text-secondary small">No URL</span>
+                                                }
+                                                else
+                                                {
+                                                    <a class="btn btn-sm btn-outline-primary" href="@placement.TrackingUrl" target="_blank"
+                                                       rel="noopener noreferrer nofollow sponsored"
+                                                       @onclick="() => TrackAffiliateClick(placement)">
+                                                        Open Offer
+                                                    </a>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+
+                    <h5 class="mb-3">Workflow History</h5>
+                    @if (CurrentDraft.WorkflowHistory.Count == 0)
+                    {
+                        <p class="text-secondary mb-0">No workflow events recorded yet.</p>
+                    }
+                    else
+                    {
+                        <ul class="list-group list-group-flush border rounded-3">
+                            @foreach (var workflow in CurrentDraft.WorkflowHistory)
+                            {
+                                <li class="list-group-item">
+                                    <div class="d-flex flex-wrap justify-content-between gap-2">
+                                        <span class="fw-semibold">@workflow.EventType</span>
+                                        <span class="text-secondary small">@FormatDate(workflow.OccurredAt)</span>
+                                    </div>
+                                    <div class="small text-secondary">By @workflow.PerformedBy</div>
+                                    @if (!string.IsNullOrWhiteSpace(workflow.Notes))
+                                    {
+                                        <div class="mt-1">@workflow.Notes</div>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+            </div>
+        }
+
+@code {
+    [Parameter]
+    public Guid DraftId { get; set; }
+
+    private ArticleGenerationResult? CurrentDraft { get; set; }
+    private bool IsBusy { get; set; }
+    private string BusyMessage { get; set; } = "Updating draft workflow and loading latest state.";
+    private DateTimeOffset? BusyStartedAt { get; set; }
+    private CancellationTokenSource? BusyTickerCts { get; set; }
+    private bool IsApproved { get; set; }
+    private string StatusMessage { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+    private string RevisionNotes { get; set; } = string.Empty;
+    private string HeroImagePrompt { get; set; } = string.Empty;
+
+    private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .Build();
+
+    private string RenderedDraftHtml => string.IsNullOrWhiteSpace(CurrentDraft?.RenderedMarkdown)
+        ? "<p class=\"text-secondary mb-0\">No rendered draft available.</p>"
+        : Markdown.ToHtml(CurrentDraft.RenderedMarkdown, MarkdownPipeline);
+
+    private string BusyElapsedText => BusyStartedAt is null
+        ? "Elapsed: 00:00"
+        : $"Elapsed: {FormatElapsed(DateTimeOffset.UtcNow - BusyStartedAt.Value)}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadDraft();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await JS.InvokeVoidAsync("gwsTooltips.init", "[data-bs-toggle='tooltip']");
+    }
+
+    private async Task LoadDraft()
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        BeginBusy("Loading draft details, workflow history, and affiliate placement metrics.");
+
+        try
+        {
+            var draft = await ContentStudioService.GetDraftAsync(DraftId);
+            if (draft is null)
+            {
+                ErrorMessage = "The requested draft no longer exists.";
+                CurrentDraft = null;
+                return;
+            }
+
+            CurrentDraft = draft;
+            IsApproved = string.Equals(CurrentDraft.Status, "Approved", StringComparison.OrdinalIgnoreCase);
+            RevisionNotes = CurrentDraft.RequestedModifications;
+            HeroImagePrompt = CurrentDraft.HeroImage.Prompt;
+            StatusMessage = $"Loaded draft '{CurrentDraft.Title}'.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load draft {DraftId}.", DraftId);
+            ErrorMessage = $"Unable to load draft. {ex.Message}";
+        }
+        finally
+        {
+            EndBusy();
+        }
+    }
+
+    private async Task RegenerateHeroImage()
+    {
+        if (CurrentDraft is null)
+        {
+            return;
+        }
+
+        await RunWorkflowAction(
+            async () => await ContentStudioService.RegenerateHeroImageAsync(new DraftHeroImageRegenerationRequest
+            {
+                DraftId = CurrentDraft.DraftId,
+                Prompt = HeroImagePrompt,
+                Notes = RevisionNotes,
+                PerformedBy = "content-studio-ui"
+            }),
+            "Generating a new hero image from your prompt and available Ollama image models.",
+            "Hero image regenerated without changing article text.");
+    }
+
+    private async Task ApproveDraft()
+    {
+        if (CurrentDraft is null)
+        {
+            return;
+        }
+
+        await RunWorkflowAction(
+            async () => await ContentStudioService.ApproveDraftAsync(new DraftDecisionRequest
+            {
+                DraftId = CurrentDraft.DraftId,
+                Notes = RevisionNotes,
+                PerformedBy = "content-studio-ui"
+            }),
+            "Saving approval decision and updating workflow history.",
+            "Draft approved. Sanity publishing fields are ready for review.");
+    }
+
+    private async Task RequestRevision()
+    {
+        if (CurrentDraft is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(RevisionNotes))
+        {
+            ErrorMessage = "Enter revision notes before requesting a revision.";
+            return;
+        }
+
+        await RunWorkflowAction(
+            async () => await ContentStudioService.RequestRevisionAsync(new DraftRevisionRequest
+            {
+                DraftId = CurrentDraft.DraftId,
+                RequestedModifications = RevisionNotes,
+                PerformedBy = "content-studio-ui"
+            }),
+            "Requesting a revised article draft from Ollama with your revision notes.",
+            "Revision requested and persisted.");
+    }
+
+    private async Task RejectDraft()
+    {
+        if (CurrentDraft is null)
+        {
+            return;
+        }
+
+        await RunWorkflowAction(
+            async () => await ContentStudioService.RejectDraftAsync(new DraftDecisionRequest
+            {
+                DraftId = CurrentDraft.DraftId,
+                Notes = RevisionNotes,
+                PerformedBy = "content-studio-ui"
+            }),
+            "Saving rejection decision and updating workflow history.",
+            "Draft rejected and persisted.");
+    }
+
+    private async Task RunWorkflowAction(
+        Func<Task<ArticleGenerationResult?>> action,
+        string busyMessage,
+        string successMessage)
+    {
+        ErrorMessage = string.Empty;
+        BeginBusy(busyMessage);
+
+        try
+        {
+            var updated = await action();
+            if (updated is null)
+            {
+                ErrorMessage = "Draft could not be found for this action.";
+                return;
+            }
+
+            CurrentDraft = updated;
+            IsApproved = string.Equals(CurrentDraft.Status, "Approved", StringComparison.OrdinalIgnoreCase);
+            RevisionNotes = CurrentDraft.RequestedModifications;
+            HeroImagePrompt = CurrentDraft.HeroImage.Prompt;
+            StatusMessage = successMessage;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Workflow action failed for draft {DraftId}.", CurrentDraft?.DraftId);
+            ErrorMessage = $"Workflow action failed. {ex.Message}";
+        }
+        finally
+        {
+            EndBusy();
+        }
+    }
+
+    public void Dispose()
+    {
+        EndBusy();
+    }
+
+    private static string FormatElapsed(TimeSpan elapsed)
+    {
+        var safe = elapsed < TimeSpan.Zero ? TimeSpan.Zero : elapsed;
+        return safe.TotalHours >= 1
+            ? safe.ToString("hh\\:mm\\:ss")
+            : safe.ToString("mm\\:ss");
+    }
+
+    private void BeginBusy(string message)
+    {
+        BusyMessage = message;
+        BusyStartedAt = DateTimeOffset.UtcNow;
+        IsBusy = true;
+        StartBusyTicker();
+    }
+
+    private void EndBusy()
+    {
+        IsBusy = false;
+        BusyStartedAt = null;
+        StopBusyTicker();
+    }
+
+    private void StartBusyTicker()
+    {
+        StopBusyTicker();
+
+        var cts = new CancellationTokenSource();
+        BusyTickerCts = cts;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (!cts.Token.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        });
+    }
+
+    private void StopBusyTicker()
+    {
+        if (BusyTickerCts is null)
+        {
+            return;
+        }
+
+        BusyTickerCts.Cancel();
+        BusyTickerCts.Dispose();
+        BusyTickerCts = null;
+    }
+
+    private async Task TrackAffiliateClick(ArticleAffiliatePlacementView placement)
+    {
+        if (CurrentDraft is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await ContentStudioService.RecordAffiliatePlacementInteractionAsync(new AffiliatePlacementInteractionRequest
+            {
+                DraftId = CurrentDraft.DraftId,
+                SlotToken = placement.SlotToken,
+                EventType = "Click",
+                PerformedBy = "content-studio-ui"
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Unable to record affiliate click for draft {DraftId} slot {SlotToken}.", CurrentDraft.DraftId,
+placement.SlotToken);
+        }
+    }
+
+    private void BackToStudio()
+    {
+        Navigation.NavigateTo("/content-studio");
+    }
+
+    private static string FormatDate(DateTimeOffset value)
+    {
+        return value.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+    }
+
+    private static string FormatCtr(double value)
+    {
+        return value.ToString("P1");
+    }
+
+    private static string GetTrendChipClass(double delta)
+    {
+        if (delta > 0.0005)
+        {
+            return "badge text-bg-success";
+        }
+
+        if (delta < -0.0005)
+        {
+            return "badge text-bg-danger";
+        }
+
+        return "badge text-bg-secondary";
+    }
+
+    private static string GetTrendArrow(double delta)
+    {
+        if (delta > 0.0005)
+        {
+            return "▲";
+        }
+
+        if (delta < -0.0005)
+        {
+            return "▼";
+        }
+
+        return "●";
+    }
+
+    private static string FormatTrendDelta(double delta)
+    {
+        var points = delta * 100;
+        var sign = points > 0 ? "+" : string.Empty;
+        return $"{sign}{points:0.0}pp";
+    }
+
+    private static string BuildTrendTooltipHtml(ArticleAffiliatePlacementView placement)
+    {
+        return $"<div class='fw-bold mb-1'>CTR Trend vs Previous Window</div><div><strong>Current 7d:</strong> {FormatCtr(placement.Current7DayClickThroughRate)}</div><div><strong>Previous 7d:</strong> {FormatCtr(placement.Previous7DayClickThroughRate)}</div><div class='mt-1'><strong>Delta:</strong> {FormatTrendDelta(placement.ClickThroughRateDelta7Day)}</div>";
+    }
+
+    private static string GetTrendTooltipClass(double delta)
+    {
+        if (delta > 0.0005)
+        {
+            return "gws-tooltip-up";
+        }
+
+        if (delta < -0.0005)
+        {
+            return "gws-tooltip-down";
+        }
+
+        return "gws-tooltip-flat";
+    }
+
+    private static string GetDraftStatusBadgeClass(string status)
+    {
+        return status switch
+        {
+            "PendingReview" => "text-bg-warning",
+            "Approved" => "text-bg-success",
+            "Rejected" => "text-bg-danger",
+            _ => "text-bg-secondary"
+        };
+    }
+}
+
+<style>
+    .gws-busy-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 1085;
+        background: rgba(15, 23, 42, 0.38);
+        backdrop-filter: blur(2px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1rem;
+    }
+
+    .gws-busy-panel {
+        width: min(30rem, 100%);
+        background: #ffffff;
+        border-radius: 14px;
+        border: 1px solid #dbe6f3;
+        padding: 1.25rem;
+        text-align: center;
+    }
+
+    .article-preview .cj-ad-card {
+        border: 1px solid #d8dee5;
+        border-radius: 12px;
+        padding: 0.85rem 1rem;
+        margin: 1rem 0;
+        background: linear-gradient(180deg, #fbfdff 0%, #f3f8ff 100%);
+    }
+
+    .article-preview .cj-ad-card p {
+        margin-bottom: 0.35rem;
+    }
+
+    .article-preview .cj-ad-card p:last-child {
+        margin-bottom: 0;
+    }
+
+    .tooltip.gws-tooltip-up .tooltip-inner {
+        background-color: #14532d;
+        color: #ecfdf3;
+        border: 1px solid #22c55e;
+        box-shadow: 0 0.35rem 1rem rgba(20, 83, 45, 0.35);
+    }
+
+    .tooltip.gws-tooltip-down .tooltip-inner {
+        background-color: #7f1d1d;
+        color: #fef2f2;
+        border: 1px solid #f87171;
+        box-shadow: 0 0.35rem 1rem rgba(127, 29, 29, 0.35);
+    }
+
+    .tooltip.gws-tooltip-flat .tooltip-inner {
+        background-color: #1f2937;
+        color: #f9fafb;
+        border: 1px solid #9ca3af;
+        box-shadow: 0 0.35rem 1rem rgba(31, 41, 55, 0.35);
+    }
+</style>

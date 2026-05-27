@@ -1,0 +1,33 @@
+# Build outputs
+**/bin/
+**/obj/
+
+# IDE and tooling
+.vs/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Test artifacts
+TestResults/
+*.trx
+coverage/
+*.coverage
+*.coveragexml
+
+# Local databases and generated state
+*.db
+*.sqlite
+*.sqlite3
+
+# Local environment and secret files
+.env
+.env.*
+appsettings.Local.json
+appsettings.*.local.json
+secrets.json
+
+# OS files
+.DS_Store

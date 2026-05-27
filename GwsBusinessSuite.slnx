@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/GwsBusinessSuite.Application/GwsBusinessSuite.Application.csproj" />
+    <Project Path="src/GwsBusinessSuite.Domain/GwsBusinessSuite.Domain.csproj" />
+    <Project Path="src/GwsBusinessSuite.Infrastructure/GwsBusinessSuite.Infrastructure.csproj" />
+    <Project Path="src/GwsBusinessSuite.Web/GwsBusinessSuite.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/GwsBusinessSuite.Tests/GwsBusinessSuite.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,136 @@
+@page "/login"
+@attribute [AllowAnonymous]
+@inject NavigationManager Navigation
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.WebUtilities
+
+<PageTitle>Admin Login</PageTitle>
+
+<div class="gws-login-shell">
+    <div class="page-header">
+        <h1><i class="bi bi-shield-lock-fill me-2 text-primary"></i>Admin Login</h1>
+        <p>Sign in to access the GWS Business Suite administration workspace.</p>
+    </div>
+
+    <div class="card border-0 shadow-sm gws-login-card">
+        <div class="card-header bg-white border-bottom py-3">
+            <h2 class="h6 mb-0 fw-semibold">GWS Admin Access</h2>
+        </div>
+        <div class="card-body p-4">
+            @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+            {
+                <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+            }
+
+            <form method="post" action="auth/login">
+                <input type="hidden" name="returnUrl" value="@ResolvedReturnUrl" />
+
+                <div class="mb-3">
+                    <label class="form-label fw-semibold small">Username</label>
+                    <input class="form-control" name="username" autocomplete="username" required />
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label fw-semibold small">Password</label>
+                    <input class="form-control" type="password" name="password" autocomplete="current-password"
+                           required />
+                </div>
+
+                <button type="submit" class="btn btn-primary w-100">Sign In</button>
+            </form>
+
+            <p class="text-secondary small mt-3 mb-0 gws-login-note">
+                This area is restricted to administrators.
+            </p>
+        </div>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthenticationStateTask { get; set; }
+
+    private string ErrorMessage { get; set; } = string.Empty;
+    private string ReturnUrl { get; set; } = "/";
+
+    private string ResolvedReturnUrl
+        => IsSafeLocalPath(ReturnUrl)
+            ? ReturnUrl!
+            : "/";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        ReturnUrl = ResolveReturnUrlFromQuery();
+
+        if (AuthenticationStateTask is not null)
+        {
+            var authState = await AuthenticationStateTask;
+            if (authState.User.Identity?.IsAuthenticated == true)
+            {
+                Navigation.NavigateTo(ResolvedReturnUrl, forceLoad: true);
+                return;
+            }
+        }
+
+        if (string.Equals(Error, "invalid", StringComparison.OrdinalIgnoreCase))
+        {
+            ErrorMessage = "Invalid admin credentials.";
+        }
+        else if (string.Equals(Error, "missing", StringComparison.OrdinalIgnoreCase))
+        {
+            ErrorMessage = "Admin credentials are not configured on the server.";
+        }
+        else
+        {
+            ErrorMessage = string.Empty;
+        }
+    }
+
+    private string ResolveReturnUrlFromQuery()
+    {
+        var query = QueryHelpers.ParseQuery(Navigation.ToAbsoluteUri(Navigation.Uri).Query);
+
+        if (query.TryGetValue("returnUrl", out var lowerValue) && IsSafeLocalPath(lowerValue.ToString()))
+        {
+            return lowerValue.ToString();
+        }
+
+        if (query.TryGetValue("ReturnUrl", out var upperValue) && IsSafeLocalPath(upperValue.ToString()))
+        {
+            return upperValue.ToString();
+        }
+
+        return "/";
+    }
+
+    private static bool IsSafeLocalPath(string? path)
+    {
+        return !string.IsNullOrWhiteSpace(path)
+               && path.StartsWith("/", StringComparison.Ordinal)
+               && !path.StartsWith("//", StringComparison.Ordinal)
+               && !path.Contains("\\", StringComparison.Ordinal);
+    }
+}
+
+<style>
+    .gws-login-shell {
+        max-width: 42rem;
+        margin: 0 auto;
+        padding: 1rem 0 2rem;
+    }
+
+    .gws-login-card {
+        border: 1px solid #dbe6f3;
+        border-radius: 14px;
+        overflow: hidden;
+    }
+
+    .gws-login-note {
+        border-top: 1px solid #e2e8f0;
+        padding-top: .85rem;
+    }
+</style>

@@ -1,0 +1,33 @@
+﻿@inherits LayoutComponentBase
+
+<div class="gws-layout">
+    <aside class="gws-sidebar">
+        <NavMenu />
+    </aside>
+    <div class="gws-body">
+        <header class="gws-topbar">
+            <AuthorizeView>
+                <Authorized>
+                    <div class="ms-auto d-inline-flex align-items-center gap-3">
+                        <span class="text-muted" style="font-size:.78rem; letter-spacing:.02em;">GWS Business Suite -
+                            Local Build</span>
+                            <a class="btn btn-sm btn-outline-secondary" href="/auth/logout">Sign Out</a>
+                        </div>
+                    </Authorized>
+                    <NotAuthorized>
+                        <span class="ms-auto text-muted" style="font-size:.78rem; letter-spacing:.02em;">GWS Business Suite
+                            - Local Build</span>
+                        </NotAuthorized>
+                    </AuthorizeView>
+                </header>
+                <main class="gws-content">
+                    @Body
+                </main>
+            </div>
+        </div>
+
+        <div id="blazor-error-ui" data-nosnippet>
+            An unhandled error has occurred.
+            <a href="." class="fw-semibold">Reload</a>
+            <span class="dismiss">&#x2715;</span>
+        </div>
