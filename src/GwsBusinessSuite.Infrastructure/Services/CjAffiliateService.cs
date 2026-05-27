@@ -194,6 +194,39 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
             }
         }
 
+        if (attempt.Partners.Count > 0 && maxResults >= AdvertiserLookupPageSize)
+        {
+            try
+            {
+                var advertiserLookupFallback = await FetchPartnersViaAdvertiserLookupAsync(
+                    requestDeveloperKey: developerKey,
+                    publisherId: publisherId,
+                    maxResults: maxResults,
+                    ct: ct);
+
+                if (advertiserLookupFallback.Partners.Count > 0)
+                {
+                    var merged = attempt.Partners
+                        .Concat(advertiserLookupFallback.Partners)
+                        .Where(x => !string.IsNullOrWhiteSpace(x.AdvertiserId) || !string.IsNullOrWhiteSpace(x.AdvertiserName))
+                        .GroupBy(x => BuildPartnerKey(x.AdvertiserId, x.AdvertiserName), StringComparer.OrdinalIgnoreCase)
+                        .Select(group => group.First())
+                        .Take(maxResults)
+                        .ToArray();
+
+                    return new CjPartnerFetchResult(
+                        Partners: merged,
+                        Message: $"Fetched {merged.Length} CJ advertisers by combining commissions data with active advertiser lookup.");
+                }
+            }
+            catch (HttpRequestException ex) when (
+                ex.StatusCode == HttpStatusCode.BadRequest &&
+                ex.Message.Contains("CJ advertiser lookup failed", StringComparison.OrdinalIgnoreCase))
+            {
+                // Ignore lookup failures here; commissions data is still usable and keeps validation stable.
+            }
+        }
+
         if (attempt.Partners.Count == 0)
         {
             CjPartnerFetchResult advertiserLookupFallback;

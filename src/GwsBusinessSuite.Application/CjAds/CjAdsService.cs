@@ -162,7 +162,10 @@ public sealed class CjAdsService(
                     .ThenByDescending(x => x.UpdatedAt ?? x.CreatedAt)
                     .First();
 
-                var catalogOfferCount = group.Count(IsCatalogOffer);
+                var activeCatalogOfferCount = group.Count(offer => IsCatalogOffer(offer) && IsActiveOffer(offer));
+                var activeOfferCount = activeCatalogOfferCount > 0
+                    ? activeCatalogOfferCount
+                    : group.Count(IsActiveOffer);
 
                 return new CjPartnerView
                 {
@@ -171,7 +174,7 @@ public sealed class CjAdsService(
                     RelationshipStatus = representative.RelationshipStatus ?? string.Empty,
                     Country = string.Empty,
                     PrimaryCategory = representative.Category ?? string.Empty,
-                    OfferCount = catalogOfferCount > 0 ? catalogOfferCount : group.Count(),
+                    OfferCount = activeOfferCount,
                     DetailsUrl = representative.TrackingUrl ?? string.Empty,
                     UpdatedAt = group.Max(x => x.UpdatedAt ?? x.CreatedAt)
                 };
@@ -179,6 +182,7 @@ public sealed class CjAdsService(
             .Where(partner =>
                 string.IsNullOrWhiteSpace(relationshipStatus) ||
                 string.Equals(relationshipStatus, "All", StringComparison.OrdinalIgnoreCase) ||
+                (IsJoinedRelationship(relationshipStatus) && IsJoinedRelationship(partner.RelationshipStatus)) ||
                 string.Equals(partner.RelationshipStatus, relationshipStatus, StringComparison.OrdinalIgnoreCase))
             .Where(partner =>
                 string.IsNullOrWhiteSpace(search) ||
@@ -211,6 +215,7 @@ public sealed class CjAdsService(
         var selectedOffers = catalogOffers.Count > 0 ? catalogOffers : offers;
 
         return selectedOffers
+            .Where(IsActiveOffer)
             .OrderByDescending(x => x.UpdatedAt ?? x.CreatedAt)
             .ThenBy(x => x.LinkName)
             .Select(x => new CjAffiliateOfferView
@@ -335,6 +340,16 @@ public sealed class CjAdsService(
     private static bool IsCatalogOffer(AffiliateOffer offer)
     {
         return !string.Equals(offer.LinkName, offer.AdvertiserId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsActiveOffer(AffiliateOffer offer)
+    {
+        if (string.IsNullOrWhiteSpace(offer.TrackingUrl))
+        {
+            return false;
+        }
+
+        return offer.PromotionEndsAt is null || offer.PromotionEndsAt.Value >= DateTimeOffset.UtcNow;
     }
 
     private static IReadOnlyCollection<CjPartnerRecord> FilterToJoinedPartnersWhenAvailable(IReadOnlyCollection<CjPartnerRecord> partners)

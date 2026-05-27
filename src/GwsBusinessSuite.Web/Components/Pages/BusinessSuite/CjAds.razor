@@ -8,8 +8,8 @@
 
 <div class="page-header">
   <h1><i class="bi bi-tags-fill me-2 text-primary"></i>CJ Ads Manager</h1>
-  <p>Connect your CJ.com account, pull partner advertisers, and keep a local partner list ready for content placement.
-  </p>
+  <p>Only your current CJ My Advertisers are shown below. Expand an advertiser to view active ads you can use in
+    articles.</p>
 </div>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
@@ -35,15 +35,15 @@
   </div>
   <div class="card-body">
     <div class="d-flex flex-wrap gap-2">
-      <button class="btn btn-primary d-inline-flex align-items-center gap-2" @onclick="OpenConnectorModal"
-              disabled="@IsBusy">
+        <button class="btn btn-primary d-inline-flex align-items-center gap-2" @onclick="OpenConnectorModal"
+                disabled="@IsBusy">
         <i class="bi bi-link-45deg"></i>
         <span>Connect CJ Account</span>
       </button>
-      <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2" @onclick="LoadPartners"
-              disabled="@IsBusy">
+        <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2" @onclick="LoadPartners"
+                disabled="@IsBusy">
         <i class="bi bi-arrow-repeat"></i>
-        <span>Refresh Local Partner List</span>
+          <span>Refresh My Advertisers</span>
       </button>
     </div>
     @if (!string.IsNullOrWhiteSpace(LastSyncSummary))
@@ -55,199 +55,113 @@
 
 <div class="card border-0 shadow-sm mb-4">
   <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
-    <span class="fw-semibold">CJ Partners</span>
+      <span class="fw-semibold">My Advertisers (Joined/Active)</span>
     <span class="badge text-bg-light">@FilteredPartners.Count</span>
   </div>
   <div class="card-body">
     <div class="row g-3 mb-3">
-      <div class="col-md-6">
-        <label class="form-label fw-semibold small">Search</label>
-        <input class="form-control" @bind="SearchTerm" @bind:event="oninput"
-               placeholder="Partner name or advertiser ID" />
+        <div class="col-md-8">
+          <label class="form-label fw-semibold small">Search My Advertisers</label>
+          <input class="form-control" @bind="SearchTerm" @bind:event="oninput" placeholder="Advertiser name or ID" />
       </div>
-      <div class="col-md-3">
-        <label class="form-label fw-semibold small">Relationship Status</label>
-        <select class="form-select" @bind="SelectedRelationshipStatus">
-          @foreach (var option in RelationshipStatusOptions)
-          {
-            <option value="@option">@option</option>
-          }
-        </select>
-      </div>
-      <div class="col-md-3 d-flex align-items-end">
-        <button class="btn btn-outline-secondary w-100" @onclick="ClearFilters">Clear Filters</button>
+        <div class="col-md-4 d-flex align-items-end">
+          <button class="btn btn-outline-secondary w-100" @onclick="ClearSearch">Clear Search</button>
       </div>
     </div>
 
     @if (FilteredPartners.Count == 0)
     {
-      <p class="text-secondary mb-0">No partners available for the current filter.</p>
+        <p class="text-secondary mb-0">No joined/active advertisers found for the current view.</p>
     }
     else
     {
-      <div class="table-responsive">
-        <table class="table align-middle mb-0">
-          <thead>
-            <tr>
-              <th>Partner</th>
-              <th>Advertiser ID</th>
-              <th>Status</th>
-              <th>Category</th>
-              <th>Ads</th>
-              <th>Updated</th>
-              <th class="text-end">Details</th>
-            </tr>
-          </thead>
-          <tbody>
-            @foreach (var partner in FilteredPartners)
-            {
-              <tr class="@(SelectedAdvertiserId == partner.AdvertiserId ? "table-primary" : string.Empty)">
-                <td class="fw-semibold">@partner.AdvertiserName</td>
-                <td class="font-monospace">@partner.AdvertiserId</td>
-                <td><span
-                  class="badge @GetRelationshipBadgeClass(partner.RelationshipStatus)">@NormalizeRelationshipStatus(partner.RelationshipStatus)</span>
-                </td>
-                <td>@(string.IsNullOrWhiteSpace(partner.PrimaryCategory) ? "-" : partner.PrimaryCategory)</td>
-                <td>@partner.OfferCount</td>
-                <td>@partner.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
-                <td class="text-end">
-                  <button class="btn btn-sm btn-outline-secondary me-2" @onclick="() => ShowAdvertiserOffers(partner)"
-                          disabled="@IsBusy">
-                    View ads
-                  </button>
-                  @if (!string.IsNullOrWhiteSpace(partner.DetailsUrl))
+        <div class="accordion" id="cjAdvertiserAccordion">
+          @foreach (var partner in FilteredPartners)
+          {
+            var panelId = $"advertiser-{partner.AdvertiserId}";
+            var isExpanded = ExpandedAdvertiserIds.Contains(partner.AdvertiserId);
+            var activeOffers = AdvertiserOffersById.TryGetValue(partner.AdvertiserId, out var loadedOffers)
+              ? loadedOffers
+              : new List<CjAffiliateOfferView>();
+
+            <div class="accordion-item">
+              <h2 class="accordion-header" id="@($"heading-{panelId}")">
+                <button class="accordion-button @(isExpanded ? string.Empty : "collapsed")" type="button"
+                        @onclick="() => ToggleAdvertiserAsync(partner)">
+                  <div class="w-100 d-flex flex-wrap align-items-center justify-content-between gap-2">
+                    <div>
+                      <div class="fw-semibold">@partner.AdvertiserName</div>
+                      <div class="small text-secondary font-monospace">@partner.AdvertiserId</div>
+                    </div>
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                      <span
+                      class="badge @GetRelationshipBadgeClass(partner.RelationshipStatus)">@NormalizeRelationshipStatus(partner.RelationshipStatus)</span>
+                      <span class="badge text-bg-light">@partner.OfferCount active ads</span>
+                      @if (!string.IsNullOrWhiteSpace(partner.PrimaryCategory))
+                      {
+                        <span class="badge text-bg-secondary">@partner.PrimaryCategory</span>
+                      }
+                    </div>
+                  </div>
+                </button>
+              </h2>
+              <div class="accordion-collapse collapse @(isExpanded ? "show" : string.Empty)">
+                <div class="accordion-body">
+                  @if (IsLoadingAdvertiserOffers && LoadingAdvertiserId == partner.AdvertiserId)
                   {
-                    <a class="btn btn-sm btn-outline-primary" href="@partner.DetailsUrl" target="_blank"
-                       rel="noopener noreferrer">Open</a>
+                    <p class="text-secondary mb-0">Loading active ads...</p>
+                  }
+                  else if (activeOffers.Count == 0)
+                  {
+                    <p class="text-secondary mb-0">No active ads were found for this advertiser.</p>
                   }
                   else
                   {
-                    <span class="text-secondary small">n/a</span>
+                    <div class="table-responsive">
+                      <table class="table align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Active Ad</th>
+                            <th>Category</th>
+                            <th>Ends</th>
+                            <th class="text-end">Use In Article</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @foreach (var offer in activeOffers)
+                          {
+                            <tr>
+                              <td>
+                                <div class="fw-semibold">@offer.LinkName</div>
+                                <div class="small text-secondary font-monospace">@offer.AdvertiserId</div>
+                              </td>
+                              <td>@(string.IsNullOrWhiteSpace(offer.Category) ? "-" : offer.Category)</td>
+                              <td>@FormatPromotionEnd(offer.PromotionEndsAt)</td>
+                              <td class="text-end">
+                                @if (!string.IsNullOrWhiteSpace(offer.TrackingUrl))
+                                {
+                                  <a class="btn btn-sm btn-outline-success" href="@offer.TrackingUrl" target="_blank"
+                                     rel="noopener noreferrer">Choose Ad</a>
+                                }
+                                else
+                                {
+                                  <span class="text-secondary small">n/a</span>
+                                }
+                              </td>
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
                   }
-                </td>
-              </tr>
-            }
-          </tbody>
-        </table>
-      </div>
-    }
-  </div>
-</div>
-
-<div class="card border-0 shadow-sm mb-4">
-  <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
-    <span class="fw-semibold">Advertiser Ads</span>
-    @if (!string.IsNullOrWhiteSpace(SelectedAdvertiserName))
-    {
-      <span class="badge text-bg-primary">@SelectedAdvertiserName</span>
-    }
-  </div>
-  <div class="card-body">
-    @if (string.IsNullOrWhiteSpace(SelectedAdvertiserId))
-    {
-      <p class="text-secondary mb-0">Select a partner above to see the ads and tracking links available for that
-        advertiser.</p>
-      }
-    else if (SelectedAdvertiserOffers.Count == 0)
-      {
-        <p class="text-secondary mb-0">No local CJ ad records are stored yet for @SelectedAdvertiserName. Import offer rows
-          below to build a richer catalog.</p>
-        }
-    else
-        {
-          <div class="table-responsive">
-            <table class="table align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Offer</th>
-                  <th>Category</th>
-                  <th>Ends</th>
-                  <th>Source</th>
-                  <th class="text-end">Run Ad</th>
-                </tr>
-              </thead>
-              <tbody>
-                @foreach (var offer in SelectedAdvertiserOffers)
-                {
-                  <tr>
-                    <td>
-                      <div class="fw-semibold">@offer.LinkName</div>
-                      <div class="text-secondary small font-monospace">@offer.AdvertiserId</div>
-                    </td>
-                    <td>@(string.IsNullOrWhiteSpace(offer.Category) ? "-" : offer.Category)</td>
-                    <td>@FormatPromotionEnd(offer.PromotionEndsAt)</td>
-                    <td>@(offer.IsImportedCatalogOffer ? "Imported" : "Partner")</td>
-                    <td class="text-end">
-                      @if (!string.IsNullOrWhiteSpace(offer.TrackingUrl))
-                      {
-                        <a class="btn btn-sm btn-outline-success" href="@offer.TrackingUrl" target="_blank"
-                           rel="noopener noreferrer">Open Tracking Link</a>
-                      }
-                      else
-                      {
-                        <span class="text-secondary small">n/a</span>
-                      }
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-        }
-      </div>
-    </div>
-
-    <div class="card border-0 shadow-sm mb-4">
-      <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
-        <span class="fw-semibold">Import Offer Rows</span>
-        @if (!string.IsNullOrWhiteSpace(SelectedAdvertiserName))
-        {
-          <span class="badge text-bg-light">@SelectedAdvertiserName</span>
-        }
-      </div>
-      <div class="card-body">
-        @if (string.IsNullOrWhiteSpace(SelectedAdvertiserId))
-        {
-          <p class="text-secondary mb-0">Choose an advertiser first, then paste CSV, TSV, or JSON offer rows for that
-            business.</p>
+                </div>
+              </div>
+            </div>
           }
-    else
-          {
-            <div class="row g-3">
-              <div class="col-md-3">
-                <label class="form-label fw-semibold small">Format</label>
-                <select class="form-select" @bind="ImportFormat">
-                  @foreach (var format in ImportFormats)
-                  {
-                    <option value="@format">@format</option>
-                  }
-                </select>
-              </div>
-              <div class="col-md-4 d-flex align-items-end">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" id="replaceImportedOffers"
-                         @bind="ReplaceExistingImportedOffers" />
-                  <label class="form-check-label" for="replaceImportedOffers">Replace existing imported offers</label>
-                </div>
-              </div>
-              <div class="col-12">
-                <label class="form-label fw-semibold small">Offer Rows</label>
-                <InputTextArea class="form-control font-monospace" rows="9" @bind-Value="ImportPayload"
-                               placeholder='offerName,category,trackingUrl,promotionEndsAt&#10;Laptop Deal,Electronics,https://example.com/track,2026-12-31' />
-                <div class="form-text">Supported headers: offerName or title, category, trackingUrl or url, promotionEndsAt.
-                  JSON arrays are also supported.</div>
-                </div>
-              </div>
-
-              <div class="mt-3 d-flex flex-wrap gap-2">
-                <button class="btn btn-primary" @onclick="ImportOffersAsync" disabled="@IsBusy">
-                  <i class="bi bi-upload me-1"></i>Import Offer Rows
-                </button>
-                <button class="btn btn-outline-secondary" @onclick="ClearImportForm" disabled="@IsBusy">Clear</button>
-              </div>
-            }
-          </div>
         </div>
+      }
+    </div>
+  </div>
 
 @if (ShowConnectorModal)
 {
@@ -259,54 +173,60 @@
           <button type="button" class="btn-close" aria-label="Close" @onclick="CloseConnectorModal"></button>
         </div>
         <div class="modal-body">
-          <p class="text-secondary">Enter your CJ Developer Key and Publisher ID (CID). Website ID is optional and is only
-            used as an additional filter.</p>
-            <div class="row g-3">
-              <div class="col-md-6">
-                <label class="form-label fw-semibold small">Developer Key</label>
-                <input class="form-control" type="password" @bind="ConnectorDeveloperKey" autocomplete="off" />
+            <p class="text-secondary">Enter your CJ Developer Key and Publisher ID (CID). Website ID is optional and is only
+              used as an additional filter.</p>
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <label class="form-label fw-semibold small">Developer Key</label>
+                  <input class="form-control" type="password" @bind="ConnectorDeveloperKey" autocomplete="off" />
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label fw-semibold small">Publisher ID (CID)</label>
+                  <input class="form-control" @bind="ConnectorPublisherId" autocomplete="off" />
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label fw-semibold small">Website ID (Optional)</label>
+                  <input class="form-control" @bind="ConnectorWebsiteId" autocomplete="off" />
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label fw-semibold small">Endpoint URL</label>
+                  <input class="form-control" @bind="ConnectorEndpointUrl" />
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label fw-semibold small">Max Results</label>
+                  <input class="form-control" type="number" min="1" max="500" @bind="ConnectorMaxResults" />
+                </div>
               </div>
-              <div class="col-md-6">
-                <label class="form-label fw-semibold small">Publisher ID (CID)</label>
-                <input class="form-control" @bind="ConnectorPublisherId" autocomplete="off" />
-              </div>
-              <div class="col-md-6">
-                <label class="form-label fw-semibold small">Website ID (Optional)</label>
-                <input class="form-control" @bind="ConnectorWebsiteId" autocomplete="off" />
-              </div>
-              <div class="col-md-6">
-                <label class="form-label fw-semibold small">Endpoint URL</label>
-                <input class="form-control" @bind="ConnectorEndpointUrl" />
-              </div>
-              <div class="col-md-3">
-                <label class="form-label fw-semibold small">Max Results</label>
-                <input class="form-control" type="number" min="1" max="500" @bind="ConnectorMaxResults" />
+              @if (!string.IsNullOrWhiteSpace(ConnectorMessage))
+              {
+                <div class="alert @(ConnectorMessageIsError ? "alert-danger" : "alert-info") mt-3 mb-0">@ConnectorMessage</div>
+              }
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline-secondary" @onclick="CloseConnectorModal"
+                      disabled="@IsBusy">Cancel</button>
+              <button type="button" class="btn btn-outline-success" @onclick="SaveConnectorSettings" disabled="@IsBusy">
+                <i class="bi bi-floppy-fill me-1"></i>Save Credentials
+              </button>
+              <button type="button" class="btn btn-outline-primary" @onclick="TestConnector" disabled="@IsBusy">Test
+                Connection</button>
+                <button type="button" class="btn btn-primary" @onclick="ConnectAndSyncPartners" disabled="@IsBusy">Connect And
+                  Pull Partners</button>
+                </div>
               </div>
             </div>
-            @if (!string.IsNullOrWhiteSpace(ConnectorMessage))
-            {
-              <div class="alert @(ConnectorMessageIsError ? "alert-danger" : "alert-info") mt-3 mb-0">@ConnectorMessage</div>
-            }
           </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-outline-secondary" @onclick="CloseConnectorModal"
-                    disabled="@IsBusy">Cancel</button>
-            <button type="button" class="btn btn-outline-success" @onclick="SaveConnectorSettings" disabled="@IsBusy">
-              <i class="bi bi-floppy-fill me-1"></i>Save Credentials
-            </button>
-            <button type="button" class="btn btn-outline-primary" @onclick="TestConnector" disabled="@IsBusy">Test
-              Connection</button>
-              <button type="button" class="btn btn-primary" @onclick="ConnectAndSyncPartners" disabled="@IsBusy">Connect And
-                Pull Partners</button>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="modal-backdrop fade show"></div>
-      }
+          <div class="modal-backdrop fade show"></div>
+        }
 
 @code {
   private List<CjPartnerView> Partners { get; set; } = new();
+  private readonly HashSet<string> ExpandedAdvertiserIds = new(StringComparer.OrdinalIgnoreCase);
+  private readonly Dictionary<string, List<CjAffiliateOfferView>> AdvertiserOffersById =
+new(StringComparer.OrdinalIgnoreCase);
+  private bool IsLoadingAdvertiserOffers { get; set; }
+  private string LoadingAdvertiserId { get; set; } = string.Empty;
+
   private bool IsBusy { get; set; }
   private bool IsConnected { get; set; }
   private bool ShowConnectorModal { get; set; }
@@ -314,12 +234,6 @@
   private string ErrorMessage { get; set; } = string.Empty;
   private string StatusMessage { get; set; } = string.Empty;
   private string LastSyncSummary { get; set; } = string.Empty;
-  private string SelectedAdvertiserId { get; set; } = string.Empty;
-  private string SelectedAdvertiserName { get; set; } = string.Empty;
-  private List<CjAffiliateOfferView> SelectedAdvertiserOffers { get; set; } = new();
-  private string ImportPayload { get; set; } = string.Empty;
-  private string ImportFormat { get; set; } = "Auto";
-  private bool ReplaceExistingImportedOffers { get; set; } = true;
 
   private string ConnectorDeveloperKey { get; set; } = string.Empty;
   private string ConnectorPublisherId { get; set; } = string.Empty;
@@ -330,21 +244,15 @@
   private bool ConnectorMessageIsError { get; set; }
 
   private string SearchTerm { get; set; } = string.Empty;
-  private string SelectedRelationshipStatus { get; set; } = "All";
-  private static readonly string[] RelationshipStatusOptions = ["All", "Joined", "Pending", "Not Joined", "Unknown"];
-  private static readonly string[] ImportFormats = ["Auto", "CSV", "TSV", "JSON"];
 
   private List<CjPartnerView> FilteredPartners =>
       Partners
-          .Where(partner =>
-              string.IsNullOrWhiteSpace(SelectedRelationshipStatus) ||
-              SelectedRelationshipStatus == "All" ||
-              string.Equals(NormalizeRelationshipStatus(partner.RelationshipStatus), SelectedRelationshipStatus,
-StringComparison.OrdinalIgnoreCase))
+          .Where(IsMyAdvertiser)
           .Where(partner =>
               string.IsNullOrWhiteSpace(SearchTerm) ||
               partner.AdvertiserName.Contains(SearchTerm.Trim(), StringComparison.OrdinalIgnoreCase) ||
               partner.AdvertiserId.Contains(SearchTerm.Trim(), StringComparison.OrdinalIgnoreCase))
+          .OrderBy(partner => partner.AdvertiserName)
           .ToList();
 
   protected override async Task OnInitializedAsync()
@@ -389,72 +297,62 @@ StringComparison.OrdinalIgnoreCase))
   {
     try
     {
-      Partners = (await CjAdsService.ListPartnersAsync(SelectedRelationshipStatus, SearchTerm)).ToList();
+      Partners = (await CjAdsService.ListPartnersAsync("Joined", SearchTerm)).ToList();
+      ExpandedAdvertiserIds.RemoveWhere(advertiserId => Partners.All(partner => !string.Equals(partner.AdvertiserId,
+advertiserId, StringComparison.OrdinalIgnoreCase)));
+      var removedKeys = AdvertiserOffersById.Keys.Where(advertiserId => Partners.All(partner =>
+!string.Equals(partner.AdvertiserId, advertiserId, StringComparison.OrdinalIgnoreCase))).ToList();
+      foreach (var removedKey in removedKeys)
+      {
+        AdvertiserOffersById.Remove(removedKey);
+      }
     }
     catch (Exception ex)
     {
-      Logger.LogError(ex, "Unable to load CJ partners.");
-      ErrorMessage = $"Unable to load CJ partners. {ex.Message}";
+      Logger.LogError(ex, "Unable to load CJ advertisers.");
+      ErrorMessage = $"Unable to load CJ advertisers. {ex.Message}";
     }
   }
 
-  private async Task ShowAdvertiserOffers(CjPartnerView partner)
+  private async Task ToggleAdvertiserAsync(CjPartnerView partner)
   {
-    SelectedAdvertiserId = partner.AdvertiserId;
-    SelectedAdvertiserName = partner.AdvertiserName;
-
-    try
+    if (ExpandedAdvertiserIds.Contains(partner.AdvertiserId))
     {
-      SelectedAdvertiserOffers = (await CjAdsService.GetOffersForAdvertiserAsync(partner.AdvertiserId,
-partner.AdvertiserName)).ToList();
-      StatusMessage = $"Loaded ad details for {partner.AdvertiserName}.";
-      ErrorMessage = string.Empty;
-    }
-    catch (Exception ex)
-    {
-      Logger.LogError(ex, "Unable to load CJ ad details for advertiser {AdvertiserId}.", partner.AdvertiserId);
-      ErrorMessage = $"Unable to load ad details for {partner.AdvertiserName}. {ex.Message}";
-      SelectedAdvertiserOffers = new List<CjAffiliateOfferView>();
-    }
-  }
-
-  private async Task ImportOffersAsync()
-  {
-    if (string.IsNullOrWhiteSpace(SelectedAdvertiserId) || string.IsNullOrWhiteSpace(SelectedAdvertiserName))
-    {
-      StatusMessage = "Select an advertiser before importing offer rows.";
+      ExpandedAdvertiserIds.Remove(partner.AdvertiserId);
       return;
     }
 
-    ErrorMessage = string.Empty;
-    StatusMessage = string.Empty;
-    IsBusy = true;
+    ExpandedAdvertiserIds.Add(partner.AdvertiserId);
 
+    if (AdvertiserOffersById.ContainsKey(partner.AdvertiserId))
+    {
+      return;
+    }
+
+    await LoadAdvertiserOffersAsync(partner);
+  }
+
+  private async Task LoadAdvertiserOffersAsync(CjPartnerView partner)
+  {
     try
     {
-      var result = await CjAdsService.ImportOffersAsync(new CjOfferImportRequest
-      {
-        AdvertiserId = SelectedAdvertiserId,
-        AdvertiserName = SelectedAdvertiserName,
-        Payload = ImportPayload,
-        Format = ImportFormat,
-        ReplaceExistingOffers = ReplaceExistingImportedOffers
-      });
-
-      SelectedAdvertiserOffers = result.Offers.ToList();
-      Partners = (await CjAdsService.ListPartnersAsync(SelectedRelationshipStatus, SearchTerm)).ToList();
-      StatusMessage = $"Imported {result.Imported} CJ offer rows, updated {result.Updated}, removed {result.Deleted}.";
+      IsLoadingAdvertiserOffers = true;
+      LoadingAdvertiserId = partner.AdvertiserId;
+      var offers = await CjAdsService.GetOffersForAdvertiserAsync(partner.AdvertiserId, partner.AdvertiserName);
+      AdvertiserOffersById[partner.AdvertiserId] = offers.ToList();
+      StatusMessage = $"Loaded active ads for {partner.AdvertiserName}.";
       ErrorMessage = string.Empty;
-      ImportPayload = string.Empty;
     }
     catch (Exception ex)
     {
-      Logger.LogError(ex, "Unable to import CJ offer rows for advertiser {AdvertiserId}.", SelectedAdvertiserId);
-      ErrorMessage = $"Unable to import CJ offer rows. {ex.Message}";
+      Logger.LogError(ex, "Unable to load CJ ads for advertiser {AdvertiserId}.", partner.AdvertiserId);
+      ErrorMessage = $"Unable to load ads for {partner.AdvertiserName}. {ex.Message}";
+      AdvertiserOffersById[partner.AdvertiserId] = new List<CjAffiliateOfferView>();
     }
     finally
     {
-      IsBusy = false;
+      IsLoadingAdvertiserOffers = false;
+      LoadingAdvertiserId = string.Empty;
     }
   }
 
@@ -481,9 +379,11 @@ partner.AdvertiserName)).ToList();
       IsConnected = sync.IsSuccess;
       ConnectorMessageIsError = !sync.IsSuccess;
       ConnectorMessage = sync.Message;
-      LastSyncSummary = $"Received {sync.TotalReceived} partners. Created {sync.Created}, updated {sync.Updated}.";
-      Partners = sync.Partners.ToList();
-      StatusMessage = "CJ partners pulled successfully.";
+      LastSyncSummary = $"My Advertisers: {sync.TotalReceived}. Created {sync.Created}, updated {sync.Updated}.";
+      Partners = sync.Partners.Where(IsMyAdvertiser).ToList();
+      ExpandedAdvertiserIds.Clear();
+      AdvertiserOffersById.Clear();
+      StatusMessage = "CJ My Advertisers pulled successfully.";
       ErrorMessage = string.Empty;
       await CjAdsService.SaveConnectorSettingsAsync(BuildSettingsView());
       ShowConnectorModal = false;
@@ -544,17 +444,15 @@ partner.AdvertiserName)).ToList();
     });
   }
 
-  private void ClearFilters()
+  private void ClearSearch()
   {
     SearchTerm = string.Empty;
-    SelectedRelationshipStatus = "All";
   }
 
-  private void ClearImportForm()
+  private static bool IsMyAdvertiser(CjPartnerView partner)
   {
-    ImportPayload = string.Empty;
-    ImportFormat = "Auto";
-    ReplaceExistingImportedOffers = true;
+    var normalized = NormalizeRelationshipStatus(partner.RelationshipStatus);
+    return normalized is "Joined" or "Active" or "Approved";
   }
 
   private static string FormatPromotionEnd(DateTimeOffset? promotionEndsAt)
@@ -572,6 +470,16 @@ partner.AdvertiserName)).ToList();
     if (status.Equals("joined", StringComparison.OrdinalIgnoreCase))
     {
       return "Joined";
+    }
+
+    if (status.Equals("active", StringComparison.OrdinalIgnoreCase))
+    {
+      return "Active";
+    }
+
+    if (status.Equals("approved", StringComparison.OrdinalIgnoreCase))
+    {
+      return "Approved";
     }
 
     if (status.Equals("pending", StringComparison.OrdinalIgnoreCase))
@@ -592,6 +500,8 @@ partner.AdvertiserName)).ToList();
     return NormalizeRelationshipStatus(status) switch
     {
       "Joined" => "text-bg-success",
+      "Active" => "text-bg-success",
+      "Approved" => "text-bg-success",
       "Pending" => "text-bg-warning",
       "Not Joined" => "text-bg-secondary",
       _ => "text-bg-light"

@@ -283,6 +283,54 @@ public sealed class CjAdsServiceTests
         Assert.DoesNotContain(await db.AffiliateOffers.ToListAsync(), row => row.AdvertiserId == "stale-import");
     }
 
+    [Fact]
+    public async Task GetOffersForAdvertiserAsync_ShouldReturnOnlyActiveAds()
+    {
+        await using var db = await CreateDbAsync();
+        db.AffiliateOffers.AddRange(
+            new GwsBusinessSuite.Domain.Entities.AffiliateOffer
+            {
+                Network = "CJ",
+                AdvertiserId = "joined-1",
+                AdvertiserName = "Joined Advertiser",
+                LinkName = "Active Deal",
+                Category = "Software",
+                TrackingUrl = "https://example.com/active",
+                PromotionEndsAt = DateTimeOffset.UtcNow.AddDays(3),
+                CreatedBy = "test"
+            },
+            new GwsBusinessSuite.Domain.Entities.AffiliateOffer
+            {
+                Network = "CJ",
+                AdvertiserId = "joined-1",
+                AdvertiserName = "Joined Advertiser",
+                LinkName = "Expired Deal",
+                Category = "Software",
+                TrackingUrl = "https://example.com/expired",
+                PromotionEndsAt = DateTimeOffset.UtcNow.AddDays(-1),
+                CreatedBy = "test"
+            },
+            new GwsBusinessSuite.Domain.Entities.AffiliateOffer
+            {
+                Network = "CJ",
+                AdvertiserId = "joined-1",
+                AdvertiserName = "Joined Advertiser",
+                LinkName = "No Url",
+                Category = "Software",
+                TrackingUrl = string.Empty,
+                PromotionEndsAt = DateTimeOffset.UtcNow.AddDays(3),
+                CreatedBy = "test"
+            });
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, new FakeSecretProtector());
+
+        var offers = await service.GetOffersForAdvertiserAsync("joined-1", "Joined Advertiser");
+
+        Assert.Single(offers);
+        Assert.Equal("Active Deal", offers[0].LinkName);
+    }
+
     private static CjAdsService CreateService(ApplicationDbContext db, ISecretProtector secretProtector)
     {
         return new CjAdsService(

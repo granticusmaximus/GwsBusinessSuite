@@ -157,6 +157,45 @@ public sealed class CjAffiliateServiceTests
     }
 
     [Fact]
+    public async Task FetchPartnersAsync_ShouldMergeActiveAdvertiserLookup_WhenCommissionsOnlyReturnSubset()
+    {
+        var observedUris = new List<Uri>();
+        using var handler = new RecordingHandler(
+            observedUris,
+            responseFactory: request =>
+            {
+                var uri = request.RequestUri;
+                if (uri is not null && uri.Host.Equals("commissions.api.cj.com", StringComparison.OrdinalIgnoreCase))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"data\":{\"publisherCommissions\":{\"records\":[{\"advertiserId\":\"1001\",\"advertiserName\":\"Acme Corp\",\"actionStatus\":\"active\"}]}}}", Encoding.UTF8, "application/json")
+                    };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"results\":[{\"advertiser-id\":\"2001\",\"advertiser-name\":\"Lookup Partner\",\"relationship-status\":\"joined\",\"country\":\"US\"},{\"advertiser-id\":\"2002\",\"advertiser-name\":\"Second Lookup Partner\",\"relationship-status\":\"active\",\"country\":\"US\"}]}", Encoding.UTF8, "application/json")
+                };
+            });
+
+        using var client = new HttpClient(handler);
+        var service = new CjAffiliateService(client);
+
+        var result = await service.FetchPartnersAsync(new CjConnectionRequest(
+            DeveloperKey: "dev-key",
+            PublisherId: "123456",
+            EndpointUrl: "https://commissions.api.cj.com/query",
+            MaxResults: 100));
+
+        Assert.Equal(3, result.Partners.Count);
+        Assert.Contains(result.Partners, partner => partner.AdvertiserId == "1001");
+        Assert.Contains(result.Partners, partner => partner.AdvertiserId == "2001");
+        Assert.Contains(result.Partners, partner => partner.AdvertiserId == "2002");
+        Assert.Contains(observedUris, uri => uri.Host.Equals("advertiser-lookup.api.cj.com", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task FetchPartnersAsync_ShouldUseOptionalWebsiteFilter_WhenProvided()
     {
         var observedUris = new List<Uri>();
