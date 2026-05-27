@@ -1,4 +1,5 @@
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.AppRegistry;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.Crm;
 using GwsBusinessSuite.Application.CjAds;
@@ -41,6 +42,7 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromMinutes(timeoutMinutes);
         });
         services.AddScoped<IDockerDeploymentService, DockerDeploymentService>();
+        services.AddScoped<IAppRegistryService, AppRegistryService>();
         services.AddScoped<ICjAdsService, CjAdsService>();
         services.AddScoped<IAffiliateOfferScoringService, AffiliateOfferScoringService>();
         services.AddScoped<ICmsBuilderService, CmsBuilderService>();

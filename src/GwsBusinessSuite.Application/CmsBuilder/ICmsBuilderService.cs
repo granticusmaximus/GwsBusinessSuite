@@ -13,4 +13,11 @@ public interface ICmsBuilderService
     Task<CmsPage?> GetPageAsync(Guid pageId, CancellationToken cancellationToken = default);
     Task<CmsPage> SavePageAsync(CmsPageEditorModel editor, CancellationToken cancellationToken = default);
     Task DeletePageAsync(Guid pageId, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<CmsWorkflowBlueprintSummary>> ListWorkflowBlueprintsAsync(CancellationToken cancellationToken = default);
+    Task<CmsPage> ApplyWorkflowBlueprintAsync(
+        Guid pageId,
+        string blueprintKey,
+        bool replaceExistingBlocks,
+        CancellationToken cancellationToken = default);
 }

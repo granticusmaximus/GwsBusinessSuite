@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -7,6 +8,50 @@ namespace GwsBusinessSuite.Application.CmsBuilder;
 
 public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderService
 {
+    private static readonly IReadOnlyList<CmsWorkflowBlueprintSummary> WorkflowBlueprints =
+    [
+        new()
+        {
+            Key = "landing-conversion",
+            Name = "Landing Page Conversion",
+            Category = "Marketing",
+            Description = "Hero, proof, feature stack, and CTA funnel workflow."
+        },
+        new()
+        {
+            Key = "blog-editorial",
+            Name = "Blog Editorial",
+            Category = "Publishing",
+            Description = "Editorial blog workflow with header, toc, content, and author box."
+        },
+        new()
+        {
+            Key = "product-launch",
+            Name = "Product Launch",
+            Category = "Commerce",
+            Description = "Pre-launch and launch-day conversion workflow blocks."
+        },
+        new()
+        {
+            Key = "service-business",
+            Name = "Service Business",
+            Category = "Local Business",
+            Description = "Lead generation workflow with service cards, trust, and booking CTA."
+        }
+    ];
+
+    private static readonly Dictionary<string, string> WorkflowBlueprintBlocks = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["landing-conversion"] =
+            "[{\"type\":\"hero\",\"title\":\"Build Your Next Growth Funnel\",\"subtitle\":\"A focused landing workflow for conversion.\",\"primaryCta\":\"Start Free Trial\"},{\"type\":\"proof-grid\",\"title\":\"Trusted by teams\",\"items\":[\"Case Study One\",\"Case Study Two\",\"Case Study Three\"]},{\"type\":\"feature-stack\",\"title\":\"What you get\",\"items\":[\"Automation\",\"Analytics\",\"Integrations\"]},{\"type\":\"cta\",\"title\":\"Ready to launch?\",\"button\":\"Book a Demo\"}]",
+        ["blog-editorial"] =
+            "[{\"type\":\"article-header\",\"title\":\"Editorial Title\",\"subtitle\":\"Strong angle and reader promise.\"},{\"type\":\"toc\",\"title\":\"In this article\"},{\"type\":\"rich-content\",\"body\":\"## Section\\nLong-form editorial content goes here.\"},{\"type\":\"author-box\",\"name\":\"GWS Editorial\",\"role\":\"Editor\"},{\"type\":\"newsletter-cta\",\"title\":\"Get weekly updates\",\"button\":\"Subscribe\"}]",
+        ["product-launch"] =
+            "[{\"type\":\"hero\",\"title\":\"Product Launch Week\",\"subtitle\":\"Ship your message with precision.\",\"primaryCta\":\"Join Waitlist\"},{\"type\":\"countdown\",\"title\":\"Launch countdown\",\"days\":7},{\"type\":\"pricing-table\",\"plans\":[\"Starter\",\"Pro\",\"Scale\"]},{\"type\":\"faq\",\"title\":\"Questions answered\"}]",
+        ["service-business"] =
+            "[{\"type\":\"hero\",\"title\":\"Professional Services\",\"subtitle\":\"Built for outcomes and trust.\",\"primaryCta\":\"Schedule Consultation\"},{\"type\":\"service-list\",\"items\":[\"Discovery\",\"Implementation\",\"Support\"]},{\"type\":\"testimonials\",\"title\":\"Client results\"},{\"type\":\"contact-form\",\"title\":\"Get your plan\"}]"
+    };
+
     public async Task<IReadOnlyList<CmsSite>> ListSitesAsync(CancellationToken cancellationToken = default)
     {
         var sites = await dbContext.CmsSites
@@ -172,6 +217,44 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public Task<IReadOnlyList<CmsWorkflowBlueprintSummary>> ListWorkflowBlueprintsAsync(CancellationToken cancellationToken = default)
+    {
+        _ = cancellationToken;
+        return Task.FromResult<IReadOnlyList<CmsWorkflowBlueprintSummary>>(WorkflowBlueprints);
+    }
+
+    public async Task<CmsPage> ApplyWorkflowBlueprintAsync(
+        Guid pageId,
+        string blueprintKey,
+        bool replaceExistingBlocks,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(blueprintKey))
+        {
+            throw new ArgumentException("Blueprint key is required.", nameof(blueprintKey));
+        }
+
+        var page = await dbContext.CmsPages.FirstOrDefaultAsync(item => item.Id == pageId, cancellationToken);
+        if (page is null)
+        {
+            throw new InvalidOperationException("The selected CMS page no longer exists.");
+        }
+
+        if (!WorkflowBlueprintBlocks.TryGetValue(blueprintKey.Trim(), out var blueprintBlocksJson))
+        {
+            throw new InvalidOperationException($"Workflow blueprint '{blueprintKey}' was not found.");
+        }
+
+        page.BlocksJson = replaceExistingBlocks
+            ? NormalizeBlocksJson(blueprintBlocksJson)
+            : MergeBlocksJson(page.BlocksJson, blueprintBlocksJson);
+        page.UpdatedAt = DateTimeOffset.UtcNow;
+        page.UpdatedBy = "cms-workflow-blueprint";
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return page;
+    }
+
     internal static string CreateSlug(string value)
     {
         var slug = value.Trim().ToLowerInvariant();
@@ -249,5 +332,30 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         var trimmed = string.IsNullOrWhiteSpace(blocksJson) ? "[]" : blocksJson.Trim();
         using var document = JsonDocument.Parse(trimmed);
         return JsonSerializer.Serialize(document.RootElement);
+    }
+
+    private static string MergeBlocksJson(string existingBlocksJson, string blueprintBlocksJson)
+    {
+        var existingArray = ParseToArray(existingBlocksJson);
+        var blueprintArray = ParseToArray(blueprintBlocksJson);
+        var mergedArray = new JsonArray();
+
+        foreach (var block in existingArray)
+        {
+            mergedArray.Add(block?.DeepClone());
+        }
+
+        foreach (var block in blueprintArray)
+        {
+            mergedArray.Add(block?.DeepClone());
+        }
+
+        return mergedArray.ToJsonString();
+    }
+
+    private static JsonArray ParseToArray(string blocksJson)
+    {
+        var node = JsonNode.Parse(string.IsNullOrWhiteSpace(blocksJson) ? "[]" : blocksJson.Trim());
+        return node as JsonArray ?? throw new InvalidOperationException("Blocks JSON must be a JSON array.");
     }
 }
