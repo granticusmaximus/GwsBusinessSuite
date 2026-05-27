@@ -1,6 +1,7 @@
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.AppRegistry;
 using GwsBusinessSuite.Application.CmsBuilder;
+using GwsBusinessSuite.Application.CmsKnowledge;
 using GwsBusinessSuite.Application.Crm;
 using GwsBusinessSuite.Application.CjAds;
 using GwsBusinessSuite.Application.ContentStudio;
@@ -46,6 +47,7 @@ public static class DependencyInjection
         services.AddScoped<ICjAdsService, CjAdsService>();
         services.AddScoped<IAffiliateOfferScoringService, AffiliateOfferScoringService>();
         services.AddScoped<ICmsBuilderService, CmsBuilderService>();
+        services.AddScoped<ICmsKnowledgeService, CmsKnowledgeService>();
         services.AddScoped<IContentStudioService, ContentStudioService>();
         services.AddScoped<ICrmService, CrmService>();
         services.AddScoped<IWikiService, WikiService>();

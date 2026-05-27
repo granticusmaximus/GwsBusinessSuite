@@ -9,6 +9,19 @@ namespace GwsBusinessSuite.Tests;
 public sealed class CmsBuilderServiceTests
 {
     [Fact]
+    public async Task ListWorkflowBlueprintsAsync_ShouldReturnDefaultBlueprintLibrary()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var blueprints = await service.ListWorkflowBlueprintsAsync();
+
+        blueprints.Should().NotBeEmpty();
+        blueprints.Should().Contain(x => x.Key == "landing-conversion");
+        blueprints.Should().Contain(x => x.Key == "blog-editorial");
+    }
+
+    [Fact]
     public async Task SaveSiteAsync_ShouldCreateUpdateAndDeleteSitesAndPages()
     {
         await using var db = await CreateDbAsync();
@@ -98,6 +111,57 @@ public sealed class CmsBuilderServiceTests
 
         first.Slug.Should().Be("landing-page");
         second.Slug.Should().Be("landing-page-2");
+    }
+
+    [Fact]
+    public async Task ApplyWorkflowBlueprintAsync_ShouldAppendOrReplaceBlocks()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel
+        {
+            Name = "Docs"
+        });
+
+        var page = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id,
+            Title = "Home",
+            BlocksJson = "[{\"type\":\"existing\"}]"
+        });
+
+        var appended = await service.ApplyWorkflowBlueprintAsync(page.Id, "landing-conversion", replaceExistingBlocks: false);
+        appended.BlocksJson.Should().Contain("existing");
+        appended.BlocksJson.Should().Contain("proof-grid");
+
+        var replaced = await service.ApplyWorkflowBlueprintAsync(page.Id, "service-business", replaceExistingBlocks: true);
+        replaced.BlocksJson.Should().NotContain("existing");
+        replaced.BlocksJson.Should().Contain("service-list");
+    }
+
+    [Fact]
+    public async Task ApplyWorkflowBlueprintAsync_ShouldThrowForUnknownBlueprint()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel
+        {
+            Name = "Docs"
+        });
+
+        var page = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id,
+            Title = "Home",
+            BlocksJson = "[]"
+        });
+
+        var action = async () => await service.ApplyWorkflowBlueprintAsync(page.Id, "missing-blueprint", replaceExistingBlocks: false);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*not found*");
     }
 
     private static async Task<ApplicationDbContext> CreateDbAsync()

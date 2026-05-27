@@ -200,6 +200,55 @@
                         </div>
                     </EditForm>
 
+                                    <div class="card border-0 bg-body-tertiary mt-4">
+                                        <div class="card-header bg-transparent border-0 pt-3 px-3 pb-0">
+                                            <span class="fw-semibold">Workflow Blueprints</span>
+                                        </div>
+                                        <div class="card-body">
+                                            @if (WorkflowBlueprints.Count == 0)
+                                            {
+                                                <p class="text-secondary mb-0">No workflow blueprints are available yet.</p>
+                                            }
+                                            else
+                                            {
+                                                <div class="row g-2">
+                                                    <div class="col-md-8">
+                                                        <select class="form-select" @bind="SelectedWorkflowBlueprintKey">
+                                                            @foreach (var blueprint in WorkflowBlueprints)
+                                                            {
+                                                                <option value="@blueprint.Key">@blueprint.Name (@blueprint.Category)</option>
+                                                            }
+                                                        </select>
+                                                        @if (!string.IsNullOrWhiteSpace(SelectedWorkflowBlueprintKey))
+                                                        {
+                                                            var selectedBlueprint = WorkflowBlueprints.FirstOrDefault(x => x.Key ==
+                                                SelectedWorkflowBlueprintKey);
+                                                            if (selectedBlueprint is not null)
+                                                            {
+                                                                <div class="small text-secondary mt-2">@selectedBlueprint.Description</div>
+                                                            }
+                                                        }
+                                                    </div>
+                                                    <div class="col-md-4 d-grid gap-2">
+                                                        <button class="btn btn-outline-primary"
+                                                                @onclick="() => ApplySelectedWorkflowBlueprintAsync(false)"
+                                                                disabled="@(IsBusy || !SelectedPageId.HasValue)">
+                                                            Append Blueprint
+                                                        </button>
+                                                        <button class="btn btn-outline-warning"
+                                                                @onclick="() => ApplySelectedWorkflowBlueprintAsync(true)"
+                                                                disabled="@(IsBusy || !SelectedPageId.HasValue)">
+                                                            Replace Blocks
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <div class="small text-secondary mt-2">
+                                                    Inspired by common CMS workflows and implemented as clean-room templates.
+                                                </div>
+                                            }
+                                        </div>
+                                    </div>
+
                     <div class="card border-0 bg-body-tertiary mt-4">
                         <div class="card-header bg-transparent border-0 pt-3 px-3 pb-0">
                             <span class="fw-semibold">Block Preview</span>
@@ -222,6 +271,8 @@
 </div>
 
 @code {
+    private List<CmsWorkflowBlueprintSummary> WorkflowBlueprints { get; set; } = new();
+    private string SelectedWorkflowBlueprintKey { get; set; } = string.Empty;
     private List<CmsSite> Sites { get; set; } = new();
     private List<CmsPage> Pages { get; set; } = new();
     private CmsSiteEditorModel SiteEditor { get; set; } = new();
@@ -236,7 +287,17 @@
 
     protected override async Task OnInitializedAsync()
     {
+        await LoadWorkflowBlueprintsAsync();
         await LoadSitesAsync(selectFirstSite: true);
+    }
+
+    private async Task LoadWorkflowBlueprintsAsync()
+    {
+        WorkflowBlueprints = (await CmsBuilderService.ListWorkflowBlueprintsAsync()).ToList();
+        if (WorkflowBlueprints.Count > 0 && string.IsNullOrWhiteSpace(SelectedWorkflowBlueprintKey))
+        {
+            SelectedWorkflowBlueprintKey = WorkflowBlueprints[0].Key;
+        }
     }
 
     private async Task LoadSitesAsync(bool selectFirstSite)
@@ -503,4 +564,52 @@
 
     await DeletePageAsync(pageId);
   }
+
+    private async Task ApplySelectedWorkflowBlueprintAsync(bool replaceExistingBlocks)
+    {
+        if (SelectedPageId is not { } pageId)
+        {
+            StatusMessage = "Save the page first before applying workflow blueprints.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(SelectedWorkflowBlueprintKey))
+        {
+            StatusMessage = "Select a workflow blueprint before applying.";
+            return;
+        }
+
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+
+        try
+        {
+            var updated = await CmsBuilderService.ApplyWorkflowBlueprintAsync(pageId, SelectedWorkflowBlueprintKey,
+replaceExistingBlocks);
+            PageEditor = new CmsPageEditorModel
+            {
+                PageId = updated.Id,
+                SiteId = updated.SiteId,
+                Title = updated.Title,
+                Slug = updated.Slug,
+                BlocksJson = updated.BlocksJson
+            };
+
+            await LoadPagesForSelectedSiteAsync(selectFirstPage: false);
+            StatusMessage = replaceExistingBlocks
+                    ? "Workflow blueprint applied by replacing all existing blocks."
+                    : "Workflow blueprint appended to existing blocks.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to apply workflow blueprint '{BlueprintKey}' to page {PageId}.",
+SelectedWorkflowBlueprintKey, pageId);
+            ErrorMessage = $"Unable to apply workflow blueprint. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
 }
