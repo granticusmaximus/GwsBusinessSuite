@@ -1,0 +1,41 @@
+name: Deploy to DigitalOcean
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: SSH into droplet and deploy
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DO_HOST }}
+          username: root
+          key: ${{ secrets.DO_SSH_KEY }}
+          script: |
+            set -e
+
+            APP_DIR=/opt/gwssuite
+
+            # First-time clone if directory doesn't exist
+            if [ ! -d "$APP_DIR/.git" ]; then
+              git clone https://github.com/granticusmaximus/GwsBusinessSuite.git "$APP_DIR"
+            fi
+
+            cd "$APP_DIR"
+
+            git fetch origin main
+            git checkout main
+            git reset --hard origin/main
+
+            # Rebuild and restart with zero-downtime swap
+            docker compose pull --quiet || true
+            docker compose up -d --build --remove-orphans
+
+            # Clean up dangling images to save disk space
+            docker image prune -f

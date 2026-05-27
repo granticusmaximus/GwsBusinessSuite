@@ -1,0 +1,91 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: #0f0f0f;
+  color: #e8e8e8;
+  min-height: 100vh;
+}
+
+.site-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 2rem;
+  border-bottom: 1px solid #222;
+}
+
+.site-logo { font-weight: 700; font-size: 1.1rem; color: #fff; text-decoration: none; }
+
+.nav-links { display: flex; gap: 1.5rem; }
+.nav-links a { color: #aaa; text-decoration: none; font-size: 0.9rem; transition: color 0.15s; }
+.nav-links a:hover { color: #fff; }
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 60px);
+  text-align: center;
+  padding: 2rem;
+}
+
+.hero h1 {
+  font-size: 3.5rem;
+  font-weight: 800;
+  margin-bottom: 0.5rem;
+  background: linear-gradient(135deg, #fff 0%, #888 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.tagline { color: #888; font-size: 1.1rem; margin-bottom: 2rem; }
+
+.hero-actions { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; }
+
+.btn {
+  padding: 0.65rem 1.4rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  border: none;
+  transition: opacity 0.15s;
+}
+.btn:hover { opacity: 0.85; }
+.btn-primary { background: #2563eb; color: #fff; }
+.btn-outline { background: transparent; color: #fff; border: 1px solid #444; }
+
+.content-section { max-width: 680px; margin: 4rem auto; padding: 0 1.5rem; }
+.content-section h1 { font-size: 2.5rem; margin-bottom: 1rem; }
+.content-section p { color: #aaa; line-height: 1.7; margin-bottom: 1rem; }
+.nav-back { color: #2563eb; text-decoration: none; font-size: 0.9rem; }
+
+.contact-form { display: flex; flex-direction: column; gap: 1.2rem; margin: 1.5rem 0; }
+.contact-form label { display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.85rem; color: #ccc; }
+.contact-form input,
+.contact-form textarea {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  color: #fff;
+  font-size: 0.95rem;
+  font-family: inherit;
+  resize: vertical;
+}
+.contact-form input:focus,
+.contact-form textarea:focus { outline: none; border-color: #2563eb; }
+
+.page-not-found {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 60px);
+  text-align: center;
+  gap: 1rem;
+}
+.page-not-found h1 { font-size: 5rem; font-weight: 800; color: #444; }

@@ -1,0 +1,17 @@
+services:
+  gwssuite:
+    build: .
+    ports:
+      - "80:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      # Set credentials via a .env file or Docker secrets — never commit them here.
+      # AdminAuth__Username: admin
+      # AdminAuth__Password: changeme
+    restart: always
+    volumes:
+      # Persist SQLite database and any local CMS file state
+      - gwssuite-data:/app/data
+
+volumes:
+  gwssuite-data:
