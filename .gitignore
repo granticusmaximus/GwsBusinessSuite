@@ -19,6 +19,8 @@ coverage/
 
 # Local databases and generated state
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 

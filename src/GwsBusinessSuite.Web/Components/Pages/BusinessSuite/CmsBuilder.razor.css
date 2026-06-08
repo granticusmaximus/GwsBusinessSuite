@@ -184,6 +184,23 @@
     box-shadow: 0 16px 36px rgba(37, 99, 235, 0.26);
 }
 
+.cms-structured-toolbar {
+    display: grid;
+    grid-template-columns: minmax(220px, 320px) auto auto;
+    gap: 1rem;
+    align-items: end;
+}
+
+.cms-structured-toolbar-group {
+    min-width: 0;
+}
+
+.cms-blocks-json-editor {
+    min-height: 520px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.82rem;
+}
+
 @media (max-width: 991.98px) {
     .cms-builder-hero {
         flex-direction: column;
@@ -195,5 +212,10 @@
 
     .cms-builder-search {
         min-width: 100%;
+    }
+
+    .cms-structured-toolbar {
+        grid-template-columns: 1fr;
+        align-items: stretch;
     }
 }

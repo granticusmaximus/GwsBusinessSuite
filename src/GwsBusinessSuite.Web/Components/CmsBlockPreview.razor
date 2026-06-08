@@ -1,0 +1,234 @@
+@using System.Text.Json
+@using System.Text.Json.Nodes
+@using Markdig
+
+@if (!string.IsNullOrWhiteSpace(ParseError))
+{
+    <div class="alert alert-danger mb-0">@ParseError</div>
+}
+else if (Blocks.Count == 0)
+{
+    <div class="cms-block-preview-empty">
+        <i class="bi bi-layout-text-window-reverse"></i>
+        <div>
+            <strong>No blocks to preview.</strong>
+            <div class="text-secondary">Add CMS blocks or apply a blueprint to render the page preview.</div>
+        </div>
+    </div>
+}
+else
+{
+    <div class="cms-block-preview-stack">
+        @foreach (var block in Blocks)
+        {
+            var blockType = GetString(block, "type");
+
+            <section class="cms-block-preview-card">
+                @switch (blockType)
+                {
+                    case "hero":
+                        <div class="cms-block-hero">
+                            <span class="cms-block-chip">Hero</span>
+                            <h3>@GetString(block, "title", "New hero section")</h3>
+                            <p>@GetString(block, "subtitle", "Add a concise promise or intro for this page.")</p>
+                            <button type="button" class="btn btn-primary btn-sm">@GetString(block, "primaryCta", "Primary CTA")</button>
+                        </div>
+                        break;
+                    case "proof-grid":
+                        <span class="cms-block-chip">Proof Grid</span>
+                        <h3>@GetString(block, "title", "Proof points")</h3>
+                        <div class="cms-block-grid">
+                            @foreach (var item in GetStringArray(block, "items", "Add proof item"))
+                            {
+                                <div class="cms-block-grid-item">@item</div>
+                            }
+                        </div>
+                        break;
+                    case "feature-stack":
+                        <span class="cms-block-chip">Feature Stack</span>
+                        <h3>@GetString(block, "title", "What you get")</h3>
+                        <ul class="cms-block-list">
+                            @foreach (var item in GetStringArray(block, "items", "Add feature"))
+                            {
+                                <li>@item</li>
+                            }
+                        </ul>
+                        break;
+                    case "cta":
+                        <div class="cms-block-callout">
+                            <span class="cms-block-chip">CTA</span>
+                            <h3>@GetString(block, "title", "Ready to take action?")</h3>
+                            <button type="button" class="btn btn-dark btn-sm">@GetString(block, "button", "Continue")</button>
+                        </div>
+                        break;
+                    case "article-header":
+                        <span class="cms-block-chip">Article Header</span>
+                        <h3>@GetString(block, "title", "Editorial title")</h3>
+                        <p>@GetString(block, "subtitle", "Article deck or reader promise.")</p>
+                        break;
+                    case "toc":
+                        <span class="cms-block-chip">Table of Contents</span>
+                        <h3>@GetString(block, "title", "In this article")</h3>
+                        <ol class="cms-block-toc">
+                            <li>Introduction</li>
+                            <li>Main section</li>
+                            <li>Implementation notes</li>
+                        </ol>
+                        break;
+                    case "rich-content":
+                        <span class="cms-block-chip">Rich Content</span>
+                        <div class="cms-block-rich-content">
+                            @((MarkupString)Markdown.ToHtml(GetString(block, "body", "## Section\nAdd long-form content here."), MarkdownPipeline))
+                        </div>
+                        break;
+                    case "author-box":
+                        <div class="cms-block-author">
+                            <span class="cms-block-chip">Author</span>
+                            <div class="cms-block-author-name">@GetString(block, "name", "GWS Editorial")</div>
+                            <div class="text-secondary small">@GetString(block, "role", "Editor")</div>
+                        </div>
+                        break;
+                    case "newsletter-cta":
+                        <div class="cms-block-callout">
+                            <span class="cms-block-chip">Newsletter</span>
+                            <h3>@GetString(block, "title", "Get weekly updates")</h3>
+                            <button type="button" class="btn btn-outline-primary btn-sm">@GetString(block, "button", "Subscribe")</button>
+                        </div>
+                        break;
+                    case "countdown":
+                        <div class="cms-block-countdown">
+                            <span class="cms-block-chip">Countdown</span>
+                            <h3>@GetString(block, "title", "Countdown")</h3>
+                            <div class="cms-block-countdown-days">@GetInt(block, "days", 7)</div>
+                            <div class="text-secondary small">days remaining</div>
+                        </div>
+                        break;
+                    case "pricing-table":
+                        <span class="cms-block-chip">Pricing</span>
+                        <div class="cms-block-grid">
+                            @foreach (var item in GetStringArray(block, "plans", "Starter"))
+                            {
+                                <div class="cms-block-grid-item">
+                                    <strong>@item</strong>
+                                    <div class="text-secondary small mt-2">Plan details go here.</div>
+                                </div>
+                            }
+                        </div>
+                        break;
+                    case "faq":
+                        <span class="cms-block-chip">FAQ</span>
+                        <h3>@GetString(block, "title", "Frequently asked questions")</h3>
+                        <div class="accordion">
+                            <div class="cms-block-grid-item">Question and answer content.</div>
+                        </div>
+                        break;
+                    case "service-list":
+                        <span class="cms-block-chip">Services</span>
+                        <div class="cms-block-grid">
+                            @foreach (var item in GetStringArray(block, "items", "Discovery"))
+                            {
+                                <div class="cms-block-grid-item">@item</div>
+                            }
+                        </div>
+                        break;
+                    case "testimonials":
+                        <div class="cms-block-callout">
+                            <span class="cms-block-chip">Testimonials</span>
+                            <h3>@GetString(block, "title", "Client results")</h3>
+                            <p>Use this block to add social proof, quote cards, or wins.</p>
+                        </div>
+                        break;
+                    case "contact-form":
+                        <div class="cms-block-callout">
+                            <span class="cms-block-chip">Contact Form</span>
+                            <h3>@GetString(block, "title", "Get your plan")</h3>
+                            <div class="cms-block-form-grid">
+                                <input class="form-control form-control-sm" placeholder="Name" />
+                                <input class="form-control form-control-sm" placeholder="Email" />
+                                <textarea class="form-control form-control-sm" rows="3" placeholder="Project details"></textarea>
+                            </div>
+                        </div>
+                        break;
+                    default:
+                        <span class="cms-block-chip">Custom Block</span>
+                        <div class="small text-secondary mb-2">Unknown block type: @blockType</div>
+                        <pre class="cms-block-json mb-0">@block.ToJsonString(new JsonSerializerOptions { WriteIndented = true })</pre>
+                        break;
+                }
+            </section>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public string BlocksJson { get; set; } = "[]";
+
+    private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .Build();
+
+    private List<JsonObject> Blocks { get; set; } = new();
+    private string ParseError { get; set; } = string.Empty;
+
+    protected override void OnParametersSet()
+    {
+        ParseError = string.Empty;
+        Blocks = new List<JsonObject>();
+
+        try
+        {
+            var parsed = JsonNode.Parse(string.IsNullOrWhiteSpace(BlocksJson) ? "[]" : BlocksJson.Trim()) as JsonArray;
+            if (parsed is null)
+            {
+                ParseError = "Blocks JSON must be a JSON array.";
+                return;
+            }
+
+            Blocks = parsed
+                .OfType<JsonObject>()
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            ParseError = $"Unable to parse blocks JSON. {ex.Message}";
+        }
+    }
+
+    private static string GetString(JsonObject block, string propertyName, string fallback = "")
+    {
+        if (block[propertyName] is JsonValue value && value.TryGetValue<string>(out var result))
+        {
+            return string.IsNullOrWhiteSpace(result) ? fallback : result;
+        }
+
+        return fallback;
+    }
+
+    private static int GetInt(JsonObject block, string propertyName, int fallback)
+    {
+        if (block[propertyName] is JsonValue value && value.TryGetValue<int>(out var result))
+        {
+            return result;
+        }
+
+        return fallback;
+    }
+
+    private static IReadOnlyList<string> GetStringArray(JsonObject block, string propertyName, params string[] fallback)
+    {
+        if (block[propertyName] is JsonArray array)
+        {
+            var values = array
+                .Select(item => item?.GetValue<string>() ?? string.Empty)
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .ToList();
+
+            if (values.Count > 0)
+            {
+                return values;
+            }
+        }
+
+        return fallback.Length == 0 ? Array.Empty<string>() : fallback;
+    }
+}

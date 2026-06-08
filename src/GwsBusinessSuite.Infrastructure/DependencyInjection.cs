@@ -5,6 +5,8 @@ using GwsBusinessSuite.Application.CmsKnowledge;
 using GwsBusinessSuite.Application.Crm;
 using GwsBusinessSuite.Application.CjAds;
 using GwsBusinessSuite.Application.ContentStudio;
+using GwsBusinessSuite.Application.Deployments;
+using GwsBusinessSuite.Application.SanityPublishing;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
@@ -23,6 +25,7 @@ public static class DependencyInjection
         services.Configure<ContentStudioOptions>(configuration.GetSection(ContentStudioOptions.SectionName));
         services.Configure<CmsBuilderOptions>(configuration.GetSection(CmsBuilderOptions.SectionName));
         services.Configure<SanityOptions>(configuration.GetSection(SanityOptions.SectionName));
+        services.Configure<ExternalServicesOptions>(configuration.GetSection(ExternalServicesOptions.SectionName));
         services.AddDbContextFactory<ApplicationDbContext>(options => options.UseSqlite(connectionString));
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
         services.AddScoped<ISecretProtector, DataProtectionSecretProtector>();
@@ -52,6 +55,8 @@ public static class DependencyInjection
         services.AddScoped<ICmsKnowledgeService, CmsKnowledgeService>();
         services.AddScoped<IContentStudioService, ContentStudioService>();
         services.AddScoped<ICrmService, CrmService>();
+        services.AddScoped<IDeploymentWorkspaceService, DeploymentWorkspaceService>();
+        services.AddScoped<ISanityPublisherWorkspaceService, SanityPublisherWorkspaceService>();
         services.AddScoped<IWikiService, WikiService>();
 
         return services;

@@ -199,6 +199,34 @@ public sealed class ReactPageBuilderServiceTests
     }
 
     [Fact]
+    public async Task ListReactPagesAsync_ShouldFallbackToVendoredPublicSite_WhenConfiguredPathIsMissing()
+    {
+        var fixture = await TestFixture.CreateAsync();
+        try
+        {
+            var service = fixture.CreateService(new CmsBuilderOptions
+            {
+                ReactAppRelativePath = "missing/public-site",
+                AutoGitPushOnSave = false,
+                GitCommitPrefix = "cms-builder",
+                GitPublishRemoteName = "origin",
+                GitPublishBranch = "main",
+                RequireGithubTokenForPush = true,
+                GithubTokenEnvironmentVariable = "GWS_GITHUB_TOKEN"
+            });
+
+            var pages = await service.ListReactPagesAsync();
+
+            Assert.Contains(pages, x => x.PageKey == "Home");
+            Assert.Contains(pages, x => x.PageKey == "About");
+        }
+        finally
+        {
+            fixture.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task ReadFileContentAsync_ShouldReturnFileContent()
     {
         var fixture = await TestFixture.CreateAsync();

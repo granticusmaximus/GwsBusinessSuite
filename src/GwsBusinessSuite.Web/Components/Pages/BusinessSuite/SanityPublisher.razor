@@ -1,23 +1,458 @@
 @page "/admin/sanity-publisher"
+@rendermode InteractiveServer
+@using GwsBusinessSuite.Application.ContentStudio
+@using GwsBusinessSuite.Application.SanityPublishing
+@using Markdig
+@inject ISanityPublisherWorkspaceService WorkspaceService
+@inject IContentStudioService ContentStudioService
+@inject NavigationManager Navigation
+@inject ILogger<SanityPublisher> Logger
 
 <PageTitle>Sanity Publisher</PageTitle>
 
-<h1>Sanity Publisher</h1>
-
-<p class="lead">
-    Publish approved articles into Sanity.io with title, slug, configured author,
-    main image, categories, markdown/rich text body, CJ ads, and SEO fields.
-</p>
-
-<div class="workspace-card">
-    <h2>Publishing Workflow</h2>
-    <ol>
-        <li>Select approved article draft.</li>
-        <li>Select CJ ads to sprinkle into the article.</li>
-        <li>Generate article hero image prompt.</li>
-        <li>Send article fields to Sanity.</li>
-        <li>Publish article.</li>
-        <li>Email live article link.</li>
-        <li>Generate social post drafts.</li>
-    </ol>
+<div class="page-header d-flex flex-wrap justify-content-between align-items-start gap-3">
+    <div>
+        <h1><i class="bi bi-send-check-fill me-2 text-primary"></i>Sanity Publisher</h1>
+        <p class="mb-0">Move approved drafts from local editorial workflow into Sanity with queue visibility, configuration checks, and publish actions in one place.</p>
+    </div>
+    <button class="btn btn-outline-secondary" @onclick="ReloadAsync" disabled="@IsBusy">
+        <i class="bi bi-arrow-repeat me-1"></i>Refresh
+    </button>
 </div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@ErrorMessage</div>
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
+        <i class="bi bi-info-circle-fill flex-shrink-0"></i>
+        <div>@StatusMessage</div>
+    </div>
+}
+
+@if (Snapshot is null)
+{
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            <p class="text-secondary mb-0">Loading Sanity publishing workspace.</p>
+        </div>
+    </div>
+}
+else
+{
+    <div class="row g-3 mb-4">
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start gap-3">
+                        <div>
+                            <div class="fw-semibold">Configuration</div>
+                            <div class="small text-secondary">@Snapshot.Configuration.Message</div>
+                        </div>
+                        <span class="badge @(Snapshot.Configuration.IsReady ? "text-bg-success" : "text-bg-warning")">
+                            @(Snapshot.Configuration.IsReady ? "Ready" : "Needs Config")
+                        </span>
+                    </div>
+                    <div class="small mt-3">
+                        <div><strong>Project:</strong> @(string.IsNullOrWhiteSpace(Snapshot.Configuration.ProjectId) ? "Not set" : Snapshot.Configuration.ProjectId)</div>
+                        <div><strong>Dataset:</strong> @(string.IsNullOrWhiteSpace(Snapshot.Configuration.Dataset) ? "Not set" : Snapshot.Configuration.Dataset)</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="fw-semibold">Document Mapping</div>
+                    <div class="small text-secondary">Current schema targets for published drafts.</div>
+                    <div class="small mt-3">
+                        <div><strong>Type:</strong> @Snapshot.Configuration.DocumentType</div>
+                        <div><strong>ID Prefix:</strong> @Snapshot.Configuration.DocumentIdPrefix</div>
+                        <div><strong>Auto Publish On Approval:</strong> @(Snapshot.Configuration.AutoPublishOnApproval ? "Enabled" : "Disabled")</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="fw-semibold">Queue Health</div>
+                    <div class="small text-secondary">Approved drafts waiting for their first publish or a republish.</div>
+                    <div class="fs-2 fw-bold lh-1 mt-3">@Snapshot.PublicationQueue.Count</div>
+                    <div class="small text-secondary mt-2">@Snapshot.TotalDrafts total persisted draft@(Snapshot.TotalDrafts == 1 ? string.Empty : "s").</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white border-bottom py-3">
+            <div class="fw-semibold">Ready To Publish</div>
+            <div class="small text-secondary">Approved drafts that need a first publish or a republish after editorial changes.</div>
+        </div>
+        <div class="card-body p-0">
+            @if (Snapshot.PublicationQueue.Count == 0)
+            {
+                <div class="p-4">
+                    <p class="text-secondary mb-0">No drafts are currently waiting on Sanity publishing.</p>
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Draft</th>
+                                <th>State</th>
+                                <th>Revision</th>
+                                <th>Approved</th>
+                                <th>Affiliate Slots</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var draft in Snapshot.PublicationQueue)
+                            {
+                                <tr>
+                                    <td>
+                                        <div class="fw-semibold">@draft.Title</div>
+                                        <div class="small text-secondary">@draft.Topic</div>
+                                    </td>
+                                    <td>
+                                        <span class="badge @GetPublishStateBadgeClass(draft.PublishState)">@draft.PublishState</span>
+                                        <div class="small text-secondary mt-1">@draft.PublishStateDetail</div>
+                                    </td>
+                                    <td>@draft.RevisionNumber</td>
+                                    <td>@FormatDate(draft.ApprovedAt)</td>
+                                    <td>@draft.AffiliatePlacementCount</td>
+                                    <td class="text-end">
+                                        <div class="d-inline-flex gap-2">
+                                            <button class="btn btn-sm btn-outline-primary" @onclick="() => InspectDraftAsync(draft.DraftId)" disabled="@IsBusy">Inspect</button>
+                                            <button class="btn btn-sm btn-primary" @onclick="() => PublishDraftAsync(draft.DraftId)" disabled="@IsBusy || !Snapshot.Configuration.IsReady">Publish</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white border-bottom py-3">
+            <div class="fw-semibold">Recently Published</div>
+            <div class="small text-secondary">Recent Sanity publish events recorded in the local workflow history.</div>
+        </div>
+        <div class="card-body p-0">
+            @if (Snapshot.RecentlyPublished.Count == 0)
+            {
+                <div class="p-4">
+                    <p class="text-secondary mb-0">No Sanity publish events have been recorded yet.</p>
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Draft</th>
+                                <th>Published</th>
+                                <th>State</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var draft in Snapshot.RecentlyPublished)
+                            {
+                                <tr>
+                                    <td>
+                                        <div class="fw-semibold">@draft.Title</div>
+                                        <div class="small text-secondary">@draft.Topic</div>
+                                    </td>
+                                    <td>@FormatDate(draft.LastPublishedAt)</td>
+                                    <td><span class="badge @GetPublishStateBadgeClass(draft.PublishState)">@draft.PublishState</span></td>
+                                    <td class="text-end">
+                                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => InspectDraftAsync(draft.DraftId)" disabled="@IsBusy">Inspect</button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
+            <div>
+                <div class="fw-semibold">Draft Inspector</div>
+                <div class="small text-secondary">Verify the draft payload before publishing or jump back into the full editorial workspace.</div>
+            </div>
+            @if (SelectedDraft is not null)
+            {
+                <button class="btn btn-sm btn-outline-secondary" @onclick="OpenContentStudioDraft">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>Open Draft Workspace
+                </button>
+            }
+        </div>
+        <div class="card-body">
+            @if (SelectedDraft is null)
+            {
+                <p class="text-secondary mb-0">Select a draft from the queue to inspect the title, body, hero image, and affiliate placements before publishing.</p>
+            }
+            else
+            {
+                <div class="d-flex flex-wrap gap-2 mb-3">
+                    <span class="badge text-bg-light">@SelectedDraft.Status</span>
+                    <span class="badge @GetPublishStateBadgeClass(SelectedDraftPublishState)">@SelectedDraftPublishState</span>
+                    <span class="badge text-bg-light">Revision @SelectedDraft.RevisionNumber</span>
+                    <span class="badge text-bg-light">@SelectedDraft.Slug</span>
+                </div>
+
+                <div class="row g-4 mb-4">
+                    <div class="col-xl-7">
+                        <h3 class="h4 mb-2">@SelectedDraft.Title</h3>
+                        <p class="text-secondary">@SelectedDraft.MetaDescription</p>
+                        <div class="article-preview surface-panel">
+                            @((MarkupString)RenderedDraftHtml)
+                        </div>
+                    </div>
+                    <div class="col-xl-5">
+                        @if (!string.IsNullOrWhiteSpace(SelectedDraft.HeroImage.DataUri))
+                        {
+                            <img class="img-fluid rounded-4 border mb-3" src="@SelectedDraft.HeroImage.DataUri" alt="@SelectedDraft.HeroImage.AltText" />
+                        }
+
+                        <div class="small mb-2"><strong>Author:</strong> @SelectedDraft.Author</div>
+                        <div class="small mb-2"><strong>Canonical URL:</strong> @SelectedDraft.CanonicalUrl</div>
+                        <div class="small mb-2"><strong>SEO Keywords:</strong> @SelectedDraft.Keywords</div>
+                        <div class="small"><strong>Hero Prompt:</strong> @SelectedDraft.HeroImage.Prompt</div>
+                    </div>
+                </div>
+
+                <div class="row g-4">
+                    <div class="col-xl-7">
+                        <label class="form-label fw-semibold small">Publish Notes</label>
+                        <textarea class="form-control" rows="3" @bind="PublishNotes" placeholder="Optional notes to record with this publish event."></textarea>
+
+                        <div class="d-flex flex-wrap gap-2 mt-3">
+                            <button class="btn btn-primary" @onclick="() => PublishDraftAsync(SelectedDraft.DraftId)" disabled="@IsBusy || !Snapshot.Configuration.IsReady">
+                                <i class="bi bi-send-check me-1"></i>Publish To Sanity
+                            </button>
+                            <button class="btn btn-outline-secondary" @onclick="OpenContentStudioDraft">Open In Content Studio</button>
+                        </div>
+                    </div>
+                    <div class="col-xl-5">
+                        <div class="fw-semibold mb-2">Affiliate Placements</div>
+                        @if (SelectedDraft.AffiliatePlacements.Count == 0)
+                        {
+                            <p class="text-secondary mb-0">No affiliate slots were attached to this draft.</p>
+                        }
+                        else
+                        {
+                            <ul class="list-group list-group-flush border rounded-3">
+                                @foreach (var placement in SelectedDraft.AffiliatePlacements.OrderBy(placement => placement.SortOrder))
+                                {
+                                    <li class="list-group-item">
+                                        <div class="fw-semibold">@placement.AdvertiserName</div>
+                                        <div class="small text-secondary">@placement.SlotToken • @(string.IsNullOrWhiteSpace(placement.Category) ? "General" : placement.Category)</div>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .Build();
+
+    private SanityPublisherWorkspaceSnapshot? Snapshot { get; set; }
+    private ArticleGenerationResult? SelectedDraft { get; set; }
+    private string SelectedDraftPublishState { get; set; } = string.Empty;
+    private string PublishNotes { get; set; } = string.Empty;
+    private bool IsBusy { get; set; }
+    private string StatusMessage { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+
+    private string RenderedDraftHtml => string.IsNullOrWhiteSpace(SelectedDraft?.RenderedMarkdown)
+        ? "<p class=\"text-secondary mb-0\">No draft preview is available.</p>"
+        : Markdown.ToHtml(SelectedDraft.RenderedMarkdown, MarkdownPipeline);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+
+        try
+        {
+            Snapshot = await WorkspaceService.GetSnapshotAsync();
+            StatusMessage = $"Loaded Sanity publishing workspace with {Snapshot.PublicationQueue.Count} queued draft{(Snapshot.PublicationQueue.Count == 1 ? string.Empty : "s")}.";
+
+            if (SelectedDraft is not null)
+            {
+                await LoadDraftAsync(SelectedDraft.DraftId, preserveMessages: true);
+            }
+            else
+            {
+                var initialDraftId = Snapshot.PublicationQueue.FirstOrDefault()?.DraftId
+                    ?? Snapshot.RecentlyPublished.FirstOrDefault()?.DraftId;
+
+                if (initialDraftId.HasValue)
+                {
+                    await LoadDraftAsync(initialDraftId.Value, preserveMessages: true);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load Sanity publishing workspace.");
+            ErrorMessage = $"Unable to load Sanity publishing workspace. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task InspectDraftAsync(Guid draftId)
+    {
+        await LoadDraftAsync(draftId);
+    }
+
+    private async Task LoadDraftAsync(Guid draftId, bool preserveMessages = false)
+    {
+        if (!preserveMessages)
+        {
+            ErrorMessage = string.Empty;
+            StatusMessage = string.Empty;
+        }
+
+        try
+        {
+            SelectedDraft = await ContentStudioService.GetDraftAsync(draftId);
+            if (SelectedDraft is null)
+            {
+                ErrorMessage = "The selected draft could not be found.";
+                return;
+            }
+
+            SelectedDraftPublishState = ResolvePublishState(draftId);
+            PublishNotes = string.Empty;
+
+            if (!preserveMessages)
+            {
+                StatusMessage = $"Loaded draft '{SelectedDraft.Title}' for Sanity review.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load draft {DraftId} for Sanity publishing.", draftId);
+            ErrorMessage = $"Unable to load draft details. {ex.Message}";
+        }
+    }
+
+    private async Task PublishDraftAsync(Guid draftId)
+    {
+        if (Snapshot is null || !Snapshot.Configuration.IsReady)
+        {
+            ErrorMessage = "Sanity configuration is incomplete. Set project, dataset, token, and document type before publishing.";
+            return;
+        }
+
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+
+        try
+        {
+            var published = await ContentStudioService.PublishDraftToSanityAsync(new DraftPublishRequest
+            {
+                DraftId = draftId,
+                Notes = PublishNotes,
+                PerformedBy = "sanity-publisher-ui"
+            });
+
+            if (published is null)
+            {
+                ErrorMessage = "The selected draft could not be published because it no longer exists.";
+                return;
+            }
+
+            SelectedDraft = published;
+            PublishNotes = string.Empty;
+            await ReloadAsync();
+            StatusMessage = $"Published '{published.Title}' to Sanity and refreshed the publication queue.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to publish draft {DraftId} to Sanity.", draftId);
+            ErrorMessage = $"Unable to publish draft to Sanity. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void OpenContentStudioDraft()
+    {
+        if (SelectedDraft is null)
+        {
+            return;
+        }
+
+        Navigation.NavigateTo($"/admin/content-studio/draft/{SelectedDraft.DraftId}");
+    }
+
+    private string ResolvePublishState(Guid draftId)
+    {
+        if (Snapshot is null)
+        {
+            return string.Empty;
+        }
+
+        return Snapshot.PublicationQueue.FirstOrDefault(item => item.DraftId == draftId)?.PublishState
+            ?? Snapshot.RecentlyPublished.FirstOrDefault(item => item.DraftId == draftId)?.PublishState
+            ?? string.Empty;
+    }
+
+    private static string FormatDate(DateTimeOffset? value)
+    {
+        return value?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "Not recorded";
+    }
+
+    private static string GetPublishStateBadgeClass(string publishState)
+    {
+        return publishState switch
+        {
+            "Ready" => "text-bg-success",
+            "Needs Republish" => "text-bg-warning",
+            "Published" => "text-bg-primary",
+            "Blocked" => "text-bg-danger",
+            _ => "text-bg-secondary"
+        };
+    }
+}

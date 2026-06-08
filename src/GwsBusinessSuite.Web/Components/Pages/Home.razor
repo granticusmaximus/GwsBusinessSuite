@@ -84,20 +84,21 @@
 
     private readonly List<DashboardModule> Modules =
     [
-        new("Content Studio", "Generate SEO articles, prepare Sanity publishing fields, select CJ ads, and create social posts.", "/content-studio", "bi-pencil-square", "bg-primary-subtle text-primary"),
-        new("CJ Ads Manager", "Review partner ads and choose affiliate links to insert into articles.", "/cj-ads",
+        new("Content Studio", "Generate SEO articles, prepare Sanity publishing fields, select CJ ads, and create social posts.", "/admin/content-studio", "bi-pencil-square", "bg-primary-subtle text-primary"),
+        new("Sanity Publisher", "Review approved drafts, confirm publish readiness, and push content into Sanity.", "/admin/sanity-publisher", "bi-send-check-fill", "bg-info-subtle text-info"),
+        new("CJ Ads Manager", "Review partner ads and choose affiliate links to insert into articles.", "/admin/cj-ads",
 "bi-tags-fill", "bg-success-subtle text-success"),
-        new("App Registry", "Track all apps, statuses, subdomains, and local ports in one place.", "/app-registry",
+        new("App Registry", "Track all apps, statuses, subdomains, and local ports in one place.", "/admin/app-registry",
 "bi-grid-1x2-fill", "bg-info-subtle text-info"),
-        new("CRM", "Track leads, contacts, companies, notes, and future client opportunities.", "/crm", "bi-people-fill",
+        new("CRM", "Track leads, contacts, companies, notes, and future client opportunities.", "/admin/crm", "bi-people-fill",
 "bg-indigo-subtle text-primary"),
-        new("Knowledge Base", "Create internal documentation, wiki pages, and operating procedures.", "/wiki",
+        new("Knowledge Base", "Create internal documentation, wiki pages, and operating procedures.", "/admin/wiki",
 "bi-journal-bookmark-fill", "bg-warning-subtle text-warning"),
-        new("CMS Builder", "Create WordPress-inspired sites, pages, blocks, templates, and subdomains.", "/cms-builder",
+        new("CMS Builder", "Create WordPress-inspired sites, pages, blocks, templates, and subdomains.", "/admin/cms-builder",
 "bi-layout-three-columns", "bg-danger-subtle text-danger"),
-        new("Deployments", "Track Docker apps, DigitalOcean droplets, Cloudflare tunnels, and ports.", "/deployments",
+        new("Deployments", "Track Docker apps, DigitalOcean droplets, Cloudflare tunnels, and ports.", "/admin/deployments",
 "bi-cloud-upload-fill", "bg-info-subtle text-info"),
-        new("Ollama Console", "Test local model connectivity and prompt workflows.", "/ollama-console", "bi-cpu-fill",
+        new("Ollama Console", "Test local model connectivity and prompt workflows.", "/admin/ollama-console", "bi-cpu-fill",
 "bg-secondary-subtle text-secondary"),
     ];
 }

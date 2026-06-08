@@ -291,11 +291,23 @@ public sealed class ReactPageBuilderService(
     private string GetReactAppRoot()
     {
         var repoRoot = GetRepositoryRoot();
-        var relative = string.IsNullOrWhiteSpace(options.Value.ReactAppRelativePath)
-            ? "apps/public-site"
-            : options.Value.ReactAppRelativePath.Trim();
+        var configured = NormalizeReactAppRelativePath(options.Value.ReactAppRelativePath);
+        var configuredAbsolutePath = Path.GetFullPath(Path.Combine(repoRoot, configured));
+        if (Directory.Exists(configuredAbsolutePath))
+        {
+            return configuredAbsolutePath;
+        }
 
-        return Path.GetFullPath(Path.Combine(repoRoot, relative));
+        foreach (var fallback in new[] { "apps/public-site", "app/public-site", "public-site" })
+        {
+            var fallbackAbsolutePath = Path.GetFullPath(Path.Combine(repoRoot, fallback));
+            if (Directory.Exists(fallbackAbsolutePath))
+            {
+                return fallbackAbsolutePath;
+            }
+        }
+
+        return configuredAbsolutePath;
     }
 
     private string GetReactPagesDirectory()
@@ -548,6 +560,13 @@ public sealed class ReactPageBuilderService(
     private static string EscapeCommitMessage(string message)
     {
         return message.Replace("\"", "\\\"", StringComparison.Ordinal);
+    }
+
+    private static string NormalizeReactAppRelativePath(string? relativePath)
+    {
+        return string.IsNullOrWhiteSpace(relativePath)
+            ? "apps/public-site"
+            : relativePath.Trim().Replace('\\', '/').Trim('/');
     }
 
     private static readonly Regex JsxImportRegex = new(

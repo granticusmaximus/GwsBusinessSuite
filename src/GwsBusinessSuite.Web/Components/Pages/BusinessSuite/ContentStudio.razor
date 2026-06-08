@@ -243,7 +243,7 @@
 
     private void OpenDraft(Guid draftId)
     {
-        Navigation.NavigateTo($"/content-studio/draft/{draftId}");
+        Navigation.NavigateTo($"/admin/content-studio/draft/{draftId}");
     }
 
     private async Task MarkDraftNotInterested(Guid draftId)
@@ -308,7 +308,7 @@
 
             await RefreshDrafts(showOverlay: false);
             StatusMessage = $"Draft generated successfully for '{result.Title}'. Use Open in the draft list to review and manage this draft on the detail page.";
-            Navigation.NavigateTo($"/content-studio/draft/{result.DraftId}");
+            Navigation.NavigateTo($"/admin/content-studio/draft/{result.DraftId}");
         }
         catch (Exception ex)
         {
