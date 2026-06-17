@@ -6,7 +6,7 @@ import Contact from './pages/Contact';
 import BlogList from './pages/BlogList';
 import BlogPost from './pages/BlogPost';
 
-const ADMIN_URL = import.meta.env.VITE_ADMIN_URL || '#';
+const ADMIN_URL = import.meta.env.VITE_ADMIN_URL || '';
 
 function Navbar() {
   return (
@@ -16,7 +16,7 @@ function Navbar() {
         <Link to="/about">About</Link>
         <Link to="/blog">Blog</Link>
         <Link to="/contact">Contact</Link>
-        <a href={ADMIN_URL} className="nav-admin">Admin ↗</a>
+        {ADMIN_URL && <a href={ADMIN_URL} className="nav-admin">Admin ↗</a>}
       </div>
     </nav>
   );
