@@ -11,7 +11,7 @@ RUN npm run build -- --outDir dist --emptyOutDir
 # ─────────────────────────────────────────────
 # Stage 2: Build the .NET Blazor app
 # ─────────────────────────────────────────────
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS dotnet-build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS dotnet-build
 WORKDIR /src
 COPY . .
 RUN dotnet restore GwsBusinessSuite.slnx
@@ -21,7 +21,7 @@ RUN dotnet publish src/GwsBusinessSuite.Web/GwsBusinessSuite.Web.csproj \
 # ─────────────────────────────────────────────
 # Stage 3: Final runtime image
 # ─────────────────────────────────────────────
-FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS final
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 
 # Copy published .NET app
