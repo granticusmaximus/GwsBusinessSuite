@@ -1,3 +1,4 @@
+using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Infrastructure;
 using GwsBusinessSuite.Infrastructure.Data;
@@ -180,65 +181,43 @@ app.MapGet("/og-image/{slug}", async (
     return Results.Bytes(bytes, mime);
 }).AllowAnonymous();
 
-// Public JSON API — returns article metadata + markdown for the React blog view.
-app.MapGet("/api/blog", async (IDbContextFactory<ApplicationDbContext> dbFactory) =>
+// Public JSON API — hydrated from Sanity CMS (source of truth for published articles).
+app.MapGet("/api/blog", async (ISanityReader sanityReader) =>
 {
-    await using var db = await dbFactory.CreateDbContextAsync();
-
-    // Fetch columns first; sort DateTimeOffset in memory (SQLite limitation).
-    var rows = await db.SeoArticleDrafts
-        .Select(a => new
-        {
-            a.Id, a.Slug,
-            Title        = a.Title != "" ? a.Title : a.Topic,
-            a.MetaDescription, a.EstimatedReadingTime,
-            a.PrimaryKeyword, a.Status,
-            HasHeroImage = a.HeroImageDataUri != "",
-            a.ApprovedAt, a.CreatedAt
-        })
-        .ToListAsync();
-
-    var articles = rows
-        .OrderByDescending(a => a.ApprovedAt ?? a.CreatedAt)
-        .Select(a => new
-        {
-            a.Id, a.Slug, a.Title, a.MetaDescription,
-            a.EstimatedReadingTime, a.PrimaryKeyword,
-            a.Status, a.HasHeroImage,
-            PublishedAt = a.ApprovedAt ?? a.CreatedAt
-        });
-
+    var articles = await sanityReader.GetArticlesAsync();
     return Results.Ok(articles);
 }).AllowAnonymous();
 
 app.MapGet("/api/blog/{slug}", async (
     string slug,
+    ISanityReader sanityReader,
     IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
-    await using var db = await dbFactory.CreateDbContextAsync();
-    var a = await db.SeoArticleDrafts
-        .Where(x => x.Slug == slug)
-        .FirstOrDefaultAsync();
+    var article = await sanityReader.GetArticleBySlugAsync(slug);
+    if (article is null) return Results.NotFound();
 
-    if (a is null) return Results.NotFound();
+    // Check SQLite for hero images generated through this app's workflow.
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var localHero = await db.SeoArticleDrafts
+        .Where(x => x.Slug == slug && x.HeroImageDataUri != "")
+        .Select(x => new { x.HeroImageAltText, x.HeroImageCaption })
+        .FirstOrDefaultAsync();
 
     return Results.Ok(new
     {
-        a.Id,
-        a.Slug,
-        Title              = a.Title != "" ? a.Title : a.Topic,
-        a.Topic,
-        a.MetaDescription,
-        a.ArticleMarkdown,
-        a.EstimatedReadingTime,
-        a.PrimaryKeyword,
-        a.SecondaryKeywords,
-        a.HeroImageAltText,
-        a.HeroImageCaption,
-        a.Status,
-        Author             = "Grant Watson",
-        HasHeroImage       = a.HeroImageDataUri != "",
-        PublishedAt        = a.ApprovedAt ?? a.CreatedAt
+        article.Slug,
+        article.Title,
+        article.Topic,
+        article.MetaDescription,
+        ArticleMarkdown        = article.ArticleMarkdown,
+        article.EstimatedReadingTime,
+        article.PrimaryKeyword,
+        article.SecondaryKeywords,
+        article.PublishedAt,
+        article.Author,
+        HasHeroImage           = localHero is not null,
+        HeroImageAltText       = localHero?.HeroImageAltText,
+        HeroImageCaption       = localHero?.HeroImageCaption
     });
 }).AllowAnonymous();
 

@@ -31,6 +31,7 @@ public static class DependencyInjection
         services.AddScoped<ISecretProtector, DataProtectionSecretProtector>();
         services.AddHttpClient<ICjAffiliateService, CjAffiliateService>();
         services.AddHttpClient<ISanityPublisher, SanityPublisher>();
+        services.AddHttpClient<ISanityReader, SanityReader>();
         services.AddHttpClient<ICloudflareService, CloudflareService>();
         services.AddHttpClient<IDigitalOceanService, DigitalOceanService>();
         services.AddHttpClient<IOllamaService, OllamaService>((serviceProvider, client) =>
