@@ -193,7 +193,11 @@ app.MapGet("/api/blog", async (IDbContextFactory<ApplicationDbContext> dbFactory
 {
     await using var db = await dbFactory.CreateDbContextAsync();
     var articles = await db.Articles
+        .AsNoTracking()
         .Where(a => a.Status == ArticleStatuses.Published)
+        .ToListAsync();
+
+    var result = articles
         .OrderByDescending(a => a.PublishedAt)
         .Select(a => new
         {
@@ -208,8 +212,9 @@ app.MapGet("/api/blog", async (IDbContextFactory<ApplicationDbContext> dbFactory
                 ? a.HeroImageUrl
                 : a.HeroImageDataUri != "" ? $"/og-image/{a.Slug}" : null
         })
-        .ToListAsync();
-    return Results.Ok(articles);
+        .ToList();
+
+    return Results.Ok(result);
 }).AllowAnonymous();
 
 app.MapGet("/api/blog/{slug}", async (
