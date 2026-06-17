@@ -7,7 +7,8 @@ public sealed record SanityArticleSummary(
     string? PrimaryKeyword,
     string? EstimatedReadingTime,
     DateTimeOffset? PublishedAt,
-    bool HasHeroImage);
+    bool HasHeroImage,
+    string? HeroImageUrl);
 
 public sealed record SanityArticleDetail(
     string Slug,
@@ -21,6 +22,7 @@ public sealed record SanityArticleDetail(
     string Author,
     string? EstimatedReadingTime,
     bool HasHeroImage,
+    string? HeroImageUrl,
     string? HeroImageAltText,
     string? HeroImageCaption);
 

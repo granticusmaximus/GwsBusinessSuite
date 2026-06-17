@@ -43,11 +43,11 @@ export default function BlogPost() {
 
   return (
     <article>
-      {article.hasHeroImage && (
+      {article.hasHeroImage && article.heroImageUrl && (
         <>
           <div className="blog-post-hero-wrap">
             <img
-              src={`/og-image/${article.slug}`}
+              src={article.heroImageUrl}
               alt={article.heroImageAltText || article.title}
             />
           </div>

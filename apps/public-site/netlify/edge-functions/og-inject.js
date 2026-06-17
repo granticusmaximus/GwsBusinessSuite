@@ -27,7 +27,7 @@ export default async (request, context) => {
 
   const title       = article.title || '';
   const description = article.metaDescription || '';
-  const imageUrl    = article.hasHeroImage ? `${backendUrl}/og-image/${slug}` : null;
+  const imageUrl    = article.heroImageUrl || null;
   const published   = article.publishedAt || '';
 
   const ogBlock = [

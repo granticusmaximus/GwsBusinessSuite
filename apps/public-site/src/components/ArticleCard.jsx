@@ -13,9 +13,9 @@ export default function ArticleCard({ article }) {
 
   return (
     <Link to={`/blog/${article.slug}`} className="article-card">
-      {article.hasHeroImage ? (
+      {article.hasHeroImage && article.heroImageUrl ? (
         <img
-          src={`/og-image/${article.slug}`}
+          src={article.heroImageUrl}
           alt={article.title}
           className="article-card-img"
           loading="lazy"

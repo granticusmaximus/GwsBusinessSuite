@@ -196,12 +196,26 @@ app.MapGet("/api/blog/{slug}", async (
     var article = await sanityReader.GetArticleBySlugAsync(slug);
     if (article is null) return Results.NotFound();
 
-    // Check SQLite for hero images generated through this app's workflow.
-    await using var db = await dbFactory.CreateDbContextAsync();
-    var localHero = await db.SeoArticleDrafts
-        .Where(x => x.Slug == slug && x.HeroImageDataUri != "")
-        .Select(x => new { x.HeroImageAltText, x.HeroImageCaption })
-        .FirstOrDefaultAsync();
+    // Prefer Sanity CDN image; fall back to SQLite-stored hero image for app-generated articles.
+    var heroImageUrl = article.HeroImageUrl;
+    string? heroAltText = null;
+    string? heroCaption = null;
+
+    if (heroImageUrl is null)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var localHero = await db.SeoArticleDrafts
+            .Where(x => x.Slug == slug && x.HeroImageDataUri != "")
+            .Select(x => new { x.HeroImageAltText, x.HeroImageCaption })
+            .FirstOrDefaultAsync();
+
+        if (localHero is not null)
+        {
+            heroImageUrl = $"/og-image/{slug}";
+            heroAltText  = localHero.HeroImageAltText;
+            heroCaption  = localHero.HeroImageCaption;
+        }
+    }
 
     return Results.Ok(new
     {
@@ -209,15 +223,16 @@ app.MapGet("/api/blog/{slug}", async (
         article.Title,
         article.Topic,
         article.MetaDescription,
-        ArticleMarkdown        = article.ArticleMarkdown,
+        ArticleMarkdown      = article.ArticleMarkdown,
         article.EstimatedReadingTime,
         article.PrimaryKeyword,
         article.SecondaryKeywords,
         article.PublishedAt,
         article.Author,
-        HasHeroImage           = localHero is not null,
-        HeroImageAltText       = localHero?.HeroImageAltText,
-        HeroImageCaption       = localHero?.HeroImageCaption
+        HasHeroImage         = heroImageUrl is not null,
+        HeroImageUrl         = heroImageUrl,
+        HeroImageAltText     = heroAltText,
+        HeroImageCaption     = heroCaption
     });
 }).AllowAnonymous();
 
