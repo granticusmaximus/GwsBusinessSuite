@@ -285,14 +285,15 @@ app.MapPost("/admin/api/articles/publish-draft/{draftId:guid}", async (
 app.MapGet("/admin/api/articles", async (IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
     await using var db = await dbFactory.CreateDbContextAsync();
-    var articles = await db.Articles
+    var rows = await db.Articles.ToListAsync();
+    var articles = rows
         .OrderByDescending(a => a.UpdatedAt ?? a.CreatedAt)
         .Select(a => new
         {
             a.Id, a.Slug, a.Title, a.Status, a.Source, a.PublishedAt,
             UpdatedAt = a.UpdatedAt ?? a.CreatedAt
         })
-        .ToListAsync();
+        .ToList();
     return Results.Ok(articles);
 }).RequireAuthorization();
 

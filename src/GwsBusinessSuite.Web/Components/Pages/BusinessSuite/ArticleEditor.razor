@@ -163,9 +163,10 @@
         try
         {
             await using var db = await DbFactory.CreateDbContextAsync();
-            Articles = await db.Articles
+            var rows = await db.Articles.ToListAsync();
+            Articles = rows
                 .OrderByDescending(a => a.UpdatedAt ?? a.CreatedAt)
-                .ToListAsync();
+                .ToList();
         }
         catch (Exception ex)
         {
