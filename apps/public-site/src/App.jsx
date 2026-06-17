@@ -11,7 +11,13 @@ const ADMIN_URL = import.meta.env.VITE_ADMIN_URL || '';
 function Navbar() {
   return (
     <nav className="site-nav">
-      <Link to="/" className="site-logo">Grant Watson</Link>
+      <Link to="/" className="site-logo">
+        <img src="/logo-mark.svg" alt="" />
+        <span className="site-logo-wordmark">
+          <span>grantwatson</span>
+          <span className="site-logo-domain">.dev</span>
+        </span>
+      </Link>
       <div className="nav-links">
         <Link to="/about">About</Link>
         <Link to="/blog">Blog</Link>
