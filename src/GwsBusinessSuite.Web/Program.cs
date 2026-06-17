@@ -281,6 +281,128 @@ app.MapPost("/admin/api/articles/publish-draft/{draftId:guid}", async (
     }
 }).RequireAuthorization();
 
+// Admin: list all articles (any status)
+app.MapGet("/admin/api/articles", async (IDbContextFactory<ApplicationDbContext> dbFactory) =>
+{
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var articles = await db.Articles
+        .OrderByDescending(a => a.UpdatedAt ?? a.CreatedAt)
+        .Select(a => new
+        {
+            a.Id, a.Slug, a.Title, a.Status, a.Source, a.PublishedAt,
+            UpdatedAt = a.UpdatedAt ?? a.CreatedAt
+        })
+        .ToListAsync();
+    return Results.Ok(articles);
+}).RequireAuthorization();
+
+// Admin: get a single article for editing
+app.MapGet("/admin/api/articles/{id:guid}", async (Guid id, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+{
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var article = await db.Articles.FindAsync(id);
+    return article is null ? Results.NotFound() : Results.Ok(article);
+}).RequireAuthorization();
+
+// Admin: create a new manual article draft
+app.MapPost("/admin/api/articles", async (ArticleUpsertRequest req, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+{
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var article = new Article
+    {
+        Slug              = req.Slug,
+        Title             = req.Title,
+        Topic             = req.Topic,
+        Author            = string.IsNullOrWhiteSpace(req.Author) ? "Grant Watson" : req.Author,
+        PrimaryKeyword    = req.PrimaryKeyword,
+        SecondaryKeywords = req.SecondaryKeywords,
+        MetaDescription   = req.MetaDescription,
+        EstimatedReadingTime = req.EstimatedReadingTime,
+        HeroImageUrl      = string.IsNullOrWhiteSpace(req.HeroImageUrl) ? null : req.HeroImageUrl,
+        HeroImageAltText  = req.HeroImageAltText,
+        HeroImageCaption  = req.HeroImageCaption,
+        BodyMarkdown      = req.BodyMarkdown,
+        Status            = ArticleStatuses.Draft,
+        Source            = ArticleSource.Manual,
+        CreatedBy         = "manual-editor"
+    };
+    db.Articles.Add(article);
+    await db.SaveChangesAsync();
+    return Results.Created($"/admin/api/articles/{article.Id}", new { article.Id, article.Slug });
+}).RequireAuthorization();
+
+// Admin: update an existing article
+app.MapPut("/admin/api/articles/{id:guid}", async (
+    Guid id,
+    ArticleUpsertRequest req,
+    IDbContextFactory<ApplicationDbContext> dbFactory) =>
+{
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var article = await db.Articles.FindAsync(id);
+    if (article is null) return Results.NotFound();
+
+    article.Slug              = req.Slug;
+    article.Title             = req.Title;
+    article.Topic             = req.Topic;
+    article.Author            = string.IsNullOrWhiteSpace(req.Author) ? "Grant Watson" : req.Author;
+    article.PrimaryKeyword    = req.PrimaryKeyword;
+    article.SecondaryKeywords = req.SecondaryKeywords;
+    article.MetaDescription   = req.MetaDescription;
+    article.EstimatedReadingTime = req.EstimatedReadingTime;
+    article.HeroImageUrl      = string.IsNullOrWhiteSpace(req.HeroImageUrl) ? null : req.HeroImageUrl;
+    article.HeroImageAltText  = req.HeroImageAltText;
+    article.HeroImageCaption  = req.HeroImageCaption;
+    article.BodyMarkdown      = req.BodyMarkdown;
+    article.UpdatedBy         = "manual-editor";
+    article.UpdatedAt         = DateTimeOffset.UtcNow;
+
+    await db.SaveChangesAsync();
+    return Results.Ok(new { article.Id, article.Slug, article.Status });
+}).RequireAuthorization();
+
+// Admin: publish an article (sets Status=Published, stamps PublishedAt if not already set)
+app.MapPost("/admin/api/articles/{id:guid}/publish", async (Guid id, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+{
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var article = await db.Articles.FindAsync(id);
+    if (article is null) return Results.NotFound();
+
+    article.Status      = ArticleStatuses.Published;
+    article.PublishedAt ??= DateTimeOffset.UtcNow;
+    article.UpdatedAt   = DateTimeOffset.UtcNow;
+    article.UpdatedBy   = "manual-editor";
+    await db.SaveChangesAsync();
+    return Results.Ok(new { article.Id, article.Slug, article.Status, article.PublishedAt });
+}).RequireAuthorization();
+
+// Admin: unpublish an article (back to Draft)
+app.MapPost("/admin/api/articles/{id:guid}/unpublish", async (Guid id, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+{
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var article = await db.Articles.FindAsync(id);
+    if (article is null) return Results.NotFound();
+
+    article.Status    = ArticleStatuses.Draft;
+    article.UpdatedAt = DateTimeOffset.UtcNow;
+    article.UpdatedBy = "manual-editor";
+    await db.SaveChangesAsync();
+    return Results.Ok(new { article.Id, article.Slug, article.Status });
+}).RequireAuthorization();
+
+// Admin: delete a draft article (published articles must be unpublished first)
+app.MapDelete("/admin/api/articles/{id:guid}", async (Guid id, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+{
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var article = await db.Articles.FindAsync(id);
+    if (article is null) return Results.NotFound();
+    if (article.Status == ArticleStatuses.Published)
+        return Results.BadRequest(new { error = "Unpublish the article before deleting it." });
+
+    db.Articles.Remove(article);
+    await db.SaveChangesAsync();
+    return Results.NoContent();
+}).RequireAuthorization();
+
 app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
@@ -456,3 +578,17 @@ static string BuildCmsPreviewHtml(string pageKey, string inlineCss, string proce
     sb.Append("</html>");
     return sb.ToString();
 }
+
+record ArticleUpsertRequest(
+    string Title,
+    string Slug,
+    string? Topic,
+    string Author,
+    string PrimaryKeyword,
+    string SecondaryKeywords,
+    string MetaDescription,
+    string EstimatedReadingTime,
+    string? HeroImageUrl,
+    string HeroImageAltText,
+    string HeroImageCaption,
+    string BodyMarkdown);

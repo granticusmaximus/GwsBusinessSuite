@@ -1,0 +1,294 @@
+@page "/admin/article-editor"
+@rendermode InteractiveServer
+@using GwsBusinessSuite.Domain.Entities
+@using GwsBusinessSuite.Infrastructure.Data
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Navigation
+@inject ILogger<ArticleEditor> Logger
+
+<PageTitle>Article Editor</PageTitle>
+
+<div class="page-header d-flex align-items-start justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-pencil me-2 text-primary"></i>Article Editor</h1>
+        <p>Write and publish articles manually, or manage all articles regardless of source.</p>
+    </div>
+    <button class="btn btn-primary d-inline-flex align-items-center gap-2" @onclick="CreateNewArticle" disabled="@IsBusy">
+        <i class="bi bi-plus-lg"></i>
+        <span>New Article</span>
+    </button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@ErrorMessage</div>
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
+        <i class="bi bi-check-circle-fill flex-shrink-0"></i>
+        <div>@StatusMessage</div>
+    </div>
+}
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white border-bottom py-3 d-flex align-items-center gap-2">
+        <span class="fw-semibold">All Articles</span>
+        <span class="badge text-bg-secondary ms-auto">@FilteredArticles.Count</span>
+    </div>
+    <div class="card-body">
+        <div class="row g-3 mb-3">
+            <div class="col-md-4">
+                <label class="form-label fw-semibold small">Status</label>
+                <select class="form-select" @bind="StatusFilter">
+                    <option value="">All</option>
+                    <option value="Draft">Draft</option>
+                    <option value="Published">Published</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold small">Source</label>
+                <select class="form-select" @bind="SourceFilter">
+                    <option value="">All</option>
+                    <option value="Manual">Manual</option>
+                    <option value="OllamaGenerated">Ollama Generated</option>
+                    <option value="SanityImport">Sanity Import</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold small">Search</label>
+                <input class="form-control" @bind="SearchTerm" @bind:event="oninput" placeholder="Filter by title" />
+            </div>
+        </div>
+
+        @if (Articles.Count == 0 && !IsBusy)
+        {
+            <p class="text-secondary mb-0">No articles yet. Click <strong>New Article</strong> to write your first one.</p>
+        }
+        else if (FilteredArticles.Count == 0)
+        {
+            <p class="text-secondary mb-0">No articles match the current filter.</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Status</th>
+                            <th>Source</th>
+                            <th>Published</th>
+                            <th>Updated</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var article in FilteredArticles)
+                        {
+                            <tr>
+                                <td>
+                                    <div class="fw-semibold">@article.Title</div>
+                                    <div class="small text-secondary font-monospace">/@article.Slug</div>
+                                </td>
+                                <td><span class="badge @GetStatusBadgeClass(article.Status)">@article.Status</span></td>
+                                <td><span class="badge text-bg-light">@FormatSource(article.Source)</span></td>
+                                <td class="small">@(article.PublishedAt.HasValue ? FormatDate(article.PublishedAt.Value) : "—")</td>
+                                <td class="small">@FormatDate(article.UpdatedAt ?? article.CreatedAt)</td>
+                                <td class="text-end">
+                                    <div class="d-inline-flex gap-2">
+                                        <button class="btn btn-sm btn-outline-primary"
+                                                @onclick="() => EditArticle(article.Id)" disabled="@IsBusy">
+                                            Edit
+                                        </button>
+                                        @if (article.Status == ArticleStatuses.Draft)
+                                        {
+                                            <button class="btn btn-sm btn-success"
+                                                    @onclick="() => PublishArticle(article.Id)" disabled="@IsBusy">
+                                                Publish
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-danger"
+                                                    @onclick="() => DeleteArticle(article.Id)" disabled="@IsBusy">
+                                                Delete
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-sm btn-outline-secondary"
+                                                    @onclick="() => UnpublishArticle(article.Id)" disabled="@IsBusy">
+                                                Unpublish
+                                            </button>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<Article> Articles { get; set; } = new();
+    private bool IsBusy { get; set; }
+    private string StatusMessage { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+    private string StatusFilter { get; set; } = string.Empty;
+    private string SourceFilter { get; set; } = string.Empty;
+    private string SearchTerm { get; set; } = string.Empty;
+
+    private IReadOnlyList<Article> FilteredArticles =>
+        Articles
+            .Where(a => string.IsNullOrEmpty(StatusFilter) || a.Status == StatusFilter)
+            .Where(a => string.IsNullOrEmpty(SourceFilter) || a.Source == SourceFilter)
+            .Where(a => string.IsNullOrEmpty(SearchTerm) ||
+                        a.Title.Contains(SearchTerm.Trim(), StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadArticles();
+    }
+
+    private async Task LoadArticles()
+    {
+        IsBusy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            Articles = await db.Articles
+                .OrderByDescending(a => a.UpdatedAt ?? a.CreatedAt)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load articles.");
+            ErrorMessage = $"Unable to load articles. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task CreateNewArticle()
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        IsBusy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var article = new Article
+            {
+                Title     = "Untitled Article",
+                Slug      = $"untitled-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}",
+                Status    = ArticleStatuses.Draft,
+                Source    = ArticleSource.Manual,
+                CreatedBy = "manual-editor"
+            };
+            db.Articles.Add(article);
+            await db.SaveChangesAsync();
+            Navigation.NavigateTo($"/admin/article-editor/{article.Id}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to create new article.");
+            ErrorMessage = $"Unable to create article. {ex.Message}";
+            IsBusy = false;
+        }
+    }
+
+    private void EditArticle(Guid id)
+    {
+        Navigation.NavigateTo($"/admin/article-editor/{id}");
+    }
+
+    private async Task PublishArticle(Guid id)
+    {
+        await RunAction(id, async (db, article) =>
+        {
+            article.Status      = ArticleStatuses.Published;
+            article.PublishedAt ??= DateTimeOffset.UtcNow;
+            article.UpdatedAt   = DateTimeOffset.UtcNow;
+            article.UpdatedBy   = "manual-editor";
+            await db.SaveChangesAsync();
+            StatusMessage = $"'{article.Title}' is now live.";
+        });
+    }
+
+    private async Task UnpublishArticle(Guid id)
+    {
+        await RunAction(id, async (db, article) =>
+        {
+            article.Status    = ArticleStatuses.Draft;
+            article.UpdatedAt = DateTimeOffset.UtcNow;
+            article.UpdatedBy = "manual-editor";
+            await db.SaveChangesAsync();
+            StatusMessage = $"'{article.Title}' moved back to Draft.";
+        });
+    }
+
+    private async Task DeleteArticle(Guid id)
+    {
+        await RunAction(id, async (db, article) =>
+        {
+            db.Articles.Remove(article);
+            await db.SaveChangesAsync();
+            StatusMessage = $"'{article.Title}' deleted.";
+        });
+    }
+
+    private async Task RunAction(Guid id, Func<ApplicationDbContext, Article, Task> action)
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        IsBusy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var article = await db.Articles.FindAsync(id);
+            if (article is null)
+            {
+                ErrorMessage = "Article not found.";
+                return;
+            }
+            await action(db, article);
+            await LoadArticles();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Action failed for article {Id}.", id);
+            ErrorMessage = $"Action failed. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private static string GetStatusBadgeClass(string status) => status switch
+    {
+        ArticleStatuses.Published => "text-bg-success",
+        ArticleStatuses.Draft     => "text-bg-warning",
+        _                         => "text-bg-secondary"
+    };
+
+    private static string FormatSource(string source) => source switch
+    {
+        ArticleSource.Manual          => "Manual",
+        ArticleSource.OllamaGenerated => "Ollama",
+        ArticleSource.SanityImport    => "Sanity",
+        _                             => source
+    };
+
+    private static string FormatDate(DateTimeOffset value) =>
+        value.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+}
