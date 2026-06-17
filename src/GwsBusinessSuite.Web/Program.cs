@@ -1,5 +1,7 @@
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.Blog;
 using GwsBusinessSuite.Application.CmsBuilder;
+using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Web.Components;
@@ -147,24 +149,29 @@ app.MapGet("/auth/logout", async (HttpContext httpContext) =>
 
 // Serve hero images stored as base64 data URIs as real image responses
 // so og:image tags have a cacheable URL that social crawlers can fetch.
+// Checks the Article table first (published articles), then falls back to SeoArticleDraft.
 app.MapGet("/og-image/{slug}", async (
     string slug,
     IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
     await using var db = await dbFactory.CreateDbContextAsync();
-    var row = await db.SeoArticleDrafts
+
+    var dataUri = await db.Articles
         .Where(a => a.Slug == slug && a.HeroImageDataUri != "")
-        .Select(a => new { a.HeroImageDataUri })
-        .FirstOrDefaultAsync();
+        .Select(a => a.HeroImageDataUri)
+        .FirstOrDefaultAsync()
+        ?? await db.SeoArticleDrafts
+            .Where(a => a.Slug == slug && a.HeroImageDataUri != "")
+            .Select(a => a.HeroImageDataUri)
+            .FirstOrDefaultAsync();
 
-    if (row is null || string.IsNullOrWhiteSpace(row.HeroImageDataUri))
-        return Results.NotFound();
+    if (string.IsNullOrWhiteSpace(dataUri)) return Results.NotFound();
 
-    var commaIdx = row.HeroImageDataUri.IndexOf(',');
+    var commaIdx = dataUri.IndexOf(',');
     if (commaIdx < 0) return Results.NotFound();
 
-    var header = row.HeroImageDataUri[..commaIdx];          // "data:image/png;base64"
-    var base64  = row.HeroImageDataUri[(commaIdx + 1)..];
+    var header = dataUri[..commaIdx];
+    var base64  = dataUri[(commaIdx + 1)..];
 
     var mime = "image/png";
     var headerParts = header.Split(':');
@@ -181,60 +188,136 @@ app.MapGet("/og-image/{slug}", async (
     return Results.Bytes(bytes, mime);
 }).AllowAnonymous();
 
-// Public JSON API — hydrated from Sanity CMS (source of truth for published articles).
-app.MapGet("/api/blog", async (ISanityReader sanityReader) =>
+// Public JSON API — hydrated from the Article table (SQLite is the source of truth).
+app.MapGet("/api/blog", async (IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
-    var articles = await sanityReader.GetArticlesAsync();
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var articles = await db.Articles
+        .Where(a => a.Status == ArticleStatuses.Published)
+        .OrderByDescending(a => a.PublishedAt)
+        .Select(a => new
+        {
+            a.Slug,
+            a.Title,
+            a.MetaDescription,
+            a.PrimaryKeyword,
+            a.EstimatedReadingTime,
+            a.PublishedAt,
+            HasHeroImage = a.HeroImageUrl != null || a.HeroImageDataUri != "",
+            HeroImageUrl = a.HeroImageUrl != null
+                ? a.HeroImageUrl
+                : a.HeroImageDataUri != "" ? $"/og-image/{a.Slug}" : null
+        })
+        .ToListAsync();
     return Results.Ok(articles);
 }).AllowAnonymous();
 
 app.MapGet("/api/blog/{slug}", async (
     string slug,
-    ISanityReader sanityReader,
     IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
-    var article = await sanityReader.GetArticleBySlugAsync(slug);
-    if (article is null) return Results.NotFound();
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var a = await db.Articles
+        .Where(x => x.Slug == slug && x.Status == ArticleStatuses.Published)
+        .FirstOrDefaultAsync();
 
-    // Prefer Sanity CDN image; fall back to SQLite-stored hero image for app-generated articles.
-    var heroImageUrl = article.HeroImageUrl;
-    string? heroAltText = null;
-    string? heroCaption = null;
+    if (a is null) return Results.NotFound();
 
-    if (heroImageUrl is null)
-    {
-        await using var db = await dbFactory.CreateDbContextAsync();
-        var localHero = await db.SeoArticleDrafts
-            .Where(x => x.Slug == slug && x.HeroImageDataUri != "")
-            .Select(x => new { x.HeroImageAltText, x.HeroImageCaption })
-            .FirstOrDefaultAsync();
-
-        if (localHero is not null)
-        {
-            heroImageUrl = $"/og-image/{slug}";
-            heroAltText  = localHero.HeroImageAltText;
-            heroCaption  = localHero.HeroImageCaption;
-        }
-    }
+    var heroImageUrl = a.HeroImageUrl
+        ?? (a.HeroImageDataUri != "" ? $"/og-image/{a.Slug}" : null);
 
     return Results.Ok(new
     {
-        article.Slug,
-        article.Title,
-        article.Topic,
-        article.MetaDescription,
-        ArticleMarkdown      = article.ArticleMarkdown,
-        article.EstimatedReadingTime,
-        article.PrimaryKeyword,
-        article.SecondaryKeywords,
-        article.PublishedAt,
-        article.Author,
+        a.Slug,
+        a.Title,
+        a.Topic,
+        a.MetaDescription,
+        ArticleMarkdown      = a.BodyMarkdown,
+        a.EstimatedReadingTime,
+        a.PrimaryKeyword,
+        a.SecondaryKeywords,
+        a.PublishedAt,
+        a.Author,
         HasHeroImage         = heroImageUrl is not null,
         HeroImageUrl         = heroImageUrl,
-        HeroImageAltText     = heroAltText,
-        HeroImageCaption     = heroCaption
+        a.HeroImageAltText,
+        a.HeroImageCaption
     });
 }).AllowAnonymous();
+
+// Admin: one-time import of all Sanity articles into the Article table.
+app.MapPost("/admin/api/migrate-from-sanity", async (ISanityImportService importService) =>
+{
+    var result = await importService.ImportAsync();
+    return Results.Ok(result);
+}).RequireAuthorization();
+
+// Admin: publish an approved SeoArticleDraft to the live blog as an Article.
+app.MapPost("/admin/api/articles/publish-draft/{draftId:guid}", async (
+    Guid draftId,
+    IDbContextFactory<ApplicationDbContext> dbFactory) =>
+{
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var draft = await db.SeoArticleDrafts.FindAsync(draftId);
+    if (draft is null) return Results.NotFound();
+
+    var heroImageUrl = draft.HeroImageDataUri != "" ? $"/og-image/{draft.Slug}" : null;
+
+    var existing = await db.Articles.FirstOrDefaultAsync(a => a.Slug == draft.Slug);
+    if (existing is null)
+    {
+        db.Articles.Add(new Article
+        {
+            Slug                 = draft.Slug,
+            Title                = draft.Title,
+            Topic                = draft.Topic,
+            BodyMarkdown         = draft.ArticleMarkdown,
+            MetaDescription      = draft.MetaDescription,
+            PrimaryKeyword       = draft.PrimaryKeyword,
+            SecondaryKeywords    = draft.SecondaryKeywords,
+            Author               = "Grant Watson",
+            EstimatedReadingTime = draft.EstimatedReadingTime,
+            HeroImageUrl         = heroImageUrl,
+            HeroImageDataUri     = draft.HeroImageDataUri,
+            HeroImageAltText     = draft.HeroImageAltText,
+            HeroImageCaption     = draft.HeroImageCaption,
+            Status               = ArticleStatuses.Published,
+            Source               = ArticleSource.OllamaGenerated,
+            PublishedAt          = DateTimeOffset.UtcNow,
+            SourceDraftId        = draft.Id,
+            CreatedBy            = "content-studio"
+        });
+    }
+    else
+    {
+        existing.Title                = draft.Title;
+        existing.Topic                = draft.Topic;
+        existing.BodyMarkdown         = draft.ArticleMarkdown;
+        existing.MetaDescription      = draft.MetaDescription;
+        existing.PrimaryKeyword       = draft.PrimaryKeyword;
+        existing.SecondaryKeywords    = draft.SecondaryKeywords;
+        existing.EstimatedReadingTime = draft.EstimatedReadingTime;
+        existing.HeroImageUrl         = heroImageUrl;
+        existing.HeroImageDataUri     = draft.HeroImageDataUri;
+        existing.HeroImageAltText     = draft.HeroImageAltText;
+        existing.HeroImageCaption     = draft.HeroImageCaption;
+        existing.Status               = ArticleStatuses.Published;
+        existing.PublishedAt        ??= DateTimeOffset.UtcNow;
+        existing.UpdatedAt            = DateTimeOffset.UtcNow;
+        existing.UpdatedBy            = "content-studio";
+    }
+
+    db.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent
+    {
+        SeoArticleDraftId = draft.Id,
+        EventType         = SeoArticleWorkflowEventTypes.PublishedToSite,
+        Notes             = "Article published to site blog.",
+        CreatedBy         = "content-studio"
+    });
+
+    await db.SaveChangesAsync();
+    return Results.Ok(new { slug = draft.Slug });
+}).RequireAuthorization();
 
 app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>()

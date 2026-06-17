@@ -1,5 +1,6 @@
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.AppRegistry;
+using GwsBusinessSuite.Application.Blog;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.CmsKnowledge;
 using GwsBusinessSuite.Application.Crm;
@@ -59,6 +60,7 @@ public static class DependencyInjection
         services.AddScoped<IDeploymentWorkspaceService, DeploymentWorkspaceService>();
         services.AddScoped<ISanityPublisherWorkspaceService, SanityPublisherWorkspaceService>();
         services.AddScoped<IWikiService, WikiService>();
+        services.AddScoped<ISanityImportService, SanityImportService>();
 
         return services;
     }

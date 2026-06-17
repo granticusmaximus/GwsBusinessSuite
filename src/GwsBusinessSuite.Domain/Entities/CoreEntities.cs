@@ -16,8 +16,23 @@ public static class SeoArticleWorkflowEventTypes
     public const string Revised = "Revised";
     public const string Approved = "Approved";
     public const string PublishedToSanity = "PublishedToSanity";
+    public const string PublishedToSite = "PublishedToSite";
     public const string Rejected = "Rejected";
     public const string HeroImageRegenerated = "HeroImageRegenerated";
+}
+
+public static class ArticleStatuses
+{
+    public const string Draft = "Draft";
+    public const string PendingReview = "PendingReview";
+    public const string Published = "Published";
+}
+
+public static class ArticleSource
+{
+    public const string SanityImport = "SanityImport";
+    public const string OllamaGenerated = "OllamaGenerated";
+    public const string Manual = "Manual";
 }
 
 public static class AffiliateInteractionEventTypes
@@ -158,4 +173,25 @@ public sealed class DeploymentTarget : AuditableEntity
     public required string Name { get; set; }
     public string? Host { get; set; }
     public string? Notes { get; set; }
+}
+
+public sealed class Article : AuditableEntity
+{
+    public required string Slug { get; set; }
+    public required string Title { get; set; }
+    public string? Topic { get; set; }
+    public string BodyMarkdown { get; set; } = string.Empty;
+    public string MetaDescription { get; set; } = string.Empty;
+    public string PrimaryKeyword { get; set; } = string.Empty;
+    public string SecondaryKeywords { get; set; } = string.Empty;
+    public string Author { get; set; } = "Grant Watson";
+    public string EstimatedReadingTime { get; set; } = string.Empty;
+    public string? HeroImageUrl { get; set; }
+    public string HeroImageAltText { get; set; } = string.Empty;
+    public string HeroImageCaption { get; set; } = string.Empty;
+    public string HeroImageDataUri { get; set; } = string.Empty;
+    public string Status { get; set; } = ArticleStatuses.Draft;
+    public string Source { get; set; } = ArticleSource.Manual;
+    public DateTimeOffset? PublishedAt { get; set; }
+    public Guid? SourceDraftId { get; set; }
 }

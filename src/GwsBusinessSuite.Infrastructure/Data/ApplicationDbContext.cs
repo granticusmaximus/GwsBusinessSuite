@@ -18,6 +18,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SeoArticleAffiliateInteraction> SeoArticleAffiliateInteractions => Set<SeoArticleAffiliateInteraction>();
     public DbSet<SeoArticleWorkflowEvent> SeoArticleWorkflowEvents => Set<SeoArticleWorkflowEvent>();
     public DbSet<CjConnectorSettings> CjConnectorSettings => Set<CjConnectorSettings>();
+    public DbSet<Article> Articles => Set<Article>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -40,5 +41,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .HasForeignKey(x => x.SeoArticleDraftId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<SeoArticleWorkflowEvent>().HasIndex(x => new { x.SeoArticleDraftId, x.CreatedAt });
+
+        modelBuilder.Entity<Article>().HasIndex(x => x.Slug).IsUnique();
+        modelBuilder.Entity<Article>().HasIndex(x => x.Status);
+        modelBuilder.Entity<Article>().HasIndex(x => x.PublishedAt);
     }
 }
