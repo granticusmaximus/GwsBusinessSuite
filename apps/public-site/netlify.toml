@@ -16,13 +16,13 @@
 # e.g. http://YOUR_DROPLET_IP  or  https://admin.grantwatson.dev
 [[redirects]]
   from   = "/api/*"
-  to     = "http://REPLACE_WITH_BACKEND_URL/api/:splat"
+  to     = "http://admin.gwsapp.net/api/:splat"
   status = 200
   force  = true
 
 [[redirects]]
   from   = "/og-image/*"
-  to     = "http://REPLACE_WITH_BACKEND_URL/og-image/:splat"
+  to     = "http://admin.gwsapp.net/og-image/:splat"
   status = 200
   force  = true
 
