@@ -3,11 +3,10 @@ services:
     build: .
     ports:
       - "80:8080"
+    env_file:
+      - .env
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      # Set credentials via a .env file or Docker secrets — never commit them here.
-      # AdminAuth__Username: admin
-      # AdminAuth__Password: changeme
     restart: always
     volumes:
       # Persist SQLite database and any local CMS file state

@@ -6,7 +6,7 @@ WORKDIR /app
 COPY apps/public-site/package*.json ./
 RUN npm ci
 COPY apps/public-site/ .
-RUN npm run build
+RUN npm run build -- --outDir dist --emptyOutDir
 
 # ─────────────────────────────────────────────
 # Stage 2: Build the .NET Blazor app
