@@ -1,4 +1,5 @@
 @page "/admin/sanity-publisher"
+@page "/admin/sanity-backup"
 @rendermode InteractiveServer
 @using GwsBusinessSuite.Application.ContentStudio
 @using GwsBusinessSuite.Application.SanityPublishing
@@ -8,12 +9,12 @@
 @inject NavigationManager Navigation
 @inject ILogger<SanityPublisher> Logger
 
-<PageTitle>Sanity Publisher</PageTitle>
+<PageTitle>Sanity Backup</PageTitle>
 
 <div class="page-header d-flex flex-wrap justify-content-between align-items-start gap-3">
     <div>
-        <h1><i class="bi bi-send-check-fill me-2 text-primary"></i>Sanity Publisher</h1>
-        <p class="mb-0">Move approved drafts from local editorial workflow into Sanity with queue visibility, configuration checks, and publish actions in one place.</p>
+        <h1><i class="bi bi-cloud-upload me-2 text-primary"></i>Sanity Backup</h1>
+        <p class="mb-0">Keep an external Sanity copy of approved drafts while this suite remains the source of truth for article creation and publication.</p>
     </div>
     <button class="btn btn-outline-secondary" @onclick="ReloadAsync" disabled="@IsBusy">
         <i class="bi bi-arrow-repeat me-1"></i>Refresh
@@ -40,7 +41,7 @@
 {
     <div class="card border-0 shadow-sm">
         <div class="card-body">
-            <p class="text-secondary mb-0">Loading Sanity publishing workspace.</p>
+            <p class="text-secondary mb-0">Loading Sanity backup workspace.</p>
         </div>
     </div>
 }
@@ -70,11 +71,11 @@ else
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-body">
                     <div class="fw-semibold">Document Mapping</div>
-                    <div class="small text-secondary">Current schema targets for published drafts.</div>
+                    <div class="small text-secondary">Current schema targets for external draft backups.</div>
                     <div class="small mt-3">
                         <div><strong>Type:</strong> @Snapshot.Configuration.DocumentType</div>
                         <div><strong>ID Prefix:</strong> @Snapshot.Configuration.DocumentIdPrefix</div>
-                        <div><strong>Auto Publish On Approval:</strong> @(Snapshot.Configuration.AutoPublishOnApproval ? "Enabled" : "Disabled")</div>
+                        <div><strong>Backup Trigger:</strong> Manual from Content Studio or this backup queue</div>
                     </div>
                 </div>
             </div>
@@ -82,8 +83,8 @@ else
         <div class="col-md-4">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-body">
-                    <div class="fw-semibold">Queue Health</div>
-                    <div class="small text-secondary">Approved drafts waiting for their first publish or a republish.</div>
+                    <div class="fw-semibold">Backup Queue</div>
+                    <div class="small text-secondary">Approved drafts waiting for their first backup or a refreshed external copy.</div>
                     <div class="fs-2 fw-bold lh-1 mt-3">@Snapshot.PublicationQueue.Count</div>
                     <div class="small text-secondary mt-2">@Snapshot.TotalDrafts total persisted draft@(Snapshot.TotalDrafts == 1 ? string.Empty : "s").</div>
                 </div>
@@ -93,14 +94,14 @@ else
 
     <div class="card border-0 shadow-sm mb-4">
         <div class="card-header bg-white border-bottom py-3">
-            <div class="fw-semibold">Ready To Publish</div>
-            <div class="small text-secondary">Approved drafts that need a first publish or a republish after editorial changes.</div>
+            <div class="fw-semibold">Ready To Back Up</div>
+            <div class="small text-secondary">Approved drafts that need a first Sanity backup or a refreshed backup after editorial changes.</div>
         </div>
         <div class="card-body p-0">
             @if (Snapshot.PublicationQueue.Count == 0)
             {
                 <div class="p-4">
-                    <p class="text-secondary mb-0">No drafts are currently waiting on Sanity publishing.</p>
+                    <p class="text-secondary mb-0">No drafts are currently waiting on Sanity backup.</p>
                 </div>
             }
             else
@@ -135,7 +136,7 @@ else
                                     <td class="text-end">
                                         <div class="d-inline-flex gap-2">
                                             <button class="btn btn-sm btn-outline-primary" @onclick="() => InspectDraftAsync(draft.DraftId)" disabled="@IsBusy">Inspect</button>
-                                            <button class="btn btn-sm btn-primary" @onclick="() => PublishDraftAsync(draft.DraftId)" disabled="@IsBusy || !Snapshot.Configuration.IsReady">Publish</button>
+                                            <button class="btn btn-sm btn-primary" @onclick="() => BackupDraftAsync(draft.DraftId)" disabled="@IsBusy || !Snapshot.Configuration.IsReady">Back Up</button>
                                         </div>
                                     </td>
                                 </tr>
@@ -149,14 +150,14 @@ else
 
     <div class="card border-0 shadow-sm mb-4">
         <div class="card-header bg-white border-bottom py-3">
-            <div class="fw-semibold">Recently Published</div>
-            <div class="small text-secondary">Recent Sanity publish events recorded in the local workflow history.</div>
+            <div class="fw-semibold">Recently Backed Up</div>
+            <div class="small text-secondary">Recent Sanity backup events recorded in the local workflow history.</div>
         </div>
         <div class="card-body p-0">
             @if (Snapshot.RecentlyPublished.Count == 0)
             {
                 <div class="p-4">
-                    <p class="text-secondary mb-0">No Sanity publish events have been recorded yet.</p>
+                    <p class="text-secondary mb-0">No Sanity backup events have been recorded yet.</p>
                 </div>
             }
             else
@@ -166,7 +167,7 @@ else
                         <thead>
                             <tr>
                                 <th>Draft</th>
-                                <th>Published</th>
+                                <th>Backed Up</th>
                                 <th>State</th>
                                 <th class="text-end">Action</th>
                             </tr>
@@ -197,7 +198,7 @@ else
         <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
             <div>
                 <div class="fw-semibold">Draft Inspector</div>
-                <div class="small text-secondary">Verify the draft payload before publishing or jump back into the full editorial workspace.</div>
+                <div class="small text-secondary">Verify the draft payload before creating an external backup or jump back into the full editorial workspace.</div>
             </div>
             @if (SelectedDraft is not null)
             {
@@ -209,7 +210,7 @@ else
         <div class="card-body">
             @if (SelectedDraft is null)
             {
-                <p class="text-secondary mb-0">Select a draft from the queue to inspect the title, body, hero image, and affiliate placements before publishing.</p>
+                <p class="text-secondary mb-0">Select a draft from the queue to inspect the title, body, hero image, and affiliate placements before backing it up.</p>
             }
             else
             {
@@ -243,12 +244,12 @@ else
 
                 <div class="row g-4">
                     <div class="col-xl-7">
-                        <label class="form-label fw-semibold small">Publish Notes</label>
-                        <textarea class="form-control" rows="3" @bind="PublishNotes" placeholder="Optional notes to record with this publish event."></textarea>
+                        <label class="form-label fw-semibold small">Backup Notes</label>
+                        <textarea class="form-control" rows="3" @bind="PublishNotes" placeholder="Optional notes to record with this backup event."></textarea>
 
                         <div class="d-flex flex-wrap gap-2 mt-3">
-                            <button class="btn btn-primary" @onclick="() => PublishDraftAsync(SelectedDraft.DraftId)" disabled="@IsBusy || !Snapshot.Configuration.IsReady">
-                                <i class="bi bi-send-check me-1"></i>Publish To Sanity
+                            <button class="btn btn-primary" @onclick="() => BackupDraftAsync(SelectedDraft.DraftId)" disabled="@IsBusy || !Snapshot.Configuration.IsReady">
+                                <i class="bi bi-cloud-upload me-1"></i>Back Up To Sanity
                             </button>
                             <button class="btn btn-outline-secondary" @onclick="OpenContentStudioDraft">Open In Content Studio</button>
                         </div>
@@ -309,7 +310,7 @@ else
         try
         {
             Snapshot = await WorkspaceService.GetSnapshotAsync();
-            StatusMessage = $"Loaded Sanity publishing workspace with {Snapshot.PublicationQueue.Count} queued draft{(Snapshot.PublicationQueue.Count == 1 ? string.Empty : "s")}.";
+            StatusMessage = $"Loaded Sanity backup workspace with {Snapshot.PublicationQueue.Count} queued draft{(Snapshot.PublicationQueue.Count == 1 ? string.Empty : "s")}.";
 
             if (SelectedDraft is not null)
             {
@@ -328,8 +329,8 @@ else
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Unable to load Sanity publishing workspace.");
-            ErrorMessage = $"Unable to load Sanity publishing workspace. {ex.Message}";
+            Logger.LogError(ex, "Unable to load Sanity backup workspace.");
+            ErrorMessage = $"Unable to load Sanity backup workspace. {ex.Message}";
         }
         finally
         {
@@ -364,21 +365,21 @@ else
 
             if (!preserveMessages)
             {
-                StatusMessage = $"Loaded draft '{SelectedDraft.Title}' for Sanity review.";
+                StatusMessage = $"Loaded draft '{SelectedDraft.Title}' for Sanity backup review.";
             }
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Unable to load draft {DraftId} for Sanity publishing.", draftId);
+            Logger.LogError(ex, "Unable to load draft {DraftId} for Sanity backup.", draftId);
             ErrorMessage = $"Unable to load draft details. {ex.Message}";
         }
     }
 
-    private async Task PublishDraftAsync(Guid draftId)
+    private async Task BackupDraftAsync(Guid draftId)
     {
         if (Snapshot is null || !Snapshot.Configuration.IsReady)
         {
-            ErrorMessage = "Sanity configuration is incomplete. Set project, dataset, token, and document type before publishing.";
+            ErrorMessage = "Sanity configuration is incomplete. Set project, dataset, token, and document type before creating backups.";
             return;
         }
 
@@ -388,28 +389,28 @@ else
 
         try
         {
-            var published = await ContentStudioService.PublishDraftToSanityAsync(new DraftPublishRequest
+            var published = await ContentStudioService.BackupDraftToSanityAsync(new DraftPublishRequest
             {
                 DraftId = draftId,
                 Notes = PublishNotes,
-                PerformedBy = "sanity-publisher-ui"
+                PerformedBy = "sanity-backup-ui"
             });
 
             if (published is null)
             {
-                ErrorMessage = "The selected draft could not be published because it no longer exists.";
+                ErrorMessage = "The selected draft could not be backed up because it no longer exists.";
                 return;
             }
 
             SelectedDraft = published;
             PublishNotes = string.Empty;
             await ReloadAsync();
-            StatusMessage = $"Published '{published.Title}' to Sanity and refreshed the publication queue.";
+            StatusMessage = $"Backed up '{published.Title}' to Sanity and refreshed the backup queue.";
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Unable to publish draft {DraftId} to Sanity.", draftId);
-            ErrorMessage = $"Unable to publish draft to Sanity. {ex.Message}";
+            Logger.LogError(ex, "Unable to back up draft {DraftId} to Sanity.", draftId);
+            ErrorMessage = $"Unable to back up draft to Sanity. {ex.Message}";
         }
         finally
         {
@@ -449,8 +450,8 @@ else
         return publishState switch
         {
             "Ready" => "text-bg-success",
-            "Needs Republish" => "text-bg-warning",
-            "Published" => "text-bg-primary",
+            "Needs Backup" => "text-bg-warning",
+            "Backed Up" => "text-bg-primary",
             "Blocked" => "text-bg-danger",
             _ => "text-bg-secondary"
         };

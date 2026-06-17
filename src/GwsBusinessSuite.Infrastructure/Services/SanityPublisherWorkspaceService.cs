@@ -52,7 +52,7 @@ public sealed class SanityPublisherWorkspaceService(
                 var lastPublishedEvent = workflowEvents
                     .Where(evt =>
                         evt.SeoArticleDraftId == draft.Id &&
-                        string.Equals(evt.EventType, SeoArticleWorkflowEventTypes.PublishedToSanity, StringComparison.OrdinalIgnoreCase))
+                        IsSanityBackupEvent(evt.EventType))
                     .OrderByDescending(evt => evt.CreatedAt)
                     .FirstOrDefault();
 
@@ -64,15 +64,15 @@ public sealed class SanityPublisherWorkspaceService(
                 var publishState = !isApproved
                     ? "Blocked"
                     : needsRepublish
-                        ? hasBeenPublished ? "Needs Republish" : "Ready"
-                        : "Published";
+                        ? hasBeenPublished ? "Needs Backup" : "Ready"
+                        : "Backed Up";
 
                 var publishDetail = publishState switch
                 {
-                    "Blocked" => "Approve the draft in Content Studio before sending it to Sanity.",
-                    "Needs Republish" => "Draft changed after the last publish event and should be sent again.",
-                    "Ready" => "Approved and waiting for the first publish event.",
-                    _ => "Latest approved revision has already been published."
+                    "Blocked" => "Approve the draft in Content Studio before sending a backup copy to Sanity.",
+                    "Needs Backup" => "Draft changed after the last Sanity backup and should be backed up again.",
+                    "Ready" => "Approved and waiting for the first Sanity backup.",
+                    _ => "Latest approved revision already has a matching Sanity backup."
                 };
 
                 return new SanityPublishingDraftSummary
@@ -102,7 +102,7 @@ public sealed class SanityPublisherWorkspaceService(
             PublicationQueue = summaries
                 .Where(summary =>
                     string.Equals(summary.PublishState, "Ready", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(summary.PublishState, "Needs Republish", StringComparison.OrdinalIgnoreCase))
+                    string.Equals(summary.PublishState, "Needs Backup", StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(summary => summary.ApprovedAt ?? summary.UpdatedAt ?? summary.CreatedAt)
                 .ToList(),
             RecentlyPublished = summaries
@@ -121,8 +121,8 @@ public sealed class SanityPublisherWorkspaceService(
         var isReady = hasProjectId && hasDataset && hasToken && !string.IsNullOrWhiteSpace(options.DocumentType);
 
         var message = isReady
-            ? "Sanity publishing is configured and ready for approved drafts."
-            : "Set Sanity project ID, dataset, token, and document type in configuration before publishing.";
+            ? "Sanity backup is configured and ready when you want an external copy of an approved draft."
+            : "Set Sanity project ID, dataset, token, and document type in configuration before creating backups.";
 
         return new SanityConfigurationStatus
         {
@@ -134,5 +134,11 @@ public sealed class SanityPublisherWorkspaceService(
             AutoPublishOnApproval = options.AutoPublishOnApproval,
             Message = message
         };
+    }
+
+    private static bool IsSanityBackupEvent(string eventType)
+    {
+        return string.Equals(eventType, SeoArticleWorkflowEventTypes.BackedUpToSanity, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(eventType, SeoArticleWorkflowEventTypes.PublishedToSanity, StringComparison.OrdinalIgnoreCase);
     }
 }

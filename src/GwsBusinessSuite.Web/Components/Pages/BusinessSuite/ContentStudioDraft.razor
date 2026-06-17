@@ -13,7 +13,7 @@
 <div class="page-header d-flex align-items-start justify-content-between gap-3">
     <div>
         <h1><i class="bi bi-file-earmark-text me-2 text-primary"></i>Draft Workspace</h1>
-        <p>Review, revise, approve, and manage affiliate placements for this draft.</p>
+        <p>Review, revise, approve, publish live, and keep an optional Sanity backup for this draft.</p>
     </div>
     <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2" @onclick="BackToStudio">
         <i class="bi bi-arrow-left"></i>
@@ -155,10 +155,15 @@ else
                             <i class="bi bi-check-circle-fill"></i>
                             <span>Approve Draft</span>
                         </button>
-                        <button class="btn btn-primary d-inline-flex align-items-center gap-2" @onclick="PublishToSanity"
+                        <button class="btn btn-primary d-inline-flex align-items-center gap-2" @onclick="PublishLive"
+                                disabled="@IsBusy || !IsApproved">
+                            <i class="bi bi-send-check-fill"></i>
+                            <span>Publish Live</span>
+                        </button>
+                        <button class="btn btn-outline-primary d-inline-flex align-items-center gap-2" @onclick="BackupToSanity"
                                 disabled="@IsBusy || !IsApproved">
                             <i class="bi bi-cloud-upload"></i>
-                            <span>Publish to Sanity</span>
+                            <span>Back Up to Sanity</span>
                         </button>
                         <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2" @onclick="RequestRevision"
                                 disabled="@IsBusy">
@@ -248,7 +253,7 @@ else
                             {
                                 <li class="list-group-item">
                                     <div class="d-flex flex-wrap justify-content-between gap-2">
-                                        <span class="fw-semibold">@workflow.EventType</span>
+                                        <span class="fw-semibold">@FormatWorkflowEventLabel(workflow.EventType)</span>
                                         <span class="text-secondary small">@FormatDate(workflow.OccurredAt)</span>
                                     </div>
                                     <div class="small text-secondary">By @workflow.PerformedBy</div>
@@ -350,7 +355,7 @@ else
                 PerformedBy = "content-studio-ui"
             }),
             "Generating a new hero image from your prompt and available Ollama image models.",
-            "Hero image regenerated without changing article text.");
+            _ => "Hero image regenerated without changing article text.");
     }
 
     private async Task ApproveDraft()
@@ -368,10 +373,10 @@ else
                 PerformedBy = "content-studio-ui"
             }),
             "Saving approval decision and updating workflow history.",
-            "Draft approved. Publish to Sanity when ready.");
+            _ => "Draft approved. Publish live when ready, then back it up to Sanity if you want an external copy.");
     }
 
-    private async Task PublishToSanity()
+    private async Task PublishLive()
     {
         if (CurrentDraft is null)
         {
@@ -379,14 +384,32 @@ else
         }
 
         await RunWorkflowAction(
-            async () => await ContentStudioService.PublishDraftToSanityAsync(new DraftPublishRequest
+            async () => await ContentStudioService.PublishDraftToSiteAsync(new DraftPublishRequest
             {
                 DraftId = CurrentDraft.DraftId,
                 Notes = RevisionNotes,
                 PerformedBy = "content-studio-ui"
             }),
-            "Publishing the approved article to Sanity.",
-            "Draft published to Sanity successfully.");
+            "Publishing the approved article live to the site blog.",
+            updated => $"Draft published live and can be shared at /blog/{updated.Slug}.");
+    }
+
+    private async Task BackupToSanity()
+    {
+        if (CurrentDraft is null)
+        {
+            return;
+        }
+
+        await RunWorkflowAction(
+            async () => await ContentStudioService.BackupDraftToSanityAsync(new DraftPublishRequest
+            {
+                DraftId = CurrentDraft.DraftId,
+                Notes = RevisionNotes,
+                PerformedBy = "content-studio-ui"
+            }),
+            "Backing up the approved article to Sanity.",
+            updated => $"Draft backed up to Sanity for article slug '{updated.Slug}'.");
     }
 
     private async Task RequestRevision()
@@ -410,7 +433,7 @@ else
                 PerformedBy = "content-studio-ui"
             }),
             "Requesting a revised article draft from Ollama with your revision notes.",
-            "Revision requested and persisted.");
+            _ => "Revision requested and persisted.");
     }
 
     private async Task RejectDraft()
@@ -428,13 +451,13 @@ else
                 PerformedBy = "content-studio-ui"
             }),
             "Saving rejection decision and updating workflow history.",
-            "Draft rejected and persisted.");
+            _ => "Draft rejected and persisted.");
     }
 
     private async Task RunWorkflowAction(
         Func<Task<ArticleGenerationResult?>> action,
         string busyMessage,
-        string successMessage)
+        Func<ArticleGenerationResult, string> successMessageFactory)
     {
         ErrorMessage = string.Empty;
         BeginBusy(busyMessage);
@@ -452,7 +475,7 @@ else
             IsApproved = string.Equals(CurrentDraft.Status, "Approved", StringComparison.OrdinalIgnoreCase);
             RevisionNotes = CurrentDraft.RequestedModifications;
             HeroImagePrompt = CurrentDraft.HeroImage.Prompt;
-            StatusMessage = successMessage;
+            StatusMessage = successMessageFactory(CurrentDraft);
         }
         catch (Exception ex)
         {
@@ -526,6 +549,19 @@ else
         BusyTickerCts.Cancel();
         BusyTickerCts.Dispose();
         BusyTickerCts = null;
+    }
+
+    private static string FormatWorkflowEventLabel(string eventType)
+    {
+        return eventType switch
+        {
+            "PublishedToSite" => "Published Live",
+            "BackedUpToSanity" => "Backed Up To Sanity",
+            "PublishedToSanity" => "Backed Up To Sanity",
+            "HeroImageRegenerated" => "Hero Image Regenerated",
+            "PendingReview" => "Pending Review",
+            _ => eventType
+        };
     }
 
     private async Task TrackAffiliateClick(ArticleAffiliatePlacementView placement)

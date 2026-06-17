@@ -82,7 +82,7 @@ public sealed class SanityPublisher(HttpClient http, IOptions<SanityOptions> opt
 
         return new SanityPublishResult(
             IsSuccess: true,
-            Message: $"Published '{draft.Title}' to Sanity.",
+            Message: $"Backed up '{draft.Title}' to Sanity.",
             DocumentId: documentId,
             Revision: ExtractRevision(body),
             DocumentUrl: BuildDocumentUrl(sanityOptions, documentId));

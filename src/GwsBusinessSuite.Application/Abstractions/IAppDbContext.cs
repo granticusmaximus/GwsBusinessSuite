@@ -17,5 +17,6 @@ public interface IAppDbContext
     DbSet<SeoArticleAffiliateInteraction> SeoArticleAffiliateInteractions { get; }
     DbSet<SeoArticleWorkflowEvent> SeoArticleWorkflowEvents { get; }
     DbSet<CjConnectorSettings> CjConnectorSettings { get; }
+    DbSet<Article> Articles { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

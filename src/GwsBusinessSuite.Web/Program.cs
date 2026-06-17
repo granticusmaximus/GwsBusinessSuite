@@ -3,6 +3,7 @@ using GwsBusinessSuite.Application.Blog;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure;
+using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Web.Components;
 using Microsoft.AspNetCore.Authentication;
@@ -260,68 +261,24 @@ app.MapPost("/admin/api/migrate-from-sanity", async (ISanityImportService import
 // Admin: publish an approved SeoArticleDraft to the live blog as an Article.
 app.MapPost("/admin/api/articles/publish-draft/{draftId:guid}", async (
     Guid draftId,
-    IDbContextFactory<ApplicationDbContext> dbFactory) =>
+    IContentStudioService contentStudioService) =>
 {
-    await using var db = await dbFactory.CreateDbContextAsync();
-    var draft = await db.SeoArticleDrafts.FindAsync(draftId);
-    if (draft is null) return Results.NotFound();
-
-    var heroImageUrl = draft.HeroImageDataUri != "" ? $"/og-image/{draft.Slug}" : null;
-
-    var existing = await db.Articles.FirstOrDefaultAsync(a => a.Slug == draft.Slug);
-    if (existing is null)
+    try
     {
-        db.Articles.Add(new Article
+        var published = await contentStudioService.PublishDraftToSiteAsync(new DraftPublishRequest
         {
-            Slug                 = draft.Slug,
-            Title                = draft.Title,
-            Topic                = draft.Topic,
-            BodyMarkdown         = draft.ArticleMarkdown,
-            MetaDescription      = draft.MetaDescription,
-            PrimaryKeyword       = draft.PrimaryKeyword,
-            SecondaryKeywords    = draft.SecondaryKeywords,
-            Author               = "Grant Watson",
-            EstimatedReadingTime = draft.EstimatedReadingTime,
-            HeroImageUrl         = heroImageUrl,
-            HeroImageDataUri     = draft.HeroImageDataUri,
-            HeroImageAltText     = draft.HeroImageAltText,
-            HeroImageCaption     = draft.HeroImageCaption,
-            Status               = ArticleStatuses.Published,
-            Source               = ArticleSource.OllamaGenerated,
-            PublishedAt          = DateTimeOffset.UtcNow,
-            SourceDraftId        = draft.Id,
-            CreatedBy            = "content-studio"
+            DraftId = draftId,
+            PerformedBy = "content-studio-api"
         });
-    }
-    else
-    {
-        existing.Title                = draft.Title;
-        existing.Topic                = draft.Topic;
-        existing.BodyMarkdown         = draft.ArticleMarkdown;
-        existing.MetaDescription      = draft.MetaDescription;
-        existing.PrimaryKeyword       = draft.PrimaryKeyword;
-        existing.SecondaryKeywords    = draft.SecondaryKeywords;
-        existing.EstimatedReadingTime = draft.EstimatedReadingTime;
-        existing.HeroImageUrl         = heroImageUrl;
-        existing.HeroImageDataUri     = draft.HeroImageDataUri;
-        existing.HeroImageAltText     = draft.HeroImageAltText;
-        existing.HeroImageCaption     = draft.HeroImageCaption;
-        existing.Status               = ArticleStatuses.Published;
-        existing.PublishedAt        ??= DateTimeOffset.UtcNow;
-        existing.UpdatedAt            = DateTimeOffset.UtcNow;
-        existing.UpdatedBy            = "content-studio";
-    }
 
-    db.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent
+        return published is null
+            ? Results.NotFound()
+            : Results.Ok(new { slug = published.Slug });
+    }
+    catch (InvalidOperationException ex)
     {
-        SeoArticleDraftId = draft.Id,
-        EventType         = SeoArticleWorkflowEventTypes.PublishedToSite,
-        Notes             = "Article published to site blog.",
-        CreatedBy         = "content-studio"
-    });
-
-    await db.SaveChangesAsync();
-    return Results.Ok(new { slug = draft.Slug });
+        return Results.BadRequest(new { error = ex.Message });
+    }
 }).RequireAuthorization();
 
 app.MapStaticAssets().AllowAnonymous();

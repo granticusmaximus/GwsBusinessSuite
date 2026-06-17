@@ -11,7 +11,6 @@ public sealed class ContentStudioService(
     IOllamaService ollama,
     IAffiliateOfferScoringService offerScoringService,
     IOptions<ContentStudioOptions> options,
-    IOptions<SanityOptions> sanityOptions,
     ISanityPublisher sanityPublisher,
     ILogger<ContentStudioService> logger) : IContentStudioService
 {
@@ -337,24 +336,100 @@ public sealed class ContentStudioService(
         DraftDecisionRequest request,
         CancellationToken cancellationToken = default)
     {
-        var updated = await ApplyDecisionAsync(request, SeoArticleDraftStatuses.Approved, SeoArticleWorkflowEventTypes.Approved, cancellationToken);
-
-        if (updated is not null && sanityOptions.Value.AutoPublishOnApproval)
-        {
-            var published = await PublishDraftToSanityAsync(new DraftPublishRequest
-            {
-                DraftId = request.DraftId,
-                Notes = request.Notes,
-                PerformedBy = request.PerformedBy
-            }, cancellationToken);
-
-            return published ?? updated;
-        }
-
-        return updated;
+        return await ApplyDecisionAsync(request, SeoArticleDraftStatuses.Approved, SeoArticleWorkflowEventTypes.Approved, cancellationToken);
     }
 
-    public async Task<ArticleGenerationResult?> PublishDraftToSanityAsync(
+    public async Task<ArticleGenerationResult?> PublishDraftToSiteAsync(
+        DraftPublishRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var draft = await db.SeoArticleDrafts
+            .FirstOrDefaultAsync(x => x.Id == request.DraftId, cancellationToken);
+
+        if (draft is null)
+        {
+            return null;
+        }
+
+        if (!string.Equals(draft.Status, SeoArticleDraftStatuses.Approved, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Only approved drafts can be published live to the site.");
+        }
+
+        var heroImageUrl = string.IsNullOrWhiteSpace(draft.HeroImageDataUri)
+            ? null
+            : $"/og-image/{draft.Slug}";
+
+        var existing = await db.Articles
+            .FirstOrDefaultAsync(article => article.Slug == draft.Slug, cancellationToken);
+
+        if (existing is null)
+        {
+            db.Articles.Add(new Article
+            {
+                Slug = draft.Slug,
+                Title = draft.Title,
+                Topic = draft.Topic,
+                BodyMarkdown = draft.ArticleMarkdown,
+                MetaDescription = draft.MetaDescription,
+                PrimaryKeyword = draft.PrimaryKeyword,
+                SecondaryKeywords = draft.SecondaryKeywords,
+                Author = "Grant Watson",
+                EstimatedReadingTime = draft.EstimatedReadingTime,
+                HeroImageUrl = heroImageUrl,
+                HeroImageDataUri = draft.HeroImageDataUri,
+                HeroImageAltText = draft.HeroImageAltText,
+                HeroImageCaption = draft.HeroImageCaption,
+                Status = ArticleStatuses.Published,
+                Source = ArticleSource.OllamaGenerated,
+                PublishedAt = DateTimeOffset.UtcNow,
+                SourceDraftId = draft.Id,
+                CreatedBy = request.PerformedBy
+            });
+        }
+        else
+        {
+            existing.Title = draft.Title;
+            existing.Topic = draft.Topic;
+            existing.BodyMarkdown = draft.ArticleMarkdown;
+            existing.MetaDescription = draft.MetaDescription;
+            existing.PrimaryKeyword = draft.PrimaryKeyword;
+            existing.SecondaryKeywords = draft.SecondaryKeywords;
+            existing.Author = "Grant Watson";
+            existing.EstimatedReadingTime = draft.EstimatedReadingTime;
+            existing.HeroImageUrl = heroImageUrl;
+            existing.HeroImageDataUri = draft.HeroImageDataUri;
+            existing.HeroImageAltText = draft.HeroImageAltText;
+            existing.HeroImageCaption = draft.HeroImageCaption;
+            existing.Status = ArticleStatuses.Published;
+            existing.Source = ArticleSource.OllamaGenerated;
+            existing.SourceDraftId = draft.Id;
+            existing.PublishedAt ??= DateTimeOffset.UtcNow;
+            existing.UpdatedAt = DateTimeOffset.UtcNow;
+            existing.UpdatedBy = request.PerformedBy;
+        }
+
+        db.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent
+        {
+            SeoArticleDraftId = draft.Id,
+            EventType = SeoArticleWorkflowEventTypes.PublishedToSite,
+            Notes = string.IsNullOrWhiteSpace(request.Notes)
+                ? $"Published '{draft.Title}' live to the site blog."
+                : request.Notes.Trim(),
+            CreatedBy = request.PerformedBy
+        });
+
+        await db.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation(
+            "Published Content Studio draft {DraftId} live to the site blog at slug {Slug}.",
+            draft.Id,
+            draft.Slug);
+
+        return await GetDraftAsync(draft.Id, cancellationToken);
+    }
+
+    public async Task<ArticleGenerationResult?> BackupDraftToSanityAsync(
         DraftPublishRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -370,7 +445,7 @@ public sealed class ContentStudioService(
 
         if (!string.Equals(draft.Status, SeoArticleDraftStatuses.Approved, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("Only approved drafts can be published to Sanity.");
+            throw new InvalidOperationException("Only approved drafts can be backed up to Sanity.");
         }
 
         var draftView = MapDraft(draft, authorName: GetAuthorName(), siteBaseUrl: GetSiteBaseUrl());
@@ -379,27 +454,21 @@ public sealed class ContentStudioService(
         db.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent
         {
             SeoArticleDraftId = draft.Id,
-            EventType = SeoArticleWorkflowEventTypes.PublishedToSanity,
+            EventType = SeoArticleWorkflowEventTypes.BackedUpToSanity,
             Notes = string.IsNullOrWhiteSpace(request.Notes)
                 ? publishResult.Message
                 : request.Notes.Trim(),
             CreatedBy = request.PerformedBy
         });
 
-        draft.UpdatedAt = DateTimeOffset.UtcNow;
-        draft.UpdatedBy = request.PerformedBy;
-
         await db.SaveChangesAsync(cancellationToken);
 
         logger.LogInformation(
-            "Published Content Studio draft {DraftId} to Sanity document {DocumentId}.",
+            "Backed up Content Studio draft {DraftId} to Sanity document {DocumentId}.",
             draft.Id,
             publishResult.DocumentId);
 
-        var publishedSnapshot = await LoadDraftSnapshotAsync(draft.Id, cancellationToken);
-        return publishedSnapshot is null
-            ? MapDraft(draft, authorName: GetAuthorName(), siteBaseUrl: GetSiteBaseUrl())
-            : MapDraft(publishedSnapshot, authorName: GetAuthorName(), siteBaseUrl: GetSiteBaseUrl());
+        return await GetDraftAsync(draft.Id, cancellationToken);
     }
 
     public async Task<ArticleGenerationResult?> RejectDraftAsync(

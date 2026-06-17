@@ -16,6 +16,7 @@ public static class SeoArticleWorkflowEventTypes
     public const string Revised = "Revised";
     public const string Approved = "Approved";
     public const string PublishedToSanity = "PublishedToSanity";
+    public const string BackedUpToSanity = "BackedUpToSanity";
     public const string PublishedToSite = "PublishedToSite";
     public const string Rejected = "Rejected";
     public const string HeroImageRegenerated = "HeroImageRegenerated";

@@ -30,13 +30,13 @@ public sealed class SanityPublisherWorkspaceServiceTests
             CreatedBy = "tests"
         };
 
-        var needsRepublishDraft = new SeoArticleDraft
+        var needsBackupDraft = new SeoArticleDraft
         {
-            Topic = "Needs Republish",
+            Topic = "Needs Backup",
             TargetAudience = "Developers",
             Status = SeoArticleDraftStatuses.Approved,
-            Title = "Needs Republish",
-            Slug = "needs-republish",
+            Title = "Needs Backup",
+            Slug = "needs-backup",
             CreatedAt = now.AddDays(-5),
             UpdatedAt = now.AddHours(-2),
             ApprovedAt = now.AddDays(-4),
@@ -67,7 +67,7 @@ public sealed class SanityPublisherWorkspaceServiceTests
             CreatedBy = "tests"
         };
 
-        db.SeoArticleDrafts.AddRange(readyDraft, needsRepublishDraft, publishedDraft, blockedDraft);
+        db.SeoArticleDrafts.AddRange(readyDraft, needsBackupDraft, publishedDraft, blockedDraft);
         await db.SaveChangesAsync();
 
         db.SeoArticleAffiliatePlacements.Add(new SeoArticleAffiliatePlacement
@@ -85,8 +85,8 @@ public sealed class SanityPublisherWorkspaceServiceTests
         db.SeoArticleWorkflowEvents.AddRange(
             new SeoArticleWorkflowEvent
             {
-                SeoArticleDraftId = needsRepublishDraft.Id,
-                EventType = SeoArticleWorkflowEventTypes.PublishedToSanity,
+                SeoArticleDraftId = needsBackupDraft.Id,
+                EventType = SeoArticleWorkflowEventTypes.BackedUpToSanity,
                 Notes = "First publish",
                 CreatedAt = now.AddDays(-2),
                 CreatedBy = "tests"
@@ -118,9 +118,9 @@ public sealed class SanityPublisherWorkspaceServiceTests
         snapshot.Configuration.IsReady.Should().BeTrue();
         snapshot.PublicationQueue.Should().HaveCount(2);
         snapshot.PublicationQueue.Should().ContainSingle(item => item.Title == "Ready Draft" && item.PublishState == "Ready");
-        snapshot.PublicationQueue.Should().ContainSingle(item => item.Title == "Needs Republish" && item.PublishState == "Needs Republish");
+        snapshot.PublicationQueue.Should().ContainSingle(item => item.Title == "Needs Backup" && item.PublishState == "Needs Backup");
         snapshot.RecentlyPublished.Should().HaveCount(2);
-        snapshot.RecentlyPublished.Should().ContainSingle(item => item.Title == "Published" && item.PublishState == "Published");
+        snapshot.RecentlyPublished.Should().ContainSingle(item => item.Title == "Published" && item.PublishState == "Backed Up");
         snapshot.PublicationQueue.Should().ContainSingle(item => item.Title == "Ready Draft" && item.AffiliatePlacementCount == 1);
     }
 
