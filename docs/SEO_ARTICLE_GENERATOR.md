@@ -30,3 +30,9 @@ Do not expose Ollama directly to the public internet. If the dashboard runs on a
 ## Editorial Standard
 
 The agent prompt instructs the model to behave like a senior technical writer with journalism and computer science expertise, specializing in C#, ASP.NET Core, Blazor, and enterprise software.
+
+## Article Image Branding
+
+All future AI-generated article images should include the official `grantwatson.dev` favicon or logo mark as a subtle branded element.
+
+See `docs/ARTICLE_IMAGE_BRANDING.md` for the exact rule, asset paths, and reusable Claude prompt.

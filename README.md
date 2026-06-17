@@ -61,3 +61,4 @@ npm run dev
 - `docs/ROADMAP.md`
 - `docs/ADMIN_BRIDGE.md`
 - `docs/SEO_ARTICLE_GENERATOR.md`
+- `docs/ARTICLE_IMAGE_BRANDING.md`
