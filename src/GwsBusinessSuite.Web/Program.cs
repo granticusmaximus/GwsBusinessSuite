@@ -9,6 +9,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.RegularExpressions;
 
+
 var builder = WebApplication.CreateBuilder(args);
 var configuredPathBase = builder.Configuration["Hosting:PathBase"];
 
@@ -57,99 +58,7 @@ if (!app.Environment.IsDevelopment())
 app.UseStatusCodePagesWithReExecute("/admin/not-found", createScopeForStatusCodePages: true);
 // HTTP-only in Docker — remove HTTPS redirect so the container runs cleanly on port 8080
 
-// Inject Open Graph / Twitter Card meta tags for /blog/{slug} requests.
-// Crawlers (social platforms, search engines) hit this before JS runs, so we
-// bake the tags into the HTML server-side and let React hydrate normally.
-app.Use(async (context, next) =>
-{
-    var pathValue = context.Request.Path.Value ?? "";
-    var blogSlugMatch = System.Text.RegularExpressions.Regex.Match(
-        pathValue, @"^/blog/([^/]+)/?$");
-
-    if (!blogSlugMatch.Success)
-    {
-        await next();
-        return;
-    }
-
-    var slug = blogSlugMatch.Groups[1].Value;
-    var dbFactory = context.RequestServices
-        .GetRequiredService<IDbContextFactory<ApplicationDbContext>>();
-    await using var db = await dbFactory.CreateDbContextAsync();
-
-    var article = await db.SeoArticleDrafts
-        .Where(a => a.Slug == slug)
-        .Select(a => new
-        {
-            a.Title, a.Topic, a.Slug, a.MetaDescription,
-            a.PrimaryKeyword, a.SecondaryKeywords,
-            a.ArticleMarkdown, a.HeroImageDataUri,
-            a.HeroImageAltText, a.HeroImageCaption,
-            a.EstimatedReadingTime, a.ApprovedAt, a.CreatedAt
-        })
-        .FirstOrDefaultAsync();
-
-    var indexPath = Path.Combine(app.Environment.WebRootPath, "index.html");
-
-    if (article is null || !File.Exists(indexPath))
-    {
-        await next();
-        return;
-    }
-
-    var html = await File.ReadAllTextAsync(indexPath);
-
-    var title = !string.IsNullOrWhiteSpace(article.Title) ? article.Title : article.Topic;
-    var description = !string.IsNullOrWhiteSpace(article.MetaDescription)
-        ? article.MetaDescription
-        : StripMarkdownExcerpt(article.ArticleMarkdown, 160);
-    var baseUrl = $"{context.Request.Scheme}://{context.Request.Host}";
-    var canonicalUrl = $"{baseUrl}/blog/{article.Slug}";
-    var hasImage = !string.IsNullOrWhiteSpace(article.HeroImageDataUri);
-    var imageUrl = hasImage ? $"{baseUrl}/og-image/{article.Slug}" : null;
-    var imageAlt = !string.IsNullOrWhiteSpace(article.HeroImageAltText)
-        ? article.HeroImageAltText : title;
-    var keywords = string.Join(", ",
-        new[] { article.PrimaryKeyword, article.SecondaryKeywords }
-        .Where(k => !string.IsNullOrWhiteSpace(k)));
-    var publishedTime = (article.ApprovedAt ?? article.CreatedAt).ToString("o");
-
-    var ogBlock = BuildOgMetaBlock(
-        title, description, canonicalUrl, imageUrl, imageAlt,
-        keywords, publishedTime);
-
-    // Swap <title> and inject OG block before </head>
-    html = System.Text.RegularExpressions.Regex.Replace(
-        html, @"<title>[^<]*</title>",
-        $"<title>{HtmlEncode(title)}</title>");
-    html = html.Replace("</head>", $"{ogBlock}\n</head>",
-        StringComparison.OrdinalIgnoreCase);
-
-    context.Response.ContentType = "text/html; charset=utf-8";
-    await context.Response.WriteAsync(html);
-});
-
-// Rewrite public (non-admin) HTML navigation requests to React's index.html.
-// Static file requests (any path with a file extension) pass through unchanged.
-app.Use(async (context, next) =>
-{
-    var path = context.Request.Path;
-    var isAdmin = path.StartsWithSegments("/admin");
-    var isApi = path.StartsWithSegments("/auth")
-             || path.StartsWithSegments("/api")
-             || path.StartsWithSegments("/og-image")
-             || path.StartsWithSegments("/cms-preview")
-             || path.StartsWithSegments("/_blazor")
-             || path.StartsWithSegments("/_framework");
-    var isFile = path.Value?.Contains('.') == true;
-
-    if (!isAdmin && !isApi && !isFile)
-        context.Request.Path = "/index.html";
-
-    await next();
-});
-
-// Serve React static files (wwwroot/index.html, wwwroot/assets/*, etc.) before auth checks.
+// Serve Blazor static assets before auth checks.
 app.UseStaticFiles();
 
 if (!string.IsNullOrWhiteSpace(normalizedPathBase))
@@ -337,83 +246,10 @@ app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
-// Safety net: serve React index.html for any route that Blazor didn't handle.
-app.MapFallbackToFile("index.html").AllowAnonymous();
+// Root redirect to admin for anyone who hits the backend URL directly.
+app.MapGet("/", () => Results.Redirect("/admin")).AllowAnonymous();
 
 app.Run();
-
-static string StripMarkdownExcerpt(string markdown, int maxLength)
-{
-    if (string.IsNullOrWhiteSpace(markdown)) return string.Empty;
-
-    var candidate = markdown
-        .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-        .Select(l => l.Trim())
-        .FirstOrDefault(l => !l.StartsWith('#')
-                          && !l.StartsWith("```")
-                          && !l.StartsWith(">")
-                          && l.Length > 20);
-
-    if (string.IsNullOrWhiteSpace(candidate)) return string.Empty;
-
-    // Strip inline markdown: bold, italic, code, links
-    candidate = System.Text.RegularExpressions.Regex.Replace(candidate, @"[*_`~]", "");
-    candidate = System.Text.RegularExpressions.Regex.Replace(candidate, @"\[([^\]]+)\]\([^)]+\)", "$1");
-
-    return candidate.Length > maxLength
-        ? candidate[..maxLength].TrimEnd() + "…"
-        : candidate;
-}
-
-static string HtmlEncode(string text) =>
-    text.Replace("&", "&amp;")
-        .Replace("<", "&lt;")
-        .Replace(">", "&gt;")
-        .Replace("\"", "&quot;");
-
-static string BuildOgMetaBlock(
-    string title, string description, string canonicalUrl,
-    string? imageUrl, string imageAlt, string keywords, string publishedTime)
-{
-    var sb = new StringBuilder();
-
-    sb.AppendLine($"  <link rel=\"canonical\" href=\"{canonicalUrl}\" />");
-
-    // Standard SEO
-    if (!string.IsNullOrWhiteSpace(description))
-        sb.AppendLine($"  <meta name=\"description\" content=\"{HtmlEncode(description)}\" />");
-    if (!string.IsNullOrWhiteSpace(keywords))
-        sb.AppendLine($"  <meta name=\"keywords\" content=\"{HtmlEncode(keywords)}\" />");
-    sb.AppendLine("  <meta name=\"author\" content=\"Grant Watson\" />");
-
-    // Open Graph
-    sb.AppendLine("  <meta property=\"og:type\" content=\"article\" />");
-    sb.AppendLine($"  <meta property=\"og:site_name\" content=\"Grant Watson\" />");
-    sb.AppendLine($"  <meta property=\"og:url\" content=\"{canonicalUrl}\" />");
-    sb.AppendLine($"  <meta property=\"og:title\" content=\"{HtmlEncode(title)}\" />");
-    if (!string.IsNullOrWhiteSpace(description))
-        sb.AppendLine($"  <meta property=\"og:description\" content=\"{HtmlEncode(description)}\" />");
-    if (imageUrl is not null)
-    {
-        sb.AppendLine($"  <meta property=\"og:image\" content=\"{imageUrl}\" />");
-        sb.AppendLine($"  <meta property=\"og:image:alt\" content=\"{HtmlEncode(imageAlt)}\" />");
-    }
-    sb.AppendLine($"  <meta property=\"article:published_time\" content=\"{publishedTime}\" />");
-    sb.AppendLine("  <meta property=\"article:author\" content=\"Grant Watson\" />");
-
-    // Twitter / X
-    sb.AppendLine($"  <meta name=\"twitter:card\" content=\"{(imageUrl is not null ? "summary_large_image" : "summary")}\" />");
-    sb.AppendLine($"  <meta name=\"twitter:title\" content=\"{HtmlEncode(title)}\" />");
-    if (!string.IsNullOrWhiteSpace(description))
-        sb.AppendLine($"  <meta name=\"twitter:description\" content=\"{HtmlEncode(description)}\" />");
-    if (imageUrl is not null)
-    {
-        sb.AppendLine($"  <meta name=\"twitter:image\" content=\"{imageUrl}\" />");
-        sb.AppendLine($"  <meta name=\"twitter:image:alt\" content=\"{HtmlEncode(imageAlt)}\" />");
-    }
-
-    return sb.ToString().TrimEnd();
-}
 
 static string NormalizePathBase(string? pathBase)
 {

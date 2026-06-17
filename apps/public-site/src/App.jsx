@@ -5,7 +5,8 @@ import About from './pages/About';
 import Contact from './pages/Contact';
 import BlogList from './pages/BlogList';
 import BlogPost from './pages/BlogPost';
-import AdminRedirect from './pages/AdminRedirect';
+
+const ADMIN_URL = import.meta.env.VITE_ADMIN_URL || '#';
 
 function Navbar() {
   return (
@@ -15,7 +16,7 @@ function Navbar() {
         <Link to="/about">About</Link>
         <Link to="/blog">Blog</Link>
         <Link to="/contact">Contact</Link>
-        <a href="/admin" className="nav-admin">Admin ↗</a>
+        <a href={ADMIN_URL} className="nav-admin">Admin ↗</a>
       </div>
     </nav>
   );
@@ -54,7 +55,6 @@ export default function App() {
         <Route path="/contact" element={<Contact />} />
         <Route path="/blog" element={<BlogList />} />
         <Route path="/blog/:slug" element={<BlogPost />} />
-        <Route path="/admin/*" element={<AdminRedirect />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
       <Footer />

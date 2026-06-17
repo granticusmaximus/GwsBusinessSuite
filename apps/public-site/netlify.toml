@@ -1,0 +1,33 @@
+[build]
+  base    = "apps/public-site"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# ── Edge function: inject OG / Twitter meta tags into /blog/:slug pages ──────
+[[edge_functions]]
+  path     = "/blog/*"
+  function = "og-inject"
+
+# ── Proxy: forward API and image calls to the DigitalOcean backend ────────────
+# Set BACKEND_URL in Netlify → Site settings → Environment variables
+# e.g. http://YOUR_DROPLET_IP  or  https://admin.grantwatson.dev
+[[redirects]]
+  from   = "/api/*"
+  to     = "http://REPLACE_WITH_BACKEND_URL/api/:splat"
+  status = 200
+  force  = true
+
+[[redirects]]
+  from   = "/og-image/*"
+  to     = "http://REPLACE_WITH_BACKEND_URL/og-image/:splat"
+  status = 200
+  force  = true
+
+# ── SPA fallback: all other routes serve index.html ──────────────────────────
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
