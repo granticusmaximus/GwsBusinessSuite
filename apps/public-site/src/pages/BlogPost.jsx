@@ -1,8 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { marked } from 'marked';
+import { Marked } from 'marked';
 
-marked.setOptions({ gfm: true, breaks: true });
+const md = new Marked({ gfm: true, breaks: true, async: false });
+
+function renderMarkdown(text) {
+  if (!text) return '';
+  try {
+    return md.parse(text);
+  } catch {
+    return `<pre>${text}</pre>`;
+  }
+}
 
 export default function BlogPost() {
   const { slug } = useParams();
@@ -36,6 +45,8 @@ export default function BlogPost() {
   }
 
   if (error) return <div className="page-loading">Could not load article.</div>;
+
+  if (!article) return null;
 
   const publishedDate = new Date(article.publishedAt).toLocaleDateString('en-US', {
     year: 'numeric', month: 'long', day: 'numeric',
@@ -76,10 +87,16 @@ export default function BlogPost() {
 
         <p className="blog-post-author">By {article.author}</p>
 
-        <div
-          className="blog-post-body"
-          dangerouslySetInnerHTML={{ __html: marked.parse(article.articleMarkdown || '') }}
-        />
+        {article.articleMarkdown ? (
+          <div
+            className="blog-post-body"
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(article.articleMarkdown) }}
+          />
+        ) : (
+          <p className="blog-post-body" style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>
+            No content available for this article.
+          </p>
+        )}
 
         <footer className="blog-post-footer">
           <Link to="/blog">← All articles</Link>
