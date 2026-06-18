@@ -78,6 +78,7 @@ public sealed class CmsBuilderOptions
     public const string SectionName = "CmsBuilder";
 
     public string ReactAppRelativePath { get; set; } = "apps/public-site";
+    public string ReactDevServerUrl { get; set; } = "http://localhost:5173";
     public bool AutoGitPushOnSave { get; set; }
     public string GitCommitPrefix { get; set; } = "cms-builder";
     public string GitPublishRemoteName { get; set; } = "origin";

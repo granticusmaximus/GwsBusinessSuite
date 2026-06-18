@@ -1,10 +1,15 @@
 @page "/admin/cms-builder/editor/{PageKey}"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using GwsBusinessSuite.Application.CmsBuilder
+@using Microsoft.Extensions.Options
+@using Microsoft.JSInterop
 @inject IPageLayoutService PageLayoutService
 @inject IReactPageBuilderService ReactPageBuilderService
+@inject IOptions<CmsBuilderOptions> CmsOptions
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 @inject ILogger<CmsBuilderEditor> Logger
+@implements IAsyncDisposable
 
 <PageTitle>Visual Builder — @PageKey</PageTitle>
 
@@ -132,25 +137,36 @@
         }
     </aside>
 
-    @* ── CENTER CANVAS ───────────────────────────────────────────────────── *@
+    @* ── CENTER — Live React App ─────────────────────────────────────────── *@
     <section class="studio-stage-panel studio-panel">
         <div class="studio-stage-header">
-            <div>
-                <span class="studio-section-eyebrow">Canvas</span>
-                <h2>Live Editor</h2>
+            <div class="studio-stage-header-left">
+                <span class="studio-section-eyebrow">React Frontend</span>
+                <span class="studio-stage-url font-monospace">@_reactDevServerUrl@_routePath</span>
             </div>
-            <div class="studio-device-switcher">
-                <button class="studio-device-button @(_previewViewport == "desktop" ? "is-active" : "")"
-                        @onclick='() => _previewViewport = "desktop"' title="Desktop">
-                    <i class="bi bi-laptop"></i>
+            <div class="studio-stage-header-right">
+                <button class='studio-edit-toggle @(_editModeEnabled ? "is-active" : "")'
+                        @onclick='() => { _editModeEnabled = !_editModeEnabled; ReloadPreview(); }'
+                        title="@(_editModeEnabled ? "Edit mode on — widgets are clickable" : "Edit mode off")">
+                    <i class='bi @(_editModeEnabled ? "bi-pencil-fill" : "bi-eye") me-1'></i>
+                    @(_editModeEnabled ? "Editing" : "Viewing")
                 </button>
-                <button class="studio-device-button @(_previewViewport == "tablet" ? "is-active" : "")"
-                        @onclick='() => _previewViewport = "tablet"' title="Tablet">
-                    <i class="bi bi-tablet-landscape"></i>
-                </button>
-                <button class="studio-device-button @(_previewViewport == "mobile" ? "is-active" : "")"
-                        @onclick='() => _previewViewport = "mobile"' title="Mobile">
-                    <i class="bi bi-phone"></i>
+                <div class="studio-device-switcher">
+                    <button class="studio-device-button @(_previewViewport == "desktop" ? "is-active" : "")"
+                            @onclick='() => _previewViewport = "desktop"' title="Desktop">
+                        <i class="bi bi-laptop"></i>
+                    </button>
+                    <button class="studio-device-button @(_previewViewport == "tablet" ? "is-active" : "")"
+                            @onclick='() => _previewViewport = "tablet"' title="Tablet">
+                        <i class="bi bi-tablet-landscape"></i>
+                    </button>
+                    <button class="studio-device-button @(_previewViewport == "mobile" ? "is-active" : "")"
+                            @onclick='() => _previewViewport = "mobile"' title="Mobile">
+                        <i class="bi bi-phone"></i>
+                    </button>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="ReloadPreview" title="Reload">
+                    <i class="bi bi-arrow-clockwise"></i>
                 </button>
             </div>
         </div>
@@ -159,244 +175,31 @@
             <div class="studio-stage-frame @GetViewportClass()">
                 <div class="studio-stage-browser">
                     <span></span><span></span><span></span>
-                    <div class="studio-stage-route">@_routePath</div>
+                    <div class="studio-stage-route">@_reactDevServerUrl@_routePath</div>
                 </div>
 
-                <div class="canvas-body" @onclick="ClearSelection">
-                    @if (_isLoading)
-                    {
-                        <div class="canvas-loading">
-                            <div class="spinner-border text-primary" role="status"></div>
-                            <p class="mt-3 text-secondary">Loading layout…</p>
-                        </div>
-                    }
-                    else if (_layout.Sections.Count == 0)
-                    {
-                        <div class="canvas-empty-state">
-                            <div class="canvas-empty-icon"><i class="bi bi-layout-wtf"></i></div>
-                            <h3>Nothing here yet</h3>
-                            <p>Add your first section to start composing this page.</p>
-                            <button class="btn btn-primary" @onclick="AddSectionAtEnd" @onclick:stopPropagation="true">
-                                <i class="bi bi-plus-circle me-2"></i>Add Section
-                            </button>
-                        </div>
-                    }
-                    else
-                    {
-                        @foreach (var section in _layout.Sections)
-                        {
-                            var secId = section.Id;
-                            <div class="canvas-section @GetSectionBgClass(section) @GetSectionPaddingClass(section) @(_selectedSectionId == section.Id && string.IsNullOrEmpty(_selectedWidgetId) ? "is-selected-section" : "")">
-
-                                @* Section toolbar *@
-                                <div class="canvas-section-toolbar" @onclick:stopPropagation="true">
-                                    <div class="canvas-section-toolbar-left">
-                                        <span class="canvas-section-badge">@(section.Label)</span>
-                                        <span class="canvas-col-badge">@GetColumnLayoutLabel(section.ColumnLayout)</span>
-                                    </div>
-                                    <div class="canvas-section-toolbar-right">
-                                        <button class="cst-btn" title="Section settings" @onclick="() => SelectSection(secId)">
-                                            <i class="bi bi-gear"></i>
-                                        </button>
-                                        <button class="cst-btn" title="Add section above" @onclick="() => AddSectionAbove(secId)">
-                                            <i class="bi bi-arrow-bar-up"></i>
-                                        </button>
-                                        <button class="cst-btn" title="Add section below" @onclick="() => AddSectionBelow(secId)">
-                                            <i class="bi bi-arrow-bar-down"></i>
-                                        </button>
-                                        <button class="cst-btn cst-btn-danger" title="Delete section" @onclick="() => DeleteSection(secId)">
-                                            <i class="bi bi-trash"></i>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                @* Columns *@
-                                <div class="canvas-columns canvas-cols-@(section.ColumnLayout.Replace("-","_"))">
-                                    @foreach (var column in section.Columns)
-                                    {
-                                        var colId = column.Id;
-                                        <div class="canvas-column">
-
-                                            @* Drop zone: top of column (index 0) *@
-                                            <div class="canvas-drop-zone @(IsDropZoneActive(secId, colId, 0) ? "is-active" : "")"
-                                                 @ondragover:preventDefault="true"
-                                                 @ondragenter="() => SetDragOver(secId, colId, 0)"
-                                                 @ondrop="() => Drop(secId, colId, 0)">
-                                                <span class="canvas-drop-label">Drop here</span>
-                                            </div>
-
-                                            @if (column.Widgets.Count == 0)
-                                            {
-                                                <div class="canvas-column-empty @(_isDragging ? "is-drag-target" : "")">
-                                                    <i class="bi bi-cursor me-2"></i>Drop a widget here
-                                                </div>
-                                            }
-
-                                            @for (var wi = 0; wi < column.Widgets.Count; wi++)
-                                            {
-                                                var widget = column.Widgets[wi];
-                                                var dropIdx = wi + 1;
-                                                var widgetIdx = wi;
-
-                                                <div class="canvas-widget @(_selectedWidgetId == widget.Id ? "is-selected" : "")"
-                                                     @onclick:stopPropagation="true"
-                                                     @onclick="() => SelectWidget(secId, widget.Id)"
-                                                     draggable="true"
-                                                     @ondragstart="() => StartWidgetDrag(widget.Id, secId, colId)"
-                                                     @ondragend="EndDrag">
-
-                                                    <div class="canvas-widget-toolbar">
-                                                        <span class="cwt-badge">@GetWidgetTypeLabel(widget.WidgetType)</span>
-                                                        <div class="cwt-actions">
-                                                            <button class="cwt-btn" title="Move up"
-                                                                    @onclick:stopPropagation="true"
-                                                                    @onclick="() => MoveWidgetInColumn(secId, colId, widgetIdx, -1)"
-                                                                    disabled="@(widgetIdx == 0)">
-                                                                <i class="bi bi-arrow-up"></i>
-                                                            </button>
-                                                            <button class="cwt-btn" title="Move down"
-                                                                    @onclick:stopPropagation="true"
-                                                                    @onclick="() => MoveWidgetInColumn(secId, colId, widgetIdx, 1)"
-                                                                    disabled="@(widgetIdx == column.Widgets.Count - 1)">
-                                                                <i class="bi bi-arrow-down"></i>
-                                                            </button>
-                                                            <button class="cwt-btn" title="Duplicate"
-                                                                    @onclick:stopPropagation="true"
-                                                                    @onclick="() => DuplicateWidget(secId, colId, widgetIdx)">
-                                                                <i class="bi bi-copy"></i>
-                                                            </button>
-                                                            <button class="cwt-btn cwt-btn-danger" title="Delete"
-                                                                    @onclick:stopPropagation="true"
-                                                                    @onclick="() => DeleteWidget(secId, colId, widget.Id)">
-                                                                <i class="bi bi-trash"></i>
-                                                            </button>
-                                                        </div>
-                                                    </div>
-
-                                                    @* ── Widget body rendering ─────────────────────── *@
-                                                    <div class="canvas-widget-body">
-                                                        @if (widget.WidgetType == "hero")
-                                                        {
-                                                            <div class="cw-hero cw-align-@GetProp(widget, "align", "left")">
-                                                                <h1 class="cw-hero-headline">@GetProp(widget, "headline", "Your Headline")</h1>
-                                                                @if (!string.IsNullOrWhiteSpace(GetProp(widget, "subline")))
-                                                                {
-                                                                    <p class="cw-hero-subline">@GetProp(widget, "subline")</p>
-                                                                }
-                                                                <div class="cw-hero-actions">
-                                                                    @if (!string.IsNullOrWhiteSpace(GetProp(widget, "cta1Label")))
-                                                                    {
-                                                                        <span class="btn btn-primary btn-sm">@GetProp(widget, "cta1Label")</span>
-                                                                    }
-                                                                    @if (!string.IsNullOrWhiteSpace(GetProp(widget, "cta2Label")))
-                                                                    {
-                                                                        <span class="btn btn-outline-secondary btn-sm">@GetProp(widget, "cta2Label")</span>
-                                                                    }
-                                                                </div>
-                                                            </div>
-                                                        }
-                                                        else if (widget.WidgetType == "heading")
-                                                        {
-                                                            var align = GetProp(widget, "align", "left");
-                                                            var text = GetProp(widget, "text", "Heading");
-                                                            var level = GetProp(widget, "level", "h2");
-                                                            @if (level == "h1") { <h1 class="cw-heading cw-align-@align">@text</h1> }
-                                                            else if (level == "h3") { <h3 class="cw-heading cw-align-@align">@text</h3> }
-                                                            else if (level == "h4") { <h4 class="cw-heading cw-align-@align">@text</h4> }
-                                                            else { <h2 class="cw-heading cw-align-@align">@text</h2> }
-                                                        }
-                                                        else if (widget.WidgetType == "paragraph")
-                                                        {
-                                                            <p class="cw-paragraph cw-align-@GetProp(widget, "align", "left")">@GetProp(widget, "text", "Paragraph text")</p>
-                                                        }
-                                                        else if (widget.WidgetType == "button")
-                                                        {
-                                                            <div class="cw-button-wrap cw-align-@GetProp(widget, "align", "left")">
-                                                                <span class="btn btn-@GetProp(widget, "variant", "primary") btn-@GetProp(widget, "size", "md")">
-                                                                    @GetProp(widget, "label", "Button")
-                                                                </span>
-                                                            </div>
-                                                        }
-                                                        else if (widget.WidgetType == "image")
-                                                        {
-                                                            var src = GetProp(widget, "src");
-                                                            @if (!string.IsNullOrWhiteSpace(src))
-                                                            {
-                                                                <div class="cw-image cw-image-@GetProp(widget, "width", "full")">
-                                                                    <img src="@src" alt="@GetProp(widget, "alt")" />
-                                                                    @if (!string.IsNullOrWhiteSpace(GetProp(widget, "caption")))
-                                                                    {
-                                                                        <p class="cw-image-caption">@GetProp(widget, "caption")</p>
-                                                                    }
-                                                                </div>
-                                                            }
-                                                            else
-                                                            {
-                                                                <div class="cw-image-placeholder">
-                                                                    <i class="bi bi-image"></i>
-                                                                    <span>Set an image URL in the inspector</span>
-                                                                </div>
-                                                            }
-                                                        }
-                                                        else if (widget.WidgetType == "card")
-                                                        {
-                                                            <div class="cw-card">
-                                                                @if (!string.IsNullOrWhiteSpace(GetProp(widget, "imageSrc")))
-                                                                {
-                                                                    <img src="@GetProp(widget, "imageSrc")" alt="" class="cw-card-img" />
-                                                                }
-                                                                <div class="cw-card-body">
-                                                                    <h3 class="cw-card-title">@GetProp(widget, "title", "Card Title")</h3>
-                                                                    <p class="cw-card-text">@GetProp(widget, "body", "Card description.")</p>
-                                                                    @if (!string.IsNullOrWhiteSpace(GetProp(widget, "link")))
-                                                                    {
-                                                                        <span class="btn btn-outline-primary btn-sm">Read more</span>
-                                                                    }
-                                                                </div>
-                                                            </div>
-                                                        }
-                                                        else if (widget.WidgetType == "spacer")
-                                                        {
-                                                            <div class="cw-spacer" style="height: @(GetProp(widget, "height", "48"))px">
-                                                                <span class="cw-spacer-label">Spacer · @GetProp(widget, "height", "48")px</span>
-                                                            </div>
-                                                        }
-                                                        else if (widget.WidgetType == "divider")
-                                                        {
-                                                            <div class="cw-divider-wrap">
-                                                                <hr class="cw-divider cw-divider-@GetProp(widget, "style", "solid")" />
-                                                            </div>
-                                                        }
-                                                        else if (widget.WidgetType == "html")
-                                                        {
-                                                            <div class="cw-html">
-                                                                @((MarkupString)GetProp(widget, "content", "<p>Custom HTML block</p>"))
-                                                            </div>
-                                                        }
-                                                    </div>
-                                                </div>
-
-                                                @* Drop zone after widget *@
-                                                <div class="canvas-drop-zone @(IsDropZoneActive(secId, colId, dropIdx) ? "is-active" : "")"
-                                                     @ondragover:preventDefault="true"
-                                                     @ondragenter="() => SetDragOver(secId, colId, dropIdx)"
-                                                     @ondrop="() => Drop(secId, colId, dropIdx)">
-                                                    <span class="canvas-drop-label">Drop here</span>
-                                                </div>
-                                            }
-                                        </div>
-                                    }
-                                </div>
-                            </div>
-                        }
-
-                        <div class="canvas-add-section-bar">
-                            <button class="canvas-add-section-btn" @onclick="AddSectionAtEnd" @onclick:stopPropagation="true">
-                                <i class="bi bi-plus-circle me-2"></i>Add Section
-                            </button>
-                        </div>
-                    }
-                </div>
+                @if (_isLoading)
+                {
+                    <div class="canvas-loading">
+                        <div class="spinner-border text-primary" role="status"></div>
+                        <p class="mt-3 text-secondary">Loading…</p>
+                    </div>
+                }
+                else if (string.IsNullOrWhiteSpace(_reactDevServerUrl))
+                {
+                    <div class="canvas-empty-state">
+                        <div class="canvas-empty-icon"><i class="bi bi-display"></i></div>
+                        <h3>Dev server not configured</h3>
+                        <p>Set <code>CmsBuilder:ReactDevServerUrl</code> in <code>appsettings.Development.json</code> to point at your running React app (e.g. <code>http://localhost:5173</code>).</p>
+                    </div>
+                }
+                else
+                {
+                    <iframe id="cms-builder-iframe"
+                            class="studio-live-iframe"
+                            src="@BuildIframeUrl()"
+                            title="Live React app — @PageKey"></iframe>
+                }
             </div>
         </div>
     </section>
@@ -405,11 +208,7 @@
     <aside class="studio-panel studio-panel-right">
         <div class="studio-tab-strip">
             <button class="studio-tab @(_rightTab == "inspector" ? "is-active" : "")" @onclick='() => _rightTab = "inspector"'>
-                <i class="bi bi-pencil-square me-1"></i>Edit
-            </button>
-            <button class="studio-tab @(_rightTab == "preview" ? "is-active" : "")"
-                    @onclick='() => { _rightTab = "preview"; ReloadPreview(); }'>
-                <i class="bi bi-eye me-1"></i>Preview
+                <i class="bi bi-pencil-square me-1"></i>Inspector
             </button>
             <button class="studio-tab @(_rightTab == "publish" ? "is-active" : "")"
                     @onclick='() => { _rightTab = "publish"; _ = RefreshPublishStatusAsync(); }'>
@@ -745,28 +544,6 @@
             </div>
         }
 
-        @* Preview tab *@
-        else if (_rightTab == "preview")
-        {
-            <div class="studio-panel-section">
-                <div class="studio-panel-header">
-                    <div>
-                        <span class="studio-section-eyebrow">Live App</span>
-                        <h2>React Preview</h2>
-                    </div>
-                    <button class="btn btn-sm btn-outline-secondary" @onclick="ReloadPreview">
-                        <i class="bi bi-arrow-clockwise me-1"></i>Reload
-                    </button>
-                </div>
-                <div class="studio-preview-iframe-wrap">
-                    <iframe src="/cms-preview/@PageKey?t=@_previewTimestamp"
-                            class="studio-preview-iframe"
-                            title="Live React preview for @PageKey"></iframe>
-                </div>
-                <p class="small text-secondary mt-2 mb-0">Shows the live React app. Save + rebuild to see layout changes reflected here.</p>
-            </div>
-        }
-
         @* Publish tab *@
         else
         {
@@ -835,6 +612,13 @@
     private string _rightTab = "inspector";
     private string _previewViewport = "desktop";
 
+    // ── Live iframe ───────────────────────────────────────────────────────
+    private string _reactDevServerUrl = string.Empty;
+    private bool _editModeEnabled = true;
+    private IJSObjectReference? _jsBridge;
+    private DotNetObjectReference<CmsBuilderEditor>? _dotNetRef;
+    private bool _bridgeInitialized;
+
     // ── Publish ───────────────────────────────────────────────────────────
     private string _routePath = string.Empty;
     private long _previewTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -891,9 +675,74 @@
     // ── Lifecycle ─────────────────────────────────────────────────────────
     protected override async Task OnInitializedAsync()
     {
+        _reactDevServerUrl = (CmsOptions.Value.ReactDevServerUrl ?? string.Empty).TrimEnd('/');
         await LoadAsync();
         try { await RefreshPublishStatusAsync(); }
         catch { _publishBranchName = "unavailable"; }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_bridgeInitialized)
+        {
+            _bridgeInitialized = true;
+            try
+            {
+                _dotNetRef = DotNetObjectReference.Create(this);
+                _jsBridge = await JS.InvokeAsync<IJSObjectReference>(
+                    "import", "/js/cms-builder-bridge.js");
+                await _jsBridge.InvokeVoidAsync("init", _dotNetRef);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "CMS bridge JS init failed — postMessage selection disabled.");
+            }
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_jsBridge is not null)
+            {
+                await _jsBridge.InvokeVoidAsync("dispose");
+                await _jsBridge.DisposeAsync();
+            }
+        }
+        catch { /* ignore disposal errors */ }
+        _dotNetRef?.Dispose();
+    }
+
+    // ── iframe bridge callbacks ────────────────────────────────────────────
+    [JSInvokable]
+    public void OnWidgetSelectedFromIframe(string sectionId, string widgetId)
+    {
+        SelectWidget(sectionId, widgetId);
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void OnSectionSelectedFromIframe(string sectionId)
+    {
+        SelectSection(sectionId);
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void OnIframeReady()
+    {
+        // iframe signaled edit-mode ready; nothing to do yet
+    }
+
+    // ── iframe URL ────────────────────────────────────────────────────────
+    private string BuildIframeUrl()
+    {
+        var base_ = _reactDevServerUrl;
+        var path = string.IsNullOrWhiteSpace(_routePath) ? "/" : _routePath;
+        var sep = path.Contains('?') ? "&" : "?";
+        var editParam = _editModeEnabled ? $"{sep}cms_edit=1" : string.Empty;
+        return $"{base_}{path}{editParam}&_t={_previewTimestamp}";
     }
 
     private async Task LoadAsync()
@@ -1245,8 +1094,26 @@
     private static string GetProp(LayoutWidget widget, string key, string defaultValue = "") =>
         widget.Props.TryGetValue(key, out var val) ? val : defaultValue;
 
-    private static void SetProp(LayoutWidget widget, string key, string value) =>
+    private void SetProp(LayoutWidget widget, string key, string value)
+    {
         widget.Props[key] = value;
+        _ = PushWidgetUpdateAsync(widget);
+    }
+
+    private async Task PushWidgetUpdateAsync(LayoutWidget widget)
+    {
+        if (_jsBridge is null || !_editModeEnabled) return;
+        try
+        {
+            await _jsBridge.InvokeVoidAsync("sendToIframe", new
+            {
+                type = "cms:update-props",
+                widgetId = widget.Id,
+                props = widget.Props
+            });
+        }
+        catch { /* non-fatal: iframe may not be in edit mode */ }
+    }
 
     // ── Widget factory ────────────────────────────────────────────────────
     private static LayoutWidget CreateDefaultWidget(string type) => type switch
