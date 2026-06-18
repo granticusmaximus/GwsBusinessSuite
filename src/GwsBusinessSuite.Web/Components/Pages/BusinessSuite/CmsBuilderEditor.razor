@@ -1,835 +1,1356 @@
 @page "/admin/cms-builder/editor/{PageKey}"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using GwsBusinessSuite.Application.CmsBuilder
+@inject IPageLayoutService PageLayoutService
 @inject IReactPageBuilderService ReactPageBuilderService
-@inject ILogger<CmsBuilderEditor> Logger
 @inject NavigationManager Navigation
+@inject ILogger<CmsBuilderEditor> Logger
 
-<PageTitle>CMS Visual Builder</PageTitle>
+<PageTitle>Visual Builder — @PageKey</PageTitle>
 
+@* ── Header ─────────────────────────────────────────────────────────────── *@
 <div class="studio-header page-header">
     <div>
         <div class="studio-kicker">Live page studio</div>
-        <h1><i class="bi bi-braces-asterisk me-2 text-primary"></i>Visual Builder</h1>
-        <p class="mb-1">Shape the managed React page in a live preview workspace with insert, layout, inspect, save, and
-            publish controls.</p>
-            @if (!string.IsNullOrWhiteSpace(RoutePath))
-            {
-                <p class="small text-secondary mb-0">Route: <span class="font-monospace">@RoutePath</span></p>
-            }
-            @if (!string.IsNullOrWhiteSpace(FilePath))
-            {
-                <p class="small text-secondary mb-0">File: <a href="@BuildFileOpenLink(FilePath)">@FilePath</a></p>
-            }
-        </div>
-
-        <div class="studio-header-actions">
-            <div class="studio-pills">
-                <span class="studio-pill">@Elements.Count element@(Elements.Count == 1 ? string.Empty : "s")</span>
-                <span class="studio-pill studio-pill-subtle">@GetViewportLabel()</span>
-            </div>
-            <button class="btn btn-outline-secondary" @onclick="BackToList">Back To Pages</button>
-            <button class="btn btn-primary" @onclick="SaveAsync" disabled="@IsBusy">Save</button>
-            <button class="btn btn-outline-success" @onclick="PublishAsync" disabled="@IsBusy">Publish Changes</button>
-        </div>
+        <h1><i class="bi bi-grid-1x2 me-2 text-primary"></i>Visual Builder</h1>
+        <p class="mb-0">Drag, drop, and configure sections to compose your React page. Saves to a layout JSON alongside your page file.</p>
+        @if (!string.IsNullOrWhiteSpace(_routePath))
+        {
+            <p class="small text-secondary mb-0 mt-1">Route: <span class="font-monospace">@_routePath</span></p>
+        }
     </div>
+    <div class="studio-header-actions">
+        <div class="studio-pills">
+            <span class="studio-pill">@_layout.Sections.Count section@(_layout.Sections.Count == 1 ? "" : "s")</span>
+            <span class="studio-pill studio-pill-subtle">@TotalWidgetCount widget@(TotalWidgetCount == 1 ? "" : "s")</span>
+            <span class="studio-pill studio-pill-subtle">@GetViewportLabel()</span>
+        </div>
+        <button class="btn btn-outline-secondary" @onclick="BackToList">Back</button>
+        <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_isBusy">
+            <i class="bi bi-floppy me-1"></i>Save Layout
+        </button>
+        <button class="btn btn-outline-success" @onclick="PublishAsync" disabled="@(_isBusy || _isPublishBusy)">
+            <i class="bi bi-cloud-upload me-1"></i>Publish
+        </button>
+    </div>
+</div>
 
-    @if (!string.IsNullOrWhiteSpace(ErrorMessage))
-    {
-        <div class="alert alert-danger">@ErrorMessage</div>
-    }
+@if (!string.IsNullOrWhiteSpace(_errorMessage))
+{
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-3">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@_errorMessage</div>
+    </div>
+}
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert alert-info d-flex align-items-center gap-2 mb-3">
+        <i class="bi bi-info-circle-fill flex-shrink-0"></i>
+        <div>@_statusMessage</div>
+    </div>
+}
 
-    @if (!string.IsNullOrWhiteSpace(StatusMessage))
-    {
-        <div class="alert alert-info">@StatusMessage</div>
-    }
+@* ── Workspace ───────────────────────────────────────────────────────────── *@
+<div class="studio-workspace">
 
-    <div class="studio-workspace">
-        <aside class="studio-panel studio-panel-left">
+    @* ── LEFT PANEL ─────────────────────────────────────────────────────── *@
+    <aside class="studio-panel studio-panel-left">
+        <div class="studio-tab-strip">
+            <button class="studio-tab @(_leftTab == "widgets" ? "is-active" : "")" @onclick='() => _leftTab = "widgets"'>
+                <i class="bi bi-grid-3x2-gap me-1"></i>Widgets
+            </button>
+            <button class="studio-tab @(_leftTab == "layers" ? "is-active" : "")" @onclick='() => _leftTab = "layers"'>
+                <i class="bi bi-layers me-1"></i>Layers
+            </button>
+        </div>
+
+        @if (_leftTab == "widgets")
+        {
             <div class="studio-panel-section">
-                <div class="studio-panel-header">
-                    <div>
-                        <span class="studio-section-eyebrow">Insert</span>
-                        <h2>Widgets</h2>
-                    </div>
-                    <button class="btn btn-sm btn-outline-secondary" @onclick="ToggleSidebar">
-                        @(SidebarCollapsed ? "Expand" : "Collapse")
-                    </button>
+                <div class="studio-section-eyebrow mb-2 px-1">Click to add · Drag onto canvas</div>
+                <div class="studio-widget-grid">
+                    @foreach (var wt in WidgetCatalog)
+                    {
+                        <button class="studio-widget-card" draggable="true"
+                                @ondragstart="() => StartNewWidgetDrag(wt.Type)"
+                                @ondragend="EndDrag"
+                                @onclick="() => QuickAddWidget(wt.Type)">
+                            <span class="studio-widget-icon"><i class="@wt.Icon"></i></span>
+                            <span class="studio-widget-copy">
+                                <strong>@wt.Title</strong>
+                                <small>@wt.Tagline</small>
+                            </span>
+                        </button>
+                    }
                 </div>
-
-                @if (!SidebarCollapsed)
-                {
-                    <div class="studio-widget-grid">
-                        @foreach (var elementType in ElementTypes)
-                        {
-                            <button class="studio-widget-card" draggable="true"
-                                    @ondragstart="() => StartDragElementType(elementType)" @ondragend="CancelDrag"
-                                    @onclick="() => AddElement(elementType)">
-                                <span class="studio-widget-icon"><i class="@GetElementIconClass(elementType)"></i></span>
-                                <span class="studio-widget-copy">
-                                    <strong>@GetElementTitle(elementType)</strong>
-                                    <small>@GetElementTagline(elementType)</small>
-                                </span>
-                            </button>
-                        }
-                    </div>
-                }
             </div>
-
+        }
+        else
+        {
             <div class="studio-panel-section">
-                <div class="studio-panel-header">
-                    <div>
-                        <span class="studio-section-eyebrow">Structure</span>
-                        <h2>Layers</h2>
-                    </div>
-                </div>
-
-                @if (Elements.Count == 0)
+                @if (_layout.Sections.Count == 0)
                 {
                     <div class="studio-empty-card">
-                        <p>No layers yet. Add a widget to start composing the page.</p>
+                        <p>No sections yet. Start adding to the canvas.</p>
                     </div>
                 }
                 else
                 {
                     <div class="studio-layer-list">
-                        @foreach (var element in Elements)
+                        @foreach (var section in _layout.Sections)
                         {
-                            <button class="studio-layer-item @(element.Id == SelectedElementId ? "is-active" : string.Empty)"
-                                    @onclick="() => SelectElement(element.Id)">
-                                <span class="studio-layer-icon"><i
-                                    class="@GetElementIconClass(element.ElementType ?? "paragraph")"></i></span>
+                            <div class="studio-layer-section-group">
+                                <button class="studio-layer-item studio-layer-section-item @(_selectedSectionId == section.Id && string.IsNullOrEmpty(_selectedWidgetId) ? "is-active" : "")"
+                                        @onclick="() => SelectSection(section.Id)">
+                                    <span class="studio-layer-icon"><i class="bi bi-layout-text-window"></i></span>
                                     <span class="studio-layer-copy">
-                                        <strong>@GetElementTitle(element.ElementType ?? "paragraph")</strong>
-                                        <small>@GetLayerSummary(element)</small>
+                                        <strong>@(section.Label)</strong>
+                                        <small>@GetColumnLayoutLabel(section.ColumnLayout) · @GetSectionWidgetCount(section) widget@(GetSectionWidgetCount(section) == 1 ? "" : "s")</small>
                                     </span>
                                 </button>
-                            }
-                        </div>
-                    }
+                                @foreach (var col in section.Columns)
+                                {
+                                    @foreach (var w in col.Widgets)
+                                    {
+                                        <button class="studio-layer-item studio-layer-widget-item @(_selectedWidgetId == w.Id ? "is-active" : "")"
+                                                @onclick="() => SelectWidget(section.Id, w.Id)">
+                                            <span class="studio-layer-icon studio-layer-icon-sm">
+                                                <i class="@GetWidgetIconClass(w.WidgetType)"></i>
+                                            </span>
+                                            <span class="studio-layer-copy">
+                                                <strong>@GetWidgetTypeLabel(w.WidgetType)</strong>
+                                                <small>@GetWidgetLayerSummary(w)</small>
+                                            </span>
+                                        </button>
+                                    }
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </aside>
+
+    @* ── CENTER CANVAS ───────────────────────────────────────────────────── *@
+    <section class="studio-stage-panel studio-panel">
+        <div class="studio-stage-header">
+            <div>
+                <span class="studio-section-eyebrow">Canvas</span>
+                <h2>Live Editor</h2>
+            </div>
+            <div class="studio-device-switcher">
+                <button class="studio-device-button @(_previewViewport == "desktop" ? "is-active" : "")"
+                        @onclick='() => _previewViewport = "desktop"' title="Desktop">
+                    <i class="bi bi-laptop"></i>
+                </button>
+                <button class="studio-device-button @(_previewViewport == "tablet" ? "is-active" : "")"
+                        @onclick='() => _previewViewport = "tablet"' title="Tablet">
+                    <i class="bi bi-tablet-landscape"></i>
+                </button>
+                <button class="studio-device-button @(_previewViewport == "mobile" ? "is-active" : "")"
+                        @onclick='() => _previewViewport = "mobile"' title="Mobile">
+                    <i class="bi bi-phone"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="studio-stage-shell">
+            <div class="studio-stage-frame @GetViewportClass()">
+                <div class="studio-stage-browser">
+                    <span></span><span></span><span></span>
+                    <div class="studio-stage-route">@_routePath</div>
                 </div>
 
-                <div class="studio-panel-section">
-                    <div class="studio-panel-header">
-                        <div>
-                            <span class="studio-section-eyebrow">Theme &amp; Styles</span>
-                            <h2>UI Files</h2>
-                        </div>
-                    </div>
-
-                    @if (UiFiles.Count == 0)
+                <div class="canvas-body" @onclick="ClearSelection">
+                    @if (_isLoading)
                     {
-                        <div class="studio-empty-card">
-                            <p>No UI files were discovered for this page.</p>
+                        <div class="canvas-loading">
+                            <div class="spinner-border text-primary" role="status"></div>
+                            <p class="mt-3 text-secondary">Loading layout…</p>
+                        </div>
+                    }
+                    else if (_layout.Sections.Count == 0)
+                    {
+                        <div class="canvas-empty-state">
+                            <div class="canvas-empty-icon"><i class="bi bi-layout-wtf"></i></div>
+                            <h3>Nothing here yet</h3>
+                            <p>Add your first section to start composing this page.</p>
+                            <button class="btn btn-primary" @onclick="AddSectionAtEnd" @onclick:stopPropagation="true">
+                                <i class="bi bi-plus-circle me-2"></i>Add Section
+                            </button>
                         </div>
                     }
                     else
                     {
-                        <div class="studio-layer-list">
-                            @foreach (var uiFile in UiFiles)
-                            {
-                                <button
-                                    class="studio-layer-item studio-ui-file-item @(SelectedUiFile?.FilePath == uiFile.FilePath ? "is-active" : string.Empty)"
-                                    @onclick="() => SelectUiFileAsync(uiFile)">
-                                    <span class="studio-layer-icon studio-file-icon @GetFileTypeIconModifier(uiFile.FileType)">
-                                        <i class="@GetFileTypeIconClass(uiFile.FileType)"></i>
-                                    </span>
-                                    <span class="studio-layer-copy">
-                                        <strong>@uiFile.FileName</strong>
-                                        <small>@(uiFile.IsThemeFile ? "Global theme" : uiFile.RelativePath)</small>
-                                    </span>
-                                </button>
-                            }
+                        @foreach (var section in _layout.Sections)
+                        {
+                            var secId = section.Id;
+                            <div class="canvas-section @GetSectionBgClass(section) @GetSectionPaddingClass(section) @(_selectedSectionId == section.Id && string.IsNullOrEmpty(_selectedWidgetId) ? "is-selected-section" : "")">
+
+                                @* Section toolbar *@
+                                <div class="canvas-section-toolbar" @onclick:stopPropagation="true">
+                                    <div class="canvas-section-toolbar-left">
+                                        <span class="canvas-section-badge">@(section.Label)</span>
+                                        <span class="canvas-col-badge">@GetColumnLayoutLabel(section.ColumnLayout)</span>
+                                    </div>
+                                    <div class="canvas-section-toolbar-right">
+                                        <button class="cst-btn" title="Section settings" @onclick="() => SelectSection(secId)">
+                                            <i class="bi bi-gear"></i>
+                                        </button>
+                                        <button class="cst-btn" title="Add section above" @onclick="() => AddSectionAbove(secId)">
+                                            <i class="bi bi-arrow-bar-up"></i>
+                                        </button>
+                                        <button class="cst-btn" title="Add section below" @onclick="() => AddSectionBelow(secId)">
+                                            <i class="bi bi-arrow-bar-down"></i>
+                                        </button>
+                                        <button class="cst-btn cst-btn-danger" title="Delete section" @onclick="() => DeleteSection(secId)">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                @* Columns *@
+                                <div class="canvas-columns canvas-cols-@(section.ColumnLayout.Replace("-","_"))">
+                                    @foreach (var column in section.Columns)
+                                    {
+                                        var colId = column.Id;
+                                        <div class="canvas-column">
+
+                                            @* Drop zone: top of column (index 0) *@
+                                            <div class="canvas-drop-zone @(IsDropZoneActive(secId, colId, 0) ? "is-active" : "")"
+                                                 @ondragover:preventDefault="true"
+                                                 @ondragenter="() => SetDragOver(secId, colId, 0)"
+                                                 @ondrop="() => Drop(secId, colId, 0)">
+                                                <span class="canvas-drop-label">Drop here</span>
+                                            </div>
+
+                                            @if (column.Widgets.Count == 0)
+                                            {
+                                                <div class="canvas-column-empty @(_isDragging ? "is-drag-target" : "")">
+                                                    <i class="bi bi-cursor me-2"></i>Drop a widget here
+                                                </div>
+                                            }
+
+                                            @for (var wi = 0; wi < column.Widgets.Count; wi++)
+                                            {
+                                                var widget = column.Widgets[wi];
+                                                var dropIdx = wi + 1;
+                                                var widgetIdx = wi;
+
+                                                <div class="canvas-widget @(_selectedWidgetId == widget.Id ? "is-selected" : "")"
+                                                     @onclick:stopPropagation="true"
+                                                     @onclick="() => SelectWidget(secId, widget.Id)"
+                                                     draggable="true"
+                                                     @ondragstart="() => StartWidgetDrag(widget.Id, secId, colId)"
+                                                     @ondragend="EndDrag">
+
+                                                    <div class="canvas-widget-toolbar">
+                                                        <span class="cwt-badge">@GetWidgetTypeLabel(widget.WidgetType)</span>
+                                                        <div class="cwt-actions">
+                                                            <button class="cwt-btn" title="Move up"
+                                                                    @onclick:stopPropagation="true"
+                                                                    @onclick="() => MoveWidgetInColumn(secId, colId, widgetIdx, -1)"
+                                                                    disabled="@(widgetIdx == 0)">
+                                                                <i class="bi bi-arrow-up"></i>
+                                                            </button>
+                                                            <button class="cwt-btn" title="Move down"
+                                                                    @onclick:stopPropagation="true"
+                                                                    @onclick="() => MoveWidgetInColumn(secId, colId, widgetIdx, 1)"
+                                                                    disabled="@(widgetIdx == column.Widgets.Count - 1)">
+                                                                <i class="bi bi-arrow-down"></i>
+                                                            </button>
+                                                            <button class="cwt-btn" title="Duplicate"
+                                                                    @onclick:stopPropagation="true"
+                                                                    @onclick="() => DuplicateWidget(secId, colId, widgetIdx)">
+                                                                <i class="bi bi-copy"></i>
+                                                            </button>
+                                                            <button class="cwt-btn cwt-btn-danger" title="Delete"
+                                                                    @onclick:stopPropagation="true"
+                                                                    @onclick="() => DeleteWidget(secId, colId, widget.Id)">
+                                                                <i class="bi bi-trash"></i>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    @* ── Widget body rendering ─────────────────────── *@
+                                                    <div class="canvas-widget-body">
+                                                        @if (widget.WidgetType == "hero")
+                                                        {
+                                                            <div class="cw-hero cw-align-@GetProp(widget, "align", "left")">
+                                                                <h1 class="cw-hero-headline">@GetProp(widget, "headline", "Your Headline")</h1>
+                                                                @if (!string.IsNullOrWhiteSpace(GetProp(widget, "subline")))
+                                                                {
+                                                                    <p class="cw-hero-subline">@GetProp(widget, "subline")</p>
+                                                                }
+                                                                <div class="cw-hero-actions">
+                                                                    @if (!string.IsNullOrWhiteSpace(GetProp(widget, "cta1Label")))
+                                                                    {
+                                                                        <span class="btn btn-primary btn-sm">@GetProp(widget, "cta1Label")</span>
+                                                                    }
+                                                                    @if (!string.IsNullOrWhiteSpace(GetProp(widget, "cta2Label")))
+                                                                    {
+                                                                        <span class="btn btn-outline-secondary btn-sm">@GetProp(widget, "cta2Label")</span>
+                                                                    }
+                                                                </div>
+                                                            </div>
+                                                        }
+                                                        else if (widget.WidgetType == "heading")
+                                                        {
+                                                            var align = GetProp(widget, "align", "left");
+                                                            var text = GetProp(widget, "text", "Heading");
+                                                            var level = GetProp(widget, "level", "h2");
+                                                            @if (level == "h1") { <h1 class="cw-heading cw-align-@align">@text</h1> }
+                                                            else if (level == "h3") { <h3 class="cw-heading cw-align-@align">@text</h3> }
+                                                            else if (level == "h4") { <h4 class="cw-heading cw-align-@align">@text</h4> }
+                                                            else { <h2 class="cw-heading cw-align-@align">@text</h2> }
+                                                        }
+                                                        else if (widget.WidgetType == "paragraph")
+                                                        {
+                                                            <p class="cw-paragraph cw-align-@GetProp(widget, "align", "left")">@GetProp(widget, "text", "Paragraph text")</p>
+                                                        }
+                                                        else if (widget.WidgetType == "button")
+                                                        {
+                                                            <div class="cw-button-wrap cw-align-@GetProp(widget, "align", "left")">
+                                                                <span class="btn btn-@GetProp(widget, "variant", "primary") btn-@GetProp(widget, "size", "md")">
+                                                                    @GetProp(widget, "label", "Button")
+                                                                </span>
+                                                            </div>
+                                                        }
+                                                        else if (widget.WidgetType == "image")
+                                                        {
+                                                            var src = GetProp(widget, "src");
+                                                            @if (!string.IsNullOrWhiteSpace(src))
+                                                            {
+                                                                <div class="cw-image cw-image-@GetProp(widget, "width", "full")">
+                                                                    <img src="@src" alt="@GetProp(widget, "alt")" />
+                                                                    @if (!string.IsNullOrWhiteSpace(GetProp(widget, "caption")))
+                                                                    {
+                                                                        <p class="cw-image-caption">@GetProp(widget, "caption")</p>
+                                                                    }
+                                                                </div>
+                                                            }
+                                                            else
+                                                            {
+                                                                <div class="cw-image-placeholder">
+                                                                    <i class="bi bi-image"></i>
+                                                                    <span>Set an image URL in the inspector</span>
+                                                                </div>
+                                                            }
+                                                        }
+                                                        else if (widget.WidgetType == "card")
+                                                        {
+                                                            <div class="cw-card">
+                                                                @if (!string.IsNullOrWhiteSpace(GetProp(widget, "imageSrc")))
+                                                                {
+                                                                    <img src="@GetProp(widget, "imageSrc")" alt="" class="cw-card-img" />
+                                                                }
+                                                                <div class="cw-card-body">
+                                                                    <h3 class="cw-card-title">@GetProp(widget, "title", "Card Title")</h3>
+                                                                    <p class="cw-card-text">@GetProp(widget, "body", "Card description.")</p>
+                                                                    @if (!string.IsNullOrWhiteSpace(GetProp(widget, "link")))
+                                                                    {
+                                                                        <span class="btn btn-outline-primary btn-sm">Read more</span>
+                                                                    }
+                                                                </div>
+                                                            </div>
+                                                        }
+                                                        else if (widget.WidgetType == "spacer")
+                                                        {
+                                                            <div class="cw-spacer" style="height: @(GetProp(widget, "height", "48"))px">
+                                                                <span class="cw-spacer-label">Spacer · @GetProp(widget, "height", "48")px</span>
+                                                            </div>
+                                                        }
+                                                        else if (widget.WidgetType == "divider")
+                                                        {
+                                                            <div class="cw-divider-wrap">
+                                                                <hr class="cw-divider cw-divider-@GetProp(widget, "style", "solid")" />
+                                                            </div>
+                                                        }
+                                                        else if (widget.WidgetType == "html")
+                                                        {
+                                                            <div class="cw-html">
+                                                                @((MarkupString)GetProp(widget, "content", "<p>Custom HTML block</p>"))
+                                                            </div>
+                                                        }
+                                                    </div>
+                                                </div>
+
+                                                @* Drop zone after widget *@
+                                                <div class="canvas-drop-zone @(IsDropZoneActive(secId, colId, dropIdx) ? "is-active" : "")"
+                                                     @ondragover:preventDefault="true"
+                                                     @ondragenter="() => SetDragOver(secId, colId, dropIdx)"
+                                                     @ondrop="() => Drop(secId, colId, dropIdx)">
+                                                    <span class="canvas-drop-label">Drop here</span>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+
+                        <div class="canvas-add-section-bar">
+                            <button class="canvas-add-section-btn" @onclick="AddSectionAtEnd" @onclick:stopPropagation="true">
+                                <i class="bi bi-plus-circle me-2"></i>Add Section
+                            </button>
                         </div>
                     }
                 </div>
-            </aside>
-
-            <section class="studio-stage-panel studio-panel" @ondragover:preventDefault="true" @ondrop="DropElementIntoCanvas">
-                <div class="studio-stage-header">
-                    <div>
-                        <span class="studio-section-eyebrow">Preview</span>
-                        <h2>Live canvas</h2>
-                    </div>
-
-                    <div class="d-flex align-items-center gap-2">
-                        <button class="btn btn-sm btn-outline-secondary" @onclick="ReloadPreview"
-                                title="Reload the live preview iframe">
-                            <i class="bi bi-arrow-clockwise me-1"></i>Reload Preview
-                        </button>
-                        <div class="studio-device-switcher">
-                            <button class="studio-device-button @(PreviewViewport == "desktop" ? "is-active" : string.Empty)"
-                                    @onclick='() => SetPreviewViewport("desktop")'>
-                                <i class="bi bi-laptop"></i>
-                            </button>
-                            <button class="studio-device-button @(PreviewViewport == "tablet" ? "is-active" : string.Empty)"
-                                    @onclick='() => SetPreviewViewport("tablet")'>
-                                <i class="bi bi-tablet-landscape"></i>
-                            </button>
-                            <button class="studio-device-button @(PreviewViewport == "mobile" ? "is-active" : string.Empty)"
-                                    @onclick='() => SetPreviewViewport("mobile")'>
-                                <i class="bi bi-phone"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="studio-stage-shell">
-                    <div class="studio-stage-frame @GetViewportClass()">
-                        <div class="studio-stage-browser">
-                            <span></span><span></span><span></span>
-                            <div class="studio-stage-route">@RoutePath</div>
-                        </div>
-
-                        <div class="studio-stage-canvas @(_isDragging ? "is-drag-active" : string.Empty)">
-                            <iframe src="/cms-preview/@PageKey?t=@_previewTimestamp"
-                                    class="studio-live-preview @(_isDragging ? "no-pointer-events" : string.Empty)"
-                                    title="Live preview for @PageKey"></iframe>
-                            @if (_isDragging)
-                            {
-                                <div class="studio-drag-overlay" @ondragover:preventDefault="true" @ondrop="DropElementIntoCanvas">
-                                    <div class="studio-drag-overlay-hint">
-                                        <i class="bi bi-plus-circle-dotted me-2"></i>Drop to add element
-                                    </div>
-                                </div>
-                            }
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <aside class="studio-panel studio-panel-right">
-                <div class="studio-panel-section">
-                    <div class="studio-panel-header">
-                        <div>
-                            <span class="studio-section-eyebrow">@(RightPanelMode == "file-editor" ? "File Editor" :
-                                                                                                                                                                                                                                                                                                                                                                     "Inspector")</span>
-                                <h2>@(RightPanelMode == "file-editor" ? "Edit UI File" : "Selected element")</h2>
-                            </div>
-                            @if (RightPanelMode == "file-editor")
-                            {
-                                <button class="btn btn-sm btn-outline-secondary" @onclick="CloseFileEditor">
-                                    <i class="bi bi-x-lg me-1"></i>Close
-                                </button>
-                            }
-                        </div>
-
-                        @if (RightPanelMode == "file-editor" && SelectedUiFile is not null)
-                        {
-                            <div class="studio-file-editor-stack">
-                                <div class="studio-file-editor-meta">
-                                    <span
-                                    class="studio-file-type-badge studio-file-type-badge-@SelectedUiFile.FileType">@SelectedUiFile.FileType.ToUpperInvariant()</span>
-                                    <span class="studio-file-editor-path font-monospace">@SelectedUiFile.RelativePath</span>
-                                    @if (SelectedUiFile.IsThemeFile)
-                                    {
-                                        <span class="studio-pill studio-pill-subtle ms-1">Global theme</span>
-                                    }
-                                </div>
-
-                                @if (!string.IsNullOrWhiteSpace(FileStatusMessage))
-                                {
-                                    <div class="alert alert-info py-2 px-3 small">@FileStatusMessage</div>
-                                }
-                                @if (!string.IsNullOrWhiteSpace(FileErrorMessage))
-                                {
-                                    <div class="alert alert-danger py-2 px-3 small">@FileErrorMessage</div>
-                                }
-
-                                <textarea class="form-control studio-file-editor-textarea font-monospace" @bind="FileEditorContent"
-                                          @bind:event="oninput" spellcheck="false" placeholder="File content will appear here..."></textarea>
-
-                                <div class="studio-action-row">
-                                    <button class="btn btn-sm btn-primary" @onclick="SaveFileAsync" disabled="@IsFileBusy">
-                                        <i class="bi bi-floppy me-1"></i>Save File
-                                    </button>
-                                    <a class="btn btn-sm btn-outline-secondary" href="@BuildFileOpenLink(SelectedUiFile.FilePath)">
-                                        <i class="bi bi-box-arrow-up-right me-1"></i>Open in VS Code
-                                    </a>
-                                </div>
-                            </div>
-                        }
-                        else
-                        {
-                            @if (SelectedElement is null)
-                            {
-                                <div class="studio-empty-card">
-                                    <p>Select a block in the preview or layers panel to edit its content and placement.</p>
-                                </div>
-                            }
-                            else
-                            {
-                                <div class="studio-inspector-stack">
-                                    <div>
-                                        <label class="form-label small">Element type</label>
-                                        <select class="form-select" value="@SelectedElement.ElementType"
-                                                @onchange="UpdateSelectedElementType">
-                                            @foreach (var elementType in ElementTypes)
-                                            {
-                                                <option value="@elementType">@GetElementTitle(elementType)</option>
-                                            }
-                                        </select>
-                                    </div>
-
-                                    <div>
-                                        <label class="form-label small">@GetContentLabel(SelectedElement.ElementType)</label>
-                                        <textarea class="form-control studio-inspector-textarea" value="@SelectedElement.Text"
-                                                  @oninput="(e) => UpdateElementText(SelectedElement.Id, e.Value?.ToString() ?? string.Empty)"></textarea>
-                                    </div>
-
-                                    <div>
-                                        <label class="form-label small">CSS class</label>
-                                        <input class="form-control" value="@SelectedElement.CssClass"
-                                               @oninput="(e) => UpdateElementCss(SelectedElement.Id, e.Value?.ToString() ?? string.Empty)" />
-                                    </div>
-
-                                    <div class="studio-action-row">
-                                        <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedUp"
-                                                disabled="@(!CanMoveSelectedUp)">
-                                            <i class="bi bi-arrow-up"></i>
-                                        </button>
-                                        <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedDown"
-                                                disabled="@(!CanMoveSelectedDown)">
-                                            <i class="bi bi-arrow-down"></i>
-                                        </button>
-                                        <button class="btn btn-sm btn-outline-secondary" @onclick="DuplicateSelected"
-                                                disabled="@(SelectedElement is null)">Duplicate</button>
-                                        <button class="btn btn-sm btn-outline-danger" @onclick="DeleteSelected"
-                                                disabled="@(SelectedElement is null)">Delete</button>
-                                    </div>
-                                </div>
-                            }
-                        }
-                    </div>
-
-                    <div class="studio-panel-section">
-                        <div class="studio-panel-header">
-                            <div>
-                                <span class="studio-section-eyebrow">Publish</span>
-                                <h2>Git workflow</h2>
-                            </div>
-                            <button class="btn btn-sm btn-outline-secondary" @onclick="RefreshPublishStatusAsync"
-                                    disabled="@IsBusy">Refresh</button>
-                        </div>
-
-                        <div class="studio-publish-meta">Current branch: <span class="font-monospace">@PublishBranchName</span>
-                        </div>
-                        <label class="form-label small">Commit message</label>
-                        <input class="form-control mb-3" @bind="PublishCommitMessage" placeholder="cms-builder publish updates" />
-
-                        @if (ChangedFiles.Count == 0)
-                        {
-                            <div class="studio-empty-card">
-                                <p>No React app changes are currently staged for a publish commit.</p>
-                            </div>
-                        }
-                        else
-                        {
-                            <div class="studio-changes-list">
-                                @foreach (var changedFile in ChangedFiles)
-                                {
-                                    <div class="studio-change-item"><span class="font-monospace">@changedFile</span></div>
-                                }
-                            </div>
-                        }
-                    </div>
-                </aside>
             </div>
+        </div>
+    </section>
+
+    @* ── RIGHT PANEL ─────────────────────────────────────────────────────── *@
+    <aside class="studio-panel studio-panel-right">
+        <div class="studio-tab-strip">
+            <button class="studio-tab @(_rightTab == "inspector" ? "is-active" : "")" @onclick='() => _rightTab = "inspector"'>
+                <i class="bi bi-pencil-square me-1"></i>Edit
+            </button>
+            <button class="studio-tab @(_rightTab == "preview" ? "is-active" : "")"
+                    @onclick='() => { _rightTab = "preview"; ReloadPreview(); }'>
+                <i class="bi bi-eye me-1"></i>Preview
+            </button>
+            <button class="studio-tab @(_rightTab == "publish" ? "is-active" : "")"
+                    @onclick='() => { _rightTab = "publish"; _ = RefreshPublishStatusAsync(); }'>
+                <i class="bi bi-cloud-upload me-1"></i>Publish
+            </button>
+        </div>
+
+        @* Inspector tab *@
+        @if (_rightTab == "inspector")
+        {
+            <div class="studio-panel-section">
+                @if (!string.IsNullOrEmpty(_selectedWidgetId))
+                {
+                    @* Widget inspector *@
+                    var selWidget = FindWidget(_selectedWidgetId);
+                    @if (selWidget is not null)
+                    {
+                        <div class="studio-inspector-stack">
+                            <div class="studio-inspector-header">
+                                <span class="studio-widget-icon studio-widget-icon-sm">
+                                    <i class="@GetWidgetIconClass(selWidget.WidgetType)"></i>
+                                </span>
+                                <div>
+                                    <div class="fw-semibold">@GetWidgetTypeLabel(selWidget.WidgetType)</div>
+                                    <div class="small text-secondary">Widget properties</div>
+                                </div>
+                            </div>
+
+                            @* ── Per-type inspector fields ─────────────────────── *@
+                            @if (selWidget.WidgetType == "hero")
+                            {
+                                <div>
+                                    <label class="form-label small fw-semibold">Headline</label>
+                                    <input class="form-control" value='@GetProp(selWidget, "headline")'
+                                           @oninput='(e) => SetProp(selWidget, "headline", e.Value?.ToString() ?? string.Empty)' />
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">Subline</label>
+                                    <textarea class="form-control studio-inspector-textarea-sm"
+                                              value='@GetProp(selWidget, "subline")'
+                                              @oninput='(e) => SetProp(selWidget, "subline", e.Value?.ToString() ?? string.Empty)'></textarea>
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">CTA 1 Label</label>
+                                    <input class="form-control" value='@GetProp(selWidget, "cta1Label")'
+                                           @oninput='(e) => SetProp(selWidget, "cta1Label", e.Value?.ToString() ?? string.Empty)' />
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">CTA 1 URL</label>
+                                    <input class="form-control font-monospace" value='@GetProp(selWidget, "cta1Href", "#")'
+                                           @oninput='(e) => SetProp(selWidget, "cta1Href", e.Value?.ToString() ?? "#")' />
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">CTA 2 Label</label>
+                                    <input class="form-control" value='@GetProp(selWidget, "cta2Label")'
+                                           @oninput='(e) => SetProp(selWidget, "cta2Label", e.Value?.ToString() ?? string.Empty)' />
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">CTA 2 URL</label>
+                                    <input class="form-control font-monospace" value='@GetProp(selWidget, "cta2Href", "#")'
+                                           @oninput='(e) => SetProp(selWidget, "cta2Href", e.Value?.ToString() ?? "#")' />
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">Alignment</label>
+                                    <select class="form-select" value='@GetProp(selWidget, "align", "left")'
+                                            @onchange='(e) => SetProp(selWidget, "align", e.Value?.ToString() ?? "left")'>
+                                        <option value="left">Left</option>
+                                        <option value="center">Center</option>
+                                    </select>
+                                </div>
+                            }
+                            else if (selWidget.WidgetType == "heading")
+                            {
+                                <div>
+                                    <label class="form-label small fw-semibold">Text</label>
+                                    <input class="form-control" value='@GetProp(selWidget, "text")'
+                                           @oninput='(e) => SetProp(selWidget, "text", e.Value?.ToString() ?? string.Empty)' />
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">Level</label>
+                                    <select class="form-select" value='@GetProp(selWidget, "level", "h2")'
+                                            @onchange='(e) => SetProp(selWidget, "level", e.Value?.ToString() ?? "h2")'>
+                                        <option value="h1">H1 — Page title</option>
+                                        <option value="h2">H2 — Section title</option>
+                                        <option value="h3">H3 — Sub-section</option>
+                                        <option value="h4">H4 — Card heading</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">Alignment</label>
+                                    <select class="form-select" value='@GetProp(selWidget, "align", "left")'
+                                            @onchange='(e) => SetProp(selWidget, "align", e.Value?.ToString() ?? "left")'>
+                                        <option value="left">Left</option>
+                                        <option value="center">Center</option>
+                                        <option value="right">Right</option>
+                                    </select>
+                                </div>
+                            }
+                            else if (selWidget.WidgetType == "paragraph")
+                            {
+                                <div>
+                                    <label class="form-label small fw-semibold">Text</label>
+                                    <textarea class="form-control studio-inspector-textarea" value='@GetProp(selWidget, "text")'
+                                              @oninput='(e) => SetProp(selWidget, "text", e.Value?.ToString() ?? string.Empty)'></textarea>
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">Alignment</label>
+                                    <select class="form-select" value='@GetProp(selWidget, "align", "left")'
+                                            @onchange='(e) => SetProp(selWidget, "align", e.Value?.ToString() ?? "left")'>
+                                        <option value="left">Left</option>
+                                        <option value="center">Center</option>
+                                        <option value="right">Right</option>
+                                    </select>
+                                </div>
+                            }
+                            else if (selWidget.WidgetType == "button")
+                            {
+                                <div>
+                                    <label class="form-label small fw-semibold">Label</label>
+                                    <input class="form-control" value='@GetProp(selWidget, "label", "Button")'
+                                           @oninput='(e) => SetProp(selWidget, "label", e.Value?.ToString() ?? string.Empty)' />
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">URL</label>
+                                    <input class="form-control font-monospace" value='@GetProp(selWidget, "href", "#")'
+                                           @oninput='(e) => SetProp(selWidget, "href", e.Value?.ToString() ?? "#")' />
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">Style</label>
+                                    <select class="form-select" value='@GetProp(selWidget, "variant", "primary")'
+                                            @onchange='(e) => SetProp(selWidget, "variant", e.Value?.ToString() ?? "primary")'>
+                                        <option value="primary">Primary</option>
+                                        <option value="secondary">Secondary</option>
+                                        <option value="outline-primary">Outline Primary</option>
+                                        <option value="outline-secondary">Outline Secondary</option>
+                                        <option value="success">Success</option>
+                                        <option value="link">Link</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">Size</label>
+                                    <select class="form-select" value='@GetProp(selWidget, "size", "md")'
+                                            @onchange='(e) => SetProp(selWidget, "size", e.Value?.ToString() ?? "md")'>
+                                        <option value="sm">Small</option>
+                                        <option value="md">Medium</option>
+                                        <option value="lg">Large</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">Alignment</label>
+                                    <select class="form-select" value='@GetProp(selWidget, "align", "left")'
+                                            @onchange='(e) => SetProp(selWidget, "align", e.Value?.ToString() ?? "left")'>
+                                        <option value="left">Left</option>
+                                        <option value="center">Center</option>
+                                        <option value="right">Right</option>
+                                    </select>
+                                </div>
+                                <div class="form-check mt-1">
+                                    <input class="form-check-input" type="checkbox" id="btnNewTab"
+                                           checked="@(GetProp(selWidget, "openInNewTab") == "true")"
+                                           @onchange='(e) => SetProp(selWidget, "openInNewTab", ((bool)(e.Value ?? false)) ? "true" : "false")' />
+                                    <label class="form-check-label small" for="btnNewTab">Open in new tab</label>
+                                </div>
+                            }
+                            else if (selWidget.WidgetType == "image")
+                            {
+                                <div>
+                                    <label class="form-label small fw-semibold">Image URL</label>
+                                    <input class="form-control font-monospace" value='@GetProp(selWidget, "src")'
+                                           @oninput='(e) => SetProp(selWidget, "src", e.Value?.ToString() ?? string.Empty)'
+                                           placeholder="https://…" />
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">Alt Text</label>
+                                    <input class="form-control" value='@GetProp(selWidget, "alt")'
+                                           @oninput='(e) => SetProp(selWidget, "alt", e.Value?.ToString() ?? string.Empty)' />
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">Caption</label>
+                                    <input class="form-control" value='@GetProp(selWidget, "caption")'
+                                           @oninput='(e) => SetProp(selWidget, "caption", e.Value?.ToString() ?? string.Empty)' />
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">Width</label>
+                                    <select class="form-select" value='@GetProp(selWidget, "width", "full")'
+                                            @onchange='(e) => SetProp(selWidget, "width", e.Value?.ToString() ?? "full")'>
+                                        <option value="full">Full width</option>
+                                        <option value="auto">Auto</option>
+                                    </select>
+                                </div>
+                            }
+                            else if (selWidget.WidgetType == "card")
+                            {
+                                <div>
+                                    <label class="form-label small fw-semibold">Title</label>
+                                    <input class="form-control" value='@GetProp(selWidget, "title")'
+                                           @oninput='(e) => SetProp(selWidget, "title", e.Value?.ToString() ?? string.Empty)' />
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">Body</label>
+                                    <textarea class="form-control studio-inspector-textarea" value='@GetProp(selWidget, "body")'
+                                              @oninput='(e) => SetProp(selWidget, "body", e.Value?.ToString() ?? string.Empty)'></textarea>
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">Image URL</label>
+                                    <input class="form-control font-monospace" value='@GetProp(selWidget, "imageSrc")'
+                                           @oninput='(e) => SetProp(selWidget, "imageSrc", e.Value?.ToString() ?? string.Empty)'
+                                           placeholder="https://…" />
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">Link URL</label>
+                                    <input class="form-control font-monospace" value='@GetProp(selWidget, "link")'
+                                           @oninput='(e) => SetProp(selWidget, "link", e.Value?.ToString() ?? string.Empty)' />
+                                </div>
+                            }
+                            else if (selWidget.WidgetType == "spacer")
+                            {
+                                <div>
+                                    <label class="form-label small fw-semibold">Height (px)</label>
+                                    <input class="form-control" type="number" min="0" max="400"
+                                           value='@GetProp(selWidget, "height", "48")'
+                                           @oninput='(e) => SetProp(selWidget, "height", e.Value?.ToString() ?? "48")' />
+                                </div>
+                            }
+                            else if (selWidget.WidgetType == "divider")
+                            {
+                                <div>
+                                    <label class="form-label small fw-semibold">Style</label>
+                                    <select class="form-select" value='@GetProp(selWidget, "style", "solid")'
+                                            @onchange='(e) => SetProp(selWidget, "style", e.Value?.ToString() ?? "solid")'>
+                                        <option value="solid">Solid</option>
+                                        <option value="dashed">Dashed</option>
+                                        <option value="dotted">Dotted</option>
+                                    </select>
+                                </div>
+                            }
+                            else if (selWidget.WidgetType == "html")
+                            {
+                                <div>
+                                    <label class="form-label small fw-semibold">HTML Content</label>
+                                    <textarea class="form-control studio-inspector-textarea font-monospace"
+                                              value='@GetProp(selWidget, "content")'
+                                              @oninput='(e) => SetProp(selWidget, "content", e.Value?.ToString() ?? string.Empty)'
+                                              spellcheck="false"></textarea>
+                                </div>
+                            }
+
+                            @* Action row *@
+                            <div class="studio-action-row mt-1">
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedWidgetUp"
+                                        disabled="@(!CanMoveSelectedWidgetUp)">
+                                    <i class="bi bi-arrow-up"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedWidgetDown"
+                                        disabled="@(!CanMoveSelectedWidgetDown)">
+                                    <i class="bi bi-arrow-down"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="DuplicateSelectedWidget">
+                                    <i class="bi bi-copy me-1"></i>Dup
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="DeleteSelectedWidget">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    }
+                }
+                else if (!string.IsNullOrEmpty(_selectedSectionId))
+                {
+                    @* Section inspector *@
+                    var sel = FindSection(_selectedSectionId);
+                    @if (sel is not null)
+                    {
+                        <div class="studio-inspector-stack">
+                            <div class="studio-inspector-header">
+                                <span class="studio-widget-icon studio-widget-icon-sm">
+                                    <i class="bi bi-layout-text-window"></i>
+                                </span>
+                                <div>
+                                    <div class="fw-semibold">Section Settings</div>
+                                    <div class="small text-secondary">@sel.Label</div>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Label</label>
+                                <input class="form-control" value="@sel.Label"
+                                       @oninput="(e) => sel.Label = e.Value?.ToString() ?? sel.Label" />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Column Layout</label>
+                                <select class="form-select" value="@sel.ColumnLayout"
+                                        @onchange="(e) => UpdateSectionColumnLayout(sel, e.Value?.ToString() ?? sel.ColumnLayout)">
+                                    <option value="full">Full Width</option>
+                                    <option value="half-half">Two Equal Columns (50/50)</option>
+                                    <option value="one-third-two-thirds">1/3 + 2/3</option>
+                                    <option value="two-thirds-one-third">2/3 + 1/3</option>
+                                    <option value="thirds">Three Equal Columns</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Background</label>
+                                <select class="form-select" @bind="sel.Background">
+                                    <option value="transparent">Transparent</option>
+                                    <option value="light">Light</option>
+                                    <option value="dark">Dark</option>
+                                    <option value="accent">Accent (Brand Blue)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Vertical Padding</label>
+                                <select class="form-select" @bind="sel.Padding">
+                                    <option value="none">None</option>
+                                    <option value="sm">Small</option>
+                                    <option value="md">Medium</option>
+                                    <option value="lg">Large</option>
+                                    <option value="xl">XL</option>
+                                </select>
+                            </div>
+                            <div class="studio-action-row mt-1">
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteSection(_selectedSectionId)">
+                                    <i class="bi bi-trash me-1"></i>Delete Section
+                                </button>
+                            </div>
+                        </div>
+                    }
+                }
+                else
+                {
+                    <div class="studio-empty-card">
+                        <p>Click a section header or widget to edit its properties here.</p>
+                    </div>
+                }
+            </div>
+        }
+
+        @* Preview tab *@
+        else if (_rightTab == "preview")
+        {
+            <div class="studio-panel-section">
+                <div class="studio-panel-header">
+                    <div>
+                        <span class="studio-section-eyebrow">Live App</span>
+                        <h2>React Preview</h2>
+                    </div>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="ReloadPreview">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Reload
+                    </button>
+                </div>
+                <div class="studio-preview-iframe-wrap">
+                    <iframe src="/cms-preview/@PageKey?t=@_previewTimestamp"
+                            class="studio-preview-iframe"
+                            title="Live React preview for @PageKey"></iframe>
+                </div>
+                <p class="small text-secondary mt-2 mb-0">Shows the live React app. Save + rebuild to see layout changes reflected here.</p>
+            </div>
+        }
+
+        @* Publish tab *@
+        else
+        {
+            <div class="studio-panel-section">
+                <div class="studio-panel-header">
+                    <div>
+                        <span class="studio-section-eyebrow">Git Workflow</span>
+                        <h2>Publish</h2>
+                    </div>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="RefreshPublishStatusAsync"
+                            disabled="@_isPublishBusy">Refresh</button>
+                </div>
+                <div class="studio-publish-meta">Branch: <span class="font-monospace">@_publishBranchName</span></div>
+                <label class="form-label small fw-semibold">Commit message</label>
+                <input class="form-control mb-3" @bind="_publishCommitMessage" placeholder="cms-builder: update layout" />
+                @if (_changedFiles.Count == 0)
+                {
+                    <div class="studio-empty-card">
+                        <p>No React app file changes staged for commit.</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="studio-changes-list mb-3">
+                        @foreach (var f in _changedFiles)
+                        {
+                            <div class="studio-change-item"><span class="font-monospace">@f</span></div>
+                        }
+                    </div>
+                    <button class="btn btn-success w-100" @onclick="PublishAsync"
+                            disabled="@(_isBusy || _isPublishBusy)">
+                        <i class="bi bi-cloud-upload me-1"></i>Commit &amp; Push
+                    </button>
+                }
+            </div>
+        }
+    </aside>
+</div>
 
 @code {
     [Parameter] public string PageKey { get; set; } = string.Empty;
 
-    private static readonly string[] ElementTypes = ["heading", "paragraph", "button", "image"];
+    // ── Data ──────────────────────────────────────────────────────────────
+    private PageLayout _layout = new();
+    private bool _isLoading = true;
+    private bool _isBusy;
+    private string _statusMessage = string.Empty;
+    private string _errorMessage = string.Empty;
 
-    private List<VisualBuilderElement> Elements { get; set; } = new();
-    private List<PageUiFile> UiFiles { get; set; } = new();
-    private PageUiFile? SelectedUiFile { get; set; }
-    private string FileEditorContent { get; set; } = string.Empty;
-    private string FileStatusMessage { get; set; } = string.Empty;
-    private string FileErrorMessage { get; set; } = string.Empty;
-    private string RightPanelMode { get; set; } = "inspector";
-    private bool IsFileBusy { get; set; }
-    private string DraggingElementType { get; set; } = string.Empty;
+    // ── Selection ─────────────────────────────────────────────────────────
+    private string _selectedSectionId = string.Empty;
+    private string _selectedWidgetId = string.Empty;
+
+    // ── Drag state ────────────────────────────────────────────────────────
+    private string _draggingNewWidgetType = string.Empty;
+    private string _draggingWidgetId = string.Empty;
+    private string _draggingWidgetSectionId = string.Empty;
+    private string _draggingWidgetColumnId = string.Empty;
+    private string _dragOverSectionId = string.Empty;
+    private string _dragOverColumnId = string.Empty;
+    private int _dragOverIndex = -1;
     private bool _isDragging;
-    private long _previewTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-    private bool SidebarCollapsed { get; set; }
-    private bool IsBusy { get; set; }
-    private string StatusMessage { get; set; } = string.Empty;
-    private string ErrorMessage { get; set; } = string.Empty;
-    private string RoutePath { get; set; } = string.Empty;
-    private string FilePath { get; set; } = string.Empty;
-    private string PreviewViewport { get; set; } = "desktop";
-    private string PublishCommitMessage { get; set; } = "cms-builder publish updates";
-    private string PublishBranchName { get; set; } = "unknown";
-    private List<string> ChangedFiles { get; set; } = new();
-    private string SelectedElementId { get; set; } = string.Empty;
 
-    private VisualBuilderElement? SelectedElement => Elements.FirstOrDefault(x => x.Id == SelectedElementId);
-    private bool CanMoveSelectedUp => GetSelectedElementIndex() > 0;
-    private bool CanMoveSelectedDown
+    // ── UI panels ─────────────────────────────────────────────────────────
+    private string _leftTab = "widgets";
+    private string _rightTab = "inspector";
+    private string _previewViewport = "desktop";
+
+    // ── Publish ───────────────────────────────────────────────────────────
+    private string _routePath = string.Empty;
+    private long _previewTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    private string _publishCommitMessage = "cms-builder: update page layout";
+    private string _publishBranchName = "unknown";
+    private List<string> _changedFiles = new();
+    private bool _isPublishBusy;
+
+    // ── Computed ──────────────────────────────────────────────────────────
+    private int TotalWidgetCount => _layout.Sections
+        .SelectMany(s => s.Columns)
+        .SelectMany(c => c.Widgets)
+        .Count();
+
+    private bool CanMoveSelectedWidgetUp
     {
         get
         {
-            var index = GetSelectedElementIndex();
-            return index >= 0 && index < Elements.Count - 1;
+            if (string.IsNullOrEmpty(_selectedWidgetId)) return false;
+            var (_, col) = FindWidgetLocation(_selectedWidgetId);
+            if (col is null) return false;
+            return col.Widgets.FindIndex(w => w.Id == _selectedWidgetId) > 0;
         }
     }
 
+    private bool CanMoveSelectedWidgetDown
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(_selectedWidgetId)) return false;
+            var (_, col) = FindWidgetLocation(_selectedWidgetId);
+            if (col is null) return false;
+            var idx = col.Widgets.FindIndex(w => w.Id == _selectedWidgetId);
+            return idx >= 0 && idx < col.Widgets.Count - 1;
+        }
+    }
+
+    // ── Widget catalog ────────────────────────────────────────────────────
+    private record WidgetDef(string Type, string Icon, string Title, string Tagline);
+
+    private static readonly WidgetDef[] WidgetCatalog =
+    [
+        new("hero",      "bi bi-stars",                    "Hero",      "Full-width headline + CTAs"),
+        new("heading",   "bi bi-type-h1",                  "Heading",   "H1–H4 title text"),
+        new("paragraph", "bi bi-text-paragraph",           "Paragraph", "Body copy"),
+        new("button",    "bi bi-hand-index-thumb",         "Button",    "CTA or navigation link"),
+        new("image",     "bi bi-image",                    "Image",     "Photo or graphic"),
+        new("card",      "bi bi-card-heading",             "Card",      "Title + body + optional image"),
+        new("spacer",    "bi bi-arrows-expand-vertical",   "Spacer",    "Vertical whitespace"),
+        new("divider",   "bi bi-dash-lg",                  "Divider",   "Horizontal rule"),
+        new("html",      "bi bi-code-slash",               "HTML",      "Raw HTML block"),
+    ];
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────
     protected override async Task OnInitializedAsync()
     {
-        await LoadEditorAsync();
+        await LoadAsync();
+        try { await RefreshPublishStatusAsync(); }
+        catch { _publishBranchName = "unavailable"; }
     }
 
-    private async Task LoadEditorAsync()
+    private async Task LoadAsync()
     {
-        IsBusy = true;
-        ErrorMessage = string.Empty;
-
+        _isLoading = true;
+        _errorMessage = string.Empty;
         try
         {
-            var state = await ReactPageBuilderService.LoadEditorStateAsync(PageKey);
-            if (state is null)
-            {
-                ErrorMessage = $"Page '{PageKey}' was not found in the active React app.";
-                return;
-            }
-
-            Elements = state.Elements.ToList();
-            UiFiles = state.UiFiles.ToList();
-            RoutePath = state.RoutePath;
-            FilePath = state.FilePath;
-            SelectedElementId = Elements.FirstOrDefault()?.Id ?? string.Empty;
-            StatusMessage = $"Loaded visual builder for {state.PageKey}.";
+            _layout = await PageLayoutService.LoadLayoutAsync(PageKey);
+            _routePath = _layout.RoutePath;
+            _statusMessage = $"Loaded layout for {PageKey}.";
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "[{ExType}] Unable to load visual builder state for page {PageKey}.", ex.GetType().Name, PageKey);
-            ErrorMessage = $"Unable to load page editor. [{ex.GetType().Name}] {ex.Message}";
+            Logger.LogError(ex, "Failed to load layout for {PageKey}.", PageKey);
+            _errorMessage = $"Failed to load layout. {ex.Message}";
+            _layout = new PageLayout { PageKey = PageKey };
         }
         finally
         {
-            IsBusy = false;
-        }
-
-        // Refresh publish status separately so a git failure never blocks editor load.
-        try
-        {
-            await RefreshPublishStatusAsync();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Unable to load publish status for page {PageKey}.", PageKey);
-            PublishBranchName = "unavailable";
+            _isLoading = false;
         }
     }
 
-    private void ToggleSidebar()
-    {
-        SidebarCollapsed = !SidebarCollapsed;
-    }
-
-    private void StartDragElementType(string elementType)
-    {
-        DraggingElementType = elementType;
-        _isDragging = true;
-    }
-
-    private void CancelDrag()
-    {
-        _isDragging = false;
-        DraggingElementType = string.Empty;
-    }
-
-    private void DropElementIntoCanvas(DragEventArgs _)
-    {
-        _isDragging = false;
-        if (string.IsNullOrWhiteSpace(DraggingElementType))
-        {
-            return;
-        }
-
-        AddElement(DraggingElementType);
-        DraggingElementType = string.Empty;
-    }
-
-    private void AddElement(string elementType)
-    {
-        var element = new VisualBuilderElement
-        {
-            ElementType = elementType,
-            Text = elementType switch
-            {
-                "heading" => "Heading text",
-                "button" => "Click me",
-                "image" => "https://via.placeholder.com/1200x630",
-                _ => "Paragraph text"
-            },
-            CssClass = string.Empty
-        };
-
-        Elements.Add(element);
-        SelectedElementId = element.Id;
-    }
-
-    private void RemoveElement(string id)
-    {
-        var index = Elements.FindIndex(x => x.Id == id);
-        if (index >= 0)
-        {
-            Elements.RemoveAt(index);
-            SelectedElementId = Elements.ElementAtOrDefault(Math.Max(0, index - 1))?.Id ?? Elements.FirstOrDefault()?.Id ??
-string.Empty;
-        }
-    }
-
-    private void SelectElement(string id)
-    {
-        SelectedElementId = id;
-    }
-
-    private void UpdateElementText(string id, string value)
-    {
-        var element = Elements.FirstOrDefault(x => x.Id == id);
-        if (element is not null)
-        {
-            element.Text = value;
-        }
-    }
-
-    private void UpdateElementCss(string id, string value)
-    {
-        var element = Elements.FirstOrDefault(x => x.Id == id);
-        if (element is not null)
-        {
-            element.CssClass = value;
-        }
-    }
-
-    private void UpdateSelectedElementType(ChangeEventArgs args)
-    {
-        if (SelectedElement is null)
-        {
-            return;
-        }
-
-        var value = args.Value?.ToString();
-        if (!string.IsNullOrWhiteSpace(value))
-        {
-            SelectedElement.ElementType = value;
-        }
-    }
-
-    private void DeleteSelected()
-    {
-        if (!string.IsNullOrWhiteSpace(SelectedElementId))
-        {
-            RemoveElement(SelectedElementId);
-        }
-    }
-
-    private void DuplicateSelected()
-    {
-        if (SelectedElement is null)
-        {
-            return;
-        }
-
-        var index = GetSelectedElementIndex();
-        if (index < 0)
-        {
-            return;
-        }
-
-        var clone = new VisualBuilderElement
-        {
-            Id = Guid.NewGuid().ToString("N"),
-            ElementType = SelectedElement.ElementType,
-            Text = SelectedElement.Text,
-            CssClass = SelectedElement.CssClass
-        };
-
-        Elements.Insert(index + 1, clone);
-        SelectedElementId = clone.Id;
-    }
-
-    private void MoveSelectedUp()
-    {
-        MoveSelected(-1);
-    }
-
-    private void MoveSelectedDown()
-    {
-        MoveSelected(1);
-    }
-
-    private void MoveSelected(int direction)
-    {
-        var index = GetSelectedElementIndex();
-        var targetIndex = index + direction;
-        if (index < 0 || targetIndex < 0 || targetIndex >= Elements.Count)
-        {
-            return;
-        }
-
-        (Elements[index], Elements[targetIndex]) = (Elements[targetIndex], Elements[index]);
-    }
-
-    private int GetSelectedElementIndex()
-    {
-        if (string.IsNullOrWhiteSpace(SelectedElementId))
-        {
-            return -1;
-        }
-
-        return Elements.FindIndex(element => element.Id == SelectedElementId);
-    }
-
+    // ── Save / Publish ────────────────────────────────────────────────────
     private async Task SaveAsync()
     {
-        IsBusy = true;
-        ErrorMessage = string.Empty;
-        StatusMessage = string.Empty;
-
+        _isBusy = true;
+        _errorMessage = string.Empty;
+        _statusMessage = string.Empty;
         try
         {
-            var result = await ReactPageBuilderService.SaveAsync(new ReactPageSaveRequest
+            await PageLayoutService.SaveLayoutAsync(_layout);
+            _statusMessage = $"Layout saved for {PageKey}.";
+            try { await RefreshPublishStatusAsync(); } catch { /* non-fatal */ }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save layout for {PageKey}.", PageKey);
+            _errorMessage = $"Failed to save layout. {ex.Message}";
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task PublishAsync()
+    {
+        _isPublishBusy = true;
+        _errorMessage = string.Empty;
+        _statusMessage = string.Empty;
+        try
+        {
+            await PageLayoutService.SaveLayoutAsync(_layout);
+            var result = await ReactPageBuilderService.PublishAsync(new ReactPublishRequest
             {
-                PageKey = PageKey,
-                Elements = Elements,
-                PerformedBy = "cms-builder-ui"
+                CommitMessage = _publishCommitMessage,
+                IncludeOnlyReactAppChanges = true
             });
-
-            StatusMessage = result.GitSummary;
-            ReloadPreview();
+            _statusMessage = result.Summary;
             await RefreshPublishStatusAsync();
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Unable to save visual builder page {PageKey}.", PageKey);
-            ErrorMessage = $"Unable to save changes. {ex.Message}";
+            Logger.LogError(ex, "Failed to publish {PageKey}.", PageKey);
+            _errorMessage = $"Publish failed. {ex.Message}";
         }
         finally
         {
-            IsBusy = false;
+            _isPublishBusy = false;
         }
-    }
-
-    private async Task SelectUiFileAsync(PageUiFile file)
-    {
-        SelectedUiFile = file;
-        RightPanelMode = "file-editor";
-        FileStatusMessage = string.Empty;
-        FileErrorMessage = string.Empty;
-
-        try
-        {
-            FileEditorContent = await ReactPageBuilderService.ReadFileContentAsync(file.FilePath);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Unable to read UI file {FilePath}.", file.FilePath);
-            FileErrorMessage = $"Unable to read file. {ex.Message}";
-        }
-    }
-
-    private void CloseFileEditor()
-    {
-        RightPanelMode = "inspector";
-        SelectedUiFile = null;
-        FileEditorContent = string.Empty;
-        FileStatusMessage = string.Empty;
-        FileErrorMessage = string.Empty;
-    }
-
-    private async Task SaveFileAsync()
-    {
-        if (SelectedUiFile is null)
-        {
-            return;
-        }
-
-        IsFileBusy = true;
-        FileStatusMessage = string.Empty;
-        FileErrorMessage = string.Empty;
-
-        try
-        {
-            await ReactPageBuilderService.SaveFileContentAsync(SelectedUiFile.FilePath, FileEditorContent);
-            FileStatusMessage = $"Saved {SelectedUiFile.FileName} successfully.";
-            ReloadPreview();
-            await RefreshPublishStatusAsync();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Unable to save UI file {FilePath}.", SelectedUiFile.FilePath);
-            FileErrorMessage = $"Unable to save file. {ex.Message}";
-        }
-        finally
-        {
-            IsFileBusy = false;
-        }
-    }
-
-    private void ReloadPreview()
-    {
-        _previewTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-    }
-
-    private void BackToList()
-    {
-        Navigation.NavigateTo("/admin/cms-builder");
-    }
-
-    private static string BuildFileOpenLink(string filePath)
-    {
-        return $"vscode://file/{Uri.EscapeDataString(filePath)}";
-    }
-
-    private void SetPreviewViewport(string viewport)
-    {
-        PreviewViewport = viewport;
-    }
-
-    private string GetViewportClass()
-    {
-        return PreviewViewport switch
-        {
-            "tablet" => "is-tablet",
-            "mobile" => "is-mobile",
-            _ => "is-desktop"
-        };
-    }
-
-    private string GetViewportLabel()
-    {
-        return PreviewViewport switch
-        {
-            "tablet" => "Tablet preview",
-            "mobile" => "Mobile preview",
-            _ => "Desktop preview"
-        };
-    }
-
-    private static string GetElementIconClass(string elementType)
-    {
-        return elementType.ToLowerInvariant() switch
-        {
-            "heading" => "bi bi-type-h1",
-            "button" => "bi bi-hand-index-thumb",
-            "image" => "bi bi-image",
-            _ => "bi bi-text-paragraph"
-        };
-    }
-
-    private static string GetElementTitle(string elementType)
-    {
-        return elementType.ToLowerInvariant() switch
-        {
-            "heading" => "Heading",
-            "button" => "Button",
-            "image" => "Image",
-            _ => "Paragraph"
-        };
-    }
-
-    private static string GetElementTagline(string elementType)
-    {
-        return elementType.ToLowerInvariant() switch
-        {
-            "heading" => "Hero titles and section labels",
-            "button" => "Primary actions and CTAs",
-            "image" => "Product imagery and diagrams",
-            _ => "Supporting copy and descriptions"
-        };
-    }
-
-    private static string GetLayerSummary(VisualBuilderElement element)
-    {
-        var content = element.Text ?? string.Empty;
-        if (content.Length <= 48)
-        {
-            return content;
-        }
-
-        return content[..48] + "...";
-    }
-
-    private string GetPreviewSelectionClass(string elementId)
-    {
-        return elementId == SelectedElementId ? "is-selected" : string.Empty;
-    }
-
-    private static string GetContentLabel(string elementType)
-    {
-        return elementType.ToLowerInvariant() switch
-        {
-            "image" => "Image URL",
-            "button" => "Button label",
-            _ => "Content"
-        };
-    }
-
-    private static string GetFileTypeIconClass(string fileType)
-    {
-        return fileType.ToLowerInvariant() switch
-        {
-            "css" or "scss" or "sass" or "less" => "bi bi-filetype-css",
-            "jsx" or "tsx" => "bi bi-filetype-jsx",
-            "js" or "ts" => "bi bi-filetype-js",
-            _ => "bi bi-file-earmark-code"
-        };
-    }
-
-    private static string GetFileTypeIconModifier(string fileType)
-    {
-        return fileType.ToLowerInvariant() switch
-        {
-            "css" or "scss" or "sass" or "less" => "is-css",
-            "jsx" or "tsx" => "is-jsx",
-            _ => "is-js"
-        };
-    }
-
-    private static string GetImageSource(string? value)
-    {
-        return string.IsNullOrWhiteSpace(value)
-            ? "https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=1200&q=80"
-            : value;
     }
 
     private async Task RefreshPublishStatusAsync()
     {
         var status = await ReactPageBuilderService.GetPublishStatusAsync();
-        PublishBranchName = status.CurrentBranch;
-        ChangedFiles = status.ChangedFiles;
+        _publishBranchName = status.CurrentBranch;
+        _changedFiles = status.ChangedFiles;
     }
 
-    private async Task PublishAsync()
+    private void ReloadPreview() =>
+        _previewTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+    // ── Selection ─────────────────────────────────────────────────────────
+    private void SelectSection(string sectionId)
     {
-        IsBusy = true;
-        ErrorMessage = string.Empty;
-        StatusMessage = string.Empty;
-
-        try
-        {
-            var result = await ReactPageBuilderService.PublishAsync(new ReactPublishRequest
-            {
-                CommitMessage = PublishCommitMessage,
-                IncludeOnlyReactAppChanges = true
-            });
-
-            StatusMessage = result.Summary;
-            ReloadPreview();
-            await RefreshPublishStatusAsync();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Unable to publish changes for page {PageKey}.", PageKey);
-            ErrorMessage = $"Unable to publish changes. {ex.Message}";
-        }
-        finally
-        {
-            IsBusy = false;
-        }
+        _selectedSectionId = sectionId;
+        _selectedWidgetId = string.Empty;
+        _rightTab = "inspector";
     }
+
+    private void SelectWidget(string sectionId, string widgetId)
+    {
+        _selectedSectionId = sectionId;
+        _selectedWidgetId = widgetId;
+        _rightTab = "inspector";
+    }
+
+    private void ClearSelection()
+    {
+        _selectedSectionId = string.Empty;
+        _selectedWidgetId = string.Empty;
+    }
+
+    // ── Section CRUD ──────────────────────────────────────────────────────
+    private void AddSectionAtEnd()
+    {
+        var section = CreateDefaultSection();
+        _layout.Sections.Add(section);
+        SelectSection(section.Id);
+    }
+
+    private void AddSectionAbove(string sectionId)
+    {
+        var idx = _layout.Sections.FindIndex(s => s.Id == sectionId);
+        if (idx < 0) return;
+        var section = CreateDefaultSection();
+        _layout.Sections.Insert(idx, section);
+        SelectSection(section.Id);
+    }
+
+    private void AddSectionBelow(string sectionId)
+    {
+        var idx = _layout.Sections.FindIndex(s => s.Id == sectionId);
+        var section = CreateDefaultSection();
+        _layout.Sections.Insert(idx < 0 ? _layout.Sections.Count : idx + 1, section);
+        SelectSection(section.Id);
+    }
+
+    private void DeleteSection(string sectionId)
+    {
+        _layout.Sections.RemoveAll(s => s.Id == sectionId);
+        if (_selectedSectionId == sectionId) ClearSelection();
+    }
+
+    private static LayoutSection CreateDefaultSection()
+    {
+        var section = new LayoutSection { Label = "Section", ColumnLayout = "full" };
+        section.Columns = BuildColumnsForLayout("full");
+        return section;
+    }
+
+    private static List<LayoutColumn> BuildColumnsForLayout(string layout) => layout switch
+    {
+        "half-half" => [new LayoutColumn { Span = 6 }, new LayoutColumn { Span = 6 }],
+        "one-third-two-thirds" => [new LayoutColumn { Span = 4 }, new LayoutColumn { Span = 8 }],
+        "two-thirds-one-third" => [new LayoutColumn { Span = 8 }, new LayoutColumn { Span = 4 }],
+        "thirds" => [new LayoutColumn { Span = 4 }, new LayoutColumn { Span = 4 }, new LayoutColumn { Span = 4 }],
+        _ => [new LayoutColumn { Span = 12 }]
+    };
+
+    private static void UpdateSectionColumnLayout(LayoutSection section, string newLayout)
+    {
+        if (section.ColumnLayout == newLayout) return;
+        var allWidgets = section.Columns.SelectMany(c => c.Widgets).ToList();
+        section.ColumnLayout = newLayout;
+        section.Columns = BuildColumnsForLayout(newLayout);
+        if (section.Columns.Count > 0)
+            section.Columns[0].Widgets.AddRange(allWidgets);
+    }
+
+    // ── Widget CRUD ───────────────────────────────────────────────────────
+    private void QuickAddWidget(string widgetType)
+    {
+        LayoutSection? targetSection = null;
+        if (!string.IsNullOrEmpty(_selectedSectionId))
+            targetSection = FindSection(_selectedSectionId);
+        targetSection ??= _layout.Sections.LastOrDefault();
+
+        if (targetSection is null)
+        {
+            targetSection = CreateDefaultSection();
+            _layout.Sections.Add(targetSection);
+        }
+
+        LayoutColumn? targetColumn = null;
+        if (!string.IsNullOrEmpty(_selectedWidgetId))
+        {
+            var (_, col) = FindWidgetLocation(_selectedWidgetId);
+            if (col is not null && targetSection.Columns.Contains(col))
+                targetColumn = col;
+        }
+        targetColumn ??= targetSection.Columns.FirstOrDefault();
+        if (targetColumn is null) return;
+
+        var widget = CreateDefaultWidget(widgetType);
+        targetColumn.Widgets.Add(widget);
+        SelectWidget(targetSection.Id, widget.Id);
+    }
+
+    private void MoveWidgetInColumn(string sectionId, string columnId, int index, int direction)
+    {
+        var col = FindSection(sectionId)?.Columns.FirstOrDefault(c => c.Id == columnId);
+        if (col is null) return;
+        var target = index + direction;
+        if (target < 0 || target >= col.Widgets.Count) return;
+        (col.Widgets[index], col.Widgets[target]) = (col.Widgets[target], col.Widgets[index]);
+    }
+
+    private void MoveSelectedWidgetUp()
+    {
+        if (string.IsNullOrEmpty(_selectedWidgetId)) return;
+        var (sec, col) = FindWidgetLocation(_selectedWidgetId);
+        if (sec is null || col is null) return;
+        var idx = col.Widgets.FindIndex(w => w.Id == _selectedWidgetId);
+        MoveWidgetInColumn(sec.Id, col.Id, idx, -1);
+    }
+
+    private void MoveSelectedWidgetDown()
+    {
+        if (string.IsNullOrEmpty(_selectedWidgetId)) return;
+        var (sec, col) = FindWidgetLocation(_selectedWidgetId);
+        if (sec is null || col is null) return;
+        var idx = col.Widgets.FindIndex(w => w.Id == _selectedWidgetId);
+        MoveWidgetInColumn(sec.Id, col.Id, idx, 1);
+    }
+
+    private void DuplicateWidget(string sectionId, string columnId, int index)
+    {
+        var col = FindSection(sectionId)?.Columns.FirstOrDefault(c => c.Id == columnId);
+        if (col is null || index >= col.Widgets.Count) return;
+        var orig = col.Widgets[index];
+        var clone = new LayoutWidget
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            WidgetType = orig.WidgetType,
+            Props = new Dictionary<string, string>(orig.Props)
+        };
+        col.Widgets.Insert(index + 1, clone);
+        SelectWidget(sectionId, clone.Id);
+    }
+
+    private void DuplicateSelectedWidget()
+    {
+        if (string.IsNullOrEmpty(_selectedWidgetId)) return;
+        var (sec, col) = FindWidgetLocation(_selectedWidgetId);
+        if (sec is null || col is null) return;
+        DuplicateWidget(sec.Id, col.Id, col.Widgets.FindIndex(w => w.Id == _selectedWidgetId));
+    }
+
+    private void DeleteWidget(string sectionId, string columnId, string widgetId)
+    {
+        var col = FindSection(sectionId)?.Columns.FirstOrDefault(c => c.Id == columnId);
+        col?.Widgets.RemoveAll(w => w.Id == widgetId);
+        if (_selectedWidgetId == widgetId) ClearSelection();
+    }
+
+    private void DeleteSelectedWidget()
+    {
+        if (string.IsNullOrEmpty(_selectedWidgetId)) return;
+        var (sec, col) = FindWidgetLocation(_selectedWidgetId);
+        if (sec is null || col is null) return;
+        DeleteWidget(sec.Id, col.Id, _selectedWidgetId);
+    }
+
+    // ── Drag-drop ─────────────────────────────────────────────────────────
+    private void StartNewWidgetDrag(string widgetType)
+    {
+        _draggingNewWidgetType = widgetType;
+        _draggingWidgetId = string.Empty;
+        _isDragging = true;
+    }
+
+    private void StartWidgetDrag(string widgetId, string sectionId, string columnId)
+    {
+        _draggingWidgetId = widgetId;
+        _draggingWidgetSectionId = sectionId;
+        _draggingWidgetColumnId = columnId;
+        _draggingNewWidgetType = string.Empty;
+        _isDragging = true;
+    }
+
+    private void EndDrag()
+    {
+        _isDragging = false;
+        _draggingNewWidgetType = string.Empty;
+        _draggingWidgetId = string.Empty;
+        _draggingWidgetSectionId = string.Empty;
+        _draggingWidgetColumnId = string.Empty;
+        _dragOverSectionId = string.Empty;
+        _dragOverColumnId = string.Empty;
+        _dragOverIndex = -1;
+    }
+
+    private void SetDragOver(string sectionId, string columnId, int index)
+    {
+        _dragOverSectionId = sectionId;
+        _dragOverColumnId = columnId;
+        _dragOverIndex = index;
+    }
+
+    private bool IsDropZoneActive(string sectionId, string columnId, int index) =>
+        _isDragging &&
+        _dragOverSectionId == sectionId &&
+        _dragOverColumnId == columnId &&
+        _dragOverIndex == index;
+
+    private void Drop(string sectionId, string columnId, int insertIndex)
+    {
+        if (!string.IsNullOrEmpty(_draggingNewWidgetType))
+        {
+            var col = FindSection(sectionId)?.Columns.FirstOrDefault(c => c.Id == columnId);
+            if (col is not null)
+            {
+                var widget = CreateDefaultWidget(_draggingNewWidgetType);
+                col.Widgets.Insert(Math.Clamp(insertIndex, 0, col.Widgets.Count), widget);
+                SelectWidget(sectionId, widget.Id);
+            }
+        }
+        else if (!string.IsNullOrEmpty(_draggingWidgetId))
+        {
+            var srcCol = FindSection(_draggingWidgetSectionId)?.Columns.FirstOrDefault(c => c.Id == _draggingWidgetColumnId);
+            var dstCol = FindSection(sectionId)?.Columns.FirstOrDefault(c => c.Id == columnId);
+            if (srcCol is null || dstCol is null) { EndDrag(); return; }
+
+            var widget = srcCol.Widgets.FirstOrDefault(w => w.Id == _draggingWidgetId);
+            if (widget is null) { EndDrag(); return; }
+
+            srcCol.Widgets.Remove(widget);
+            dstCol.Widgets.Insert(Math.Clamp(insertIndex, 0, dstCol.Widgets.Count), widget);
+            SelectWidget(sectionId, widget.Id);
+        }
+
+        EndDrag();
+    }
+
+    // ── Lookup helpers ────────────────────────────────────────────────────
+    private LayoutSection? FindSection(string id) =>
+        _layout.Sections.FirstOrDefault(s => s.Id == id);
+
+    private LayoutWidget? FindWidget(string widgetId) =>
+        _layout.Sections.SelectMany(s => s.Columns).SelectMany(c => c.Widgets)
+            .FirstOrDefault(w => w.Id == widgetId);
+
+    private (LayoutSection? Section, LayoutColumn? Column) FindWidgetLocation(string widgetId)
+    {
+        foreach (var s in _layout.Sections)
+            foreach (var c in s.Columns)
+                if (c.Widgets.Any(w => w.Id == widgetId))
+                    return (s, c);
+        return (null, null);
+    }
+
+    private static int GetSectionWidgetCount(LayoutSection section) =>
+        section.Columns.Sum(c => c.Widgets.Count);
+
+    // ── Prop helpers ──────────────────────────────────────────────────────
+    private static string GetProp(LayoutWidget widget, string key, string defaultValue = "") =>
+        widget.Props.TryGetValue(key, out var val) ? val : defaultValue;
+
+    private static void SetProp(LayoutWidget widget, string key, string value) =>
+        widget.Props[key] = value;
+
+    // ── Widget factory ────────────────────────────────────────────────────
+    private static LayoutWidget CreateDefaultWidget(string type) => type switch
+    {
+        "heading"   => new() { WidgetType = "heading",   Props = new() { ["level"] = "h2", ["text"] = "Heading",                      ["align"] = "left" } },
+        "paragraph" => new() { WidgetType = "paragraph", Props = new() { ["text"] = "Your paragraph text here.",                       ["align"] = "left" } },
+        "button"    => new() { WidgetType = "button",    Props = new() { ["label"] = "Click me",  ["href"] = "#", ["variant"] = "primary", ["size"] = "md", ["align"] = "left" } },
+        "image"     => new() { WidgetType = "image",     Props = new() { ["src"] = "",  ["alt"] = "", ["caption"] = "", ["width"] = "full" } },
+        "hero"      => new() { WidgetType = "hero",      Props = new() { ["headline"] = "Your Headline", ["subline"] = "Your supporting description.", ["cta1Label"] = "Get Started", ["cta1Href"] = "#", ["cta2Label"] = "", ["cta2Href"] = "", ["align"] = "left" } },
+        "card"      => new() { WidgetType = "card",      Props = new() { ["title"] = "Card Title", ["body"] = "Card description text.", ["imageSrc"] = "", ["link"] = "" } },
+        "spacer"    => new() { WidgetType = "spacer",    Props = new() { ["height"] = "48" } },
+        "divider"   => new() { WidgetType = "divider",   Props = new() { ["style"] = "solid" } },
+        "html"      => new() { WidgetType = "html",      Props = new() { ["content"] = "<p>Custom HTML content here.</p>" } },
+        _           => new() { WidgetType = "paragraph", Props = new() { ["text"] = "Content", ["align"] = "left" } }
+    };
+
+    // ── CSS helpers ───────────────────────────────────────────────────────
+    private string GetViewportClass() => _previewViewport switch
+    {
+        "tablet" => "is-tablet",
+        "mobile" => "is-mobile",
+        _ => "is-desktop"
+    };
+
+    private string GetViewportLabel() => _previewViewport switch
+    {
+        "tablet" => "Tablet",
+        "mobile" => "Mobile",
+        _ => "Desktop"
+    };
+
+    private static string GetSectionBgClass(LayoutSection s) => s.Background switch
+    {
+        "light"  => "canvas-bg-light",
+        "dark"   => "canvas-bg-dark",
+        "accent" => "canvas-bg-accent",
+        _        => "canvas-bg-transparent"
+    };
+
+    private static string GetSectionPaddingClass(LayoutSection s) => s.Padding switch
+    {
+        "none" => "canvas-pad-none",
+        "sm"   => "canvas-pad-sm",
+        "lg"   => "canvas-pad-lg",
+        "xl"   => "canvas-pad-xl",
+        _      => "canvas-pad-md"
+    };
+
+    private static string GetColumnLayoutLabel(string layout) => layout switch
+    {
+        "half-half"             => "50/50",
+        "one-third-two-thirds"  => "1/3 + 2/3",
+        "two-thirds-one-third"  => "2/3 + 1/3",
+        "thirds"                => "33/33/33",
+        _                       => "Full"
+    };
+
+    private static string GetWidgetTypeLabel(string type) => type switch
+    {
+        "heading"   => "Heading",
+        "paragraph" => "Paragraph",
+        "button"    => "Button",
+        "image"     => "Image",
+        "hero"      => "Hero",
+        "card"      => "Card",
+        "spacer"    => "Spacer",
+        "divider"   => "Divider",
+        "html"      => "HTML",
+        _           => type
+    };
+
+    private static string GetWidgetIconClass(string type) => type switch
+    {
+        "heading"   => "bi bi-type-h1",
+        "paragraph" => "bi bi-text-paragraph",
+        "button"    => "bi bi-hand-index-thumb",
+        "image"     => "bi bi-image",
+        "hero"      => "bi bi-stars",
+        "card"      => "bi bi-card-heading",
+        "spacer"    => "bi bi-arrows-expand-vertical",
+        "divider"   => "bi bi-dash-lg",
+        "html"      => "bi bi-code-slash",
+        _           => "bi bi-square"
+    };
+
+    private static string GetWidgetLayerSummary(LayoutWidget w)
+    {
+        var raw = w.WidgetType switch
+        {
+            "heading"   => GetPropStatic(w, "text", "Heading"),
+            "paragraph" => GetPropStatic(w, "text", ""),
+            "button"    => GetPropStatic(w, "label", "Button"),
+            "image"     => GetPropStatic(w, "alt", GetPropStatic(w, "src", "Image")),
+            "hero"      => GetPropStatic(w, "headline", "Hero"),
+            "card"      => GetPropStatic(w, "title", "Card"),
+            "spacer"    => $"{GetPropStatic(w, "height", "48")}px",
+            "html"      => "Custom HTML",
+            _           => w.WidgetType
+        };
+        return raw.Length <= 38 ? raw : raw[..38] + "…";
+    }
+
+    private static string GetPropStatic(LayoutWidget w, string key, string def) =>
+        w.Props.TryGetValue(key, out var v) ? v : def;
+
+    private void BackToList() => Navigation.NavigateTo("/admin/cms-builder");
 }

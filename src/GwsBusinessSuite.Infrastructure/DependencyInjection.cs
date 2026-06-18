@@ -54,6 +54,7 @@ public static class DependencyInjection
         services.AddScoped<IAffiliateOfferScoringService, AffiliateOfferScoringService>();
         services.AddScoped<ICmsBuilderService, CmsBuilderService>();
         services.AddScoped<IReactPageBuilderService, ReactPageBuilderService>();
+        services.AddScoped<IPageLayoutService, PageLayoutService>();
         services.AddScoped<ICmsKnowledgeService, CmsKnowledgeService>();
         services.AddScoped<IContentStudioService, ContentStudioService>();
         services.AddScoped<ICrmService, CrmService>();
