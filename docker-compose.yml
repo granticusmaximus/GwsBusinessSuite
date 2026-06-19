@@ -7,10 +7,36 @@ services:
       - .env
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      # Point the app at the Ollama container on the internal Docker network.
+      # These override the localhost defaults in appsettings.json.
+      ContentStudio__BaseUrl: http://ollama:11434
+      ExternalServices__OllamaBaseUrl: http://ollama:11434
     restart: always
     volumes:
-      # Persist SQLite database and any local CMS file state
       - gwssuite-data:/app/data
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: always
+    volumes:
+      # Models are stored on the droplet SSD so they survive container restarts
+      # and image updates. Only the first-ever startup downloads the full files.
+      - ollama-models:/root/.ollama
+      # Mount the init script from the repo into the container read-only.
+      - ./scripts/ollama-init.sh:/scripts/ollama-init.sh:ro
+    entrypoint: ["/bin/sh", "/scripts/ollama-init.sh"]
+    healthcheck:
+      # Passes as soon as the Ollama server is accepting requests —
+      # before model pulls complete, so the app can start in parallel.
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
 
 volumes:
   gwssuite-data:
+  ollama-models:
