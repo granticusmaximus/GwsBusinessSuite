@@ -5,7 +5,11 @@
 @implements IDisposable
 @using GwsBusinessSuite.Application.ContentStudio
 @using Markdig
+@using GwsBusinessSuite.Domain.Entities
+@using GwsBusinessSuite.Infrastructure.Data
+@using Microsoft.EntityFrameworkCore
 @inject IContentStudioService ContentStudioService
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
 @inject ILogger<ContentStudioDraft> Logger
@@ -86,62 +90,26 @@ else
                 </div>
             </div>
 
-            @if (CurrentDraft.HeroImage is not null)
-            {
-                <div class="hero-preview-panel mb-4">
-                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-                        <div>
-                            <div class="form-label fw-semibold small mb-1">Ollama Hero Image Generation</div>
-                            <div class="text-secondary small">Shows persisted image-generation output and status metadata.</div>
-                        </div>
-                        <div class="d-flex flex-wrap gap-2">
-                            <span class="hero-chip">@CurrentDraft.HeroImage.ThemeLabel</span>
-                            <span class="hero-chip hero-chip-secondary">@CurrentDraft.HeroImage.AccentLabel</span>
-                        </div>
+            <div class="hero-upload-panel mb-4">
+                <div class="form-label fw-semibold small mb-1">Hero Image</div>
+                @if (!string.IsNullOrWhiteSpace(CurrentDraft.HeroImage?.DataUri))
+                {
+                    <img class="hero-preview-image mb-3" src="@CurrentDraft.HeroImage.DataUri"
+                         alt="@CurrentDraft.HeroImage.AltText" />
+                }
+                <div class="upload-drop-zone @(IsBusy ? "disabled" : "")">
+                    <InputFile OnChange="HandleHeroImageUpload" accept="image/*" class="upload-input" disabled="@IsBusy" />
+                    <div class="upload-prompt">
+                        <i class="bi bi-cloud-upload fs-4 mb-1"></i>
+                        <span>@(string.IsNullOrWhiteSpace(CurrentDraft.HeroImage?.DataUri) ? "Upload hero image" : "Replace hero image")</span>
+                        <small class="text-secondary">PNG, JPG, WebP · max 5 MB · drag &amp; drop or click</small>
                     </div>
-
-                    <div class="row g-4 align-items-start">
-                        <div class="col-xl-7">
-                            @if (!string.IsNullOrWhiteSpace(CurrentDraft.HeroImage.DataUri))
-                            {
-                                <img class="hero-preview-image" src="@CurrentDraft.HeroImage.DataUri"
-                                     alt="@CurrentDraft.HeroImage.AltText" />
-                            }
-                            else
-                            {
-                                <div class="hero-status-panel">
-                                    <div class="hero-status-icon">
-                                        <i class="bi bi-image-alt"></i>
-                                    </div>
-                                    <div>
-                                        <div class="fw-semibold mb-2">No real Ollama-generated image is available.</div>
-                                        <p class="mb-2">@CurrentDraft.HeroImage.StatusMessage</p>
-                                        <p class="small text-secondary mb-0">@CurrentDraft.HeroImage.Caption</p>
-                                    </div>
-                                </div>
-                            }
-                        </div>
-                        <div class="col-xl-5">
-                            <label class="form-label fw-semibold small">Image Generation Prompt</label>
-                            <textarea class="form-control hero-prompt-editor mb-3" @bind="HeroImagePrompt"></textarea>
-                            <div class="small text-secondary mb-1"><strong>Provider:</strong> @CurrentDraft.HeroImage.Provider
-                            </div>
-                            <div class="small text-secondary mb-1"><strong>Configured image model:</strong>
-                                @CurrentDraft.HeroImage.ConfiguredModel</div>
-                                <div class="small text-secondary mb-0"><strong>Available local models:</strong>
-                                    @CurrentDraft.HeroImage.AvailableModelsSummary</div>
-                                    <div class="d-grid mt-3">
-                                        <button
-                                            class="btn btn-outline-primary d-inline-flex align-items-center justify-content-center gap-2"
-                                            @onclick="RegenerateHeroImage" disabled="@IsBusy">
-                                            <i class="bi bi-image"></i>
-                                            <span>Regenerate Hero Image</span>
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    }
+                </div>
+                @if (!string.IsNullOrWhiteSpace(HeroUploadError))
+                {
+                    <div class="text-danger small mt-1">@HeroUploadError</div>
+                }
+            </div>
 
                     <div class="row g-3 mb-4">
                         <div class="col-12">
@@ -279,7 +247,7 @@ else
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
     private string RevisionNotes { get; set; } = string.Empty;
-    private string HeroImagePrompt { get; set; } = string.Empty;
+    private string HeroUploadError { get; set; } = string.Empty;
 
     private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
@@ -322,7 +290,6 @@ else
             CurrentDraft = draft;
             IsApproved = string.Equals(CurrentDraft.Status, "Approved", StringComparison.OrdinalIgnoreCase);
             RevisionNotes = CurrentDraft.RequestedModifications;
-            HeroImagePrompt = CurrentDraft.HeroImage.Prompt;
             StatusMessage = $"Loaded draft '{CurrentDraft.Title}'.";
         }
         catch (Exception ex)
@@ -336,23 +303,52 @@ else
         }
     }
 
-    private async Task RegenerateHeroImage()
+    private async Task HandleHeroImageUpload(InputFileChangeEventArgs e)
     {
-        if (CurrentDraft is null)
+        HeroUploadError = string.Empty;
+        const long maxBytes = 5 * 1024 * 1024;
+
+        if (e.File.Size > maxBytes)
         {
+            HeroUploadError = "Image must be under 5 MB.";
             return;
         }
 
-        await RunWorkflowAction(
-            async () => await ContentStudioService.RegenerateHeroImageAsync(new DraftHeroImageRegenerationRequest
+        if (CurrentDraft is null) return;
+
+        IsBusy = true;
+        try
+        {
+            using var stream = e.File.OpenReadStream(maxAllowedSize: maxBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var dataUri = $"data:{e.File.ContentType};base64,{Convert.ToBase64String(ms.ToArray())}";
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var draft = await db.SeoArticleDrafts.FindAsync(CurrentDraft.DraftId);
+            if (draft is not null)
             {
-                DraftId = CurrentDraft.DraftId,
-                Prompt = HeroImagePrompt,
-                Notes = RevisionNotes,
-                PerformedBy = "content-studio-ui"
-            }),
-            "Generating a new hero image from your prompt and available Ollama image models.",
-            _ => "Hero image regenerated without changing article text.");
+                draft.HeroImageDataUri = dataUri;
+                draft.HeroImageAltText = CurrentDraft.Title;
+                draft.UpdatedAt = DateTimeOffset.UtcNow;
+                draft.UpdatedBy = "content-studio-ui";
+                await db.SaveChangesAsync();
+            }
+
+            var refreshed = await ContentStudioService.GetDraftAsync(CurrentDraft.DraftId);
+            if (refreshed is not null) CurrentDraft = refreshed;
+            StatusMessage = "Hero image uploaded.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Hero image upload failed for draft {DraftId}.", CurrentDraft.DraftId);
+            HeroUploadError = $"Upload failed. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+            StateHasChanged();
+        }
     }
 
     private async Task ApproveDraft()
@@ -453,7 +449,6 @@ else
             CurrentDraft = updated;
             IsApproved = string.Equals(CurrentDraft.Status, "Approved", StringComparison.OrdinalIgnoreCase);
             RevisionNotes = CurrentDraft.RequestedModifications;
-            HeroImagePrompt = CurrentDraft.HeroImage.Prompt;
             StatusMessage = successMessageFactory(CurrentDraft);
         }
         catch (Exception ex)
@@ -537,7 +532,6 @@ else
         return eventType switch
         {
             "PublishedToSite" => "Published Live",
-            "HeroImageRegenerated" => "Hero Image Regenerated",
             "PendingReview" => "Pending Review",
             _ => eventType
         };
@@ -708,5 +702,53 @@ placement.SlotToken);
         color: #f9fafb;
         border: 1px solid #9ca3af;
         box-shadow: 0 0.35rem 1rem rgba(31, 41, 55, 0.35);
+    }
+
+    .hero-preview-image {
+        display: block;
+        width: 100%;
+        max-height: 220px;
+        object-fit: cover;
+        border-radius: 10px;
+        border: 1px solid #dbe6f3;
+    }
+
+    .upload-drop-zone {
+        position: relative;
+        border: 2px dashed #93c5fd;
+        border-radius: 10px;
+        background: #f0f7ff;
+        padding: 1.5rem 1rem;
+        text-align: center;
+        transition: border-color 0.15s, background 0.15s;
+        cursor: pointer;
+    }
+
+    .upload-drop-zone:hover:not(.disabled) {
+        border-color: #3b82f6;
+        background: #e0effe;
+    }
+
+    .upload-drop-zone.disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+    }
+
+    .upload-input {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0;
+        cursor: pointer;
+    }
+
+    .upload-prompt {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.25rem;
+        pointer-events: none;
+        color: #3b82f6;
     }
 </style>

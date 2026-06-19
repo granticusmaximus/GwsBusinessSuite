@@ -11,7 +11,6 @@ public sealed class ContentStudioService(
     IOllamaService ollama,
     IAffiliateOfferScoringService offerScoringService,
     IOptions<ContentStudioOptions> options,
-    IHeroImageCompositor heroImageCompositor,
     ILogger<ContentStudioService> logger) : IContentStudioService
 {
     private static readonly string[] AffiliateSlotTokens = ["{{CJ_AD_SLOT_1}}", "{{CJ_AD_SLOT_2}}", "{{CJ_AD_SLOT_3}}"];
@@ -154,18 +153,6 @@ public sealed class ContentStudioService(
         var model = string.IsNullOrWhiteSpace(configuredOptions.Model)
             ? ContentStudioOptions.DefaultModel
             : configuredOptions.Model;
-        var imageModel = string.IsNullOrWhiteSpace(configuredOptions.ImageModel)
-            ? ContentStudioOptions.DefaultImageModel
-            : configuredOptions.ImageModel;
-        var imageWidth = configuredOptions.ImageWidth <= 0
-            ? ContentStudioOptions.DefaultImageWidth
-            : configuredOptions.ImageWidth;
-        var imageHeight = configuredOptions.ImageHeight <= 0
-            ? ContentStudioOptions.DefaultImageHeight
-            : configuredOptions.ImageHeight;
-        var imageSteps = configuredOptions.ImageSteps <= 0
-            ? ContentStudioOptions.DefaultImageSteps
-            : configuredOptions.ImageSteps;
 
         logger.LogInformation(
             "Generating Content Studio draft for topic '{Topic}' using Ollama model '{Model}'.",
@@ -182,21 +169,7 @@ public sealed class ContentStudioService(
 
         var markdownWithAffiliateSlots = EnsureAffiliatePlaceholders(markdown);
         var slug = CreateSlug(request.Topic);
-        var availableModels = await GetAvailableModelNamesAsync(cancellationToken);
         var title = request.Topic.Trim();
-
-        var heroImagePrompt = ContentStudioImagePreviewFactory.BuildPrompt(request, title);
-        var heroImage = await GenerateHeroImageAsync(
-            request,
-            title,
-            model,
-            imageModel,
-            imageWidth,
-            imageHeight,
-            imageSteps,
-            availableModels,
-            null,
-            cancellationToken);
 
         var draft = new SeoArticleDraft
         {
@@ -213,17 +186,6 @@ public sealed class ContentStudioService(
             ArticleMarkdown = markdownWithAffiliateSlots,
             SeoChecklistMarkdown = BuildDefaultChecklist(request.PrimaryKeyword, request.SecondaryKeywords),
             SourceNotesMarkdown = "Verify references against Microsoft Learn and official .NET docs before publishing.",
-            HeroImagePrompt = heroImagePrompt,
-            HeroImageAltText = heroImage.AltText,
-            HeroImageDataUri = heroImage.DataUri,
-            HeroImageThemeLabel = heroImage.ThemeLabel,
-            HeroImageAccentLabel = heroImage.AccentLabel,
-            HeroImageCaption = heroImage.Caption,
-            HeroImageProvider = heroImage.Provider,
-            HeroImageConfiguredModel = heroImage.ConfiguredModel,
-            HeroImageAvailableModelsSummary = heroImage.AvailableModelsSummary,
-            HeroImageStatusMessage = heroImage.StatusMessage,
-            IsHeroImageGeneratedByOllama = heroImage.IsGeneratedByOllama,
             RevisionNumber = 0
         };
 
@@ -436,82 +398,6 @@ public sealed class ContentStudioService(
         return await ApplyDecisionAsync(request, SeoArticleDraftStatuses.Rejected, SeoArticleWorkflowEventTypes.Rejected, cancellationToken);
     }
 
-    public async Task<ArticleGenerationResult?> RegenerateHeroImageAsync(
-        DraftHeroImageRegenerationRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        var draft = await db.SeoArticleDrafts.FirstOrDefaultAsync(x => x.Id == request.DraftId, cancellationToken);
-        if (draft is null)
-        {
-            return null;
-        }
-
-        var configuredOptions = options.Value;
-        var articleModel = string.IsNullOrWhiteSpace(configuredOptions.Model)
-            ? ContentStudioOptions.DefaultModel
-            : configuredOptions.Model;
-        var imageModel = string.IsNullOrWhiteSpace(configuredOptions.ImageModel)
-            ? ContentStudioOptions.DefaultImageModel
-            : configuredOptions.ImageModel;
-        var imageWidth = configuredOptions.ImageWidth <= 0
-            ? ContentStudioOptions.DefaultImageWidth
-            : configuredOptions.ImageWidth;
-        var imageHeight = configuredOptions.ImageHeight <= 0
-            ? ContentStudioOptions.DefaultImageHeight
-            : configuredOptions.ImageHeight;
-        var imageSteps = configuredOptions.ImageSteps <= 0
-            ? ContentStudioOptions.DefaultImageSteps
-            : configuredOptions.ImageSteps;
-
-        var generationRequest = new ArticleGenerationRequest
-        {
-            Topic = draft.Topic,
-            TargetAudience = draft.TargetAudience,
-            PrimaryKeyword = draft.PrimaryKeyword,
-            SecondaryKeywords = draft.SecondaryKeywords
-        };
-
-        var availableModels = await GetAvailableModelNamesAsync(cancellationToken);
-        var heroImage = await GenerateHeroImageAsync(
-            generationRequest,
-            draft.Title,
-            articleModel,
-            imageModel,
-            imageWidth,
-            imageHeight,
-            imageSteps,
-            availableModels,
-            request.Prompt,
-            cancellationToken);
-
-        draft.HeroImagePrompt = heroImage.Prompt;
-        draft.HeroImageAltText = heroImage.AltText;
-        draft.HeroImageDataUri = heroImage.DataUri;
-        draft.HeroImageThemeLabel = heroImage.ThemeLabel;
-        draft.HeroImageAccentLabel = heroImage.AccentLabel;
-        draft.HeroImageCaption = heroImage.Caption;
-        draft.HeroImageProvider = heroImage.Provider;
-        draft.HeroImageConfiguredModel = heroImage.ConfiguredModel;
-        draft.HeroImageAvailableModelsSummary = heroImage.AvailableModelsSummary;
-        draft.HeroImageStatusMessage = heroImage.StatusMessage;
-        draft.IsHeroImageGeneratedByOllama = heroImage.IsGeneratedByOllama;
-        draft.UpdatedAt = DateTimeOffset.UtcNow;
-        draft.UpdatedBy = request.PerformedBy;
-
-        db.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent
-        {
-            SeoArticleDraftId = draft.Id,
-            EventType = SeoArticleWorkflowEventTypes.HeroImageRegenerated,
-            Notes = string.IsNullOrWhiteSpace(request.Notes)
-                ? "Hero image regenerated independently from article text."
-                : request.Notes.Trim(),
-            CreatedBy = request.PerformedBy
-        });
-
-        await db.SaveChangesAsync(cancellationToken);
-        return await GetDraftAsync(draft.Id, cancellationToken);
-    }
-
     public static string BuildPrompt(ArticleGenerationRequest request, IReadOnlyCollection<ScoredAffiliateOfferView>? scoredOffers = null)
     {
         var affiliatePromptBlock = BuildAffiliateOfferPromptContext(scoredOffers ?? Array.Empty<ScoredAffiliateOfferView>());
@@ -612,138 +498,6 @@ public sealed class ContentStudioService(
         await db.SaveChangesAsync(cancellationToken);
 
         return await GetDraftAsync(draft.Id, cancellationToken);
-    }
-
-    private async Task<ArticleHeroImagePreview> GenerateHeroImageAsync(
-        ArticleGenerationRequest request,
-        string title,
-        string articleModel,
-        string imageModel,
-        int imageWidth,
-        int imageHeight,
-        int imageSteps,
-        IReadOnlyCollection<string> availableModels,
-        string? promptOverride,
-        CancellationToken cancellationToken)
-    {
-        var prompt = string.IsNullOrWhiteSpace(promptOverride)
-            ? ContentStudioImagePreviewFactory.BuildPrompt(request, title)
-            : promptOverride.Trim();
-        var configuredModel = imageModel.Trim();
-        var candidates = BuildImageModelCandidates(configuredModel, availableModels);
-
-        Exception? lastException = null;
-
-        foreach (var candidate in candidates)
-        {
-            try
-            {
-                var imageResult = await ollama.GenerateImageAsync(
-                    new OllamaImageGenerationRequest(
-                        candidate,
-                        prompt,
-                        imageWidth,
-                        imageHeight,
-                        imageSteps),
-                    cancellationToken);
-
-                if (!string.Equals(candidate, configuredModel, StringComparison.OrdinalIgnoreCase))
-                {
-                    logger.LogInformation(
-                        "Ollama hero image generation succeeded for topic '{Topic}' after fallback from configured model '{ConfiguredModel}' to local model '{ResolvedModel}'.",
-                        request.Topic,
-                        configuredModel,
-                        candidate);
-                }
-
-                var compositedDataUri = heroImageCompositor.CompositeTitle(imageResult.DataUri, title);
-
-                return ContentStudioImagePreviewFactory.CreateGenerated(
-                    request,
-                    title,
-                    prompt,
-                    articleModel,
-                    imageResult.Model,
-                    availableModels,
-                    compositedDataUri);
-            }
-            catch (Exception ex)
-            {
-                lastException = ex;
-                logger.LogWarning(
-                    ex,
-                    "Unable to generate Ollama hero image for topic '{Topic}' using image model '{ImageModelCandidate}'.",
-                    request.Topic,
-                    candidate);
-            }
-        }
-
-        return ContentStudioImagePreviewFactory.CreateUnavailable(
-            request,
-            title,
-            prompt,
-            articleModel,
-            configuredModel,
-            availableModels,
-            lastException?.Message);
-    }
-
-    private static IReadOnlyList<string> BuildImageModelCandidates(string configuredModel, IReadOnlyCollection<string> availableModels)
-    {
-        var normalizedConfigured = (configuredModel ?? string.Empty).Trim();
-        var candidates = new List<string>();
-
-        if (!string.IsNullOrWhiteSpace(normalizedConfigured))
-        {
-            candidates.Add(normalizedConfigured);
-            if (!normalizedConfigured.Contains(':', StringComparison.Ordinal))
-            {
-                candidates.Add($"{normalizedConfigured}:latest");
-            }
-        }
-
-        var configuredBase = normalizedConfigured.Contains(':', StringComparison.Ordinal)
-            ? normalizedConfigured[..normalizedConfigured.IndexOf(':')]
-            : normalizedConfigured;
-
-        foreach (var model in availableModels)
-        {
-            if (string.IsNullOrWhiteSpace(model))
-            {
-                continue;
-            }
-
-            var candidate = model.Trim();
-            var candidateBase = candidate.Contains(':', StringComparison.Ordinal)
-                ? candidate[..candidate.IndexOf(':')]
-                : candidate;
-
-            if (!string.IsNullOrWhiteSpace(configuredBase) &&
-                !string.Equals(candidateBase, configuredBase, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            candidates.Add(candidate);
-        }
-
-        return candidates
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-    }
-
-    private async Task<IReadOnlyCollection<string>> GetAvailableModelNamesAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            return await ollama.ListModelsAsync(cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Unable to load available Ollama models for hero image generation status.");
-            return Array.Empty<string>();
-        }
     }
 
     private static string BuildMetaTitle(string topic)
@@ -960,17 +714,9 @@ public sealed class ContentStudioService(
             AffiliatePlacements = placements,
             HeroImage = new ArticleHeroImagePreview
             {
-                Prompt = draft.HeroImagePrompt,
                 AltText = draft.HeroImageAltText,
                 DataUri = draft.HeroImageDataUri,
-                ThemeLabel = draft.HeroImageThemeLabel,
-                AccentLabel = draft.HeroImageAccentLabel,
                 Caption = draft.HeroImageCaption,
-                Provider = draft.HeroImageProvider,
-                ConfiguredModel = draft.HeroImageConfiguredModel,
-                AvailableModelsSummary = draft.HeroImageAvailableModelsSummary,
-                StatusMessage = draft.HeroImageStatusMessage,
-                IsGeneratedByOllama = draft.IsHeroImageGeneratedByOllama
             },
             WorkflowHistory = events
                 .OrderByDescending(x => x.CreatedAt)
@@ -1002,34 +748,6 @@ public sealed class ContentStudioService(
         db.SeoArticleDrafts.Remove(draft);
         await db.SaveChangesAsync(cancellationToken);
         return true;
-    }
-
-    public async Task<int> BulkRegenerateHeroImagesAsync(CancellationToken cancellationToken = default)
-    {
-        var draftIds = await db.SeoArticleDrafts
-            .AsNoTracking()
-            .Select(x => x.Id)
-            .ToListAsync(cancellationToken);
-
-        var succeeded = 0;
-        foreach (var id in draftIds)
-        {
-            try
-            {
-                await RegenerateHeroImageAsync(new DraftHeroImageRegenerationRequest
-                {
-                    DraftId = id,
-                    Prompt = string.Empty,
-                    PerformedBy = "bulk-migration"
-                }, cancellationToken);
-                succeeded++;
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Bulk hero image regeneration failed for draft {DraftId}.", id);
-            }
-        }
-        return succeeded;
     }
 
     private async Task RecordDraftImpressionsAsync(Guid draftId, string performedBy, CancellationToken cancellationToken)

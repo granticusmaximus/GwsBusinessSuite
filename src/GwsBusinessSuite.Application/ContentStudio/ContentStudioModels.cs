@@ -31,14 +31,6 @@ public sealed class DraftPublishRequest
     public string PerformedBy { get; init; } = "content-studio";
 }
 
-public sealed class DraftHeroImageRegenerationRequest
-{
-    public Guid DraftId { get; init; }
-    public string Prompt { get; init; } = string.Empty;
-    public string Notes { get; init; } = string.Empty;
-    public string PerformedBy { get; init; } = "content-studio";
-}
-
 public sealed class AffiliatePlacementInteractionRequest
 {
     public Guid DraftId { get; init; }
@@ -125,15 +117,7 @@ public sealed class ArticleHeroImagePreview
 {
     public static ArticleHeroImagePreview Empty { get; } = new();
 
-    public string Prompt { get; init; } = string.Empty;
-    public string AltText { get; init; } = string.Empty;
-    public string DataUri { get; init; } = string.Empty;
-    public string ThemeLabel { get; init; } = string.Empty;
-    public string AccentLabel { get; init; } = string.Empty;
-    public string Caption { get; init; } = string.Empty;
-    public string Provider { get; init; } = string.Empty;
-    public string ConfiguredModel { get; init; } = string.Empty;
-    public string AvailableModelsSummary { get; init; } = string.Empty;
-    public string StatusMessage { get; init; } = string.Empty;
-    public bool IsGeneratedByOllama { get; init; }
+    public string AltText  { get; init; } = string.Empty;
+    public string DataUri  { get; init; } = string.Empty;
+    public string Caption  { get; init; } = string.Empty;
 }

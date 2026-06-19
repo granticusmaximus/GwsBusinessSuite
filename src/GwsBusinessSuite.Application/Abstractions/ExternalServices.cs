@@ -11,25 +11,8 @@ public interface IOllamaService
 {
     Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default);
     Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default);
-    Task<OllamaImageGenerationResult> GenerateImageAsync(OllamaImageGenerationRequest request, CancellationToken ct = default);
 }
 public interface IDockerDeploymentService { Task<string> DeployAsync(string appName, string dockerfilePath, CancellationToken ct = default); }
-public interface IHeroImageCompositor
-{
-    string CompositeTitle(string dataUri, string title);
-}
-
-public sealed record OllamaImageGenerationRequest(
-    string Model,
-    string Prompt,
-    int Width,
-    int Height,
-    int Steps);
-
-public sealed record OllamaImageGenerationResult(
-    string DataUri,
-    string MimeType,
-    string Model);
 
 public sealed record CjConnectionRequest(
     string DeveloperKey,

@@ -37,40 +37,7 @@ public sealed class OllamaService(HttpClient http) : IOllamaService
             ?? Array.Empty<string>();
     }
 
-    public async Task<OllamaImageGenerationResult> GenerateImageAsync(OllamaImageGenerationRequest request, CancellationToken ct = default)
-    {
-        var payload = new
-        {
-            model = request.Model,
-            prompt = request.Prompt,
-            width = request.Width,
-            height = request.Height,
-            steps = request.Steps,
-            stream = false
-        };
-
-        using var response = await http.PostAsJsonAsync("/api/generate", payload, ct);
-        response.EnsureSuccessStatusCode();
-
-        var result = await response.Content.ReadFromJsonAsync<OllamaImageGenerateResponse>(cancellationToken: ct);
-        var base64Image = result?.Image?.Trim() ?? string.Empty;
-
-        if (string.IsNullOrWhiteSpace(base64Image))
-        {
-            throw new InvalidOperationException("Ollama image response did not include an image payload.");
-        }
-
-        return new OllamaImageGenerationResult(
-            DataUri: $"data:image/png;base64,{base64Image}",
-            MimeType: "image/png",
-            Model: result?.Model ?? request.Model);
-    }
-
     private sealed record OllamaGenerateResponse(string Response);
-
-    private sealed record OllamaImageGenerateResponse(
-        [property: JsonPropertyName("model")] string? Model,
-        [property: JsonPropertyName("image")] string? Image);
 
     private sealed record OllamaTagsResponse([property: JsonPropertyName("models")] OllamaTagModel[]? Models);
 

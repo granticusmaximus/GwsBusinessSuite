@@ -105,8 +105,29 @@ else
                     <label class="form-label fw-semibold small">Estimated Reading Time</label>
                     <input class="form-control" @bind="EstimatedReadingTime" placeholder="e.g. 6 min read" />
                 </div>
-                <div class="col-md-8">
-                    <label class="form-label fw-semibold small">Hero Image URL</label>
+                <div class="col-12">
+                    <label class="form-label fw-semibold small">Hero Image</label>
+                    @if (!string.IsNullOrWhiteSpace(HeroImageDataUri))
+                    {
+                        <img class="hero-preview-image mb-2" src="@HeroImageDataUri" alt="@HeroImageAltText" />
+                    }
+                    else if (!string.IsNullOrWhiteSpace(HeroImageUrl))
+                    {
+                        <img class="hero-preview-image mb-2" src="@HeroImageUrl" alt="@HeroImageAltText" />
+                    }
+                    <div class="upload-drop-zone mb-2">
+                        <InputFile OnChange="HandleHeroImageUpload" accept="image/*" class="upload-input" />
+                        <div class="upload-prompt">
+                            <i class="bi bi-cloud-upload fs-4 mb-1"></i>
+                            <span>@(string.IsNullOrWhiteSpace(HeroImageDataUri) && string.IsNullOrWhiteSpace(HeroImageUrl) ? "Upload hero image" : "Replace hero image")</span>
+                            <small class="text-secondary">PNG, JPG, WebP · max 5 MB · drag &amp; drop or click</small>
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(HeroUploadError))
+                    {
+                        <div class="text-danger small mb-1">@HeroUploadError</div>
+                    }
+                    <label class="form-label fw-semibold small mt-1">Hero Image URL <span class="text-secondary fw-normal">(optional — overrides upload)</span></label>
                     <input class="form-control" @bind="HeroImageUrl" placeholder="https://..." />
                 </div>
                 <div class="col-md-6">
@@ -191,8 +212,10 @@ else
     private string MetaDescription { get; set; } = string.Empty;
     private string EstimatedReadingTime { get; set; } = string.Empty;
     private string? HeroImageUrl { get; set; }
+    private string? HeroImageDataUri { get; set; }
     private string HeroImageAltText { get; set; } = string.Empty;
     private string HeroImageCaption { get; set; } = string.Empty;
+    private string HeroUploadError { get; set; } = string.Empty;
     private string BodyMarkdown { get; set; } = string.Empty;
     private bool SlugManuallyEdited { get; set; }
 
@@ -247,6 +270,7 @@ else
         MetaDescription      = a.MetaDescription;
         EstimatedReadingTime = a.EstimatedReadingTime;
         HeroImageUrl         = a.HeroImageUrl;
+        HeroImageDataUri     = a.HeroImageDataUri;
         HeroImageAltText     = a.HeroImageAltText;
         HeroImageCaption     = a.HeroImageCaption;
         BodyMarkdown         = a.BodyMarkdown;
@@ -308,6 +332,39 @@ else
         }
     }
 
+    private async Task HandleHeroImageUpload(InputFileChangeEventArgs e)
+    {
+        HeroUploadError = string.Empty;
+        const long maxBytes = 5 * 1024 * 1024;
+
+        if (e.File.Size > maxBytes)
+        {
+            HeroUploadError = "Image must be under 5 MB.";
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            using var stream = e.File.OpenReadStream(maxAllowedSize: maxBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            HeroImageDataUri = $"data:{e.File.ContentType};base64,{Convert.ToBase64String(ms.ToArray())}";
+            if (string.IsNullOrWhiteSpace(HeroImageAltText))
+                HeroImageAltText = Title;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Hero image upload failed.");
+            HeroUploadError = $"Upload failed. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+            StateHasChanged();
+        }
+    }
+
     private async Task PersistArticle(bool publish)
     {
         if (CurrentArticle is null) return;
@@ -340,6 +397,7 @@ else
             article.MetaDescription   = MetaDescription.Trim();
             article.EstimatedReadingTime = EstimatedReadingTime.Trim();
             article.HeroImageUrl      = string.IsNullOrWhiteSpace(HeroImageUrl) ? null : HeroImageUrl.Trim();
+            article.HeroImageDataUri  = HeroImageDataUri ?? string.Empty;
             article.HeroImageAltText  = HeroImageAltText.Trim();
             article.HeroImageCaption  = HeroImageCaption.Trim();
             article.BodyMarkdown      = BodyMarkdown;
@@ -420,5 +478,48 @@ else
 
     .surface-panel {
         background: #f8fafc;
+    }
+
+    .hero-preview-image {
+        display: block;
+        width: 100%;
+        max-height: 220px;
+        object-fit: cover;
+        border-radius: 10px;
+        border: 1px solid #dbe6f3;
+    }
+
+    .upload-drop-zone {
+        position: relative;
+        border: 2px dashed #93c5fd;
+        border-radius: 10px;
+        background: #f0f7ff;
+        padding: 1.5rem 1rem;
+        text-align: center;
+        transition: border-color 0.15s, background 0.15s;
+        cursor: pointer;
+    }
+
+    .upload-drop-zone:hover {
+        border-color: #3b82f6;
+        background: #e0effe;
+    }
+
+    .upload-input {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0;
+        cursor: pointer;
+    }
+
+    .upload-prompt {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.25rem;
+        pointer-events: none;
+        color: #3b82f6;
     }
 </style>

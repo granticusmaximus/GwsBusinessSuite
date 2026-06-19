@@ -43,7 +43,6 @@ services.AddHttpClient<ICloudflareService, CloudflareService>();
             client.BaseAddress = new Uri(baseUrl);
             client.Timeout = TimeSpan.FromMinutes(timeoutMinutes);
         });
-        services.AddSingleton<IHeroImageCompositor, HeroImageCompositor>();
         services.AddScoped<IDockerDeploymentService, DockerDeploymentService>();
         services.AddScoped<IAppRegistryService, AppRegistryService>();
         services.AddScoped<ICjAdsService, CjAdsService>();
