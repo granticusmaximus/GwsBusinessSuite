@@ -8,7 +8,7 @@ import BlogPost from './pages/BlogPost';
 
 const ADMIN_URL = import.meta.env.DEV
   ? 'http://localhost:5000/admin'
-  : '/admin';
+  : 'https://admin.gwsapp.net/admin';
 
 function Navbar() {
   return (

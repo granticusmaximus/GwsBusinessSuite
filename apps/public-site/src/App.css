@@ -759,10 +759,11 @@ a { color: inherit; }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 1.5rem;
   max-width: 1100px;
   margin: 0 auto;
 }
-.site-footer p { color: var(--text-3); font-size: 0.8rem; }
+.site-footer p { color: var(--text-3); font-size: 0.8rem; margin: 0; }
 
 .footer-admin-link {
   color: var(--text-3);

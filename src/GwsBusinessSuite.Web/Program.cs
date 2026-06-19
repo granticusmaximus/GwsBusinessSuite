@@ -5,12 +5,14 @@ using GwsBusinessSuite.Infrastructure;
 using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Web.Components;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading.RateLimiting;
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -38,6 +40,25 @@ builder.Services.AddAuthorization(options =>
         policy.RequireAuthenticatedUser().RequireRole("Admin"));
 
     options.FallbackPolicy = options.GetPolicy("AdminOnly");
+});
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddPolicy("login", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                Window               = TimeSpan.FromMinutes(15),
+                PermitLimit          = 5,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit           = 0,
+            }));
+    options.OnRejected = (context, _) =>
+    {
+        context.HttpContext.Response.Redirect("/admin/login?error=ratelimit");
+        return ValueTask.CompletedTask;
+    };
 });
 
 var app = builder.Build();
@@ -72,6 +93,7 @@ if (!string.IsNullOrWhiteSpace(normalizedPathBase))
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
+app.UseRateLimiter();
 
 app.MapGet("/cms-preview/{pageKey}", async (string pageKey, IReactPageBuilderService builderService) =>
 {
@@ -105,8 +127,17 @@ app.MapGet("/cms-preview/{pageKey}", async (string pageKey, IReactPageBuilderSer
     return Results.Content(html, "text/html");
 }).RequireAuthorization();
 
-app.MapPost("/auth/login", async (HttpContext httpContext, IConfiguration configuration) =>
+app.MapPost("/auth/login", async (HttpContext httpContext, IAntiforgery antiforgery, IConfiguration configuration) =>
 {
+    try
+    {
+        await antiforgery.ValidateRequestAsync(httpContext);
+    }
+    catch (AntiforgeryValidationException)
+    {
+        return Results.LocalRedirect("/admin/login?error=invalid");
+    }
+
     var form = await httpContext.Request.ReadFormAsync();
     var username = form["username"].ToString().Trim();
     var password = form["password"].ToString();
@@ -139,7 +170,7 @@ app.MapPost("/auth/login", async (HttpContext httpContext, IConfiguration config
     await httpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
 
     return Results.LocalRedirect(IsSafeLocalPath(returnUrl) ? returnUrl : "/admin");
-}).AllowAnonymous();
+}).AllowAnonymous().RequireRateLimiting("login");
 
 app.MapGet("/auth/logout", async (HttpContext httpContext) =>
 {
