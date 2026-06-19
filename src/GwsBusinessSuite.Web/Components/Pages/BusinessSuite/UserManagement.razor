@@ -1,0 +1,402 @@
+@page "/admin/users"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using GwsBusinessSuite.Domain.Entities
+@using GwsBusinessSuite.Infrastructure.Data
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject IPasswordHasher<AppUser> Hasher
+@inject ILogger<UserManagement> Logger
+
+<PageTitle>User Management</PageTitle>
+
+<div class="page-header d-flex align-items-start justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-person-fill-gear me-2 text-primary"></i>User Management</h1>
+        <p>Create accounts, assign roles, and control who can access the admin portal.</p>
+    </div>
+    <button class="btn btn-primary d-inline-flex align-items-center gap-2"
+            @onclick="ToggleCreateForm" disabled="@IsBusy">
+        <i class="bi @(ShowCreateForm ? "bi-x-lg" : "bi-plus-lg")"></i>
+        <span>@(ShowCreateForm ? "Cancel" : "New User")</span>
+    </button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@ErrorMessage</div>
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-success d-flex align-items-center gap-2 mb-4" role="alert">
+        <i class="bi bi-check-circle-fill flex-shrink-0"></i>
+        <div>@StatusMessage</div>
+    </div>
+}
+
+@if (ShowCreateForm)
+{
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white border-bottom py-3">
+            <span class="fw-semibold">Create New User</span>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold small">Username</label>
+                    <input class="form-control" @bind="NewUsername" placeholder="e.g. jsmith" autocomplete="off" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold small">Password</label>
+                    <input class="form-control" type="password" @bind="NewPassword" placeholder="Initial password" autocomplete="new-password" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold small">Role</label>
+                    <select class="form-select" @bind="NewRole">
+                        <option value="@AppRoles.Author">Author</option>
+                        <option value="@AppRoles.Contributor">Contributor</option>
+                        <option value="@AppRoles.Admin">Admin</option>
+                    </select>
+                </div>
+            </div>
+            <div class="mt-3">
+                <button class="btn btn-primary d-inline-flex align-items-center gap-2"
+                        @onclick="CreateUser" disabled="@IsBusy">
+                    <i class="bi bi-person-plus-fill"></i>
+                    <span>Create User</span>
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-white border-bottom py-3 d-flex align-items-center gap-2">
+        <span class="fw-semibold">All Users</span>
+        <span class="badge text-bg-secondary ms-auto">@Users.Count</span>
+    </div>
+    <div class="card-body p-0">
+        @if (Users.Count == 0 && !IsBusy)
+        {
+            <p class="text-secondary m-3">No users found.</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Username</th>
+                            <th>Role</th>
+                            <th>Status</th>
+                            <th>Created</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var user in Users)
+                        {
+                            <tr class="@(user.IsActive ? "" : "table-secondary text-muted")">
+                                <td class="fw-semibold">@user.Username</td>
+                                <td>
+                                    @if (EditingRoleForId == user.Id)
+                                    {
+                                        <div class="d-flex align-items-center gap-2">
+                                            <select class="form-select form-select-sm" style="width:auto"
+                                                    @bind="EditingRole">
+                                                <option value="@AppRoles.Author">Author</option>
+                                                <option value="@AppRoles.Contributor">Contributor</option>
+                                                <option value="@AppRoles.Admin">Admin</option>
+                                            </select>
+                                            <button class="btn btn-sm btn-success" @onclick="() => SaveRole(user.Id)" disabled="@IsBusy">Save</button>
+                                            <button class="btn btn-sm btn-outline-secondary" @onclick="CancelEditRole">Cancel</button>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge @GetRoleBadgeClass(user.Role)">@user.Role</span>
+                                    }
+                                </td>
+                                <td>
+                                    <span class="badge @(user.IsActive ? "text-bg-success" : "text-bg-secondary")">
+                                        @(user.IsActive ? "Active" : "Inactive")
+                                    </span>
+                                </td>
+                                <td class="small text-secondary">@user.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</td>
+                                <td class="text-end">
+                                    <div class="d-flex justify-content-end gap-2 flex-wrap">
+                                        @if (ResetPasswordForId == user.Id)
+                                        {
+                                            <input class="form-control form-control-sm" style="width:160px"
+                                                   type="password" @bind="ResetPasswordValue"
+                                                   placeholder="New password" autocomplete="new-password" />
+                                            <button class="btn btn-sm btn-warning" @onclick="() => SavePassword(user.Id)" disabled="@IsBusy">Set</button>
+                                            <button class="btn btn-sm btn-outline-secondary" @onclick="CancelResetPassword">Cancel</button>
+                                        }
+                                        else
+                                        {
+                                            @if (EditingRoleForId != user.Id)
+                                            {
+                                                <button class="btn btn-sm btn-outline-primary"
+                                                        @onclick="() => StartEditRole(user)"
+                                                        disabled="@IsBusy">
+                                                    Edit Role
+                                                </button>
+                                            }
+                                            <button class="btn btn-sm btn-outline-secondary"
+                                                    @onclick="() => StartResetPassword(user.Id)"
+                                                    disabled="@IsBusy">
+                                                Reset Password
+                                            </button>
+                                            <button class="btn btn-sm @(user.IsActive ? "btn-outline-danger" : "btn-outline-success")"
+                                                    @onclick="() => ToggleActive(user.Id)"
+                                                    disabled="@(IsBusy || IsLastAdmin(user))">
+                                                @(user.IsActive ? "Deactivate" : "Activate")
+                                            </button>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<AppUser> Users { get; set; } = new();
+    private bool IsBusy { get; set; }
+    private string StatusMessage { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+
+    // Create form
+    private bool ShowCreateForm { get; set; }
+    private string NewUsername { get; set; } = string.Empty;
+    private string NewPassword { get; set; } = string.Empty;
+    private string NewRole     { get; set; } = AppRoles.Author;
+
+    // Inline role edit
+    private Guid?  EditingRoleForId { get; set; }
+    private string EditingRole      { get; set; } = string.Empty;
+
+    // Inline password reset
+    private Guid?  ResetPasswordForId  { get; set; }
+    private string ResetPasswordValue  { get; set; } = string.Empty;
+
+    protected override async Task OnInitializedAsync() => await LoadUsers();
+
+    private async Task LoadUsers()
+    {
+        IsBusy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            Users = await db.AppUsers.OrderBy(u => u.Username).ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load users.");
+            ErrorMessage = $"Unable to load users. {ex.Message}";
+        }
+        finally { IsBusy = false; }
+    }
+
+    private void ToggleCreateForm()
+    {
+        ShowCreateForm  = !ShowCreateForm;
+        NewUsername     = string.Empty;
+        NewPassword     = string.Empty;
+        NewRole         = AppRoles.Author;
+        ErrorMessage    = string.Empty;
+        StatusMessage   = string.Empty;
+    }
+
+    private async Task CreateUser()
+    {
+        ErrorMessage  = string.Empty;
+        StatusMessage = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(NewUsername))
+        { ErrorMessage = "Username is required."; return; }
+
+        if (string.IsNullOrWhiteSpace(NewPassword) || NewPassword.Length < 8)
+        { ErrorMessage = "Password must be at least 8 characters."; return; }
+
+        if (!AppRoles.All.Contains(NewRole))
+        { ErrorMessage = "Invalid role selected."; return; }
+
+        IsBusy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            if (await db.AppUsers.AnyAsync(u => u.Username == NewUsername.Trim()))
+            { ErrorMessage = $"Username '{NewUsername.Trim()}' is already taken."; return; }
+
+            var user = new AppUser
+            {
+                Username  = NewUsername.Trim(),
+                Role      = NewRole,
+                CreatedBy = "admin"
+            };
+            user.PasswordHash = Hasher.HashPassword(user, NewPassword);
+            db.AppUsers.Add(user);
+            await db.SaveChangesAsync();
+
+            StatusMessage  = $"User '{user.Username}' created successfully.";
+            ShowCreateForm = false;
+            await LoadUsers();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to create user.");
+            ErrorMessage = $"Unable to create user. {ex.Message}";
+        }
+        finally { IsBusy = false; }
+    }
+
+    private void StartEditRole(AppUser user)
+    {
+        EditingRoleForId   = user.Id;
+        EditingRole        = user.Role;
+        ResetPasswordForId = null;
+        ErrorMessage       = string.Empty;
+        StatusMessage      = string.Empty;
+    }
+
+    private void CancelEditRole()
+    {
+        EditingRoleForId = null;
+        EditingRole      = string.Empty;
+    }
+
+    private async Task SaveRole(Guid id)
+    {
+        if (!AppRoles.All.Contains(EditingRole))
+        { ErrorMessage = "Invalid role."; return; }
+
+        ErrorMessage  = string.Empty;
+        StatusMessage = string.Empty;
+        IsBusy        = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var user = await db.AppUsers.FindAsync(id);
+            if (user is null) { ErrorMessage = "User not found."; return; }
+
+            if (user.Role == AppRoles.Admin && EditingRole != AppRoles.Admin && IsLastAdmin(user))
+            { ErrorMessage = "Cannot change the role of the last Admin account."; return; }
+
+            user.Role      = EditingRole;
+            user.UpdatedAt = DateTimeOffset.UtcNow;
+            user.UpdatedBy = "admin";
+            await db.SaveChangesAsync();
+
+            StatusMessage    = $"Role updated for '{user.Username}'.";
+            EditingRoleForId = null;
+            await LoadUsers();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to update role for user {Id}.", id);
+            ErrorMessage = $"Unable to update role. {ex.Message}";
+        }
+        finally { IsBusy = false; }
+    }
+
+    private void StartResetPassword(Guid id)
+    {
+        ResetPasswordForId = id;
+        ResetPasswordValue = string.Empty;
+        EditingRoleForId   = null;
+        ErrorMessage       = string.Empty;
+        StatusMessage      = string.Empty;
+    }
+
+    private void CancelResetPassword()
+    {
+        ResetPasswordForId = null;
+        ResetPasswordValue = string.Empty;
+    }
+
+    private async Task SavePassword(Guid id)
+    {
+        if (string.IsNullOrWhiteSpace(ResetPasswordValue) || ResetPasswordValue.Length < 8)
+        { ErrorMessage = "Password must be at least 8 characters."; return; }
+
+        ErrorMessage  = string.Empty;
+        StatusMessage = string.Empty;
+        IsBusy        = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var user = await db.AppUsers.FindAsync(id);
+            if (user is null) { ErrorMessage = "User not found."; return; }
+
+            user.PasswordHash = Hasher.HashPassword(user, ResetPasswordValue);
+            user.UpdatedAt    = DateTimeOffset.UtcNow;
+            user.UpdatedBy    = "admin";
+            await db.SaveChangesAsync();
+
+            StatusMessage      = $"Password reset for '{user.Username}'.";
+            ResetPasswordForId = null;
+            await LoadUsers();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to reset password for user {Id}.", id);
+            ErrorMessage = $"Unable to reset password. {ex.Message}";
+        }
+        finally { IsBusy = false; }
+    }
+
+    private async Task ToggleActive(Guid id)
+    {
+        ErrorMessage  = string.Empty;
+        StatusMessage = string.Empty;
+        IsBusy        = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var user = await db.AppUsers.FindAsync(id);
+            if (user is null) { ErrorMessage = "User not found."; return; }
+
+            if (user.IsActive && IsLastAdmin(user))
+            { ErrorMessage = "Cannot deactivate the last Admin account."; return; }
+
+            user.IsActive  = !user.IsActive;
+            user.UpdatedAt = DateTimeOffset.UtcNow;
+            user.UpdatedBy = "admin";
+            await db.SaveChangesAsync();
+
+            StatusMessage = $"'{user.Username}' is now {(user.IsActive ? "active" : "inactive")}.";
+            await LoadUsers();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to toggle active state for user {Id}.", id);
+            ErrorMessage = $"Unable to update user. {ex.Message}";
+        }
+        finally { IsBusy = false; }
+    }
+
+    private bool IsLastAdmin(AppUser user) =>
+        user.Role == AppRoles.Admin &&
+        Users.Count(u => u.Role == AppRoles.Admin && u.IsActive) <= 1;
+
+    private static string GetRoleBadgeClass(string role) => role switch
+    {
+        AppRoles.Admin       => "text-bg-danger",
+        AppRoles.Contributor => "text-bg-primary",
+        AppRoles.Author      => "text-bg-info",
+        _                    => "text-bg-secondary"
+    };
+}

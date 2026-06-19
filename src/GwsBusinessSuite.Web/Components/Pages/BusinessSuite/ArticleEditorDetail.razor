@@ -1,5 +1,7 @@
 @page "/admin/article-editor/{ArticleId:guid}"
 @rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContentAccess")]
+@using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Infrastructure.Data
 @using Markdig

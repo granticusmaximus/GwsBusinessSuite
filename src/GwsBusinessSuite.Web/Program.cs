@@ -8,6 +8,7 @@ using GwsBusinessSuite.Web.Components;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using System.Text;
@@ -25,11 +26,13 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddCascadingAuthenticationState();
 
+builder.Services.AddSingleton<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
+
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
         options.LoginPath = "/admin/login";
-        options.AccessDeniedPath = "/admin/login";
+        options.AccessDeniedPath = "/admin/access-denied";
         options.SlidingExpiration = true;
         options.ExpireTimeSpan = TimeSpan.FromHours(8);
     });
@@ -37,7 +40,13 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("AdminOnly", policy =>
-        policy.RequireAuthenticatedUser().RequireRole("Admin"));
+        policy.RequireAuthenticatedUser().RequireRole(AppRoles.Admin));
+
+    options.AddPolicy("ContentAccess", policy =>
+        policy.RequireAuthenticatedUser().RequireRole(AppRoles.Admin, AppRoles.Author, AppRoles.Contributor));
+
+    options.AddPolicy("ContributorAccess", policy =>
+        policy.RequireAuthenticatedUser().RequireRole(AppRoles.Admin, AppRoles.Contributor));
 
     options.FallbackPolicy = options.GetPolicy("AdminOnly");
 });
@@ -70,6 +79,21 @@ using (var scope = app.Services.CreateScope())
     var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<ApplicationDbContext>>();
     await using var dbContext = await dbFactory.CreateDbContextAsync();
     await dbContext.Database.MigrateAsync();
+
+    if (!await dbContext.AppUsers.AnyAsync())
+    {
+        var hasher        = scope.ServiceProvider.GetRequiredService<IPasswordHasher<AppUser>>();
+        var seedUsername  = app.Configuration["AdminAuth:Username"]?.Trim();
+        var seedPassword  = app.Configuration["AdminAuth:Password"];
+
+        if (!string.IsNullOrWhiteSpace(seedUsername) && !string.IsNullOrWhiteSpace(seedPassword))
+        {
+            var admin = new AppUser { Username = seedUsername, Role = AppRoles.Admin, CreatedBy = "system" };
+            admin.PasswordHash = hasher.HashPassword(admin, seedPassword);
+            dbContext.AppUsers.Add(admin);
+            await dbContext.SaveChangesAsync();
+        }
+    }
 }
 
 // Configure the HTTP request pipeline.
@@ -127,7 +151,11 @@ app.MapGet("/cms-preview/{pageKey}", async (string pageKey, IReactPageBuilderSer
     return Results.Content(html, "text/html");
 }).RequireAuthorization();
 
-app.MapPost("/auth/login", async (HttpContext httpContext, IAntiforgery antiforgery, IConfiguration configuration) =>
+app.MapPost("/auth/login", async (
+    HttpContext httpContext,
+    IAntiforgery antiforgery,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    IPasswordHasher<AppUser> hasher) =>
 {
     try
     {
@@ -138,38 +166,34 @@ app.MapPost("/auth/login", async (HttpContext httpContext, IAntiforgery antiforg
         return Results.LocalRedirect("/admin/login?error=invalid");
     }
 
-    var form = await httpContext.Request.ReadFormAsync();
-    var username = form["username"].ToString().Trim();
-    var password = form["password"].ToString();
+    var form      = await httpContext.Request.ReadFormAsync();
+    var username  = form["username"].ToString().Trim();
+    var password  = form["password"].ToString();
     var returnUrl = form["returnUrl"].ToString();
 
-    var configuredUsername = configuration["AdminAuth:Username"]?.Trim();
-    var configuredPassword = configuration["AdminAuth:Password"];
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var user = await db.AppUsers
+        .FirstOrDefaultAsync(u => u.Username == username && u.IsActive);
 
-    if (string.IsNullOrWhiteSpace(configuredUsername) || string.IsNullOrWhiteSpace(configuredPassword))
+    if (user is null || hasher.VerifyHashedPassword(user, user.PasswordHash, password) == PasswordVerificationResult.Failed)
     {
-        return Results.LocalRedirect("/admin/login?error=missing");
-    }
-
-    if (!string.Equals(username, configuredUsername, StringComparison.Ordinal) ||
-        !string.Equals(password, configuredPassword, StringComparison.Ordinal))
-    {
-        var safeReturnUrl = IsSafeLocalPath(returnUrl) ? returnUrl : "/admin";
-        return Results.LocalRedirect($"/admin/login?error=invalid&returnUrl={Uri.EscapeDataString(safeReturnUrl)}");
+        var safeReturn = IsSafeLocalPath(returnUrl) ? returnUrl : "/admin";
+        return Results.LocalRedirect($"/admin/login?error=invalid&returnUrl={Uri.EscapeDataString(safeReturn)}");
     }
 
     var claims = new List<Claim>
     {
-        new(ClaimTypes.Name, configuredUsername),
-        new(ClaimTypes.Role, "Admin")
+        new(ClaimTypes.Name, user.Username),
+        new(ClaimTypes.Role, user.Role),
+        new("UserId", user.Id.ToString())
     };
 
-    var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+    var identity  = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
     var principal = new ClaimsPrincipal(identity);
-
     await httpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
 
-    return Results.LocalRedirect(IsSafeLocalPath(returnUrl) ? returnUrl : "/admin");
+    var defaultUrl = user.Role == AppRoles.Admin ? "/admin" : "/admin/content-studio";
+    return Results.LocalRedirect(IsSafeLocalPath(returnUrl) ? returnUrl : defaultUrl);
 }).AllowAnonymous().RequireRateLimiting("login");
 
 app.MapGet("/auth/logout", async (HttpContext httpContext) =>

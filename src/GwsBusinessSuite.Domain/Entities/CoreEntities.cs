@@ -2,6 +2,23 @@ using GwsBusinessSuite.Domain.Common;
 
 namespace GwsBusinessSuite.Domain.Entities;
 
+public static class AppRoles
+{
+    public const string Admin       = "Admin";
+    public const string Author      = "Author";
+    public const string Contributor = "Contributor";
+
+    public static readonly string[] All = [Admin, Author, Contributor];
+}
+
+public sealed class AppUser : AuditableEntity
+{
+    public required string Username     { get; set; }
+    public string PasswordHash          { get; set; } = string.Empty;
+    public string Role                  { get; set; } = AppRoles.Author;
+    public bool   IsActive              { get; set; } = true;
+}
+
 public static class SeoArticleDraftStatuses
 {
     public const string Draft = "Draft";

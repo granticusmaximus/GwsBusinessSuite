@@ -1,5 +1,7 @@
 @page "/admin/content-studio"
 @rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContentAccess")]
+@using Microsoft.AspNetCore.Authorization
 @implements IDisposable
 @using GwsBusinessSuite.Application.ContentStudio
 @inject IContentStudioService ContentStudioService

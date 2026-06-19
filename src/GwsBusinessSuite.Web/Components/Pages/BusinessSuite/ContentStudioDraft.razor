@@ -1,5 +1,7 @@
 @page "/admin/content-studio/draft/{DraftId:guid}"
 @rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContentAccess")]
+@using Microsoft.AspNetCore.Authorization
 @implements IDisposable
 @using GwsBusinessSuite.Application.ContentStudio
 @using Markdig

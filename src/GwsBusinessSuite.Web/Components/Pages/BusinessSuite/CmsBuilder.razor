@@ -1,5 +1,7 @@
 @page "/admin/cms-builder"
 @rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContributorAccess")]
+@using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Domain.Entities
 @inject ICmsBuilderService CmsBuilderService

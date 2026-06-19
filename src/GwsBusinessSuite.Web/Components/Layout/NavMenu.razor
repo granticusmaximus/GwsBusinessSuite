@@ -1,3 +1,8 @@
+@using GwsBusinessSuite.Domain.Entities
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@inject AuthenticationStateProvider AuthProvider
+
 <div class="gws-brand">
     <div class="gws-brand-mark">
         <i class="bi bi-command gws-brand-icon"></i>
@@ -9,13 +14,16 @@
 </div>
 
 <nav class="gws-nav">
-    <NavLink class="gws-nav-link" href="admin" Match="NavLinkMatch.All">
-        <i class="bi bi-speedometer2"></i>
-        <span class="gws-nav-link-copy">
-            <span>Dashboard</span>
-            <small>Suite overview</small>
-        </span>
-    </NavLink>
+    @if (IsAdmin)
+    {
+        <NavLink class="gws-nav-link" href="admin" Match="NavLinkMatch.All">
+            <i class="bi bi-speedometer2"></i>
+            <span class="gws-nav-link-copy">
+                <span>Dashboard</span>
+                <small>Suite overview</small>
+            </span>
+        </NavLink>
+    }
 
     <div class="gws-nav-section">Content</div>
 
@@ -35,71 +43,103 @@
         </span>
     </NavLink>
 
-    <NavLink class="gws-nav-link" href="admin/cj-ads">
-        <i class="bi bi-tags-fill"></i>
-        <span class="gws-nav-link-copy">
-            <span>CJ Ads</span>
-            <small>Affiliate campaigns</small>
-        </span>
-    </NavLink>
+    @if (IsAdmin)
+    {
+        <NavLink class="gws-nav-link" href="admin/cj-ads">
+            <i class="bi bi-tags-fill"></i>
+            <span class="gws-nav-link-copy">
+                <span>CJ Ads</span>
+                <small>Affiliate campaigns</small>
+            </span>
+        </NavLink>
 
-    <div class="gws-nav-section">Business</div>
+        <div class="gws-nav-section">Business</div>
 
-    <NavLink class="gws-nav-link" href="admin/app-registry">
-        <i class="bi bi-grid-1x2-fill"></i>
-        <span class="gws-nav-link-copy">
-            <span>App Registry</span>
-            <small>Manage products</small>
-        </span>
-    </NavLink>
+        <NavLink class="gws-nav-link" href="admin/app-registry">
+            <i class="bi bi-grid-1x2-fill"></i>
+            <span class="gws-nav-link-copy">
+                <span>App Registry</span>
+                <small>Manage products</small>
+            </span>
+        </NavLink>
 
-    <NavLink class="gws-nav-link" href="admin/crm">
-        <i class="bi bi-people-fill"></i>
-        <span class="gws-nav-link-copy">
-            <span>CRM</span>
-            <small>Contacts and activity</small>
-        </span>
-    </NavLink>
+        <NavLink class="gws-nav-link" href="admin/crm">
+            <i class="bi bi-people-fill"></i>
+            <span class="gws-nav-link-copy">
+                <span>CRM</span>
+                <small>Contacts and activity</small>
+            </span>
+        </NavLink>
 
-    <NavLink class="gws-nav-link" href="admin/wiki">
-        <i class="bi bi-journal-bookmark-fill"></i>
-        <span class="gws-nav-link-copy">
-            <span>Knowledge Base</span>
-            <small>Operational reference</small>
-        </span>
-    </NavLink>
+        <NavLink class="gws-nav-link" href="admin/wiki">
+            <i class="bi bi-journal-bookmark-fill"></i>
+            <span class="gws-nav-link-copy">
+                <span>Knowledge Base</span>
+                <small>Operational reference</small>
+            </span>
+        </NavLink>
+    }
 
-    <div class="gws-nav-section">Builder</div>
+    @if (IsContributorOrAbove)
+    {
+        <div class="gws-nav-section">Builder</div>
 
-    <NavLink class="gws-nav-link" href="admin/cms-builder">
-        <i class="bi bi-layout-three-columns"></i>
-        <span class="gws-nav-link-copy">
-            <span>CMS Builder</span>
-            <small>Live page studio</small>
-        </span>
-    </NavLink>
+        <NavLink class="gws-nav-link" href="admin/cms-builder">
+            <i class="bi bi-layout-three-columns"></i>
+            <span class="gws-nav-link-copy">
+                <span>CMS Builder</span>
+                <small>Live page studio</small>
+            </span>
+        </NavLink>
+    }
 
-    <NavLink class="gws-nav-link" href="admin/live-show">
-        <i class="bi bi-camera-video-fill"></i>
-        <span class="gws-nav-link-copy">
-            <span>Live Show</span>
-            <small>Camera broadcast studio</small>
-        </span>
-    </NavLink>
+    @if (IsAdmin)
+    {
+        <NavLink class="gws-nav-link" href="admin/live-show">
+            <i class="bi bi-camera-video-fill"></i>
+            <span class="gws-nav-link-copy">
+                <span>Live Show</span>
+                <small>Camera broadcast studio</small>
+            </span>
+        </NavLink>
 
-    <NavLink class="gws-nav-link" href="admin/deployments">
-        <i class="bi bi-cloud-upload-fill"></i>
-        <span class="gws-nav-link-copy">
-            <span>Deployments</span>
-            <small>Release pipeline</small>
-        </span>
-    </NavLink>
+        <NavLink class="gws-nav-link" href="admin/deployments">
+            <i class="bi bi-cloud-upload-fill"></i>
+            <span class="gws-nav-link-copy">
+                <span>Deployments</span>
+                <small>Release pipeline</small>
+            </span>
+        </NavLink>
 
-    <NavLink class="gws-nav-link" href="admin/ollama-console">
-        <i class="bi bi-cpu-fill"></i>
-        <span class="gws-nav-link-copy">
-            <span>Ollama Console</span>
-            <small>Local model console</small>
-        </span>
-    </NavLink>
+        <NavLink class="gws-nav-link" href="admin/ollama-console">
+            <i class="bi bi-cpu-fill"></i>
+            <span class="gws-nav-link-copy">
+                <span>Ollama Console</span>
+                <small>Local model console</small>
+            </span>
+        </NavLink>
+
+        <div class="gws-nav-section">Admin</div>
+
+        <NavLink class="gws-nav-link" href="admin/users">
+            <i class="bi bi-people-fill"></i>
+            <span class="gws-nav-link-copy">
+                <span>User Management</span>
+                <small>Accounts &amp; roles</small>
+            </span>
+        </NavLink>
+    }
 </nav>
+
+@code {
+    private string _role = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthProvider.GetAuthenticationStateAsync();
+        _role = state.User.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
+    }
+
+    private bool IsAdmin              => _role == AppRoles.Admin;
+    private bool IsContributorOrAbove => _role is AppRoles.Admin or AppRoles.Contributor;
+}
