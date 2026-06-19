@@ -9,6 +9,7 @@ using GwsBusinessSuite.Application.Deployments;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,7 +21,15 @@ public static class DependencyInjection
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         var connectionString = configuration.GetConnectionString("DefaultConnection") ?? "Data Source=gws-suite.db";
-        services.AddDataProtection();
+
+        // Persist Data Protection keys to the data volume so encrypted values
+        // (like the CJ developer key) survive Docker container rebuilds on deploy.
+        var dpKeysPath = new System.IO.DirectoryInfo(
+            configuration["DataProtection:KeysPath"] ?? "/app/data/dp-keys");
+        services.AddDataProtection()
+            .PersistKeysToFileSystem(dpKeysPath)
+            .SetApplicationName("GwsBusinessSuite");
+
         services.Configure<ContentStudioOptions>(configuration.GetSection(ContentStudioOptions.SectionName));
         services.Configure<CmsBuilderOptions>(configuration.GetSection(CmsBuilderOptions.SectionName));
 services.Configure<ExternalServicesOptions>(configuration.GetSection(ExternalServicesOptions.SectionName));
