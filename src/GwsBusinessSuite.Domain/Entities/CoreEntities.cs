@@ -15,8 +15,6 @@ public static class SeoArticleWorkflowEventTypes
     public const string Generated = "Generated";
     public const string Revised = "Revised";
     public const string Approved = "Approved";
-    public const string PublishedToSanity = "PublishedToSanity";
-    public const string BackedUpToSanity = "BackedUpToSanity";
     public const string PublishedToSite = "PublishedToSite";
     public const string Rejected = "Rejected";
     public const string HeroImageRegenerated = "HeroImageRegenerated";
@@ -31,7 +29,6 @@ public static class ArticleStatuses
 
 public static class ArticleSource
 {
-    public const string SanityImport = "SanityImport";
     public const string OllamaGenerated = "OllamaGenerated";
     public const string Manual = "Manual";
 }

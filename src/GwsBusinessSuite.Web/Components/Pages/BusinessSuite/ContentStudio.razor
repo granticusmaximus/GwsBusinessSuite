@@ -4,6 +4,7 @@
 @using GwsBusinessSuite.Application.ContentStudio
 @inject IContentStudioService ContentStudioService
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 @inject ILogger<ContentStudio> Logger
 
 <PageTitle>Content Studio</PageTitle>
@@ -79,6 +80,11 @@
                 <i class="bi bi-arrow-repeat"></i>
                 <span>Refresh Draft List</span>
             </button>
+            <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2"
+                    @onclick="BulkRegenerateHeroImages" disabled="@IsBusy">
+                <i class="bi bi-images"></i>
+                <span>Regenerate All Hero Images</span>
+            </button>
         </div>
     </div>
 </div>
@@ -135,14 +141,21 @@
                                 <td>@draft.RevisionNumber</td>
                                 <td>@FormatDate(draft.UpdatedAt ?? draft.CreatedAt)</td>
                                 <td class="text-end">
-                                    <div class="d-inline-flex gap-2">
-                                        <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenDraft(draft.DraftId)"
-                                                disabled="@IsBusy">Open</button>
-                                        <button class="btn btn-sm btn-outline-danger"
-                                                @onclick="() => MarkDraftNotInterested(draft.DraftId)" disabled="@IsBusy">Not
-                                            Interested</button>
-                                        </div>
-                                    </td>
+                                    <div class="d-inline-flex gap-1">
+                                        <button class="btn btn-sm btn-outline-primary" title="Open draft"
+                                                @onclick="() => OpenDraft(draft.DraftId)" disabled="@IsBusy">
+                                            <i class="bi bi-folder2-open"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-secondary" title="Not interested"
+                                                @onclick="() => MarkDraftNotInterested(draft.DraftId)" disabled="@IsBusy">
+                                            <i class="bi bi-x-circle"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger" title="Delete draft permanently"
+                                                @onclick="() => DeleteDraft(draft.DraftId, draft.Topic)" disabled="@IsBusy">
+                                            <i class="bi bi-trash3"></i>
+                                        </button>
+                                    </div>
+                                </td>
                                 </tr>
                             }
                         </tbody>
@@ -241,9 +254,64 @@
         await RefreshDrafts();
     }
 
+    private async Task BulkRegenerateHeroImages()
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            "Regenerate hero images for ALL drafts using the current prompt? This calls Ollama once per draft and may take several minutes.");
+        if (!confirmed) return;
+
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        BeginBusy("Regenerating hero images for all drafts. Ollama is running — this may take a few minutes.");
+
+        try
+        {
+            var count = await ContentStudioService.BulkRegenerateHeroImagesAsync();
+            await RefreshDrafts(showOverlay: false);
+            StatusMessage = $"Hero images regenerated for {count} draft(s) using the current circuit board prompt.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Bulk hero image regeneration failed.");
+            ErrorMessage = $"Bulk regeneration failed. {ex.Message}";
+        }
+        finally
+        {
+            EndBusy();
+        }
+    }
+
     private void OpenDraft(Guid draftId)
     {
-        Navigation.NavigateTo($"/admin/content-studio/draft/{draftId}");
+        Navigation.NavigateTo($"/admin/content-studio/draft/{draftId}", forceLoad: true);
+    }
+
+    private async Task DeleteDraft(Guid draftId, string topic)
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Permanently delete draft '{topic}'? This cannot be undone.");
+        if (!confirmed) return;
+
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        BeginBusy("Deleting draft and all related data.");
+
+        try
+        {
+            var deleted = await ContentStudioService.DeleteDraftAsync(draftId);
+            await RefreshDrafts(showOverlay: false);
+            StatusMessage = deleted
+                ? $"Draft '{topic}' deleted."
+                : "Draft could not be found.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to delete draft {DraftId}.", draftId);
+            ErrorMessage = $"Unable to delete draft. {ex.Message}";
+        }
+        finally
+        {
+            EndBusy();
+        }
     }
 
     private async Task MarkDraftNotInterested(Guid draftId)

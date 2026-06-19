@@ -23,16 +23,3 @@ public sealed class ContentStudioOptions
     public string AuthorName { get; init; } = DefaultAuthorName;
     public string SiteBaseUrl { get; init; } = DefaultSiteBaseUrl;
 }
-
-public sealed class SanityOptions
-{
-    public const string SectionName = "Sanity";
-
-    public string ProjectId { get; init; } = string.Empty;
-    public string Dataset { get; init; } = string.Empty;
-    public string Token { get; init; } = string.Empty;
-    public string ApiVersion { get; init; } = "2021-10-21";
-    public string DocumentType { get; init; } = "seoArticle";
-    public string DocumentIdPrefix { get; init; } = "gws-seo-";
-    public bool AutoPublishOnApproval { get; init; }
-}

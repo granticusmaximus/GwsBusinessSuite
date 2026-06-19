@@ -16,9 +16,6 @@ public interface IContentStudioService
     Task<ArticleGenerationResult?> PublishDraftToSiteAsync(
         DraftPublishRequest request,
         CancellationToken cancellationToken = default);
-    Task<ArticleGenerationResult?> BackupDraftToSanityAsync(
-        DraftPublishRequest request,
-        CancellationToken cancellationToken = default);
     Task<ArticleGenerationResult?> RejectDraftAsync(
         DraftDecisionRequest request,
         CancellationToken cancellationToken = default);
@@ -28,4 +25,6 @@ public interface IContentStudioService
     Task RecordAffiliatePlacementInteractionAsync(
         AffiliatePlacementInteractionRequest request,
         CancellationToken cancellationToken = default);
+    Task<bool> DeleteDraftAsync(Guid draftId, CancellationToken cancellationToken = default);
+    Task<int> BulkRegenerateHeroImagesAsync(CancellationToken cancellationToken = default);
 }

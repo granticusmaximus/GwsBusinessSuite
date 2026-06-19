@@ -13,7 +13,7 @@
 <div class="page-header d-flex align-items-start justify-content-between gap-3">
     <div>
         <h1><i class="bi bi-file-earmark-text me-2 text-primary"></i>Draft Workspace</h1>
-        <p>Review, revise, approve, publish live, and keep an optional Sanity backup for this draft.</p>
+        <p>Review, revise, approve, and publish drafts live to the site.</p>
     </div>
     <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2" @onclick="BackToStudio">
         <i class="bi bi-arrow-left"></i>
@@ -156,14 +156,9 @@ else
                             <span>Approve Draft</span>
                         </button>
                         <button class="btn btn-primary d-inline-flex align-items-center gap-2" @onclick="PublishLive"
-                                disabled="@IsBusy || !IsApproved">
+                                disabled="@(IsBusy || !IsApproved)">
                             <i class="bi bi-send-check-fill"></i>
-                            <span>Publish Live</span>
-                        </button>
-                        <button class="btn btn-outline-primary d-inline-flex align-items-center gap-2" @onclick="BackupToSanity"
-                                disabled="@IsBusy || !IsApproved">
-                            <i class="bi bi-cloud-upload"></i>
-                            <span>Back Up to Sanity</span>
+                            <span>Publish</span>
                         </button>
                         <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2" @onclick="RequestRevision"
                                 disabled="@IsBusy">
@@ -373,7 +368,7 @@ else
                 PerformedBy = "content-studio-ui"
             }),
             "Saving approval decision and updating workflow history.",
-            _ => "Draft approved. Publish live when ready, then back it up to Sanity if you want an external copy.");
+            _ => "Draft approved. Publish live when ready.");
     }
 
     private async Task PublishLive()
@@ -392,24 +387,6 @@ else
             }),
             "Publishing the approved article live to the site blog.",
             updated => $"Draft published live and can be shared at /blog/{updated.Slug}.");
-    }
-
-    private async Task BackupToSanity()
-    {
-        if (CurrentDraft is null)
-        {
-            return;
-        }
-
-        await RunWorkflowAction(
-            async () => await ContentStudioService.BackupDraftToSanityAsync(new DraftPublishRequest
-            {
-                DraftId = CurrentDraft.DraftId,
-                Notes = RevisionNotes,
-                PerformedBy = "content-studio-ui"
-            }),
-            "Backing up the approved article to Sanity.",
-            updated => $"Draft backed up to Sanity for article slug '{updated.Slug}'.");
     }
 
     private async Task RequestRevision()
@@ -486,6 +463,8 @@ else
         {
             EndBusy();
         }
+
+        StateHasChanged();
     }
 
     public void Dispose()
@@ -533,7 +512,7 @@ else
                     await InvokeAsync(StateHasChanged);
                 }
             }
-            catch (OperationCanceledException)
+            catch (Exception)
             {
             }
         });
@@ -556,8 +535,6 @@ else
         return eventType switch
         {
             "PublishedToSite" => "Published Live",
-            "BackedUpToSanity" => "Backed Up To Sanity",
-            "PublishedToSanity" => "Backed Up To Sanity",
             "HeroImageRegenerated" => "Hero Image Regenerated",
             "PendingReview" => "Pending Review",
             _ => eventType

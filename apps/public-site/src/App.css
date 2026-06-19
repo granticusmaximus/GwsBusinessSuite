@@ -764,17 +764,15 @@ a { color: inherit; }
 }
 .site-footer p { color: var(--text-3); font-size: 0.8rem; }
 
-.footer-links {
-  display: flex;
-  gap: 1.5rem;
-}
-.footer-links a {
+.footer-admin-link {
   color: var(--text-3);
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   text-decoration: none;
-  transition: color 0.15s;
+  opacity: 0.4;
+  transition: opacity 0.15s;
+  letter-spacing: 0.04em;
 }
-.footer-links a:hover { color: var(--accent); }
+.footer-admin-link:hover { opacity: 1; }
 
 /* ─── 404 ─────────────────────────────────────────────── */
 .page-not-found {

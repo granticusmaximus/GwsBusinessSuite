@@ -6,7 +6,9 @@ import Contact from './pages/Contact';
 import BlogList from './pages/BlogList';
 import BlogPost from './pages/BlogPost';
 
-const ADMIN_URL = import.meta.env.VITE_ADMIN_URL || '';
+const ADMIN_URL = import.meta.env.DEV
+  ? 'http://localhost:5000/admin'
+  : '/admin';
 
 function Navbar() {
   return (
@@ -22,7 +24,7 @@ function Navbar() {
         <Link to="/about">About</Link>
         <Link to="/blog">Blog</Link>
         <Link to="/contact">Contact</Link>
-        {ADMIN_URL && <a href={ADMIN_URL} className="nav-admin">Admin ↗</a>}
+        {import.meta.env.DEV && <a href={ADMIN_URL} className="nav-admin">Admin ↗</a>}
       </div>
     </nav>
   );
@@ -32,11 +34,7 @@ function Footer() {
   return (
     <footer className="site-footer">
       <p>© {new Date().getFullYear()} Grant Watson</p>
-      <div className="footer-links">
-        <a href="https://github.com/granticusmaximus" target="_blank" rel="noopener noreferrer">GitHub</a>
-        <Link to="/about">About</Link>
-        <Link to="/contact">Contact</Link>
-      </div>
+      <a href={ADMIN_URL} className="footer-admin-link">admin</a>
     </footer>
   );
 }

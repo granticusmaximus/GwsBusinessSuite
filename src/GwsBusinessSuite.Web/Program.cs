@@ -1,5 +1,4 @@
 using GwsBusinessSuite.Application.Abstractions;
-using GwsBusinessSuite.Application.Blog;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure;
@@ -250,13 +249,6 @@ app.MapGet("/api/blog/{slug}", async (
         a.HeroImageCaption
     });
 }).AllowAnonymous();
-
-// Admin: one-time import of all Sanity articles into the Article table.
-app.MapPost("/admin/api/migrate-from-sanity", async (ISanityImportService importService) =>
-{
-    var result = await importService.ImportAsync();
-    return Results.Ok(result);
-}).RequireAuthorization();
 
 // Admin: publish an approved SeoArticleDraft to the live blog as an Article.
 app.MapPost("/admin/api/articles/publish-draft/{draftId:guid}", async (

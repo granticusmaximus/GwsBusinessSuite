@@ -11,7 +11,7 @@ public sealed class ContentStudioService(
     IOllamaService ollama,
     IAffiliateOfferScoringService offerScoringService,
     IOptions<ContentStudioOptions> options,
-    ISanityPublisher sanityPublisher,
+    IHeroImageCompositor heroImageCompositor,
     ILogger<ContentStudioService> logger) : IContentStudioService
 {
     private static readonly string[] AffiliateSlotTokens = ["{{CJ_AD_SLOT_1}}", "{{CJ_AD_SLOT_2}}", "{{CJ_AD_SLOT_3}}"];
@@ -429,48 +429,6 @@ public sealed class ContentStudioService(
         return await GetDraftAsync(draft.Id, cancellationToken);
     }
 
-    public async Task<ArticleGenerationResult?> BackupDraftToSanityAsync(
-        DraftPublishRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        var draft = await db.SeoArticleDrafts
-            .Include(x => x.AffiliatePlacements)
-            .Include(x => x.WorkflowEvents)
-            .FirstOrDefaultAsync(x => x.Id == request.DraftId, cancellationToken);
-
-        if (draft is null)
-        {
-            return null;
-        }
-
-        if (!string.Equals(draft.Status, SeoArticleDraftStatuses.Approved, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("Only approved drafts can be backed up to Sanity.");
-        }
-
-        var draftView = MapDraft(draft, authorName: GetAuthorName(), siteBaseUrl: GetSiteBaseUrl());
-        var publishResult = await sanityPublisher.PublishDraftAsync(draftView, cancellationToken);
-
-        db.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent
-        {
-            SeoArticleDraftId = draft.Id,
-            EventType = SeoArticleWorkflowEventTypes.BackedUpToSanity,
-            Notes = string.IsNullOrWhiteSpace(request.Notes)
-                ? publishResult.Message
-                : request.Notes.Trim(),
-            CreatedBy = request.PerformedBy
-        });
-
-        await db.SaveChangesAsync(cancellationToken);
-
-        logger.LogInformation(
-            "Backed up Content Studio draft {DraftId} to Sanity document {DocumentId}.",
-            draft.Id,
-            publishResult.DocumentId);
-
-        return await GetDraftAsync(draft.Id, cancellationToken);
-    }
-
     public async Task<ArticleGenerationResult?> RejectDraftAsync(
         DraftDecisionRequest request,
         CancellationToken cancellationToken = default)
@@ -698,6 +656,8 @@ public sealed class ContentStudioService(
                         candidate);
                 }
 
+                var compositedDataUri = heroImageCompositor.CompositeTitle(imageResult.DataUri, title);
+
                 return ContentStudioImagePreviewFactory.CreateGenerated(
                     request,
                     title,
@@ -705,7 +665,7 @@ public sealed class ContentStudioService(
                     articleModel,
                     imageResult.Model,
                     availableModels,
-                    imageResult.DataUri);
+                    compositedDataUri);
             }
             catch (Exception ex)
             {
@@ -1023,6 +983,53 @@ public sealed class ContentStudioService(
                 })
                 .ToArray()
         };
+    }
+
+    public async Task<bool> DeleteDraftAsync(Guid draftId, CancellationToken cancellationToken = default)
+    {
+        var draft = await db.SeoArticleDrafts
+            .Include(x => x.AffiliatePlacements)
+            .Include(x => x.WorkflowEvents)
+            .FirstOrDefaultAsync(x => x.Id == draftId, cancellationToken);
+
+        if (draft is null) return false;
+
+        var interactions = await db.SeoArticleAffiliateInteractions
+            .Where(x => x.SeoArticleDraftId == draftId)
+            .ToListAsync(cancellationToken);
+
+        db.SeoArticleAffiliateInteractions.RemoveRange(interactions);
+        db.SeoArticleDrafts.Remove(draft);
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<int> BulkRegenerateHeroImagesAsync(CancellationToken cancellationToken = default)
+    {
+        var draftIds = await db.SeoArticleDrafts
+            .AsNoTracking()
+            .Select(x => x.Id)
+            .ToListAsync(cancellationToken);
+
+        var succeeded = 0;
+        foreach (var id in draftIds)
+        {
+            try
+            {
+                await RegenerateHeroImageAsync(new DraftHeroImageRegenerationRequest
+                {
+                    DraftId = id,
+                    Prompt = string.Empty,
+                    PerformedBy = "bulk-migration"
+                }, cancellationToken);
+                succeeded++;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Bulk hero image regeneration failed for draft {DraftId}.", id);
+            }
+        }
+        return succeeded;
     }
 
     private async Task RecordDraftImpressionsAsync(Guid draftId, string performedBy, CancellationToken cancellationToken)

@@ -73,65 +73,13 @@ public static class ContentStudioImagePreviewFactory
 
     public static string BuildPrompt(ArticleGenerationRequest request, string title)
     {
-        var secondaryKeywords = string.IsNullOrWhiteSpace(request.SecondaryKeywords)
-            ? "none provided"
-            : request.SecondaryKeywords.Trim();
-        var stabilizedHeadline = BuildStabilizedHeadline(title);
-
-        return $$"""
-        SUBJECT
-        Create a production-grade hero image for a professional technical article.
-        Topic context: {{request.Topic}}.
-        Target audience: {{request.TargetAudience}}.
-        Primary keyword context: {{request.PrimaryKeyword}}.
-        Secondary keyword context: {{secondaryKeywords}}.
-
-        TYPOGRAPHY RULES
-        Use a single short headline only: "{{stabilizedHeadline}}".
-        Keep typography to one focal region only.
-        Use centered or left-aligned title layout only.
-        Avoid text wrapping whenever possible.
-        Keep text area minimal and focused.
-        Require perfectly legible text, correct spelling, professionally typeset typography, clean sans-serif font, and high contrast behind text.
-        Forbid gibberish, malformed letters, distorted typography, fake UI text, multiple unrelated text elements, handwritten fonts, and paragraph text.
-
-        VISUAL STYLE
-        Modern enterprise software editorial aesthetic.
-        Clean interface-inspired geometry and subtle technical motifs.
-        Professional lighting and restrained color palette suitable for business blogs.
-
-        COMPOSITION
-        1200x630 aspect ratio.
-        Create a clean typography-safe area with uncluttered negative space around the title.
-        Maintain strong contrast behind text.
-        Avoid busy backgrounds in typography regions.
-        Do not include people.
-
-        QUALITY REQUIREMENTS
-        Prioritize reliability over artistic experimentation.
-        Optimize for realistic typography rendering limitations of diffusion models.
-        Verify internally that all text is readable and correctly spelled before finalizing the image.
-        If typography is malformed, regenerate the text region before final output.
-
-        NEGATIVE PROMPT
-        gibberish text, distorted letters, malformed fonts, unreadable typography, duplicate characters, blurry text, watermark, logo, random symbols
-
-        OUTPUT FORMAT
-        Return one final hero image suitable for professional blogs, websites, technical branding, and editorial content.
+        return """
+        A sleek abstract macro shot of a printed circuit board, glowing copper traces and intricate microchips,
+        shallow depth of field with soft bokeh, deep navy and teal tones accented by warm orange light,
+        cinematic side lighting, futuristic high-tech software-engineering atmosphere,
+        clean and modern, highly detailed, smooth surfaces.
+        Negative: text, letters, words, numbers, symbols, people, faces, logos, watermarks, UI chrome.
         """;
-    }
-
-    private static string BuildStabilizedHeadline(string title)
-    {
-        var tokens = title
-            .Split(' ', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-            .Take(5)
-            .Select(token => token.ToUpperInvariant())
-            .ToArray();
-
-        return tokens.Length == 0
-            ? "TECHNICAL INSIGHTS"
-            : string.Join(' ', tokens);
     }
 
     private static string BuildUnavailableStatus(
