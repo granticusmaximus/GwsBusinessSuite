@@ -107,6 +107,13 @@
               </h2>
               <div class="accordion-collapse collapse @(isExpanded ? "show" : string.Empty)">
                 <div class="accordion-body">
+                  <div class="d-flex justify-content-end mb-2">
+                    <button type="button" class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-1"
+                            @onclick="() => OpenImportModal(partner)">
+                      <i class="bi bi-upload"></i>
+                      <span>Import Offers (with Tracking URLs)</span>
+                    </button>
+                  </div>
                   @if (IsLoadingAdvertiserOffers && LoadingAdvertiserId == partner.AdvertiserId)
                   {
                     <p class="text-secondary mb-0">Loading active ads...</p>
@@ -226,6 +233,66 @@
           <div class="modal-backdrop fade show"></div>
         }
 
+  @if (ShowImportModal)
+  {
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+      <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Import Offers for @ImportAdvertiserName</h5>
+            <button type="button" class="btn-close" aria-label="Close" @onclick="CloseImportModal"></button>
+          </div>
+          <div class="modal-body">
+            <p class="text-secondary">
+              CJ's Sync/commissions API does not return clickable tracking links - only paste/upload offers
+              exported from CJ's own "Get Links" / deep-link tool in your CJ dashboard for
+              <strong>@ImportAdvertiserName</strong>. Each row needs at least an offer name and a tracking URL.
+            </p>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label fw-semibold small">Format</label>
+                <select class="form-select" @bind="ImportFormat">
+                  <option value="Auto">Auto-detect</option>
+                  <option value="CSV">CSV</option>
+                  <option value="TSV">TSV</option>
+                  <option value="JSON">JSON</option>
+                </select>
+              </div>
+              <div class="col-md-6 d-flex align-items-end">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="replaceExistingOffers" @bind="ImportReplaceExisting" />
+                  <label class="form-check-label small" for="replaceExistingOffers">
+                    Replace this advertiser's existing offers
+                  </label>
+                </div>
+              </div>
+              <div class="col-12">
+                <label class="form-label fw-semibold small">Upload a file</label>
+                <InputFile OnChange="HandleImportFileSelected" class="form-control" accept=".csv,.tsv,.json,.txt" />
+              </div>
+              <div class="col-12">
+                <label class="form-label fw-semibold small">Or paste offer data</label>
+                <textarea class="form-control font-monospace" rows="10" @bind="ImportPayload"
+                          placeholder="offerName,trackingUrl,category,promotionEndsAt"></textarea>
+              </div>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(ImportMessage))
+            {
+              <div class="alert @(ImportMessageIsError ? "alert-danger" : "alert-info") mt-3 mb-0">@ImportMessage</div>
+            }
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" @onclick="CloseImportModal" disabled="@IsBusy">Cancel</button>
+            <button type="button" class="btn btn-primary" @onclick="SubmitImport" disabled="@IsBusy">
+              <i class="bi bi-upload me-1"></i>Import Offers
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-backdrop fade show"></div>
+    </div>
+  }
+
 @code {
   private List<CjPartnerView> Partners { get; set; } = new();
   private readonly HashSet<string> ExpandedAdvertiserIds = new(StringComparer.OrdinalIgnoreCase);
@@ -238,6 +305,15 @@ new(StringComparer.OrdinalIgnoreCase);
   private bool IsConnected { get; set; }
   private bool ShowConnectorModal { get; set; }
   private bool ShowConnectorDeveloperKey { get; set; }
+
+  private bool ShowImportModal { get; set; }
+  private string ImportAdvertiserId { get; set; } = string.Empty;
+  private string ImportAdvertiserName { get; set; } = string.Empty;
+  private string ImportFormat { get; set; } = "Auto";
+  private bool ImportReplaceExisting { get; set; } = true;
+  private string ImportPayload { get; set; } = string.Empty;
+  private string ImportMessage { get; set; } = string.Empty;
+  private bool ImportMessageIsError { get; set; }
 
   private string ErrorMessage { get; set; } = string.Empty;
   private string StatusMessage { get; set; } = string.Empty;
@@ -306,6 +382,82 @@ new(StringComparer.OrdinalIgnoreCase);
   private void CloseConnectorModal()
   {
     ShowConnectorModal = false;
+  }
+
+  private void OpenImportModal(CjPartnerView partner)
+  {
+    ImportAdvertiserId = partner.AdvertiserId;
+    ImportAdvertiserName = partner.AdvertiserName;
+    ImportFormat = "Auto";
+    ImportReplaceExisting = true;
+    ImportPayload = string.Empty;
+    ImportMessage = string.Empty;
+    ImportMessageIsError = false;
+    ShowImportModal = true;
+  }
+
+  private void CloseImportModal()
+  {
+    ShowImportModal = false;
+  }
+
+  private async Task HandleImportFileSelected(InputFileChangeEventArgs e)
+  {
+    const long maxBytes = 5 * 1024 * 1024;
+    try
+    {
+      using var stream = e.File.OpenReadStream(maxAllowedSize: maxBytes);
+      using var reader = new StreamReader(stream);
+      ImportPayload = await reader.ReadToEndAsync();
+      ImportMessage = string.Empty;
+      ImportMessageIsError = false;
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Unable to read uploaded CJ offer import file.");
+      ImportMessage = $"Unable to read file. {ex.Message}";
+      ImportMessageIsError = true;
+    }
+  }
+
+  private async Task SubmitImport()
+  {
+    if (string.IsNullOrWhiteSpace(ImportPayload))
+    {
+      ImportMessage = "Paste offer data or upload a file before importing.";
+      ImportMessageIsError = true;
+      return;
+    }
+
+    IsBusy = true;
+    ImportMessage = string.Empty;
+    ImportMessageIsError = false;
+
+    try
+    {
+      var result = await CjAdsService.ImportOffersAsync(new CjOfferImportRequest
+      {
+        AdvertiserId = ImportAdvertiserId,
+        AdvertiserName = ImportAdvertiserName,
+        Payload = ImportPayload,
+        Format = ImportFormat,
+        ReplaceExistingOffers = ImportReplaceExisting
+      });
+
+      AdvertiserOffersById[ImportAdvertiserId] = result.Offers.ToList();
+      StatusMessage = $"Imported {result.Imported} new and updated {result.Updated} offers for {ImportAdvertiserName} ({result.Deleted} removed).";
+      ShowImportModal = false;
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Unable to import CJ offers for advertiser {AdvertiserId}.", ImportAdvertiserId);
+      ImportMessage = $"Import failed. {ex.Message}";
+      ImportMessageIsError = true;
+    }
+    finally
+    {
+      IsBusy = false;
+    }
   }
 
   private async Task LoadPartners()
