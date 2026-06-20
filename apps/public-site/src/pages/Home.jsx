@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import ArticleCard from '../components/ArticleCard';
+import { API_BASE_URL } from '../apiBase';
 
 export default function Home() {
   const [recentArticles, setRecentArticles] = useState([]);
 
   useEffect(() => {
-    fetch('/api/blog')
+    fetch(`${API_BASE_URL}/api/blog`)
       .then(r => r.ok ? r.json() : [])
       .then(data => setRecentArticles(data.slice(0, 3)))
       .catch(() => {});

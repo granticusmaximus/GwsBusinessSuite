@@ -37,6 +37,20 @@ builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions
 
 builder.Services.AddSingleton<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 
+// The public React site (apps/public-site) calls /api/blog and /og-image directly
+// against this backend's absolute URL rather than through Netlify's redirect-based
+// proxy, which proved unreliable. Allow its origins to read those public endpoints.
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy => policy
+        .WithOrigins(
+            "https://grantwatson.dev",
+            "https://www.grantwatson.dev",
+            "http://localhost:5173")
+        .AllowAnyHeader()
+        .AllowAnyMethod());
+});
+
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
@@ -123,6 +137,7 @@ if (!string.IsNullOrWhiteSpace(normalizedPathBase))
     app.UsePathBase(normalizedPathBase);
 }
 
+app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();

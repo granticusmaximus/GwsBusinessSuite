@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Marked } from 'marked';
+import { API_BASE_URL, resolveBackendUrl } from '../apiBase';
 
 const md = new Marked({ gfm: true, breaks: true, async: false });
 
@@ -22,7 +23,7 @@ export default function BlogPost() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    fetch(`/api/blog/${slug}`)
+    fetch(`${API_BASE_URL}/api/blog/${slug}`)
       .then(r => {
         if (!r.ok) throw new Error(r.status === 404 ? 'not_found' : 'error');
         return r.json();
@@ -58,7 +59,7 @@ export default function BlogPost() {
         <>
           <div className="blog-post-hero-wrap">
             <img
-              src={article.heroImageUrl}
+              src={resolveBackendUrl(article.heroImageUrl)}
               alt={article.heroImageAltText || article.title}
             />
           </div>

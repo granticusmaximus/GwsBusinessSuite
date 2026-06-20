@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import ArticleCard from '../components/ArticleCard';
+import { API_BASE_URL } from '../apiBase';
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50];
 
@@ -11,7 +12,7 @@ export default function BlogList() {
   const [pageSize, setPageSize]       = useState(10);
 
   useEffect(() => {
-    fetch('/api/blog')
+    fetch(`${API_BASE_URL}/api/blog`)
       .then(r => r.ok ? r.json() : [])
       .then(data => {
         // sort by publishedAt descending (API should already do this, but be safe)

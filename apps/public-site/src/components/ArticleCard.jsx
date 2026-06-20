@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { resolveBackendUrl } from '../apiBase';
 
 export default function ArticleCard({ article }) {
   const date = new Date(article.publishedAt).toLocaleDateString('en-US', {
@@ -15,7 +16,7 @@ export default function ArticleCard({ article }) {
     <Link to={`/blog/${article.slug}`} className="article-card">
       {article.hasHeroImage && article.heroImageUrl ? (
         <img
-          src={article.heroImageUrl}
+          src={resolveBackendUrl(article.heroImageUrl)}
           alt={article.title}
           className="article-card-img"
           loading="lazy"
