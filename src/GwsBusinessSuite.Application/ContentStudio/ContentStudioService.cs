@@ -344,6 +344,24 @@ public sealed class ContentStudioService(
             ? null
             : $"/og-image/{draft.Slug}";
 
+        var placements = await db.SeoArticleAffiliatePlacements
+            .AsNoTracking()
+            .Where(x => x.SeoArticleDraftId == draft.Id)
+            .OrderBy(x => x.SortOrder)
+            .Select(x => new ArticleAffiliatePlacementView
+            {
+                SlotToken = x.SlotToken,
+                AdvertiserId = x.AdvertiserId,
+                AdvertiserName = x.AdvertiserName,
+                Category = x.Category,
+                TrackingUrl = x.TrackingUrl,
+                CallToActionText = x.CallToActionText,
+                SortOrder = x.SortOrder
+            })
+            .ToListAsync(cancellationToken);
+
+        var publishMarkdown = RenderAffiliatePlacements(draft.ArticleMarkdown, placements);
+
         var existing = await db.Articles
             .FirstOrDefaultAsync(article => article.Slug == draft.Slug, cancellationToken);
 
@@ -354,7 +372,7 @@ public sealed class ContentStudioService(
                 Slug = draft.Slug,
                 Title = draft.Title,
                 Topic = draft.Topic,
-                BodyMarkdown = draft.ArticleMarkdown,
+                BodyMarkdown = publishMarkdown,
                 MetaDescription = draft.MetaDescription,
                 PrimaryKeyword = draft.PrimaryKeyword,
                 SecondaryKeywords = draft.SecondaryKeywords,
@@ -375,7 +393,7 @@ public sealed class ContentStudioService(
         {
             existing.Title = draft.Title;
             existing.Topic = draft.Topic;
-            existing.BodyMarkdown = draft.ArticleMarkdown;
+            existing.BodyMarkdown = publishMarkdown;
             existing.MetaDescription = draft.MetaDescription;
             existing.PrimaryKeyword = draft.PrimaryKeyword;
             existing.SecondaryKeywords = draft.SecondaryKeywords;
