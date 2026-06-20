@@ -22,6 +22,7 @@ coverage/
 *.db-shm
 *.db-wal
 *.sqlite
+dp-keys/
 *.sqlite3
 
 # Local environment and secret files

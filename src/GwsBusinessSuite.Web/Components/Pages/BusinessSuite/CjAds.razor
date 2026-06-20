@@ -178,7 +178,14 @@
               <div class="row g-3">
                 <div class="col-md-6">
                   <label class="form-label fw-semibold small">Developer Key</label>
-                  <input class="form-control" type="password" @bind="ConnectorDeveloperKey" autocomplete="off" />
+                  <div class="input-group">
+                    <input class="form-control" type="@(ShowConnectorDeveloperKey ? "text" : "password")"
+                           @bind="ConnectorDeveloperKey" autocomplete="off" />
+                    <button type="button" class="btn btn-outline-secondary"
+                            @onclick="() => ShowConnectorDeveloperKey = !ShowConnectorDeveloperKey">
+                      <i class="bi @(ShowConnectorDeveloperKey ? "bi-eye-slash-fill" : "bi-eye-fill")"></i>
+                    </button>
+                  </div>
                 </div>
                 <div class="col-md-6">
                   <label class="form-label fw-semibold small">Publisher ID (CID)</label>
@@ -230,6 +237,7 @@ new(StringComparer.OrdinalIgnoreCase);
   private bool IsBusy { get; set; }
   private bool IsConnected { get; set; }
   private bool ShowConnectorModal { get; set; }
+  private bool ShowConnectorDeveloperKey { get; set; }
 
   private string ErrorMessage { get; set; } = string.Empty;
   private string StatusMessage { get; set; } = string.Empty;
