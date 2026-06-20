@@ -74,4 +74,11 @@ public sealed class CjConnectorSettingsView
     public string WebsiteId { get; init; } = string.Empty;
     public string EndpointUrl { get; init; } = "https://commissions.api.cj.com/query";
     public int MaxResults { get; init; } = 100;
+
+    /// <summary>
+    /// True when a developer key is stored but could not be decrypted (e.g. the Data
+    /// Protection key ring changed since it was saved). <see cref="DeveloperKey"/> is left
+    /// empty in this case rather than exposing the unreadable ciphertext.
+    /// </summary>
+    public bool DeveloperKeyUnreadable { get; init; }
 }

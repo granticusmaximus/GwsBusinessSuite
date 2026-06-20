@@ -288,6 +288,13 @@ new(StringComparer.OrdinalIgnoreCase);
         ConnectorWebsiteId = saved.WebsiteId;
         ConnectorEndpointUrl = saved.EndpointUrl;
         ConnectorMaxResults = saved.MaxResults;
+
+        if (saved.DeveloperKeyUnreadable)
+        {
+          ConnectorMessage = "The stored Developer Key could not be decrypted (it was saved under a previous encryption key) and has been cleared. Please re-enter your CJ Personal Access Token below.";
+          ConnectorMessageIsError = true;
+          ShowConnectorModal = true;
+        }
       }
     }
     catch (Exception ex)

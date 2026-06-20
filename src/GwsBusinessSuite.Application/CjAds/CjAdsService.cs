@@ -646,13 +646,16 @@ public sealed class CjAdsService(
             return null;
         }
 
+        var (developerKey, isUnreadable) = UnprotectDeveloperKey(row.DeveloperKey);
+
         return new CjConnectorSettingsView
         {
-            DeveloperKey = UnprotectDeveloperKey(row.DeveloperKey),
+            DeveloperKey = developerKey,
             PublisherId = row.PublisherId,
             WebsiteId = row.WebsiteId,
             EndpointUrl = row.EndpointUrl,
-            MaxResults = row.MaxResults
+            MaxResults = row.MaxResults,
+            DeveloperKeyUnreadable = isUnreadable
         };
     }
 
@@ -685,22 +688,25 @@ public sealed class CjAdsService(
             : secretProtector.Protect(developerKey.Trim());
     }
 
-    private string UnprotectDeveloperKey(string storedValue)
+    private (string DeveloperKey, bool IsUnreadable) UnprotectDeveloperKey(string storedValue)
     {
         if (string.IsNullOrWhiteSpace(storedValue))
         {
-            return string.Empty;
+            return (string.Empty, false);
         }
 
         try
         {
-            return secretProtector.Unprotect(storedValue);
+            return (secretProtector.Unprotect(storedValue), false);
         }
         catch (Exception ex)
         {
-            // Backward compatibility for legacy rows saved before encryption.
-            logger.LogWarning(ex, "Unable to decrypt stored CJ developer key. Treating value as legacy plaintext.");
-            return storedValue;
+            // The Data Protection key ring that encrypted this value no longer exists
+            // (e.g. rotated keys). The stored ciphertext can never be decrypted again -
+            // surface that clearly instead of returning the unreadable ciphertext as if
+            // it were a usable key.
+            logger.LogWarning(ex, "Unable to decrypt stored CJ developer key. The key ring may have changed since it was saved.");
+            return (string.Empty, true);
         }
     }
 }
