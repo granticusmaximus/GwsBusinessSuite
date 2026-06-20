@@ -7,7 +7,7 @@ import BlogList from './pages/BlogList';
 import BlogPost from './pages/BlogPost';
 
 const ADMIN_URL = import.meta.env.DEV
-  ? 'http://localhost:5000/admin'
+  ? 'http://localhost:5050/admin'
   : 'https://admin.gwsapp.net/admin';
 
 function Navbar() {

@@ -11,7 +11,7 @@ export default async (request, context) => {
 
   if (!slug) return context.next();
 
-  const backendUrl = Netlify.env.get('BACKEND_URL') || 'http://localhost:5000';
+  const backendUrl = Netlify.env.get('BACKEND_URL') || 'http://localhost:5050';
 
   let article;
   try {

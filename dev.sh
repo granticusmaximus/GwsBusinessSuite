@@ -2,7 +2,7 @@
 set -e
 set -m  # job control: each backgrounded job gets its own process group
 
-DOTNET_PORT=5000
+DOTNET_PORT=5050  # avoid 5000: macOS Control Center / AirPlay Receiver claims it by default
 
 # Kill any leftover processes holding the .NET port before starting
 existing=$(lsof -ti :$DOTNET_PORT 2>/dev/null || true)
@@ -40,10 +40,10 @@ cleanup() {
 }
 trap cleanup INT TERM
 
-dotnet watch --project src/GwsBusinessSuite.Web run --urls "http://localhost:$DOTNET_PORT" &
+dotnet watch --project src/GwsBusinessSuite.Web run --urls "http://localhost:$DOTNET_PORT" </dev/null &
 DOTNET_PID=$!
 
-(cd apps/public-site && npm run dev) &
+(cd apps/public-site && npm run dev) </dev/null &
 VITE_PID=$!
 
 wait "$DOTNET_PID" "$VITE_PID"
