@@ -8,6 +8,7 @@ namespace GwsBusinessSuite.Application.ContentStudio;
 
 public sealed class ContentStudioService(
     IAppDbContext db,
+    IAppDbContextFactory dbContextFactory,
     IOllamaService ollama,
     IAffiliateOfferScoringService offerScoringService,
     IOptions<ContentStudioOptions> options,
@@ -37,11 +38,14 @@ public sealed class ContentStudioService(
             .ToList();
     }
 
-    public async Task<ArticleGenerationResult?> GetDraftAsync(Guid draftId, CancellationToken cancellationToken = default)
-    {
-        await RecordDraftImpressionsAsync(draftId, "content-studio-preview", cancellationToken);
+    public Task<ArticleGenerationResult?> GetDraftAsync(Guid draftId, CancellationToken cancellationToken = default)
+        => GetDraftCoreAsync(db, draftId, cancellationToken);
 
-        var draft = await LoadDraftSnapshotAsync(draftId, cancellationToken);
+    private async Task<ArticleGenerationResult?> GetDraftCoreAsync(IAppDbContext context, Guid draftId, CancellationToken cancellationToken)
+    {
+        await RecordDraftImpressionsAsync(context, draftId, "content-studio-preview", cancellationToken);
+
+        var draft = await LoadDraftSnapshotAsync(context, draftId, cancellationToken);
 
         if (draft is null)
         {
@@ -52,7 +56,7 @@ public sealed class ContentStudioService(
         var currentWindowStart = now.AddDays(-7);
         var previousWindowStart = now.AddDays(-14);
 
-        var interactions = await db.SeoArticleAffiliateInteractions
+        var interactions = await context.SeoArticleAffiliateInteractions
             .AsNoTracking()
             .Where(x => x.SeoArticleDraftId == draftId)
             .Select(x => new { x.SlotToken, x.EventType, x.CreatedAt })
@@ -159,6 +163,10 @@ public sealed class ContentStudioService(
             request.Topic,
             model);
 
+        // Ollama's first-time model load plus generation can take several minutes.
+        // A Blazor Server circuit can disconnect and have its DI scope (and the
+        // constructor-injected db context) disposed during that wait, so the save
+        // below uses a freshly created context instead of the field-level `db`.
         var markdown = (await ollama.GenerateAsync(model, string.Empty, prompt, cancellationToken)).Trim();
 
         if (string.IsNullOrWhiteSpace(markdown))
@@ -189,13 +197,15 @@ public sealed class ContentStudioService(
             RevisionNumber = 0
         };
 
-        db.SeoArticleDrafts.Add(draft);
+        await using var freshContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        freshContext.SeoArticleDrafts.Add(draft);
         foreach (var placement in BuildAffiliatePlacements(draft.Id, scoredOffers))
         {
-            db.SeoArticleAffiliatePlacements.Add(placement);
+            freshContext.SeoArticleAffiliatePlacements.Add(placement);
         }
 
-        db.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent
+        freshContext.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent
         {
             SeoArticleDraftId = draft.Id,
             EventType = SeoArticleWorkflowEventTypes.Generated,
@@ -203,7 +213,7 @@ public sealed class ContentStudioService(
             CreatedBy = "content-studio"
         });
 
-        await db.SaveChangesAsync(cancellationToken);
+        await freshContext.SaveChangesAsync(cancellationToken);
 
         logger.LogInformation(
             "Content Studio draft {DraftId} generated successfully for topic '{Topic}' with slug '{Slug}'.",
@@ -211,7 +221,7 @@ public sealed class ContentStudioService(
             request.Topic,
             slug);
 
-        var saved = await GetDraftAsync(draft.Id, cancellationToken);
+        var saved = await GetDraftCoreAsync(freshContext, draft.Id, cancellationToken);
         if (saved is null)
         {
             throw new InvalidOperationException("The generated draft could not be reloaded from persistence.");
@@ -251,6 +261,10 @@ public sealed class ContentStudioService(
             ? ContentStudioOptions.DefaultModel
             : options.Value.Model;
 
+        // Ollama generation can take several minutes; a Blazor Server circuit can
+        // disconnect and dispose the field-level db context during that wait, so the
+        // save below re-loads the draft on a freshly created context instead of
+        // reusing the entity tracked by the original context.
         var revisedMarkdown = (await ollama.GenerateAsync(configuredModel, string.Empty, prompt, cancellationToken)).Trim();
         if (string.IsNullOrWhiteSpace(revisedMarkdown))
         {
@@ -259,39 +273,47 @@ public sealed class ContentStudioService(
 
         var revisedMarkdownWithAffiliateSlots = EnsureAffiliatePlaceholders(revisedMarkdown);
 
-        draft.ArticleMarkdown = revisedMarkdownWithAffiliateSlots;
-        draft.OutlineMarkdown = ExtractSection(revisedMarkdownWithAffiliateSlots, "## Outline");
-        draft.RequestedModifications = revisionNotes;
-        draft.Status = SeoArticleDraftStatuses.PendingReview;
-        draft.RevisionNumber += 1;
-        draft.UpdatedAt = DateTimeOffset.UtcNow;
-        draft.UpdatedBy = request.PerformedBy;
+        await using var freshContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-        var existingPlacements = await db.SeoArticleAffiliatePlacements
-            .Where(x => x.SeoArticleDraftId == draft.Id)
+        var freshDraft = await freshContext.SeoArticleDrafts.FirstOrDefaultAsync(x => x.Id == draft.Id, cancellationToken);
+        if (freshDraft is null)
+        {
+            return null;
+        }
+
+        freshDraft.ArticleMarkdown = revisedMarkdownWithAffiliateSlots;
+        freshDraft.OutlineMarkdown = ExtractSection(revisedMarkdownWithAffiliateSlots, "## Outline");
+        freshDraft.RequestedModifications = revisionNotes;
+        freshDraft.Status = SeoArticleDraftStatuses.PendingReview;
+        freshDraft.RevisionNumber += 1;
+        freshDraft.UpdatedAt = DateTimeOffset.UtcNow;
+        freshDraft.UpdatedBy = request.PerformedBy;
+
+        var existingPlacements = await freshContext.SeoArticleAffiliatePlacements
+            .Where(x => x.SeoArticleDraftId == freshDraft.Id)
             .ToListAsync(cancellationToken);
 
         foreach (var existingPlacement in existingPlacements)
         {
-            db.SeoArticleAffiliatePlacements.Remove(existingPlacement);
+            freshContext.SeoArticleAffiliatePlacements.Remove(existingPlacement);
         }
 
-        foreach (var placement in BuildAffiliatePlacements(draft.Id, scoredOffers))
+        foreach (var placement in BuildAffiliatePlacements(freshDraft.Id, scoredOffers))
         {
-            db.SeoArticleAffiliatePlacements.Add(placement);
+            freshContext.SeoArticleAffiliatePlacements.Add(placement);
         }
 
-        db.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent
+        freshContext.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent
         {
-            SeoArticleDraftId = draft.Id,
+            SeoArticleDraftId = freshDraft.Id,
             EventType = SeoArticleWorkflowEventTypes.Revised,
             Notes = revisionNotes,
             CreatedBy = request.PerformedBy
         });
 
-        await db.SaveChangesAsync(cancellationToken);
+        await freshContext.SaveChangesAsync(cancellationToken);
 
-        return await GetDraftAsync(draft.Id, cancellationToken);
+        return await GetDraftCoreAsync(freshContext, freshDraft.Id, cancellationToken);
     }
 
     public async Task<ArticleGenerationResult?> ApproveDraftAsync(
@@ -750,9 +772,9 @@ public sealed class ContentStudioService(
         return true;
     }
 
-    private async Task RecordDraftImpressionsAsync(Guid draftId, string performedBy, CancellationToken cancellationToken)
+    private async Task RecordDraftImpressionsAsync(IAppDbContext context, Guid draftId, string performedBy, CancellationToken cancellationToken)
     {
-        var placements = await db.SeoArticleAffiliatePlacements
+        var placements = await context.SeoArticleAffiliatePlacements
             .AsNoTracking()
             .Where(x => x.SeoArticleDraftId == draftId)
             .Select(x => new { x.SeoArticleDraftId, x.SlotToken, x.AdvertiserId })
@@ -765,7 +787,7 @@ public sealed class ContentStudioService(
 
         foreach (var placement in placements)
         {
-            db.SeoArticleAffiliateInteractions.Add(new SeoArticleAffiliateInteraction
+            context.SeoArticleAffiliateInteractions.Add(new SeoArticleAffiliateInteraction
             {
                 SeoArticleDraftId = placement.SeoArticleDraftId,
                 SlotToken = placement.SlotToken,
@@ -775,7 +797,7 @@ public sealed class ContentStudioService(
             });
         }
 
-        await db.SaveChangesAsync(cancellationToken);
+        await context.SaveChangesAsync(cancellationToken);
     }
 
     private static double CalculateCtr(int clicks, int impressions)
@@ -785,9 +807,9 @@ public sealed class ContentStudioService(
             : (double)clicks / impressions;
     }
 
-    private async Task<SeoArticleDraft?> LoadDraftSnapshotAsync(Guid draftId, CancellationToken cancellationToken)
+    private async Task<SeoArticleDraft?> LoadDraftSnapshotAsync(IAppDbContext context, Guid draftId, CancellationToken cancellationToken)
     {
-        return await db.SeoArticleDrafts
+        return await context.SeoArticleDrafts
             .AsNoTracking()
             .Include(x => x.AffiliatePlacements)
             .Include(x => x.WorkflowEvents)

@@ -35,6 +35,7 @@ public static class DependencyInjection
 services.Configure<ExternalServicesOptions>(configuration.GetSection(ExternalServicesOptions.SectionName));
         services.AddDbContextFactory<ApplicationDbContext>(options => options.UseSqlite(connectionString));
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
+        services.AddScoped<IAppDbContextFactory, AppDbContextFactory>();
         services.AddScoped<ISecretProtector, DataProtectionSecretProtector>();
         services.AddHttpClient<ICjAffiliateService, CjAffiliateService>();
 services.AddHttpClient<ICloudflareService, CloudflareService>();

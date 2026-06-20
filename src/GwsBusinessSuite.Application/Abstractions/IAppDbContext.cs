@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GwsBusinessSuite.Application.Abstractions;
 
-public interface IAppDbContext
+public interface IAppDbContext : IAsyncDisposable
 {
     DbSet<BusinessApp> BusinessApps { get; }
     DbSet<Contact> Contacts { get; }
@@ -19,4 +19,15 @@ public interface IAppDbContext
     DbSet<CjConnectorSettings> CjConnectorSettings { get; }
     DbSet<Article> Articles { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Creates standalone <see cref="IAppDbContext"/> instances that are not tied to the
+/// caller's DI scope. Use this for work that spans a long-running external call (e.g. an
+/// Ollama generation request) so a Blazor Server circuit disconnecting mid-call can't
+/// dispose the context out from under a pending save.
+/// </summary>
+public interface IAppDbContextFactory
+{
+    Task<IAppDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default);
 }

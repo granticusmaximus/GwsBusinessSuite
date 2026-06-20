@@ -26,6 +26,15 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddCascadingAuthenticationState();
 
+// Content Studio article generation can take several minutes against Ollama
+// (first-time model load especially). Extend the circuit's disconnect grace
+// period well past that so a brief network blip over the Cloudflare Tunnel
+// doesn't tear down the circuit mid-generation.
+builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions>(options =>
+{
+    options.DisconnectedCircuitRetentionPeriod = TimeSpan.FromMinutes(10);
+});
+
 builder.Services.AddSingleton<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
