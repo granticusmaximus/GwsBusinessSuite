@@ -18,6 +18,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<SeoArticleWorkflowEvent> SeoArticleWorkflowEvents { get; }
     DbSet<CjConnectorSettings> CjConnectorSettings { get; }
     DbSet<Article> Articles { get; }
+    DbSet<ArticleAffiliatePlacement> ArticleAffiliatePlacements { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
 

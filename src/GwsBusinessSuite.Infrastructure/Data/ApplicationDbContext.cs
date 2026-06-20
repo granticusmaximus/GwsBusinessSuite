@@ -19,6 +19,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SeoArticleWorkflowEvent> SeoArticleWorkflowEvents => Set<SeoArticleWorkflowEvent>();
     public DbSet<CjConnectorSettings> CjConnectorSettings => Set<CjConnectorSettings>();
     public DbSet<Article> Articles => Set<Article>();
+    public DbSet<ArticleAffiliatePlacement> ArticleAffiliatePlacements => Set<ArticleAffiliatePlacement>();
     public DbSet<AppUser> AppUsers => Set<AppUser>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -46,6 +47,12 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<Article>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<Article>().HasIndex(x => x.Status);
         modelBuilder.Entity<Article>().HasIndex(x => x.PublishedAt);
+        modelBuilder.Entity<ArticleAffiliatePlacement>()
+            .HasOne(x => x.Article)
+            .WithMany(x => x.AffiliatePlacements)
+            .HasForeignKey(x => x.ArticleId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<ArticleAffiliatePlacement>().HasIndex(x => new { x.ArticleId, x.SortOrder });
 
         modelBuilder.Entity<AppUser>().HasIndex(x => x.Username).IsUnique();
         modelBuilder.Entity<AppUser>().HasIndex(x => x.Role);

@@ -344,35 +344,30 @@ public sealed class ContentStudioService(
             ? null
             : $"/og-image/{draft.Slug}";
 
-        var placements = await db.SeoArticleAffiliatePlacements
+        var draftPlacements = await db.SeoArticleAffiliatePlacements
             .AsNoTracking()
             .Where(x => x.SeoArticleDraftId == draft.Id)
             .OrderBy(x => x.SortOrder)
-            .Select(x => new ArticleAffiliatePlacementView
-            {
-                SlotToken = x.SlotToken,
-                AdvertiserId = x.AdvertiserId,
-                AdvertiserName = x.AdvertiserName,
-                Category = x.Category,
-                TrackingUrl = x.TrackingUrl,
-                CallToActionText = x.CallToActionText,
-                SortOrder = x.SortOrder
-            })
             .ToListAsync(cancellationToken);
 
-        var publishMarkdown = RenderAffiliatePlacements(draft.ArticleMarkdown, placements);
-
+        // Keep the raw markdown (with unresolved {{CJ_AD_*}} tokens) on the live Article
+        // rather than baking resolved ad HTML in here. Tokens are resolved dynamically at
+        // serve time from ArticleAffiliatePlacement rows, so ads can be edited, moved, or
+        // added on the published article afterward without needing to republish.
         var existing = await db.Articles
             .FirstOrDefaultAsync(article => article.Slug == draft.Slug, cancellationToken);
 
+        Article article;
+        var isNewArticle = existing is null;
+
         if (existing is null)
         {
-            db.Articles.Add(new Article
+            article = new Article
             {
                 Slug = draft.Slug,
                 Title = draft.Title,
                 Topic = draft.Topic,
-                BodyMarkdown = publishMarkdown,
+                BodyMarkdown = draft.ArticleMarkdown,
                 MetaDescription = draft.MetaDescription,
                 PrimaryKeyword = draft.PrimaryKeyword,
                 SecondaryKeywords = draft.SecondaryKeywords,
@@ -387,13 +382,15 @@ public sealed class ContentStudioService(
                 PublishedAt = DateTimeOffset.UtcNow,
                 SourceDraftId = draft.Id,
                 CreatedBy = request.PerformedBy
-            });
+            };
+            db.Articles.Add(article);
         }
         else
         {
+            article = existing;
             existing.Title = draft.Title;
             existing.Topic = draft.Topic;
-            existing.BodyMarkdown = publishMarkdown;
+            existing.BodyMarkdown = draft.ArticleMarkdown;
             existing.MetaDescription = draft.MetaDescription;
             existing.PrimaryKeyword = draft.PrimaryKeyword;
             existing.SecondaryKeywords = draft.SecondaryKeywords;
@@ -409,6 +406,28 @@ public sealed class ContentStudioService(
             existing.PublishedAt ??= DateTimeOffset.UtcNow;
             existing.UpdatedAt = DateTimeOffset.UtcNow;
             existing.UpdatedBy = request.PerformedBy;
+        }
+
+        // Only seed ad placements on the article's first publish. Once live, ads are
+        // managed independently via the Article Editor and shouldn't be overwritten by
+        // republishing the source draft.
+        if (isNewArticle)
+        {
+            foreach (var draftPlacement in draftPlacements)
+            {
+                db.ArticleAffiliatePlacements.Add(new ArticleAffiliatePlacement
+                {
+                    ArticleId = article.Id,
+                    SlotToken = draftPlacement.SlotToken,
+                    AdvertiserId = draftPlacement.AdvertiserId,
+                    AdvertiserName = draftPlacement.AdvertiserName,
+                    Category = draftPlacement.Category,
+                    TrackingUrl = draftPlacement.TrackingUrl,
+                    CallToActionText = draftPlacement.CallToActionText,
+                    SortOrder = draftPlacement.SortOrder,
+                    CreatedBy = request.PerformedBy
+                });
+            }
         }
 
         db.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent

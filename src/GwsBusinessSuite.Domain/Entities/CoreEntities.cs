@@ -209,4 +209,18 @@ public sealed class Article : AuditableEntity
     public string Source { get; set; } = ArticleSource.Manual;
     public DateTimeOffset? PublishedAt { get; set; }
     public Guid? SourceDraftId { get; set; }
+    public ICollection<ArticleAffiliatePlacement> AffiliatePlacements { get; set; } = new List<ArticleAffiliatePlacement>();
+}
+
+public sealed class ArticleAffiliatePlacement : AuditableEntity
+{
+    public Guid ArticleId { get; set; }
+    public string SlotToken { get; set; } = string.Empty;
+    public string AdvertiserId { get; set; } = string.Empty;
+    public string AdvertiserName { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public string TrackingUrl { get; set; } = string.Empty;
+    public string CallToActionText { get; set; } = "Explore Offer";
+    public int SortOrder { get; set; }
+    public Article? Article { get; set; }
 }

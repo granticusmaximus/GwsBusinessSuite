@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "ContentAccess")]
 @using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Articles
 @using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Infrastructure.Data
 @using Markdig
@@ -10,6 +11,7 @@
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject NavigationManager Navigation
 @inject ILogger<ArticleEditorDetail> Logger
+@inject IJSRuntime JS
 
 <PageTitle>@(CurrentArticle?.Title ?? "Article Editor")</PageTitle>
 
@@ -150,7 +152,7 @@ else
             <div class="row g-4">
                 <div class="col-xl-6">
                     <label class="form-label fw-semibold small">Markdown</label>
-                    <textarea class="form-control article-body-editor font-monospace"
+                    <textarea id="article-body-textarea" class="form-control article-body-editor font-monospace"
                               @bind="BodyMarkdown" @bind:event="oninput"
                               placeholder="Write your article in Markdown..."></textarea>
                 </div>
@@ -161,6 +163,70 @@ else
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- CJ ad placements -->
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+            <span class="fw-semibold">CJ Ad Placements</span>
+            <button class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-1"
+                    @onclick="() => OpenPlacementModal(null)" disabled="@IsBusy">
+                <i class="bi bi-plus-circle"></i>
+                <span>Add Ad Placement</span>
+            </button>
+        </div>
+        <div class="card-body">
+            @if (Placements.Count == 0)
+            {
+                <p class="text-secondary mb-0">No ads placed in this article yet. Add one, then use "Insert at Cursor"
+                    to drop its token into the markdown wherever you want it to appear.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Advertiser</th>
+                                <th>CTA Text</th>
+                                <th>Slot Token</th>
+                                <th class="text-end">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var placement in Placements)
+                            {
+                                <tr>
+                                    <td>
+                                        <div class="fw-semibold">@placement.AdvertiserName</div>
+                                        <div class="small text-secondary">@placement.Category</div>
+                                    </td>
+                                    <td>@placement.CallToActionText</td>
+                                    <td><code class="small">@placement.SlotToken</code></td>
+                                    <td class="text-end">
+                                        <div class="d-inline-flex gap-1">
+                                            <button class="btn btn-sm btn-outline-secondary"
+                                                    @onclick="() => InsertTokenAtCursor(placement.SlotToken)"
+                                                    title="Insert at Cursor">
+                                                <i class="bi bi-cursor-text"></i>
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-secondary"
+                                                    @onclick="() => OpenPlacementModal(placement)" title="Edit">
+                                                <i class="bi bi-pencil-fill"></i>
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-danger"
+                                                    @onclick="() => DeletePlacement(placement)" title="Remove">
+                                                <i class="bi bi-trash-fill"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
         </div>
     </div>
 
@@ -186,6 +252,67 @@ else
                 </button>
             }
         </div>
+    </div>
+}
+
+@if (ShowPlacementModal)
+{
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(EditingPlacementId is null ? "Add Ad Placement" : "Edit Ad Placement")</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="ClosePlacementModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label fw-semibold small">Advertiser</label>
+                            <select class="form-select" value="@SelectedAdvertiserId" @onchange="OnAdvertiserChanged">
+                                <option value="">Select an advertiser...</option>
+                                @foreach (var advertiser in AvailableAdvertisers)
+                                {
+                                    <option value="@advertiser.AdvertiserId">@advertiser.AdvertiserName</option>
+                                }
+                            </select>
+                            @if (AvailableAdvertisers.Count == 0)
+                            {
+                                <div class="form-text text-secondary">
+                                    No advertisers with offers found. Use "Import Offers" on the
+                                    <a href="/admin/cj-ads">CJ Ads page</a> first.
+                                </div>
+                            }
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-semibold small">Offer</label>
+                            <select class="form-select" value="@SelectedOfferId" @onchange="OnOfferChanged"
+                                    disabled="@(string.IsNullOrWhiteSpace(SelectedAdvertiserId))">
+                                <option value="">Select an offer...</option>
+                                @foreach (var offer in AvailableOffersForSelectedAdvertiser)
+                                {
+                                    <option value="@offer.Id">@offer.LinkName</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-semibold small">Call To Action Text</label>
+                            <input class="form-control" @bind="PlacementCallToActionText" placeholder="Explore Offer" />
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(PlacementMessage))
+                    {
+                        <div class="alert @(PlacementMessageIsError ? "alert-danger" : "alert-info") mt-3 mb-0">@PlacementMessage</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="ClosePlacementModal" disabled="@IsBusy">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="SavePlacement" disabled="@IsBusy">
+                        <i class="bi bi-floppy-fill me-1"></i>Save Placement
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-backdrop fade show"></div>
     </div>
 }
 
@@ -215,13 +342,45 @@ else
     private string BodyMarkdown { get; set; } = string.Empty;
     private bool SlugManuallyEdited { get; set; }
 
+    // CJ ad placements
+    private List<ArticleAffiliatePlacement> Placements { get; set; } = new();
+    private bool ShowPlacementModal { get; set; }
+    private Guid? EditingPlacementId { get; set; }
+    private List<AffiliateOffer> AllOffers { get; set; } = new();
+    private string SelectedAdvertiserId { get; set; } = string.Empty;
+    private string SelectedOfferId { get; set; } = string.Empty;
+    private string PlacementCallToActionText { get; set; } = "Explore Offer";
+    private string PlacementMessage { get; set; } = string.Empty;
+    private bool PlacementMessageIsError { get; set; }
+
+    private List<AffiliateOffer> AvailableAdvertisers =>
+        AllOffers
+            .GroupBy(x => new { x.AdvertiserId, x.AdvertiserName }, (key, group) => group.First())
+            .OrderBy(x => x.AdvertiserName)
+            .ToList();
+
+    private List<AffiliateOffer> AvailableOffersForSelectedAdvertiser =>
+        string.IsNullOrWhiteSpace(SelectedAdvertiserId)
+            ? new List<AffiliateOffer>()
+            : AllOffers.Where(x => x.AdvertiserId == SelectedAdvertiserId).OrderBy(x => x.LinkName).ToList();
+
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
         .Build();
 
-    private string RenderedBodyHtml => string.IsNullOrWhiteSpace(BodyMarkdown)
-        ? "<p class=\"text-secondary mb-0\">Nothing to preview yet.</p>"
-        : Markdown.ToHtml(BodyMarkdown, Pipeline);
+    private string RenderedBodyHtml
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(BodyMarkdown))
+            {
+                return "<p class=\"text-secondary mb-0\">Nothing to preview yet.</p>";
+            }
+
+            var resolvedMarkdown = ArticleMarkdownRenderer.Render(BodyMarkdown, Placements);
+            return Markdown.ToHtml(resolvedMarkdown, Pipeline);
+        }
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -243,6 +402,15 @@ else
                 return;
             }
             PopulateForm(CurrentArticle);
+
+            Placements = await db.ArticleAffiliatePlacements
+                .Where(x => x.ArticleId == ArticleId)
+                .OrderBy(x => x.SortOrder)
+                .ToListAsync();
+
+            AllOffers = await db.AffiliateOffers
+                .Where(x => x.Network == "CJ" && x.TrackingUrl != null && x.TrackingUrl != "")
+                .ToListAsync();
         }
         catch (Exception ex)
         {
@@ -426,6 +594,171 @@ else
     private void BackToList()
     {
         Navigation.NavigateTo("/admin/article-editor");
+    }
+
+    private void OpenPlacementModal(ArticleAffiliatePlacement? existing)
+    {
+        PlacementMessage = string.Empty;
+        PlacementMessageIsError = false;
+
+        if (existing is null)
+        {
+            EditingPlacementId = null;
+            SelectedAdvertiserId = string.Empty;
+            SelectedOfferId = string.Empty;
+            PlacementCallToActionText = "Explore Offer";
+        }
+        else
+        {
+            EditingPlacementId = existing.Id;
+            SelectedAdvertiserId = existing.AdvertiserId;
+            SelectedOfferId = AllOffers
+                .FirstOrDefault(x => x.AdvertiserId == existing.AdvertiserId && x.TrackingUrl == existing.TrackingUrl)
+                ?.Id.ToString() ?? string.Empty;
+            PlacementCallToActionText = existing.CallToActionText;
+        }
+
+        ShowPlacementModal = true;
+    }
+
+    private void ClosePlacementModal()
+    {
+        ShowPlacementModal = false;
+    }
+
+    private void OnAdvertiserChanged(ChangeEventArgs e)
+    {
+        SelectedAdvertiserId = e.Value?.ToString() ?? string.Empty;
+        SelectedOfferId = string.Empty;
+    }
+
+    private void OnOfferChanged(ChangeEventArgs e)
+    {
+        SelectedOfferId = e.Value?.ToString() ?? string.Empty;
+    }
+
+    private async Task SavePlacement()
+    {
+        if (string.IsNullOrWhiteSpace(SelectedOfferId) || !Guid.TryParse(SelectedOfferId, out var offerId))
+        {
+            PlacementMessage = "Select an advertiser and offer before saving.";
+            PlacementMessageIsError = true;
+            return;
+        }
+
+        var offer = AllOffers.FirstOrDefault(x => x.Id == offerId);
+        if (offer is null)
+        {
+            PlacementMessage = "The selected offer could not be found.";
+            PlacementMessageIsError = true;
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            if (EditingPlacementId is { } id)
+            {
+                var existing = await db.ArticleAffiliatePlacements.FindAsync(id);
+                if (existing is null)
+                {
+                    PlacementMessage = "Placement could not be found.";
+                    PlacementMessageIsError = true;
+                    return;
+                }
+
+                existing.AdvertiserId = offer.AdvertiserId;
+                existing.AdvertiserName = offer.AdvertiserName;
+                existing.Category = offer.Category ?? string.Empty;
+                existing.TrackingUrl = offer.TrackingUrl ?? string.Empty;
+                existing.CallToActionText = string.IsNullOrWhiteSpace(PlacementCallToActionText)
+                    ? "Explore Offer"
+                    : PlacementCallToActionText.Trim();
+                existing.UpdatedAt = DateTimeOffset.UtcNow;
+                existing.UpdatedBy = "manual-editor";
+            }
+            else
+            {
+                db.ArticleAffiliatePlacements.Add(new ArticleAffiliatePlacement
+                {
+                    ArticleId = ArticleId,
+                    SlotToken = ArticleMarkdownRenderer.GenerateSlotToken(),
+                    AdvertiserId = offer.AdvertiserId,
+                    AdvertiserName = offer.AdvertiserName,
+                    Category = offer.Category ?? string.Empty,
+                    TrackingUrl = offer.TrackingUrl ?? string.Empty,
+                    CallToActionText = string.IsNullOrWhiteSpace(PlacementCallToActionText)
+                        ? "Explore Offer"
+                        : PlacementCallToActionText.Trim(),
+                    SortOrder = Placements.Count,
+                    CreatedBy = "manual-editor"
+                });
+            }
+
+            await db.SaveChangesAsync();
+
+            Placements = await db.ArticleAffiliatePlacements
+                .Where(x => x.ArticleId == ArticleId)
+                .OrderBy(x => x.SortOrder)
+                .ToListAsync();
+
+            ShowPlacementModal = false;
+            StatusMessage = EditingPlacementId is null
+                ? "Ad placement added. Use \"Insert at Cursor\" to drop its token into the markdown."
+                : "Ad placement updated.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save ad placement for article {Id}.", ArticleId);
+            PlacementMessage = $"Unable to save placement. {ex.Message}";
+            PlacementMessageIsError = true;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task DeletePlacement(ArticleAffiliatePlacement placement)
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            $"Remove the {placement.AdvertiserName} ad placement? Its token will be removed from the published article the next time it's served.");
+        if (!confirmed) return;
+
+        IsBusy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var existing = await db.ArticleAffiliatePlacements.FindAsync(placement.Id);
+            if (existing is not null)
+            {
+                db.ArticleAffiliatePlacements.Remove(existing);
+                await db.SaveChangesAsync();
+            }
+
+            Placements = await db.ArticleAffiliatePlacements
+                .Where(x => x.ArticleId == ArticleId)
+                .OrderBy(x => x.SortOrder)
+                .ToListAsync();
+
+            StatusMessage = "Ad placement removed.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to delete ad placement for article {Id}.", ArticleId);
+            ErrorMessage = $"Unable to remove placement. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task InsertTokenAtCursor(string slotToken)
+    {
+        await JS.InvokeVoidAsync("insertAtCursor", "article-body-textarea", slotToken);
     }
 
     private static string ToSlug(string title)

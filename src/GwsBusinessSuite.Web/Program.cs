@@ -1,4 +1,5 @@
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.Articles;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure;
@@ -302,6 +303,7 @@ app.MapGet("/api/blog/{slug}", async (
 {
     await using var db = await dbFactory.CreateDbContextAsync();
     var a = await db.Articles
+        .Include(x => x.AffiliatePlacements)
         .Where(x => x.Slug == slug && x.Status == ArticleStatuses.Published)
         .FirstOrDefaultAsync();
 
@@ -310,13 +312,17 @@ app.MapGet("/api/blog/{slug}", async (
     var heroImageUrl = a.HeroImageUrl
         ?? (a.HeroImageDataUri != "" ? $"/og-image/{a.Slug}" : null);
 
+    var renderedMarkdown = ArticleMarkdownRenderer.Render(
+        a.BodyMarkdown,
+        a.AffiliatePlacements.OrderBy(p => p.SortOrder).ToList());
+
     return Results.Ok(new
     {
         a.Slug,
         a.Title,
         a.Topic,
         a.MetaDescription,
-        ArticleMarkdown      = a.BodyMarkdown,
+        ArticleMarkdown      = renderedMarkdown,
         a.EstimatedReadingTime,
         a.PrimaryKeyword,
         a.SecondaryKeywords,
