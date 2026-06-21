@@ -69,6 +69,12 @@
                 </button>
             </div>
         </div>
+        <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" id="trendForceRefresh" @bind="TrendForceRefresh" />
+            <label class="form-check-label small text-secondary" for="trendForceRefresh">
+                Force refresh (skip the 4-hour cache and re-query live sources)
+            </label>
+        </div>
 
         @if (TrendResult is not null)
         {
@@ -266,6 +272,7 @@
     private string SecondaryKeywords { get; set; } = string.Empty;
 
     private string TrendFocusArea { get; set; } = string.Empty;
+    private bool TrendForceRefresh { get; set; }
     private TrendResearchResult? TrendResult { get; set; }
 
     private List<ContentStudioDraftSummary> Drafts { get; set; } = new();
@@ -421,19 +428,23 @@
     {
         ErrorMessage = string.Empty;
         StatusMessage = string.Empty;
-        BeginBusy("Pulling trending posts from Hacker News and Reddit, then asking Ollama to summarize them.");
+        BeginBusy("Pulling trending posts from Hacker News and dev.to, then asking Ollama to summarize them.");
         await InvokeAsync(StateHasChanged);
 
         try
         {
             TrendResult = await TrendResearchService.ResearchTrendsAsync(new TrendResearchRequest
             {
-                FocusArea = TrendFocusArea
+                FocusArea = TrendFocusArea,
+                ForceRefresh = TrendForceRefresh
             });
 
-            StatusMessage = TrendResult.Suggestions.Count > 0
-                ? $"Found {TrendResult.Suggestions.Count} suggested article angles from {TrendResult.Signals.Count} trending sources."
-                : "Trend research completed, but no suggestions could be generated.";
+            StatusMessage = TrendResult.Suggestions.Count switch
+            {
+                > 0 => $"Found {TrendResult.Suggestions.Count} suggested article angles from {TrendResult.Signals.Count} trending sources.",
+                _ when TrendResult.Signals.Count == 0 => "No live trend data could be retrieved from Hacker News or dev.to for this focus area. Try Force Refresh or broaden the focus area.",
+                _ => $"Retrieved {TrendResult.Signals.Count} trending sources, but Ollama did not return parseable suggestions. Try Force Refresh to re-run it."
+            };
         }
         catch (Exception ex)
         {
