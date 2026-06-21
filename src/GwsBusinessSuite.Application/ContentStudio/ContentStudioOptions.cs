@@ -5,7 +5,7 @@ public sealed class ContentStudioOptions
     public const string SectionName = "ContentStudio";
     public const string DefaultBaseUrl = "http://localhost:11434";
     public const string DefaultModel = "llama3.2";
-    public const int DefaultGenerationTimeoutMinutes = 5;
+    public const int DefaultGenerationTimeoutMinutes = 20;
     public const string DefaultAuthorName = "GWS Editorial";
     public const string DefaultSiteBaseUrl = "https://example.com";
 
