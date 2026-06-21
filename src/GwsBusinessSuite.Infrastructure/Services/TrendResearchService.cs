@@ -1,4 +1,3 @@
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.ContentStudio;
@@ -9,10 +8,16 @@ using Microsoft.Extensions.Options;
 namespace GwsBusinessSuite.Infrastructure.Services;
 
 // Discovers what the software-development community is currently talking about (Hacker
-// News + Reddit, both free/keyless JSON APIs) and asks Ollama to synthesize that raw
+// News + dev.to, both free/keyless JSON APIs) and asks Ollama to synthesize that raw
 // signal into hot takes and concrete article angles. Search/discovery is delegated to
 // these real data sources because a local LLM has no way to know what's trending today;
 // Ollama's role is limited to summarizing and brainstorming from data it's actually given.
+//
+// Reddit's public .json endpoints were tried first but now blanket-403 non-browser and
+// datacenter traffic (confirmed even from a residential dev machine), so they aren't a
+// usable source for a server-side feature. dev.to's official articles API has no such
+// restriction and is arguably a better fit anyway: it's specifically newly-published
+// technical blog posts rather than link-aggregator discussion threads.
 public sealed class TrendResearchService(
     HttpClient http,
     IOllamaService ollama,
@@ -21,7 +26,6 @@ public sealed class TrendResearchService(
     ILogger<TrendResearchService> logger) : ITrendResearchService
 {
     private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(4);
-    private static readonly string[] DefaultSubreddits = ["programming", "dotnet", "csharp", "webdev"];
 
     public async Task<TrendResearchResult> ResearchTrendsAsync(TrendResearchRequest request, CancellationToken cancellationToken = default)
     {
@@ -37,7 +41,7 @@ public sealed class TrendResearchService(
 
         if (signals.Count == 0)
         {
-            logger.LogWarning("Trend research found no signals from Hacker News or Reddit for focus area '{FocusArea}'.", focusArea);
+            logger.LogWarning("Trend research found no signals from Hacker News or dev.to for focus area '{FocusArea}'.", focusArea);
         }
 
         var (summary, suggestions) = await SynthesizeWithOllamaAsync(focusArea, signals, cancellationToken);
@@ -72,11 +76,11 @@ public sealed class TrendResearchService(
 
         try
         {
-            signals.AddRange(await FetchRedditAsync(focusArea, cancellationToken));
+            signals.AddRange(await FetchDevToAsync(focusArea, cancellationToken));
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Reddit trend fetch failed for focus area '{FocusArea}'.", focusArea);
+            logger.LogWarning(ex, "dev.to trend fetch failed for focus area '{FocusArea}'.", focusArea);
         }
 
         return signals
@@ -92,7 +96,7 @@ public sealed class TrendResearchService(
 
         var url = string.IsNullOrWhiteSpace(focusArea)
             ? "https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=20"
-            : $"https://hn.algolia.com/api/v1/search?tags=story&query={Uri.EscapeDataString(focusArea)}&numericFilters=created_at_i>{weekAgo}&hitsPerPage=15";
+            : $"https://hn.algolia.com/api/v1/search?tags=story&query={Uri.EscapeDataString(focusArea)}&numericFilters={Uri.EscapeDataString($"created_at_i>{weekAgo}")}&hitsPerPage=15";
 
         using var response = await http.GetAsync(url, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -116,32 +120,29 @@ public sealed class TrendResearchService(
             .ToList();
     }
 
-    private async Task<List<TrendSignal>> FetchRedditAsync(string focusArea, CancellationToken cancellationToken)
+    private async Task<List<TrendSignal>> FetchDevToAsync(string focusArea, CancellationToken cancellationToken)
     {
-        var url = string.IsNullOrWhiteSpace(focusArea)
-            ? $"https://www.reddit.com/r/{string.Join("+", DefaultSubreddits)}/top.json?limit=20&t=week"
-            : $"https://www.reddit.com/search.json?q={Uri.EscapeDataString(focusArea)}&sort=top&t=week&limit=15";
+        // dev.to tags are single lowercase words with no spaces/punctuation.
+        var tagSlug = new string(focusArea.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
 
-        using var requestMessage = new HttpRequestMessage(HttpMethod.Get, url);
-        // Reddit's API rejects requests with no/default User-Agent.
-        requestMessage.Headers.UserAgent.Add(new ProductInfoHeaderValue("GwsBusinessSuiteTrendResearch", "1.0"));
+        var url = string.IsNullOrWhiteSpace(tagSlug)
+            ? "https://dev.to/api/articles?top=7&per_page=20"
+            : $"https://dev.to/api/articles?top=7&per_page=15&tag={Uri.EscapeDataString(tagSlug)}";
 
-        using var response = await http.SendAsync(requestMessage, cancellationToken);
+        using var response = await http.GetAsync(url, cancellationToken);
         response.EnsureSuccessStatusCode();
 
-        var payload = await response.Content.ReadFromJsonAsync<RedditListing>(cancellationToken: cancellationToken);
-        var posts = payload?.Data?.Children ?? [];
+        var posts = await response.Content.ReadFromJsonAsync<DevToArticle[]>(cancellationToken: cancellationToken);
 
-        return posts
-            .Select(child => child.Data)
-            .Where(post => post is not null && !string.IsNullOrWhiteSpace(post.Title))
+        return (posts ?? [])
+            .Where(post => !string.IsNullOrWhiteSpace(post.Title))
             .Select(post => new TrendSignal
             {
-                Title = post!.Title ?? string.Empty,
-                Url = string.IsNullOrWhiteSpace(post.Url) ? $"https://reddit.com{post.Permalink}" : post.Url!,
-                Source = $"Reddit r/{post.Subreddit}",
-                Score = post.Score,
-                CommentCount = post.NumComments
+                Title = post.Title ?? string.Empty,
+                Url = post.Url ?? string.Empty,
+                Source = "dev.to",
+                Score = post.PublicReactionsCount,
+                CommentCount = post.CommentsCount
             })
             .ToList();
     }
@@ -153,7 +154,7 @@ public sealed class TrendResearchService(
     {
         if (signals.Count == 0)
         {
-            return ("No live trend data could be retrieved. Check network access to Hacker News and Reddit and try again.", []);
+            return ("No live trend data could be retrieved. Check network access to Hacker News and dev.to and try again.", []);
         }
 
         var model = string.IsNullOrWhiteSpace(options.Value.Model)
@@ -171,7 +172,7 @@ public sealed class TrendResearchService(
         var prompt = $$"""
         You are a technical content strategist for a blog about C#, .NET, ASP.NET Core, and Blazor
         aimed at professional developers. Below is a list of real, currently trending posts and
-        discussions from Hacker News and Reddit related to "{{focusLine}}".
+        articles from Hacker News and dev.to related to "{{focusLine}}".
 
         Trending items:
         {{string.Join('\n', signalLines)}}
@@ -270,17 +271,9 @@ public sealed class TrendResearchService(
         [property: System.Text.Json.Serialization.JsonPropertyName("num_comments")] int NumComments,
         [property: System.Text.Json.Serialization.JsonPropertyName("objectID")] string? ObjectId);
 
-    private sealed record RedditListing(RedditListingData? Data);
-
-    private sealed record RedditListingData(RedditChild[]? Children);
-
-    private sealed record RedditChild(RedditPost? Data);
-
-    private sealed record RedditPost(
+    private sealed record DevToArticle(
         string? Title,
         string? Url,
-        string? Permalink,
-        string? Subreddit,
-        int Score,
-        [property: System.Text.Json.Serialization.JsonPropertyName("num_comments")] int NumComments);
+        [property: System.Text.Json.Serialization.JsonPropertyName("public_reactions_count")] int PublicReactionsCount,
+        [property: System.Text.Json.Serialization.JsonPropertyName("comments_count")] int CommentsCount);
 }
