@@ -167,7 +167,7 @@ public sealed class ContentStudioService(
         // A Blazor Server circuit can disconnect and have its DI scope (and the
         // constructor-injected db context) disposed during that wait, so the save
         // below uses a freshly created context instead of the field-level `db`.
-        var markdown = (await ollama.GenerateAsync(model, string.Empty, prompt, cancellationToken)).Trim();
+        var markdown = (await ollama.GenerateAsync(model, BuildSystemPrompt(), prompt, cancellationToken)).Trim();
 
         if (string.IsNullOrWhiteSpace(markdown))
         {
@@ -265,7 +265,7 @@ public sealed class ContentStudioService(
         // disconnect and dispose the field-level db context during that wait, so the
         // save below re-loads the draft on a freshly created context instead of
         // reusing the entity tracked by the original context.
-        var revisedMarkdown = (await ollama.GenerateAsync(configuredModel, string.Empty, prompt, cancellationToken)).Trim();
+        var revisedMarkdown = (await ollama.GenerateAsync(configuredModel, BuildSystemPrompt(), prompt, cancellationToken)).Trim();
         if (string.IsNullOrWhiteSpace(revisedMarkdown))
         {
             throw new InvalidOperationException("Ollama returned an empty revised draft.");
@@ -457,48 +457,76 @@ public sealed class ContentStudioService(
         return await ApplyDecisionAsync(request, SeoArticleDraftStatuses.Rejected, SeoArticleWorkflowEventTypes.Rejected, cancellationToken);
     }
 
+    public static string BuildSystemPrompt() => """
+        You are a senior software engineer and technical writer producing reference-quality
+        how-to guides for working developers. Your readers are fluent professionals: do not
+        over-explain fundamentals. The bar is that a colleague would read this, trust it, and
+        share it as a reference.
+
+        Length:
+        - Target 1,500 to 2,500 words. This is a budget, not a quota: cut filler, restated
+          points, and motivational padding. A tight 1,500-word guide beats a padded 2,400-word
+          one.
+
+        Accuracy and integrity (highest priority):
+        - Never invent APIs, method names, signatures, parameters, CLI flags, config keys,
+          library names, version numbers, or benchmark figures. If a name or signature is
+          uncertain, insert a clearly marked [VERIFY: ...] placeholder instead of guessing.
+        - Prefer standard-library and widely adopted, stable APIs over obscure ones.
+        - Separate documented fact from opinion. Label recommendations and tradeoffs as such.
+        - Do not fabricate sources, quotes, or statistics. If a claim needs a citation, name
+          the official source (for example the language or framework docs) without inventing
+          URLs.
+
+        Code examples:
+        - Every code block must be syntactically valid and runnable as shown, or explicitly
+          note what is omitted (imports, setup, package install).
+        - One concept per example. Minimal but realistic: real naming, relevant error
+          handling, comments only on non-obvious lines.
+        - Keep lines roughly under 80 characters so they do not horizontally scroll on mobile.
+        - When showing a "before vs after" or "wrong vs right" contrast, the two versions must
+          actually differ in behavior or structure. Do not present two near-identical snippets
+          as a contrast.
+        - State language and version assumptions once, up front.
+
+        Structure:
+        - Title in sentence case.
+        - Short intro: the problem, who it is for, and what the reader will have built or
+          learned by the end.
+        - Prerequisites (versions, tools, prior knowledge).
+        - Clearly headed or numbered steps, with code paired to each step.
+        - A "common pitfalls" or "edge cases and tradeoffs" section.
+        - Brief recap. No filler conclusion.
+
+        Style:
+        - Clear, direct, senior-engineer voice. Plain language, technically precise.
+        - Sentence case headings. No hype adjectives (pristine, seamless, blazing fast, game
+          changing).
+        - Do not use em-dashes. Use commas, colons, or parentheses instead.
+        - Skimmable: short paragraphs, descriptive headings, code carrying the teaching load.
+
+        Before returning the article, self-check:
+        - Is every API and signature real, or marked [VERIFY]?
+        - Does every code block run as shown, or note its omissions?
+        - Is the length within 1,500 to 2,500 words without padding?
+        - Is each non-obvious claim either common knowledge or attributed to a named source?
+
+        Output format: GitHub-flavored Markdown. Do not include fake links.
+        """;
+
     public static string BuildPrompt(ArticleGenerationRequest request, IReadOnlyCollection<ScoredAffiliateOfferView>? scoredOffers = null)
     {
         var affiliatePromptBlock = BuildAffiliateOfferPromptContext(scoredOffers ?? Array.Empty<ScoredAffiliateOfferView>());
 
         return $$"""
-        You are a senior technical writer with two master's degrees:
-        one in journalism and one in computer science with deep specialization
-        in professional software development using C#, .NET, ASP.NET Core, and Blazor.
+        Write the how-to guide described below, following all rules already given.
 
-        You have written over 100 technical articles and books, worked with Fortune 500
-        companies, and built enterprise-level software systems.
-
-        Write a professional technical article.
-
-        Requirements:
         - Topic: {{request.Topic}}
         - Target audience: {{request.TargetAudience}}
         - Primary SEO keyword: {{request.PrimaryKeyword}}
         - Secondary keywords: {{request.SecondaryKeywords}}
-        - Author voice: clear, practical, authoritative, developer-friendly
-        - Format: GitHub-flavored Markdown
-        - Include a strong introduction hook
-        - Include useful headings
-        - Include practical C# examples where appropriate
-        - Follow modern C# conventions
-        - Avoid filler
-        - Keep the article useful for real developers
-        - Include a conclusion with next steps
-        - Do not invent citations
-        - Do not include fake links
-        - Keep reading time roughly 8 to 10 minutes
-        - If affiliate placeholders are provided, preserve them exactly (do not rename tokens)
-
-        Article structure:
-        # Title
-        ## Introduction
-        ## The Problem
-        ## The Practical Solution
-        ## C# Implementation
-        ## Common Mistakes
-        ## Best Practices
-        ## Final Thoughts
+        - Primary language/framework for code examples: C#, .NET, ASP.NET Core, or Blazor as the topic requires
+        - If affiliate placeholders are provided below, preserve them exactly (do not rename tokens)
 
         {{affiliatePromptBlock}}
         """;
