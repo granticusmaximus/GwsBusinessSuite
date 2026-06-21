@@ -53,6 +53,8 @@ services.AddHttpClient<ICloudflareService, CloudflareService>();
             client.BaseAddress = new Uri(baseUrl);
             client.Timeout = TimeSpan.FromMinutes(timeoutMinutes);
         });
+        services.AddMemoryCache();
+        services.AddHttpClient<ITrendResearchService, TrendResearchService>();
         services.AddScoped<IDockerDeploymentService, DockerDeploymentService>();
         services.AddScoped<IAppRegistryService, AppRegistryService>();
         services.AddScoped<ICjAdsService, CjAdsService>();

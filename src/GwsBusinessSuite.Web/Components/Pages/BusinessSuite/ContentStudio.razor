@@ -5,6 +5,7 @@
 @implements IDisposable
 @using GwsBusinessSuite.Application.ContentStudio
 @inject IContentStudioService ContentStudioService
+@inject ITrendResearchService TrendResearchService
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 @inject ILogger<ContentStudio> Logger
@@ -47,6 +48,100 @@
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-header bg-white border-bottom py-3 d-flex align-items-center gap-2">
         <span class="badge bg-primary rounded-pill">1</span>
+        <span class="fw-semibold">Research Current Trends</span>
+    </div>
+    <div class="card-body">
+        <p class="text-secondary small mb-3">
+            Pulls currently trending posts from Hacker News and Reddit, then asks Ollama to summarize
+            the hot takes (positive and negative) and suggest article angles for this blog. Leave the
+            focus area blank for general software-development trends, or narrow it to a topic.
+        </p>
+        <div class="row g-3 align-items-end">
+            <div class="col-md-8">
+                <label class="form-label fw-semibold small">Focus Area (optional)</label>
+                <input class="form-control" @bind="TrendFocusArea" placeholder="e.g. Blazor, AI coding agents, microservices" />
+            </div>
+            <div class="col-md-4">
+                <button class="btn btn-primary w-100 d-inline-flex align-items-center justify-content-center gap-2"
+                        @onclick="ResearchTrends" disabled="@IsBusy">
+                    <i class="bi bi-graph-up-arrow"></i>
+                    <span>Research Current Trends</span>
+                </button>
+            </div>
+        </div>
+
+        @if (TrendResult is not null)
+        {
+            <div class="mt-4">
+                @if (TrendResult.FromCache)
+                {
+                    <span class="badge text-bg-secondary mb-2">Cached results from @FormatDate(TrendResult.GeneratedAt)</span>
+                }
+                @if (!string.IsNullOrWhiteSpace(TrendResult.OverallSummary))
+                {
+                    <div class="alert alert-light border mb-3">
+                        <div class="fw-semibold small text-uppercase text-secondary mb-1">What the community is talking about</div>
+                        <div>@TrendResult.OverallSummary</div>
+                    </div>
+                }
+
+                @if (TrendResult.Suggestions.Count == 0)
+                {
+                    <p class="text-secondary mb-0">No article suggestions were generated. Try again or broaden the focus area.</p>
+                }
+                else
+                {
+                    <div class="row g-3">
+                        @foreach (var suggestion in TrendResult.Suggestions)
+                        {
+                            <div class="col-md-6">
+                                <div class="border rounded-3 p-3 h-100 d-flex flex-column">
+                                    <div class="fw-semibold mb-2">@suggestion.Topic</div>
+                                    @if (!string.IsNullOrWhiteSpace(suggestion.Rationale))
+                                    {
+                                        <div class="text-secondary small mb-2">@suggestion.Rationale</div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(suggestion.PositiveTake))
+                                    {
+                                        <div class="small mb-1"><i class="bi bi-emoji-smile text-success me-1"></i>@suggestion.PositiveTake</div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(suggestion.NegativeTake))
+                                    {
+                                        <div class="small mb-2"><i class="bi bi-emoji-frown text-danger me-1"></i>@suggestion.NegativeTake</div>
+                                    }
+                                    <button class="btn btn-sm btn-outline-primary mt-auto align-self-start"
+                                            @onclick="() => UseTrendSuggestion(suggestion)" disabled="@IsBusy">
+                                        Use This Brief
+                                    </button>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+
+                @if (TrendResult.Signals.Count > 0)
+                {
+                    <details class="mt-3">
+                        <summary class="small text-secondary">View @TrendResult.Signals.Count raw source items</summary>
+                        <ul class="small mt-2">
+                            @foreach (var signal in TrendResult.Signals)
+                            {
+                                <li>
+                                    <span class="text-secondary">[@signal.Source, score @signal.Score]</span>
+                                    <a href="@signal.Url" target="_blank" rel="noopener noreferrer">@signal.Title</a>
+                                </li>
+                            }
+                        </ul>
+                    </details>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white border-bottom py-3 d-flex align-items-center gap-2">
+        <span class="badge bg-primary rounded-pill">2</span>
         <span class="fw-semibold">Article Brief</span>
     </div>
     <div class="card-body">
@@ -88,7 +183,7 @@
 
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-header bg-white border-bottom py-3 d-flex align-items-center gap-2">
-        <span class="badge bg-primary rounded-pill">2</span>
+        <span class="badge bg-primary rounded-pill">3</span>
         <span class="fw-semibold">Persisted Drafts</span>
     </div>
     <div class="card-body">
@@ -169,6 +264,9 @@
     private string TargetAudience { get; set; } = "C# and ASP.NET developers";
     private string PrimaryKeyword { get; set; } = string.Empty;
     private string SecondaryKeywords { get; set; } = string.Empty;
+
+    private string TrendFocusArea { get; set; } = string.Empty;
+    private TrendResearchResult? TrendResult { get; set; }
 
     private List<ContentStudioDraftSummary> Drafts { get; set; } = new();
     private bool IsBusy { get; set; }
@@ -317,6 +415,44 @@
         {
             EndBusy();
         }
+    }
+
+    private async Task ResearchTrends()
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        BeginBusy("Pulling trending posts from Hacker News and Reddit, then asking Ollama to summarize them.");
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            TrendResult = await TrendResearchService.ResearchTrendsAsync(new TrendResearchRequest
+            {
+                FocusArea = TrendFocusArea
+            });
+
+            StatusMessage = TrendResult.Suggestions.Count > 0
+                ? $"Found {TrendResult.Suggestions.Count} suggested article angles from {TrendResult.Signals.Count} trending sources."
+                : "Trend research completed, but no suggestions could be generated.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Trend research failed for focus area '{FocusArea}'.", TrendFocusArea);
+            ErrorMessage = $"Unable to research trends. Details: {ex.Message}";
+        }
+        finally
+        {
+            EndBusy();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void UseTrendSuggestion(TrendTopicSuggestion suggestion)
+    {
+        Topic = suggestion.Topic;
+        PrimaryKeyword = suggestion.PrimaryKeyword;
+        SecondaryKeywords = suggestion.SecondaryKeywords;
+        StatusMessage = $"Article Brief pre-filled from trend suggestion '{suggestion.Topic}'. Review it below and click Generate Draft With Ollama.";
     }
 
     private async Task GenerateDraft()
