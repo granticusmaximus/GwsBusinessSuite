@@ -17,6 +17,13 @@ public sealed class DraftRevisionRequest
     public string PerformedBy { get; init; } = "content-studio";
 }
 
+public sealed class DraftMarkdownUpdateRequest
+{
+    public Guid DraftId { get; init; }
+    public string Markdown { get; init; } = string.Empty;
+    public string PerformedBy { get; init; } = "content-studio";
+}
+
 public sealed class DraftDecisionRequest
 {
     public Guid DraftId { get; init; }

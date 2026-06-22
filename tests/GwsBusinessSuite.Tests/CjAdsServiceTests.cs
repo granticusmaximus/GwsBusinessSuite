@@ -33,8 +33,11 @@ public sealed class CjAdsServiceTests
     }
 
     [Fact]
-    public async Task GetConnectorSettingsAsync_ShouldSupportLegacyPlaintextDeveloperKey()
+    public async Task GetConnectorSettingsAsync_ShouldFlagUndecryptableDeveloperKeyAsUnreadable()
     {
+        // A value stored without the expected "enc::" prefix can never be decrypted
+        // (whether it's legacy plaintext or ciphertext from a rotated key ring), so it
+        // must be surfaced as unreadable rather than returned as a usable key.
         await using var db = await CreateDbAsync();
         db.CjConnectorSettings.Add(new GwsBusinessSuite.Domain.Entities.CjConnectorSettings
         {
@@ -50,7 +53,8 @@ public sealed class CjAdsServiceTests
         var settings = await service.GetConnectorSettingsAsync();
 
         Assert.NotNull(settings);
-        Assert.Equal("legacy-plain", settings!.DeveloperKey);
+        Assert.Equal(string.Empty, settings!.DeveloperKey);
+        Assert.True(settings.DeveloperKeyUnreadable);
     }
 
     [Fact]

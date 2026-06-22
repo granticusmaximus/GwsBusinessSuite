@@ -31,6 +31,7 @@ public static class SeoArticleWorkflowEventTypes
 {
     public const string Generated = "Generated";
     public const string Revised = "Revised";
+    public const string ManuallyEdited = "ManuallyEdited";
     public const string Approved = "Approved";
     public const string PublishedToSite = "PublishedToSite";
     public const string Rejected = "Rejected";

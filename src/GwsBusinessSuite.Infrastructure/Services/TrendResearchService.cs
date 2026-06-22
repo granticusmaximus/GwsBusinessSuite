@@ -209,7 +209,7 @@ public sealed class TrendResearchService(
         return ParseOllamaResponse(raw);
     }
 
-    private static (string Summary, List<TrendTopicSuggestion> Suggestions) ParseOllamaResponse(string raw)
+    public static (string Summary, List<TrendTopicSuggestion> Suggestions) ParseOllamaResponse(string raw)
     {
         var blocks = raw.Split("---", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (blocks.Length == 0)

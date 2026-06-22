@@ -10,6 +10,9 @@ public interface IContentStudioService
     Task<ArticleGenerationResult?> RequestRevisionAsync(
         DraftRevisionRequest request,
         CancellationToken cancellationToken = default);
+    Task<ArticleGenerationResult?> UpdateDraftMarkdownAsync(
+        DraftMarkdownUpdateRequest request,
+        CancellationToken cancellationToken = default);
     Task<ArticleGenerationResult?> ApproveDraftAsync(
         DraftDecisionRequest request,
         CancellationToken cancellationToken = default);

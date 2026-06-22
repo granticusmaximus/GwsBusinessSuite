@@ -316,6 +316,40 @@ public sealed class ContentStudioService(
         return await GetDraftCoreAsync(freshContext, freshDraft.Id, cancellationToken);
     }
 
+    public async Task<ArticleGenerationResult?> UpdateDraftMarkdownAsync(
+        DraftMarkdownUpdateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var markdown = request.Markdown.Trim();
+        if (string.IsNullOrWhiteSpace(markdown))
+        {
+            throw new ArgumentException("Markdown cannot be empty.", nameof(request));
+        }
+
+        var draft = await db.SeoArticleDrafts.FirstOrDefaultAsync(x => x.Id == request.DraftId, cancellationToken);
+        if (draft is null)
+        {
+            return null;
+        }
+
+        draft.ArticleMarkdown = markdown;
+        draft.OutlineMarkdown = ExtractSection(markdown, "## Outline");
+        draft.UpdatedAt = DateTimeOffset.UtcNow;
+        draft.UpdatedBy = request.PerformedBy;
+
+        db.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent
+        {
+            SeoArticleDraftId = draft.Id,
+            EventType = SeoArticleWorkflowEventTypes.ManuallyEdited,
+            Notes = "Markdown edited directly in the draft workspace.",
+            CreatedBy = request.PerformedBy
+        });
+
+        await db.SaveChangesAsync(cancellationToken);
+
+        return await GetDraftAsync(draft.Id, cancellationToken);
+    }
+
     public async Task<ArticleGenerationResult?> ApproveDraftAsync(
         DraftDecisionRequest request,
         CancellationToken cancellationToken = default)
