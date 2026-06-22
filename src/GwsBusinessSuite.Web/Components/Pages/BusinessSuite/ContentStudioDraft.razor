@@ -2,9 +2,8 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "ContentAccess")]
 @using Microsoft.AspNetCore.Authorization
-@implements IDisposable
+@implements IAsyncDisposable
 @using GwsBusinessSuite.Application.ContentStudio
-@using Markdig
 @using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Infrastructure.Data
 @using Microsoft.EntityFrameworkCore
@@ -77,31 +76,25 @@ else
                 <span class="badge text-bg-light">Created: @FormatDate(CurrentDraft.CreatedAt)</span>
             </div>
 
-            <div class="row g-4 mb-4">
-                <div class="col-xl-6">
-                    <div class="d-flex align-items-center justify-content-between mb-1">
-                        <label class="form-label fw-semibold small mb-0">Generated Article (Markdown)</label>
-                        @if (IsMarkdownDirty)
-                        {
-                            <span class="badge text-bg-warning">Unsaved edits</span>
-                        }
-                    </div>
-                    <textarea class="form-control article-editor font-monospace" @bind="EditableMarkdown"
-                              @bind:event="oninput"></textarea>
-                    <div class="mt-2">
-                        <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2"
-                                @onclick="SaveMarkdownEdits" disabled="@(IsBusy || !IsMarkdownDirty)">
-                            <i class="bi bi-save"></i>
-                            <span>Save Markdown Edits</span>
-                        </button>
-                        <span class="text-secondary small ms-2">Saves immediately, no Ollama regeneration.</span>
-                    </div>
+            <div class="mb-4">
+                <div class="d-flex align-items-center justify-content-between mb-1">
+                    <label class="form-label fw-semibold small mb-0">Generated Article (Markdown)</label>
+                    @if (IsMarkdownDirty)
+                    {
+                        <span class="badge text-bg-warning">Unsaved edits</span>
+                    }
                 </div>
-                <div class="col-xl-6">
-                    <label class="form-label fw-semibold small">Rendered Draft Preview</label>
-                    <div class="article-preview surface-panel">
-                        @((MarkupString)RenderedDraftHtml)
-                    </div>
+                <textarea id="@MarkdownEditorElementId">@EditableMarkdown</textarea>
+                <div class="mt-2">
+                    <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2"
+                            @onclick="SaveMarkdownEdits" disabled="@(IsBusy || !IsMarkdownDirty)">
+                        <i class="bi bi-save"></i>
+                        <span>Save Markdown Edits</span>
+                    </button>
+                    <span class="text-secondary small ms-2">
+                        Saves immediately, no Ollama regeneration. Use the editor's preview/side-by-side
+                        toolbar buttons to see the rendered article.
+                    </span>
                 </div>
             </div>
 
@@ -269,13 +262,10 @@ else
         CurrentDraft is not null &&
         !string.Equals(EditableMarkdown, CurrentDraft.Markdown, StringComparison.Ordinal);
 
-    private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
-        .UseAdvancedExtensions()
-        .Build();
-
-    private string RenderedDraftHtml => string.IsNullOrWhiteSpace(CurrentDraft?.RenderedMarkdown)
-        ? "<p class=\"text-secondary mb-0\">No rendered draft available.</p>"
-        : Markdown.ToHtml(CurrentDraft.RenderedMarkdown, MarkdownPipeline);
+    private const string MarkdownEditorElementId = "draft-markdown-editor";
+    private bool _markdownEditorInitialized;
+    private string? _lastSyncedMarkdown;
+    private DotNetObjectReference<ContentStudioDraft>? _markdownEditorRef;
 
     private string BusyElapsedText => BusyStartedAt is null
         ? "Elapsed: 00:00"
@@ -289,6 +279,32 @@ else
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         await JS.InvokeVoidAsync("gwsTooltips.init", "[data-bs-toggle='tooltip']");
+
+        if (CurrentDraft is null)
+        {
+            return;
+        }
+
+        if (!_markdownEditorInitialized)
+        {
+            _markdownEditorRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("gwsMarkdownEditor.init", MarkdownEditorElementId, _markdownEditorRef);
+            _markdownEditorInitialized = true;
+            _lastSyncedMarkdown = EditableMarkdown;
+        }
+        else if (!string.Equals(EditableMarkdown, _lastSyncedMarkdown, StringComparison.Ordinal))
+        {
+            await JS.InvokeVoidAsync("gwsMarkdownEditor.setValue", MarkdownEditorElementId, EditableMarkdown);
+            _lastSyncedMarkdown = EditableMarkdown;
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnMarkdownChanged(string value)
+    {
+        EditableMarkdown = value;
+        _lastSyncedMarkdown = value;
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task LoadDraft()
@@ -504,9 +520,23 @@ else
         StateHasChanged();
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         EndBusy();
+
+        if (_markdownEditorInitialized)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("gwsMarkdownEditor.destroy", MarkdownEditorElementId);
+            }
+            catch (JSDisconnectedException)
+            {
+                // The circuit is already gone (e.g. browser closed); nothing to clean up client-side.
+            }
+        }
+
+        _markdownEditorRef?.Dispose();
     }
 
     private static string FormatElapsed(TimeSpan elapsed)
@@ -708,7 +738,7 @@ placement.SlotToken);
         text-align: center;
     }
 
-    .article-preview .cj-ad-card {
+    .cj-ad-card {
         border: 1px solid #d8dee5;
         border-radius: 12px;
         padding: 0.85rem 1rem;
@@ -716,12 +746,27 @@ placement.SlotToken);
         background: linear-gradient(180deg, #fbfdff 0%, #f3f8ff 100%);
     }
 
-    .article-preview .cj-ad-card p {
+    .cj-ad-card p {
         margin-bottom: 0.35rem;
     }
 
-    .article-preview .cj-ad-card p:last-child {
+    .cj-ad-card p:last-child {
         margin-bottom: 0;
+    }
+
+    .EasyMDEContainer .CodeMirror {
+        border-radius: 0 0 10px 10px;
+        font-size: 0.92rem;
+    }
+
+    .EasyMDEContainer .editor-toolbar {
+        border-radius: 10px 10px 0 0;
+        border-color: #dbe6f3;
+    }
+
+    .EasyMDEContainer .CodeMirror,
+    .EasyMDEContainer .editor-toolbar {
+        border-color: #dbe6f3;
     }
 
     .tooltip.gws-tooltip-up .tooltip-inner {
