@@ -43,13 +43,16 @@ builder.Services.AddSingleton<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>
 // proxy, which proved unreliable. Allow its origins to read those public endpoints.
 builder.Services.AddCors(options =>
 {
+    // The public site only ever issues plain GET fetches against /api/blog and
+    // /og-image with no custom headers, so the policy is scoped to that rather
+    // than the broader AllowAnyHeader/AllowAnyMethod defaults.
     options.AddDefaultPolicy(policy => policy
         .WithOrigins(
             "https://grantwatson.dev",
             "https://www.grantwatson.dev",
             "http://localhost:5173")
-        .AllowAnyHeader()
-        .AllowAnyMethod());
+        .WithMethods("GET")
+        .WithHeaders("Content-Type"));
 });
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
@@ -74,6 +77,10 @@ builder.Services.AddAuthorization(options =>
 
     options.FallbackPolicy = options.GetPolicy("AdminOnly");
 });
+
+builder.Services.AddHealthChecks()
+    .AddCheck<GwsBusinessSuite.Web.HealthChecks.DatabaseHealthCheck>("database")
+    .AddCheck<GwsBusinessSuite.Web.HealthChecks.OllamaHealthCheck>("ollama");
 
 builder.Services.AddRateLimiter(options =>
 {
@@ -143,6 +150,10 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
 app.UseRateLimiter();
+
+// Plain-text Healthy/Degraded/Unhealthy with no detail disclosure, intended for the deploy
+// pipeline's post-deploy smoke test and any external uptime monitor.
+app.MapHealthChecks("/health").AllowAnonymous();
 
 app.MapGet("/cms-preview/{pageKey}", async (string pageKey, IReactPageBuilderService builderService) =>
 {
@@ -383,7 +394,7 @@ app.MapGet("/admin/api/articles/{id:guid}", async (Guid id, IDbContextFactory<Ap
 }).RequireAuthorization();
 
 // Admin: create a new manual article draft
-app.MapPost("/admin/api/articles", async (ArticleUpsertRequest req, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+app.MapPost("/admin/api/articles", async (ArticleUpsertRequest req, HttpContext httpContext, IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
     await using var db = await dbFactory.CreateDbContextAsync();
     var article = new Article
@@ -402,7 +413,7 @@ app.MapPost("/admin/api/articles", async (ArticleUpsertRequest req, IDbContextFa
         BodyMarkdown      = req.BodyMarkdown,
         Status            = ArticleStatuses.Draft,
         Source            = ArticleSource.Manual,
-        CreatedBy         = "manual-editor"
+        CreatedBy         = GetCurrentUsername(httpContext)
     };
     db.Articles.Add(article);
     await db.SaveChangesAsync();
@@ -413,6 +424,7 @@ app.MapPost("/admin/api/articles", async (ArticleUpsertRequest req, IDbContextFa
 app.MapPut("/admin/api/articles/{id:guid}", async (
     Guid id,
     ArticleUpsertRequest req,
+    HttpContext httpContext,
     IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
     await using var db = await dbFactory.CreateDbContextAsync();
@@ -431,7 +443,7 @@ app.MapPut("/admin/api/articles/{id:guid}", async (
     article.HeroImageAltText  = req.HeroImageAltText;
     article.HeroImageCaption  = req.HeroImageCaption;
     article.BodyMarkdown      = req.BodyMarkdown;
-    article.UpdatedBy         = "manual-editor";
+    article.UpdatedBy         = GetCurrentUsername(httpContext);
     article.UpdatedAt         = DateTimeOffset.UtcNow;
 
     await db.SaveChangesAsync();
@@ -439,7 +451,7 @@ app.MapPut("/admin/api/articles/{id:guid}", async (
 }).RequireAuthorization();
 
 // Admin: publish an article (sets Status=Published, stamps PublishedAt if not already set)
-app.MapPost("/admin/api/articles/{id:guid}/publish", async (Guid id, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+app.MapPost("/admin/api/articles/{id:guid}/publish", async (Guid id, HttpContext httpContext, IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
     await using var db = await dbFactory.CreateDbContextAsync();
     var article = await db.Articles.FindAsync(id);
@@ -448,13 +460,13 @@ app.MapPost("/admin/api/articles/{id:guid}/publish", async (Guid id, IDbContextF
     article.Status      = ArticleStatuses.Published;
     article.PublishedAt ??= DateTimeOffset.UtcNow;
     article.UpdatedAt   = DateTimeOffset.UtcNow;
-    article.UpdatedBy   = "manual-editor";
+    article.UpdatedBy   = GetCurrentUsername(httpContext);
     await db.SaveChangesAsync();
     return Results.Ok(new { article.Id, article.Slug, article.Status, article.PublishedAt });
 }).RequireAuthorization();
 
 // Admin: unpublish an article (back to Draft)
-app.MapPost("/admin/api/articles/{id:guid}/unpublish", async (Guid id, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+app.MapPost("/admin/api/articles/{id:guid}/unpublish", async (Guid id, HttpContext httpContext, IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
     await using var db = await dbFactory.CreateDbContextAsync();
     var article = await db.Articles.FindAsync(id);
@@ -462,7 +474,7 @@ app.MapPost("/admin/api/articles/{id:guid}/unpublish", async (Guid id, IDbContex
 
     article.Status    = ArticleStatuses.Draft;
     article.UpdatedAt = DateTimeOffset.UtcNow;
-    article.UpdatedBy = "manual-editor";
+    article.UpdatedBy = GetCurrentUsername(httpContext);
     await db.SaveChangesAsync();
     return Results.Ok(new { article.Id, article.Slug, article.Status });
 }).RequireAuthorization();
@@ -489,6 +501,12 @@ app.MapRazorComponents<App>()
 app.MapGet("/", () => Results.Redirect("/admin")).AllowAnonymous();
 
 app.Run();
+
+static string GetCurrentUsername(HttpContext httpContext)
+{
+    var username = httpContext.User.Identity?.Name;
+    return string.IsNullOrWhiteSpace(username) ? "unknown" : username;
+}
 
 static string NormalizePathBase(string? pathBase)
 {

@@ -1,4 +1,5 @@
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.Articles;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -738,28 +739,16 @@ public sealed class ContentStudioService(
 
     private static string RenderAffiliatePlacements(string markdown, IReadOnlyList<ArticleAffiliatePlacementView> placements)
     {
-        var rendered = markdown;
+        var markup = placements
+            .Select(placement => new ArticleMarkdownRenderer.AffiliatePlacementMarkup(
+                placement.SlotToken,
+                placement.AdvertiserName,
+                placement.Category,
+                placement.TrackingUrl,
+                placement.CallToActionText))
+            .ToArray();
 
-        foreach (var placement in placements)
-        {
-            var card = BuildAffiliateCardMarkdown(placement);
-            rendered = rendered.Replace(placement.SlotToken, card, StringComparison.Ordinal);
-        }
-
-        foreach (var token in AffiliateSlotTokens)
-        {
-            rendered = rendered.Replace(token, string.Empty, StringComparison.Ordinal);
-        }
-
-        return rendered;
-    }
-
-    private static string BuildAffiliateCardMarkdown(ArticleAffiliatePlacementView placement)
-    {
-        var safeCategory = string.IsNullOrWhiteSpace(placement.Category) ? "General" : placement.Category;
-        var safeUrl = string.IsNullOrWhiteSpace(placement.TrackingUrl) ? "#" : placement.TrackingUrl;
-
-        return $"<div class=\"cj-ad-card\"><p><strong>Sponsored Pick: {placement.AdvertiserName}</strong></p><p>Category: {safeCategory}</p><p><a href=\"{safeUrl}\" target=\"_blank\" rel=\"noopener noreferrer nofollow sponsored\">{placement.CallToActionText}</a></p></div>";
+        return ArticleMarkdownRenderer.Render(markdown, markup);
     }
 
     private static ArticleGenerationResult MapDraft(

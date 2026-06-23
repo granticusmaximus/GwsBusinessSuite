@@ -13,6 +13,8 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Http.Resilience;
+using Polly;
 
 namespace GwsBusinessSuite.Infrastructure;
 
@@ -52,6 +54,19 @@ services.AddHttpClient<ICloudflareService, CloudflareService>();
 
             client.BaseAddress = new Uri(baseUrl);
             client.Timeout = TimeSpan.FromMinutes(timeoutMinutes);
+        }).AddResilienceHandler("ollama-transient-retry", builder =>
+        {
+            // Only retries connection-level failures (Ollama not yet up, dropped socket,
+            // DNS blip) that fail fast. A generation that's genuinely just slow runs for
+            // up to client.Timeout above and is deliberately NOT retried here, since
+            // retrying a multi-minute timeout would silently double the user's wait.
+            builder.AddRetry(new HttpRetryStrategyOptions
+            {
+                ShouldHandle = args => ValueTask.FromResult(args.Outcome.Exception is HttpRequestException),
+                MaxRetryAttempts = 2,
+                BackoffType = DelayBackoffType.Exponential,
+                Delay = TimeSpan.FromSeconds(1)
+            });
         });
         services.AddMemoryCache();
         services.AddHttpClient<ITrendResearchService, TrendResearchService>();

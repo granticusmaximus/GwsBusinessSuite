@@ -58,5 +58,25 @@ jobs:
             docker compose pull --quiet || true
             docker compose up -d --build --remove-orphans
 
+            # Smoke test: a container reporting "up" doesn't mean the app inside it is
+            # actually serving traffic (DB migration failures, a bad config value, etc.
+            # all start the container and then crash or hang silently). Poll /health
+            # before declaring the deploy successful, so a broken release fails the
+            # GitHub Actions run instead of going unnoticed until a user hits an error.
+            echo "Waiting for the app to report healthy..."
+            for i in $(seq 1 24); do
+              status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/health || echo "000")
+              if [ "$status" = "200" ]; then
+                echo "Health check passed (HTTP $status)."
+                break
+              fi
+              if [ "$i" = "24" ]; then
+                echo "Health check failed after deploy (last status: HTTP $status)."
+                docker compose logs --tail=100 gwssuite
+                exit 1
+              fi
+              sleep 5
+            done
+
             # Clean up dangling images to save disk space
             docker image prune -f

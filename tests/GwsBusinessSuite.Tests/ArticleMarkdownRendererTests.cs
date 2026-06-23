@@ -32,7 +32,7 @@ public sealed class ArticleMarkdownRendererTests
     {
         var rendered = ArticleMarkdownRenderer.Render(
             "Before.\n\n{{CJ_AD_deadbeef}}\n\nAfter.",
-            []);
+            Array.Empty<ArticleAffiliatePlacement>());
 
         Assert.DoesNotContain("{{CJ_AD_deadbeef}}", rendered);
         Assert.Contains("Before.", rendered);
@@ -55,6 +55,39 @@ public sealed class ArticleMarkdownRendererTests
 
         Assert.Contains("Category: General", rendered);
         Assert.Contains("href=\"#\"", rendered);
+    }
+
+    [Fact]
+    public void Render_ShouldHtmlEncodePlacementFields_ToPreventScriptInjection()
+    {
+        var placement = new ArticleAffiliatePlacement
+        {
+            SlotToken = "{{CJ_AD_xss}}",
+            AdvertiserName = "<script>alert(1)</script>",
+            Category = "\"><img src=x onerror=alert(1)>",
+            TrackingUrl = "javascript:alert(1)\"onmouseover=\"alert(1)",
+            CallToActionText = "Click <b>here</b>"
+        };
+
+        var rendered = ArticleMarkdownRenderer.Render("{{CJ_AD_xss}}", [placement]);
+
+        Assert.DoesNotContain("<script>", rendered);
+        Assert.DoesNotContain("\"><img", rendered);
+        Assert.DoesNotContain("<b>here</b>", rendered);
+        Assert.Contains("&lt;script&gt;", rendered);
+    }
+
+    [Fact]
+    public void Render_AffiliatePlacementMarkupOverload_ShouldEncodeAndRenderTheSameAsEntityOverload()
+    {
+        var markup = new ArticleMarkdownRenderer.AffiliatePlacementMarkup(
+            "{{CJ_AD_view}}", "Acme Tools", "Developer Tools", "https://example.com/track", "Check it out");
+
+        var rendered = ArticleMarkdownRenderer.Render("{{CJ_AD_view}}", [markup]);
+
+        Assert.Contains("Acme Tools", rendered);
+        Assert.Contains("https://example.com/track", rendered);
+        Assert.Contains("Check it out", rendered);
     }
 
     [Fact]
