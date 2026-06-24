@@ -279,6 +279,53 @@ app.MapGet("/og-image/{slug}", async (
     return Results.Bytes(bytes, mime);
 }).AllowAnonymous();
 
+// Serves a CmsSite/CmsPage built in the structured CMS Builder ("/admin/cms-builder") as a
+// standalone public HTML page. These pages are independent of the apps/public-site React
+// app — the structured builder targets sites that don't have a hand-written frontend.
+app.MapGet("/cms/{siteSlug}/{pageSlug}", async (
+    string siteSlug,
+    string pageSlug,
+    ICmsBuilderService cmsBuilderService) =>
+{
+    var site = await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
+    if (site is null) return Results.NotFound();
+
+    var page = await cmsBuilderService.GetPageBySlugAsync(site.Id, pageSlug);
+    if (page is null) return Results.NotFound();
+
+    var bodyHtml = CmsBlockHtmlRenderer.Render(page.BlocksJson);
+    var pageTitle = System.Net.WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle);
+    var metaDescription = System.Net.WebUtility.HtmlEncode(page.MetaDescription);
+    var ogImageTag = string.IsNullOrWhiteSpace(page.OgImageUrl)
+        ? string.Empty
+        : $"""<meta property="og:image" content="{System.Net.WebUtility.HtmlEncode(page.OgImageUrl)}" />""";
+
+    var html = $"""
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>{pageTitle}</title>
+          <meta name="description" content="{metaDescription}" />
+          {ogImageTag}
+        </head>
+        <body>
+          {bodyHtml}
+        </body>
+        </html>
+        """;
+
+    return Results.Content(html, "text/html");
+}).AllowAnonymous();
+
+// Decodes and serves a base64-stored media library asset, mirroring the /og-image pattern.
+app.MapGet("/media/{id:guid}", async (Guid id, IMediaLibraryService mediaLibraryService) =>
+{
+    var content = await mediaLibraryService.GetContentAsync(id);
+    return content is null ? Results.NotFound() : Results.Bytes(content.Value.Content, content.Value.ContentType);
+}).AllowAnonymous();
+
 // Public JSON API — hydrated from the Article table (SQLite is the source of truth).
 app.MapGet("/api/blog", async (IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {

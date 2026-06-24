@@ -141,6 +141,42 @@ public sealed class CmsBuilderServiceTests
     }
 
     [Fact]
+    public async Task GetSiteBySlugAndGetPageBySlugAsync_ShouldResolveThePublishedPage()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Public Site" });
+        await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id,
+            Title = "Home",
+            BlocksJson = "[]",
+            MetaTitle = "Welcome",
+            MetaDescription = "A test page",
+            OgImageUrl = "/media/abc"
+        });
+
+        var resolvedSite = await service.GetSiteBySlugAsync("public-site");
+        resolvedSite.Should().NotBeNull();
+
+        var resolvedPage = await service.GetPageBySlugAsync(resolvedSite!.Id, "home");
+        resolvedPage.Should().NotBeNull();
+        resolvedPage!.MetaTitle.Should().Be("Welcome");
+        resolvedPage.MetaDescription.Should().Be("A test page");
+        resolvedPage.OgImageUrl.Should().Be("/media/abc");
+    }
+
+    [Fact]
+    public async Task GetSiteBySlugAsync_ShouldReturnNull_ForUnknownSlug()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        (await service.GetSiteBySlugAsync("does-not-exist")).Should().BeNull();
+    }
+
+    [Fact]
     public async Task ApplyWorkflowBlueprintAsync_ShouldThrowForUnknownBlueprint()
     {
         await using var db = await CreateDbAsync();

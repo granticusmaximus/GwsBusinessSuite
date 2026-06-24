@@ -71,6 +71,18 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
             .FirstOrDefaultAsync(site => site.Id == siteId, cancellationToken);
     }
 
+    public async Task<CmsSite?> GetSiteBySlugAsync(string siteSlug, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(siteSlug))
+        {
+            return null;
+        }
+
+        return await dbContext.CmsSites
+            .AsNoTracking()
+            .FirstOrDefaultAsync(site => site.Slug == siteSlug, cancellationToken);
+    }
+
     public async Task<CmsSite> SaveSiteAsync(CmsSiteEditorModel editor, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(editor);
@@ -153,6 +165,18 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
             .FirstOrDefaultAsync(page => page.Id == pageId, cancellationToken);
     }
 
+    public async Task<CmsPage?> GetPageBySlugAsync(Guid siteId, string pageSlug, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(pageSlug))
+        {
+            return null;
+        }
+
+        return await dbContext.CmsPages
+            .AsNoTracking()
+            .FirstOrDefaultAsync(page => page.SiteId == siteId && page.Slug == pageSlug, cancellationToken);
+    }
+
     public async Task<CmsPage> SavePageAsync(CmsPageEditorModel editor, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(editor);
@@ -193,6 +217,9 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         page.Title = editor.Title.Trim();
         page.Slug = uniqueSlug;
         page.BlocksJson = NormalizeBlocksJson(editor.BlocksJson);
+        page.MetaTitle = editor.MetaTitle?.Trim() ?? string.Empty;
+        page.MetaDescription = editor.MetaDescription?.Trim() ?? string.Empty;
+        page.OgImageUrl = editor.OgImageUrl?.Trim() ?? string.Empty;
         page.UpdatedAt = now;
         page.UpdatedBy = "cms-ui";
 

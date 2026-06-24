@@ -10,6 +10,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<WikiPage> WikiPages { get; }
     DbSet<CmsSite> CmsSites { get; }
     DbSet<CmsPage> CmsPages { get; }
+    DbSet<MediaAsset> MediaAssets { get; }
     DbSet<AffiliateOffer> AffiliateOffers { get; }
     DbSet<DeploymentTarget> DeploymentTargets { get; }
     DbSet<SeoArticleDraft> SeoArticleDrafts { get; }

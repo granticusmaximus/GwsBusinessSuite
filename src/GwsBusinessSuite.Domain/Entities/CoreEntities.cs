@@ -94,6 +94,18 @@ public sealed class CmsPage : AuditableEntity
     public required string Title { get; set; }
     public required string Slug { get; set; }
     public string BlocksJson { get; set; } = "[]";
+    public string MetaTitle { get; set; } = string.Empty;
+    public string MetaDescription { get; set; } = string.Empty;
+    public string OgImageUrl { get; set; } = string.Empty;
+}
+
+public sealed class MediaAsset : AuditableEntity
+{
+    public required string FileName { get; set; }
+    public required string ContentType { get; set; }
+    public required string DataUri { get; set; }
+    public string AltText { get; set; } = string.Empty;
+    public long SizeBytes { get; set; }
 }
 
 public sealed class CjConnectorSettings : AuditableEntity

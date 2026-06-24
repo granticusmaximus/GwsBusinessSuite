@@ -75,6 +75,7 @@ services.AddHttpClient<ICloudflareService, CloudflareService>();
         services.AddScoped<ICjAdsService, CjAdsService>();
         services.AddScoped<IAffiliateOfferScoringService, AffiliateOfferScoringService>();
         services.AddScoped<ICmsBuilderService, CmsBuilderService>();
+        services.AddScoped<IMediaLibraryService, MediaLibraryService>();
         services.AddScoped<IReactPageBuilderService, ReactPageBuilderService>();
         services.AddScoped<IPageLayoutService, PageLayoutService>();
         services.AddScoped<ICmsKnowledgeService, CmsKnowledgeService>();

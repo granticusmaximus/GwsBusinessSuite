@@ -4,7 +4,9 @@
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Domain.Entities
+@using Microsoft.AspNetCore.Components.Forms
 @inject ICmsBuilderService CmsBuilderService
+@inject IMediaLibraryService MediaLibraryService
 @inject IReactPageBuilderService ReactPageBuilderService
 @inject NavigationManager Navigation
 @inject ILogger<CmsBuilder> Logger
@@ -237,6 +239,56 @@
                 }
             </div>
         </div>
+
+        <div class="card border-0 shadow-sm mt-4">
+            <div class="card-header bg-white border-bottom py-3">
+                <div class="fw-semibold">Media Library</div>
+                <div class="small text-secondary">Upload images and insert them into the selected page's blocks.</div>
+            </div>
+            <div class="card-body">
+                @if (!string.IsNullOrEmpty(MediaErrorMessage))
+                {
+                    <div class="alert alert-danger py-2 small mb-3">@MediaErrorMessage</div>
+                }
+                @if (!string.IsNullOrEmpty(MediaStatusMessage))
+                {
+                    <div class="alert alert-info py-2 small mb-3">@MediaStatusMessage</div>
+                }
+
+                <div class="mb-3">
+                    <label class="form-label fw-semibold small">Alt Text (applied to next upload)</label>
+                    <InputText class="form-control form-control-sm mb-2" @bind-Value="MediaAltTextInput" placeholder="Describe the image" />
+                    <InputFile OnChange="OnMediaFileSelectedAsync" disabled="@IsMediaBusy" class="form-control form-control-sm" accept="image/*" />
+                </div>
+
+                @if (MediaAssets.Count == 0)
+                {
+                    <p class="text-secondary small mb-0">No media uploaded yet.</p>
+                }
+                else
+                {
+                    <div class="cms-media-grid">
+                        @foreach (var asset in MediaAssets)
+                        {
+                            <div class="cms-media-item">
+                                <img src="@asset.Url" alt="@asset.AltText" />
+                                <div class="cms-media-item-name small text-truncate" title="@asset.FileName">@asset.FileName</div>
+                                <div class="d-flex gap-1 mt-1">
+                                    <button class="btn btn-xs btn-outline-primary" disabled="@(!SelectedPageId.HasValue)"
+                                            @onclick="() => InsertImageBlock(asset.Url, asset.AltText)">
+                                        Insert
+                                    </button>
+                                    <button class="btn btn-xs btn-outline-danger" disabled="@IsMediaBusy"
+                                            @onclick="() => DeleteMediaAssetAsync(asset.Id)">
+                                        Delete
+                                    </button>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
     </div>
 
     <div class="col-xl-8">
@@ -267,6 +319,30 @@
                             <InputText class="form-control" @bind-Value="PageEditor.Slug" placeholder="home" />
                         </div>
                     </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold small">SEO Meta Title</label>
+                            <InputText class="form-control" @bind-Value="PageEditor.MetaTitle" placeholder="Falls back to Page Title if blank" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold small">OG Image URL</label>
+                            <InputText class="form-control" @bind-Value="PageEditor.OgImageUrl" placeholder="/media/{id} or external URL" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-semibold small">SEO Meta Description</label>
+                            <InputText class="form-control" @bind-Value="PageEditor.MetaDescription" placeholder="Shown in search results and link previews" />
+                        </div>
+                    </div>
+
+                    @if (LivePageUrl is { } livePageUrl && SelectedPageId.HasValue)
+                    {
+                        <div class="mb-3">
+                            <a class="btn btn-sm btn-outline-success" href="@livePageUrl" target="_blank" rel="noopener noreferrer">
+                                <i class="bi bi-box-arrow-up-right me-1"></i>View Live Page
+                            </a>
+                        </div>
+                    }
 
                     <div class="cms-structured-toolbar mb-3">
                         <div class="cms-structured-toolbar-group">
@@ -343,6 +419,7 @@
     {
         await LoadReactPagesAsync();
         await LoadCmsWorkspaceAsync();
+        await LoadMediaAssetsAsync();
     }
 
     private async Task LoadReactPagesAsync()
@@ -588,7 +665,10 @@
             SiteId = page.SiteId,
             Title = page.Title,
             Slug = page.Slug,
-            BlocksJson = page.BlocksJson
+            BlocksJson = page.BlocksJson,
+            MetaTitle = page.MetaTitle,
+            MetaDescription = page.MetaDescription,
+            OgImageUrl = page.OgImageUrl
         };
 
         if (updateStatus)
@@ -710,5 +790,106 @@
     private static string BuildFileOpenLink(string filePath)
     {
         return $"vscode://file/{Uri.EscapeDataString(filePath)}";
+    }
+
+    private string? LivePageUrl =>
+        SelectedSiteId.HasValue && CmsSites.FirstOrDefault(s => s.Id == SelectedSiteId.Value) is { } selectedSite
+            && !string.IsNullOrWhiteSpace(PageEditor.Slug)
+            ? $"/cms/{selectedSite.Slug}/{PageEditor.Slug}"
+            : null;
+
+    // ── Media library ───────────────────────────────────────────────────────
+
+    private List<MediaAssetSummary> MediaAssets { get; set; } = new();
+    private bool IsMediaBusy { get; set; }
+    private string MediaErrorMessage { get; set; } = string.Empty;
+    private string MediaStatusMessage { get; set; } = string.Empty;
+    private string MediaAltTextInput { get; set; } = string.Empty;
+
+    private async Task LoadMediaAssetsAsync()
+    {
+        try
+        {
+            MediaAssets = (await MediaLibraryService.ListAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load media library.");
+            MediaErrorMessage = $"Unable to load media library. {ex.Message}";
+        }
+    }
+
+    private async Task OnMediaFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        IsMediaBusy = true;
+        MediaErrorMessage = string.Empty;
+        MediaStatusMessage = string.Empty;
+
+        try
+        {
+            const long maxFileBytes = 8 * 1024 * 1024;
+            var file = e.File;
+            using var stream = file.OpenReadStream(maxFileBytes);
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+
+            var uploaded = await MediaLibraryService.UploadAsync(
+                file.Name,
+                file.ContentType,
+                memory.ToArray(),
+                MediaAltTextInput);
+
+            MediaAltTextInput = string.Empty;
+            await LoadMediaAssetsAsync();
+            MediaStatusMessage = $"Uploaded '{uploaded.FileName}'.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to upload media asset.");
+            MediaErrorMessage = $"Unable to upload file. {ex.Message}";
+        }
+        finally
+        {
+            IsMediaBusy = false;
+        }
+    }
+
+    private async Task DeleteMediaAssetAsync(Guid mediaAssetId)
+    {
+        IsMediaBusy = true;
+        MediaErrorMessage = string.Empty;
+
+        try
+        {
+            await MediaLibraryService.DeleteAsync(mediaAssetId);
+            await LoadMediaAssetsAsync();
+            MediaStatusMessage = "Deleted media asset.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to delete media asset {MediaAssetId}.", mediaAssetId);
+            MediaErrorMessage = $"Unable to delete media asset. {ex.Message}";
+        }
+        finally
+        {
+            IsMediaBusy = false;
+        }
+    }
+
+    private void InsertImageBlock(string url, string altText)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(
+            string.IsNullOrWhiteSpace(PageEditor.BlocksJson) ? "[]" : PageEditor.BlocksJson) as System.Text.Json.Nodes.JsonArray
+            ?? new System.Text.Json.Nodes.JsonArray();
+
+        node.Add(new System.Text.Json.Nodes.JsonObject
+        {
+            ["type"] = "image",
+            ["src"] = url,
+            ["alt"] = altText
+        });
+
+        PageEditor.BlocksJson = node.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        MediaStatusMessage = "Inserted image block into the page's Blocks JSON.";
     }
 }

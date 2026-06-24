@@ -1,4 +1,13 @@
+import LayoutRenderer from '../cms/LayoutRenderer';
+import { loadLayout } from '../cms/loadLayout';
+
+const layout = loadLayout('About');
+
 export default function About() {
+  if (layout) {
+    return <LayoutRenderer layout={layout} />;
+  }
+
   return (
     <main className="about-page">
       <h1>About Me</h1>

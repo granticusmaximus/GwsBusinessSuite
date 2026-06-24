@@ -1,0 +1,72 @@
+using GwsBusinessSuite.Application.CmsBuilder;
+
+namespace GwsBusinessSuite.Tests;
+
+public sealed class CmsBlockHtmlRendererTests
+{
+    [Fact]
+    public void Render_ShouldRenderHeroBlockWithTitleAndCta()
+    {
+        var html = CmsBlockHtmlRenderer.Render(
+            "[{\"type\":\"hero\",\"title\":\"Welcome\",\"subtitle\":\"Intro\",\"primaryCta\":\"Start\",\"primaryCtaHref\":\"/start\"}]");
+
+        Assert.Contains("Welcome", html);
+        Assert.Contains("Intro", html);
+        Assert.Contains("href=\"/start\"", html);
+        Assert.Contains("Start", html);
+    }
+
+    [Fact]
+    public void Render_ShouldHtmlEncodeUserSuppliedFields_ToPreventScriptInjection()
+    {
+        var html = CmsBlockHtmlRenderer.Render(
+            "[{\"type\":\"hero\",\"title\":\"<script>alert(1)</script>\",\"subtitle\":\"\"}]");
+
+        Assert.DoesNotContain("<script>alert(1)</script>", html);
+        Assert.Contains("&lt;script&gt;", html);
+    }
+
+    [Fact]
+    public void Render_ShouldReturnEmptyString_ForEmptyBlocksArray()
+    {
+        var html = CmsBlockHtmlRenderer.Render("[]");
+
+        Assert.Equal(string.Empty, html);
+    }
+
+    [Fact]
+    public void Render_ShouldSkipUnknownBlockTypes_WithoutThrowing()
+    {
+        var html = CmsBlockHtmlRenderer.Render("[{\"type\":\"totally-unknown\",\"title\":\"x\"}]");
+
+        Assert.DoesNotContain("totally-unknown", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderImageBlock_WithEncodedSrcAndAlt()
+    {
+        var html = CmsBlockHtmlRenderer.Render(
+            "[{\"type\":\"image\",\"src\":\"/media/abc\",\"alt\":\"A photo\"}]");
+
+        Assert.Contains("src=\"/media/abc\"", html);
+        Assert.Contains("alt=\"A photo\"", html);
+    }
+
+    [Fact]
+    public void Render_ShouldOmitImageBlock_WhenSrcIsMissing()
+    {
+        var html = CmsBlockHtmlRenderer.Render("[{\"type\":\"image\",\"alt\":\"A photo\"}]");
+
+        Assert.DoesNotContain("<img", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderFeatureStackItemsAsListItems()
+    {
+        var html = CmsBlockHtmlRenderer.Render(
+            "[{\"type\":\"feature-stack\",\"title\":\"What you get\",\"items\":[\"Automation\",\"Analytics\"]}]");
+
+        Assert.Contains("<li>Automation</li>", html);
+        Assert.Contains("<li>Analytics</li>", html);
+    }
+}

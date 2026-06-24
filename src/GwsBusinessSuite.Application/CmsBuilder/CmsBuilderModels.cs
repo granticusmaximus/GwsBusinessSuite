@@ -28,6 +28,12 @@ public sealed class CmsPageEditorModel
 
     [Required]
     public string BlocksJson { get; set; } = "[]";
+
+    public string MetaTitle { get; set; } = string.Empty;
+
+    public string MetaDescription { get; set; } = string.Empty;
+
+    public string OgImageUrl { get; set; } = string.Empty;
 }
 
 public sealed class CmsWorkflowBlueprintSummary

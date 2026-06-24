@@ -1,4 +1,13 @@
+import LayoutRenderer from '../cms/LayoutRenderer';
+import { loadLayout } from '../cms/loadLayout';
+
+const layout = loadLayout('Contact');
+
 export default function Contact() {
+  if (layout) {
+    return <LayoutRenderer layout={layout} />;
+  }
+
   return (
     <main className="contact-page">
       <h1>Say Hello</h1>

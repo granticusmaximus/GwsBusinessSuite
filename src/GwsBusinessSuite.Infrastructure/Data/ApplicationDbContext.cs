@@ -11,6 +11,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<WikiPage> WikiPages => Set<WikiPage>();
     public DbSet<CmsSite> CmsSites => Set<CmsSite>();
     public DbSet<CmsPage> CmsPages => Set<CmsPage>();
+    public DbSet<MediaAsset> MediaAssets => Set<MediaAsset>();
     public DbSet<AffiliateOffer> AffiliateOffers => Set<AffiliateOffer>();
     public DbSet<DeploymentTarget> DeploymentTargets => Set<DeploymentTarget>();
     public DbSet<SeoArticleDraft> SeoArticleDrafts => Set<SeoArticleDraft>();

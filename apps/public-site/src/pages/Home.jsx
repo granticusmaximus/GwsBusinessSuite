@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import ArticleCard from '../components/ArticleCard';
 import { API_BASE_URL } from '../apiBase';
+import LayoutRenderer from '../cms/LayoutRenderer';
+import { loadLayout } from '../cms/loadLayout';
+
+const layout = loadLayout('Home');
 
 export default function Home() {
   const [recentArticles, setRecentArticles] = useState([]);
@@ -12,6 +16,10 @@ export default function Home() {
       .then(data => setRecentArticles(data.slice(0, 3)))
       .catch(() => {});
   }, []);
+
+  if (layout) {
+    return <LayoutRenderer layout={layout} />;
+  }
 
   return (
     <>
