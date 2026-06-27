@@ -1,3 +1,36 @@
+.cms-builder-shell {
+    padding: 1.5rem 2rem 2.5rem;
+    max-width: 1600px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.cms-builder-exit {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+}
+
+.cms-builder-exit-link {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    font-size: .85rem;
+    font-weight: 600;
+    color: #475569;
+    text-decoration: none;
+    padding: .4rem .2rem;
+}
+
+.cms-builder-exit-link:hover {
+    color: #0f172a;
+}
+
+.cms-builder-exit-link-subtle {
+    color: #94a3b8;
+}
+
 .cms-builder-hero {
     display: flex;
     align-items: flex-start;
