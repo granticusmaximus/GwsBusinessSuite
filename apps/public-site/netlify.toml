@@ -22,3 +22,27 @@
   from   = "/*"
   to     = "/index.html"
   status = 200
+
+# ── Cache headers ─────────────────────────────────────────────────────────────
+# Without this, Netlify applies the same max-age=0 policy to everything,
+# including the content-hashed /assets/*.js and *.css bundles. That made some
+# browsers (mobile Chrome in particular) serve a stale cached index.html
+# without revalidating, which then pointed at an old (but still-present)
+# hashed bundle from a previous deploy — the page would silently render an
+# outdated build until a hard refresh.
+#
+# Header rules match the *requested* path, not the path the SPA rewrite above
+# serves — so the catch-all "/*" (covering "/", "/about", "/blog/:slug", etc.,
+# which all rewrite to index.html) must be the one marked no-store. Hashed
+# assets are safe to cache forever since their filename changes whenever
+# their content does; Netlify merges the more specific /assets/* rule on top
+# of the catch-all for those requests.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "no-store"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
