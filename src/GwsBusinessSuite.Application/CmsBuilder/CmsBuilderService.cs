@@ -110,6 +110,7 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         site.Name = editor.Name.Trim();
         site.Slug = uniqueSlug;
         site.Theme = string.IsNullOrWhiteSpace(editor.Theme) ? "Default" : editor.Theme.Trim();
+        site.CustomCss = editor.CustomCss?.Trim() ?? string.Empty;
         site.UpdatedAt = now;
         site.UpdatedBy = "cms-ui";
 
@@ -230,6 +231,7 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         page.MetaTitle = editor.MetaTitle?.Trim() ?? string.Empty;
         page.MetaDescription = editor.MetaDescription?.Trim() ?? string.Empty;
         page.OgImageUrl = editor.OgImageUrl?.Trim() ?? string.Empty;
+        page.CustomCss = editor.CustomCss?.Trim() ?? string.Empty;
         page.UpdatedAt = now;
         page.UpdatedBy = "cms-ui";
 

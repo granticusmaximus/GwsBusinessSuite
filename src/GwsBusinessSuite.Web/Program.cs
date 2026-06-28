@@ -366,6 +366,14 @@ app.MapGet("/cms/{siteSlug}/{pageSlug}", async (
         ? string.Empty
         : $"""<meta property="og:image" content="{System.Net.WebUtility.HtmlEncode(page.OgImageUrl)}" />""";
 
+    // Site CSS first so page-level CSS can override it for this one page. Custom CSS is
+    // never HTML-encoded (that would break the CSS itself), so the only defense needed
+    // against breaking out of the <style> tag is stripping any literal "</style" sequence.
+    var customCss = string.Join('\n', new[] { site.CustomCss, page.CustomCss }.Where(css => !string.IsNullOrWhiteSpace(css)));
+    var customStyleTag = string.IsNullOrWhiteSpace(customCss)
+        ? string.Empty
+        : $"<style>{SanitizeInlineCss(customCss)}</style>";
+
     var html = $"""
         <!DOCTYPE html>
         <html lang="en">
@@ -376,6 +384,7 @@ app.MapGet("/cms/{siteSlug}/{pageSlug}", async (
           <meta name="description" content="{metaDescription}" />
           {ogImageTag}
           <link rel="stylesheet" href="/cms-public.css" />
+          {customStyleTag}
         </head>
         <body>
           {bodyHtml}
@@ -721,6 +730,12 @@ app.MapRazorComponents<App>()
 app.MapGet("/", () => Results.Redirect("/admin")).AllowAnonymous();
 
 app.Run();
+
+// CSS isn't HTML-encoded before going into a <style> tag (encoding it would break the
+// CSS), so the only injection vector worth closing is a literal "</style" that would let
+// the custom CSS escape into raw HTML/script. This isn't a general HTML sanitizer.
+static string SanitizeInlineCss(string css) =>
+    css.Replace("</style", "<\\/style", StringComparison.OrdinalIgnoreCase);
 
 // A misconfigured deploy that ships a blank/trivial AdminAuth:Password previously seeded
 // it without any complaint — the admin login would then be guessable on day one. This is

@@ -199,6 +199,11 @@
                         <label class="form-label fw-semibold small">Theme</label>
                         <InputText class="form-control" @bind-Value="SiteEditor.Theme" placeholder="Editorial" />
                     </div>
+                    <div class="col-12">
+                        <label class="form-label fw-semibold small">Site-wide Custom CSS</label>
+                        <InputTextArea class="form-control font-monospace cms-custom-css-editor" @bind-Value="SiteEditor.CustomCss"
+                                       placeholder="Applies to every page on this site. Page-level CSS below can override it." spellcheck="false" />
+                    </div>
                 </div>
 
                 <div class="d-flex flex-wrap gap-2 mt-3">
@@ -342,6 +347,11 @@
                         <div class="col-12">
                             <label class="form-label fw-semibold small">SEO Meta Description</label>
                             <InputText class="form-control" @bind-Value="PageEditor.MetaDescription" placeholder="Shown in search results and link previews" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-semibold small">Page Custom CSS</label>
+                            <InputTextArea class="form-control font-monospace cms-custom-css-editor" @bind-Value="PageEditor.CustomCss"
+                                           placeholder="Applies only to this page, after the site-wide CSS." spellcheck="false" />
                         </div>
                     </div>
 
@@ -605,7 +615,8 @@
             SiteId = site.Id,
             Name = site.Name,
             Slug = site.Slug,
-            Theme = site.Theme
+            Theme = site.Theme,
+            CustomCss = site.CustomCss
         };
 
         CmsPages = (await CmsBuilderService.ListPagesAsync(site.Id)).ToList();
@@ -738,7 +749,8 @@
             BlocksJson = page.BlocksJson,
             MetaTitle = page.MetaTitle,
             MetaDescription = page.MetaDescription,
-            OgImageUrl = page.OgImageUrl
+            OgImageUrl = page.OgImageUrl,
+            CustomCss = page.CustomCss
         };
 
         if (updateStatus)

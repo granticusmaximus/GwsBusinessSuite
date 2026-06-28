@@ -86,6 +86,7 @@ public sealed class CmsSite : AuditableEntity
     public required string Name { get; set; }
     public required string Slug { get; set; }
     public string Theme { get; set; } = "Default";
+    public string CustomCss { get; set; } = string.Empty;
 }
 
 public sealed class CmsPage : AuditableEntity
@@ -97,6 +98,7 @@ public sealed class CmsPage : AuditableEntity
     public string MetaTitle { get; set; } = string.Empty;
     public string MetaDescription { get; set; } = string.Empty;
     public string OgImageUrl { get; set; } = string.Empty;
+    public string CustomCss { get; set; } = string.Empty;
 }
 
 public sealed class MediaAsset : AuditableEntity

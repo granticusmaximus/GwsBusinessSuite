@@ -65,6 +65,30 @@ public sealed class CmsBuilderServiceTests
     }
 
     [Fact]
+    public async Task SaveSiteAsync_AndSavePageAsync_ShouldPersistCustomCss()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel
+        {
+            Name = "Styled Site",
+            CustomCss = "body { background: #111; }"
+        });
+
+        var page = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id,
+            Title = "Home",
+            BlocksJson = "[]",
+            CustomCss = ".cms-hero { color: hotpink; }"
+        });
+
+        site.CustomCss.Should().Be("body { background: #111; }");
+        page.CustomCss.Should().Be(".cms-hero { color: hotpink; }");
+    }
+
+    [Fact]
     public async Task SaveSiteAsync_ShouldGenerateUniqueSlugsForDuplicateNames()
     {
         await using var db = await CreateDbAsync();

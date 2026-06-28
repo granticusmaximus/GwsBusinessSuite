@@ -12,6 +12,8 @@ public sealed class CmsSiteEditorModel
     public string Slug { get; set; } = string.Empty;
 
     public string Theme { get; set; } = "Default";
+
+    public string CustomCss { get; set; } = string.Empty;
 }
 
 public sealed class CmsPageEditorModel
@@ -34,6 +36,8 @@ public sealed class CmsPageEditorModel
     public string MetaDescription { get; set; } = string.Empty;
 
     public string OgImageUrl { get; set; } = string.Empty;
+
+    public string CustomCss { get; set; } = string.Empty;
 }
 
 public sealed class CmsWorkflowBlueprintSummary

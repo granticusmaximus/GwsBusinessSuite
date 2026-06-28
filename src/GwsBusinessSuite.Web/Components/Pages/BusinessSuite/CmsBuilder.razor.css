@@ -281,3 +281,9 @@
     padding: 0.15rem 0.5rem;
     font-size: 0.72rem;
 }
+
+.cms-custom-css-editor {
+    min-height: 140px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.82rem;
+}
