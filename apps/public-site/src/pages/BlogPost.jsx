@@ -21,6 +21,9 @@ export default function BlogPost() {
   const [error, setError]      = useState(null);
 
   useEffect(() => {
+    // Resetting loading/error before the fetch keyed on `slug` below, not deriving state
+    // from other state — the cascading-render case this rule targets doesn't apply here.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     setError(null);
     fetch(`${API_BASE_URL}/api/blog/${slug}`)

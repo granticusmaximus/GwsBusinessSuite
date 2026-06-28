@@ -12,6 +12,20 @@ public sealed class MediaLibraryService(IAppDbContext dbContext) : IMediaLibrary
     // file into a SQLite TEXT column.
     private const long MaxContentBytes = 8 * 1024 * 1024;
 
+    // Raster-format magic bytes. A browser's reported Content-Type is attacker-controlled
+    // (trivial to relabel an .svg or .html payload as "image/png" before upload), and that
+    // same value would later be echoed back as the response Content-Type by the /media/{id}
+    // endpoint — so the stored content type is derived from the file's actual bytes, never
+    // from client input. SVG is deliberately not in this list: it's XML and can carry
+    // <script>, so it isn't treated as a safe image format here.
+    private static readonly (byte[] Signature, string ContentType)[] ImageSignatures =
+    [
+        ([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], "image/png"),
+        ([0xFF, 0xD8, 0xFF], "image/jpeg"),
+        ([0x47, 0x49, 0x46, 0x38, 0x37, 0x61], "image/gif"),
+        ([0x47, 0x49, 0x46, 0x38, 0x39, 0x61], "image/gif")
+    ];
+
     public async Task<IReadOnlyList<MediaAssetSummary>> ListAsync(CancellationToken cancellationToken = default)
     {
         var assets = await dbContext.MediaAssets
@@ -26,7 +40,6 @@ public sealed class MediaLibraryService(IAppDbContext dbContext) : IMediaLibrary
 
     public async Task<MediaAssetSummary> UploadAsync(
         string fileName,
-        string contentType,
         byte[] content,
         string altText,
         CancellationToken cancellationToken = default)
@@ -34,11 +47,6 @@ public sealed class MediaLibraryService(IAppDbContext dbContext) : IMediaLibrary
         if (string.IsNullOrWhiteSpace(fileName))
         {
             throw new ArgumentException("File name is required.", nameof(fileName));
-        }
-
-        if (string.IsNullOrWhiteSpace(contentType) || !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ArgumentException("Only image uploads are supported.", nameof(contentType));
         }
 
         if (content.Length == 0)
@@ -51,11 +59,19 @@ public sealed class MediaLibraryService(IAppDbContext dbContext) : IMediaLibrary
             throw new ArgumentException($"File exceeds the {MaxContentBytes / 1024 / 1024} MB upload limit.", nameof(content));
         }
 
+        var detectedContentType = DetectImageContentType(content);
+        if (detectedContentType is null)
+        {
+            throw new ArgumentException(
+                "File does not appear to be a supported image (PNG, JPEG, GIF, or WEBP).",
+                nameof(content));
+        }
+
         var asset = new MediaAsset
         {
             FileName = fileName.Trim(),
-            ContentType = contentType.Trim(),
-            DataUri = $"data:{contentType.Trim()};base64,{Convert.ToBase64String(content)}",
+            ContentType = detectedContentType,
+            DataUri = $"data:{detectedContentType};base64,{Convert.ToBase64String(content)}",
             AltText = altText?.Trim() ?? string.Empty,
             SizeBytes = content.Length,
             CreatedBy = "cms-media-library"
@@ -65,6 +81,23 @@ public sealed class MediaLibraryService(IAppDbContext dbContext) : IMediaLibrary
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return ToSummary(asset);
+    }
+
+    private static string? DetectImageContentType(byte[] content)
+    {
+        foreach (var (signature, imageContentType) in ImageSignatures)
+        {
+            if (content.Length >= signature.Length && content.AsSpan(0, signature.Length).SequenceEqual(signature))
+            {
+                return imageContentType;
+            }
+        }
+
+        var isRiffContainer = content.Length >= 12
+            && content[0] == (byte)'R' && content[1] == (byte)'I' && content[2] == (byte)'F' && content[3] == (byte)'F'
+            && content[8] == (byte)'W' && content[9] == (byte)'E' && content[10] == (byte)'B' && content[11] == (byte)'P';
+
+        return isRiffContainer ? "image/webp" : null;
     }
 
     public async Task<(string ContentType, byte[] Content)?> GetContentAsync(Guid mediaAssetId, CancellationToken cancellationToken = default)

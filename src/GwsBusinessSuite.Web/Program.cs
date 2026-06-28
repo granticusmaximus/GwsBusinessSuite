@@ -82,6 +82,10 @@ builder.Services.AddHealthChecks()
     .AddCheck<GwsBusinessSuite.Web.HealthChecks.DatabaseHealthCheck>("database")
     .AddCheck<GwsBusinessSuite.Web.HealthChecks.OllamaHealthCheck>("ollama");
 
+// HeaderName enables validating JSON API requests (which can't carry a hidden form
+// field) via the X-CSRF-TOKEN header instead, for the /admin/api/articles endpoints.
+builder.Services.AddAntiforgery(options => options.HeaderName = "X-CSRF-TOKEN");
+
 builder.Services.AddRateLimiter(options =>
 {
     options.AddPolicy("login", context =>
@@ -94,9 +98,48 @@ builder.Services.AddRateLimiter(options =>
                 QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                 QueueLimit           = 0,
             }));
+
+    // Unauthenticated GET endpoints that hit the DB (and, for /og-image and /media,
+    // decode base64 blobs up to several MB) on every request. Generous since real
+    // visitors and crawlers hit these often, but bounded so a single IP can't hammer them.
+    options.AddPolicy("public-read", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                Window               = TimeSpan.FromMinutes(1),
+                PermitLimit          = 120,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit           = 0,
+            }));
+
+    // Authenticated admin endpoints that mutate data. RequireAuthorization() already
+    // blocks unauthenticated callers; this just dampens abuse from a single compromised
+    // or scripted session.
+    options.AddPolicy("admin-mutation", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                Window               = TimeSpan.FromMinutes(1),
+                PermitLimit          = 30,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit           = 0,
+            }));
+
+    // Only the login page wants a redirect on rejection; API-shaped endpoints should get
+    // a plain 429 instead of being bounced to an HTML page.
     options.OnRejected = (context, _) =>
     {
-        context.HttpContext.Response.Redirect("/admin/login?error=ratelimit");
+        if (context.HttpContext.Request.Path.StartsWithSegments("/admin/login"))
+        {
+            context.HttpContext.Response.Redirect("/admin/login?error=ratelimit");
+        }
+        else
+        {
+            context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        }
+
         return ValueTask.CompletedTask;
     };
 });
@@ -119,10 +162,20 @@ using (var scope = app.Services.CreateScope())
 
         if (!string.IsNullOrWhiteSpace(seedUsername) && !string.IsNullOrWhiteSpace(seedPassword))
         {
-            var admin = new AppUser { Username = seedUsername, Role = AppRoles.Admin, CreatedBy = "system" };
-            admin.PasswordHash = hasher.HashPassword(admin, seedPassword);
-            dbContext.AppUsers.Add(admin);
-            await dbContext.SaveChangesAsync();
+            if (IsWeakSeedPassword(seedPassword, seedUsername, out var weakReason))
+            {
+                app.Logger.LogError(
+                    "Refusing to seed the admin account: AdminAuth:Password {Reason}. " +
+                    "Set a stronger password in configuration and restart.",
+                    weakReason);
+            }
+            else
+            {
+                var admin = new AppUser { Username = seedUsername, Role = AppRoles.Admin, CreatedBy = "system" };
+                admin.PasswordHash = hasher.HashPassword(admin, seedPassword);
+                dbContext.AppUsers.Add(admin);
+                await dbContext.SaveChangesAsync();
+            }
         }
     }
 }
@@ -277,7 +330,7 @@ app.MapGet("/og-image/{slug}", async (
     catch { return Results.NotFound(); }
 
     return Results.Bytes(bytes, mime);
-}).AllowAnonymous();
+}).AllowAnonymous().RequireRateLimiting("public-read");
 
 // Serves a CmsSite/CmsPage built in the structured CMS Builder ("/admin/cms-builder") as a
 // standalone public HTML page. These pages are independent of the apps/public-site React
@@ -309,6 +362,7 @@ app.MapGet("/cms/{siteSlug}/{pageSlug}", async (
           <title>{pageTitle}</title>
           <meta name="description" content="{metaDescription}" />
           {ogImageTag}
+          <link rel="stylesheet" href="/cms-public.css" />
         </head>
         <body>
           {bodyHtml}
@@ -317,14 +371,14 @@ app.MapGet("/cms/{siteSlug}/{pageSlug}", async (
         """;
 
     return Results.Content(html, "text/html");
-}).AllowAnonymous();
+}).AllowAnonymous().RequireRateLimiting("public-read");
 
 // Decodes and serves a base64-stored media library asset, mirroring the /og-image pattern.
 app.MapGet("/media/{id:guid}", async (Guid id, IMediaLibraryService mediaLibraryService) =>
 {
     var content = await mediaLibraryService.GetContentAsync(id);
     return content is null ? Results.NotFound() : Results.Bytes(content.Value.Content, content.Value.ContentType);
-}).AllowAnonymous();
+}).AllowAnonymous().RequireRateLimiting("public-read");
 
 // Public JSON API — hydrated from the Article table (SQLite is the source of truth).
 app.MapGet("/api/blog", async (IDbContextFactory<ApplicationDbContext> dbFactory) =>
@@ -353,7 +407,7 @@ app.MapGet("/api/blog", async (IDbContextFactory<ApplicationDbContext> dbFactory
         .ToList();
 
     return Results.Ok(result);
-}).AllowAnonymous();
+}).AllowAnonymous().RequireRateLimiting("public-read");
 
 app.MapGet("/api/blog/{slug}", async (
     string slug,
@@ -391,13 +445,17 @@ app.MapGet("/api/blog/{slug}", async (
         a.HeroImageAltText,
         a.HeroImageCaption
     });
-}).AllowAnonymous();
+}).AllowAnonymous().RequireRateLimiting("public-read");
 
 // Admin: publish an approved SeoArticleDraft to the live blog as an Article.
 app.MapPost("/admin/api/articles/publish-draft/{draftId:guid}", async (
     Guid draftId,
+    HttpContext httpContext,
+    IAntiforgery antiforgery,
     IContentStudioService contentStudioService) =>
 {
+    if (await ValidateAntiforgeryAsync(httpContext, antiforgery) is { } rejection) return rejection;
+
     try
     {
         var published = await contentStudioService.PublishDraftToSiteAsync(new DraftPublishRequest
@@ -414,6 +472,14 @@ app.MapPost("/admin/api/articles/publish-draft/{draftId:guid}", async (
     {
         return Results.BadRequest(new { error = ex.Message });
     }
+}).RequireAuthorization().RequireRateLimiting("admin-mutation");
+
+// Admin: issue a CSRF token for the mutation endpoints below. Callers must fetch this
+// first and echo the returned token back via the X-CSRF-TOKEN header.
+app.MapGet("/admin/api/antiforgery-token", (HttpContext httpContext, IAntiforgery antiforgery) =>
+{
+    var tokens = antiforgery.GetAndStoreTokens(httpContext);
+    return Results.Ok(new { token = tokens.RequestToken });
 }).RequireAuthorization();
 
 // Admin: list all articles (any status)
@@ -441,8 +507,14 @@ app.MapGet("/admin/api/articles/{id:guid}", async (Guid id, IDbContextFactory<Ap
 }).RequireAuthorization();
 
 // Admin: create a new manual article draft
-app.MapPost("/admin/api/articles", async (ArticleUpsertRequest req, HttpContext httpContext, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+app.MapPost("/admin/api/articles", async (
+    ArticleUpsertRequest req,
+    HttpContext httpContext,
+    IAntiforgery antiforgery,
+    IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
+    if (await ValidateAntiforgeryAsync(httpContext, antiforgery) is { } rejection) return rejection;
+
     await using var db = await dbFactory.CreateDbContextAsync();
     var article = new Article
     {
@@ -465,15 +537,18 @@ app.MapPost("/admin/api/articles", async (ArticleUpsertRequest req, HttpContext 
     db.Articles.Add(article);
     await db.SaveChangesAsync();
     return Results.Created($"/admin/api/articles/{article.Id}", new { article.Id, article.Slug });
-}).RequireAuthorization();
+}).RequireAuthorization().RequireRateLimiting("admin-mutation");
 
 // Admin: update an existing article
 app.MapPut("/admin/api/articles/{id:guid}", async (
     Guid id,
     ArticleUpsertRequest req,
     HttpContext httpContext,
+    IAntiforgery antiforgery,
     IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
+    if (await ValidateAntiforgeryAsync(httpContext, antiforgery) is { } rejection) return rejection;
+
     await using var db = await dbFactory.CreateDbContextAsync();
     var article = await db.Articles.FindAsync(id);
     if (article is null) return Results.NotFound();
@@ -495,11 +570,17 @@ app.MapPut("/admin/api/articles/{id:guid}", async (
 
     await db.SaveChangesAsync();
     return Results.Ok(new { article.Id, article.Slug, article.Status });
-}).RequireAuthorization();
+}).RequireAuthorization().RequireRateLimiting("admin-mutation");
 
 // Admin: publish an article (sets Status=Published, stamps PublishedAt if not already set)
-app.MapPost("/admin/api/articles/{id:guid}/publish", async (Guid id, HttpContext httpContext, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+app.MapPost("/admin/api/articles/{id:guid}/publish", async (
+    Guid id,
+    HttpContext httpContext,
+    IAntiforgery antiforgery,
+    IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
+    if (await ValidateAntiforgeryAsync(httpContext, antiforgery) is { } rejection) return rejection;
+
     await using var db = await dbFactory.CreateDbContextAsync();
     var article = await db.Articles.FindAsync(id);
     if (article is null) return Results.NotFound();
@@ -510,11 +591,17 @@ app.MapPost("/admin/api/articles/{id:guid}/publish", async (Guid id, HttpContext
     article.UpdatedBy   = GetCurrentUsername(httpContext);
     await db.SaveChangesAsync();
     return Results.Ok(new { article.Id, article.Slug, article.Status, article.PublishedAt });
-}).RequireAuthorization();
+}).RequireAuthorization().RequireRateLimiting("admin-mutation");
 
 // Admin: unpublish an article (back to Draft)
-app.MapPost("/admin/api/articles/{id:guid}/unpublish", async (Guid id, HttpContext httpContext, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+app.MapPost("/admin/api/articles/{id:guid}/unpublish", async (
+    Guid id,
+    HttpContext httpContext,
+    IAntiforgery antiforgery,
+    IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
+    if (await ValidateAntiforgeryAsync(httpContext, antiforgery) is { } rejection) return rejection;
+
     await using var db = await dbFactory.CreateDbContextAsync();
     var article = await db.Articles.FindAsync(id);
     if (article is null) return Results.NotFound();
@@ -524,11 +611,17 @@ app.MapPost("/admin/api/articles/{id:guid}/unpublish", async (Guid id, HttpConte
     article.UpdatedBy = GetCurrentUsername(httpContext);
     await db.SaveChangesAsync();
     return Results.Ok(new { article.Id, article.Slug, article.Status });
-}).RequireAuthorization();
+}).RequireAuthorization().RequireRateLimiting("admin-mutation");
 
 // Admin: delete a draft article (published articles must be unpublished first)
-app.MapDelete("/admin/api/articles/{id:guid}", async (Guid id, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+app.MapDelete("/admin/api/articles/{id:guid}", async (
+    Guid id,
+    HttpContext httpContext,
+    IAntiforgery antiforgery,
+    IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
+    if (await ValidateAntiforgeryAsync(httpContext, antiforgery) is { } rejection) return rejection;
+
     await using var db = await dbFactory.CreateDbContextAsync();
     var article = await db.Articles.FindAsync(id);
     if (article is null) return Results.NotFound();
@@ -538,7 +631,7 @@ app.MapDelete("/admin/api/articles/{id:guid}", async (Guid id, IDbContextFactory
     db.Articles.Remove(article);
     await db.SaveChangesAsync();
     return Results.NoContent();
-}).RequireAuthorization();
+}).RequireAuthorization().RequireRateLimiting("admin-mutation");
 
 app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>()
@@ -549,10 +642,59 @@ app.MapGet("/", () => Results.Redirect("/admin")).AllowAnonymous();
 
 app.Run();
 
+// A misconfigured deploy that ships a blank/trivial AdminAuth:Password previously seeded
+// it without any complaint — the admin login would then be guessable on day one. This is
+// a floor (length + a denylist of obviously common values), not full entropy scoring.
+static bool IsWeakSeedPassword(string password, string username, out string reason)
+{
+    string[] commonWeakSeedPasswords =
+    [
+        "password", "admin", "administrator", "changeme", "letmein",
+        "12345678", "123456789", "qwertyuiop", "password123"
+    ];
+
+    if (password.Length < 12)
+    {
+        reason = "is shorter than the required 12 characters";
+        return true;
+    }
+
+    if (string.Equals(password, username, StringComparison.OrdinalIgnoreCase))
+    {
+        reason = "must not be the same as the username";
+        return true;
+    }
+
+    if (commonWeakSeedPasswords.Contains(password, StringComparer.OrdinalIgnoreCase))
+    {
+        reason = "is a commonly guessed password";
+        return true;
+    }
+
+    reason = string.Empty;
+    return false;
+}
+
 static string GetCurrentUsername(HttpContext httpContext)
 {
     var username = httpContext.User.Identity?.Name;
     return string.IsNullOrWhiteSpace(username) ? "unknown" : username;
+}
+
+// These mutation endpoints are authenticated, but cookie auth alone gives no CSRF
+// protection for non-browser-form requests. Callers must fetch a token from
+// GET /admin/api/antiforgery-token first and send it back via the X-CSRF-TOKEN header.
+static async Task<IResult?> ValidateAntiforgeryAsync(HttpContext httpContext, IAntiforgery antiforgery)
+{
+    try
+    {
+        await antiforgery.ValidateRequestAsync(httpContext);
+        return null;
+    }
+    catch (AntiforgeryValidationException)
+    {
+        return Results.BadRequest(new { error = "Missing or invalid CSRF token." });
+    }
 }
 
 static string NormalizePathBase(string? pathBase)

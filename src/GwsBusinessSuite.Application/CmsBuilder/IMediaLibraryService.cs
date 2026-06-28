@@ -4,9 +4,12 @@ public interface IMediaLibraryService
 {
     Task<IReadOnlyList<MediaAssetSummary>> ListAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Stores an uploaded image. The content type is determined from the file's own bytes,
+    /// not from any client-supplied value, so callers don't pass one.
+    /// </summary>
     Task<MediaAssetSummary> UploadAsync(
         string fileName,
-        string contentType,
         byte[] content,
         string altText,
         CancellationToken cancellationToken = default);

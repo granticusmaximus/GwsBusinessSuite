@@ -6,6 +6,7 @@
 @using Microsoft.Extensions.Options
 @using Microsoft.JSInterop
 @inject IPageLayoutService PageLayoutService
+@inject IMediaLibraryService MediaLibraryService
 @inject IReactPageBuilderService ReactPageBuilderService
 @inject IOptions<CmsBuilderOptions> CmsOptions
 @inject NavigationManager Navigation
@@ -381,10 +382,42 @@
                             {
                                 <div>
                                     <label class="form-label small fw-semibold">Image URL</label>
-                                    <input class="form-control font-monospace" value='@GetProp(selWidget, "src")'
-                                           @oninput='(e) => SetProp(selWidget, "src", e.Value?.ToString() ?? string.Empty)'
-                                           placeholder="https://…" />
+                                    <div class="d-flex gap-2">
+                                        <input class="form-control font-monospace" value='@GetProp(selWidget, "src")'
+                                               @oninput='(e) => SetProp(selWidget, "src", e.Value?.ToString() ?? string.Empty)'
+                                               placeholder="https://…" />
+                                        <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0" @onclick="ToggleMediaPickerAsync">
+                                            <i class="bi bi-images"></i>
+                                        </button>
+                                    </div>
                                 </div>
+
+                                @if (_showMediaPicker)
+                                {
+                                    <div class="studio-media-picker">
+                                        @if (!string.IsNullOrEmpty(_mediaPickerError))
+                                        {
+                                            <div class="text-danger small mb-2">@_mediaPickerError</div>
+                                        }
+                                        else if (_mediaAssets.Count == 0)
+                                        {
+                                            <p class="text-secondary small mb-0">No media uploaded yet. Upload images from the CMS Builder's Media Library panel.</p>
+                                        }
+                                        else
+                                        {
+                                            <div class="studio-media-picker-grid">
+                                                @foreach (var asset in _mediaAssets)
+                                                {
+                                                    <button type="button" class="studio-media-picker-item" title="@asset.FileName"
+                                                            @onclick="() => SelectMediaAsset(selWidget, asset)">
+                                                        <img src="@asset.Url" alt="@asset.AltText" />
+                                                    </button>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                }
+
                                 <div>
                                     <label class="form-label small fw-semibold">Alt Text</label>
                                     <input class="form-control" value='@GetProp(selWidget, "alt")'
@@ -1106,6 +1139,42 @@
         _ = PushWidgetUpdateAsync(widget);
     }
 
+    // ── Media library picker ────────────────────────────────────────────────
+    private bool _showMediaPicker;
+    private string _mediaPickerError = string.Empty;
+    private List<MediaAssetSummary> _mediaAssets = new();
+
+    private async Task ToggleMediaPickerAsync()
+    {
+        _showMediaPicker = !_showMediaPicker;
+        if (!_showMediaPicker)
+        {
+            return;
+        }
+
+        _mediaPickerError = string.Empty;
+        try
+        {
+            _mediaAssets = (await MediaLibraryService.ListAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load media library for the widget inspector picker.");
+            _mediaPickerError = $"Unable to load media library. {ex.Message}";
+        }
+    }
+
+    private void SelectMediaAsset(LayoutWidget widget, MediaAssetSummary asset)
+    {
+        SetProp(widget, "src", asset.Url);
+        if (string.IsNullOrWhiteSpace(GetProp(widget, "alt")) && !string.IsNullOrWhiteSpace(asset.AltText))
+        {
+            SetProp(widget, "alt", asset.AltText);
+        }
+
+        _showMediaPicker = false;
+    }
+
     private async Task PushWidgetUpdateAsync(LayoutWidget widget)
     {
         if (_jsBridge is null || !_editModeEnabled) return;
@@ -1149,23 +1218,6 @@
         "tablet" => "Tablet",
         "mobile" => "Mobile",
         _ => "Desktop"
-    };
-
-    private static string GetSectionBgClass(LayoutSection s) => s.Background switch
-    {
-        "light"  => "canvas-bg-light",
-        "dark"   => "canvas-bg-dark",
-        "accent" => "canvas-bg-accent",
-        _        => "canvas-bg-transparent"
-    };
-
-    private static string GetSectionPaddingClass(LayoutSection s) => s.Padding switch
-    {
-        "none" => "canvas-pad-none",
-        "sm"   => "canvas-pad-sm",
-        "lg"   => "canvas-pad-lg",
-        "xl"   => "canvas-pad-xl",
-        _      => "canvas-pad-md"
     };
 
     private static string GetColumnLayoutLabel(string layout) => layout switch

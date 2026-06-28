@@ -62,6 +62,14 @@ public static class CmsBlockHtmlRenderer
                 <h1>{Html(GetString(block, "title", "Editorial title"))}</h1>
                 <p>{Html(GetString(block, "subtitle"))}</p>
                 """,
+            // toc/faq/testimonials render heading-only deliberately: the admin preview's
+            // body content for these three ("Introduction/Main section/...", "Question and
+            // answer content.", "Use this block to add social proof...") is editorial
+            // scaffolding text, not real per-block data — there's no "items" field for any
+            // of them in any workflow blueprint. Copying that placeholder copy to a public
+            // page would look like an obviously broken stub to real visitors, which is worse
+            // than just showing the heading. countdown and contact-form below DO have real
+            // per-block data (days / static form fields) and are rendered in full.
             "toc" => $"""
                 <h2>{Html(GetString(block, "title", "In this article"))}</h2>
                 """,
@@ -80,6 +88,13 @@ public static class CmsBlockHtmlRenderer
                   {Button(GetString(block, "button", "Subscribe"), GetString(block, "buttonHref", "#"))}
                 </div>
                 """,
+            "countdown" => $"""
+                <div class="cms-countdown">
+                  <h2>{Html(GetString(block, "title", "Countdown"))}</h2>
+                  <div class="cms-countdown-days">{GetInt(block, "days", 7)}</div>
+                  <div class="cms-countdown-caption">days remaining</div>
+                </div>
+                """,
             "pricing-table" => $"""
                 <h2>{Html(GetString(block, "title", "Pricing"))}</h2>
                 <div class="cms-grid">{Items(block, "plans")}</div>
@@ -93,6 +108,20 @@ public static class CmsBlockHtmlRenderer
                 """,
             "testimonials" => $"""
                 <h2>{Html(GetString(block, "title", "Client results"))}</h2>
+                """,
+            // Visual structure only — there's no submission endpoint behind this yet, same
+            // as the admin preview's mockup inputs. A page author who drags this block in
+            // gets the layout they designed rather than nothing; wiring up real submission
+            // handling is a separate, larger piece of work.
+            "contact-form" => $"""
+                <div class="cms-callout">
+                  <h2>{Html(GetString(block, "title", "Get your plan"))}</h2>
+                  <div class="cms-form-grid">
+                    <input type="text" placeholder="Name" disabled />
+                    <input type="email" placeholder="Email" disabled />
+                    <textarea rows="3" placeholder="Project details" disabled></textarea>
+                  </div>
+                </div>
                 """,
             "image" => GetString(block, "src") is { Length: > 0 } src
                 ? $"""<img class="cms-image" src="{Html(src)}" alt="{Html(GetString(block, "alt", string.Empty))}" />"""
@@ -113,6 +142,16 @@ public static class CmsBlockHtmlRenderer
         string.Concat(GetStringArray(block, propertyName).Select(item => $"<li>{Html(item)}</li>"));
 
     private static string Html(string value) => WebUtility.HtmlEncode(value);
+
+    private static int GetInt(JsonObject block, string propertyName, int fallback)
+    {
+        if (block[propertyName] is JsonValue value && value.TryGetValue<int>(out var result))
+        {
+            return result;
+        }
+
+        return fallback;
+    }
 
     private static string GetString(JsonObject block, string propertyName, string fallback = "")
     {

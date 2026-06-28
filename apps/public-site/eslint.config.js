@@ -18,4 +18,18 @@ export default defineConfig([
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
   },
+  {
+    // Runs under Node (the Vite CLI), not the browser.
+    files: ['vite.config.js'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
+  {
+    // Netlify Edge Functions inject their own runtime globals.
+    files: ['netlify/edge-functions/**/*.js'],
+    languageOptions: {
+      globals: { Netlify: 'readonly' },
+    },
+  },
 ])

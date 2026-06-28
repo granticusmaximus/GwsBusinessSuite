@@ -846,7 +846,6 @@
 
             var uploaded = await MediaLibraryService.UploadAsync(
                 file.Name,
-                file.ContentType,
                 memory.ToArray(),
                 MediaAltTextInput);
 

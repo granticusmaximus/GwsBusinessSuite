@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 /**
  * Renders a GWS layout JSON (PageLayout) as React components.
@@ -188,7 +188,6 @@ function Widget({ widget, resolvedProps: p = {} }) {
       return <hr className={`gws-divider gws-divider-${p.style || 'solid'}`} />;
 
     case 'html':
-      // eslint-disable-next-line react/no-danger
       return <div className="gws-html" dangerouslySetInnerHTML={{ __html: p.content || '' }} />;
 
     default:
