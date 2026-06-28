@@ -127,6 +127,19 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit           = 0,
             }));
 
+    // Unauthenticated POST that writes to the database (public contact-form submissions) —
+    // a much smaller budget than read traffic to keep it useless for spam/flood attempts.
+    options.AddPolicy("public-write", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                Window               = TimeSpan.FromMinutes(5),
+                PermitLimit          = 5,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit           = 0,
+            }));
+
     // Only the login page wants a redirect on rejection; API-shaped endpoints should get
     // a plain 429 instead of being bounced to an HTML page.
     options.OnRejected = (context, _) =>
@@ -346,7 +359,7 @@ app.MapGet("/cms/{siteSlug}/{pageSlug}", async (
     var page = await cmsBuilderService.GetPageBySlugAsync(site.Id, pageSlug);
     if (page is null) return Results.NotFound();
 
-    var bodyHtml = CmsBlockHtmlRenderer.Render(page.BlocksJson);
+    var bodyHtml = CmsBlockHtmlRenderer.Render(page.BlocksJson, siteSlug, pageSlug);
     var pageTitle = System.Net.WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle);
     var metaDescription = System.Net.WebUtility.HtmlEncode(page.MetaDescription);
     var ogImageTag = string.IsNullOrWhiteSpace(page.OgImageUrl)
@@ -366,6 +379,73 @@ app.MapGet("/cms/{siteSlug}/{pageSlug}", async (
         </head>
         <body>
           {bodyHtml}
+        </body>
+        </html>
+        """;
+
+    return Results.Content(html, "text/html");
+}).AllowAnonymous().RequireRateLimiting("public-read");
+
+// Handles contact-form block submissions (see CmsBlockHtmlRenderer's "contact-form" case).
+// Tightly rate-limited since it's an unauthenticated POST that writes to the database —
+// a much smaller budget than ordinary page views.
+app.MapPost("/cms/{siteSlug}/{pageSlug}/submit", async (
+    string siteSlug,
+    string pageSlug,
+    HttpRequest request,
+    ICmsBuilderService cmsBuilderService,
+    IFormSubmissionService formSubmissionService) =>
+{
+    var site = await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
+    if (site is null) return Results.NotFound();
+
+    var page = await cmsBuilderService.GetPageBySlugAsync(site.Id, pageSlug);
+    if (page is null) return Results.NotFound();
+
+    var form = await request.ReadFormAsync();
+
+    // Honeypot: a hidden field real visitors never see or fill. A non-empty value means a
+    // bot filled every field it found — accept silently so the bot doesn't learn it failed.
+    if (!string.IsNullOrWhiteSpace(form["company"]))
+    {
+        return Results.Redirect($"/cms/{siteSlug}/{pageSlug}/thanks");
+    }
+
+    try
+    {
+        await formSubmissionService.SubmitAsync(
+            page.Id,
+            form["name"].ToString(),
+            form["email"].ToString(),
+            form["message"].ToString());
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+
+    return Results.Redirect($"/cms/{siteSlug}/{pageSlug}/thanks");
+}).AllowAnonymous().RequireRateLimiting("public-write");
+
+app.MapGet("/cms/{siteSlug}/{pageSlug}/thanks", (string siteSlug, string pageSlug) =>
+{
+    var html = $"""
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>Thank you</title>
+          <link rel="stylesheet" href="/cms-public.css" />
+        </head>
+        <body>
+          <section class="cms-block">
+            <div class="cms-callout">
+              <h2>Thanks — your message was sent.</h2>
+              <p>We'll get back to you soon.</p>
+              <a class="cms-button" href="/cms/{System.Net.WebUtility.HtmlEncode(siteSlug)}/{System.Net.WebUtility.HtmlEncode(pageSlug)}">Back</a>
+            </div>
+          </section>
         </body>
         </html>
         """;

@@ -90,14 +90,21 @@ public sealed class CmsBlockHtmlRendererTests
     }
 
     [Fact]
-    public void Render_ShouldRenderContactFormBlock_AsDisabledStaticFields()
+    public void Render_ShouldRenderContactFormBlock_AsAWorkingFormPostingToTheSubmitEndpoint()
     {
-        var html = CmsBlockHtmlRenderer.Render("[{\"type\":\"contact-form\",\"title\":\"Get your plan\"}]");
+        var html = CmsBlockHtmlRenderer.Render(
+            "[{\"type\":\"contact-form\",\"title\":\"Get your plan\"}]",
+            "my-site",
+            "contact");
 
         Assert.Contains("Get your plan", html);
-        Assert.Contains("placeholder=\"Name\"", html);
-        Assert.Contains("placeholder=\"Email\"", html);
-        Assert.Contains("disabled", html);
+        Assert.Contains("<form", html);
+        Assert.Contains("action=\"/cms/my-site/contact/submit\"", html);
+        Assert.Contains("name=\"name\"", html);
+        Assert.Contains("name=\"email\"", html);
+        Assert.Contains("name=\"message\"", html);
+        Assert.Contains("cms-form-honeypot", html);
+        Assert.DoesNotContain("disabled", html);
     }
 
     [Fact]

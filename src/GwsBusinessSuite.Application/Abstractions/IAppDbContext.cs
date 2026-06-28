@@ -11,6 +11,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<CmsSite> CmsSites { get; }
     DbSet<CmsPage> CmsPages { get; }
     DbSet<MediaAsset> MediaAssets { get; }
+    DbSet<FormSubmission> FormSubmissions { get; }
     DbSet<AffiliateOffer> AffiliateOffers { get; }
     DbSet<DeploymentTarget> DeploymentTargets { get; }
     DbSet<SeoArticleDraft> SeoArticleDrafts { get; }

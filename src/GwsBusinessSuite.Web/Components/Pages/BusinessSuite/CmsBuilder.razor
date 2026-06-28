@@ -7,6 +7,7 @@
 @using Microsoft.AspNetCore.Components.Forms
 @inject ICmsBuilderService CmsBuilderService
 @inject IMediaLibraryService MediaLibraryService
+@inject IFormSubmissionService FormSubmissionService
 @inject IReactPageBuilderService ReactPageBuilderService
 @inject NavigationManager Navigation
 @inject ILogger<CmsBuilder> Logger
@@ -393,6 +394,63 @@
                 }
             </div>
         </div>
+
+        @if (SelectedPageId.HasValue)
+        {
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
+                    <div>
+                        <div class="fw-semibold">Form Submissions</div>
+                        <div class="small text-secondary">Visitor submissions from this page's contact-form block.</div>
+                    </div>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="LoadFormSubmissionsAsync" disabled="@IsSubmissionsBusy">
+                        <i class="bi bi-arrow-repeat me-1"></i>Refresh
+                    </button>
+                </div>
+                <div class="card-body p-0">
+                    @if (!string.IsNullOrEmpty(SubmissionsErrorMessage))
+                    {
+                        <div class="alert alert-danger m-3 mb-0 py-2 small">@SubmissionsErrorMessage</div>
+                    }
+                    @if (FormSubmissions.Count == 0)
+                    {
+                        <div class="p-4">
+                            <p class="text-secondary mb-0">No submissions yet.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="list-group list-group-flush">
+                            @foreach (var submission in FormSubmissions)
+                            {
+                                <div class="list-group-item">
+                                    <div class="d-flex justify-content-between align-items-start gap-2">
+                                        <div>
+                                            <div class="fw-semibold">
+                                                @submission.Name
+                                                @if (!submission.IsRead)
+                                                {
+                                                    <span class="badge text-bg-primary ms-2">New</span>
+                                                }
+                                            </div>
+                                            <div class="small text-secondary">@submission.Email · @submission.CreatedAt.ToLocalTime().ToString("g")</div>
+                                            <p class="mb-0 mt-2">@submission.Message</p>
+                                        </div>
+                                        <div class="d-flex flex-column gap-1 flex-shrink-0">
+                                            @if (!submission.IsRead)
+                                            {
+                                                <button class="btn btn-xs btn-outline-secondary" @onclick="() => MarkSubmissionReadAsync(submission.Id)">Mark read</button>
+                                            }
+                                            <button class="btn btn-xs btn-outline-danger" @onclick="() => DeleteSubmissionAsync(submission.Id)">Delete</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
     </div>
 </div>
 
@@ -637,6 +695,7 @@
         };
         SelectedBlueprintKey = string.Empty;
         ReplaceExistingBlocks = false;
+        FormSubmissions = new();
     }
 
     private async Task OpenPageAsync(Guid pageId)
@@ -686,6 +745,52 @@
         {
             CmsStatusMessage = $"Opened CMS page '{page.Title}'.";
         }
+
+        await LoadFormSubmissionsAsync();
+    }
+
+    // ── Form submissions ────────────────────────────────────────────────────
+
+    private List<FormSubmission> FormSubmissions { get; set; } = new();
+    private bool IsSubmissionsBusy { get; set; }
+    private string SubmissionsErrorMessage { get; set; } = string.Empty;
+
+    private async Task LoadFormSubmissionsAsync()
+    {
+        if (!SelectedPageId.HasValue)
+        {
+            FormSubmissions = new();
+            return;
+        }
+
+        IsSubmissionsBusy = true;
+        SubmissionsErrorMessage = string.Empty;
+
+        try
+        {
+            FormSubmissions = (await FormSubmissionService.ListAsync(SelectedPageId.Value)).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load form submissions for page {PageId}.", SelectedPageId);
+            SubmissionsErrorMessage = $"Unable to load form submissions. {ex.Message}";
+        }
+        finally
+        {
+            IsSubmissionsBusy = false;
+        }
+    }
+
+    private async Task MarkSubmissionReadAsync(Guid submissionId)
+    {
+        await FormSubmissionService.MarkReadAsync(submissionId);
+        await LoadFormSubmissionsAsync();
+    }
+
+    private async Task DeleteSubmissionAsync(Guid submissionId)
+    {
+        await FormSubmissionService.DeleteAsync(submissionId);
+        await LoadFormSubmissionsAsync();
     }
 
     private async Task SavePageAsync()

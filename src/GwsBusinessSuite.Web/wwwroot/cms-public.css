@@ -97,3 +97,19 @@ body {
   font-family: inherit;
   font-size: 0.95rem;
 }
+
+.cms-form-grid button {
+  justify-self: start;
+  border: none;
+  cursor: pointer;
+}
+
+/* Honeypot: invisible to real visitors and excluded from tab order, but still present in
+   the DOM for simple bots that fill every field they find. */
+.cms-form-honeypot {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}

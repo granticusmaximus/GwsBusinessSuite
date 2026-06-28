@@ -12,6 +12,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<CmsSite> CmsSites => Set<CmsSite>();
     public DbSet<CmsPage> CmsPages => Set<CmsPage>();
     public DbSet<MediaAsset> MediaAssets => Set<MediaAsset>();
+    public DbSet<FormSubmission> FormSubmissions => Set<FormSubmission>();
     public DbSet<AffiliateOffer> AffiliateOffers => Set<AffiliateOffer>();
     public DbSet<DeploymentTarget> DeploymentTargets => Set<DeploymentTarget>();
     public DbSet<SeoArticleDraft> SeoArticleDrafts => Set<SeoArticleDraft>();
@@ -29,6 +30,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<WikiPage>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<CmsSite>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<CmsPage>().HasIndex(x => new { x.SiteId, x.Slug }).IsUnique();
+        modelBuilder.Entity<FormSubmission>().HasIndex(x => new { x.PageId, x.CreatedAt });
         modelBuilder.Entity<SeoArticleDraft>().HasIndex(x => x.Status);
         modelBuilder.Entity<SeoArticleAffiliatePlacement>()
             .HasOne(x => x.Draft)

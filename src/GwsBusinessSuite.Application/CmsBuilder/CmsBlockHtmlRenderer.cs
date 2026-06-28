@@ -18,7 +18,7 @@ public static class CmsBlockHtmlRenderer
         .UseAdvancedExtensions()
         .Build();
 
-    public static string Render(string blocksJson)
+    public static string Render(string blocksJson, string siteSlug = "", string pageSlug = "")
     {
         var node = JsonNode.Parse(string.IsNullOrWhiteSpace(blocksJson) ? "[]" : blocksJson.Trim());
         var blocks = (node as JsonArray)?.OfType<JsonObject>() ?? Enumerable.Empty<JsonObject>();
@@ -26,13 +26,13 @@ public static class CmsBlockHtmlRenderer
         var html = new StringBuilder();
         foreach (var block in blocks)
         {
-            html.Append("<section class=\"cms-block\">").Append(RenderBlock(block)).Append("</section>\n");
+            html.Append("<section class=\"cms-block\">").Append(RenderBlock(block, siteSlug, pageSlug)).Append("</section>\n");
         }
 
         return html.ToString();
     }
 
-    private static string RenderBlock(JsonObject block)
+    private static string RenderBlock(JsonObject block, string siteSlug, string pageSlug)
     {
         var type = GetString(block, "type");
         return type switch
@@ -109,18 +109,20 @@ public static class CmsBlockHtmlRenderer
             "testimonials" => $"""
                 <h2>{Html(GetString(block, "title", "Client results"))}</h2>
                 """,
-            // Visual structure only — there's no submission endpoint behind this yet, same
-            // as the admin preview's mockup inputs. A page author who drags this block in
-            // gets the layout they designed rather than nothing; wiring up real submission
-            // handling is a separate, larger piece of work.
+            // Posts to /cms/{siteSlug}/{pageSlug}/submit (see Program.cs), which stores the
+            // submission via IFormSubmissionService. The "company" field is a honeypot:
+            // hidden from real visitors via cms-public.css, so a filled-in value marks the
+            // request as a bot without telling the bot it was caught.
             "contact-form" => $"""
                 <div class="cms-callout">
                   <h2>{Html(GetString(block, "title", "Get your plan"))}</h2>
-                  <div class="cms-form-grid">
-                    <input type="text" placeholder="Name" disabled />
-                    <input type="email" placeholder="Email" disabled />
-                    <textarea rows="3" placeholder="Project details" disabled></textarea>
-                  </div>
+                  <form class="cms-form-grid" method="post" action="/cms/{Html(siteSlug)}/{Html(pageSlug)}/submit">
+                    <input type="text" name="name" placeholder="Name" required maxlength="200" />
+                    <input type="email" name="email" placeholder="Email" required maxlength="320" />
+                    <textarea name="message" rows="3" placeholder="Project details" required maxlength="5000"></textarea>
+                    <input type="text" name="company" class="cms-form-honeypot" tabindex="-1" autocomplete="off" />
+                    <button type="submit" class="cms-button">Send</button>
+                  </form>
                 </div>
                 """,
             "image" => GetString(block, "src") is { Length: > 0 } src

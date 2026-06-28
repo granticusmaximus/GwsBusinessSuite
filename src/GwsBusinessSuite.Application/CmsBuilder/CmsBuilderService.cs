@@ -136,6 +136,16 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
 
         if (pages.Count > 0)
         {
+            var pageIds = pages.Select(page => page.Id).ToList();
+            var submissions = await dbContext.FormSubmissions
+                .Where(submission => pageIds.Contains(submission.PageId))
+                .ToListAsync(cancellationToken);
+
+            if (submissions.Count > 0)
+            {
+                dbContext.FormSubmissions.RemoveRange(submissions);
+            }
+
             dbContext.CmsPages.RemoveRange(pages);
         }
 
@@ -238,6 +248,15 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         if (page is null)
         {
             return;
+        }
+
+        var submissions = await dbContext.FormSubmissions
+            .Where(submission => submission.PageId == pageId)
+            .ToListAsync(cancellationToken);
+
+        if (submissions.Count > 0)
+        {
+            dbContext.FormSubmissions.RemoveRange(submissions);
         }
 
         dbContext.CmsPages.Remove(page);

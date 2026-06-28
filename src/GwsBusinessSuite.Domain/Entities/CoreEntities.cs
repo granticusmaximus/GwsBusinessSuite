@@ -108,6 +108,15 @@ public sealed class MediaAsset : AuditableEntity
     public long SizeBytes { get; set; }
 }
 
+public sealed class FormSubmission : AuditableEntity
+{
+    public Guid PageId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+    public bool IsRead { get; set; }
+}
+
 public sealed class CjConnectorSettings : AuditableEntity
 {
     // Singleton row — always upserted using WellKnownId.
