@@ -8,6 +8,7 @@
 @inject ICmsBuilderService CmsBuilderService
 @inject IMediaLibraryService MediaLibraryService
 @inject IFormSubmissionService FormSubmissionService
+@inject IPageRevisionService PageRevisionService
 @inject IReactPageBuilderService ReactPageBuilderService
 @inject NavigationManager Navigation
 @inject ILogger<CmsBuilder> Logger
@@ -461,6 +462,83 @@
                 </div>
             </div>
         }
+
+        @if (SelectedPageId.HasValue)
+        {
+            <div class="card border-0 shadow-sm mt-4">
+                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
+                    <div>
+                        <div class="fw-semibold">Revision History</div>
+                        <div class="small text-secondary">Snapshots captured before each save. Restoring a revision saves a checkpoint first so you can undo it.</div>
+                    </div>
+                    <span class="badge text-bg-secondary">@PageRevisions.Count revision@(PageRevisions.Count == 1 ? "" : "s")</span>
+                </div>
+                <div class="card-body p-0">
+                    @if (!string.IsNullOrEmpty(RevisionErrorMessage))
+                    {
+                        <div class="alert alert-danger m-3 mb-0 py-2 small">@RevisionErrorMessage</div>
+                    }
+                    @if (PageRevisions.Count == 0)
+                    {
+                        <div class="p-4">
+                            <p class="text-secondary mb-0">No revisions yet — a snapshot is captured automatically before each save.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="list-group list-group-flush">
+                            @foreach (var rev in PageRevisions)
+                            {
+                                <div class="list-group-item">
+                                    <div class="d-flex justify-content-between align-items-start gap-2">
+                                        <div>
+                                            <div class="fw-semibold small">
+                                                <span class="badge text-bg-secondary me-1">#@rev.RevisionNumber</span>
+                                                @if (!string.IsNullOrWhiteSpace(rev.Label))
+                                                {
+                                                    <span class="text-secondary">@rev.Label</span>
+                                                }
+                                                else
+                                                {
+                                                    <span>@rev.Title</span>
+                                                }
+                                            </div>
+                                            <div class="small text-secondary mt-1">
+                                                @rev.CreatedAt.ToLocalTime().ToString("g")
+                                                @if (!string.IsNullOrWhiteSpace(rev.Label) && rev.Label != rev.Title)
+                                                {
+                                                    <span> · @rev.Title</span>
+                                                }
+                                            </div>
+                                        </div>
+                                        <div class="d-flex gap-1 flex-shrink-0">
+                                            <button class="btn btn-xs btn-outline-secondary" @onclick="() => PreviewRevision(rev)">
+                                                Preview
+                                            </button>
+                                            <button class="btn btn-xs btn-outline-primary" @onclick="() => RestoreRevisionAsync(rev.Id)"
+                                                    disabled="@IsRevisionBusy">
+                                                Restore
+                                            </button>
+                                            <button class="btn btn-xs btn-outline-danger" @onclick="() => DeleteRevisionAsync(rev.Id)"
+                                                    disabled="@IsRevisionBusy">
+                                                Delete
+                                            </button>
+                                        </div>
+                                    </div>
+                                    @if (PreviewedRevisionId == rev.Id)
+                                    {
+                                        <div class="mt-3 border-top pt-3">
+                                            <div class="small fw-semibold text-secondary mb-2">Preview of revision #@rev.RevisionNumber</div>
+                                            <CmsBlockPreview BlocksJson="@rev.BlocksJson" />
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
     </div>
 </div>
 
@@ -707,6 +785,8 @@
         SelectedBlueprintKey = string.Empty;
         ReplaceExistingBlocks = false;
         FormSubmissions = new();
+        PageRevisions = new();
+        PreviewedRevisionId = null;
     }
 
     private async Task OpenPageAsync(Guid pageId)
@@ -759,6 +839,7 @@
         }
 
         await LoadFormSubmissionsAsync();
+        await LoadRevisionsAsync();
     }
 
     // ── Form submissions ────────────────────────────────────────────────────
@@ -805,6 +886,82 @@
         await LoadFormSubmissionsAsync();
     }
 
+    // ── Revision history ────────────────────────────────────────────────────
+
+    private List<CmsPageRevision> PageRevisions { get; set; } = new();
+    private bool IsRevisionBusy { get; set; }
+    private string RevisionErrorMessage { get; set; } = string.Empty;
+    private Guid? PreviewedRevisionId { get; set; }
+
+    private async Task LoadRevisionsAsync()
+    {
+        if (!SelectedPageId.HasValue)
+        {
+            PageRevisions = new();
+            return;
+        }
+
+        try
+        {
+            PageRevisions = (await PageRevisionService.ListAsync(SelectedPageId.Value)).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load revisions for page {PageId}.", SelectedPageId);
+            RevisionErrorMessage = $"Unable to load revisions. {ex.Message}";
+        }
+    }
+
+    private void PreviewRevision(CmsPageRevision revision)
+    {
+        PreviewedRevisionId = PreviewedRevisionId == revision.Id ? null : revision.Id;
+    }
+
+    private async Task RestoreRevisionAsync(Guid revisionId)
+    {
+        if (!SelectedPageId.HasValue) return;
+
+        IsRevisionBusy = true;
+        RevisionErrorMessage = string.Empty;
+
+        try
+        {
+            var restored = await PageRevisionService.RestoreAsync(SelectedPageId.Value, revisionId);
+            CmsPages = (await CmsBuilderService.ListPagesAsync(SelectedSiteId!.Value)).ToList();
+            await LoadSelectedPageAsync(restored.Id, updateStatus: false);
+            PreviewedRevisionId = null;
+            CmsStatusMessage = "Revision restored. A checkpoint of the previous state was saved as the latest revision.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to restore revision {RevisionId}.", revisionId);
+            RevisionErrorMessage = $"Unable to restore revision. {ex.Message}";
+        }
+        finally
+        {
+            IsRevisionBusy = false;
+        }
+    }
+
+    private async Task DeleteRevisionAsync(Guid revisionId)
+    {
+        IsRevisionBusy = true;
+        try
+        {
+            await PageRevisionService.DeleteAsync(revisionId);
+            await LoadRevisionsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to delete revision {RevisionId}.", revisionId);
+            RevisionErrorMessage = $"Unable to delete revision. {ex.Message}";
+        }
+        finally
+        {
+            IsRevisionBusy = false;
+        }
+    }
+
     private async Task SavePageAsync()
     {
         if (!SelectedSiteId.HasValue)
@@ -819,6 +976,16 @@
 
         try
         {
+            // Checkpoint the current state before overwriting so any save is undoable.
+            if (SelectedPageId.HasValue)
+            {
+                var currentPage = await CmsBuilderService.GetPageAsync(SelectedPageId.Value);
+                if (currentPage is not null)
+                {
+                    await PageRevisionService.CreateRevisionAsync(currentPage);
+                }
+            }
+
             PageEditor.SiteId = SelectedSiteId;
             var saved = await CmsBuilderService.SavePageAsync(PageEditor);
             SelectedPageId = saved.Id;

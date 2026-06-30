@@ -101,6 +101,20 @@ public sealed class CmsPage : AuditableEntity
     public string CustomCss { get; set; } = string.Empty;
 }
 
+public sealed class CmsPageRevision : AuditableEntity
+{
+    public Guid PageId { get; set; }
+    public int RevisionNumber { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string Slug { get; set; } = string.Empty;
+    public string BlocksJson { get; set; } = "[]";
+    public string MetaTitle { get; set; } = string.Empty;
+    public string MetaDescription { get; set; } = string.Empty;
+    public string OgImageUrl { get; set; } = string.Empty;
+    public string CustomCss { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+}
+
 public sealed class MediaAsset : AuditableEntity
 {
     public required string FileName { get; set; }
