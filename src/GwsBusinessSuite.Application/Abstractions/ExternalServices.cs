@@ -5,8 +5,6 @@ public interface ICjAffiliateService
     Task<CjConnectionValidationResult> ValidateConnectionAsync(CjConnectionRequest request, CancellationToken ct = default);
     Task<CjPartnerFetchResult> FetchPartnersAsync(CjConnectionRequest request, CancellationToken ct = default);
 }
-public interface ICloudflareService { Task<string> CreateSubdomainRouteAsync(string subdomain, int port, CancellationToken ct = default); }
-public interface IDigitalOceanService { Task<string> GetDropletsAsync(CancellationToken ct = default); }
 public interface IOllamaService
 {
     Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default);

@@ -6,7 +6,6 @@ namespace GwsBusinessSuite.Infrastructure.Data;
 
 public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : DbContext(options), IAppDbContext
 {
-    public DbSet<BusinessApp> BusinessApps => Set<BusinessApp>();
     public DbSet<Contact> Contacts => Set<Contact>();
     public DbSet<WikiPage> WikiPages => Set<WikiPage>();
     public DbSet<CmsSite> CmsSites => Set<CmsSite>();
@@ -15,7 +14,6 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<FormSubmission> FormSubmissions => Set<FormSubmission>();
     public DbSet<CmsPageRevision> CmsPageRevisions => Set<CmsPageRevision>();
     public DbSet<AffiliateOffer> AffiliateOffers => Set<AffiliateOffer>();
-    public DbSet<DeploymentTarget> DeploymentTargets => Set<DeploymentTarget>();
     public DbSet<SeoArticleDraft> SeoArticleDrafts => Set<SeoArticleDraft>();
     public DbSet<SeoArticleAffiliatePlacement> SeoArticleAffiliatePlacements => Set<SeoArticleAffiliatePlacement>();
     public DbSet<SeoArticleAffiliateInteraction> SeoArticleAffiliateInteractions => Set<SeoArticleAffiliateInteraction>();
@@ -27,7 +25,6 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<BusinessApp>().HasIndex(x => x.Subdomain).IsUnique(false);
         modelBuilder.Entity<WikiPage>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<CmsSite>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<CmsPage>().HasIndex(x => new { x.SiteId, x.Slug }).IsUnique();

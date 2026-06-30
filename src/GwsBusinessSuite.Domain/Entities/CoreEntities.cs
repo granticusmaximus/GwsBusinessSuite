@@ -57,15 +57,6 @@ public static class AffiliateInteractionEventTypes
     public const string Click = "Click";
 }
 
-public sealed class BusinessApp : AuditableEntity
-{
-    public required string Name { get; set; }
-    public required string AppType { get; set; }
-    public string? Subdomain { get; set; }
-    public string Status { get; set; } = "Draft";
-    public int? Port { get; set; }
-}
-
 public sealed class Contact : AuditableEntity
 {
     public required string FullName { get; set; }
@@ -218,14 +209,6 @@ public sealed class SeoArticleWorkflowEvent : AuditableEntity
     public string EventType { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
     public SeoArticleDraft? Draft { get; set; }
-}
-
-public sealed class DeploymentTarget : AuditableEntity
-{
-    public required string Provider { get; set; }
-    public required string Name { get; set; }
-    public string? Host { get; set; }
-    public string? Notes { get; set; }
 }
 
 public sealed class Article : AuditableEntity

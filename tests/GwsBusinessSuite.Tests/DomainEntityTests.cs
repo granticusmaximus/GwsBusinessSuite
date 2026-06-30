@@ -6,14 +6,6 @@ namespace GwsBusinessSuite.Tests;
 public sealed class DomainEntityTests
 {
     [Fact]
-    public void BusinessApp_Should_Default_To_Draft_Status()
-    {
-        var app = new BusinessApp { Name = "Test App", AppType = "WebsiteCms" };
-        app.Status.Should().Be("Draft");
-        app.Id.Should().NotBeEmpty();
-    }
-
-    [Fact]
     public void SeoArticleDraft_Should_Default_To_Draft_Status()
     {
         var draft = new SeoArticleDraft

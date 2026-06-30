@@ -5,7 +5,6 @@ namespace GwsBusinessSuite.Application.Abstractions;
 
 public interface IAppDbContext : IAsyncDisposable
 {
-    DbSet<BusinessApp> BusinessApps { get; }
     DbSet<Contact> Contacts { get; }
     DbSet<WikiPage> WikiPages { get; }
     DbSet<CmsSite> CmsSites { get; }
@@ -14,7 +13,6 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<FormSubmission> FormSubmissions { get; }
     DbSet<CmsPageRevision> CmsPageRevisions { get; }
     DbSet<AffiliateOffer> AffiliateOffers { get; }
-    DbSet<DeploymentTarget> DeploymentTargets { get; }
     DbSet<SeoArticleDraft> SeoArticleDrafts { get; }
     DbSet<SeoArticleAffiliatePlacement> SeoArticleAffiliatePlacements { get; }
     DbSet<SeoArticleAffiliateInteraction> SeoArticleAffiliateInteractions { get; }
