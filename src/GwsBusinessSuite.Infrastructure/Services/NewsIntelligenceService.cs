@@ -1,30 +1,37 @@
 using CodeHollow.FeedReader;
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.NewsIntelligence;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
 public sealed class NewsIntelligenceService(
     IAppDbContextFactory dbContextFactory,
     IOllamaService ollama,
+    IOptions<ContentStudioOptions> studioOptions,
+    HttpClient http,
     ILogger<NewsIntelligenceService> logger) : INewsIntelligenceService
 {
-    // Curated RSS feeds by category. No API key needed — all public.
+    // Verified working RSS feeds as of 2026. Prefer feeds that don't require
+    // subscriptions and have stable URLs. Reuters public RSS was deprecated in 2020;
+    // Bloomberg/WSJ require paid access — both are omitted.
     private static readonly string[] GeneralFeeds =
     [
-        "https://feeds.bbci.co.uk/news/rss.xml",
-        "https://feeds.reuters.com/reuters/topNews",
+        "https://feeds.bbci.co.uk/news/world/rss.xml",
+        "https://www.theguardian.com/world/rss",
+        "https://feeds.npr.org/1001/rss.xml",
+        "https://abcnews.go.com/abcnews/topstories",
         "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
-        "https://apnews.com/rss",
     ];
 
     private static readonly string[] TechFeeds =
     [
         "https://hnrss.org/frontpage",
-        "https://feeds.feedburner.com/TechCrunch",
+        "https://techcrunch.com/feed/",
         "https://feeds.arstechnica.com/arstechnica/index",
         "https://www.theverge.com/rss/index.xml",
         "https://www.wired.com/feed/rss",
@@ -32,14 +39,15 @@ public sealed class NewsIntelligenceService(
 
     private static readonly string[] BusinessFeeds =
     [
-        "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
-        "https://feeds.bloomberg.com/markets/news.rss",
+        "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+        "https://feeds.marketwatch.com/marketwatch/topstories/",
     ];
 
     private static readonly string[] ScienceFeeds =
     [
-        "https://rss.sciencedaily.com/top/science.xml",
+        "https://www.sciencedaily.com/rss/all.xml",
         "https://news.mit.edu/rss/feed",
+        "https://www.nasa.gov/rss/dyn/breaking_news.rss",
     ];
 
     private static readonly string[] AllFeeds =
@@ -48,7 +56,8 @@ public sealed class NewsIntelligenceService(
     private const int MaxItemsPerTopic = 30;
     private const int MaxTopNewsItems = 25;
     private const int NewsItemTtlHours = 24;
-    private const string OllamaModel = "llama3.2";
+
+    private string OllamaModel => studioOptions.Value.Model;
 
     public async Task<IReadOnlyList<WatchedTopicSummary>> ListTopicsAsync(CancellationToken ct = default)
     {
@@ -117,7 +126,6 @@ public sealed class NewsIntelligenceService(
         var topic = await db.WatchedTopics.FindAsync([id], ct);
         if (topic is null) return;
 
-        // Remove associated news items first (no cascade configured)
         var items = await db.NewsItems.Where(n => n.TopicId == id).ToListAsync(ct);
         db.NewsItems.RemoveRange(items);
         db.WatchedTopics.Remove(topic);
@@ -129,20 +137,22 @@ public sealed class NewsIntelligenceService(
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
 
         var cutoff = DateTimeOffset.UtcNow.AddHours(-NewsItemTtlHours);
-
-        var topicMap = await db.WatchedTopics
-            .AsNoTracking()
-            .ToDictionaryAsync(t => t.Id, ct);
+        var topicMap = await db.WatchedTopics.AsNoTracking().ToDictionaryAsync(t => t.Id, ct);
 
         IQueryable<NewsItem> query = db.NewsItems.AsNoTracking().Where(n => n.FetchedAt >= cutoff);
-
         if (topicId.HasValue)
             query = query.Where(n => n.TopicId == topicId.Value);
 
+        // Sort by FetchedAt in SQL (non-nullable, always translates safely in SQLite EF).
+        // Then re-sort in memory on PublishedAt so published timestamps take precedence.
         var items = await query
-            .OrderByDescending(n => n.PublishedAt ?? n.FetchedAt)
+            .OrderByDescending(n => n.FetchedAt)
             .Take(100)
             .ToListAsync(ct);
+
+        items = items
+            .OrderByDescending(n => n.PublishedAt ?? n.FetchedAt)
+            .ToList();
 
         var dtos = items.Select(n =>
         {
@@ -152,8 +162,7 @@ public sealed class NewsIntelligenceService(
                 n.PublishedAt, n.Description, n.OllamaSummary, n.FetchedAt);
         }).ToList();
 
-        var lastRefresh = items.Count > 0 ? items.Max(n => n.FetchedAt) : (DateTimeOffset?)null;
-
+        var lastRefresh = items.Count > 0 ? (DateTimeOffset?)items.Max(n => n.FetchedAt) : null;
         return new NewsFeedResult(dtos, lastRefresh);
     }
 
@@ -188,38 +197,33 @@ public sealed class NewsIntelligenceService(
     public async Task RefreshTopNewsAsync(CancellationToken ct = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
-
         logger.LogInformation("Refreshing top news");
-
         var articles = await FetchFromFeedsAsync(GeneralFeeds, keywords: null, ct);
         await PruneAndSaveItemsAsync(db, topicId: null, articles, MaxTopNewsItems, ct);
-        await db.SaveChangesAsync(ct);
     }
 
     public async Task RefreshAllAsync(CancellationToken ct = default)
     {
         await RefreshTopNewsAsync(ct);
 
-        await using var db = await dbContextFactory.CreateDbContextAsync(ct);
-        var activeTopicIds = await db.WatchedTopics
-            .AsNoTracking()
-            .Where(t => t.IsActive)
-            .Select(t => t.Id)
-            .ToListAsync(ct);
+        List<Guid> activeTopicIds;
+        await using (var db = await dbContextFactory.CreateDbContextAsync(ct))
+        {
+            activeTopicIds = await db.WatchedTopics
+                .AsNoTracking()
+                .Where(t => t.IsActive)
+                .Select(t => t.Id)
+                .ToListAsync(ct);
+        }
 
         foreach (var id in activeTopicIds)
         {
-            try
-            {
-                await RefreshTopicAsync(id, ct);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to refresh topic {TopicId}", id);
-            }
+            if (ct.IsCancellationRequested) break;
+            try { await RefreshTopicAsync(id, ct); }
+            catch (Exception ex) { logger.LogError(ex, "Failed to refresh topic {TopicId}", id); }
         }
 
-        // Prune expired items (older than 24h) across all topics
+        // Prune items older than 24h
         await using var pruneDb = await dbContextFactory.CreateDbContextAsync(ct);
         var cutoff = DateTimeOffset.UtcNow.AddHours(-NewsItemTtlHours);
         var expired = await pruneDb.NewsItems.Where(n => n.FetchedAt < cutoff).ToListAsync(ct);
@@ -241,7 +245,11 @@ public sealed class NewsIntelligenceService(
             if (ct.IsCancellationRequested) break;
             try
             {
-                var feed = await FeedReader.ReadAsync(url, ct);
+                // Fetch raw content with our HttpClient (has User-Agent set in DI) then
+                // parse with FeedReader so we aren't at the mercy of its internal client.
+                var content = await http.GetStringAsync(url, ct);
+                var feed = FeedReader.ReadFromString(content);
+
                 foreach (var item in feed.Items)
                 {
                     if (string.IsNullOrWhiteSpace(item.Link) || !seenUrls.Add(item.Link))
@@ -251,7 +259,6 @@ public sealed class NewsIntelligenceService(
                     var desc = item.Description ?? string.Empty;
                     var combined = $"{title} {desc}";
 
-                    // If no keywords, accept all (used for Top News)
                     var matches = keywords is null || keywords.Any(k =>
                         combined.Contains(k, StringComparison.OrdinalIgnoreCase));
 
@@ -283,15 +290,10 @@ public sealed class NewsIntelligenceService(
         int maxItems,
         CancellationToken ct)
     {
-        // Remove stale items for this slot
-        var stale = await db.NewsItems
-            .Where(n => n.TopicId == topicId)
-            .ToListAsync(ct);
+        var stale = await db.NewsItems.Where(n => n.TopicId == topicId).ToListAsync(ct);
         db.NewsItems.RemoveRange(stale);
 
         var toSave = articles.Take(maxItems).ToList();
-
-        // Batch-summarize with Ollama if we have items
         var summaries = await BatchSummarizeAsync(toSave, ct);
 
         for (var i = 0; i < toSave.Count; i++)
@@ -316,27 +318,23 @@ public sealed class NewsIntelligenceService(
     private async Task<List<string>> BatchSummarizeAsync(List<RawArticle> articles, CancellationToken ct)
     {
         if (articles.Count == 0) return [];
-
         try
         {
             var numbered = articles
                 .Select((a, i) => $"{i + 1}. {a.Title}: {Truncate(a.Description, 200)}")
                 .ToList();
 
-            var userPrompt = string.Join("\n", numbered);
+            var system =
+                "You are a news curator. For each numbered article, respond with one sharp, opinionated " +
+                "sentence under 20 words that captures what matters. Respond only with a numbered list " +
+                "matching the input order. No intro, no closing remarks.";
 
-            var systemPrompt =
-                "You are a news curator. For each numbered article, respond with one sharp, opinionated sentence " +
-                "under 20 words that captures what matters. Respond only with a numbered list matching the input " +
-                "order. No intro, no closing remarks.";
-
-            var raw = await ollama.GenerateAsync(OllamaModel, systemPrompt, userPrompt, ct);
-
+            var raw = await ollama.GenerateAsync(OllamaModel, system, string.Join("\n", numbered), ct);
             return ParseNumberedList(raw, articles.Count);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Ollama summarization failed — storing items without summaries");
+            logger.LogWarning(ex, "Ollama summarization skipped ({Model} may not be available) — articles saved without hot takes", OllamaModel);
             return Enumerable.Repeat(string.Empty, articles.Count).ToList();
         }
     }
@@ -345,23 +343,16 @@ public sealed class NewsIntelligenceService(
     {
         var lines = raw.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         var results = new List<string>(expectedCount);
-
         foreach (var line in lines)
         {
             var trimmed = line.TrimStart();
-            // Strip leading "1. " or "1) "
             var dotIdx = trimmed.IndexOf('.');
             var parenIdx = trimmed.IndexOf(')');
             var sepIdx = dotIdx >= 0 && (parenIdx < 0 || dotIdx < parenIdx) ? dotIdx : parenIdx;
-
             if (sepIdx > 0 && int.TryParse(trimmed[..sepIdx], out _))
                 results.Add(trimmed[(sepIdx + 1)..].Trim());
         }
-
-        // Pad if Ollama returned fewer lines than expected
-        while (results.Count < expectedCount)
-            results.Add(string.Empty);
-
+        while (results.Count < expectedCount) results.Add(string.Empty);
         return results;
     }
 

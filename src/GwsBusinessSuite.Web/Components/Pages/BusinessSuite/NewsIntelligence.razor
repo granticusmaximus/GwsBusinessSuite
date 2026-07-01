@@ -223,7 +223,7 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Refresh failed");
-            _errorMessage = "Refresh failed — check that Ollama is running and try again.";
+            _errorMessage = $"Refresh failed: {ex.Message}";
         }
         finally { _refreshing = false; }
     }

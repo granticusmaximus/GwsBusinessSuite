@@ -80,7 +80,12 @@ public static class DependencyInjection
         services.AddScoped<IContentStudioService, ContentStudioService>();
         services.AddScoped<ICrmService, CrmService>();
         services.AddScoped<IWikiService, WikiService>();
-        services.AddScoped<INewsIntelligenceService, NewsIntelligenceService>();
+        services.AddHttpClient<INewsIntelligenceService, NewsIntelligenceService>(client =>
+        {
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(
+                "Mozilla/5.0 (compatible; GWSuite/1.0; +https://grantwatson.dev)");
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
         services.AddHostedService<NewsRefreshBackgroundService>();
 
         return services;
