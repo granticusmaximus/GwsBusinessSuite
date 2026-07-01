@@ -43,14 +43,18 @@ public sealed class NewsIntelligenceService(
         var cutoff = DateTimeOffset.UtcNow.AddHours(-NewsItemTtlHours);
         var topicIds = topics.Select(t => t.Id).ToList();
 
-        var counts = await db.NewsItems
+        // SQLite can't translate range comparisons (>=) on DateTimeOffset columns,
+        // so pull the (small) candidate set down and filter/group in memory.
+        var recent = await db.NewsItems
             .AsNoTracking()
-            .Where(n => n.TopicId != null && topicIds.Contains(n.TopicId!.Value) && n.FetchedAt >= cutoff)
-            .GroupBy(n => n.TopicId!.Value)
-            .Select(g => new { TopicId = g.Key, Count = g.Count() })
+            .Where(n => n.TopicId != null && topicIds.Contains(n.TopicId!.Value))
+            .Select(n => new { n.TopicId, n.FetchedAt })
             .ToListAsync(ct);
 
-        var countMap = counts.ToDictionary(c => c.TopicId, c => c.Count);
+        var countMap = recent
+            .Where(n => n.FetchedAt >= cutoff)
+            .GroupBy(n => n.TopicId!.Value)
+            .ToDictionary(g => g.Key, g => g.Count());
 
         return topics.Select(t => new WatchedTopicSummary(
             t.Id, t.Name, t.Keywords, t.ColorHex, t.IsActive, t.LastFetchedAt,
@@ -110,14 +114,19 @@ public sealed class NewsIntelligenceService(
         var cutoff = DateTimeOffset.UtcNow.AddHours(-NewsItemTtlHours);
         var topicMap = await db.WatchedTopics.AsNoTracking().ToDictionaryAsync(t => t.Id, ct);
 
-        IQueryable<NewsItem> query = db.NewsItems.AsNoTracking().Where(n => n.FetchedAt >= cutoff);
+        IQueryable<NewsItem> query = db.NewsItems.AsNoTracking();
         if (topicId.HasValue)
             query = query.Where(n => n.TopicId == topicId.Value);
 
-        var items = await query.OrderByDescending(n => n.FetchedAt).Take(100).ToListAsync(ct);
+        // SQLite can't translate range comparisons (>=) on DateTimeOffset columns,
+        // so the cutoff filter and ordering both happen in memory below.
+        var items = await query.ToListAsync(ct);
 
-        // Re-sort in memory so published timestamps take precedence over fetch order.
-        items = items.OrderByDescending(n => n.PublishedAt ?? n.FetchedAt).ToList();
+        items = items
+            .Where(n => n.FetchedAt >= cutoff)
+            .OrderByDescending(n => n.PublishedAt ?? n.FetchedAt)
+            .Take(100)
+            .ToList();
 
         var dtos = items.Select(n =>
         {
@@ -194,9 +203,21 @@ public sealed class NewsIntelligenceService(
         }
 
         // Prune items older than 24h using direct SQL to avoid concurrency collisions.
+        // SQLite can't translate a DateTimeOffset "<" comparison, so the cutoff check
+        // happens in memory and only the resulting id list is sent to ExecuteDeleteAsync.
         await using var pruneDb = await dbContextFactory.CreateDbContextAsync(ct);
         var cutoff = DateTimeOffset.UtcNow.AddHours(-NewsItemTtlHours);
-        var pruned = await pruneDb.NewsItems.Where(n => n.FetchedAt < cutoff).ExecuteDeleteAsync(ct);
+        var staleIds = (await pruneDb.NewsItems
+                .AsNoTracking()
+                .Select(n => new { n.Id, n.FetchedAt })
+                .ToListAsync(ct))
+            .Where(n => n.FetchedAt < cutoff)
+            .Select(n => n.Id)
+            .ToList();
+
+        var pruned = staleIds.Count > 0
+            ? await pruneDb.NewsItems.Where(n => staleIds.Contains(n.Id)).ExecuteDeleteAsync(ct)
+            : 0;
         if (pruned > 0)
             logger.LogInformation("Pruned {Count} expired news items", pruned);
     }
