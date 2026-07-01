@@ -21,9 +21,11 @@
         @if (_showTopicForm)
         {
             <div class="ni-topic-form">
-                <input class="ni-input" placeholder="Topic name" @bind="_formName" />
+                <input class="ni-input" placeholder="Topic name"
+                       value="@_formName" @oninput="e => _formName = e.Value?.ToString() ?? string.Empty" />
                 <textarea class="ni-input ni-textarea" placeholder="Keywords (comma-separated)"
-                          @bind="_formKeywords" rows="2"></textarea>
+                          @oninput="e => _formKeywords = e.Value?.ToString() ?? string.Empty"
+                          rows="2">@_formKeywords</textarea>
                 <div class="ni-color-row">
                     <label class="ni-label">Badge color</label>
                     <input type="color" class="ni-color-picker" @bind="_formColor" />

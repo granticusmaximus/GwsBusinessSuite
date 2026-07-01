@@ -16,48 +16,20 @@ public sealed class NewsIntelligenceService(
     HttpClient http,
     ILogger<NewsIntelligenceService> logger) : INewsIntelligenceService
 {
-    // Verified working RSS feeds as of 2026. Prefer feeds that don't require
-    // subscriptions and have stable URLs. Reuters public RSS was deprecated in 2020;
-    // Bloomberg/WSJ require paid access — both are omitted.
-    private static readonly string[] GeneralFeeds =
-    [
-        "https://feeds.bbci.co.uk/news/world/rss.xml",
-        "https://www.theguardian.com/world/rss",
-        "https://feeds.npr.org/1001/rss.xml",
-        "https://abcnews.go.com/abcnews/topstories",
-        "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
-    ];
-
-    private static readonly string[] TechFeeds =
-    [
-        "https://hnrss.org/frontpage",
-        "https://techcrunch.com/feed/",
-        "https://feeds.arstechnica.com/arstechnica/index",
-        "https://www.theverge.com/rss/index.xml",
-        "https://www.wired.com/feed/rss",
-    ];
-
-    private static readonly string[] BusinessFeeds =
-    [
-        "https://www.cnbc.com/id/100003114/device/rss/rss.html",
-        "https://feeds.marketwatch.com/marketwatch/topstories/",
-    ];
-
-    private static readonly string[] ScienceFeeds =
-    [
-        "https://www.sciencedaily.com/rss/all.xml",
-        "https://news.mit.edu/rss/feed",
-        "https://www.nasa.gov/rss/dyn/breaking_news.rss",
-    ];
-
-    private static readonly string[] AllFeeds =
-        [.. GeneralFeeds, .. TechFeeds, .. BusinessFeeds, .. ScienceFeeds];
+    // Google News RSS is used exclusively because:
+    // 1. It works reliably from cloud / datacenter IPs (unlike outlet-specific feeds).
+    // 2. It supports keyword search natively, so one request covers all sources.
+    // 3. It aggregates hundreds of outlets simultaneously.
+    private const string GoogleNewsTopUrl =
+        "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en";
 
     private const int MaxItemsPerTopic = 30;
     private const int MaxTopNewsItems = 25;
     private const int NewsItemTtlHours = 24;
 
     private string OllamaModel => studioOptions.Value.Model;
+
+    // ── CRUD ─────────────────────────────────────────────────
 
     public async Task<IReadOnlyList<WatchedTopicSummary>> ListTopicsAsync(CancellationToken ct = default)
     {
@@ -88,7 +60,6 @@ public sealed class NewsIntelligenceService(
     public async Task<WatchedTopicSummary> CreateTopicAsync(string name, string keywords, string colorHex, CancellationToken ct = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
-
         var topic = new WatchedTopic
         {
             Name = name.Trim(),
@@ -98,14 +69,12 @@ public sealed class NewsIntelligenceService(
         };
         db.WatchedTopics.Add(topic);
         await db.SaveChangesAsync(ct);
-
         return new WatchedTopicSummary(topic.Id, topic.Name, topic.Keywords, topic.ColorHex, topic.IsActive, null, 0);
     }
 
     public async Task<WatchedTopicSummary> UpdateTopicAsync(Guid id, string name, string keywords, string colorHex, bool isActive, CancellationToken ct = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
-
         var topic = await db.WatchedTopics.FindAsync([id], ct)
             ?? throw new InvalidOperationException($"Topic {id} not found");
 
@@ -115,7 +84,6 @@ public sealed class NewsIntelligenceService(
         topic.IsActive = isActive;
         topic.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
-
         return new WatchedTopicSummary(topic.Id, topic.Name, topic.Keywords, topic.ColorHex, topic.IsActive, topic.LastFetchedAt, 0);
     }
 
@@ -126,11 +94,14 @@ public sealed class NewsIntelligenceService(
         var topic = await db.WatchedTopics.FindAsync([id], ct);
         if (topic is null) return;
 
-        var items = await db.NewsItems.Where(n => n.TopicId == id).ToListAsync(ct);
-        db.NewsItems.RemoveRange(items);
+        // ExecuteDeleteAsync avoids loading news items into memory and is safe
+        // if a concurrent refresh is touching the same rows simultaneously.
+        await db.NewsItems.Where(n => n.TopicId == id).ExecuteDeleteAsync(ct);
         db.WatchedTopics.Remove(topic);
         await db.SaveChangesAsync(ct);
     }
+
+    // ── Feed read ─────────────────────────────────────────────
 
     public async Task<NewsFeedResult> GetFeedAsync(Guid? topicId, CancellationToken ct = default)
     {
@@ -143,28 +114,24 @@ public sealed class NewsIntelligenceService(
         if (topicId.HasValue)
             query = query.Where(n => n.TopicId == topicId.Value);
 
-        // Sort by FetchedAt in SQL (non-nullable, always translates safely in SQLite EF).
-        // Then re-sort in memory on PublishedAt so published timestamps take precedence.
-        var items = await query
-            .OrderByDescending(n => n.FetchedAt)
-            .Take(100)
-            .ToListAsync(ct);
+        var items = await query.OrderByDescending(n => n.FetchedAt).Take(100).ToListAsync(ct);
 
-        items = items
-            .OrderByDescending(n => n.PublishedAt ?? n.FetchedAt)
-            .ToList();
+        // Re-sort in memory so published timestamps take precedence over fetch order.
+        items = items.OrderByDescending(n => n.PublishedAt ?? n.FetchedAt).ToList();
 
         var dtos = items.Select(n =>
         {
-            var topicName = n.TopicId.HasValue && topicMap.TryGetValue(n.TopicId.Value, out var t) ? t.Name : "Top News";
+            var topicName  = n.TopicId.HasValue && topicMap.TryGetValue(n.TopicId.Value, out var t)  ? t.Name     : "Top News";
             var topicColor = n.TopicId.HasValue && topicMap.TryGetValue(n.TopicId.Value, out var tc) ? tc.ColorHex : "#64748b";
-            return new NewsItemDto(n.Id, n.TopicId, topicName, topicColor, n.Title, n.Url, n.Source,
-                n.PublishedAt, n.Description, n.OllamaSummary, n.FetchedAt);
+            return new NewsItemDto(n.Id, n.TopicId, topicName, topicColor, n.Title, n.Url,
+                n.Source, n.PublishedAt, n.Description, n.OllamaSummary, n.FetchedAt);
         }).ToList();
 
         var lastRefresh = items.Count > 0 ? (DateTimeOffset?)items.Max(n => n.FetchedAt) : null;
         return new NewsFeedResult(dtos, lastRefresh);
     }
+
+    // ── Refresh ───────────────────────────────────────────────
 
     public async Task RefreshTopicAsync(Guid topicId, CancellationToken ct = default)
     {
@@ -180,17 +147,19 @@ public sealed class NewsIntelligenceService(
 
         if (keywords.Length == 0)
         {
-            logger.LogWarning("Topic {Name} has no keywords — skipping refresh", topic.Name);
+            logger.LogWarning("Topic '{Name}' has no keywords — skipping", topic.Name);
             return;
         }
 
-        logger.LogInformation("Refreshing topic '{Name}' with keywords: {Keywords}", topic.Name, string.Join(", ", keywords));
+        logger.LogInformation("Refreshing topic '{Name}': {Keywords}", topic.Name, string.Join(", ", keywords));
 
-        var articles = await FetchFromFeedsAsync(AllFeeds, keywords, ct);
+        var articles = await FetchGoogleNewsAsync(keywords, ct);
+        logger.LogInformation("Topic '{Name}': fetched {Count} articles", topic.Name, articles.Count);
+
         await PruneAndSaveItemsAsync(db, topicId, articles, MaxItemsPerTopic, ct);
 
         topic.LastFetchedAt = DateTimeOffset.UtcNow;
-        topic.UpdatedAt = DateTimeOffset.UtcNow;
+        topic.UpdatedAt     = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
     }
 
@@ -198,7 +167,8 @@ public sealed class NewsIntelligenceService(
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
         logger.LogInformation("Refreshing top news");
-        var articles = await FetchFromFeedsAsync(GeneralFeeds, keywords: null, ct);
+        var articles = await FetchGoogleNewsAsync(keywords: null, ct);
+        logger.LogInformation("Top news: fetched {Count} articles", articles.Count);
         await PruneAndSaveItemsAsync(db, topicId: null, articles, MaxTopNewsItems, ct);
     }
 
@@ -219,12 +189,11 @@ public sealed class NewsIntelligenceService(
         foreach (var id in activeTopicIds)
         {
             if (ct.IsCancellationRequested) break;
-            try { await RefreshTopicAsync(id, ct); }
+            try   { await RefreshTopicAsync(id, ct); }
             catch (Exception ex) { logger.LogError(ex, "Failed to refresh topic {TopicId}", id); }
         }
 
-        // Prune items older than 24h — also uses ExecuteDeleteAsync to avoid
-        // any overlap with a concurrent refresh deleting the same rows.
+        // Prune items older than 24h using direct SQL to avoid concurrency collisions.
         await using var pruneDb = await dbContextFactory.CreateDbContextAsync(ct);
         var cutoff = DateTimeOffset.UtcNow.AddHours(-NewsItemTtlHours);
         var pruned = await pruneDb.NewsItems.Where(n => n.FetchedAt < cutoff).ExecuteDeleteAsync(ct);
@@ -232,53 +201,88 @@ public sealed class NewsIntelligenceService(
             logger.LogInformation("Pruned {Count} expired news items", pruned);
     }
 
-    private async Task<List<RawArticle>> FetchFromFeedsAsync(string[] feedUrls, string[]? keywords, CancellationToken ct)
+    // ── Google News RSS ───────────────────────────────────────
+
+    /// <summary>
+    /// Fetches articles from Google News RSS.
+    /// When <paramref name="keywords"/> is null, returns the top general news feed.
+    /// When keywords are provided, runs one search per keyword and merges results.
+    /// </summary>
+    private async Task<List<RawArticle>> FetchGoogleNewsAsync(string[]? keywords, CancellationToken ct)
     {
-        var results = new List<RawArticle>();
+        var urls = keywords is null or { Length: 0 }
+            ? [GoogleNewsTopUrl]
+            : keywords.Select(BuildGoogleSearchUrl).ToArray();
+
+        // Fetch all URLs in parallel (one request per keyword).
+        var tasks = urls.Select(url => FetchFeedAsync(url, ct)).ToArray();
+        var allResults = await Task.WhenAll(tasks);
+
         var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var merged   = new List<RawArticle>();
 
-        foreach (var url in feedUrls)
+        foreach (var batch in allResults)
         {
-            if (ct.IsCancellationRequested) break;
-            try
+            foreach (var article in batch)
             {
-                // Fetch raw content with our HttpClient (has User-Agent set in DI) then
-                // parse with FeedReader so we aren't at the mercy of its internal client.
-                var content = await http.GetStringAsync(url, ct);
-                var feed = FeedReader.ReadFromString(content);
-
-                foreach (var item in feed.Items)
-                {
-                    if (string.IsNullOrWhiteSpace(item.Link) || !seenUrls.Add(item.Link))
-                        continue;
-
-                    var title = item.Title ?? string.Empty;
-                    var desc = item.Description ?? string.Empty;
-                    var combined = $"{title} {desc}";
-
-                    var matches = keywords is null || keywords.Any(k =>
-                        combined.Contains(k, StringComparison.OrdinalIgnoreCase));
-
-                    if (!matches) continue;
-
-                    results.Add(new RawArticle(
-                        title,
-                        item.Link!,
-                        feed.Title ?? ExtractDomain(url),
-                        item.PublishingDate,
-                        StripHtml(desc)));
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Failed to read RSS feed: {Url}", url);
+                if (seenUrls.Add(article.Url))
+                    merged.Add(article);
             }
         }
 
-        return results
+        return merged
             .OrderByDescending(a => a.PublishedAt ?? DateTimeOffset.MinValue)
             .ToList();
     }
+
+    private async Task<List<RawArticle>> FetchFeedAsync(string url, CancellationToken ct)
+    {
+        try
+        {
+            var content = await http.GetStringAsync(url, ct);
+            var feed    = FeedReader.ReadFromString(content);
+
+            return feed.Items
+                .Where(item => !string.IsNullOrWhiteSpace(item.Link))
+                .Select(item => new RawArticle(
+                    item.Title ?? string.Empty,
+                    item.Link!,
+                    ExtractGoogleNewsSource(item) ?? feed.Title ?? ExtractDomain(url),
+                    item.PublishingDate,
+                    StripHtml(item.Description ?? string.Empty)))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to fetch feed: {Url}", url);
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Google News RSS encodes the originating publisher in the &lt;source&gt; element.
+    /// Fall back to the item title suffix " - Source Name" pattern if needed.
+    /// </summary>
+    private static string? ExtractGoogleNewsSource(FeedItem item)
+    {
+        // FeedReader exposes the raw XML element; Google News puts the outlet in
+        // the <source> child element of each <item>.
+        if (item.SpecificItem is CodeHollow.FeedReader.Feeds.Rss20FeedItem rss)
+        {
+            var source = rss.Element?.Element("source")?.Value;
+            if (!string.IsNullOrWhiteSpace(source)) return source.Trim();
+        }
+
+        // Fallback: Google News often appends " - Publisher Name" to the title.
+        var title = item.Title ?? string.Empty;
+        var dashIdx = title.LastIndexOf(" - ", StringComparison.Ordinal);
+        return dashIdx > 0 ? title[(dashIdx + 3)..].Trim() : null;
+    }
+
+    private static string BuildGoogleSearchUrl(string keyword) =>
+        $"https://news.google.com/rss/search?q={Uri.EscapeDataString(keyword)}&hl=en-US&gl=US&ceid=US:en";
+
+    // ── Ollama summarisation ──────────────────────────────────
 
     private async Task PruneAndSaveItemsAsync(
         IAppDbContext db,
@@ -287,11 +291,9 @@ public sealed class NewsIntelligenceService(
         int maxItems,
         CancellationToken ct)
     {
-        // ExecuteDeleteAsync runs a single SQL DELETE WHERE without loading entities into
-        // the change tracker, so concurrent refreshes can't collide on the same rows.
         await db.NewsItems.Where(n => n.TopicId == topicId).ExecuteDeleteAsync(ct);
 
-        var toSave = articles.Take(maxItems).ToList();
+        var toSave   = articles.Take(maxItems).ToList();
         var summaries = await BatchSummarizeAsync(toSave, ct);
 
         for (var i = 0; i < toSave.Count; i++)
@@ -299,14 +301,14 @@ public sealed class NewsIntelligenceService(
             var a = toSave[i];
             db.NewsItems.Add(new NewsItem
             {
-                TopicId = topicId,
-                Title = Truncate(a.Title, 500),
-                Url = a.Url,
-                Source = Truncate(a.Source, 200),
-                PublishedAt = a.PublishedAt,
-                Description = Truncate(a.Description, 1000),
+                TopicId      = topicId,
+                Title        = Truncate(a.Title, 500),
+                Url          = a.Url,
+                Source       = Truncate(a.Source, 200),
+                PublishedAt  = a.PublishedAt,
+                Description  = Truncate(a.Description, 1000),
                 OllamaSummary = summaries.ElementAtOrDefault(i) ?? string.Empty,
-                FetchedAt = DateTimeOffset.UtcNow
+                FetchedAt    = DateTimeOffset.UtcNow
             });
         }
 
@@ -318,41 +320,43 @@ public sealed class NewsIntelligenceService(
         if (articles.Count == 0) return [];
         try
         {
-            var numbered = articles
+            var input = articles
                 .Select((a, i) => $"{i + 1}. {a.Title}: {Truncate(a.Description, 200)}")
                 .ToList();
 
-            var system =
+            const string system =
                 "You are a news curator. For each numbered article, respond with one sharp, opinionated " +
                 "sentence under 20 words that captures what matters. Respond only with a numbered list " +
                 "matching the input order. No intro, no closing remarks.";
 
-            var raw = await ollama.GenerateAsync(OllamaModel, system, string.Join("\n", numbered), ct);
+            var raw = await ollama.GenerateAsync(OllamaModel, system, string.Join("\n", input), ct);
             return ParseNumberedList(raw, articles.Count);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Ollama summarization skipped ({Model} may not be available) — articles saved without hot takes", OllamaModel);
+            logger.LogWarning(ex, "Ollama summarisation skipped ({Model} unavailable) — articles saved without hot takes", OllamaModel);
             return Enumerable.Repeat(string.Empty, articles.Count).ToList();
         }
     }
 
     private static List<string> ParseNumberedList(string raw, int expectedCount)
     {
-        var lines = raw.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var lines   = raw.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         var results = new List<string>(expectedCount);
         foreach (var line in lines)
         {
-            var trimmed = line.TrimStart();
-            var dotIdx = trimmed.IndexOf('.');
+            var trimmed  = line.TrimStart();
+            var dotIdx   = trimmed.IndexOf('.');
             var parenIdx = trimmed.IndexOf(')');
-            var sepIdx = dotIdx >= 0 && (parenIdx < 0 || dotIdx < parenIdx) ? dotIdx : parenIdx;
+            var sepIdx   = dotIdx >= 0 && (parenIdx < 0 || dotIdx < parenIdx) ? dotIdx : parenIdx;
             if (sepIdx > 0 && int.TryParse(trimmed[..sepIdx], out _))
                 results.Add(trimmed[(sepIdx + 1)..].Trim());
         }
         while (results.Count < expectedCount) results.Add(string.Empty);
         return results;
     }
+
+    // ── Helpers ───────────────────────────────────────────────
 
     private static string StripHtml(string html)
     {
