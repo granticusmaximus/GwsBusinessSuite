@@ -1,14 +1,273 @@
 @page "/admin/ollama-console"
+@rendermode InteractiveServer
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.ContentStudio
+@using Microsoft.Extensions.Options
+@inject IOllamaService Ollama
+@inject IOptions<ContentStudioOptions> StudioOptions
+@inject ILogger<OllamaConsole> Logger
 
 <PageTitle>Ollama Console</PageTitle>
 
-<h1>Ollama Console</h1>
-
-<p class="lead">
-    Test local Ollama connectivity and prompt generation workflows.
-</p>
-
-<div class="workspace-card">
-    <p>Local Ollama endpoint expected at:</p>
-    <code>http://localhost:11434</code>
+<div class="page-header">
+    <h1><i class="bi bi-cpu-fill me-2 text-primary"></i>Ollama Console</h1>
+    <p>Check connectivity to the Ollama server, see which models are installed, and test prompts before
+       they run live in Content Studio and News Intelligence.</p>
 </div>
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
+                <span class="fw-semibold">Connection</span>
+                <button class="btn btn-sm btn-outline-primary" @onclick="CheckConnectionAsync" disabled="@_checking">
+                    @if (_checking)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1"></span>
+                    }
+                    else
+                    {
+                        <i class="bi bi-arrow-clockwise me-1"></i>
+                    }
+                    Recheck
+                </button>
+            </div>
+            <div class="card-body">
+                <dl class="row mb-0 small">
+                    <dt class="col-5 text-secondary">Endpoint</dt>
+                    <dd class="col-7 font-monospace">@_baseUrl</dd>
+                    <dt class="col-5 text-secondary">Default model</dt>
+                    <dd class="col-7 font-monospace">@_configuredModel</dd>
+                    <dt class="col-5 text-secondary">Generation timeout</dt>
+                    <dd class="col-7">@_timeoutMinutes min</dd>
+                </dl>
+
+                <hr />
+
+                @if (_checking)
+                {
+                    <div class="d-flex align-items-center gap-2 text-secondary">
+                        <span class="spinner-border spinner-border-sm"></span>
+                        <span>Checking connection…</span>
+                    </div>
+                }
+                else if (_connected)
+                {
+                    <div class="d-flex align-items-center gap-2 text-success">
+                        <i class="bi bi-check-circle-fill"></i>
+                        <span>Connected — responded in @_latencyMs ms</span>
+                    </div>
+                    @if (!_configuredModelInstalled)
+                    {
+                        <div class="alert alert-warning mt-3 mb-0 small" role="alert">
+                            <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                            The configured model "<strong>@_configuredModel</strong>" is not installed on this
+                            Ollama server. Content Studio and News Intelligence generation calls will fail until
+                            it's pulled (<code>ollama pull @_configuredModel</code>).
+                        </div>
+                    }
+                }
+                else
+                {
+                    <div class="alert alert-danger mb-0" role="alert">
+                        <i class="bi bi-x-circle-fill me-1"></i>
+                        Unreachable: @_connectionError
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3">
+                <span class="fw-semibold">Installed models (@_models.Count)</span>
+            </div>
+            <div class="card-body p-0">
+                @if (_models.Count == 0)
+                {
+                    <div class="p-4 text-secondary small">
+                        @(_checking ? "Loading…" : "No models found, or the server is unreachable.")
+                    </div>
+                }
+                else
+                {
+                    <ul class="list-group list-group-flush">
+                        @foreach (var model in _models)
+                        {
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <span class="font-monospace small">@model</span>
+                                @if (IsConfiguredModel(model))
+                                {
+                                    <span class="badge text-bg-primary">active</span>
+                                }
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3">
+                <span class="fw-semibold">Prompt tester</span>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label small text-secondary">Model</label>
+                    <select class="form-select" @bind="_promptModel">
+                        @if (_models.Count == 0 && !string.IsNullOrWhiteSpace(_promptModel))
+                        {
+                            <option value="@_promptModel">@_promptModel</option>
+                        }
+                        @foreach (var model in _models)
+                        {
+                            <option value="@model">@model</option>
+                        }
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small text-secondary">System prompt (optional)</label>
+                    <textarea class="form-control" rows="2" @bind="_systemPrompt"
+                              placeholder="e.g. You are a concise news curator."></textarea>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small text-secondary">User prompt</label>
+                    <textarea class="form-control" rows="5" @bind="_userPrompt"
+                              placeholder="Type a prompt to test against the model above…"></textarea>
+                </div>
+
+                <button class="btn btn-primary" @onclick="RunPromptAsync"
+                        disabled="@(_generating || string.IsNullOrWhiteSpace(_userPrompt) || string.IsNullOrWhiteSpace(_promptModel))">
+                    @if (_generating)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1"></span>
+                        <span>Generating…</span>
+                    }
+                    else
+                    {
+                        <i class="bi bi-play-fill me-1"></i>
+                        <span>Generate</span>
+                    }
+                </button>
+
+                @if (!string.IsNullOrWhiteSpace(_generateError))
+                {
+                    <div class="alert alert-danger mt-3 mb-0" role="alert">@_generateError</div>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(_response))
+                {
+                    <div class="mt-3">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <label class="form-label small text-secondary mb-0">Response</label>
+                            <span class="text-secondary small">@_responseElapsedMs ms</span>
+                        </div>
+                        <pre class="bg-light border rounded p-3 mb-0" style="white-space: pre-wrap;">@_response</pre>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string _baseUrl = string.Empty;
+    private string _configuredModel = string.Empty;
+    private int _timeoutMinutes;
+
+    private bool _checking;
+    private bool _connected;
+    private string _connectionError = string.Empty;
+    private long _latencyMs;
+    private List<string> _models = [];
+    private bool _configuredModelInstalled;
+
+    private string _promptModel = string.Empty;
+    private string _systemPrompt = string.Empty;
+    private string _userPrompt = string.Empty;
+    private bool _generating;
+    private string _generateError = string.Empty;
+    private string _response = string.Empty;
+    private long _responseElapsedMs;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var options = StudioOptions.Value;
+        _baseUrl = options.BaseUrl;
+        _configuredModel = options.Model;
+        _timeoutMinutes = options.GenerationTimeoutMinutes;
+        _promptModel = options.Model;
+
+        await CheckConnectionAsync();
+    }
+
+    private async Task CheckConnectionAsync()
+    {
+        _checking = true;
+        _connectionError = string.Empty;
+        StateHasChanged();
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var models = await Ollama.ListModelsAsync();
+            sw.Stop();
+            _models = models.OrderBy(m => m, StringComparer.OrdinalIgnoreCase).ToList();
+            _configuredModelInstalled = _models.Any(IsConfiguredModel);
+            _connected = true;
+            _latencyMs = sw.ElapsedMilliseconds;
+
+            if (string.IsNullOrWhiteSpace(_promptModel) || !_models.Contains(_promptModel, StringComparer.OrdinalIgnoreCase))
+                _promptModel = _models.FirstOrDefault(IsConfiguredModel) ?? _models.FirstOrDefault() ?? _configuredModel;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Ollama connection check failed");
+            _connected = false;
+            _connectionError = ex.Message;
+            _models = [];
+        }
+        finally
+        {
+            _checking = false;
+        }
+    }
+
+    private async Task RunPromptAsync()
+    {
+        _generating = true;
+        _generateError = string.Empty;
+        _response = string.Empty;
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            _response = await Ollama.GenerateAsync(_promptModel, _systemPrompt, _userPrompt);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Ollama prompt test failed");
+            _generateError = $"Generation failed: {ex.Message}";
+        }
+        finally
+        {
+            sw.Stop();
+            _responseElapsedMs = sw.ElapsedMilliseconds;
+            _generating = false;
+        }
+    }
+
+    // Ollama's /api/tags always returns tag-qualified names (e.g. "llama3.2:latest"),
+    // but config typically stores the bare model name ("llama3.2") since that's what
+    // /api/generate accepts and defaults to the ":latest" tag. Compare both forms so
+    // an installed model isn't wrongly flagged as missing.
+    private bool IsConfiguredModel(string installedModel)
+    {
+        if (string.Equals(installedModel, _configuredModel, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var baseName = installedModel.Split(':')[0];
+        return string.Equals(baseName, _configuredModel, StringComparison.OrdinalIgnoreCase);
+    }
+}
