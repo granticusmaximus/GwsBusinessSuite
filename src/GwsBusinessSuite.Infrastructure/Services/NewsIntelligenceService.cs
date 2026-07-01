@@ -223,16 +223,13 @@ public sealed class NewsIntelligenceService(
             catch (Exception ex) { logger.LogError(ex, "Failed to refresh topic {TopicId}", id); }
         }
 
-        // Prune items older than 24h
+        // Prune items older than 24h — also uses ExecuteDeleteAsync to avoid
+        // any overlap with a concurrent refresh deleting the same rows.
         await using var pruneDb = await dbContextFactory.CreateDbContextAsync(ct);
         var cutoff = DateTimeOffset.UtcNow.AddHours(-NewsItemTtlHours);
-        var expired = await pruneDb.NewsItems.Where(n => n.FetchedAt < cutoff).ToListAsync(ct);
-        if (expired.Count > 0)
-        {
-            pruneDb.NewsItems.RemoveRange(expired);
-            await pruneDb.SaveChangesAsync(ct);
-            logger.LogInformation("Pruned {Count} expired news items", expired.Count);
-        }
+        var pruned = await pruneDb.NewsItems.Where(n => n.FetchedAt < cutoff).ExecuteDeleteAsync(ct);
+        if (pruned > 0)
+            logger.LogInformation("Pruned {Count} expired news items", pruned);
     }
 
     private async Task<List<RawArticle>> FetchFromFeedsAsync(string[] feedUrls, string[]? keywords, CancellationToken ct)
@@ -290,8 +287,9 @@ public sealed class NewsIntelligenceService(
         int maxItems,
         CancellationToken ct)
     {
-        var stale = await db.NewsItems.Where(n => n.TopicId == topicId).ToListAsync(ct);
-        db.NewsItems.RemoveRange(stale);
+        // ExecuteDeleteAsync runs a single SQL DELETE WHERE without loading entities into
+        // the change tracker, so concurrent refreshes can't collide on the same rows.
+        await db.NewsItems.Where(n => n.TopicId == topicId).ExecuteDeleteAsync(ct);
 
         var toSave = articles.Take(maxItems).ToList();
         var summaries = await BatchSummarizeAsync(toSave, ct);

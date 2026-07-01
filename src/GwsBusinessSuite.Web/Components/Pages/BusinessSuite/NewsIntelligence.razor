@@ -1,6 +1,7 @@
 @page "/admin/news-intelligence"
 @rendermode InteractiveServer
 @using GwsBusinessSuite.Application.NewsIntelligence
+@using GwsBusinessSuite.Infrastructure.Services
 @inject INewsIntelligenceService NewsService
 @inject ILogger<NewsIntelligence> Logger
 
@@ -213,8 +214,18 @@
         _refreshing = true;
         _statusMessage = string.Empty;
         _errorMessage = string.Empty;
+
+        // Try to acquire the shared refresh lock (non-blocking).
+        // If the background service is already refreshing, wait up to 3s then give up.
+        var acquired = await NewsRefreshBackgroundService.RefreshLock.WaitAsync(3000);
         try
         {
+            if (!acquired)
+            {
+                _statusMessage = "A background refresh is already running — try again in a moment.";
+                return;
+            }
+
             await NewsService.RefreshAllAsync();
             await LoadTopicsAsync();
             await LoadFeedAsync();
@@ -225,7 +236,11 @@
             Logger.LogError(ex, "Refresh failed");
             _errorMessage = $"Refresh failed: {ex.Message}";
         }
-        finally { _refreshing = false; }
+        finally
+        {
+            if (acquired) NewsRefreshBackgroundService.RefreshLock.Release();
+            _refreshing = false;
+        }
     }
 
     private async Task RefreshTopicAsync(Guid topicId)

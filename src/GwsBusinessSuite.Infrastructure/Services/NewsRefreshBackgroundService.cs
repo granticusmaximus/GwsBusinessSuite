@@ -11,6 +11,10 @@ public sealed class NewsRefreshBackgroundService(
 {
     private static readonly TimeSpan Interval = TimeSpan.FromHours(1);
 
+    // Prevents the background timer from overlapping a manually-triggered refresh.
+    // SemaphoreSlim(1,1) acts as a non-reentrant async lock.
+    public static readonly SemaphoreSlim RefreshLock = new(1, 1);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Run an initial refresh shortly after startup so the feed isn't empty
@@ -24,9 +28,14 @@ public sealed class NewsRefreshBackgroundService(
 
     private async Task RunRefreshAsync(CancellationToken ct)
     {
-        logger.LogInformation("News Intelligence: starting scheduled refresh");
+        if (!await RefreshLock.WaitAsync(0, ct))
+        {
+            logger.LogInformation("News Intelligence: scheduled refresh skipped (manual refresh already running)");
+            return;
+        }
         try
         {
+            logger.LogInformation("News Intelligence: starting scheduled refresh");
             await using var scope = scopeFactory.CreateAsyncScope();
             var svc = scope.ServiceProvider.GetRequiredService<INewsIntelligenceService>();
             await svc.RefreshAllAsync(ct);
@@ -39,6 +48,10 @@ public sealed class NewsRefreshBackgroundService(
         catch (Exception ex)
         {
             logger.LogError(ex, "News Intelligence: refresh failed");
+        }
+        finally
+        {
+            RefreshLock.Release();
         }
     }
 }
