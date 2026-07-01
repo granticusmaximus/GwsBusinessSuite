@@ -38,6 +38,10 @@ h1:focus { outline: none; }
 }
 
 .gws-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 20;
     width: var(--gws-sidebar-width);
     min-width: var(--gws-sidebar-width);
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.58));
@@ -51,6 +55,18 @@ h1:focus { outline: none; }
     overflow-y: auto;
     flex-shrink: 0;
     padding: 1.1rem 1rem;
+}
+
+/* The sidebar is fixed and taken out of flow, so .gws-body reserves its own
+   space with a matching left margin instead of relying on flex layout — that
+   keeps the sidebar pinned top-to-bottom no matter how tall any given page's
+   content is (long lists, tall forms, etc. can no longer drag it off-screen). */
+.gws-layout:not(.gws-builder-mode) .gws-body {
+    margin-left: var(--gws-sidebar-width);
+}
+
+.gws-layout.gws-sidebar-collapsed:not(.gws-builder-mode) .gws-body {
+    margin-left: 84px;
 }
 
 .gws-body {
@@ -165,18 +181,19 @@ h1:focus { outline: none; }
     .gws-brand-mark {
         width: 2.8rem;
         height: 2.8rem;
+        min-width: 2.8rem;
         border-radius: 15px;
-        background: linear-gradient(145deg, #0f172a, #2563eb 62%, #7dd3fc);
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        overflow: hidden;
         box-shadow: 0 12px 28px rgba(37, 99, 235, 0.28);
 }
 
 .gws-brand-icon {
-    color: #f8fafc;
-        font-size: 1.2rem;
-    line-height: 1;
+    width: 100%;
+    height: 100%;
+    display: block;
 }
 
 .gws-brand-name {
@@ -625,6 +642,7 @@ h1:focus { outline: none; }
 @media (max-width: 767.98px) {
     .gws-sidebar { display: none; }
     .gws-sidebar-toggle { display: none; }
+    .gws-layout .gws-body { margin-left: 0; }
                 .gws-topbar {
                     padding: 0 1.1rem;
                     height: auto;
