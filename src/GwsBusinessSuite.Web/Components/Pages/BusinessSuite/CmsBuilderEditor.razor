@@ -1,20 +1,16 @@
-@page "/admin/canvas/editor/{PageKey}"
+@page "/admin/canvas/editor/{PageId:guid}"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @attribute [Authorize(Policy = "ContributorAccess")]
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.CmsBuilder
-@using Microsoft.Extensions.Options
-@using Microsoft.JSInterop
-@inject IPageLayoutService PageLayoutService
+@using GwsBusinessSuite.Domain.Entities
+@using System.Text.Json
+@inject ICmsBuilderService CmsBuilderService
 @inject IMediaLibraryService MediaLibraryService
-@inject IReactPageBuilderService ReactPageBuilderService
-@inject IOptions<CmsBuilderOptions> CmsOptions
 @inject NavigationManager Navigation
-@inject IJSRuntime JS
 @inject ILogger<CmsBuilderEditor> Logger
-@implements IAsyncDisposable
 
-<PageTitle>Visual Builder — @PageKey</PageTitle>
+<PageTitle>Canvas Studio — @(_page?.Title ?? "Loading…")</PageTitle>
 
 <div class="studio-shell">
 
@@ -22,11 +18,11 @@
 <div class="studio-header page-header">
     <div>
         <div class="studio-kicker">Live page studio</div>
-        <h1><i class="bi bi-grid-1x2 me-2 text-primary"></i>Visual Builder</h1>
-        <p class="mb-0">Drag, drop, and configure sections to compose your React page. Saves to a layout JSON alongside your page file.</p>
-        @if (!string.IsNullOrWhiteSpace(_routePath))
+        <h1><i class="bi bi-grid-1x2 me-2 text-primary"></i>@(_page?.Title ?? "Canvas Studio")</h1>
+        <p class="mb-0">Add sections and widgets, edit their content, and save — changes go live immediately, no rebuild or deploy.</p>
+        @if (_site is not null && _page is not null)
         {
-            <p class="small text-secondary mb-0 mt-1">Route: <span class="font-monospace">@_routePath</span></p>
+            <p class="small text-secondary mb-0 mt-1">Live at: <span class="font-monospace">/@_page.Slug</span></p>
         }
     </div>
     <div class="studio-header-actions">
@@ -36,11 +32,8 @@
             <span class="studio-pill studio-pill-subtle">@GetViewportLabel()</span>
         </div>
         <button class="btn btn-outline-secondary" @onclick="BackToList">Back</button>
-        <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_isBusy">
-            <i class="bi bi-floppy me-1"></i>Save Layout
-        </button>
-        <button class="btn btn-outline-success" @onclick="PublishAsync" disabled="@(_isBusy || _isPublishBusy)">
-            <i class="bi bi-cloud-upload me-1"></i>Publish
+        <button class="btn btn-primary" @onclick="SaveAsync" disabled="@(_isBusy || _page is null)">
+            <i class="bi bi-cloud-check me-1"></i>@(_isBusy ? "Saving…" : "Save")
         </button>
     </div>
 </div>
@@ -60,6 +53,23 @@
     </div>
 }
 
+@if (_isLoading)
+{
+    <div class="canvas-loading">
+        <div class="spinner-border text-primary" role="status"></div>
+        <p class="mt-3 text-secondary">Loading…</p>
+    </div>
+}
+else if (_page is null)
+{
+    <div class="canvas-empty-state">
+        <div class="canvas-empty-icon"><i class="bi bi-exclamation-triangle"></i></div>
+        <h3>Page not found</h3>
+        <p>This page may have been deleted. <a href="/admin/canvas">Back to Canvas</a>.</p>
+    </div>
+}
+else
+{
 @* ── Workspace ───────────────────────────────────────────────────────────── *@
 <div class="studio-workspace">
 
@@ -77,14 +87,11 @@
         @if (_leftTab == "widgets")
         {
             <div class="studio-panel-section">
-                <div class="studio-section-eyebrow mb-2 px-1">Click to add · Drag onto canvas</div>
+                <div class="studio-section-eyebrow mb-2 px-1">Click to add to the selected section</div>
                 <div class="studio-widget-grid">
                     @foreach (var wt in WidgetCatalog)
                     {
-                        <button class="studio-widget-card" draggable="true"
-                                @ondragstart="() => StartNewWidgetDrag(wt.Type)"
-                                @ondragend="EndDrag"
-                                @onclick="() => QuickAddWidget(wt.Type)">
+                        <button class="studio-widget-card" @onclick="() => QuickAddWidget(wt.Type)">
                             <span class="studio-widget-icon"><i class="@wt.Icon"></i></span>
                             <span class="studio-widget-copy">
                                 <strong>@wt.Title</strong>
@@ -98,10 +105,13 @@
         else
         {
             <div class="studio-panel-section">
+                <button class="btn btn-sm btn-outline-primary w-100 mb-3" @onclick="AddSectionAtEnd">
+                    <i class="bi bi-plus-lg me-1"></i>Add Section
+                </button>
                 @if (_layout.Sections.Count == 0)
                 {
                     <div class="studio-empty-card">
-                        <p>No sections yet. Start adding to the canvas.</p>
+                        <p>No sections yet. Click "Add Section" to start building this page.</p>
                     </div>
                 }
                 else
@@ -142,20 +152,14 @@
         }
     </aside>
 
-    @* ── CENTER — Live React App ─────────────────────────────────────────── *@
+    @* ── CENTER — Live Preview ────────────────────────────────────────────── *@
     <section class="studio-stage-panel studio-panel">
         <div class="studio-stage-header">
             <div class="studio-stage-header-left">
-                <span class="studio-section-eyebrow">React Frontend</span>
-                <span class="studio-stage-url font-monospace">@_reactDevServerUrl@_routePath</span>
+                <span class="studio-section-eyebrow">Live Preview</span>
+                <span class="studio-stage-url font-monospace">/@_page.Slug</span>
             </div>
             <div class="studio-stage-header-right">
-                <button class='studio-edit-toggle @(_editModeEnabled ? "is-active" : "")'
-                        @onclick='() => { _editModeEnabled = !_editModeEnabled; ReloadPreview(); }'
-                        title="@(_editModeEnabled ? "Edit mode on — widgets are clickable" : "Edit mode off")">
-                    <i class='bi @(_editModeEnabled ? "bi-pencil-fill" : "bi-eye") me-1'></i>
-                    @(_editModeEnabled ? "Editing" : "Viewing")
-                </button>
                 <div class="studio-device-switcher">
                     <button class="studio-device-button @(_previewViewport == "desktop" ? "is-active" : "")"
                             @onclick='() => _previewViewport = "desktop"' title="Desktop">
@@ -170,7 +174,7 @@
                         <i class="bi bi-phone"></i>
                     </button>
                 </div>
-                <button class="btn btn-sm btn-outline-secondary" @onclick="ReloadPreview" title="Reload">
+                <button class="btn btn-sm btn-outline-secondary" @onclick="ReloadPreview" title="Reload preview">
                     <i class="bi bi-arrow-clockwise"></i>
                 </button>
             </div>
@@ -180,453 +184,457 @@
             <div class="studio-stage-frame @GetViewportClass()">
                 <div class="studio-stage-browser">
                     <span></span><span></span><span></span>
-                    <div class="studio-stage-route">@_reactDevServerUrl@_routePath</div>
+                    <div class="studio-stage-route">/@_page.Slug</div>
                 </div>
 
-                @if (_isLoading)
-                {
-                    <div class="canvas-loading">
-                        <div class="spinner-border text-primary" role="status"></div>
-                        <p class="mt-3 text-secondary">Loading…</p>
-                    </div>
-                }
-                else if (string.IsNullOrWhiteSpace(_reactDevServerUrl))
-                {
-                    <div class="canvas-empty-state">
-                        <div class="canvas-empty-icon"><i class="bi bi-display"></i></div>
-                        <h3>Dev server not configured</h3>
-                        <p>Set <code>CmsBuilder:ReactDevServerUrl</code> in <code>appsettings.Development.json</code> to point at your running React app (e.g. <code>http://localhost:5173</code>).</p>
-                    </div>
-                }
-                else
-                {
-                    <iframe id="cms-builder-iframe"
-                            class="studio-live-iframe"
-                            src="@BuildIframeUrl()"
-                            title="Live React app — @PageKey"></iframe>
-                }
+                <iframe class="studio-live-iframe"
+                        src="@BuildIframeUrl()"
+                        title="Live preview — @_page.Title"></iframe>
             </div>
         </div>
+        <p class="small text-secondary px-2 mb-0">
+            <i class="bi bi-info-circle me-1"></i>Preview updates on save or reload — edits here aren't pushed live until you click Save.
+        </p>
     </section>
 
-    @* ── RIGHT PANEL ─────────────────────────────────────────────────────── *@
+    @* ── RIGHT PANEL — Inspector ──────────────────────────────────────────── *@
     <aside class="studio-panel studio-panel-right">
         <div class="studio-tab-strip">
-            <button class="studio-tab @(_rightTab == "inspector" ? "is-active" : "")" @onclick='() => _rightTab = "inspector"'>
+            <button class="studio-tab is-active" disabled>
                 <i class="bi bi-pencil-square me-1"></i>Inspector
-            </button>
-            <button class="studio-tab @(_rightTab == "publish" ? "is-active" : "")"
-                    @onclick='() => { _rightTab = "publish"; _ = RefreshPublishStatusAsync(); }'>
-                <i class="bi bi-cloud-upload me-1"></i>Publish
             </button>
         </div>
 
-        @* Inspector tab *@
-        @if (_rightTab == "inspector")
-        {
-            <div class="studio-panel-section">
-                @if (!string.IsNullOrEmpty(_selectedWidgetId))
+        <div class="studio-panel-section">
+            @if (!string.IsNullOrEmpty(_selectedWidgetId))
+            {
+                @* Widget inspector *@
+                var selWidget = FindWidget(_selectedWidgetId);
+                @if (selWidget is not null)
                 {
-                    @* Widget inspector *@
-                    var selWidget = FindWidget(_selectedWidgetId);
-                    @if (selWidget is not null)
-                    {
-                        <div class="studio-inspector-stack">
-                            <div class="studio-inspector-header">
-                                <span class="studio-widget-icon studio-widget-icon-sm">
-                                    <i class="@GetWidgetIconClass(selWidget.WidgetType)"></i>
-                                </span>
-                                <div>
-                                    <div class="fw-semibold">@GetWidgetTypeLabel(selWidget.WidgetType)</div>
-                                    <div class="small text-secondary">Widget properties</div>
-                                </div>
-                            </div>
-
-                            @* ── Per-type inspector fields ─────────────────────── *@
-                            @if (selWidget.WidgetType == "hero")
-                            {
-                                <div>
-                                    <label class="form-label small fw-semibold">Headline</label>
-                                    <input class="form-control" value='@GetProp(selWidget, "headline")'
-                                           @oninput='(e) => SetProp(selWidget, "headline", e.Value?.ToString() ?? string.Empty)' />
-                                </div>
-                                <div>
-                                    <label class="form-label small fw-semibold">Subline</label>
-                                    <textarea class="form-control studio-inspector-textarea-sm"
-                                              value='@GetProp(selWidget, "subline")'
-                                              @oninput='(e) => SetProp(selWidget, "subline", e.Value?.ToString() ?? string.Empty)'></textarea>
-                                </div>
-                                <div>
-                                    <label class="form-label small fw-semibold">CTA 1 Label</label>
-                                    <input class="form-control" value='@GetProp(selWidget, "cta1Label")'
-                                           @oninput='(e) => SetProp(selWidget, "cta1Label", e.Value?.ToString() ?? string.Empty)' />
-                                </div>
-                                <div>
-                                    <label class="form-label small fw-semibold">CTA 1 URL</label>
-                                    <input class="form-control font-monospace" value='@GetProp(selWidget, "cta1Href", "#")'
-                                           @oninput='(e) => SetProp(selWidget, "cta1Href", e.Value?.ToString() ?? "#")' />
-                                </div>
-                                <div>
-                                    <label class="form-label small fw-semibold">CTA 2 Label</label>
-                                    <input class="form-control" value='@GetProp(selWidget, "cta2Label")'
-                                           @oninput='(e) => SetProp(selWidget, "cta2Label", e.Value?.ToString() ?? string.Empty)' />
-                                </div>
-                                <div>
-                                    <label class="form-label small fw-semibold">CTA 2 URL</label>
-                                    <input class="form-control font-monospace" value='@GetProp(selWidget, "cta2Href", "#")'
-                                           @oninput='(e) => SetProp(selWidget, "cta2Href", e.Value?.ToString() ?? "#")' />
-                                </div>
-                                <div>
-                                    <label class="form-label small fw-semibold">Alignment</label>
-                                    <select class="form-select" value='@GetProp(selWidget, "align", "left")'
-                                            @onchange='(e) => SetProp(selWidget, "align", e.Value?.ToString() ?? "left")'>
-                                        <option value="left">Left</option>
-                                        <option value="center">Center</option>
-                                    </select>
-                                </div>
-                            }
-                            else if (selWidget.WidgetType == "heading")
-                            {
-                                <div>
-                                    <label class="form-label small fw-semibold">Text</label>
-                                    <input class="form-control" value='@GetProp(selWidget, "text")'
-                                           @oninput='(e) => SetProp(selWidget, "text", e.Value?.ToString() ?? string.Empty)' />
-                                </div>
-                                <div>
-                                    <label class="form-label small fw-semibold">Level</label>
-                                    <select class="form-select" value='@GetProp(selWidget, "level", "h2")'
-                                            @onchange='(e) => SetProp(selWidget, "level", e.Value?.ToString() ?? "h2")'>
-                                        <option value="h1">H1 — Page title</option>
-                                        <option value="h2">H2 — Section title</option>
-                                        <option value="h3">H3 — Sub-section</option>
-                                        <option value="h4">H4 — Card heading</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="form-label small fw-semibold">Alignment</label>
-                                    <select class="form-select" value='@GetProp(selWidget, "align", "left")'
-                                            @onchange='(e) => SetProp(selWidget, "align", e.Value?.ToString() ?? "left")'>
-                                        <option value="left">Left</option>
-                                        <option value="center">Center</option>
-                                        <option value="right">Right</option>
-                                    </select>
-                                </div>
-                            }
-                            else if (selWidget.WidgetType == "paragraph")
-                            {
-                                <div>
-                                    <label class="form-label small fw-semibold">Text</label>
-                                    <textarea class="form-control studio-inspector-textarea" value='@GetProp(selWidget, "text")'
-                                              @oninput='(e) => SetProp(selWidget, "text", e.Value?.ToString() ?? string.Empty)'></textarea>
-                                </div>
-                                <div>
-                                    <label class="form-label small fw-semibold">Alignment</label>
-                                    <select class="form-select" value='@GetProp(selWidget, "align", "left")'
-                                            @onchange='(e) => SetProp(selWidget, "align", e.Value?.ToString() ?? "left")'>
-                                        <option value="left">Left</option>
-                                        <option value="center">Center</option>
-                                        <option value="right">Right</option>
-                                    </select>
-                                </div>
-                            }
-                            else if (selWidget.WidgetType == "button")
-                            {
-                                <div>
-                                    <label class="form-label small fw-semibold">Label</label>
-                                    <input class="form-control" value='@GetProp(selWidget, "label", "Button")'
-                                           @oninput='(e) => SetProp(selWidget, "label", e.Value?.ToString() ?? string.Empty)' />
-                                </div>
-                                <div>
-                                    <label class="form-label small fw-semibold">URL</label>
-                                    <input class="form-control font-monospace" value='@GetProp(selWidget, "href", "#")'
-                                           @oninput='(e) => SetProp(selWidget, "href", e.Value?.ToString() ?? "#")' />
-                                </div>
-                                <div>
-                                    <label class="form-label small fw-semibold">Style</label>
-                                    <select class="form-select" value='@GetProp(selWidget, "variant", "primary")'
-                                            @onchange='(e) => SetProp(selWidget, "variant", e.Value?.ToString() ?? "primary")'>
-                                        <option value="primary">Primary</option>
-                                        <option value="secondary">Secondary</option>
-                                        <option value="outline-primary">Outline Primary</option>
-                                        <option value="outline-secondary">Outline Secondary</option>
-                                        <option value="success">Success</option>
-                                        <option value="link">Link</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="form-label small fw-semibold">Size</label>
-                                    <select class="form-select" value='@GetProp(selWidget, "size", "md")'
-                                            @onchange='(e) => SetProp(selWidget, "size", e.Value?.ToString() ?? "md")'>
-                                        <option value="sm">Small</option>
-                                        <option value="md">Medium</option>
-                                        <option value="lg">Large</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="form-label small fw-semibold">Alignment</label>
-                                    <select class="form-select" value='@GetProp(selWidget, "align", "left")'
-                                            @onchange='(e) => SetProp(selWidget, "align", e.Value?.ToString() ?? "left")'>
-                                        <option value="left">Left</option>
-                                        <option value="center">Center</option>
-                                        <option value="right">Right</option>
-                                    </select>
-                                </div>
-                                <div class="form-check mt-1">
-                                    <input class="form-check-input" type="checkbox" id="btnNewTab"
-                                           checked="@(GetProp(selWidget, "openInNewTab") == "true")"
-                                           @onchange='(e) => SetProp(selWidget, "openInNewTab", ((bool)(e.Value ?? false)) ? "true" : "false")' />
-                                    <label class="form-check-label small" for="btnNewTab">Open in new tab</label>
-                                </div>
-                            }
-                            else if (selWidget.WidgetType == "image")
-                            {
-                                <div>
-                                    <label class="form-label small fw-semibold">Image URL</label>
-                                    <div class="d-flex gap-2">
-                                        <input class="form-control font-monospace" value='@GetProp(selWidget, "src")'
-                                               @oninput='(e) => SetProp(selWidget, "src", e.Value?.ToString() ?? string.Empty)'
-                                               placeholder="https://…" />
-                                        <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0" @onclick="ToggleMediaPickerAsync">
-                                            <i class="bi bi-images"></i>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                @if (_showMediaPicker)
-                                {
-                                    <div class="studio-media-picker">
-                                        @if (!string.IsNullOrEmpty(_mediaPickerError))
-                                        {
-                                            <div class="text-danger small mb-2">@_mediaPickerError</div>
-                                        }
-                                        else if (_mediaAssets.Count == 0)
-                                        {
-                                            <p class="text-secondary small mb-0">No media uploaded yet. Upload images from Canvas's Media Library panel.</p>
-                                        }
-                                        else
-                                        {
-                                            <div class="studio-media-picker-grid">
-                                                @foreach (var asset in _mediaAssets)
-                                                {
-                                                    <button type="button" class="studio-media-picker-item" title="@asset.FileName"
-                                                            @onclick="() => SelectMediaAsset(selWidget, asset)">
-                                                        <img src="@asset.Url" alt="@asset.AltText" />
-                                                    </button>
-                                                }
-                                            </div>
-                                        }
-                                    </div>
-                                }
-
-                                <div>
-                                    <label class="form-label small fw-semibold">Alt Text</label>
-                                    <input class="form-control" value='@GetProp(selWidget, "alt")'
-                                           @oninput='(e) => SetProp(selWidget, "alt", e.Value?.ToString() ?? string.Empty)' />
-                                </div>
-                                <div>
-                                    <label class="form-label small fw-semibold">Caption</label>
-                                    <input class="form-control" value='@GetProp(selWidget, "caption")'
-                                           @oninput='(e) => SetProp(selWidget, "caption", e.Value?.ToString() ?? string.Empty)' />
-                                </div>
-                                <div>
-                                    <label class="form-label small fw-semibold">Width</label>
-                                    <select class="form-select" value='@GetProp(selWidget, "width", "full")'
-                                            @onchange='(e) => SetProp(selWidget, "width", e.Value?.ToString() ?? "full")'>
-                                        <option value="full">Full width</option>
-                                        <option value="auto">Auto</option>
-                                    </select>
-                                </div>
-                            }
-                            else if (selWidget.WidgetType == "card")
-                            {
-                                <div>
-                                    <label class="form-label small fw-semibold">Title</label>
-                                    <input class="form-control" value='@GetProp(selWidget, "title")'
-                                           @oninput='(e) => SetProp(selWidget, "title", e.Value?.ToString() ?? string.Empty)' />
-                                </div>
-                                <div>
-                                    <label class="form-label small fw-semibold">Body</label>
-                                    <textarea class="form-control studio-inspector-textarea" value='@GetProp(selWidget, "body")'
-                                              @oninput='(e) => SetProp(selWidget, "body", e.Value?.ToString() ?? string.Empty)'></textarea>
-                                </div>
-                                <div>
-                                    <label class="form-label small fw-semibold">Image URL</label>
-                                    <input class="form-control font-monospace" value='@GetProp(selWidget, "imageSrc")'
-                                           @oninput='(e) => SetProp(selWidget, "imageSrc", e.Value?.ToString() ?? string.Empty)'
-                                           placeholder="https://…" />
-                                </div>
-                                <div>
-                                    <label class="form-label small fw-semibold">Link URL</label>
-                                    <input class="form-control font-monospace" value='@GetProp(selWidget, "link")'
-                                           @oninput='(e) => SetProp(selWidget, "link", e.Value?.ToString() ?? string.Empty)' />
-                                </div>
-                            }
-                            else if (selWidget.WidgetType == "spacer")
-                            {
-                                <div>
-                                    <label class="form-label small fw-semibold">Height (px)</label>
-                                    <input class="form-control" type="number" min="0" max="400"
-                                           value='@GetProp(selWidget, "height", "48")'
-                                           @oninput='(e) => SetProp(selWidget, "height", e.Value?.ToString() ?? "48")' />
-                                </div>
-                            }
-                            else if (selWidget.WidgetType == "divider")
-                            {
-                                <div>
-                                    <label class="form-label small fw-semibold">Style</label>
-                                    <select class="form-select" value='@GetProp(selWidget, "style", "solid")'
-                                            @onchange='(e) => SetProp(selWidget, "style", e.Value?.ToString() ?? "solid")'>
-                                        <option value="solid">Solid</option>
-                                        <option value="dashed">Dashed</option>
-                                        <option value="dotted">Dotted</option>
-                                    </select>
-                                </div>
-                            }
-                            else if (selWidget.WidgetType == "html")
-                            {
-                                <div>
-                                    <label class="form-label small fw-semibold">HTML Content</label>
-                                    <textarea class="form-control studio-inspector-textarea font-monospace"
-                                              value='@GetProp(selWidget, "content")'
-                                              @oninput='(e) => SetProp(selWidget, "content", e.Value?.ToString() ?? string.Empty)'
-                                              spellcheck="false"></textarea>
-                                </div>
-                            }
-
-                            @* Action row *@
-                            <div class="studio-action-row mt-1">
-                                <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedWidgetUp"
-                                        disabled="@(!CanMoveSelectedWidgetUp)">
-                                    <i class="bi bi-arrow-up"></i>
-                                </button>
-                                <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedWidgetDown"
-                                        disabled="@(!CanMoveSelectedWidgetDown)">
-                                    <i class="bi bi-arrow-down"></i>
-                                </button>
-                                <button class="btn btn-sm btn-outline-secondary" @onclick="DuplicateSelectedWidget">
-                                    <i class="bi bi-copy me-1"></i>Dup
-                                </button>
-                                <button class="btn btn-sm btn-outline-danger" @onclick="DeleteSelectedWidget">
-                                    <i class="bi bi-trash"></i>
-                                </button>
+                    <div class="studio-inspector-stack">
+                        <div class="studio-inspector-header">
+                            <span class="studio-widget-icon studio-widget-icon-sm">
+                                <i class="@GetWidgetIconClass(selWidget.WidgetType)"></i>
+                            </span>
+                            <div>
+                                <div class="fw-semibold">@GetWidgetTypeLabel(selWidget.WidgetType)</div>
+                                <div class="small text-secondary">Widget properties</div>
                             </div>
                         </div>
-                    }
-                }
-                else if (!string.IsNullOrEmpty(_selectedSectionId))
-                {
-                    @* Section inspector *@
-                    var sel = FindSection(_selectedSectionId);
-                    @if (sel is not null)
-                    {
-                        <div class="studio-inspector-stack">
-                            <div class="studio-inspector-header">
-                                <span class="studio-widget-icon studio-widget-icon-sm">
-                                    <i class="bi bi-layout-text-window"></i>
-                                </span>
-                                <div>
-                                    <div class="fw-semibold">Section Settings</div>
-                                    <div class="small text-secondary">@sel.Label</div>
-                                </div>
+
+                        @* ── Per-type inspector fields ─────────────────────── *@
+                        @if (selWidget.WidgetType == "hero")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">Headline</label>
+                                <input class="form-control" value='@GetProp(selWidget, "headline")'
+                                       @oninput='(e) => SetProp(selWidget, "headline", e.Value?.ToString() ?? string.Empty)' />
                             </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Subline</label>
+                                <textarea class="form-control studio-inspector-textarea-sm"
+                                          value='@GetProp(selWidget, "subline")'
+                                          @oninput='(e) => SetProp(selWidget, "subline", e.Value?.ToString() ?? string.Empty)'></textarea>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">CTA 1 Label</label>
+                                <input class="form-control" value='@GetProp(selWidget, "cta1Label")'
+                                       @oninput='(e) => SetProp(selWidget, "cta1Label", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">CTA 1 URL</label>
+                                <input class="form-control font-monospace" value='@GetProp(selWidget, "cta1Href", "#")'
+                                       @oninput='(e) => SetProp(selWidget, "cta1Href", e.Value?.ToString() ?? "#")' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">CTA 2 Label</label>
+                                <input class="form-control" value='@GetProp(selWidget, "cta2Label")'
+                                       @oninput='(e) => SetProp(selWidget, "cta2Label", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">CTA 2 URL</label>
+                                <input class="form-control font-monospace" value='@GetProp(selWidget, "cta2Href", "#")'
+                                       @oninput='(e) => SetProp(selWidget, "cta2Href", e.Value?.ToString() ?? "#")' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Alignment</label>
+                                <select class="form-select" value='@GetProp(selWidget, "align", "left")'
+                                        @onchange='(e) => SetProp(selWidget, "align", e.Value?.ToString() ?? "left")'>
+                                    <option value="left">Left</option>
+                                    <option value="center">Center</option>
+                                </select>
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "heading")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">Text</label>
+                                <input class="form-control" value='@GetProp(selWidget, "text")'
+                                       @oninput='(e) => SetProp(selWidget, "text", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Level</label>
+                                <select class="form-select" value='@GetProp(selWidget, "level", "h2")'
+                                        @onchange='(e) => SetProp(selWidget, "level", e.Value?.ToString() ?? "h2")'>
+                                    <option value="h1">H1 — Page title</option>
+                                    <option value="h2">H2 — Section title</option>
+                                    <option value="h3">H3 — Sub-section</option>
+                                    <option value="h4">H4 — Card heading</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Alignment</label>
+                                <select class="form-select" value='@GetProp(selWidget, "align", "left")'
+                                        @onchange='(e) => SetProp(selWidget, "align", e.Value?.ToString() ?? "left")'>
+                                    <option value="left">Left</option>
+                                    <option value="center">Center</option>
+                                    <option value="right">Right</option>
+                                </select>
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "paragraph")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">Text</label>
+                                <textarea class="form-control studio-inspector-textarea" value='@GetProp(selWidget, "text")'
+                                          @oninput='(e) => SetProp(selWidget, "text", e.Value?.ToString() ?? string.Empty)'></textarea>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Alignment</label>
+                                <select class="form-select" value='@GetProp(selWidget, "align", "left")'
+                                        @onchange='(e) => SetProp(selWidget, "align", e.Value?.ToString() ?? "left")'>
+                                    <option value="left">Left</option>
+                                    <option value="center">Center</option>
+                                    <option value="right">Right</option>
+                                </select>
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "button")
+                        {
                             <div>
                                 <label class="form-label small fw-semibold">Label</label>
-                                <input class="form-control" value="@sel.Label"
-                                       @oninput="(e) => sel.Label = e.Value?.ToString() ?? sel.Label" />
+                                <input class="form-control" value='@GetProp(selWidget, "label", "Button")'
+                                       @oninput='(e) => SetProp(selWidget, "label", e.Value?.ToString() ?? string.Empty)' />
                             </div>
                             <div>
-                                <label class="form-label small fw-semibold">Column Layout</label>
-                                <select class="form-select" value="@sel.ColumnLayout"
-                                        @onchange="(e) => UpdateSectionColumnLayout(sel, e.Value?.ToString() ?? sel.ColumnLayout)">
-                                    <option value="full">Full Width</option>
-                                    <option value="half-half">Two Equal Columns (50/50)</option>
-                                    <option value="one-third-two-thirds">1/3 + 2/3</option>
-                                    <option value="two-thirds-one-third">2/3 + 1/3</option>
-                                    <option value="thirds">Three Equal Columns</option>
+                                <label class="form-label small fw-semibold">URL</label>
+                                <input class="form-control font-monospace" value='@GetProp(selWidget, "href", "#")'
+                                       @oninput='(e) => SetProp(selWidget, "href", e.Value?.ToString() ?? "#")' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Style</label>
+                                <select class="form-select" value='@GetProp(selWidget, "variant", "primary")'
+                                        @onchange='(e) => SetProp(selWidget, "variant", e.Value?.ToString() ?? "primary")'>
+                                    <option value="primary">Primary</option>
+                                    <option value="secondary">Secondary</option>
+                                    <option value="outline-primary">Outline Primary</option>
+                                    <option value="outline-secondary">Outline Secondary</option>
+                                    <option value="success">Success</option>
+                                    <option value="link">Link</option>
                                 </select>
                             </div>
                             <div>
-                                <label class="form-label small fw-semibold">Background</label>
-                                <select class="form-select" @bind="sel.Background">
-                                    <option value="transparent">Transparent</option>
-                                    <option value="light">Light</option>
-                                    <option value="dark">Dark</option>
-                                    <option value="accent">Accent (Brand Blue)</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="form-label small fw-semibold">Vertical Padding</label>
-                                <select class="form-select" @bind="sel.Padding">
-                                    <option value="none">None</option>
+                                <label class="form-label small fw-semibold">Size</label>
+                                <select class="form-select" value='@GetProp(selWidget, "size", "md")'
+                                        @onchange='(e) => SetProp(selWidget, "size", e.Value?.ToString() ?? "md")'>
                                     <option value="sm">Small</option>
                                     <option value="md">Medium</option>
                                     <option value="lg">Large</option>
-                                    <option value="xl">XL</option>
                                 </select>
                             </div>
-                            <div class="studio-action-row mt-1">
-                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteSection(_selectedSectionId)">
-                                    <i class="bi bi-trash me-1"></i>Delete Section
-                                </button>
+                            <div>
+                                <label class="form-label small fw-semibold">Alignment</label>
+                                <select class="form-select" value='@GetProp(selWidget, "align", "left")'
+                                        @onchange='(e) => SetProp(selWidget, "align", e.Value?.ToString() ?? "left")'>
+                                    <option value="left">Left</option>
+                                    <option value="center">Center</option>
+                                    <option value="right">Right</option>
+                                </select>
+                            </div>
+                            <div class="form-check mt-1">
+                                <input class="form-check-input" type="checkbox" id="btnNewTab"
+                                       checked="@(GetProp(selWidget, "openInNewTab") == "true")"
+                                       @onchange='(e) => SetProp(selWidget, "openInNewTab", ((bool)(e.Value ?? false)) ? "true" : "false")' />
+                                <label class="form-check-label small" for="btnNewTab">Open in new tab</label>
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "image")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">Image URL</label>
+                                <div class="d-flex gap-2">
+                                    <input class="form-control font-monospace" value='@GetProp(selWidget, "src")'
+                                           @oninput='(e) => SetProp(selWidget, "src", e.Value?.ToString() ?? string.Empty)'
+                                           placeholder="https://…" />
+                                    <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0" @onclick="ToggleMediaPickerAsync">
+                                        <i class="bi bi-images"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            @if (_showMediaPicker)
+                            {
+                                <div class="studio-media-picker">
+                                    @if (!string.IsNullOrEmpty(_mediaPickerError))
+                                    {
+                                        <div class="text-danger small mb-2">@_mediaPickerError</div>
+                                    }
+                                    else if (_mediaAssets.Count == 0)
+                                    {
+                                        <p class="text-secondary small mb-0">No media uploaded yet. Upload images from Canvas's Media Library panel.</p>
+                                    }
+                                    else
+                                    {
+                                        <div class="studio-media-picker-grid">
+                                            @foreach (var asset in _mediaAssets)
+                                            {
+                                                <button type="button" class="studio-media-picker-item" title="@asset.FileName"
+                                                        @onclick="() => SelectMediaAsset(selWidget, asset)">
+                                                    <img src="@asset.Url" alt="@asset.AltText" />
+                                                </button>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            }
+
+                            <div>
+                                <label class="form-label small fw-semibold">Alt Text</label>
+                                <input class="form-control" value='@GetProp(selWidget, "alt")'
+                                       @oninput='(e) => SetProp(selWidget, "alt", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Caption</label>
+                                <input class="form-control" value='@GetProp(selWidget, "caption")'
+                                       @oninput='(e) => SetProp(selWidget, "caption", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Width</label>
+                                <select class="form-select" value='@GetProp(selWidget, "width", "full")'
+                                        @onchange='(e) => SetProp(selWidget, "width", e.Value?.ToString() ?? "full")'>
+                                    <option value="full">Full width</option>
+                                    <option value="auto">Auto</option>
+                                </select>
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "card")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">Title</label>
+                                <input class="form-control" value='@GetProp(selWidget, "title")'
+                                       @oninput='(e) => SetProp(selWidget, "title", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Body</label>
+                                <textarea class="form-control studio-inspector-textarea" value='@GetProp(selWidget, "body")'
+                                          @oninput='(e) => SetProp(selWidget, "body", e.Value?.ToString() ?? string.Empty)'></textarea>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Image URL</label>
+                                <input class="form-control font-monospace" value='@GetProp(selWidget, "imageSrc")'
+                                       @oninput='(e) => SetProp(selWidget, "imageSrc", e.Value?.ToString() ?? string.Empty)'
+                                       placeholder="https://…" />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Link URL</label>
+                                <input class="form-control font-monospace" value='@GetProp(selWidget, "link")'
+                                       @oninput='(e) => SetProp(selWidget, "link", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "spacer")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">Height (px)</label>
+                                <input class="form-control" type="number" min="0" max="400"
+                                       value='@GetProp(selWidget, "height", "48")'
+                                       @oninput='(e) => SetProp(selWidget, "height", e.Value?.ToString() ?? "48")' />
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "divider")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">Style</label>
+                                <select class="form-select" value='@GetProp(selWidget, "style", "solid")'
+                                        @onchange='(e) => SetProp(selWidget, "style", e.Value?.ToString() ?? "solid")'>
+                                    <option value="solid">Solid</option>
+                                    <option value="dashed">Dashed</option>
+                                    <option value="dotted">Dotted</option>
+                                </select>
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "html")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">HTML Content</label>
+                                <textarea class="form-control studio-inspector-textarea font-monospace"
+                                          value='@GetProp(selWidget, "content")'
+                                          @oninput='(e) => SetProp(selWidget, "content", e.Value?.ToString() ?? string.Empty)'
+                                          spellcheck="false"></textarea>
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "form")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">Submit Button Label</label>
+                                <input class="form-control" value='@GetProp(selWidget, "submitLabel", "Submit")'
+                                       @oninput='(e) => SetProp(selWidget, "submitLabel", e.Value?.ToString() ?? "Submit")' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold d-flex align-items-center justify-content-between">
+                                    Fields
+                                    <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => AddFormField(selWidget)">
+                                        <i class="bi bi-plus-lg"></i> Add field
+                                    </button>
+                                </label>
+                                @{ var fields = GetFormFields(selWidget); }
+                                @if (fields.Count == 0)
+                                {
+                                    <p class="small text-secondary mb-0">No fields yet — click "Add field" to build this form.</p>
+                                }
+                                else
+                                {
+                                    @for (var i = 0; i < fields.Count; i++)
+                                    {
+                                        var index = i;
+                                        var field = fields[index];
+                                        <div class="studio-form-field-editor">
+                                            <div class="d-flex gap-2 mb-2">
+                                                <input class="form-control form-control-sm" placeholder="Label" value="@field.Label"
+                                                       @oninput="(e) => UpdateFormField(selWidget, index, f => f with { Label = e.Value?.ToString() ?? string.Empty })" />
+                                                <select class="form-select form-select-sm" style="max-width:9rem"
+                                                        @onchange='(e) => UpdateFormField(selWidget, index, f => f with { Type = e.Value?.ToString() ?? "text" })'>
+                                                    @foreach (var t in FormFieldTypes)
+                                                    {
+                                                        <option value="@t" selected="@(field.Type == t)">@t</option>
+                                                    }
+                                                </select>
+                                                <button type="button" class="btn btn-sm btn-outline-danger flex-shrink-0" @onclick="() => RemoveFormField(selWidget, index)">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </div>
+                                            @if (field.Type == "select")
+                                            {
+                                                <input class="form-control form-control-sm mb-2" placeholder="Comma-separated options"
+                                                       value="@string.Join(", ", field.Options)"
+                                                       @oninput="(e) => UpdateFormField(selWidget, index, f => f with { Options = (e.Value?.ToString() ?? string.Empty).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList() })" />
+                                            }
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="@($"field-required-{selWidget.Id}-{index}")"
+                                                       checked="@field.Required"
+                                                       @onchange="(e) => UpdateFormField(selWidget, index, f => f with { Required = (bool)(e.Value ?? false) })" />
+                                                <label class="form-check-label small" for="@($"field-required-{selWidget.Id}-{index}")">Required</label>
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            </div>
+                        }
+
+                        @* Action row *@
+                        <div class="studio-action-row mt-1">
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedWidgetUp"
+                                    disabled="@(!CanMoveSelectedWidgetUp)">
+                                <i class="bi bi-arrow-up"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedWidgetDown"
+                                    disabled="@(!CanMoveSelectedWidgetDown)">
+                                <i class="bi bi-arrow-down"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="DuplicateSelectedWidget">
+                                <i class="bi bi-copy me-1"></i>Dup
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" @onclick="DeleteSelectedWidget">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                }
+            }
+            else if (!string.IsNullOrEmpty(_selectedSectionId))
+            {
+                @* Section inspector *@
+                var sel = FindSection(_selectedSectionId);
+                @if (sel is not null)
+                {
+                    <div class="studio-inspector-stack">
+                        <div class="studio-inspector-header">
+                            <span class="studio-widget-icon studio-widget-icon-sm">
+                                <i class="bi bi-layout-text-window"></i>
+                            </span>
+                            <div>
+                                <div class="fw-semibold">Section Settings</div>
+                                <div class="small text-secondary">@sel.Label</div>
                             </div>
                         </div>
-                    }
-                }
-                else
-                {
-                    <div class="studio-empty-card">
-                        <p>Click a section header or widget to edit its properties here.</p>
+                        <div>
+                            <label class="form-label small fw-semibold">Label</label>
+                            <input class="form-control" value="@sel.Label"
+                                   @oninput="(e) => sel.Label = e.Value?.ToString() ?? sel.Label" />
+                        </div>
+                        <div>
+                            <label class="form-label small fw-semibold">Column Layout</label>
+                            <select class="form-select" value="@sel.ColumnLayout"
+                                    @onchange="(e) => UpdateSectionColumnLayout(sel, e.Value?.ToString() ?? sel.ColumnLayout)">
+                                <option value="full">Full Width</option>
+                                <option value="half-half">Two Equal Columns (50/50)</option>
+                                <option value="one-third-two-thirds">1/3 + 2/3</option>
+                                <option value="two-thirds-one-third">2/3 + 1/3</option>
+                                <option value="thirds">Three Equal Columns</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label small fw-semibold">Background</label>
+                            <select class="form-select" @bind="sel.Background">
+                                <option value="transparent">Transparent</option>
+                                <option value="light">Light</option>
+                                <option value="dark">Dark</option>
+                                <option value="accent">Accent (Brand Blue)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label small fw-semibold">Vertical Padding</label>
+                            <select class="form-select" @bind="sel.Padding">
+                                <option value="none">None</option>
+                                <option value="sm">Small</option>
+                                <option value="md">Medium</option>
+                                <option value="lg">Large</option>
+                                <option value="xl">XL</option>
+                            </select>
+                        </div>
+                        <div class="studio-action-row mt-1">
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteSection(_selectedSectionId)">
+                                <i class="bi bi-trash me-1"></i>Delete Section
+                            </button>
+                        </div>
                     </div>
                 }
-            </div>
-        }
-
-        @* Publish tab *@
-        else
-        {
-            <div class="studio-panel-section">
-                <div class="studio-panel-header">
-                    <div>
-                        <span class="studio-section-eyebrow">Git Workflow</span>
-                        <h2>Publish</h2>
-                    </div>
-                    <button class="btn btn-sm btn-outline-secondary" @onclick="RefreshPublishStatusAsync"
-                            disabled="@_isPublishBusy">Refresh</button>
+            }
+            else
+            {
+                <div class="studio-empty-card">
+                    <p>Click a section header or widget to edit its properties here.</p>
                 </div>
-                <div class="studio-publish-meta">Branch: <span class="font-monospace">@_publishBranchName</span></div>
-                <label class="form-label small fw-semibold">Commit message</label>
-                <input class="form-control mb-3" @bind="_publishCommitMessage" placeholder="canvas: update layout" />
-                @if (_changedFiles.Count == 0)
-                {
-                    <div class="studio-empty-card">
-                        <p>No React app file changes staged for commit.</p>
-                    </div>
-                }
-                else
-                {
-                    <div class="studio-changes-list mb-3">
-                        @foreach (var f in _changedFiles)
-                        {
-                            <div class="studio-change-item"><span class="font-monospace">@f</span></div>
-                        }
-                    </div>
-                    <button class="btn btn-success w-100" @onclick="PublishAsync"
-                            disabled="@(_isBusy || _isPublishBusy)">
-                        <i class="bi bi-cloud-upload me-1"></i>Commit &amp; Push
-                    </button>
-                }
-            </div>
-        }
+            }
+        </div>
     </aside>
 </div>
+}
 
 </div>
 
 @code {
-    [Parameter] public string PageKey { get; set; } = string.Empty;
+    [Parameter] public Guid PageId { get; set; }
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
 
     // ── Data ──────────────────────────────────────────────────────────────
     private PageLayout _layout = new();
+    private CmsPage? _page;
+    private CmsSite? _site;
     private bool _isLoading = true;
     private bool _isBusy;
     private string _statusMessage = string.Empty;
@@ -636,35 +644,10 @@
     private string _selectedSectionId = string.Empty;
     private string _selectedWidgetId = string.Empty;
 
-    // ── Drag state ────────────────────────────────────────────────────────
-    private string _draggingNewWidgetType = string.Empty;
-    private string _draggingWidgetId = string.Empty;
-    private string _draggingWidgetSectionId = string.Empty;
-    private string _draggingWidgetColumnId = string.Empty;
-    private string _dragOverSectionId = string.Empty;
-    private string _dragOverColumnId = string.Empty;
-    private int _dragOverIndex = -1;
-    private bool _isDragging;
-
     // ── UI panels ─────────────────────────────────────────────────────────
     private string _leftTab = "widgets";
-    private string _rightTab = "inspector";
     private string _previewViewport = "desktop";
-
-    // ── Live iframe ───────────────────────────────────────────────────────
-    private string _reactDevServerUrl = string.Empty;
-    private bool _editModeEnabled = true;
-    private IJSObjectReference? _jsBridge;
-    private DotNetObjectReference<CmsBuilderEditor>? _dotNetRef;
-    private bool _bridgeInitialized;
-
-    // ── Publish ───────────────────────────────────────────────────────────
-    private string _routePath = string.Empty;
     private long _previewTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-    private string _publishCommitMessage = "canvas: update page layout";
-    private string _publishBranchName = "unknown";
-    private List<string> _changedFiles = new();
-    private bool _isPublishBusy;
 
     // ── Computed ──────────────────────────────────────────────────────────
     private int TotalWidgetCount => _layout.Sections
@@ -706,83 +689,14 @@
         new("button",    "bi bi-hand-index-thumb",         "Button",    "CTA or navigation link"),
         new("image",     "bi bi-image",                    "Image",     "Photo or graphic"),
         new("card",      "bi bi-card-heading",             "Card",      "Title + body + optional image"),
+        new("form",      "bi bi-ui-checks",                "Form",      "Custom fields, posts to submissions"),
         new("spacer",    "bi bi-arrows-expand-vertical",   "Spacer",    "Vertical whitespace"),
         new("divider",   "bi bi-dash-lg",                  "Divider",   "Horizontal rule"),
         new("html",      "bi bi-code-slash",               "HTML",      "Raw HTML block"),
     ];
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
-    protected override async Task OnInitializedAsync()
-    {
-        _reactDevServerUrl = (CmsOptions.Value.ReactDevServerUrl ?? string.Empty).TrimEnd('/');
-        await LoadAsync();
-        try { await RefreshPublishStatusAsync(); }
-        catch { _publishBranchName = "unavailable"; }
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (firstRender && !_bridgeInitialized)
-        {
-            _bridgeInitialized = true;
-            try
-            {
-                _dotNetRef = DotNetObjectReference.Create(this);
-                _jsBridge = await JS.InvokeAsync<IJSObjectReference>(
-                    "import", "/js/cms-builder-bridge.js");
-                await _jsBridge.InvokeVoidAsync("init", _dotNetRef);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(ex, "CMS bridge JS init failed — postMessage selection disabled.");
-            }
-        }
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        try
-        {
-            if (_jsBridge is not null)
-            {
-                await _jsBridge.InvokeVoidAsync("dispose");
-                await _jsBridge.DisposeAsync();
-            }
-        }
-        catch { /* ignore disposal errors */ }
-        _dotNetRef?.Dispose();
-    }
-
-    // ── iframe bridge callbacks ────────────────────────────────────────────
-    [JSInvokable]
-    public void OnWidgetSelectedFromIframe(string sectionId, string widgetId)
-    {
-        SelectWidget(sectionId, widgetId);
-        StateHasChanged();
-    }
-
-    [JSInvokable]
-    public void OnSectionSelectedFromIframe(string sectionId)
-    {
-        SelectSection(sectionId);
-        StateHasChanged();
-    }
-
-    [JSInvokable]
-    public void OnIframeReady()
-    {
-        // iframe signaled edit-mode ready; nothing to do yet
-    }
-
-    // ── iframe URL ────────────────────────────────────────────────────────
-    private string BuildIframeUrl()
-    {
-        var base_ = _reactDevServerUrl;
-        var path = string.IsNullOrWhiteSpace(_routePath) ? "/" : _routePath;
-        var sep = path.Contains('?') ? "&" : "?";
-        var editParam = _editModeEnabled ? $"{sep}cms_edit=1" : string.Empty;
-        return $"{base_}{path}{editParam}&_t={_previewTimestamp}";
-    }
+    protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private async Task LoadAsync()
     {
@@ -790,15 +704,20 @@
         _errorMessage = string.Empty;
         try
         {
-            _layout = await PageLayoutService.LoadLayoutAsync(PageKey);
-            _routePath = _layout.RoutePath;
-            _statusMessage = $"Loaded layout for {PageKey}.";
+            _page = await CmsBuilderService.GetPageAsync(PageId);
+            if (_page is null)
+            {
+                return;
+            }
+
+            _site = await CmsBuilderService.GetSiteAsync(_page.SiteId);
+            _layout = ParseLayout(_page.BlocksJson);
+            _statusMessage = $"Loaded '{_page.Title}'.";
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to load layout for {PageKey}.", PageKey);
-            _errorMessage = $"Failed to load layout. {ex.Message}";
-            _layout = new PageLayout { PageKey = PageKey };
+            Logger.LogError(ex, "Failed to load page {PageId}.", PageId);
+            _errorMessage = $"Failed to load page. {ex.Message}";
         }
         finally
         {
@@ -806,22 +725,49 @@
         }
     }
 
-    // ── Save / Publish ────────────────────────────────────────────────────
+    private static PageLayout ParseLayout(string blocksJson)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<PageLayout>(
+                string.IsNullOrWhiteSpace(blocksJson) ? "{}" : blocksJson, JsonOptions) ?? new PageLayout();
+        }
+        catch
+        {
+            return new PageLayout();
+        }
+    }
+
+    // ── Save ──────────────────────────────────────────────────────────────
     private async Task SaveAsync()
     {
+        if (_page is null) return;
+
         _isBusy = true;
         _errorMessage = string.Empty;
         _statusMessage = string.Empty;
         try
         {
-            await PageLayoutService.SaveLayoutAsync(_layout);
-            _statusMessage = $"Layout saved for {PageKey}.";
-            try { await RefreshPublishStatusAsync(); } catch { /* non-fatal */ }
+            var editor = new CmsPageEditorModel
+            {
+                PageId = _page.Id,
+                SiteId = _page.SiteId,
+                Title = _page.Title,
+                Slug = _page.Slug,
+                BlocksJson = JsonSerializer.Serialize(_layout, JsonOptions),
+                MetaTitle = _page.MetaTitle,
+                MetaDescription = _page.MetaDescription,
+                OgImageUrl = _page.OgImageUrl,
+                CustomCss = _page.CustomCss
+            };
+            _page = await CmsBuilderService.SavePageAsync(editor);
+            _statusMessage = "Saved — live now.";
+            ReloadPreview();
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to save layout for {PageKey}.", PageKey);
-            _errorMessage = $"Failed to save layout. {ex.Message}";
+            Logger.LogError(ex, "Failed to save page {PageId}.", PageId);
+            _errorMessage = $"Failed to save. {ex.Message}";
         }
         finally
         {
@@ -829,56 +775,23 @@
         }
     }
 
-    private async Task PublishAsync()
-    {
-        _isPublishBusy = true;
-        _errorMessage = string.Empty;
-        _statusMessage = string.Empty;
-        try
-        {
-            await PageLayoutService.SaveLayoutAsync(_layout);
-            var result = await ReactPageBuilderService.PublishAsync(new ReactPublishRequest
-            {
-                CommitMessage = _publishCommitMessage,
-                IncludeOnlyReactAppChanges = true
-            });
-            _statusMessage = result.Summary;
-            await RefreshPublishStatusAsync();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to publish {PageKey}.", PageKey);
-            _errorMessage = $"Publish failed. {ex.Message}";
-        }
-        finally
-        {
-            _isPublishBusy = false;
-        }
-    }
-
-    private async Task RefreshPublishStatusAsync()
-    {
-        var status = await ReactPageBuilderService.GetPublishStatusAsync();
-        _publishBranchName = status.CurrentBranch;
-        _changedFiles = status.ChangedFiles;
-    }
-
     private void ReloadPreview() =>
         _previewTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+    private string BuildIframeUrl() =>
+        _site is null || _page is null ? "about:blank" : $"/cms/{_site.Slug}/{_page.Slug}?_t={_previewTimestamp}";
 
     // ── Selection ─────────────────────────────────────────────────────────
     private void SelectSection(string sectionId)
     {
         _selectedSectionId = sectionId;
         _selectedWidgetId = string.Empty;
-        _rightTab = "inspector";
     }
 
     private void SelectWidget(string sectionId, string widgetId)
     {
         _selectedSectionId = sectionId;
         _selectedWidgetId = widgetId;
-        _rightTab = "inspector";
     }
 
     private void ClearSelection()
@@ -892,23 +805,7 @@
     {
         var section = CreateDefaultSection();
         _layout.Sections.Add(section);
-        SelectSection(section.Id);
-    }
-
-    private void AddSectionAbove(string sectionId)
-    {
-        var idx = _layout.Sections.FindIndex(s => s.Id == sectionId);
-        if (idx < 0) return;
-        var section = CreateDefaultSection();
-        _layout.Sections.Insert(idx, section);
-        SelectSection(section.Id);
-    }
-
-    private void AddSectionBelow(string sectionId)
-    {
-        var idx = _layout.Sections.FindIndex(s => s.Id == sectionId);
-        var section = CreateDefaultSection();
-        _layout.Sections.Insert(idx < 0 ? _layout.Sections.Count : idx + 1, section);
+        _leftTab = "layers";
         SelectSection(section.Id);
     }
 
@@ -1038,77 +935,6 @@
         DeleteWidget(sec.Id, col.Id, _selectedWidgetId);
     }
 
-    // ── Drag-drop ─────────────────────────────────────────────────────────
-    private void StartNewWidgetDrag(string widgetType)
-    {
-        _draggingNewWidgetType = widgetType;
-        _draggingWidgetId = string.Empty;
-        _isDragging = true;
-    }
-
-    private void StartWidgetDrag(string widgetId, string sectionId, string columnId)
-    {
-        _draggingWidgetId = widgetId;
-        _draggingWidgetSectionId = sectionId;
-        _draggingWidgetColumnId = columnId;
-        _draggingNewWidgetType = string.Empty;
-        _isDragging = true;
-    }
-
-    private void EndDrag()
-    {
-        _isDragging = false;
-        _draggingNewWidgetType = string.Empty;
-        _draggingWidgetId = string.Empty;
-        _draggingWidgetSectionId = string.Empty;
-        _draggingWidgetColumnId = string.Empty;
-        _dragOverSectionId = string.Empty;
-        _dragOverColumnId = string.Empty;
-        _dragOverIndex = -1;
-    }
-
-    private void SetDragOver(string sectionId, string columnId, int index)
-    {
-        _dragOverSectionId = sectionId;
-        _dragOverColumnId = columnId;
-        _dragOverIndex = index;
-    }
-
-    private bool IsDropZoneActive(string sectionId, string columnId, int index) =>
-        _isDragging &&
-        _dragOverSectionId == sectionId &&
-        _dragOverColumnId == columnId &&
-        _dragOverIndex == index;
-
-    private void Drop(string sectionId, string columnId, int insertIndex)
-    {
-        if (!string.IsNullOrEmpty(_draggingNewWidgetType))
-        {
-            var col = FindSection(sectionId)?.Columns.FirstOrDefault(c => c.Id == columnId);
-            if (col is not null)
-            {
-                var widget = CreateDefaultWidget(_draggingNewWidgetType);
-                col.Widgets.Insert(Math.Clamp(insertIndex, 0, col.Widgets.Count), widget);
-                SelectWidget(sectionId, widget.Id);
-            }
-        }
-        else if (!string.IsNullOrEmpty(_draggingWidgetId))
-        {
-            var srcCol = FindSection(_draggingWidgetSectionId)?.Columns.FirstOrDefault(c => c.Id == _draggingWidgetColumnId);
-            var dstCol = FindSection(sectionId)?.Columns.FirstOrDefault(c => c.Id == columnId);
-            if (srcCol is null || dstCol is null) { EndDrag(); return; }
-
-            var widget = srcCol.Widgets.FirstOrDefault(w => w.Id == _draggingWidgetId);
-            if (widget is null) { EndDrag(); return; }
-
-            srcCol.Widgets.Remove(widget);
-            dstCol.Widgets.Insert(Math.Clamp(insertIndex, 0, dstCol.Widgets.Count), widget);
-            SelectWidget(sectionId, widget.Id);
-        }
-
-        EndDrag();
-    }
-
     // ── Lookup helpers ────────────────────────────────────────────────────
     private LayoutSection? FindSection(string id) =>
         _layout.Sections.FirstOrDefault(s => s.Id == id);
@@ -1133,10 +959,82 @@
     private static string GetProp(LayoutWidget widget, string key, string defaultValue = "") =>
         widget.Props.TryGetValue(key, out var val) ? val : defaultValue;
 
-    private void SetProp(LayoutWidget widget, string key, string value)
-    {
+    private static void SetProp(LayoutWidget widget, string key, string value) =>
         widget.Props[key] = value;
-        _ = PushWidgetUpdateAsync(widget);
+
+    // ── Form widget field editor ─────────────────────────────────────────
+    private static readonly string[] FormFieldTypes = ["text", "email", "tel", "textarea", "select", "checkbox"];
+
+    private sealed record FormFieldDef(string Key, string Label, string Type, bool Required, List<string> Options);
+
+    private static List<FormFieldDef> GetFormFields(LayoutWidget widget)
+    {
+        try
+        {
+            var raw = GetProp(widget, "fieldsJson");
+            if (string.IsNullOrWhiteSpace(raw)) return [];
+
+            var parsed = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(raw);
+            if (parsed is null) return [];
+
+            return parsed.Select(f => new FormFieldDef(
+                f.TryGetValue("key", out var k) ? k.GetString() ?? string.Empty : string.Empty,
+                f.TryGetValue("label", out var l) ? l.GetString() ?? string.Empty : string.Empty,
+                f.TryGetValue("type", out var t) ? t.GetString() ?? "text" : "text",
+                f.TryGetValue("required", out var r) && r.ValueKind == JsonValueKind.True,
+                f.TryGetValue("optionsJson", out var o) && o.ValueKind == JsonValueKind.String
+                    ? JsonSerializer.Deserialize<List<string>>(o.GetString() ?? "[]") ?? []
+                    : []
+            )).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static void SaveFormFields(LayoutWidget widget, List<FormFieldDef> fields)
+    {
+        var json = JsonSerializer.Serialize(fields.Select(f => new
+        {
+            key = f.Key,
+            label = f.Label,
+            type = f.Type,
+            required = f.Required,
+            optionsJson = f.Options.Count > 0 ? JsonSerializer.Serialize(f.Options) : null
+        }));
+        SetProp(widget, "fieldsJson", json);
+    }
+
+    private void AddFormField(LayoutWidget widget)
+    {
+        var fields = GetFormFields(widget);
+        var n = fields.Count + 1;
+        fields.Add(new FormFieldDef($"field{n}", $"Field {n}", "text", false, []));
+        SaveFormFields(widget, fields);
+    }
+
+    private void UpdateFormField(LayoutWidget widget, int index, Func<FormFieldDef, FormFieldDef> update)
+    {
+        var fields = GetFormFields(widget);
+        if (index < 0 || index >= fields.Count) return;
+        var updated = update(fields[index]);
+        // Derive a stable field key from the label so submissions have a readable key,
+        // falling back to the existing key if the label is blank.
+        var derivedKey = string.IsNullOrWhiteSpace(updated.Label)
+            ? updated.Key
+            : new string(updated.Label.Trim().ToLowerInvariant()
+                .Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray());
+        fields[index] = updated with { Key = string.IsNullOrWhiteSpace(derivedKey) ? updated.Key : derivedKey };
+        SaveFormFields(widget, fields);
+    }
+
+    private void RemoveFormField(LayoutWidget widget, int index)
+    {
+        var fields = GetFormFields(widget);
+        if (index < 0 || index >= fields.Count) return;
+        fields.RemoveAt(index);
+        SaveFormFields(widget, fields);
     }
 
     // ── Media library picker ────────────────────────────────────────────────
@@ -1175,21 +1073,6 @@
         _showMediaPicker = false;
     }
 
-    private async Task PushWidgetUpdateAsync(LayoutWidget widget)
-    {
-        if (_jsBridge is null || !_editModeEnabled) return;
-        try
-        {
-            await _jsBridge.InvokeVoidAsync("sendToIframe", new
-            {
-                type = "cms:update-props",
-                widgetId = widget.Id,
-                props = widget.Props
-            });
-        }
-        catch { /* non-fatal: iframe may not be in edit mode */ }
-    }
-
     // ── Widget factory ────────────────────────────────────────────────────
     private static LayoutWidget CreateDefaultWidget(string type) => type switch
     {
@@ -1199,6 +1082,7 @@
         "image"     => new() { WidgetType = "image",     Props = new() { ["src"] = "",  ["alt"] = "", ["caption"] = "", ["width"] = "full" } },
         "hero"      => new() { WidgetType = "hero",      Props = new() { ["headline"] = "Your Headline", ["subline"] = "Your supporting description.", ["cta1Label"] = "Get Started", ["cta1Href"] = "#", ["cta2Label"] = "", ["cta2Href"] = "", ["align"] = "left" } },
         "card"      => new() { WidgetType = "card",      Props = new() { ["title"] = "Card Title", ["body"] = "Card description text.", ["imageSrc"] = "", ["link"] = "" } },
+        "form"      => new() { WidgetType = "form",      Props = new() { ["submitLabel"] = "Submit", ["fieldsJson"] = "[]" } },
         "spacer"    => new() { WidgetType = "spacer",    Props = new() { ["height"] = "48" } },
         "divider"   => new() { WidgetType = "divider",   Props = new() { ["style"] = "solid" } },
         "html"      => new() { WidgetType = "html",      Props = new() { ["content"] = "<p>Custom HTML content here.</p>" } },
@@ -1237,6 +1121,7 @@
         "image"     => "Image",
         "hero"      => "Hero",
         "card"      => "Card",
+        "form"      => "Form",
         "spacer"    => "Spacer",
         "divider"   => "Divider",
         "html"      => "HTML",
@@ -1251,6 +1136,7 @@
         "image"     => "bi bi-image",
         "hero"      => "bi bi-stars",
         "card"      => "bi bi-card-heading",
+        "form"      => "bi bi-ui-checks",
         "spacer"    => "bi bi-arrows-expand-vertical",
         "divider"   => "bi bi-dash-lg",
         "html"      => "bi bi-code-slash",
@@ -1267,6 +1153,7 @@
             "image"     => GetPropStatic(w, "alt", GetPropStatic(w, "src", "Image")),
             "hero"      => GetPropStatic(w, "headline", "Hero"),
             "card"      => GetPropStatic(w, "title", "Card"),
+            "form"      => $"{GetFormFields(w).Count} field(s)",
             "spacer"    => $"{GetPropStatic(w, "height", "48")}px",
             "html"      => "Custom HTML",
             _           => w.WidgetType

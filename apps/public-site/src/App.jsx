@@ -1,10 +1,6 @@
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import './App.css';
 import './cms/layout-renderer.css';
-import './cms/cms-blocks.css';
-import Home from './pages/Home';
-import About from './pages/About';
-import Contact from './pages/Contact';
 import BlogList from './pages/BlogList';
 import BlogPost from './pages/BlogPost';
 import CmsPage from './pages/CmsPage';
@@ -57,12 +53,14 @@ export default function App() {
     <BrowserRouter>
       <Navbar />
       <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/about" element={<About />} />
-        <Route path="/contact" element={<Contact />} />
+        {/* Home, About, and Contact are Canvas-managed pages (slugs "home", "about",
+            "contact") rendered through CmsPage — the catch-all below doesn't match the
+            bare root, so "/" gets its own route with an explicit slug override. */}
+        <Route path="/" element={<CmsPage pageSlug="home" />} />
         <Route path="/blog" element={<BlogList />} />
         <Route path="/blog/:slug" element={<BlogPost />} />
-        {/* Catch-all: try to load a CMS-managed page for any unmatched slug.
+        {/* Catch-all: try to load a CMS-managed page for any unmatched slug (this is
+            what serves /about, /contact, and any page created in Canvas).
             Falls through to 404 inside CmsPage if no matching page exists.
             VITE_CMS_SITE_SLUG in .env controls which CmsSite powers this site. */}
         <Route path="/:pageSlug" element={<CmsPage />} />

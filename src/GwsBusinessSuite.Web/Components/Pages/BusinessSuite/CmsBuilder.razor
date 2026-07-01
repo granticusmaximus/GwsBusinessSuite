@@ -5,11 +5,11 @@
 @using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Domain.Entities
 @using Microsoft.AspNetCore.Components.Forms
+@using System.Text.Json
 @inject ICmsBuilderService CmsBuilderService
 @inject IMediaLibraryService MediaLibraryService
 @inject IFormSubmissionService FormSubmissionService
 @inject IPageRevisionService PageRevisionService
-@inject IReactPageBuilderService ReactPageBuilderService
 @inject NavigationManager Navigation
 @inject ILogger<CmsBuilder> Logger
 
@@ -28,14 +28,10 @@
     <div>
         <div class="cms-builder-kicker">Visual editing studio</div>
         <h1><i class="bi bi-window-stack me-2 text-primary"></i>Canvas</h1>
-        <p>Manage live React pages and structured CMS blocks in one workspace. The React studio handles production page files, and the structured editor gives the internal CMS page model a real end-to-end preview.</p>
+        <p>Build and edit every page on the live site here — no code, no deploy. Create sites, add pages, and edit their content and forms; changes go live immediately.</p>
     </div>
 
     <div class="cms-builder-hero-metrics">
-        <div class="cms-builder-metric">
-            <span>React pages</span>
-            <strong>@ReactPages.Count</strong>
-        </div>
         <div class="cms-builder-metric">
             <span>CMS sites</span>
             <strong>@CmsSites.Count</strong>
@@ -44,89 +40,6 @@
             <span>Selected site pages</span>
             <strong>@CmsPages.Count</strong>
         </div>
-    </div>
-</div>
-
-@if (!string.IsNullOrWhiteSpace(ReactErrorMessage))
-{
-    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
-        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
-        <div>@ReactErrorMessage</div>
-    </div>
-}
-
-@if (!string.IsNullOrWhiteSpace(ReactStatusMessage))
-{
-    <div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
-        <i class="bi bi-info-circle-fill flex-shrink-0"></i>
-        <div>@ReactStatusMessage</div>
-    </div>
-}
-
-<div class="cms-builder-surface card border-0 shadow-sm mb-4">
-    <div class="card-header bg-transparent border-0 px-4 pt-4 pb-3 d-flex align-items-center justify-content-between gap-3 flex-wrap">
-        <div>
-            <div class="fw-semibold">Live React Pages</div>
-            <div class="small text-secondary">Choose a page to open the builder workspace with preview, inspector, and publish controls.</div>
-        </div>
-
-        <div class="cms-builder-toolbar">
-            <input class="form-control cms-builder-search" @bind="SearchText" @bind:event="oninput"
-                   placeholder="Search pages, routes, or files" />
-            <button class="btn btn-sm btn-outline-secondary" @onclick="LoadReactPagesAsync" disabled="@IsReactBusy">
-                <i class="bi bi-arrow-repeat me-1"></i>Refresh
-            </button>
-        </div>
-    </div>
-
-    <div class="card-body px-4 pb-4 pt-0">
-        @if (VisiblePages.Count == 0)
-        {
-            <div class="cms-builder-empty-state">
-                <div class="cms-builder-empty-icon"><i class="bi bi-layout-wtf"></i></div>
-                <div>
-                    <h2>No matching React pages</h2>
-                    <p>Try a different search term or refresh the route discovery for the connected public site.</p>
-                </div>
-            </div>
-        }
-        else
-        {
-            <div class="cms-page-grid">
-                @foreach (var reactPage in VisiblePages)
-                {
-                    <article class="cms-page-card">
-                        <div class="cms-page-card-topline">
-                            <span class="cms-page-chip">React page</span>
-                            <span class="cms-page-route">@reactPage.RoutePath</span>
-                        </div>
-
-                        <div>
-                            <h2>@reactPage.DisplayName</h2>
-                            <p>Visual-edit the managed page structure, preview the composition, and publish the resulting file changes.</p>
-                        </div>
-
-                        <dl class="cms-page-meta">
-                            <div>
-                                <dt>Page key</dt>
-                                <dd>@reactPage.PageKey</dd>
-                            </div>
-                            <div>
-                                <dt>React file</dt>
-                                <dd><a href="@BuildFileOpenLink(reactPage.FilePath)">@reactPage.FilePath</a></dd>
-                            </div>
-                        </dl>
-
-                        <div class="cms-page-card-actions">
-                            <button class="btn btn-primary" @onclick="() => OpenVisualBuilder(reactPage.PageKey)">
-                                Open Studio
-                            </button>
-                            <a class="btn btn-outline-secondary" href="@BuildFileOpenLink(reactPage.FilePath)">Open File</a>
-                        </div>
-                    </article>
-                }
-            </div>
-        }
     </div>
 </div>
 
@@ -393,21 +306,29 @@
                         </div>
                     </div>
 
-                    <div class="row g-4">
-                        <div class="col-xl-6">
-                            <label class="form-label fw-semibold small">Blocks JSON</label>
-                            <textarea class="form-control cms-blocks-json-editor" @bind="PageEditor.BlocksJson" @bind:event="oninput" spellcheck="false"></textarea>
-                            <div class="d-flex flex-wrap gap-2 mt-3">
-                                <button class="btn btn-primary" @onclick="SavePageAsync" disabled="@IsCmsBusy">Save Page</button>
-                                <button class="btn btn-outline-secondary" @onclick="CreateNewPage" disabled="@IsCmsBusy">Reset</button>
-                                <button class="btn btn-outline-danger" @onclick="DeleteSelectedPageAsync" disabled="@(IsCmsBusy || !SelectedPageId.HasValue)">Delete</button>
+                    <div class="d-flex flex-wrap gap-2 mb-3">
+                        <button class="btn btn-primary" @onclick="SavePageAsync" disabled="@IsCmsBusy">Save Page Details</button>
+                        <button class="btn btn-outline-secondary" @onclick="CreateNewPage" disabled="@IsCmsBusy">Reset</button>
+                        <button class="btn btn-outline-danger" @onclick="DeleteSelectedPageAsync" disabled="@(IsCmsBusy || !SelectedPageId.HasValue)">Delete</button>
+                    </div>
+
+                    @if (SelectedPageId.HasValue)
+                    {
+                        <div class="cms-block-preview-empty">
+                            <i class="bi bi-magic"></i>
+                            <div>
+                                <strong>Edit this page's content in the Studio.</strong>
+                                <div class="text-secondary mb-2">Add sections and widgets, write copy, and build forms visually — changes go live the moment you save.</div>
+                                <button class="btn btn-primary" @onclick="() => OpenStudio(SelectedPageId.Value)">
+                                    <i class="bi bi-magic me-1"></i>Open Studio
+                                </button>
                             </div>
                         </div>
-                        <div class="col-xl-6">
-                            <label class="form-label fw-semibold small">Live Block Preview</label>
-                            <CmsBlockPreview BlocksJson="@PageEditor.BlocksJson" />
-                        </div>
-                    </div>
+                    }
+                    else
+                    {
+                        <p class="text-secondary small mb-0">Save this page's details first, then open the Studio to build its content.</p>
+                    }
                 }
             </div>
         </div>
@@ -418,7 +339,7 @@
                 <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
                     <div>
                         <div class="fw-semibold">Form Submissions</div>
-                        <div class="small text-secondary">Visitor submissions from this page's contact-form block.</div>
+                        <div class="small text-secondary">Visitor submissions from this page's form widgets.</div>
                     </div>
                     <button class="btn btn-sm btn-outline-secondary" @onclick="LoadFormSubmissionsAsync" disabled="@IsSubmissionsBusy">
                         <i class="bi bi-arrow-repeat me-1"></i>Refresh
@@ -444,14 +365,19 @@
                                     <div class="d-flex justify-content-between align-items-start gap-2">
                                         <div>
                                             <div class="fw-semibold">
-                                                @submission.Name
+                                                @submission.CreatedAt.ToLocalTime().ToString("g")
                                                 @if (!submission.IsRead)
                                                 {
                                                     <span class="badge text-bg-primary ms-2">New</span>
                                                 }
                                             </div>
-                                            <div class="small text-secondary">@submission.Email · @submission.CreatedAt.ToLocalTime().ToString("g")</div>
-                                            <p class="mb-0 mt-2">@submission.Message</p>
+                                            <dl class="row small mb-0 mt-2">
+                                                @foreach (var field in ParseSubmissionFields(submission.FieldsJson))
+                                                {
+                                                    <dt class="col-4 text-secondary">@field.Key</dt>
+                                                    <dd class="col-8">@field.Value</dd>
+                                                }
+                                            </dl>
                                         </div>
                                         <div class="d-flex flex-column gap-1 flex-shrink-0">
                                             @if (!submission.IsRead)
@@ -551,17 +477,11 @@
 </div>
 
 @code {
-    private List<ReactPageReference> ReactPages { get; set; } = new();
-    private bool IsReactBusy { get; set; }
-    private string ReactStatusMessage { get; set; } = string.Empty;
-    private string ReactErrorMessage { get; set; } = string.Empty;
-    private string SearchText { get; set; } = string.Empty;
-
     private List<CmsSite> CmsSites { get; set; } = new();
     private List<CmsPage> CmsPages { get; set; } = new();
     private List<CmsWorkflowBlueprintSummary> CmsBlueprints { get; set; } = new();
     private CmsSiteEditorModel SiteEditor { get; set; } = new() { Theme = "Default" };
-    private CmsPageEditorModel PageEditor { get; set; } = new() { BlocksJson = "[]" };
+    private CmsPageEditorModel PageEditor { get; set; } = new() { BlocksJson = "{\"sections\":[]}" };
     private Guid? SelectedSiteId { get; set; }
     private Guid? SelectedPageId { get; set; }
     private bool IsCmsBusy { get; set; }
@@ -570,41 +490,10 @@
     private string SelectedBlueprintKey { get; set; } = string.Empty;
     private bool ReplaceExistingBlocks { get; set; }
 
-    private IReadOnlyList<ReactPageReference> VisiblePages => ReactPages
-        .Where(page => string.IsNullOrWhiteSpace(SearchText)
-            || page.DisplayName.Contains(SearchText, StringComparison.OrdinalIgnoreCase)
-            || page.RoutePath.Contains(SearchText, StringComparison.OrdinalIgnoreCase)
-            || page.FilePath.Contains(SearchText, StringComparison.OrdinalIgnoreCase)
-            || page.PageKey.Contains(SearchText, StringComparison.OrdinalIgnoreCase))
-        .ToList();
-
     protected override async Task OnInitializedAsync()
     {
-        await LoadReactPagesAsync();
         await LoadCmsWorkspaceAsync();
         await LoadMediaAssetsAsync();
-    }
-
-    private async Task LoadReactPagesAsync()
-    {
-        IsReactBusy = true;
-        ReactErrorMessage = string.Empty;
-        ReactStatusMessage = string.Empty;
-
-        try
-        {
-            ReactPages = (await ReactPageBuilderService.ListReactPagesAsync()).ToList();
-            ReactStatusMessage = $"Loaded {ReactPages.Count} React pages from the active app.";
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Unable to load React pages for Canvas.");
-            ReactErrorMessage = $"Unable to load React pages. {ex.Message}";
-        }
-        finally
-        {
-            IsReactBusy = false;
-        }
     }
 
     private async Task LoadCmsWorkspaceAsync()
@@ -786,7 +675,7 @@
         PageEditor = new CmsPageEditorModel
         {
             SiteId = SelectedSiteId,
-            BlocksJson = "[]"
+            BlocksJson = "{\"sections\":[]}"
         };
         SelectedBlueprintKey = string.Empty;
         ReplaceExistingBlocks = false;
@@ -890,6 +779,19 @@
     {
         await FormSubmissionService.DeleteAsync(submissionId);
         await LoadFormSubmissionsAsync();
+    }
+
+    private static Dictionary<string, string> ParseSubmissionFields(string fieldsJson)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(
+                string.IsNullOrWhiteSpace(fieldsJson) ? "{}" : fieldsJson) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
     }
 
     // ── Revision history ────────────────────────────────────────────────────
@@ -1083,21 +985,13 @@
         }
     }
 
-    private void OpenVisualBuilder(string pageKey)
-    {
-        Navigation.NavigateTo($"/admin/canvas/editor/{Uri.EscapeDataString(pageKey)}");
-    }
-
-    private static string BuildFileOpenLink(string filePath)
-    {
-        return $"vscode://file/{Uri.EscapeDataString(filePath)}";
-    }
-
     private string? LivePageUrl =>
         SelectedSiteId.HasValue && CmsSites.FirstOrDefault(s => s.Id == SelectedSiteId.Value) is { } selectedSite
             && !string.IsNullOrWhiteSpace(PageEditor.Slug)
             ? $"/cms/{selectedSite.Slug}/{PageEditor.Slug}"
             : null;
+
+    private void OpenStudio(Guid pageId) => Navigation.NavigateTo($"/admin/canvas/editor/{pageId}");
 
     private string? SiteExportUrl =>
         SelectedSiteId.HasValue && CmsSites.FirstOrDefault(s => s.Id == SelectedSiteId.Value) is { } exportSite

@@ -8,6 +8,13 @@ namespace GwsBusinessSuite.Tests;
 
 public sealed class FormSubmissionServiceTests
 {
+    private static Dictionary<string, string> AdaFields(string message = "Interested in a quote.") => new()
+    {
+        ["name"] = "Ada Lovelace",
+        ["email"] = "ada@example.com",
+        ["message"] = message
+    };
+
     [Fact]
     public async Task SubmitAsync_ShouldStoreAndReturnTheSubmission()
     {
@@ -16,31 +23,46 @@ public sealed class FormSubmissionServiceTests
         var service = new FormSubmissionService(db);
         var page = await CreatePageAsync(cmsBuilder);
 
-        var submission = await service.SubmitAsync(page.Id, "Ada Lovelace", "ada@example.com", "Interested in a quote.");
+        var submission = await service.SubmitAsync(page.Id, AdaFields());
 
-        submission.Name.Should().Be("Ada Lovelace");
-        submission.Email.Should().Be("ada@example.com");
-        submission.Message.Should().Be("Interested in a quote.");
+        submission.FieldsJson.Should().Contain("Ada Lovelace");
+        submission.FieldsJson.Should().Contain("ada@example.com");
+        submission.FieldsJson.Should().Contain("Interested in a quote.");
         submission.IsRead.Should().BeFalse();
 
         var listed = await service.ListAsync(page.Id);
         listed.Should().ContainSingle(s => s.Id == submission.Id);
     }
 
-    [Theory]
-    [InlineData("", "ada@example.com", "Hello")]
-    [InlineData("Ada", "not-an-email", "Hello")]
-    [InlineData("Ada", "ada@example.com", "")]
-    public async Task SubmitAsync_ShouldRejectInvalidInput(string name, string email, string message)
+    [Fact]
+    public async Task SubmitAsync_ShouldRejectSubmissionsWithNoNonEmptyFields()
     {
         await using var db = await CreateDbAsync();
         var cmsBuilder = new CmsBuilderService(db);
         var service = new FormSubmissionService(db);
         var page = await CreatePageAsync(cmsBuilder);
 
-        var action = async () => await service.SubmitAsync(page.Id, name, email, message);
+        var action = async () => await service.SubmitAsync(page.Id, new Dictionary<string, string> { ["name"] = "   " });
 
         await action.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task SubmitAsync_ShouldIgnoreBlankFields_ButKeepNonBlankOnes()
+    {
+        await using var db = await CreateDbAsync();
+        var cmsBuilder = new CmsBuilderService(db);
+        var service = new FormSubmissionService(db);
+        var page = await CreatePageAsync(cmsBuilder);
+
+        var submission = await service.SubmitAsync(page.Id, new Dictionary<string, string>
+        {
+            ["name"] = "Ada",
+            ["optional-field"] = ""
+        });
+
+        submission.FieldsJson.Should().Contain("Ada");
+        submission.FieldsJson.Should().NotContain("optional-field");
     }
 
     [Fact]
@@ -49,7 +71,7 @@ public sealed class FormSubmissionServiceTests
         await using var db = await CreateDbAsync();
         var service = new FormSubmissionService(db);
 
-        var action = async () => await service.SubmitAsync(Guid.NewGuid(), "Ada", "ada@example.com", "Hello");
+        var action = async () => await service.SubmitAsync(Guid.NewGuid(), AdaFields());
 
         await action.Should().ThrowAsync<InvalidOperationException>();
     }
@@ -62,13 +84,13 @@ public sealed class FormSubmissionServiceTests
         var service = new FormSubmissionService(db);
         var page = await CreatePageAsync(cmsBuilder);
 
-        await service.SubmitAsync(page.Id, "First", "first@example.com", "First message");
-        await service.SubmitAsync(page.Id, "Second", "second@example.com", "Second message");
+        await service.SubmitAsync(page.Id, new Dictionary<string, string> { ["name"] = "First" });
+        await service.SubmitAsync(page.Id, new Dictionary<string, string> { ["name"] = "Second" });
 
         var listed = await service.ListAsync(page.Id);
 
         listed.Should().HaveCount(2);
-        listed[0].Name.Should().Be("Second");
+        listed[0].FieldsJson.Should().Contain("Second");
     }
 
     [Fact]
@@ -78,7 +100,7 @@ public sealed class FormSubmissionServiceTests
         var cmsBuilder = new CmsBuilderService(db);
         var service = new FormSubmissionService(db);
         var page = await CreatePageAsync(cmsBuilder);
-        var submission = await service.SubmitAsync(page.Id, "Ada", "ada@example.com", "Hello");
+        var submission = await service.SubmitAsync(page.Id, AdaFields());
 
         await service.DeleteAsync(submission.Id);
 
@@ -92,7 +114,7 @@ public sealed class FormSubmissionServiceTests
         var cmsBuilder = new CmsBuilderService(db);
         var service = new FormSubmissionService(db);
         var page = await CreatePageAsync(cmsBuilder);
-        var submission = await service.SubmitAsync(page.Id, "Ada", "ada@example.com", "Hello");
+        var submission = await service.SubmitAsync(page.Id, AdaFields());
 
         await service.MarkReadAsync(submission.Id);
 
@@ -106,7 +128,7 @@ public sealed class FormSubmissionServiceTests
         var cmsBuilder = new CmsBuilderService(db);
         var service = new FormSubmissionService(db);
         var page = await CreatePageAsync(cmsBuilder);
-        await service.SubmitAsync(page.Id, "Ada", "ada@example.com", "Hello");
+        await service.SubmitAsync(page.Id, AdaFields());
 
         await cmsBuilder.DeletePageAsync(page.Id);
 
@@ -120,7 +142,7 @@ public sealed class FormSubmissionServiceTests
         {
             SiteId = site.Id,
             Title = "Contact",
-            BlocksJson = "[]"
+            BlocksJson = "{\"sections\":[]}"
         });
     }
 

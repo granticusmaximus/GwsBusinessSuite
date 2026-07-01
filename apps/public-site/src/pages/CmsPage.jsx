@@ -5,8 +5,9 @@ import CmsBlockRenderer from '../cms/CmsBlockRenderer';
 
 const CMS_SITE_SLUG = import.meta.env.VITE_CMS_SITE_SLUG || '';
 
-export default function CmsPage() {
-  const { pageSlug } = useParams();
+export default function CmsPage({ pageSlug: pageSlugProp } = {}) {
+  const { pageSlug: pageSlugParam } = useParams();
+  const pageSlug = pageSlugProp ?? pageSlugParam;
   const [page, setPage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -55,7 +56,7 @@ export default function CmsPage() {
         <style>{[page.siteCustomCss, page.pageCustomCss].filter(Boolean).join('\n')}</style>
       )}
       <CmsBlockRenderer
-        blocks={page.blocks || []}
+        layout={page.blocks}
         siteSlug={CMS_SITE_SLUG}
         pageSlug={pageSlug}
       />

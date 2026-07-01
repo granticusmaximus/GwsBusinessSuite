@@ -4,11 +4,16 @@ namespace GwsBusinessSuite.Tests;
 
 public sealed class CmsBlockHtmlRendererTests
 {
+    // Wraps a single widget in the minimal one-section/one-column layout envelope
+    // (Section -> Column -> Widget) that CmsBlockHtmlRenderer.Render expects.
+    private static string Layout(string widgetJson) =>
+        $$"""{"sections":[{"id":"s1","columns":[{"id":"c1","widgets":[{{widgetJson}}]}]}]}""";
+
     [Fact]
-    public void Render_ShouldRenderHeroBlockWithTitleAndCta()
+    public void Render_ShouldRenderHeroWidget_WithHeadlineSublineAndCtas()
     {
-        var html = CmsBlockHtmlRenderer.Render(
-            "[{\"type\":\"hero\",\"title\":\"Welcome\",\"subtitle\":\"Intro\",\"primaryCta\":\"Start\",\"primaryCtaHref\":\"/start\"}]");
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"hero","props":{"headline":"Welcome","subline":"Intro","cta1Label":"Start","cta1Href":"/start"}}"""));
 
         Assert.Contains("Welcome", html);
         Assert.Contains("Intro", html);
@@ -19,112 +24,141 @@ public sealed class CmsBlockHtmlRendererTests
     [Fact]
     public void Render_ShouldHtmlEncodeUserSuppliedFields_ToPreventScriptInjection()
     {
-        var html = CmsBlockHtmlRenderer.Render(
-            "[{\"type\":\"hero\",\"title\":\"<script>alert(1)</script>\",\"subtitle\":\"\"}]");
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"hero","props":{"headline":"<script>alert(1)</script>"}}"""));
 
         Assert.DoesNotContain("<script>alert(1)</script>", html);
         Assert.Contains("&lt;script&gt;", html);
     }
 
     [Fact]
-    public void Render_ShouldReturnEmptyString_ForEmptyBlocksArray()
+    public void Render_ShouldReturnEmptyString_ForNoSections()
     {
-        var html = CmsBlockHtmlRenderer.Render("[]");
+        var html = CmsBlockHtmlRenderer.Render("""{"sections":[]}""");
 
         Assert.Equal(string.Empty, html);
     }
 
     [Fact]
-    public void Render_ShouldSkipUnknownBlockTypes_WithoutThrowing()
+    public void Render_ShouldReturnEmptyString_ForInvalidJson()
     {
-        var html = CmsBlockHtmlRenderer.Render("[{\"type\":\"totally-unknown\",\"title\":\"x\"}]");
+        var html = CmsBlockHtmlRenderer.Render("not json");
+
+        Assert.Equal(string.Empty, html);
+    }
+
+    [Fact]
+    public void Render_ShouldSkipUnknownWidgetTypes_WithoutThrowing()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"totally-unknown","props":{"text":"x"}}"""));
 
         Assert.DoesNotContain("totally-unknown", html);
     }
 
     [Fact]
-    public void Render_ShouldRenderImageBlock_WithEncodedSrcAndAlt()
+    public void Render_ShouldRenderImageWidget_WithEncodedSrcAndAlt()
     {
-        var html = CmsBlockHtmlRenderer.Render(
-            "[{\"type\":\"image\",\"src\":\"/media/abc\",\"alt\":\"A photo\"}]");
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"image","props":{"src":"/media/abc","alt":"A photo"}}"""));
 
         Assert.Contains("src=\"/media/abc\"", html);
         Assert.Contains("alt=\"A photo\"", html);
     }
 
     [Fact]
-    public void Render_ShouldOmitImageBlock_WhenSrcIsMissing()
+    public void Render_ShouldOmitImageWidget_WhenSrcIsMissing()
     {
-        var html = CmsBlockHtmlRenderer.Render("[{\"type\":\"image\",\"alt\":\"A photo\"}]");
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"image","props":{"alt":"A photo"}}"""));
 
         Assert.DoesNotContain("<img", html);
     }
 
     [Fact]
-    public void Render_ShouldRenderFeatureStackItemsAsListItems()
+    public void Render_ShouldRenderHeadingWidget_WithRequestedLevel()
     {
-        var html = CmsBlockHtmlRenderer.Render(
-            "[{\"type\":\"feature-stack\",\"title\":\"What you get\",\"items\":[\"Automation\",\"Analytics\"]}]");
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"heading","props":{"text":"Section title","level":"h3"}}"""));
 
-        Assert.Contains("<li>Automation</li>", html);
-        Assert.Contains("<li>Analytics</li>", html);
+        Assert.Contains("<h3", html);
+        Assert.Contains("Section title", html);
+        Assert.Contains("</h3>", html);
     }
 
     [Fact]
-    public void Render_ShouldRenderCountdownBlock_WithItsDaysValue()
+    public void Render_ShouldFallBackToH2_ForAnUnrecognizedHeadingLevel()
     {
-        var html = CmsBlockHtmlRenderer.Render(
-            "[{\"type\":\"countdown\",\"title\":\"Launch countdown\",\"days\":12}]");
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"heading","props":{"text":"x","level":"h9"}}"""));
 
-        Assert.Contains("Launch countdown", html);
-        Assert.Contains(">12<", html);
-        Assert.Contains("days remaining", html);
+        Assert.Contains("<h2", html);
     }
 
     [Fact]
-    public void Render_ShouldDefaultCountdownDaysToSeven_WhenMissing()
+    public void Render_ShouldRenderSpacerWidget_WithItsHeightValue()
     {
-        var html = CmsBlockHtmlRenderer.Render("[{\"type\":\"countdown\",\"title\":\"Coming soon\"}]");
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"spacer","props":{"height":"120"}}"""));
 
-        Assert.Contains(">7<", html);
+        Assert.Contains("height:120px", html);
     }
 
     [Fact]
-    public void Render_ShouldRenderContactFormBlock_AsAWorkingFormPostingToTheSubmitEndpoint()
+    public void Render_ShouldDefaultSpacerHeightTo48_WhenMissing()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"spacer","props":{}}"""));
+
+        Assert.Contains("height:48px", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderFormWidget_WithCustomFieldsPostingToTheSubmitEndpoint()
     {
         var html = CmsBlockHtmlRenderer.Render(
-            "[{\"type\":\"contact-form\",\"title\":\"Get your plan\"}]",
+            Layout("""{"id":"w1","widgetType":"form","props":{"submitLabel":"Send","fieldsJson":"[{\"key\":\"name\",\"label\":\"Name\",\"type\":\"text\",\"required\":true},{\"key\":\"favoriteColor\",\"label\":\"Favorite color\",\"type\":\"select\",\"optionsJson\":\"[\\\"Red\\\",\\\"Blue\\\"]\"}]"}}"""),
             "my-site",
             "contact");
 
-        Assert.Contains("Get your plan", html);
         Assert.Contains("<form", html);
         Assert.Contains("action=\"/cms/my-site/contact/submit\"", html);
         Assert.Contains("name=\"name\"", html);
-        Assert.Contains("name=\"email\"", html);
-        Assert.Contains("name=\"message\"", html);
-        Assert.Contains("cms-form-honeypot", html);
-        Assert.DoesNotContain("disabled", html);
+        Assert.Contains("required", html);
+        Assert.Contains("name=\"favoriteColor\"", html);
+        Assert.Contains("<option value=\"Red\">Red</option>", html);
+        Assert.Contains("gws-form-honeypot", html);
+        Assert.Contains("Send", html);
     }
 
     [Fact]
-    public void Render_ShouldRenderOnlyTheHeading_ForTocFaqAndTestimonials()
+    public void Render_ShouldRenderFormWidget_WithNoFields_WithoutThrowing()
     {
-        // These three have no real per-block content fields anywhere in the system (no
-        // "items" array in any workflow blueprint) — the admin preview's body text for
-        // them is editorial scaffolding, not real data, so it's deliberately not ported
-        // to the public renderer. Heading-only is the correct, honest output.
-        var toc = CmsBlockHtmlRenderer.Render("[{\"type\":\"toc\",\"title\":\"In this article\"}]");
-        var faq = CmsBlockHtmlRenderer.Render("[{\"type\":\"faq\",\"title\":\"FAQ\"}]");
-        var testimonials = CmsBlockHtmlRenderer.Render("[{\"type\":\"testimonials\",\"title\":\"Results\"}]");
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"form","props":{}}"""));
 
-        Assert.Contains("In this article", toc);
-        Assert.DoesNotContain("Introduction", toc);
+        Assert.Contains("<form", html);
+        Assert.Contains("gws-form-honeypot", html);
+    }
 
-        Assert.Contains("FAQ", faq);
-        Assert.DoesNotContain("Question and answer content.", faq);
+    [Fact]
+    public void Render_ShouldApplySectionBackgroundAndPaddingClasses()
+    {
+        var html = CmsBlockHtmlRenderer.Render(
+            """{"sections":[{"id":"s1","background":"dark","padding":"lg","columns":[]}]}""");
 
-        Assert.Contains("Results", testimonials);
-        Assert.DoesNotContain("social proof", testimonials);
+        Assert.Contains("gws-bg-dark", html);
+        Assert.Contains("gws-pad-lg", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderMultipleColumns_UsingTheColumnLayoutClass()
+    {
+        var html = CmsBlockHtmlRenderer.Render(
+            """{"sections":[{"id":"s1","columnLayout":"half-half","columns":[{"id":"c1","widgets":[]},{"id":"c2","widgets":[]}]}]}""");
+
+        Assert.Contains("gws-cols-2", html);
+        var columnCount = html.Split("class=\"gws-column\"").Length - 1;
+        Assert.Equal(2, columnCount);
     }
 }

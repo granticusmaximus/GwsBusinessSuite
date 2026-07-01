@@ -1,180 +1,267 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Markdig;
 
 namespace GwsBusinessSuite.Application.CmsBuilder;
 
 /// <summary>
-/// Renders a CmsPage's BlocksJson to a public-facing HTML fragment. Mirrors the block
-/// vocabulary of the admin-only Blazor preview (CmsBlockPreview.razor) so what an editor
-/// sees while building a page matches what visitors see once it's published, but this
-/// renderer produces plain HTML strings so it can run outside the Blazor render pipeline,
-/// from a minimal API endpoint.
+/// Renders a CmsPage's BlocksJson — a PageLayout-shaped Section/Column/Widget document,
+/// the same schema the Studio (CmsBuilderEditor.razor) edits — to a public-facing HTML
+/// fragment. Mirrors the widget vocabulary and prop-key conventions of the React renderer
+/// (CmsBlockRenderer.jsx) and the admin preview (CmsBlockPreview.razor) so all three stay
+/// in sync, but this one produces plain HTML strings so it can run outside the Blazor
+/// render pipeline, from a minimal API endpoint.
 /// </summary>
 public static class CmsBlockHtmlRenderer
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
         .Build();
 
     public static string Render(string blocksJson, string siteSlug = "", string pageSlug = "")
     {
-        var node = JsonNode.Parse(string.IsNullOrWhiteSpace(blocksJson) ? "[]" : blocksJson.Trim());
-        var blocks = (node as JsonArray)?.OfType<JsonObject>() ?? Enumerable.Empty<JsonObject>();
+        var layout = ParseLayout(blocksJson);
+        if (layout is null || layout.Sections.Count == 0)
+        {
+            return string.Empty;
+        }
 
         var html = new StringBuilder();
-        foreach (var block in blocks)
+        foreach (var section in layout.Sections)
         {
-            html.Append("<section class=\"cms-block\">").Append(RenderBlock(block, siteSlug, pageSlug)).Append("</section>\n");
+            html.Append(RenderSection(section, siteSlug, pageSlug));
         }
 
         return html.ToString();
     }
 
-    private static string RenderBlock(JsonObject block, string siteSlug, string pageSlug)
+    private static PageLayout? ParseLayout(string blocksJson)
     {
-        var type = GetString(block, "type");
-        return type switch
+        if (string.IsNullOrWhiteSpace(blocksJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<PageLayout>(blocksJson, JsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string RenderSection(LayoutSection section, string siteSlug, string pageSlug)
+    {
+        var sectionClass = $"gws-section {BgClass(section.Background)} {PadClass(section.Padding)}".TrimEnd();
+        var columnsClass = ColsClass(section.ColumnLayout);
+
+        var sb = new StringBuilder();
+        sb.Append($"""<section class="{Html(sectionClass)}"><div class="{Html(columnsClass)}">""");
+
+        foreach (var column in section.Columns)
+        {
+            sb.Append("""<div class="gws-column">""");
+            foreach (var widget in column.Widgets)
+            {
+                sb.Append(RenderWidget(widget, siteSlug, pageSlug));
+            }
+            sb.Append("</div>");
+        }
+
+        sb.Append("</div></section>\n");
+        return sb.ToString();
+    }
+
+    private static string RenderWidget(LayoutWidget widget, string siteSlug, string pageSlug)
+    {
+        var p = widget.Props;
+        return widget.WidgetType switch
         {
             "hero" => $"""
-                <div class="cms-hero">
-                  <h1>{Html(GetString(block, "title", "New hero section"))}</h1>
-                  <p>{Html(GetString(block, "subtitle"))}</p>
-                  {Button(GetString(block, "primaryCta"), GetString(block, "primaryCtaHref", "#"))}
+                <div class="gws-hero gws-align-{Html(Align(p))}">
+                  <h1 class="gws-hero-headline">{Html(Get(p, "headline"))}</h1>
+                  {(HasValue(p, "subline") ? $"""<p class="gws-hero-subline">{Html(Get(p, "subline"))}</p>""" : "")}
+                  <div class="gws-hero-actions">
+                    {HeroCta(Get(p, "cta1Label"), Get(p, "cta1Href"), "btn-primary")}
+                    {HeroCta(Get(p, "cta2Label"), Get(p, "cta2Href"), "btn-ghost")}
+                  </div>
                 </div>
                 """,
-            "proof-grid" => $"""
-                <h2>{Html(GetString(block, "title", "Proof points"))}</h2>
-                <div class="cms-grid">{Items(block, "items")}</div>
-                """,
-            "feature-stack" => $"""
-                <h2>{Html(GetString(block, "title", "What you get"))}</h2>
-                <ul class="cms-list">{ListItems(block, "items")}</ul>
-                """,
-            "cta" => $"""
-                <div class="cms-callout">
-                  <h2>{Html(GetString(block, "title", "Ready to take action?"))}</h2>
-                  {Button(GetString(block, "button", "Continue"), GetString(block, "buttonHref", "#"))}
+            "heading" => $"""<{Tag(p)} class="gws-heading gws-align-{Html(Align(p))}">{Html(Get(p, "text"))}</{Tag(p)}>""",
+            "paragraph" => $"""<p class="gws-paragraph gws-align-{Html(Align(p))}">{Html(Get(p, "text"))}</p>""",
+            "button" => $"""
+                <div class="gws-button-wrap gws-align-{Html(Align(p))}">
+                  <a href="{Html(HrefOrHash(Get(p, "href")))}" class="btn btn-{Html(Get(p, "variant", "primary"))}"{OpenInNewTabAttrs(p)}>{Html(Get(p, "label"))}</a>
                 </div>
                 """,
-            "article-header" => $"""
-                <h1>{Html(GetString(block, "title", "Editorial title"))}</h1>
-                <p>{Html(GetString(block, "subtitle"))}</p>
-                """,
-            // toc/faq/testimonials render heading-only deliberately: the admin preview's
-            // body content for these three ("Introduction/Main section/...", "Question and
-            // answer content.", "Use this block to add social proof...") is editorial
-            // scaffolding text, not real per-block data — there's no "items" field for any
-            // of them in any workflow blueprint. Copying that placeholder copy to a public
-            // page would look like an obviously broken stub to real visitors, which is worse
-            // than just showing the heading. countdown and contact-form below DO have real
-            // per-block data (days / static form fields) and are rendered in full.
-            "toc" => $"""
-                <h2>{Html(GetString(block, "title", "In this article"))}</h2>
-                """,
-            "rich-content" => $"""
-                <div class="cms-rich-content">{Markdown.ToHtml(GetString(block, "body", string.Empty), MarkdownPipeline)}</div>
-                """,
-            "author-box" => $"""
-                <div class="cms-author">
-                  <div class="cms-author-name">{Html(GetString(block, "name", string.Empty))}</div>
-                  <div class="cms-author-role">{Html(GetString(block, "role", string.Empty))}</div>
-                </div>
-                """,
-            "newsletter-cta" => $"""
-                <div class="cms-callout">
-                  <h2>{Html(GetString(block, "title", "Get weekly updates"))}</h2>
-                  {Button(GetString(block, "button", "Subscribe"), GetString(block, "buttonHref", "#"))}
-                </div>
-                """,
-            "countdown" => $"""
-                <div class="cms-countdown">
-                  <h2>{Html(GetString(block, "title", "Countdown"))}</h2>
-                  <div class="cms-countdown-days">{GetInt(block, "days", 7)}</div>
-                  <div class="cms-countdown-caption">days remaining</div>
-                </div>
-                """,
-            "pricing-table" => $"""
-                <h2>{Html(GetString(block, "title", "Pricing"))}</h2>
-                <div class="cms-grid">{Items(block, "plans")}</div>
-                """,
-            "faq" => $"""
-                <h2>{Html(GetString(block, "title", "Frequently asked questions"))}</h2>
-                """,
-            "service-list" => $"""
-                <h2>{Html(GetString(block, "title", "Services"))}</h2>
-                <div class="cms-grid">{Items(block, "items")}</div>
-                """,
-            "testimonials" => $"""
-                <h2>{Html(GetString(block, "title", "Client results"))}</h2>
-                """,
-            // Posts to /cms/{siteSlug}/{pageSlug}/submit (see Program.cs), which stores the
-            // submission via IFormSubmissionService. The "company" field is a honeypot:
-            // hidden from real visitors via cms-public.css, so a filled-in value marks the
-            // request as a bot without telling the bot it was caught.
-            "contact-form" => $"""
-                <div class="cms-callout">
-                  <h2>{Html(GetString(block, "title", "Get your plan"))}</h2>
-                  <form class="cms-form-grid" method="post" action="/cms/{Html(siteSlug)}/{Html(pageSlug)}/submit">
-                    <input type="text" name="name" placeholder="Name" required maxlength="200" />
-                    <input type="email" name="email" placeholder="Email" required maxlength="320" />
-                    <textarea name="message" rows="3" placeholder="Project details" required maxlength="5000"></textarea>
-                    <input type="text" name="company" class="cms-form-honeypot" tabindex="-1" autocomplete="off" />
-                    <button type="submit" class="cms-button">Send</button>
-                  </form>
-                </div>
-                """,
-            "image" => GetString(block, "src") is { Length: > 0 } src
-                ? $"""<img class="cms-image" src="{Html(src)}" alt="{Html(GetString(block, "alt", string.Empty))}" />"""
+            "image" => HasValue(p, "src")
+                ? $"""
+                    <div class="gws-image gws-image-{Html(Get(p, "width", "full"))}">
+                      <img src="{Html(Get(p, "src"))}" alt="{Html(Get(p, "alt"))}" />
+                      {(HasValue(p, "caption") ? $"""<p class="gws-image-caption">{Html(Get(p, "caption"))}</p>""" : "")}
+                    </div>
+                    """
                 : string.Empty,
+            "card" => $"""
+                <div class="gws-card">
+                  {(HasValue(p, "imageSrc") ? $"""<img src="{Html(Get(p, "imageSrc"))}" alt="" class="gws-card-img" />""" : "")}
+                  <div class="gws-card-body">
+                    <h3 class="gws-card-title">{Html(Get(p, "title"))}</h3>
+                    <p class="gws-card-text">{Html(Get(p, "body"))}</p>
+                    {(HasValue(p, "link") ? $"""<a href="{Html(Get(p, "link"))}" class="btn btn-sm btn-outline-primary">Read more</a>""" : "")}
+                  </div>
+                </div>
+                """,
+            "spacer" => $"""<div class="gws-spacer" style="height:{GetInt(p, "height", 48)}px"></div>""",
+            "divider" => $"""<hr class="gws-divider gws-divider-{Html(Get(p, "style", "solid"))}" />""",
+            "html" => Get(p, "content"),
+            "form" => RenderForm(p, siteSlug, pageSlug),
             _ => string.Empty
         };
     }
 
-    private static string Button(string label, string href) =>
-        string.IsNullOrWhiteSpace(label)
-            ? string.Empty
-            : $"""<a class="cms-button" href="{Html(string.IsNullOrWhiteSpace(href) ? "#" : href)}">{Html(label)}</a>""";
-
-    private static string Items(JsonObject block, string propertyName) =>
-        string.Concat(GetStringArray(block, propertyName).Select(item => $"""<div class="cms-grid-item">{Html(item)}</div>"""));
-
-    private static string ListItems(JsonObject block, string propertyName) =>
-        string.Concat(GetStringArray(block, propertyName).Select(item => $"<li>{Html(item)}</li>"));
-
-    private static string Html(string value) => WebUtility.HtmlEncode(value);
-
-    private static int GetInt(JsonObject block, string propertyName, int fallback)
+    // Posts to /cms/{siteSlug}/{pageSlug}/submit (see Program.cs), which stores the
+    // submission via IFormSubmissionService. The "company" field is a honeypot: hidden
+    // from real visitors via CSS, so a filled-in value marks the request as a bot without
+    // telling the bot it was caught.
+    private static string RenderForm(IReadOnlyDictionary<string, string> p, string siteSlug, string pageSlug)
     {
-        if (block[propertyName] is JsonValue value && value.TryGetValue<int>(out var result))
+        var fields = ParseFormFields(Get(p, "fieldsJson"));
+        var sb = new StringBuilder();
+        sb.Append($"""<form class="gws-form" method="post" action="/cms/{Html(siteSlug)}/{Html(pageSlug)}/submit">""");
+
+        foreach (var field in fields)
         {
-            return result;
+            sb.Append("""<label class="gws-form-field"><span class="gws-form-label">""");
+            sb.Append(Html(field.Label));
+            if (field.Required) sb.Append("""<span class="gws-form-required">*</span>""");
+            sb.Append("</span>");
+            sb.Append(RenderFormControl(field));
+            sb.Append("</label>");
         }
 
-        return fallback;
+        sb.Append("""<input type="text" name="company" class="gws-form-honeypot" tabindex="-1" autocomplete="off" />""");
+        sb.Append($"""<button type="submit" class="btn btn-primary gws-form-submit">{Html(Get(p, "submitLabel", "Submit"))}</button>""");
+        sb.Append("</form>");
+        return sb.ToString();
     }
 
-    private static string GetString(JsonObject block, string propertyName, string fallback = "")
+    private static string RenderFormControl(FormFieldDefinition field)
     {
-        if (block[propertyName] is JsonValue value && value.TryGetValue<string>(out var result) && !string.IsNullOrWhiteSpace(result))
+        var required = field.Required ? " required" : string.Empty;
+        var name = Html(field.Key);
+        return field.Type switch
         {
-            return result;
-        }
-
-        return fallback;
+            "textarea" => $"""<textarea name="{name}" rows="4"{required}></textarea>""",
+            "select" => $"""<select name="{name}"{required}><option value="">Select…</option>{SelectOptions(field.OptionsJson)}</select>""",
+            "checkbox" => $"""<input type="checkbox" name="{name}"{required} />""",
+            "tel" => $"""<input type="tel" name="{name}"{required} />""",
+            "email" => $"""<input type="email" name="{name}"{required} />""",
+            _ => $"""<input type="text" name="{name}"{required} />"""
+        };
     }
 
-    private static IReadOnlyList<string> GetStringArray(JsonObject block, string propertyName)
+    private static string SelectOptions(string optionsJson)
     {
-        if (block[propertyName] is not JsonArray array)
+        try
+        {
+            var node = JsonNode.Parse(string.IsNullOrWhiteSpace(optionsJson) ? "[]" : optionsJson) as JsonArray;
+            if (node is null) return string.Empty;
+            return string.Concat(node
+                .Select(item => item?.GetValue<string>() ?? string.Empty)
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Select(opt => $"""<option value="{Html(opt)}">{Html(opt)}</option>"""));
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static List<FormFieldDefinition> ParseFormFields(string fieldsJson)
+    {
+        try
+        {
+            var node = JsonNode.Parse(string.IsNullOrWhiteSpace(fieldsJson) ? "[]" : fieldsJson) as JsonArray;
+            if (node is null) return [];
+
+            return node.OfType<JsonObject>().Select(obj => new FormFieldDefinition(
+                Key: obj["key"]?.GetValue<string>() ?? string.Empty,
+                Label: obj["label"]?.GetValue<string>() ?? string.Empty,
+                Type: obj["type"]?.GetValue<string>() ?? "text",
+                Required: obj["required"]?.GetValue<bool>() ?? false,
+                OptionsJson: obj["optionsJson"]?.GetValue<string>() ?? string.Empty
+            )).Where(f => !string.IsNullOrWhiteSpace(f.Key)).ToList();
+        }
+        catch
         {
             return [];
         }
-
-        return array
-            .Select(item => item?.GetValue<string>() ?? string.Empty)
-            .Where(item => !string.IsNullOrWhiteSpace(item))
-            .ToList();
     }
+
+    private sealed record FormFieldDefinition(string Key, string Label, string Type, bool Required, string OptionsJson);
+
+    private static string HeroCta(string label, string href, string cssClass) =>
+        string.IsNullOrWhiteSpace(label)
+            ? string.Empty
+            : $"""<a href="{Html(HrefOrHash(href))}" class="btn {cssClass}">{Html(label)}</a>""";
+
+    private static string HrefOrHash(string href) => string.IsNullOrWhiteSpace(href) ? "#" : href;
+
+    private static string OpenInNewTabAttrs(IReadOnlyDictionary<string, string> p) =>
+        Get(p, "openInNewTab") == "true" ? " target=\"_blank\" rel=\"noopener noreferrer\"" : string.Empty;
+
+    private static string Align(IReadOnlyDictionary<string, string> p) => Get(p, "align", "left");
+
+    private static string Tag(IReadOnlyDictionary<string, string> p)
+    {
+        var level = Get(p, "level", "h2");
+        return level is "h1" or "h2" or "h3" or "h4" ? level : "h2";
+    }
+
+    private static string BgClass(string background) => background switch
+    {
+        "light" => "gws-bg-light",
+        "dark" => "gws-bg-dark",
+        "accent" => "gws-bg-accent",
+        _ => string.Empty
+    };
+
+    private static string PadClass(string padding) => padding switch
+    {
+        "none" => "gws-pad-none",
+        "sm" => "gws-pad-sm",
+        "lg" => "gws-pad-lg",
+        "xl" => "gws-pad-xl",
+        _ => "gws-pad-md"
+    };
+
+    private static string ColsClass(string columnLayout) => columnLayout switch
+    {
+        "half-half" => "gws-columns gws-cols-2",
+        "one-third-two-thirds" => "gws-columns gws-cols-1-2",
+        "two-thirds-one-third" => "gws-columns gws-cols-2-1",
+        "thirds" => "gws-columns gws-cols-3",
+        _ => "gws-columns gws-cols-1"
+    };
+
+    private static bool HasValue(IReadOnlyDictionary<string, string> p, string key) =>
+        p.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v);
+
+    private static string Get(IReadOnlyDictionary<string, string> p, string key, string fallback = "") =>
+        p.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v) ? v : fallback;
+
+    private static int GetInt(IReadOnlyDictionary<string, string> p, string key, int fallback) =>
+        p.TryGetValue(key, out var v) && int.TryParse(v, out var result) ? result : fallback;
+
+    private static string Html(string value) => WebUtility.HtmlEncode(value);
 }

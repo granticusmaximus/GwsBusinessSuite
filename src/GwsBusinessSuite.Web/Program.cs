@@ -128,7 +128,7 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit           = 0,
             }));
 
-    // Unauthenticated POST that writes to the database (public contact-form submissions) —
+    // Unauthenticated POST that writes to the database (public "form" widget submissions) —
     // a much smaller budget than read traffic to keep it useless for spam/flood attempts.
     options.AddPolicy("public-write", context =>
         RateLimitPartition.GetFixedWindowLimiter(
@@ -221,38 +221,6 @@ app.UseRateLimiter();
 // Plain-text Healthy/Degraded/Unhealthy with no detail disclosure, intended for the deploy
 // pipeline's post-deploy smoke test and any external uptime monitor.
 app.MapHealthChecks("/health").AllowAnonymous();
-
-app.MapGet("/cms-preview/{pageKey}", async (string pageKey, IReactPageBuilderService builderService) =>
-{
-    var state = await builderService.LoadEditorStateAsync(pageKey);
-    if (state is null)
-        return Results.NotFound();
-
-    var css = new StringBuilder();
-    foreach (var uiFile in state.UiFiles)
-    {
-        if (uiFile.FileType is "css" or "scss" or "sass" or "less")
-        {
-            try
-            {
-                var content = await builderService.ReadFileContentAsync(uiFile.FilePath);
-                css.AppendLine($"/* {uiFile.FileName} */");
-                css.AppendLine(content);
-            }
-            catch { /* skip unreadable files */ }
-        }
-    }
-
-    var jsxSource = string.Empty;
-    if (!string.IsNullOrWhiteSpace(state.FilePath))
-    {
-        try { jsxSource = await builderService.ReadFileContentAsync(state.FilePath); }
-        catch { /* no source available */ }
-    }
-
-    var html = BuildCmsPreviewHtml(pageKey, css.ToString(), PreprocessJsxForPreview(jsxSource));
-    return Results.Content(html, "text/html");
-}).RequireAuthorization();
 
 app.MapPost("/auth/login", async (
     HttpContext httpContext,
@@ -396,7 +364,7 @@ app.MapGet("/cms/{siteSlug}/{pageSlug}", async (
     return Results.Content(html, "text/html");
 }).AllowAnonymous().RequireRateLimiting("public-read");
 
-// Handles contact-form block submissions (see CmsBlockHtmlRenderer's "contact-form" case).
+// Handles "form" widget submissions (see CmsBlockHtmlRenderer's "form" case).
 // Tightly rate-limited since it's an unauthenticated POST that writes to the database —
 // a much smaller budget than ordinary page views.
 app.MapPost("/cms/{siteSlug}/{pageSlug}/submit", async (
@@ -421,13 +389,15 @@ app.MapPost("/cms/{siteSlug}/{pageSlug}/submit", async (
         return Results.Redirect($"/cms/{siteSlug}/{pageSlug}/thanks");
     }
 
+    // The form widget's fields are admin-defined per page, so collect whatever was
+    // actually posted (minus the honeypot) rather than assuming fixed field names.
+    var fields = form
+        .Where(kvp => kvp.Key != "company")
+        .ToDictionary(kvp => kvp.Key, kvp => kvp.Value.ToString());
+
     try
     {
-        await formSubmissionService.SubmitAsync(
-            page.Id,
-            form["name"].ToString(),
-            form["email"].ToString(),
-            form["message"].ToString());
+        await formSubmissionService.SubmitAsync(page.Id, fields);
     }
     catch (ArgumentException ex)
     {
@@ -969,147 +939,6 @@ static bool IsSafeLocalPath(string? returnUrl)
            && returnUrl.StartsWith("/", StringComparison.Ordinal)
            && !returnUrl.StartsWith("//", StringComparison.Ordinal)
            && !returnUrl.Contains("\\", StringComparison.Ordinal);
-}
-
-static string PreprocessJsxForPreview(string source)
-{
-    if (string.IsNullOrWhiteSpace(source))
-        return "function __GWSPage() { return React.createElement('div', null, 'No source available'); }";
-
-    var result = source;
-
-    // React default import (with optional named imports): import React, { useState } from 'react';
-    result = Regex.Replace(result,
-        @"import\s+React\s*(?:,\s*\{([^}]*)\}\s*)?from\s+['""]react['""];?\r?\n?",
-        m =>
-        {
-            var named = m.Groups[1].Value.Trim();
-            return string.IsNullOrEmpty(named) ? "" : $"const {{ {named} }} = React;\n";
-        }, RegexOptions.Multiline);
-
-    // ReactDOM imports
-    result = Regex.Replace(result,
-        @"import\s+(?:\w+|\{[^}]*\})\s+from\s+['""]react-dom(?:/[^'""]*)?['""];?\r?\n?",
-        "", RegexOptions.Multiline);
-
-    // React named-only import: import { useState } from 'react';
-    result = Regex.Replace(result,
-        @"import\s+\{([^}]*)\}\s+from\s+['""]react['""];?\r?\n?",
-        m => $"const {{ {m.Groups[1].Value.Trim()} }} = React;\n",
-        RegexOptions.Multiline);
-
-    // CSS module imports: import styles from './X.module.css';
-    result = Regex.Replace(result,
-        @"import\s+(\w+)\s+from\s+['""][^'""]*\.module\.[^'""]+['""];?\r?\n?",
-        m => $"const {m.Groups[1].Value} = new Proxy({{}}, {{ get: (_, k) => k }});\n",
-        RegexOptions.Multiline);
-
-    // CSS side-effect imports: import './App.css';
-    result = Regex.Replace(result,
-        @"import\s+['""][^'""]*\.(?:css|scss|sass|less)['""];?\r?\n?",
-        "", RegexOptions.Multiline);
-
-    // Namespace imports: import * as X from './path';
-    result = Regex.Replace(result,
-        @"import\s+\*\s+as\s+(\w+)\s+from\s+['""][^'""]*['""];?\r?\n?",
-        m => $"const {m.Groups[1].Value} = {{}};\n",
-        RegexOptions.Multiline);
-
-    // Named imports from any path: import { X, Y } from './path';
-    result = Regex.Replace(result,
-        @"import\s+\{([^}]*)\}\s+from\s+['""][^'""]*['""];?\r?\n?",
-        m =>
-        {
-            var names = m.Groups[1].Value
-                .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-                .Select(n => n.Contains(" as ") ? n.Split(" as ", StringSplitOptions.TrimEntries)[1] : n.Trim());
-            return $"const {{ {string.Join(", ", names)} }} = {{}};\n";
-        }, RegexOptions.Multiline);
-
-    // Default imports: import Something from './path';
-    result = Regex.Replace(result,
-        @"import\s+(\w+)\s+from\s+['""][^'""]*['""];?\r?\n?",
-        m => $"const {m.Groups[1].Value} = () => null;\n",
-        RegexOptions.Multiline);
-
-    // Bare imports: import 'something';
-    result = Regex.Replace(result,
-        @"import\s+['""][^'""]*['""];?\r?\n?",
-        "", RegexOptions.Multiline);
-
-    // export default function ComponentName( → function __GWSPage(
-    result = Regex.Replace(result,
-        @"export\s+default\s+function\s+\w+\s*\(",
-        "function __GWSPage(", RegexOptions.Multiline);
-
-    // export default function( (anonymous)
-    result = Regex.Replace(result,
-        @"export\s+default\s+function\s*\(",
-        "function __GWSPage(", RegexOptions.Multiline);
-
-    // export default class ClassName
-    result = Regex.Replace(result,
-        @"export\s+default\s+class\s+\w+",
-        "class __GWSPage", RegexOptions.Multiline);
-
-    // export default ComponentName; (standalone trailing export)
-    result = Regex.Replace(result,
-        @"^export\s+default\s+(\w+)\s*;?\s*$",
-        "const __GWSPage = $1;", RegexOptions.Multiline);
-
-    // export { X as default };
-    result = Regex.Replace(result,
-        @"^export\s+\{[^}]*\b(\w+)\s+as\s+default[^}]*\}\s*;?\s*$",
-        "const __GWSPage = $1;", RegexOptions.Multiline);
-
-    // export const → const
-    result = Regex.Replace(result, @"^export\s+const\b", "const", RegexOptions.Multiline);
-
-    // export function → function
-    result = Regex.Replace(result, @"^export\s+function\b", "function", RegexOptions.Multiline);
-
-    // export { X, Y }; (named-only exports — strip)
-    result = Regex.Replace(result, @"^export\s+\{[^}]*\}\s*;?\s*$", "", RegexOptions.Multiline);
-
-    return result.Trim();
-}
-
-static string BuildCmsPreviewHtml(string pageKey, string inlineCss, string processedJsx)
-{
-    var sb = new StringBuilder();
-    sb.AppendLine("<!DOCTYPE html>");
-    sb.AppendLine("<html lang=\"en\">");
-    sb.AppendLine("<head>");
-    sb.AppendLine("  <meta charset=\"UTF-8\">");
-    sb.AppendLine("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
-    sb.AppendLine($"  <title>Preview \u2013 {pageKey}</title>");
-    sb.AppendLine("  <style>");
-    sb.AppendLine("    *, *::before, *::after { box-sizing: border-box; }");
-    sb.AppendLine("    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; }");
-    sb.AppendLine("    img { max-width: 100%; height: auto; display: block; }");
-    sb.AppendLine("  </style>");
-    sb.AppendLine($"  <style id=\"page-css\">{inlineCss}</style>");
-    sb.AppendLine("  <script crossorigin src=\"https://unpkg.com/react@18/umd/react.development.js\"></script>");
-    sb.AppendLine("  <script crossorigin src=\"https://unpkg.com/react-dom@18/umd/react-dom.development.js\"></script>");
-    sb.AppendLine("  <script src=\"https://unpkg.com/@babel/standalone/babel.min.js\"></script>");
-    sb.AppendLine("</head>");
-    sb.AppendLine("<body>");
-    sb.AppendLine("  <div id=\"root\"></div>");
-    sb.AppendLine("  <script type=\"text/babel\" data-presets=\"react\">");
-    sb.AppendLine(processedJsx);
-    sb.AppendLine(";(function() {");
-    sb.AppendLine("  var _gwsEl = typeof __GWSPage !== 'undefined' ? __GWSPage");
-    sb.AppendLine("    : function() {");
-    sb.AppendLine("        return React.createElement('div', { style: { fontFamily: 'sans-serif', padding: '3rem', textAlign: 'center', color: '#64748b' } },");
-    sb.AppendLine($"          React.createElement('h3', {{ style: {{ fontWeight: 600, marginBottom: '0.5rem' }} }}, 'Preview \u2013 {pageKey}'),");
-    sb.AppendLine("          React.createElement('p', { style: { margin: 0 } }, 'Component export not resolved. Save the file to refresh.'));");
-    sb.AppendLine("      };");
-    sb.AppendLine("  ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(_gwsEl));");
-    sb.AppendLine("})();");
-    sb.AppendLine("  </script>");
-    sb.AppendLine("</body>");
-    sb.Append("</html>");
-    return sb.ToString();
 }
 
 record ArticleUpsertRequest(

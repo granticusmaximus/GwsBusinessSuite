@@ -1,6 +1,7 @@
 /* Styles for pages published from Canvas and served via
    GET /cms/{siteSlug}/{pageSlug} (see CmsBlockHtmlRenderer.cs for the markup
-   these classes apply to). These sites have no other stylesheet of their own. */
+   these classes apply to). These sites have no other stylesheet of their own,
+   so this is a neutral design that isn't tied to any one site's branding. */
 
 :root {
   --cms-text: #0f172a;
@@ -9,6 +10,7 @@
   --cms-accent: #2563eb;
   --cms-border: #e2e8f0;
   --cms-surface: #f8fafc;
+  --cms-dark: #0f172a;
 }
 
 body {
@@ -18,95 +20,102 @@ body {
   line-height: 1.6;
 }
 
-.cms-block {
-  max-width: 880px;
-  margin: 0 auto;
-  padding: 2.5rem 1.5rem;
+.gws-layout { display: flex; flex-direction: column; }
+
+.gws-section { width: 100%; }
+.gws-section > .gws-columns { max-width: 960px; margin: 0 auto; padding: 0 1.5rem; }
+
+.gws-bg-light  { background: var(--cms-surface); }
+.gws-bg-dark   { background: var(--cms-dark); color: #fff; }
+.gws-bg-accent { background: rgba(37, 99, 235, 0.08); }
+
+.gws-pad-none { padding-block: 0; }
+.gws-pad-sm   { padding-block: 1.5rem; }
+.gws-pad-md   { padding-block: 3rem; }
+.gws-pad-lg   { padding-block: 5rem; }
+.gws-pad-xl   { padding-block: 7rem; }
+
+.gws-columns { display: grid; gap: 2rem; }
+.gws-cols-1   { grid-template-columns: 1fr; }
+.gws-cols-2   { grid-template-columns: 1fr 1fr; }
+.gws-cols-1-2 { grid-template-columns: 1fr 2fr; }
+.gws-cols-2-1 { grid-template-columns: 2fr 1fr; }
+.gws-cols-3   { grid-template-columns: 1fr 1fr 1fr; }
+
+@media (max-width: 760px) {
+  .gws-columns { grid-template-columns: 1fr !important; }
 }
 
-.cms-block h1 { font-size: 2.2rem; line-height: 1.15; margin: 0 0 0.75rem; }
-.cms-block h2 { font-size: 1.5rem; margin: 0 0 1rem; }
-.cms-block p { color: var(--cms-text-soft); margin: 0 0 1rem; }
+.gws-column { display: flex; flex-direction: column; gap: 1.25rem; }
 
-.cms-hero { text-align: left; }
+.gws-align-left   { text-align: left; }
+.gws-align-center { text-align: center; }
+.gws-align-right  { text-align: right; }
 
-.cms-button {
+.gws-hero-headline { font-size: clamp(2rem, 5vw, 2.8rem); line-height: 1.15; margin: 0 0 0.75rem; }
+.gws-hero-subline { color: var(--cms-text-soft); font-size: 1.05rem; margin: 0 0 1.5rem; }
+.gws-bg-dark .gws-hero-subline { color: rgba(255, 255, 255, 0.75); }
+.gws-hero-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+.gws-align-center .gws-hero-actions { justify-content: center; }
+.gws-align-right .gws-hero-actions { justify-content: flex-end; }
+
+.gws-heading { line-height: 1.2; margin: 0; }
+.gws-paragraph { color: var(--cms-text-soft); line-height: 1.6; margin: 0; }
+.gws-bg-dark .gws-paragraph { color: rgba(255, 255, 255, 0.75); }
+
+.gws-button-wrap { display: flex; }
+.gws-align-center.gws-button-wrap { justify-content: center; }
+.gws-align-right.gws-button-wrap { justify-content: flex-end; }
+
+.btn {
   display: inline-block;
   padding: 0.65rem 1.25rem;
   border-radius: 8px;
-  background: var(--cms-accent);
-  color: #fff;
   text-decoration: none;
   font-weight: 600;
+  cursor: pointer;
+  border: none;
 }
+.btn-primary { background: var(--cms-accent); color: #fff; }
+.btn-ghost, .btn-outline-primary { background: transparent; color: var(--cms-accent); border: 1px solid var(--cms-accent); }
 
-.cms-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 1rem;
-  margin-top: 1rem;
-}
+.gws-image img { display: block; max-width: 100%; border-radius: 10px; }
+.gws-image-full img { width: 100%; }
+.gws-image-caption { color: var(--cms-text-faint); font-size: 0.85rem; margin-top: 0.5rem; }
 
-.cms-grid-item {
-  padding: 1rem;
+.gws-card {
   border: 1px solid var(--cms-border);
   border-radius: 10px;
+  overflow: hidden;
   background: var(--cms-surface);
 }
+.gws-card-img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+.gws-card-body { padding: 1.25rem; }
+.gws-card-title { margin: 0 0 0.5rem; }
+.gws-card-text { color: var(--cms-text-soft); margin: 0 0 1rem; }
 
-.cms-list {
-  padding-left: 1.25rem;
-  color: var(--cms-text-soft);
-}
+.gws-divider { border: none; border-top: 1px solid var(--cms-border); margin: 0; }
+.gws-divider-dashed { border-top-style: dashed; }
+.gws-divider-dotted { border-top-style: dotted; }
 
-.cms-callout {
-  padding: 1.5rem;
-  border-radius: 12px;
-  background: var(--cms-surface);
-  border: 1px solid var(--cms-border);
-}
-
-.cms-rich-content :first-child { margin-top: 0; }
-
-.cms-author {
-  padding: 1rem;
-  border-radius: 10px;
-  background: var(--cms-surface);
-}
-
-.cms-author-name { font-weight: 700; }
-.cms-author-role { color: var(--cms-text-faint); font-size: 0.9rem; }
-
-.cms-image img { display: block; max-width: 100%; border-radius: 10px; }
-
-.cms-countdown { text-align: center; }
-.cms-countdown-days { font-size: 3rem; font-weight: 800; line-height: 1; }
-.cms-countdown-caption { color: var(--cms-text-faint); font-size: 0.85rem; }
-
-.cms-form-grid {
-  display: grid;
-  gap: 0.75rem;
-  margin-top: 1rem;
-}
-
-.cms-form-grid input,
-.cms-form-grid textarea {
+.gws-form { display: grid; gap: 1rem; max-width: 480px; }
+.gws-form-field { display: grid; gap: 0.4rem; }
+.gws-form-label { font-weight: 600; font-size: 0.92rem; }
+.gws-form-required { color: var(--cms-accent); margin-left: 0.2rem; }
+.gws-form-field input,
+.gws-form-field textarea,
+.gws-form-field select {
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--cms-border);
   border-radius: 8px;
   font-family: inherit;
   font-size: 0.95rem;
 }
-
-.cms-form-grid button {
-  justify-self: start;
-  border: none;
-  cursor: pointer;
-}
+.gws-form-submit { justify-self: start; }
 
 /* Honeypot: invisible to real visitors and excluded from tab order, but still present in
    the DOM for simple bots that fill every field they find. */
-.cms-form-honeypot {
+.gws-form-honeypot {
   position: absolute;
   width: 1px;
   height: 1px;

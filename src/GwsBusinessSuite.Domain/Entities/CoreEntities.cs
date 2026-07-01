@@ -118,9 +118,13 @@ public sealed class MediaAsset : AuditableEntity
 public sealed class FormSubmission : AuditableEntity
 {
     public Guid PageId { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public string Email { get; set; } = string.Empty;
-    public string Message { get; set; } = string.Empty;
+
+    // JSON object of { fieldKey: submittedValue }, since the "form" widget lets an admin
+    // define arbitrary fields per page — there's no fixed set of columns that covers
+    // every form. Keyed by the field's key (the HTML input's "name") rather than its
+    // label, since the submit endpoint only has the raw posted field names to work with.
+    public string FieldsJson { get; set; } = "{}";
+
     public bool IsRead { get; set; }
 }
 

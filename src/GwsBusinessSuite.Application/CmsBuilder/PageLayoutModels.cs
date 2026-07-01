@@ -1,9 +1,12 @@
 namespace GwsBusinessSuite.Application.CmsBuilder;
 
+// The schema stored in CmsPage.BlocksJson — a page is a list of sections, each split
+// into columns, each holding widgets. Edited by the Studio (CmsBuilderEditor.razor) and
+// rendered by three parallel renderers that must stay in sync: CmsBlockRenderer.jsx
+// (live React site), CmsBlockHtmlRenderer.cs (server-rendered /cms/ route), and
+// CmsBlockPreview.razor (admin preview).
 public sealed class PageLayout
 {
-    public string PageKey { get; set; } = string.Empty;
-    public string RoutePath { get; set; } = string.Empty;
     public List<LayoutSection> Sections { get; set; } = new();
 }
 
@@ -35,7 +38,7 @@ public sealed class LayoutWidget
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
 
-    // heading | paragraph | button | image | hero | card | spacer | divider | html
+    // heading | paragraph | button | image | hero | card | form | spacer | divider | html
     public string WidgetType { get; set; } = "paragraph";
 
     public Dictionary<string, string> Props { get; set; } = new();

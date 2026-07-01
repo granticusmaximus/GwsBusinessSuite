@@ -32,7 +32,6 @@ public static class DependencyInjection
             .SetApplicationName("GwsBusinessSuite");
 
         services.Configure<ContentStudioOptions>(configuration.GetSection(ContentStudioOptions.SectionName));
-        services.Configure<CmsBuilderOptions>(configuration.GetSection(CmsBuilderOptions.SectionName));
 
         services.AddDbContextFactory<ApplicationDbContext>(options => options.UseSqlite(connectionString));
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
@@ -74,8 +73,6 @@ public static class DependencyInjection
         services.AddScoped<IMediaLibraryService, MediaLibraryService>();
         services.AddScoped<IFormSubmissionService, FormSubmissionService>();
         services.AddScoped<IPageRevisionService, PageRevisionService>();
-        services.AddScoped<IReactPageBuilderService, ReactPageBuilderService>();
-        services.AddScoped<IPageLayoutService, PageLayoutService>();
         services.AddScoped<ICmsKnowledgeService, CmsKnowledgeService>();
         services.AddScoped<IContentStudioService, ContentStudioService>();
         services.AddScoped<ICrmService, CrmService>();

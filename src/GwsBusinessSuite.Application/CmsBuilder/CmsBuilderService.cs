@@ -40,16 +40,95 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         }
     ];
 
+    // Section/Column/Widget layout JSON (the schema the Studio edits and CmsBlockRenderer.jsx
+    // / CmsBlockHtmlRenderer.cs / CmsBlockPreview.razor all render) — not the old flat block
+    // array. Widget vocabulary is generic primitives (heading, paragraph, card, button, form,
+    // etc.) rather than pre-composed marketing blocks, so specialized old block types
+    // (countdown, pricing-table, faq, testimonials) are approximated with those primitives.
     private static readonly Dictionary<string, string> WorkflowBlueprintBlocks = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["landing-conversion"] =
-            "[{\"type\":\"hero\",\"title\":\"Build Your Next Growth Funnel\",\"subtitle\":\"A focused landing workflow for conversion.\",\"primaryCta\":\"Start Free Trial\"},{\"type\":\"proof-grid\",\"title\":\"Trusted by teams\",\"items\":[\"Case Study One\",\"Case Study Two\",\"Case Study Three\"]},{\"type\":\"feature-stack\",\"title\":\"What you get\",\"items\":[\"Automation\",\"Analytics\",\"Integrations\"]},{\"type\":\"cta\",\"title\":\"Ready to launch?\",\"button\":\"Book a Demo\"}]",
-        ["blog-editorial"] =
-            "[{\"type\":\"article-header\",\"title\":\"Editorial Title\",\"subtitle\":\"Strong angle and reader promise.\"},{\"type\":\"toc\",\"title\":\"In this article\"},{\"type\":\"rich-content\",\"body\":\"## Section\\nLong-form editorial content goes here.\"},{\"type\":\"author-box\",\"name\":\"GWS Editorial\",\"role\":\"Editor\"},{\"type\":\"newsletter-cta\",\"title\":\"Get weekly updates\",\"button\":\"Subscribe\"}]",
-        ["product-launch"] =
-            "[{\"type\":\"hero\",\"title\":\"Product Launch Week\",\"subtitle\":\"Ship your message with precision.\",\"primaryCta\":\"Join Waitlist\"},{\"type\":\"countdown\",\"title\":\"Launch countdown\",\"days\":7},{\"type\":\"pricing-table\",\"plans\":[\"Starter\",\"Pro\",\"Scale\"]},{\"type\":\"faq\",\"title\":\"Questions answered\"}]",
-        ["service-business"] =
-            "[{\"type\":\"hero\",\"title\":\"Professional Services\",\"subtitle\":\"Built for outcomes and trust.\",\"primaryCta\":\"Schedule Consultation\"},{\"type\":\"service-list\",\"items\":[\"Discovery\",\"Implementation\",\"Support\"]},{\"type\":\"testimonials\",\"title\":\"Client results\"},{\"type\":\"contact-form\",\"title\":\"Get your plan\"}]"
+        ["landing-conversion"] = """
+            {"sections":[
+              {"id":"hero","padding":"lg","columnLayout":"full","columns":[{"id":"hero-col","widgets":[
+                {"id":"hero-w","widgetType":"hero","props":{"headline":"Build Your Next Growth Funnel","subline":"A focused landing workflow for conversion.","cta1Label":"Start Free Trial","cta1Href":"#","align":"left"}}
+              ]}]},
+              {"id":"proof","background":"light","padding":"md","columnLayout":"full","columns":[{"id":"proof-col","widgets":[
+                {"id":"proof-h","widgetType":"heading","props":{"text":"Trusted by teams","level":"h2","align":"left"}}
+              ]}]},
+              {"id":"proof-cards","background":"light","padding":"sm","columnLayout":"thirds","columns":[
+                {"id":"pc1","widgets":[{"id":"pc1w","widgetType":"card","props":{"title":"Case Study One","body":"Result summary goes here."}}]},
+                {"id":"pc2","widgets":[{"id":"pc2w","widgetType":"card","props":{"title":"Case Study Two","body":"Result summary goes here."}}]},
+                {"id":"pc3","widgets":[{"id":"pc3w","widgetType":"card","props":{"title":"Case Study Three","body":"Result summary goes here."}}]}
+              ]},
+              {"id":"features","padding":"md","columnLayout":"full","columns":[{"id":"features-col","widgets":[
+                {"id":"features-h","widgetType":"heading","props":{"text":"What you get","level":"h2","align":"left"}}
+              ]}]},
+              {"id":"features-cards","padding":"sm","columnLayout":"thirds","columns":[
+                {"id":"fc1","widgets":[{"id":"fc1w","widgetType":"card","props":{"title":"Automation","body":"Automate the repetitive parts of your workflow."}}]},
+                {"id":"fc2","widgets":[{"id":"fc2w","widgetType":"card","props":{"title":"Analytics","body":"See what's working and double down."}}]},
+                {"id":"fc3","widgets":[{"id":"fc3w","widgetType":"card","props":{"title":"Integrations","body":"Connect the tools you already use."}}]}
+              ]},
+              {"id":"cta","background":"dark","padding":"lg","columnLayout":"full","columns":[{"id":"cta-col","widgets":[
+                {"id":"cta-h","widgetType":"heading","props":{"text":"Ready to launch?","level":"h2","align":"center"}},
+                {"id":"cta-b","widgetType":"button","props":{"label":"Book a Demo","href":"#","variant":"primary","align":"center"}}
+              ]}]}
+            ]}
+            """,
+        ["blog-editorial"] = """
+            {"sections":[
+              {"id":"header","padding":"lg","columnLayout":"full","columns":[{"id":"header-col","widgets":[
+                {"id":"h1","widgetType":"heading","props":{"text":"Editorial Title","level":"h1","align":"left"}},
+                {"id":"h1-sub","widgetType":"paragraph","props":{"text":"Strong angle and reader promise.","align":"left"}}
+              ]}]},
+              {"id":"body","padding":"md","columnLayout":"full","columns":[{"id":"body-col","widgets":[
+                {"id":"toc","widgetType":"heading","props":{"text":"In this article","level":"h3","align":"left"}},
+                {"id":"content","widgetType":"html","props":{"content":"<h2>Section</h2><p>Long-form editorial content goes here.</p>"}}
+              ]}]},
+              {"id":"author","padding":"sm","columnLayout":"full","columns":[{"id":"author-col","widgets":[
+                {"id":"author-card","widgetType":"card","props":{"title":"GWS Editorial","body":"Editor"}}
+              ]}]},
+              {"id":"newsletter","background":"accent","padding":"lg","columnLayout":"full","columns":[{"id":"newsletter-col","widgets":[
+                {"id":"n-h","widgetType":"heading","props":{"text":"Get weekly updates","level":"h2","align":"center"}},
+                {"id":"n-b","widgetType":"button","props":{"label":"Subscribe","href":"#","variant":"primary","align":"center"}}
+              ]}]}
+            ]}
+            """,
+        ["product-launch"] = """
+            {"sections":[
+              {"id":"hero","padding":"lg","columnLayout":"full","columns":[{"id":"hero-col","widgets":[
+                {"id":"hero-w","widgetType":"hero","props":{"headline":"Product Launch Week","subline":"Ship your message with precision.","cta1Label":"Join Waitlist","cta1Href":"#","align":"left"}}
+              ]}]},
+              {"id":"countdown","padding":"md","columnLayout":"full","columns":[{"id":"countdown-col","widgets":[
+                {"id":"cd-h","widgetType":"heading","props":{"text":"Launch countdown: 7 days","level":"h2","align":"center"}}
+              ]}]},
+              {"id":"pricing","padding":"sm","columnLayout":"thirds","columns":[
+                {"id":"p1","widgets":[{"id":"p1w","widgetType":"card","props":{"title":"Starter","body":"Everything you need to get going."}}]},
+                {"id":"p2","widgets":[{"id":"p2w","widgetType":"card","props":{"title":"Pro","body":"For teams that are scaling fast."}}]},
+                {"id":"p3","widgets":[{"id":"p3w","widgetType":"card","props":{"title":"Scale","body":"Custom limits and dedicated support."}}]}
+              ]},
+              {"id":"faq","padding":"md","columnLayout":"full","columns":[{"id":"faq-col","widgets":[
+                {"id":"faq-h","widgetType":"heading","props":{"text":"Questions answered","level":"h2","align":"left"}}
+              ]}]}
+            ]}
+            """,
+        ["service-business"] = """
+            {"sections":[
+              {"id":"hero","padding":"lg","columnLayout":"full","columns":[{"id":"hero-col","widgets":[
+                {"id":"hero-w","widgetType":"hero","props":{"headline":"Professional Services","subline":"Built for outcomes and trust.","cta1Label":"Schedule Consultation","cta1Href":"#","align":"left"}}
+              ]}]},
+              {"id":"services","padding":"sm","columnLayout":"thirds","columns":[
+                {"id":"s1","widgets":[{"id":"s1w","widgetType":"card","props":{"title":"Discovery","body":"We start by understanding your goals."}}]},
+                {"id":"s2","widgets":[{"id":"s2w","widgetType":"card","props":{"title":"Implementation","body":"We build and ship the solution."}}]},
+                {"id":"s3","widgets":[{"id":"s3w","widgetType":"card","props":{"title":"Support","body":"We stick around after launch."}}]}
+              ]},
+              {"id":"testimonials","padding":"md","columnLayout":"full","columns":[{"id":"testimonials-col","widgets":[
+                {"id":"t-h","widgetType":"heading","props":{"text":"Client results","level":"h2","align":"left"}}
+              ]}]},
+              {"id":"contact","padding":"lg","columnLayout":"full","columns":[{"id":"contact-col","widgets":[
+                {"id":"contact-form","widgetType":"form","props":{"submitLabel":"Get your plan","fieldsJson":"[{\"key\":\"name\",\"label\":\"Name\",\"type\":\"text\",\"required\":true},{\"key\":\"email\",\"label\":\"Email\",\"type\":\"email\",\"required\":true},{\"key\":\"message\",\"label\":\"Project details\",\"type\":\"textarea\",\"required\":true}]"}}
+              ]}]}
+            ]}
+            """
     };
 
     public async Task<IReadOnlyList<CmsSite>> ListSitesAsync(CancellationToken cancellationToken = default)
@@ -223,7 +302,7 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
             SiteId = siteId,
             Title = string.Empty,
             Slug = string.Empty,
-            BlocksJson = "[]",
+            BlocksJson = "{\"sections\":[]}",
             CreatedAt = now,
             CreatedBy = "cms-ui"
         };
@@ -395,33 +474,38 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
 
     private static string NormalizeBlocksJson(string blocksJson)
     {
-        var trimmed = string.IsNullOrWhiteSpace(blocksJson) ? "[]" : blocksJson.Trim();
+        var trimmed = string.IsNullOrWhiteSpace(blocksJson) ? "{\"sections\":[]}" : blocksJson.Trim();
         using var document = JsonDocument.Parse(trimmed);
         return JsonSerializer.Serialize(document.RootElement);
     }
 
     private static string MergeBlocksJson(string existingBlocksJson, string blueprintBlocksJson)
     {
-        var existingArray = ParseToArray(existingBlocksJson);
-        var blueprintArray = ParseToArray(blueprintBlocksJson);
-        var mergedArray = new JsonArray();
+        var existingSections = ParseSections(existingBlocksJson);
+        var blueprintSections = ParseSections(blueprintBlocksJson);
+        var mergedSections = new JsonArray();
 
-        foreach (var block in existingArray)
+        foreach (var section in existingSections)
         {
-            mergedArray.Add(block?.DeepClone());
+            mergedSections.Add(section?.DeepClone());
         }
 
-        foreach (var block in blueprintArray)
+        foreach (var section in blueprintSections)
         {
-            mergedArray.Add(block?.DeepClone());
+            mergedSections.Add(section?.DeepClone());
         }
 
-        return mergedArray.ToJsonString();
+        return new JsonObject { ["sections"] = mergedSections }.ToJsonString();
     }
 
-    private static JsonArray ParseToArray(string blocksJson)
+    private static JsonArray ParseSections(string blocksJson)
     {
-        var node = JsonNode.Parse(string.IsNullOrWhiteSpace(blocksJson) ? "[]" : blocksJson.Trim());
-        return node as JsonArray ?? throw new InvalidOperationException("Blocks JSON must be a JSON array.");
+        var node = JsonNode.Parse(string.IsNullOrWhiteSpace(blocksJson) ? "{}" : blocksJson.Trim());
+        if (node is not JsonObject obj)
+        {
+            throw new InvalidOperationException("Page layout JSON must be an object with a \"sections\" array.");
+        }
+
+        return obj["sections"] as JsonArray ?? [];
     }
 }

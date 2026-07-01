@@ -152,16 +152,16 @@ public sealed class CmsBuilderServiceTests
         {
             SiteId = site.Id,
             Title = "Home",
-            BlocksJson = "[{\"type\":\"existing\"}]"
+            BlocksJson = "{\"sections\":[{\"id\":\"existing-section\",\"columns\":[]}]}"
         });
 
         var appended = await service.ApplyWorkflowBlueprintAsync(page.Id, "landing-conversion", replaceExistingBlocks: false);
-        appended.BlocksJson.Should().Contain("existing");
-        appended.BlocksJson.Should().Contain("proof-grid");
+        appended.BlocksJson.Should().Contain("existing-section");
+        appended.BlocksJson.Should().Contain("Trusted by teams");
 
         var replaced = await service.ApplyWorkflowBlueprintAsync(page.Id, "service-business", replaceExistingBlocks: true);
-        replaced.BlocksJson.Should().NotContain("existing");
-        replaced.BlocksJson.Should().Contain("service-list");
+        replaced.BlocksJson.Should().NotContain("existing-section");
+        replaced.BlocksJson.Should().Contain("Discovery");
     }
 
     [Fact]

@@ -1,40 +1,29 @@
-using System.Text.RegularExpressions;
+using System.Text.Json;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace GwsBusinessSuite.Application.CmsBuilder;
 
-public sealed partial class FormSubmissionService(IAppDbContext dbContext) : IFormSubmissionService
+public sealed class FormSubmissionService(IAppDbContext dbContext) : IFormSubmissionService
 {
-    private const int MaxNameLength = 200;
-    private const int MaxEmailLength = 320;
-    private const int MaxMessageLength = 5000;
+    private const int MaxFieldCount = 50;
+    private const int MaxFieldValueLength = 5000;
 
     public async Task<FormSubmission> SubmitAsync(
         Guid pageId,
-        string name,
-        string email,
-        string message,
+        IReadOnlyDictionary<string, string> fields,
         CancellationToken cancellationToken = default)
     {
-        var trimmedName = (name ?? string.Empty).Trim();
-        var trimmedEmail = (email ?? string.Empty).Trim();
-        var trimmedMessage = (message ?? string.Empty).Trim();
+        var trimmed = fields
+            .Select(kvp => (Label: kvp.Key.Trim(), Value: (kvp.Value ?? string.Empty).Trim()))
+            .Where(f => !string.IsNullOrWhiteSpace(f.Label) && !string.IsNullOrWhiteSpace(f.Value))
+            .Take(MaxFieldCount)
+            .ToDictionary(f => f.Label, f => f.Value.Length > MaxFieldValueLength ? f.Value[..MaxFieldValueLength] : f.Value);
 
-        if (string.IsNullOrWhiteSpace(trimmedName) || trimmedName.Length > MaxNameLength)
+        if (trimmed.Count == 0)
         {
-            throw new ArgumentException($"Name is required and must be {MaxNameLength} characters or fewer.", nameof(name));
-        }
-
-        if (string.IsNullOrWhiteSpace(trimmedEmail) || trimmedEmail.Length > MaxEmailLength || !EmailPattern().IsMatch(trimmedEmail))
-        {
-            throw new ArgumentException("A valid email address is required.", nameof(email));
-        }
-
-        if (string.IsNullOrWhiteSpace(trimmedMessage) || trimmedMessage.Length > MaxMessageLength)
-        {
-            throw new ArgumentException($"Message is required and must be {MaxMessageLength} characters or fewer.", nameof(message));
+            throw new ArgumentException("At least one field must have a value.", nameof(fields));
         }
 
         var pageExists = await dbContext.CmsPages.AnyAsync(page => page.Id == pageId, cancellationToken);
@@ -46,9 +35,7 @@ public sealed partial class FormSubmissionService(IAppDbContext dbContext) : IFo
         var submission = new FormSubmission
         {
             PageId = pageId,
-            Name = trimmedName,
-            Email = trimmedEmail,
-            Message = trimmedMessage,
+            FieldsJson = JsonSerializer.Serialize(trimmed),
             CreatedBy = "public-form"
         };
 
@@ -106,7 +93,4 @@ public sealed partial class FormSubmissionService(IAppDbContext dbContext) : IFo
             await dbContext.SaveChangesAsync(cancellationToken);
         }
     }
-
-    [GeneratedRegex(@"^[^@\s]+@[^@\s]+\.[^@\s]+$")]
-    private static partial Regex EmailPattern();
 }

@@ -1,6 +1,6 @@
-/* Styles for blocks rendered by LayoutRenderer.jsx (CMS Builder output).
-   Reuses the design tokens defined in App.css so builder-authored sections
-   match the rest of the hand-written site. */
+/* Styles for pages rendered by CmsBlockRenderer.jsx (Canvas Section/Column/
+   Widget output). Reuses the design tokens defined in App.css so
+   Canvas-authored sections match the rest of the hand-written site. */
 
 .gws-layout { display: flex; flex-direction: column; }
 
@@ -35,6 +35,10 @@
 .gws-align-right  { text-align: right; }
 
 .gws-hero-headline {
+  /* Explicit color needed: index.css's leftover Vite-template "h1, h2 { color:
+     var(--text-h) }" rule resolves to near-black under a light color-scheme
+     preference, which is invisible against this dark theme's background. */
+  color: var(--text-1);
   font-family: var(--font-serif);
   font-size: clamp(2.2rem, 5vw, 3.4rem);
   line-height: 1.1;
@@ -45,7 +49,7 @@
 .gws-align-center .gws-hero-actions { justify-content: center; }
 .gws-align-right .gws-hero-actions { justify-content: flex-end; }
 
-.gws-heading { font-family: var(--font-serif); line-height: 1.2; margin: 0; }
+.gws-heading { color: var(--text-1); font-family: var(--font-serif); line-height: 1.2; margin: 0; }
 .gws-paragraph { color: var(--text-2); line-height: 1.6; margin: 0; }
 
 .gws-button-wrap { display: flex; }
@@ -70,3 +74,21 @@
 .gws-divider { border: none; border-top: 1px solid var(--border); margin: 0; }
 .gws-divider-dashed { border-top-style: dashed; }
 .gws-divider-dotted { border-top-style: dotted; }
+
+.gws-form { display: grid; gap: 1rem; max-width: 480px; }
+.gws-form-field { display: grid; gap: 0.4rem; }
+.gws-form-label { font-weight: 600; color: var(--text-1); font-size: 0.92rem; }
+.gws-form-required { color: var(--accent); margin-left: 0.2rem; }
+.gws-form-field input,
+.gws-form-field textarea,
+.gws-form-field select {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+}
+.gws-form-submit { justify-self: start; border: none; cursor: pointer; }
+.gws-form-honeypot { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
