@@ -147,7 +147,7 @@ h1:focus { outline: none; }
     padding: .7rem;
 }
 
-/* ── CMS Builder fullscreen mode ────────────────────────────
+/* ── Canvas fullscreen mode ──────────────────────────────────
    Mirrors how WordPress/Elementor/Squarespace take over the full
    viewport while editing — no app sidebar/topbar, the builder's own
    header and panels fill the screen edge-to-edge. */

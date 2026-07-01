@@ -1,4 +1,4 @@
-/* Styles for pages published from the structured CMS Builder and served via
+/* Styles for pages published from Canvas and served via
    GET /cms/{siteSlug}/{pageSlug} (see CmsBlockHtmlRenderer.cs for the markup
    these classes apply to). These sites have no other stylesheet of their own. */
 

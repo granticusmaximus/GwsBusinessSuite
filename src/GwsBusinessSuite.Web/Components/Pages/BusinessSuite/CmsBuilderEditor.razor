@@ -1,4 +1,4 @@
-@page "/admin/cms-builder/editor/{PageKey}"
+@page "/admin/canvas/editor/{PageKey}"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @attribute [Authorize(Policy = "ContributorAccess")]
 @using Microsoft.AspNetCore.Authorization
@@ -401,7 +401,7 @@
                                         }
                                         else if (_mediaAssets.Count == 0)
                                         {
-                                            <p class="text-secondary small mb-0">No media uploaded yet. Upload images from the CMS Builder's Media Library panel.</p>
+                                            <p class="text-secondary small mb-0">No media uploaded yet. Upload images from Canvas's Media Library panel.</p>
                                         }
                                         else
                                         {
@@ -595,7 +595,7 @@
                 </div>
                 <div class="studio-publish-meta">Branch: <span class="font-monospace">@_publishBranchName</span></div>
                 <label class="form-label small fw-semibold">Commit message</label>
-                <input class="form-control mb-3" @bind="_publishCommitMessage" placeholder="cms-builder: update layout" />
+                <input class="form-control mb-3" @bind="_publishCommitMessage" placeholder="canvas: update layout" />
                 @if (_changedFiles.Count == 0)
                 {
                     <div class="studio-empty-card">
@@ -661,7 +661,7 @@
     // ── Publish ───────────────────────────────────────────────────────────
     private string _routePath = string.Empty;
     private long _previewTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-    private string _publishCommitMessage = "cms-builder: update page layout";
+    private string _publishCommitMessage = "canvas: update page layout";
     private string _publishBranchName = "unknown";
     private List<string> _changedFiles = new();
     private bool _isPublishBusy;
@@ -1277,5 +1277,5 @@
     private static string GetPropStatic(LayoutWidget w, string key, string def) =>
         w.Props.TryGetValue(key, out var v) ? v : def;
 
-    private void BackToList() => Navigation.NavigateTo("/admin/cms-builder");
+    private void BackToList() => Navigation.NavigateTo("/admin/canvas");
 }

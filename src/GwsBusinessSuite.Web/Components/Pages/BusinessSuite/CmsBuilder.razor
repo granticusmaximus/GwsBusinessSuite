@@ -1,5 +1,5 @@
-@page "/admin/cms-builder"
-@rendermode InteractiveServer
+@page "/admin/canvas"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
 @attribute [Authorize(Policy = "ContributorAccess")]
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.CmsBuilder
@@ -13,7 +13,7 @@
 @inject NavigationManager Navigation
 @inject ILogger<CmsBuilder> Logger
 
-<PageTitle>CMS Builder</PageTitle>
+<PageTitle>Canvas</PageTitle>
 
 <div class="cms-builder-shell">
 
@@ -27,7 +27,7 @@
 <div class="cms-builder-hero page-header">
     <div>
         <div class="cms-builder-kicker">Visual editing studio</div>
-        <h1><i class="bi bi-window-stack me-2 text-primary"></i>CMS Builder</h1>
+        <h1><i class="bi bi-window-stack me-2 text-primary"></i>Canvas</h1>
         <p>Manage live React pages and structured CMS blocks in one workspace. The React studio handles production page files, and the structured editor gives the internal CMS page model a real end-to-end preview.</p>
     </div>
 
@@ -405,7 +405,7 @@
                         </div>
                         <div class="col-xl-6">
                             <label class="form-label fw-semibold small">Live Block Preview</label>
-                            <CmsBlockPreview BlocksJson="PageEditor.BlocksJson" />
+                            <CmsBlockPreview BlocksJson="@PageEditor.BlocksJson" />
                         </div>
                     </div>
                 }
@@ -598,7 +598,7 @@
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Unable to load React pages for CMS Builder.");
+            Logger.LogError(ex, "Unable to load React pages for Canvas.");
             ReactErrorMessage = $"Unable to load React pages. {ex.Message}";
         }
         finally
@@ -1085,7 +1085,7 @@
 
     private void OpenVisualBuilder(string pageKey)
     {
-        Navigation.NavigateTo($"/admin/cms-builder/editor/{Uri.EscapeDataString(pageKey)}");
+        Navigation.NavigateTo($"/admin/canvas/editor/{Uri.EscapeDataString(pageKey)}");
     }
 
     private static string BuildFileOpenLink(string filePath)

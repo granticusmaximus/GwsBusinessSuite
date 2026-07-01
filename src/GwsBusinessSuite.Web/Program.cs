@@ -346,7 +346,7 @@ app.MapGet("/og-image/{slug}", async (
     return Results.Bytes(bytes, mime);
 }).AllowAnonymous().RequireRateLimiting("public-read");
 
-// Serves a CmsSite/CmsPage built in the structured CMS Builder ("/admin/cms-builder") as a
+// Serves a CmsSite/CmsPage built in Canvas ("/admin/canvas") as a
 // standalone public HTML page. These pages are independent of the apps/public-site React
 // app — the structured builder targets sites that don't have a hand-written frontend.
 app.MapGet("/cms/{siteSlug}/{pageSlug}", async (
@@ -571,7 +571,7 @@ app.MapGet("/media/{id:guid}", async (Guid id, IMediaLibraryService mediaLibrary
 // ── CMS Pages JSON API ────────────────────────────────────────────────────
 // Used by the React frontend (apps/public-site) to fetch page content for
 // dynamic routes. The React app reads the VITE_CMS_SITE_SLUG env var to know
-// which site's pages to load, so the CMS Builder admin becomes the single
+// which site's pages to load, so Canvas becomes the single
 // tool for managing what appears on grantwatson.dev.
 
 app.MapGet("/api/cms/{siteSlug}/pages", async (
