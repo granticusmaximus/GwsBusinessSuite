@@ -11,6 +11,7 @@
 @inject IFormSubmissionService FormSubmissionService
 @inject IPageRevisionService PageRevisionService
 @inject NavigationManager Navigation
+@inject IConfiguration Configuration
 @inject ILogger<CmsBuilder> Logger
 
 <PageTitle>Canvas</PageTitle>
@@ -28,16 +29,12 @@
     <div>
         <div class="cms-builder-kicker">Visual editing studio</div>
         <h1><i class="bi bi-window-stack me-2 text-primary"></i>Canvas</h1>
-        <p>Build and edit every page on the live site here — no code, no deploy. Create sites, add pages, and edit their content and forms; changes go live immediately.</p>
+        <p>Build and edit every page on @(CurrentSite?.Name ?? "the live site") here — no code, no deploy. Add pages and edit their content and forms; changes go live immediately.</p>
     </div>
 
     <div class="cms-builder-hero-metrics">
         <div class="cms-builder-metric">
-            <span>CMS sites</span>
-            <strong>@CmsSites.Count</strong>
-        </div>
-        <div class="cms-builder-metric">
-            <span>Selected site pages</span>
+            <span>Pages</span>
             <strong>@CmsPages.Count</strong>
         </div>
     </div>
@@ -62,68 +59,17 @@
 <div class="row g-4">
     <div class="col-xl-4">
         <div class="card border-0 shadow-sm mb-4">
-            <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
-                <div>
-                    <div class="fw-semibold">Structured CMS Sites</div>
-                    <div class="small text-secondary">Persisted CMS site records backed by the internal page model.</div>
-                </div>
-                <button class="btn btn-sm btn-outline-primary" @onclick="CreateNewSite" disabled="@IsCmsBusy">
-                    <i class="bi bi-plus-lg me-1"></i>New Site
-                </button>
+            <div class="card-header bg-white border-bottom py-3">
+                <div class="fw-semibold">Site Settings</div>
+                <div class="small text-secondary">@(CurrentSite?.Name ?? "Site") · /@(CurrentSite?.Slug)</div>
             </div>
-            <div class="card-body p-0">
-                @if (CmsSites.Count == 0)
-                {
-                    <div class="p-4">
-                        <p class="text-secondary mb-0">No CMS sites exist yet. Create a site record to start building structured pages.</p>
-                    </div>
-                }
-                else
-                {
-                    <div class="list-group list-group-flush">
-                        @foreach (var site in CmsSites)
-                        {
-                            <button type="button"
-                                    class="list-group-item list-group-item-action @(SelectedSiteId == site.Id ? "active" : string.Empty)"
-                                    @onclick="() => OpenSiteAsync(site.Id)"
-                                    disabled="@IsCmsBusy">
-                                <div class="d-flex justify-content-between align-items-start gap-2">
-                                    <div>
-                                        <div class="fw-semibold">@site.Name</div>
-                                        <div class="small @(SelectedSiteId == site.Id ? "text-white-50" : "text-secondary")">/@site.Slug</div>
-                                    </div>
-                                    <span class="badge @(SelectedSiteId == site.Id ? "text-bg-light" : "text-bg-secondary")">@site.Theme</span>
-                                </div>
-                            </button>
-                        }
-                    </div>
-                }
-            </div>
-            <div class="card-footer bg-white border-top">
-                <div class="row g-3">
-                    <div class="col-12">
-                        <label class="form-label fw-semibold small">Site Name</label>
-                        <InputText class="form-control" @bind-Value="SiteEditor.Name" placeholder="Public Site" />
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label fw-semibold small">Slug</label>
-                        <InputText class="form-control" @bind-Value="SiteEditor.Slug" placeholder="public-site" />
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label fw-semibold small">Theme</label>
-                        <InputText class="form-control" @bind-Value="SiteEditor.Theme" placeholder="Editorial" />
-                    </div>
-                    <div class="col-12">
-                        <label class="form-label fw-semibold small">Site-wide Custom CSS</label>
-                        <InputTextArea class="form-control font-monospace cms-custom-css-editor" @bind-Value="SiteEditor.CustomCss"
-                                       placeholder="Applies to every page on this site. Page-level CSS below can override it." spellcheck="false" />
-                    </div>
-                </div>
+            <div class="card-body">
+                <label class="form-label fw-semibold small">Site-wide Custom CSS</label>
+                <InputTextArea class="form-control font-monospace cms-custom-css-editor" @bind-Value="SiteCustomCssInput"
+                               placeholder="Applies to every page on this site. Page-level CSS below can override it." spellcheck="false" />
 
                 <div class="d-flex flex-wrap gap-2 mt-3">
-                    <button class="btn btn-primary btn-sm" @onclick="SaveSiteAsync" disabled="@IsCmsBusy">Save Site</button>
-                    <button class="btn btn-outline-secondary btn-sm" @onclick="CreateNewSite" disabled="@IsCmsBusy">Reset</button>
-                    <button class="btn btn-outline-danger btn-sm" @onclick="DeleteSelectedSiteAsync" disabled="@(IsCmsBusy || !SelectedSiteId.HasValue)">Delete</button>
+                    <button class="btn btn-primary btn-sm" @onclick="SaveSiteSettingsAsync" disabled="@IsCmsBusy">Save</button>
                     @if (SiteExportUrl is { } exportUrl)
                     {
                         <a class="btn btn-sm btn-outline-secondary" href="@exportUrl" download>
@@ -137,21 +83,15 @@
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
                 <div>
-                    <div class="fw-semibold">Pages For Selected Site</div>
-                    <div class="small text-secondary">Create, edit, and preview JSON block pages for the active site.</div>
+                    <div class="fw-semibold">Pages</div>
+                    <div class="small text-secondary">Create, edit, and preview pages on this site.</div>
                 </div>
                 <button class="btn btn-sm btn-outline-primary" @onclick="CreateNewPage" disabled="@(IsCmsBusy || !SelectedSiteId.HasValue)">
                     <i class="bi bi-file-earmark-plus me-1"></i>New Page
                 </button>
             </div>
             <div class="card-body p-0">
-                @if (!SelectedSiteId.HasValue)
-                {
-                    <div class="p-4">
-                        <p class="text-secondary mb-0">Select or create a site to manage its pages.</p>
-                    </div>
-                }
-                else if (CmsPages.Count == 0)
+                @if (CmsPages.Count == 0)
                 {
                     <div class="p-4">
                         <p class="text-secondary mb-0">No pages exist for this site yet.</p>
@@ -477,10 +417,10 @@
 </div>
 
 @code {
-    private List<CmsSite> CmsSites { get; set; } = new();
+    private CmsSite? CurrentSite { get; set; }
+    private string SiteCustomCssInput { get; set; } = string.Empty;
     private List<CmsPage> CmsPages { get; set; } = new();
     private List<CmsWorkflowBlueprintSummary> CmsBlueprints { get; set; } = new();
-    private CmsSiteEditorModel SiteEditor { get; set; } = new() { Theme = "Default" };
     private CmsPageEditorModel PageEditor { get; set; } = new() { BlocksJson = "{\"sections\":[]}" };
     private Guid? SelectedSiteId { get; set; }
     private Guid? SelectedPageId { get; set; }
@@ -504,25 +444,8 @@
 
         try
         {
-            CmsSites = (await CmsBuilderService.ListSitesAsync()).ToList();
             CmsBlueprints = (await CmsBuilderService.ListWorkflowBlueprintsAsync()).ToList();
-
-            if (!SelectedSiteId.HasValue || CmsSites.All(site => site.Id != SelectedSiteId.Value))
-            {
-                SelectedSiteId = CmsSites.FirstOrDefault()?.Id;
-            }
-
-            if (SelectedSiteId.HasValue)
-            {
-                await LoadSelectedSiteAsync(SelectedSiteId.Value, updateStatus: false);
-            }
-            else
-            {
-                CreateNewSite();
-                CreateNewPage();
-            }
-
-            CmsStatusMessage = $"Loaded {CmsSites.Count} CMS site{(CmsSites.Count == 1 ? string.Empty : "s")} and {CmsBlueprints.Count} workflow blueprint{(CmsBlueprints.Count == 1 ? string.Empty : "s")}.";
+            await LoadDefaultSiteAsync();
         }
         catch (Exception ex)
         {
@@ -535,62 +458,28 @@
         }
     }
 
-    private void CreateNewSite()
+    // Canvas manages exactly one site — the one behind the live React frontend,
+    // identified by Canvas:SiteSlug — rather than exposing general multi-site CRUD.
+    // It's auto-provisioned on first load if it doesn't exist yet.
+    private async Task LoadDefaultSiteAsync()
     {
-        SelectedSiteId = null;
-        SelectedPageId = null;
-        CmsPages = new List<CmsPage>();
-        SiteEditor = new CmsSiteEditorModel
-        {
-            Theme = "Default"
-        };
-        CreateNewPage();
-        CmsErrorMessage = string.Empty;
-        CmsStatusMessage = "Ready to create a new structured CMS site.";
-    }
+        var slug = Configuration["Canvas:SiteSlug"] ?? "grantwatson-dev";
+        var name = Configuration["Canvas:SiteName"] ?? slug;
 
-    private async Task OpenSiteAsync(Guid siteId)
-    {
-        IsCmsBusy = true;
-        CmsErrorMessage = string.Empty;
-
-        try
-        {
-            await LoadSelectedSiteAsync(siteId, updateStatus: true);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Unable to open CMS site {SiteId}.", siteId);
-            CmsErrorMessage = $"Unable to open CMS site. {ex.Message}";
-        }
-        finally
-        {
-            IsCmsBusy = false;
-        }
-    }
-
-    private async Task LoadSelectedSiteAsync(Guid siteId, bool updateStatus)
-    {
-        var site = await CmsBuilderService.GetSiteAsync(siteId);
+        var site = await CmsBuilderService.GetSiteBySlugAsync(slug);
         if (site is null)
         {
-            CmsErrorMessage = "The selected CMS site no longer exists.";
-            SelectedSiteId = null;
-            CmsPages = new List<CmsPage>();
-            CreateNewSite();
-            CreateNewPage();
-            return;
+            site = await CmsBuilderService.SaveSiteAsync(new CmsSiteEditorModel
+            {
+                Name = name,
+                Slug = slug,
+                Theme = "Default"
+            });
         }
 
+        CurrentSite = site;
         SelectedSiteId = site.Id;
-        SiteEditor = new CmsSiteEditorModel
-        {
-            SiteId = site.Id,
-            Name = site.Name,
-            Slug = site.Slug,
-            Theme = site.Theme,
-            CustomCss = site.CustomCss
-        };
+        SiteCustomCssInput = site.CustomCss;
 
         CmsPages = (await CmsBuilderService.ListPagesAsync(site.Id)).ToList();
 
@@ -605,45 +494,11 @@
                 CreateNewPage();
             }
         }
-
-        if (updateStatus)
-        {
-            CmsStatusMessage = $"Opened CMS site '{site.Name}'.";
-        }
     }
 
-    private async Task SaveSiteAsync()
+    private async Task SaveSiteSettingsAsync()
     {
-        IsCmsBusy = true;
-        CmsErrorMessage = string.Empty;
-        CmsStatusMessage = string.Empty;
-
-        try
-        {
-            var saved = await CmsBuilderService.SaveSiteAsync(SiteEditor);
-            SelectedSiteId = saved.Id;
-            await LoadCmsWorkspaceAsync();
-            CmsStatusMessage = $"Saved CMS site '{saved.Name}'.";
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Unable to save CMS site.");
-            CmsErrorMessage = $"Unable to save CMS site. {ex.Message}";
-        }
-        finally
-        {
-            IsCmsBusy = false;
-        }
-    }
-
-    private async Task DeleteSelectedSiteAsync()
-    {
-        if (!SelectedSiteId.HasValue)
-        {
-            return;
-        }
-
-        var siteId = SelectedSiteId.Value;
+        if (CurrentSite is null) return;
 
         IsCmsBusy = true;
         CmsErrorMessage = string.Empty;
@@ -651,17 +506,21 @@
 
         try
         {
-            await CmsBuilderService.DeleteSiteAsync(siteId);
-            SelectedSiteId = null;
-            SelectedPageId = null;
-            CmsPages = new List<CmsPage>();
-            await LoadCmsWorkspaceAsync();
-            CmsStatusMessage = "Deleted the selected CMS site and its pages.";
+            var saved = await CmsBuilderService.SaveSiteAsync(new CmsSiteEditorModel
+            {
+                SiteId = CurrentSite.Id,
+                Name = CurrentSite.Name,
+                Slug = CurrentSite.Slug,
+                Theme = CurrentSite.Theme,
+                CustomCss = SiteCustomCssInput
+            });
+            CurrentSite = saved;
+            CmsStatusMessage = "Saved site settings.";
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Unable to delete CMS site {SiteId}.", siteId);
-            CmsErrorMessage = $"Unable to delete CMS site. {ex.Message}";
+            Logger.LogError(ex, "Unable to save CMS site settings.");
+            CmsErrorMessage = $"Unable to save site settings. {ex.Message}";
         }
         finally
         {
@@ -986,15 +845,14 @@
     }
 
     private string? LivePageUrl =>
-        SelectedSiteId.HasValue && CmsSites.FirstOrDefault(s => s.Id == SelectedSiteId.Value) is { } selectedSite
-            && !string.IsNullOrWhiteSpace(PageEditor.Slug)
+        CurrentSite is { } selectedSite && !string.IsNullOrWhiteSpace(PageEditor.Slug)
             ? $"/cms/{selectedSite.Slug}/{PageEditor.Slug}"
             : null;
 
     private void OpenStudio(Guid pageId) => Navigation.NavigateTo($"/admin/canvas/editor/{pageId}");
 
     private string? SiteExportUrl =>
-        SelectedSiteId.HasValue && CmsSites.FirstOrDefault(s => s.Id == SelectedSiteId.Value) is { } exportSite
+        CurrentSite is { } exportSite
             ? $"/admin/api/cms/{exportSite.Slug}/export.zip"
             : null;
 
