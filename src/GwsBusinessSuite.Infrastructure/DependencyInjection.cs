@@ -4,6 +4,7 @@ using GwsBusinessSuite.Application.CmsKnowledge;
 using GwsBusinessSuite.Application.Crm;
 using GwsBusinessSuite.Application.CjAds;
 using GwsBusinessSuite.Application.ContentStudio;
+using GwsBusinessSuite.Application.NewsIntelligence;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
@@ -79,6 +80,8 @@ public static class DependencyInjection
         services.AddScoped<IContentStudioService, ContentStudioService>();
         services.AddScoped<ICrmService, CrmService>();
         services.AddScoped<IWikiService, WikiService>();
+        services.AddScoped<INewsIntelligenceService, NewsIntelligenceService>();
+        services.AddHostedService<NewsRefreshBackgroundService>();
 
         return services;
     }

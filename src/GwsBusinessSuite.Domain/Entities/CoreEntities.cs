@@ -245,3 +245,26 @@ public sealed class ArticleAffiliatePlacement : AuditableEntity
     public int SortOrder { get; set; }
     public Article? Article { get; set; }
 }
+
+public sealed class WatchedTopic : AuditableEntity
+{
+    public required string Name { get; set; }
+    // Comma-separated search terms matched against article title + description
+    public string Keywords { get; set; } = string.Empty;
+    public string ColorHex { get; set; } = "#6366f1";
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset? LastFetchedAt { get; set; }
+}
+
+public sealed class NewsItem : AuditableEntity
+{
+    // Null = "Today's Top News" (not tied to a specific topic)
+    public Guid? TopicId { get; set; }
+    public required string Title { get; set; }
+    public required string Url { get; set; }
+    public string Source { get; set; } = string.Empty;
+    public DateTimeOffset? PublishedAt { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public string OllamaSummary { get; set; } = string.Empty;
+    public DateTimeOffset FetchedAt { get; set; } = DateTimeOffset.UtcNow;
+}

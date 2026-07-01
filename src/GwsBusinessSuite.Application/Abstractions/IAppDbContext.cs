@@ -20,6 +20,9 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<CjConnectorSettings> CjConnectorSettings { get; }
     DbSet<Article> Articles { get; }
     DbSet<ArticleAffiliatePlacement> ArticleAffiliatePlacements { get; }
+    DbSet<AppUser> AppUsers { get; }
+    DbSet<WatchedTopic> WatchedTopics { get; }
+    DbSet<NewsItem> NewsItems { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
 

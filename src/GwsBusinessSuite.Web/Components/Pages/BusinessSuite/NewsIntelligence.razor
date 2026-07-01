@@ -1,0 +1,459 @@
+@page "/admin/news-intelligence"
+@rendermode InteractiveServer
+@using GwsBusinessSuite.Application.NewsIntelligence
+@inject INewsIntelligenceService NewsService
+@inject ILogger<NewsIntelligence> Logger
+
+<PageTitle>News Intelligence</PageTitle>
+
+<div class="ni-shell">
+
+    @* ── LEFT SIDEBAR ─────────────────────────────────────── *@
+    <aside class="ni-sidebar">
+        <div class="ni-sidebar-header">
+            <span class="ni-sidebar-title">Watched Topics</span>
+            <button class="ni-icon-btn" title="Add topic" @onclick="OpenAddForm">
+                <i class="bi bi-plus-lg"></i>
+            </button>
+        </div>
+
+        @if (_showTopicForm)
+        {
+            <div class="ni-topic-form">
+                <input class="ni-input" placeholder="Topic name" @bind="_formName" />
+                <textarea class="ni-input ni-textarea" placeholder="Keywords (comma-separated)"
+                          @bind="_formKeywords" rows="2"></textarea>
+                <div class="ni-color-row">
+                    <label class="ni-label">Badge color</label>
+                    <input type="color" class="ni-color-picker" @bind="_formColor" />
+                </div>
+                <div class="ni-form-actions">
+                    <button class="ni-btn ni-btn-primary" @onclick="SaveTopicAsync">
+                        @(_editingTopicId.HasValue ? "Save" : "Add")
+                    </button>
+                    <button class="ni-btn ni-btn-ghost" @onclick="CloseForm">Cancel</button>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_formError))
+                {
+                    <p class="ni-form-error">@_formError</p>
+                }
+            </div>
+        }
+
+        <nav class="ni-topic-list">
+            <button class="ni-topic-item @(_activeFilter == "all" ? "ni-topic-item--active" : "")"
+                    @onclick='() => SelectFilter("all")'>
+                <span class="ni-topic-dot" style="background:#64748b"></span>
+                <span class="ni-topic-name">All News</span>
+                <span class="ni-topic-count">@_topics.Sum(t => t.UnreadCount)</span>
+            </button>
+
+            <button class="ni-topic-item @(_activeFilter == "top" ? "ni-topic-item--active" : "")"
+                    @onclick='() => SelectFilter("top")'>
+                <span class="ni-topic-dot" style="background:#0f172a"></span>
+                <span class="ni-topic-name">Top News</span>
+            </button>
+
+            @foreach (var topic in _topics)
+            {
+                <div class="ni-topic-row">
+                    <button class="ni-topic-item @(_activeFilter == topic.Id.ToString() ? "ni-topic-item--active" : "")"
+                            @onclick="() => SelectFilter(topic.Id.ToString())">
+                        <span class="ni-topic-dot" style="background:@topic.ColorHex"></span>
+                        <span class="ni-topic-name @(topic.IsActive ? "" : "ni-topic-name--inactive")">@topic.Name</span>
+                        @if (topic.UnreadCount > 0)
+                        {
+                            <span class="ni-topic-count">@topic.UnreadCount</span>
+                        }
+                    </button>
+                    <div class="ni-topic-actions">
+                        <button class="ni-icon-btn-sm" title="Refresh now" @onclick="() => RefreshTopicAsync(topic.Id)">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                        <button class="ni-icon-btn-sm" title="Edit" @onclick="() => OpenEditForm(topic)">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button class="ni-icon-btn-sm ni-icon-btn-danger" title="Delete"
+                                @onclick="() => DeleteTopicAsync(topic.Id)">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            }
+        </nav>
+    </aside>
+
+    @* ── MAIN FEED ────────────────────────────────────────── *@
+    <main class="ni-feed">
+        <div class="ni-feed-header">
+            <div class="ni-feed-title">
+                <span>@FeedHeading()</span>
+                @if (_feed?.LastRefreshedAt.HasValue == true)
+                {
+                    <small class="ni-last-refresh">Updated @TimeAgo(_feed.LastRefreshedAt.Value)</small>
+                }
+            </div>
+            <button class="ni-btn ni-btn-primary @(_refreshing ? "ni-btn--loading" : "")"
+                    disabled="@_refreshing" @onclick="RefreshAllAsync">
+                <i class="bi bi-arrow-clockwise @(_refreshing ? "ni-spin" : "")"></i>
+                @(_refreshing ? "Refreshing…" : "Refresh All")
+            </button>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_statusMessage))
+        {
+            <div class="ni-alert ni-alert-info">
+                <i class="bi bi-info-circle"></i> @_statusMessage
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <div class="ni-alert ni-alert-error">
+                <i class="bi bi-exclamation-triangle"></i> @_errorMessage
+            </div>
+        }
+
+        @if (_loading)
+        {
+            <div class="ni-loading">
+                <i class="bi bi-hourglass-split ni-spin"></i>
+                <span>Loading feed…</span>
+            </div>
+        }
+        else if (_activeFilter == "all")
+        {
+            @RenderAllView()
+        }
+        else if (_feed is null || CurrentItems().Count == 0)
+        {
+            <div class="ni-empty">
+                <i class="bi bi-newspaper"></i>
+                <p>No articles yet. Click <strong>Refresh All</strong> to fetch the latest news,
+                   or add keywords to a topic and click <strong>Refresh All</strong>.</p>
+            </div>
+        }
+        else
+        {
+            <div class="ni-card-grid">
+                @foreach (var item in CurrentItems())
+                {
+                    @RenderCard(item)
+                }
+            </div>
+        }
+    </main>
+
+</div>
+
+@code {
+    // ── State ────────────────────────────────────────────────
+    private List<WatchedTopicSummary> _topics = [];
+    private NewsFeedResult? _feed;
+    private string _activeFilter = "all";   // "all" | "top" | topic-id string
+    private bool _loading;
+    private bool _refreshing;
+    private string _statusMessage = string.Empty;
+    private string _errorMessage = string.Empty;
+
+    // Topic form
+    private bool _showTopicForm;
+    private Guid? _editingTopicId;
+    private string _formName = string.Empty;
+    private string _formKeywords = string.Empty;
+    private string _formColor = "#6366f1";
+    private string _formError = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadTopicsAsync();
+        await LoadFeedAsync();
+    }
+
+    // ── Data loading ─────────────────────────────────────────
+
+    private async Task LoadTopicsAsync()
+    {
+        try { _topics = (await NewsService.ListTopicsAsync()).ToList(); }
+        catch (Exception ex) { Logger.LogError(ex, "Failed to load topics"); }
+    }
+
+    private async Task LoadFeedAsync()
+    {
+        _loading = true;
+        _errorMessage = string.Empty;
+        try
+        {
+            // For "top" filter we pass null topicId (Top News has null in DB).
+            // For "all" we also pass null so the service returns everything.
+            Guid? queryTopicId = _activeFilter == "all" || _activeFilter == "top"
+                ? null
+                : Guid.Parse(_activeFilter);
+
+            _feed = await NewsService.GetFeedAsync(queryTopicId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load feed");
+            _errorMessage = "Failed to load news feed.";
+        }
+        finally { _loading = false; }
+    }
+
+    // ── Actions ──────────────────────────────────────────────
+
+    private async Task SelectFilter(string filter)
+    {
+        _activeFilter = filter;
+        await LoadFeedAsync();
+    }
+
+    private async Task RefreshAllAsync()
+    {
+        _refreshing = true;
+        _statusMessage = string.Empty;
+        _errorMessage = string.Empty;
+        try
+        {
+            await NewsService.RefreshAllAsync();
+            await LoadTopicsAsync();
+            await LoadFeedAsync();
+            _statusMessage = "Feed refreshed.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Refresh failed");
+            _errorMessage = "Refresh failed — check that Ollama is running and try again.";
+        }
+        finally { _refreshing = false; }
+    }
+
+    private async Task RefreshTopicAsync(Guid topicId)
+    {
+        _statusMessage = string.Empty;
+        _errorMessage = string.Empty;
+        try
+        {
+            await NewsService.RefreshTopicAsync(topicId);
+            await LoadTopicsAsync();
+            await LoadFeedAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Topic refresh failed");
+            _errorMessage = "Topic refresh failed.";
+        }
+    }
+
+    private async Task DeleteTopicAsync(Guid topicId)
+    {
+        try
+        {
+            await NewsService.DeleteTopicAsync(topicId);
+            if (_activeFilter == topicId.ToString()) _activeFilter = "all";
+            await LoadTopicsAsync();
+            await LoadFeedAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Delete topic failed");
+            _errorMessage = "Failed to delete topic.";
+        }
+    }
+
+    // ── Topic form ───────────────────────────────────────────
+
+    private void OpenAddForm()
+    {
+        _editingTopicId = null;
+        _formName = _formKeywords = _formError = string.Empty;
+        _formColor = "#6366f1";
+        _showTopicForm = true;
+    }
+
+    private void OpenEditForm(WatchedTopicSummary topic)
+    {
+        _editingTopicId = topic.Id;
+        _formName = topic.Name;
+        _formKeywords = topic.Keywords;
+        _formColor = topic.ColorHex;
+        _formError = string.Empty;
+        _showTopicForm = true;
+    }
+
+    private void CloseForm() { _showTopicForm = false; _formError = string.Empty; }
+
+    private async Task SaveTopicAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_formName)) { _formError = "Name is required."; return; }
+        _formError = string.Empty;
+        try
+        {
+            if (_editingTopicId.HasValue)
+            {
+                var existing = _topics.First(t => t.Id == _editingTopicId.Value);
+                await NewsService.UpdateTopicAsync(_editingTopicId.Value, _formName, _formKeywords, _formColor, existing.IsActive);
+            }
+            else
+            {
+                await NewsService.CreateTopicAsync(_formName, _formKeywords, _formColor);
+            }
+            CloseForm();
+            await LoadTopicsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Save topic failed");
+            _formError = "Failed to save topic.";
+        }
+    }
+
+    // ── Render helpers ───────────────────────────────────────
+
+    private string FeedHeading() => _activeFilter switch
+    {
+        "all" => "All News",
+        "top" => "Today's Top News",
+        _ => _topics.FirstOrDefault(t => t.Id.ToString() == _activeFilter)?.Name ?? "Feed"
+    };
+
+    private List<NewsItemDto> CurrentItems()
+    {
+        if (_feed is null) return [];
+        return _activeFilter == "top"
+            ? _feed.Items.Where(x => x.TopicId == null).ToList()
+            : _feed.Items.ToList();
+    }
+
+    private RenderFragment RenderAllView() => __builder =>
+    {
+        if (_feed is null || _feed.Items.Count == 0)
+        {
+            __builder.OpenElement(0, "div");
+            __builder.AddAttribute(1, "class", "ni-empty");
+            __builder.OpenElement(2, "i");
+            __builder.AddAttribute(3, "class", "bi bi-newspaper");
+            __builder.CloseElement();
+            __builder.OpenElement(4, "p");
+            __builder.AddMarkupContent(5, "No articles yet. Click <strong>Refresh All</strong> to fetch the latest news.");
+            __builder.CloseElement();
+            __builder.CloseElement();
+            return;
+        }
+
+        var topNews = _feed.Items.Where(x => x.TopicId == null).ToList();
+        var topicGroups = _feed.Items
+            .Where(x => x.TopicId != null)
+            .GroupBy(x => x.TopicId)
+            .OrderBy(g => g.First().TopicName)
+            .ToList();
+
+        var seq = 10;
+
+        if (topNews.Count > 0)
+        {
+            __builder.OpenElement(seq++, "section");
+            __builder.AddAttribute(seq++, "class", "ni-section");
+            __builder.OpenElement(seq++, "h2");
+            __builder.AddAttribute(seq++, "class", "ni-section-heading");
+            __builder.OpenElement(seq++, "span");
+            __builder.AddAttribute(seq++, "class", "ni-dot");
+            __builder.AddAttribute(seq++, "style", "background:#0f172a");
+            __builder.CloseElement();
+            __builder.AddContent(seq++, "Today's Top News");
+            __builder.CloseElement();
+            __builder.OpenElement(seq++, "div");
+            __builder.AddAttribute(seq++, "class", "ni-card-grid");
+            foreach (var item in topNews)
+            {
+                var captured = item;
+                __builder.AddContent(seq++, RenderCard(captured));
+            }
+            __builder.CloseElement();
+            __builder.CloseElement();
+        }
+
+        foreach (var group in topicGroups)
+        {
+            var first = group.First();
+            __builder.OpenElement(seq++, "section");
+            __builder.AddAttribute(seq++, "class", "ni-section");
+            __builder.OpenElement(seq++, "h2");
+            __builder.AddAttribute(seq++, "class", "ni-section-heading");
+            __builder.OpenElement(seq++, "span");
+            __builder.AddAttribute(seq++, "class", "ni-dot");
+            __builder.AddAttribute(seq++, "style", $"background:{first.TopicColorHex}");
+            __builder.CloseElement();
+            __builder.AddContent(seq++, first.TopicName);
+            __builder.OpenElement(seq++, "span");
+            __builder.AddAttribute(seq++, "class", "ni-section-count");
+            __builder.AddContent(seq++, $"({group.Count()})");
+            __builder.CloseElement();
+            __builder.CloseElement();
+            __builder.OpenElement(seq++, "div");
+            __builder.AddAttribute(seq++, "class", "ni-card-grid");
+            foreach (var item in group)
+            {
+                var captured = item;
+                __builder.AddContent(seq++, RenderCard(captured));
+            }
+            __builder.CloseElement();
+            __builder.CloseElement();
+        }
+    };
+
+    private RenderFragment RenderCard(NewsItemDto item) => __builder =>
+    {
+        __builder.OpenElement(0, "article");
+        __builder.AddAttribute(1, "class", "ni-card");
+
+        __builder.OpenElement(2, "div");
+        __builder.AddAttribute(3, "class", "ni-card-meta");
+        __builder.OpenElement(4, "span");
+        __builder.AddAttribute(5, "class", "ni-card-source");
+        __builder.AddContent(6, item.Source);
+        __builder.CloseElement();
+        if (item.PublishedAt.HasValue)
+        {
+            __builder.OpenElement(7, "span");
+            __builder.AddAttribute(8, "class", "ni-card-time");
+            __builder.AddContent(9, TimeAgo(item.PublishedAt.Value));
+            __builder.CloseElement();
+        }
+        __builder.CloseElement();
+
+        __builder.OpenElement(10, "a");
+        __builder.AddAttribute(11, "href", item.Url);
+        __builder.AddAttribute(12, "target", "_blank");
+        __builder.AddAttribute(13, "rel", "noopener noreferrer");
+        __builder.AddAttribute(14, "class", "ni-card-title");
+        __builder.AddContent(15, item.Title);
+        __builder.CloseElement();
+
+        if (!string.IsNullOrWhiteSpace(item.OllamaSummary))
+        {
+            __builder.OpenElement(16, "p");
+            __builder.AddAttribute(17, "class", "ni-card-take");
+            __builder.AddContent(18, item.OllamaSummary);
+            __builder.CloseElement();
+        }
+
+        __builder.OpenElement(19, "a");
+        __builder.AddAttribute(20, "href", item.Url);
+        __builder.AddAttribute(21, "target", "_blank");
+        __builder.AddAttribute(22, "rel", "noopener noreferrer");
+        __builder.AddAttribute(23, "class", "ni-card-open");
+        __builder.AddContent(24, "Open ↗");
+        __builder.CloseElement();
+
+        __builder.CloseElement();
+    };
+
+    private static string TimeAgo(DateTimeOffset dt)
+    {
+        var diff = DateTimeOffset.UtcNow - dt;
+        if (diff.TotalMinutes < 60) return $"{(int)diff.TotalMinutes}m ago";
+        if (diff.TotalHours < 24) return $"{(int)diff.TotalHours}h ago";
+        return $"{(int)diff.TotalDays}d ago";
+    }
+}
