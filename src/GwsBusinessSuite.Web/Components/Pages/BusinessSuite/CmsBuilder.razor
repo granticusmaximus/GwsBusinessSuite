@@ -211,6 +211,12 @@
                     <button class="btn btn-primary btn-sm" @onclick="SaveSiteAsync" disabled="@IsCmsBusy">Save Site</button>
                     <button class="btn btn-outline-secondary btn-sm" @onclick="CreateNewSite" disabled="@IsCmsBusy">Reset</button>
                     <button class="btn btn-outline-danger btn-sm" @onclick="DeleteSelectedSiteAsync" disabled="@(IsCmsBusy || !SelectedSiteId.HasValue)">Delete</button>
+                    @if (SiteExportUrl is { } exportUrl)
+                    {
+                        <a class="btn btn-sm btn-outline-secondary" href="@exportUrl" download>
+                            <i class="bi bi-file-zip me-1"></i>Export ZIP
+                        </a>
+                    }
                 </div>
             </div>
         </div>
@@ -1091,6 +1097,11 @@
         SelectedSiteId.HasValue && CmsSites.FirstOrDefault(s => s.Id == SelectedSiteId.Value) is { } selectedSite
             && !string.IsNullOrWhiteSpace(PageEditor.Slug)
             ? $"/cms/{selectedSite.Slug}/{PageEditor.Slug}"
+            : null;
+
+    private string? SiteExportUrl =>
+        SelectedSiteId.HasValue && CmsSites.FirstOrDefault(s => s.Id == SelectedSiteId.Value) is { } exportSite
+            ? $"/admin/api/cms/{exportSite.Slug}/export.zip"
             : null;
 
     // ── Media library ───────────────────────────────────────────────────────

@@ -1,11 +1,13 @@
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import './App.css';
 import './cms/layout-renderer.css';
+import './cms/cms-blocks.css';
 import Home from './pages/Home';
 import About from './pages/About';
 import Contact from './pages/Contact';
 import BlogList from './pages/BlogList';
 import BlogPost from './pages/BlogPost';
+import CmsPage from './pages/CmsPage';
 
 const ADMIN_URL = import.meta.env.DEV
   ? 'http://localhost:5050/admin'
@@ -60,6 +62,10 @@ export default function App() {
         <Route path="/contact" element={<Contact />} />
         <Route path="/blog" element={<BlogList />} />
         <Route path="/blog/:slug" element={<BlogPost />} />
+        {/* Catch-all: try to load a CMS-managed page for any unmatched slug.
+            Falls through to 404 inside CmsPage if no matching page exists.
+            VITE_CMS_SITE_SLUG in .env controls which CmsSite powers this site. */}
+        <Route path="/:pageSlug" element={<CmsPage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
       <Footer />

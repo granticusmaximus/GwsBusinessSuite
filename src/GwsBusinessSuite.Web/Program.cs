@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using System.IO.Compression;
 using System.Security.Claims;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -462,11 +463,163 @@ app.MapGet("/cms/{siteSlug}/{pageSlug}/thanks", (string siteSlug, string pageSlu
     return Results.Content(html, "text/html");
 }).AllowAnonymous().RequireRateLimiting("public-read");
 
+// Admin: exports a full CmsSite as a self-contained static ZIP so the output can be
+// deployed to any host that serves static files. Each page becomes its own HTML file
+// with all CSS inlined (no external links), making the archive fully portable.
+app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
+    string siteSlug,
+    ICmsBuilderService cmsBuilderService,
+    IWebHostEnvironment env) =>
+{
+    var site = await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
+    if (site is null) return Results.NotFound();
+
+    var pages = await cmsBuilderService.ListPagesAsync(site.Id);
+
+    // Read the base stylesheet once — it gets embedded in every page.
+    var cssFilePath = Path.Combine(env.WebRootPath, "cms-public.css");
+    var baseStylesheet = File.Exists(cssFilePath) ? await File.ReadAllTextAsync(cssFilePath) : string.Empty;
+
+    await using var memoryStream = new MemoryStream();
+    using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
+    {
+        foreach (var page in pages)
+        {
+            var bodySections = CmsBlockHtmlRenderer.Render(page.BlocksJson, site.Slug, page.Slug);
+            var pageTitle = System.Net.WebUtility.HtmlEncode(
+                string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle);
+            var metaDescription = System.Net.WebUtility.HtmlEncode(page.MetaDescription);
+            var ogImageTag = string.IsNullOrWhiteSpace(page.OgImageUrl)
+                ? string.Empty
+                : $"""<meta property="og:image" content="{System.Net.WebUtility.HtmlEncode(page.OgImageUrl)}" />""";
+
+            // Combine base + site + page CSS inline so the HTML file is self-contained.
+            var combinedCss = string.Join('\n', new[] { baseStylesheet, site.CustomCss, page.CustomCss }
+                .Where(css => !string.IsNullOrWhiteSpace(css)));
+
+            var pageHtml = $"""
+                <!DOCTYPE html>
+                <html lang="en">
+                <head>
+                  <meta charset="utf-8" />
+                  <meta name="viewport" content="width=device-width, initial-scale=1" />
+                  <title>{pageTitle}</title>
+                  <meta name="description" content="{metaDescription}" />
+                  {ogImageTag}
+                  <style>{SanitizeInlineCss(combinedCss)}</style>
+                </head>
+                <body>
+                  {bodySections}
+                </body>
+                </html>
+                """;
+
+            // Each page lives at {slug}/index.html so /about/ resolves correctly on any
+            // static host, and the site root gets an index.html that lists all pages.
+            var entryPath = string.Equals(page.Slug, "index", StringComparison.OrdinalIgnoreCase)
+                ? "index.html"
+                : $"{page.Slug}/index.html";
+
+            var entry = archive.CreateEntry(entryPath, CompressionLevel.SmallestSize);
+            await using var entryStream = entry.Open();
+            await using var writer = new StreamWriter(entryStream);
+            await writer.WriteAsync(pageHtml);
+        }
+
+        // Top-level index.html if no page has a slug of "index"
+        if (!pages.Any(p => string.Equals(p.Slug, "index", StringComparison.OrdinalIgnoreCase)))
+        {
+            var pageLinks = string.Concat(pages.Select(p =>
+                $"""<li><a href="./{System.Net.WebUtility.HtmlEncode(p.Slug)}/">{System.Net.WebUtility.HtmlEncode(p.Title)}</a></li>"""));
+
+            var indexHtml = $"""
+                <!DOCTYPE html>
+                <html lang="en">
+                <head>
+                  <meta charset="utf-8" />
+                  <title>{System.Net.WebUtility.HtmlEncode(site.Name)}</title>
+                  <style>{SanitizeInlineCss(string.IsNullOrWhiteSpace(site.CustomCss) ? baseStylesheet : baseStylesheet + '\n' + site.CustomCss)}</style>
+                </head>
+                <body>
+                  <section class="cms-block">
+                    <h1>{System.Net.WebUtility.HtmlEncode(site.Name)}</h1>
+                    <ul>{pageLinks}</ul>
+                  </section>
+                </body>
+                </html>
+                """;
+
+            var rootEntry = archive.CreateEntry("index.html", CompressionLevel.SmallestSize);
+            await using var rootStream = rootEntry.Open();
+            await using var rootWriter = new StreamWriter(rootStream);
+            await rootWriter.WriteAsync(indexHtml);
+        }
+    }
+
+    memoryStream.Position = 0;
+    var fileName = $"{siteSlug}-export.zip";
+    return Results.File(memoryStream.ToArray(), "application/zip", fileName);
+}).RequireAuthorization();
+
 // Decodes and serves a base64-stored media library asset, mirroring the /og-image pattern.
 app.MapGet("/media/{id:guid}", async (Guid id, IMediaLibraryService mediaLibraryService) =>
 {
     var content = await mediaLibraryService.GetContentAsync(id);
     return content is null ? Results.NotFound() : Results.Bytes(content.Value.Content, content.Value.ContentType);
+}).AllowAnonymous().RequireRateLimiting("public-read");
+
+// ── CMS Pages JSON API ────────────────────────────────────────────────────
+// Used by the React frontend (apps/public-site) to fetch page content for
+// dynamic routes. The React app reads the VITE_CMS_SITE_SLUG env var to know
+// which site's pages to load, so the CMS Builder admin becomes the single
+// tool for managing what appears on grantwatson.dev.
+
+app.MapGet("/api/cms/{siteSlug}/pages", async (
+    string siteSlug,
+    ICmsBuilderService cmsBuilderService) =>
+{
+    var site = await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
+    if (site is null) return Results.NotFound();
+
+    var pages = await cmsBuilderService.ListPagesAsync(site.Id);
+
+    return Results.Ok(pages.Select(page => new
+    {
+        page.Slug,
+        page.Title,
+        MetaTitle = string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle,
+        page.MetaDescription,
+        page.OgImageUrl
+    }));
+}).AllowAnonymous().RequireRateLimiting("public-read");
+
+app.MapGet("/api/cms/{siteSlug}/pages/{pageSlug}", async (
+    string siteSlug,
+    string pageSlug,
+    ICmsBuilderService cmsBuilderService) =>
+{
+    var site = await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
+    if (site is null) return Results.NotFound();
+
+    var page = await cmsBuilderService.GetPageBySlugAsync(site.Id, pageSlug);
+    if (page is null) return Results.NotFound();
+
+    // Parse blocks from JSON so the React app gets a proper array, not a raw
+    // JSON string — it can iterate blocks directly without a second parse.
+    var blocks = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+        string.IsNullOrWhiteSpace(page.BlocksJson) ? "[]" : page.BlocksJson);
+
+    return Results.Ok(new
+    {
+        page.Slug,
+        page.Title,
+        MetaTitle = string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle,
+        page.MetaDescription,
+        page.OgImageUrl,
+        SiteCustomCss = site.CustomCss,
+        PageCustomCss = page.CustomCss,
+        Blocks = blocks
+    });
 }).AllowAnonymous().RequireRateLimiting("public-read");
 
 // Public JSON API — hydrated from the Article table (SQLite is the source of truth).

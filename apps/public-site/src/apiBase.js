@@ -3,7 +3,7 @@
 // forwarding to the DigitalOcean backend. Calling the backend's absolute URL directly
 // (with CORS enabled there for this site's origin) is more robust.
 export const API_BASE_URL = import.meta.env.DEV
-  ? 'http://localhost:5050'
+  ? (import.meta.env.VITE_BACKEND_URL || 'http://localhost:5050')
   : 'https://admin.gwsapp.net';
 
 // Backend responses contain relative paths (e.g. heroImageUrl: "/og-image/slug") meant
