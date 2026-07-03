@@ -120,6 +120,7 @@ public sealed class PageRevisionServiceTests
         await revisions.CreateRevisionAsync(page);
         await revisions.CreateRevisionAsync(page);
 
+        await cms.TrashPageAsync(page.Id);
         await cms.DeletePageAsync(page.Id);
 
         (await revisions.ListAsync(page.Id)).Should().BeEmpty();

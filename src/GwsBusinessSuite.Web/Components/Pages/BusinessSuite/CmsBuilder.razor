@@ -12,6 +12,7 @@
 @inject IPageRevisionService PageRevisionService
 @inject NavigationManager Navigation
 @inject IConfiguration Configuration
+@inject IJSRuntime JS
 @inject ILogger<CmsBuilder> Logger
 
 <PageTitle>Canvas</PageTitle>
@@ -127,15 +128,52 @@
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
                 <div>
-                    <div class="fw-semibold">Pages</div>
-                    <div class="small text-secondary">Create, edit, and preview pages on this site.</div>
+                    <div class="fw-semibold">@(ShowTrash ? "Trash" : "Pages")</div>
+                    <div class="small text-secondary">@(ShowTrash ? "Restore a page or delete it permanently." : "Create, edit, and preview pages on this site.")</div>
                 </div>
-                <button class="btn btn-sm btn-outline-primary" @onclick="CreateNewPage" disabled="@(IsCmsBusy || !SelectedSiteId.HasValue)">
-                    <i class="bi bi-file-earmark-plus me-1"></i>New Page
-                </button>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm @(ShowTrash ? "btn-secondary" : "btn-outline-secondary")" @onclick="ToggleTrashViewAsync" disabled="@IsCmsBusy">
+                        <i class="bi bi-trash3 me-1"></i>Trash@(TrashedPages.Count > 0 ? $" ({TrashedPages.Count})" : "")
+                    </button>
+                    @if (!ShowTrash)
+                    {
+                        <button class="btn btn-sm btn-outline-primary" @onclick="CreateNewPage" disabled="@(IsCmsBusy || !SelectedSiteId.HasValue)">
+                            <i class="bi bi-file-earmark-plus me-1"></i>New Page
+                        </button>
+                    }
+                </div>
             </div>
             <div class="card-body p-0">
-                @if (CmsPages.Count == 0)
+                @if (ShowTrash)
+                {
+                    @if (TrashedPages.Count == 0)
+                    {
+                        <div class="p-4">
+                            <p class="text-secondary mb-0">Trash is empty.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="list-group list-group-flush">
+                            @foreach (var trashedPage in TrashedPages)
+                            {
+                                <div class="list-group-item">
+                                    <div class="d-flex justify-content-between align-items-start gap-2">
+                                        <div>
+                                            <div class="fw-semibold">@trashedPage.Title</div>
+                                            <div class="small text-secondary">/@trashedPage.Slug &middot; trashed @trashedPage.TrashedAt?.ToLocalTime().ToString("g")</div>
+                                        </div>
+                                        <div class="d-flex gap-1 flex-shrink-0">
+                                            <button class="btn btn-xs btn-outline-primary" @onclick="() => RestoreTrashedPageAsync(trashedPage.Id)" disabled="@IsCmsBusy">Restore</button>
+                                            <button class="btn btn-xs btn-outline-danger" @onclick="() => PermanentlyDeleteTrashedPageAsync(trashedPage.Id)" disabled="@IsCmsBusy">Delete Permanently</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                }
+                else if (CmsPages.Count == 0)
                 {
                     <div class="p-4">
                         <p class="text-secondary mb-0">No pages exist for this site yet.</p>
@@ -337,7 +375,9 @@
                             </button>
                         }
                         <button class="btn btn-outline-secondary" @onclick="CreateNewPage" disabled="@IsCmsBusy">Reset</button>
-                        <button class="btn btn-outline-danger" @onclick="DeleteSelectedPageAsync" disabled="@(IsCmsBusy || !SelectedPageId.HasValue)">Delete</button>
+                        <button class="btn btn-outline-danger" @onclick="TrashSelectedPageAsync" disabled="@(IsCmsBusy || !SelectedPageId.HasValue)">
+                            <i class="bi bi-trash3 me-1"></i>Move to Trash
+                        </button>
                     </div>
 
                     @if (SelectedPageId.HasValue)
@@ -574,6 +614,7 @@
         NavMenuItems = ParseNavMenuJson(site.NavMenuJson);
 
         CmsPages = (await CmsBuilderService.ListPagesAsync(site.Id)).ToList();
+        TrashedPages = (await CmsBuilderService.ListTrashedPagesAsync(site.Id)).ToList();
 
         if (!SelectedPageId.HasValue || CmsPages.All(page => page.Id != SelectedPageId.Value))
         {
@@ -1020,7 +1061,7 @@
         await SavePageAsync();
     }
 
-    private async Task DeleteSelectedPageAsync()
+    private async Task TrashSelectedPageAsync()
     {
         if (!SelectedPageId.HasValue || !SelectedSiteId.HasValue)
         {
@@ -1036,9 +1077,10 @@
 
         try
         {
-            await CmsBuilderService.DeletePageAsync(pageId);
+            await CmsBuilderService.TrashPageAsync(pageId);
             SelectedPageId = null;
             CmsPages = (await CmsBuilderService.ListPagesAsync(siteId)).ToList();
+            TrashedPages = (await CmsBuilderService.ListTrashedPagesAsync(siteId)).ToList();
             if (CmsPages.Count > 0)
             {
                 await LoadSelectedPageAsync(CmsPages[0].Id, updateStatus: false);
@@ -1048,12 +1090,93 @@
                 CreateNewPage();
             }
 
-            CmsStatusMessage = "Deleted the selected CMS page.";
+            CmsStatusMessage = "Moved the page to Trash.";
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Unable to delete CMS page {PageId}.", pageId);
-            CmsErrorMessage = $"Unable to delete CMS page. {ex.Message}";
+            Logger.LogError(ex, "Unable to trash CMS page {PageId}.", pageId);
+            CmsErrorMessage = $"Unable to move page to Trash. {ex.Message}";
+        }
+        finally
+        {
+            IsCmsBusy = false;
+        }
+    }
+
+    // ── Trash ────────────────────────────────────────────────────────────────
+
+    private List<CmsPage> TrashedPages { get; set; } = new();
+    private bool ShowTrash { get; set; }
+
+    private async Task ToggleTrashViewAsync()
+    {
+        ShowTrash = !ShowTrash;
+        if (ShowTrash && SelectedSiteId.HasValue)
+        {
+            IsCmsBusy = true;
+            try
+            {
+                TrashedPages = (await CmsBuilderService.ListTrashedPagesAsync(SelectedSiteId.Value)).ToList();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Unable to load trashed pages.");
+                CmsErrorMessage = $"Unable to load Trash. {ex.Message}";
+            }
+            finally
+            {
+                IsCmsBusy = false;
+            }
+        }
+    }
+
+    private async Task RestoreTrashedPageAsync(Guid pageId)
+    {
+        if (!SelectedSiteId.HasValue) return;
+
+        IsCmsBusy = true;
+        CmsErrorMessage = string.Empty;
+        CmsStatusMessage = string.Empty;
+
+        try
+        {
+            await CmsBuilderService.RestorePageAsync(pageId);
+            TrashedPages = (await CmsBuilderService.ListTrashedPagesAsync(SelectedSiteId.Value)).ToList();
+            CmsPages = (await CmsBuilderService.ListPagesAsync(SelectedSiteId.Value)).ToList();
+            CmsStatusMessage = "Restored the page from Trash.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to restore CMS page {PageId}.", pageId);
+            CmsErrorMessage = $"Unable to restore page. {ex.Message}";
+        }
+        finally
+        {
+            IsCmsBusy = false;
+        }
+    }
+
+    private async Task PermanentlyDeleteTrashedPageAsync(Guid pageId)
+    {
+        if (!SelectedSiteId.HasValue) return;
+
+        var confirmed = await JS.InvokeAsync<bool>("confirm", "Permanently delete this page? This cannot be undone.");
+        if (!confirmed) return;
+
+        IsCmsBusy = true;
+        CmsErrorMessage = string.Empty;
+        CmsStatusMessage = string.Empty;
+
+        try
+        {
+            await CmsBuilderService.DeletePageAsync(pageId);
+            TrashedPages = (await CmsBuilderService.ListTrashedPagesAsync(SelectedSiteId.Value)).ToList();
+            CmsStatusMessage = "Permanently deleted the page.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to permanently delete CMS page {PageId}.", pageId);
+            CmsErrorMessage = $"Unable to permanently delete page. {ex.Message}";
         }
         finally
         {

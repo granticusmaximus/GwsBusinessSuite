@@ -100,6 +100,7 @@ public sealed class CmsPage : AuditableEntity
     public string CustomCss { get; set; } = string.Empty;
     public string Status { get; set; } = CmsPageStatuses.Draft;
     public DateTimeOffset? PublishedAt { get; set; }
+    public DateTimeOffset? TrashedAt { get; set; }
 }
 
 public sealed class CmsPageRevision : AuditableEntity

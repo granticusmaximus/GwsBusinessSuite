@@ -130,6 +130,7 @@ public sealed class FormSubmissionServiceTests
         var page = await CreatePageAsync(cmsBuilder);
         await service.SubmitAsync(page.Id, AdaFields());
 
+        await cmsBuilder.TrashPageAsync(page.Id);
         await cmsBuilder.DeletePageAsync(page.Id);
 
         (await service.ListAsync(page.Id)).Should().BeEmpty();

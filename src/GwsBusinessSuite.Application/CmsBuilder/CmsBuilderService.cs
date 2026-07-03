@@ -243,18 +243,36 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<IReadOnlyList<CmsPage>> ListPagesAsync(Guid? siteId = null, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<CmsPage>> ListPagesAsync(Guid? siteId = null, bool includeTrashed = false, CancellationToken cancellationToken = default)
     {
         var query = dbContext.CmsPages.AsNoTracking();
         if (siteId is { } actualSiteId)
         {
             query = query.Where(page => page.SiteId == actualSiteId);
         }
+        if (!includeTrashed)
+        {
+            query = query.Where(page => page.TrashedAt == null);
+        }
 
         var pages = await query.ToListAsync(cancellationToken);
         return pages
             .OrderByDescending(page => page.UpdatedAt ?? page.CreatedAt)
             .ThenBy(page => page.Title)
+            .ToList();
+    }
+
+    // Thin wrapper for the Trash view — every page for the site that IS trashed, most
+    // recently trashed first (mirrors ListPagesAsync's own recency-first ordering).
+    public async Task<IReadOnlyList<CmsPage>> ListTrashedPagesAsync(Guid siteId, CancellationToken cancellationToken = default)
+    {
+        var pages = await dbContext.CmsPages
+            .AsNoTracking()
+            .Where(page => page.SiteId == siteId && page.TrashedAt != null)
+            .ToListAsync(cancellationToken);
+
+        return pages
+            .OrderByDescending(page => page.TrashedAt)
             .ToList();
     }
 
@@ -315,6 +333,14 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
                 return null;
             }
             parentId = current.Id;
+        }
+
+        // Trashed is unconditional — unlike Draft, an authenticated admin previewing via
+        // the Studio doesn't get to see a trashed page either. Trash means "not visible
+        // anywhere until restored."
+        if (current is not null && current.TrashedAt is not null)
+        {
+            return null;
         }
 
         if (current is not null && !includeUnpublished && current.Status != CmsPageStatuses.Published)
@@ -429,12 +455,20 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         return page;
     }
 
+    // Permanent, unrecoverable delete — only allowed on a page that's already in the Trash
+    // (see TrashPageAsync), so a stray click on the normal page editor can never permanently
+    // destroy content; it has to go through Trash first.
     public async Task DeletePageAsync(Guid pageId, CancellationToken cancellationToken = default)
     {
         var page = await dbContext.CmsPages.FirstOrDefaultAsync(item => item.Id == pageId, cancellationToken);
         if (page is null)
         {
             return;
+        }
+
+        if (page.TrashedAt is null)
+        {
+            throw new ArgumentException("Move this page to Trash before deleting it permanently.");
         }
 
         var children = await dbContext.CmsPages
@@ -467,6 +501,50 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         }
 
         dbContext.CmsPages.Remove(page);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    // Soft delete — the page disappears from the normal Pages list and every public/preview
+    // route (GetPageByFullPathAsync) but isn't gone until DeletePageAsync (permanent) is
+    // called on it explicitly from the Trash view.
+    public async Task TrashPageAsync(Guid pageId, CancellationToken cancellationToken = default)
+    {
+        var page = await dbContext.CmsPages.FirstOrDefaultAsync(item => item.Id == pageId, cancellationToken);
+        if (page is null)
+        {
+            return;
+        }
+
+        var activeChildren = await dbContext.CmsPages
+            .Where(p => p.ParentPageId == pageId && p.TrashedAt == null)
+            .Select(p => p.Title)
+            .ToListAsync(cancellationToken);
+
+        if (activeChildren.Count > 0)
+        {
+            throw new ArgumentException(
+                $"Trash or move its child page{(activeChildren.Count == 1 ? "" : "s")} first: {string.Join(", ", activeChildren)}.");
+        }
+
+        page.TrashedAt = DateTimeOffset.UtcNow;
+        page.UpdatedAt = DateTimeOffset.UtcNow;
+        page.UpdatedBy = "cms-ui";
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    // Restores a trashed page exactly as it was — Status (Draft/Published) is untouched, so
+    // restoring never silently publishes or unpublishes anything.
+    public async Task RestorePageAsync(Guid pageId, CancellationToken cancellationToken = default)
+    {
+        var page = await dbContext.CmsPages.FirstOrDefaultAsync(item => item.Id == pageId, cancellationToken);
+        if (page is null)
+        {
+            return;
+        }
+
+        page.TrashedAt = null;
+        page.UpdatedAt = DateTimeOffset.UtcNow;
+        page.UpdatedBy = "cms-ui";
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 

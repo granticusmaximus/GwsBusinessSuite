@@ -356,12 +356,101 @@ public sealed class CmsBuilderServiceTests
 
         var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
         var parent = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, Title = "Parent", Slug = "parent" });
-        await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, ParentPageId = parent.Id, Title = "Child", Slug = "child" });
+        var child = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, ParentPageId = parent.Id, Title = "Child", Slug = "child" });
 
+        // Permanent delete requires the page to already be trashed, and trashing itself
+        // requires no *active* children — trash the child first, then the parent, so this
+        // test actually exercises DeletePageAsync's children-check (which blocks on any
+        // children regardless of trash status), not TrashPageAsync's.
+        await service.TrashPageAsync(child.Id);
+        await service.TrashPageAsync(parent.Id);
         var action = async () => await service.DeletePageAsync(parent.Id);
 
         await action.Should().ThrowAsync<ArgumentException>().WithMessage("*Child*");
         (await service.GetPageAsync(parent.Id)).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task TrashPageAsync_ShouldHidePageFromListsAndPublicRouting()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        var page = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id,
+            Title = "Page",
+            Slug = "page",
+            Status = CmsPageStatuses.Published
+        });
+
+        await service.TrashPageAsync(page.Id);
+
+        (await service.ListPagesAsync(site.Id)).Should().NotContain(p => p.Id == page.Id);
+        (await service.ListPagesAsync(site.Id, includeTrashed: true)).Should().Contain(p => p.Id == page.Id);
+        (await service.GetPageByFullPathAsync(site.Id, "page")).Should().BeNull();
+        // Trash is unconditional — even an authenticated admin preview doesn't see it.
+        (await service.GetPageByFullPathAsync(site.Id, "page", includeUnpublished: true)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RestorePageAsync_ShouldBringBackAPage_WithItsOriginalStatusIntact()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        var page = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id,
+            Title = "Page",
+            Slug = "page",
+            Status = CmsPageStatuses.Published
+        });
+
+        await service.TrashPageAsync(page.Id);
+        await service.RestorePageAsync(page.Id);
+
+        var restored = await service.GetPageAsync(page.Id);
+        restored!.TrashedAt.Should().BeNull();
+        restored.Status.Should().Be(CmsPageStatuses.Published);
+        (await service.GetPageByFullPathAsync(site.Id, "page")).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task TrashPageAsync_ShouldBeBlockedByActiveChildren_ButAllowedWhenChildrenAreAlreadyTrashed()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        var parent = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, Title = "Parent", Slug = "parent" });
+        var child = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, ParentPageId = parent.Id, Title = "Child", Slug = "child" });
+
+        var blockedAction = async () => await service.TrashPageAsync(parent.Id);
+        await blockedAction.Should().ThrowAsync<ArgumentException>().WithMessage("*Child*");
+
+        await service.TrashPageAsync(child.Id);
+        var allowedAction = async () => await service.TrashPageAsync(parent.Id);
+        await allowedAction.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task DeletePageAsync_ShouldRequireThePageToAlreadyBeTrashed()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        var page = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, Title = "Page", Slug = "page" });
+
+        var action = async () => await service.DeletePageAsync(page.Id);
+        await action.Should().ThrowAsync<ArgumentException>().WithMessage("*Trash*");
+
+        await service.TrashPageAsync(page.Id);
+        await service.DeletePageAsync(page.Id);
+        (await service.GetPageAsync(page.Id)).Should().BeNull();
     }
 
     [Fact]
