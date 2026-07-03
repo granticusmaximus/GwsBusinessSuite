@@ -467,6 +467,23 @@ h1:focus { outline: none; }
     line-height: 1.65;
 }
 
+/* Global so every gwsMarkdownEditor (EasyMDE) instance gets consistent chrome,
+   regardless of which page mounts it. */
+.EasyMDEContainer .CodeMirror {
+    border-radius: 0 0 10px 10px;
+    font-size: 0.92rem;
+}
+
+.EasyMDEContainer .editor-toolbar {
+    border-radius: 10px 10px 0 0;
+    border-color: #dbe6f3;
+}
+
+.EasyMDEContainer .CodeMirror,
+.EasyMDEContainer .editor-toolbar {
+    border-color: #dbe6f3;
+}
+
 .surface-panel {
     background: #fff;
     border: 1px solid #e2e8f0;

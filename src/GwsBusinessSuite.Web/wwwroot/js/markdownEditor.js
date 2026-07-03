@@ -52,5 +52,18 @@ window.gwsMarkdownEditor = (function () {
         delete instances[elementId];
     }
 
-    return { init, setValue, destroy };
+    // CodeMirror-native equivalent of the old raw-textarea insertAtCursor - once EasyMDE
+    // is active the underlying textarea is hidden and no longer reflects keystrokes, so
+    // inserts have to go through the CodeMirror instance directly.
+    function insertAtCursor(elementId, text) {
+        const editor = instances[elementId];
+        if (!editor) {
+            return;
+        }
+
+        editor.codemirror.getDoc().replaceSelection(text);
+        editor.codemirror.focus();
+    }
+
+    return { init, setValue, destroy, insertAtCursor };
 })();

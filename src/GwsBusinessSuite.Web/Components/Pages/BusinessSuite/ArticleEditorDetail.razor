@@ -1,6 +1,7 @@
 @page "/admin/article-editor/{ArticleId:guid}"
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "ContentAccess")]
+@implements IAsyncDisposable
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.Articles
 @using GwsBusinessSuite.Domain.Entities
@@ -166,9 +167,7 @@ else
             <div class="row g-4">
                 <div class="col-xl-6">
                     <label class="form-label fw-semibold small">Markdown</label>
-                    <textarea id="article-body-textarea" class="form-control article-body-editor font-monospace"
-                              @bind="BodyMarkdown" @bind:event="oninput"
-                              placeholder="Write your article in Markdown..."></textarea>
+                    <textarea id="article-body-textarea">@BodyMarkdown</textarea>
                 </div>
                 <div class="col-xl-6">
                     <label class="form-label fw-semibold small">Preview</label>
@@ -359,6 +358,11 @@ else
     private string BodyMarkdown { get; set; } = string.Empty;
     private bool SlugManuallyEdited { get; set; }
 
+    private const string MarkdownEditorElementId = "article-body-textarea";
+    private bool _markdownEditorInitialized;
+    private string? _lastSyncedMarkdown;
+    private DotNetObjectReference<ArticleEditorDetail>? _markdownEditorRef;
+
     // CJ ad placements
     private List<ArticleAffiliatePlacement> Placements { get; set; } = new();
     private bool ShowPlacementModal { get; set; }
@@ -402,6 +406,35 @@ else
     protected override async Task OnParametersSetAsync()
     {
         await LoadArticle();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (CurrentArticle is null)
+        {
+            return;
+        }
+
+        if (!_markdownEditorInitialized)
+        {
+            _markdownEditorRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("gwsMarkdownEditor.init", MarkdownEditorElementId, _markdownEditorRef);
+            _markdownEditorInitialized = true;
+            _lastSyncedMarkdown = BodyMarkdown;
+        }
+        else if (!string.Equals(BodyMarkdown, _lastSyncedMarkdown, StringComparison.Ordinal))
+        {
+            await JS.InvokeVoidAsync("gwsMarkdownEditor.setValue", MarkdownEditorElementId, BodyMarkdown);
+            _lastSyncedMarkdown = BodyMarkdown;
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnMarkdownChanged(string value)
+    {
+        BodyMarkdown = value;
+        _lastSyncedMarkdown = value;
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task LoadArticle()
@@ -781,7 +814,24 @@ else
 
     private async Task InsertTokenAtCursor(string slotToken)
     {
-        await JS.InvokeVoidAsync("insertAtCursor", "article-body-textarea", slotToken);
+        await JS.InvokeVoidAsync("gwsMarkdownEditor.insertAtCursor", MarkdownEditorElementId, slotToken);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_markdownEditorInitialized)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("gwsMarkdownEditor.destroy", MarkdownEditorElementId);
+            }
+            catch (JSDisconnectedException)
+            {
+                // The circuit is already gone (e.g. browser closed); nothing to clean up client-side.
+            }
+        }
+
+        _markdownEditorRef?.Dispose();
     }
 
     private static string ToSlug(string title)
