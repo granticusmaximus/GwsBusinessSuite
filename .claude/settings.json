@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -D - -o /dev/null \"http://localhost:5214/api/cms/grantwatson-dev/pages/nonexistent-xyz\")",
+      "Bash(curl -s -D - -o /dev/null -H \"Host: grantwatson.dev\" \"http://localhost:5214/nonexistent-xyz-test\")",
+      "Bash(curl -sv \"http://localhost:5214/api/cms/grantwatson-dev/pages/nonexistent-xyz\")",
+      "Bash(curl -s -D - -o /dev/null \"http://localhost:5214/__admin-not-found\")",
+      "Bash(sqlite3 gws-suite.db \"DELETE FROM CmsPages WHERE slug='draft-test-page';\")",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}
