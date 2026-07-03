@@ -81,6 +81,12 @@ public sealed class CmsSite : AuditableEntity
     public string NavMenuJson { get; set; } = "[]";
 }
 
+public static class CmsPageStatuses
+{
+    public const string Draft = "Draft";
+    public const string Published = "Published";
+}
+
 public sealed class CmsPage : AuditableEntity
 {
     public Guid SiteId { get; set; }
@@ -92,6 +98,8 @@ public sealed class CmsPage : AuditableEntity
     public string MetaDescription { get; set; } = string.Empty;
     public string OgImageUrl { get; set; } = string.Empty;
     public string CustomCss { get; set; } = string.Empty;
+    public string Status { get; set; } = CmsPageStatuses.Draft;
+    public DateTimeOffset? PublishedAt { get; set; }
 }
 
 public sealed class CmsPageRevision : AuditableEntity

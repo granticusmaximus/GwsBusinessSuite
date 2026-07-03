@@ -22,11 +22,15 @@
         <p class="mb-0">Add sections and widgets, edit their content, and save — changes go live immediately, no rebuild or deploy.</p>
         @if (_site is not null && _page is not null)
         {
-            <p class="small text-secondary mb-0 mt-1">Live at: <span class="font-monospace">/@_page.Slug</span></p>
+            <p class="small text-secondary mb-0 mt-1">Live at: <span class="font-monospace">/@CurrentFullPath</span></p>
         }
     </div>
     <div class="studio-header-actions">
         <div class="studio-pills">
+            @if (_page is not null)
+            {
+                <span class="studio-pill @(_page.Status == CmsPageStatuses.Published ? "" : "studio-pill-subtle")">@(_page.Status == CmsPageStatuses.Published ? "Published" : "Draft")</span>
+            }
             <span class="studio-pill">@_layout.Sections.Count section@(_layout.Sections.Count == 1 ? "" : "s")</span>
             <span class="studio-pill studio-pill-subtle">@TotalWidgetCount widget@(TotalWidgetCount == 1 ? "" : "s")</span>
             <span class="studio-pill studio-pill-subtle">@GetViewportLabel()</span>
@@ -157,7 +161,7 @@ else
         <div class="studio-stage-header">
             <div class="studio-stage-header-left">
                 <span class="studio-section-eyebrow">Live Preview</span>
-                <span class="studio-stage-url font-monospace">/@_page.Slug</span>
+                <span class="studio-stage-url font-monospace">/@CurrentFullPath</span>
             </div>
             <div class="studio-stage-header-right">
                 <div class="studio-device-switcher">
@@ -184,7 +188,7 @@ else
             <div class="studio-stage-frame @GetViewportClass()">
                 <div class="studio-stage-browser">
                     <span></span><span></span><span></span>
-                    <div class="studio-stage-route">/@_page.Slug</div>
+                    <div class="studio-stage-route">/@CurrentFullPath</div>
                 </div>
 
                 <iframe class="studio-live-iframe"
@@ -635,6 +639,7 @@ else
     private PageLayout _layout = new();
     private CmsPage? _page;
     private CmsSite? _site;
+    private List<CmsPage> _allPagesInSite = new();
     private bool _isLoading = true;
     private bool _isBusy;
     private string _statusMessage = string.Empty;
@@ -711,6 +716,7 @@ else
             }
 
             _site = await CmsBuilderService.GetSiteAsync(_page.SiteId);
+            _allPagesInSite = (await CmsBuilderService.ListPagesAsync(_page.SiteId)).ToList();
             _layout = ParseLayout(_page.BlocksJson);
             _statusMessage = $"Loaded '{_page.Title}'.";
         }
@@ -752,13 +758,15 @@ else
             {
                 PageId = _page.Id,
                 SiteId = _page.SiteId,
+                ParentPageId = _page.ParentPageId,
                 Title = _page.Title,
                 Slug = _page.Slug,
                 BlocksJson = JsonSerializer.Serialize(_layout, JsonOptions),
                 MetaTitle = _page.MetaTitle,
                 MetaDescription = _page.MetaDescription,
                 OgImageUrl = _page.OgImageUrl,
-                CustomCss = _page.CustomCss
+                CustomCss = _page.CustomCss,
+                Status = _page.Status
             };
             _page = await CmsBuilderService.SavePageAsync(editor);
             _statusMessage = "Saved — live now.";
@@ -778,8 +786,12 @@ else
     private void ReloadPreview() =>
         _previewTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
+    private string CurrentFullPath => _page is null ? string.Empty : CmsBuilderService.BuildFullPath(_page, _allPagesInSite);
+
     private string BuildIframeUrl() =>
-        _site is null || _page is null ? "about:blank" : $"/cms/{_site.Slug}/{_page.Slug}?_t={_previewTimestamp}";
+        _site is null || _page is null
+            ? "about:blank"
+            : $"/cms/{_site.Slug}/{CurrentFullPath}?_t={_previewTimestamp}";
 
     // ── Selection ─────────────────────────────────────────────────────────
     private void SelectSection(string sectionId)

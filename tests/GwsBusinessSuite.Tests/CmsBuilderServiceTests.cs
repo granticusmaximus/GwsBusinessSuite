@@ -1,5 +1,6 @@
 using FluentAssertions;
 using GwsBusinessSuite.Application.CmsBuilder;
+using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -8,6 +9,67 @@ namespace GwsBusinessSuite.Tests;
 
 public sealed class CmsBuilderServiceTests
 {
+    [Fact]
+    public async Task SavePageAsync_ShouldDefaultNewPagesToDraft()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        var page = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, Title = "Page", Slug = "page" });
+
+        page.Status.Should().Be(CmsPageStatuses.Draft);
+        page.PublishedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetPageByFullPathAsync_ShouldHideDraftPages_ByDefault_AndShowThemWithIncludeUnpublished()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, Title = "Draft Page", Slug = "draft-page" });
+
+        (await service.GetPageByFullPathAsync(site.Id, "draft-page")).Should().BeNull();
+        (await service.GetPageByFullPathAsync(site.Id, "draft-page", includeUnpublished: true)).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task SavePageAsync_ShouldStampPublishedAt_OnFirstPublish_AndPreserveIt()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        var draft = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, Title = "Page", Slug = "page" });
+        draft.PublishedAt.Should().BeNull();
+
+        var published = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            PageId = draft.Id,
+            SiteId = site.Id,
+            Title = "Page",
+            Slug = "page",
+            Status = CmsPageStatuses.Published
+        });
+        published.PublishedAt.Should().NotBeNull();
+        var firstPublishedAt = published.PublishedAt;
+
+        // Unpublish then republish — PublishedAt shouldn't reset to a new timestamp.
+        await service.SavePageAsync(new CmsPageEditorModel { PageId = draft.Id, SiteId = site.Id, Title = "Page", Slug = "page", Status = CmsPageStatuses.Draft });
+        var republished = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            PageId = draft.Id,
+            SiteId = site.Id,
+            Title = "Page",
+            Slug = "page",
+            Status = CmsPageStatuses.Published
+        });
+
+        republished.PublishedAt.Should().Be(firstPublishedAt);
+    }
+
     [Fact]
     public async Task ListWorkflowBlueprintsAsync_ShouldReturnDefaultBlueprintLibrary()
     {
@@ -207,13 +269,14 @@ public sealed class CmsBuilderServiceTests
         var service = new CmsBuilderService(db);
 
         var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
-        var services = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, Title = "Services", Slug = "services" });
+        var services = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, Title = "Services", Slug = "services", Status = CmsPageStatuses.Published });
         var webDev = await service.SavePageAsync(new CmsPageEditorModel
         {
             SiteId = site.Id,
             ParentPageId = services.Id,
             Title = "Web Dev",
-            Slug = "web-dev"
+            Slug = "web-dev",
+            Status = CmsPageStatuses.Published
         });
 
         var resolved = await service.GetPageByFullPathAsync(site.Id, "services/web-dev");

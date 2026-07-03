@@ -208,11 +208,12 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 // grantwatson.dev gets its own styled 404 (matching public-site.css) instead of the
-// admin's Bootstrap-styled not-found page.
-app.UseWhen(ctx => IsPublicHost(ctx),
-    branch => branch.UseStatusCodePagesWithReExecute("/__public-not-found", createScopeForStatusCodePages: true));
-app.UseWhen(ctx => !IsPublicHost(ctx),
-    branch => branch.UseStatusCodePagesWithReExecute("/admin/not-found", createScopeForStatusCodePages: true));
+// admin's Bootstrap-styled not-found page — handled by one target endpoint that branches
+// internally on IsPublicHost, not two UseWhen-branched re-execute targets. The two-branch
+// version reliably broke auth on the admin side: a re-executed request replayed inside a
+// UseWhen branch somehow lost track of the target endpoint's AllowAnonymous metadata by the
+// time it reached UseAuthorization, bouncing every admin-side 404 through a login redirect.
+app.UseStatusCodePagesWithReExecute("/__not-found", createScopeForStatusCodePages: true);
 // HTTP-only in Docker — remove HTTPS redirect so the container runs cleanly on port 8080
 
 // Serve Blazor static assets before auth checks.
@@ -328,15 +329,22 @@ app.MapGet("/og-image/{slug}", async (
 // Serves a CmsSite/CmsPage built in Canvas ("/admin/canvas") as a
 // standalone public HTML page. These pages are independent of the apps/public-site React
 // app — the structured builder targets sites that don't have a hand-written frontend.
-app.MapGet("/cms/{siteSlug}/{pageSlug}", async (
+// Catch-all so nested pages resolve (see GetPageByFullPathAsync) — a bare {pageSlug} segment
+// could only ever look up by slug, which is ambiguous now that slugs are unique per-parent,
+// not per-site. Authenticated requests (the Studio's same-origin preview iframe carries the
+// admin session cookie) can see Draft pages; anonymous ones can't — this is also what lets
+// this route double as the Studio's live preview without a separate draft-preview mechanism.
+app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     string siteSlug,
     string pageSlug,
+    HttpContext httpContext,
     ICmsBuilderService cmsBuilderService) =>
 {
     var site = await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
     if (site is null) return Results.NotFound();
 
-    var page = await cmsBuilderService.GetPageBySlugAsync(site.Id, pageSlug);
+    var includeUnpublished = httpContext.User.Identity?.IsAuthenticated == true;
+    var page = await cmsBuilderService.GetPageByFullPathAsync(site.Id, pageSlug, includeUnpublished);
     if (page is null) return Results.NotFound();
 
     var bodyHtml = CmsBlockHtmlRenderer.Render(page.BlocksJson, siteSlug, pageSlug);
@@ -394,7 +402,11 @@ app.MapPost("/cms/{siteSlug}/submit", async (
     var form = await request.ReadFormAsync();
     var path = form["_path"].ToString();
 
-    var page = await cmsBuilderService.GetPageByFullPathAsync(site.Id, path);
+    // Lets an authenticated admin test a draft page's form from the Studio preview; an
+    // anonymous visitor can never reach that far since the draft page itself already 404s
+    // for them before a form could be submitted.
+    var includeUnpublished = httpContext.User.Identity?.IsAuthenticated == true;
+    var page = await cmsBuilderService.GetPageByFullPathAsync(site.Id, path, includeUnpublished);
     if (page is null) return Results.NotFound();
 
     // The same form widget renders on both the bare /cms/ fallback and the real public
@@ -532,12 +544,40 @@ app.MapGet("/blog/{slug}", async (
     })
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
 
-app.MapGet("/__public-not-found", async (ICmsBuilderService cmsBuilderService, IConfiguration configuration) =>
+// One re-execute target for every 404 in the app, branching internally on IsPublicHost —
+// not two UseWhen-branched re-execute targets (see the note above
+// UseStatusCodePagesWithReExecute for why that broke admin-side auth) and not the Blazor
+// NotFound.razor component (its own <AuthorizeRouteView> in Routes.razor does a second,
+// separate authorization check that doesn't reliably see [AllowAnonymous] on a re-executed
+// request either).
+app.MapGet("/__not-found", async (HttpContext httpContext, ICmsBuilderService cmsBuilderService, IConfiguration configuration) =>
     {
-        var navItems = await GetPublicNavItemsAsync(cmsBuilderService, configuration);
-        var html = PublicSiteHtmlRenderer.Layout("404 — Not Found", string.Empty, null,
-            PublicSiteHtmlRenderer.NotFoundBody("Sorry, the content you are looking for does not exist.", "/", "Back to Home"), navItems);
-        return Results.Content(html, "text/html");
+        if (IsPublicHost(httpContext))
+        {
+            var navItems = await GetPublicNavItemsAsync(cmsBuilderService, configuration);
+            var html = PublicSiteHtmlRenderer.Layout("404 — Not Found", string.Empty, null,
+                PublicSiteHtmlRenderer.NotFoundBody("Sorry, the content you are looking for does not exist.", "/", "Back to Home"), navItems);
+            return Results.Content(html, "text/html");
+        }
+
+        return Results.Content("""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+              <meta charset="utf-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1" />
+              <title>Not Found</title>
+              <link rel="stylesheet" href="/lib/bootstrap/dist/css/bootstrap.min.css" />
+            </head>
+            <body class="d-flex align-items-center justify-content-center" style="min-height:100vh">
+              <div class="text-center">
+                <h3>Not Found</h3>
+                <p class="text-secondary">Sorry, the content you are looking for does not exist.</p>
+                <a href="/admin" class="btn btn-primary btn-sm">Back to Dashboard</a>
+              </div>
+            </body>
+            </html>
+            """, "text/html");
     })
     .AllowAnonymous();
 
@@ -680,7 +720,9 @@ app.MapGet("/api/cms/{siteSlug}/pages/{pageSlug}", async (
     if (site is null) return Results.NotFound();
 
     var page = await cmsBuilderService.GetPageBySlugAsync(site.Id, pageSlug);
-    if (page is null) return Results.NotFound();
+    // Likely unused now that the React frontend is retired (AllowAnonymous JSON API), but
+    // still shouldn't leak draft content if anything still calls it.
+    if (page is null || page.Status != CmsPageStatuses.Published) return Results.NotFound();
 
     // Parse blocks from JSON so the React app gets a proper array, not a raw
     // JSON string — it can iterate blocks directly without a second parse.
@@ -992,7 +1034,9 @@ static async Task<IResult> RenderPublicCanvasPageAsync(string fullPath, bool sho
     }
 
     var navItems = PublicSiteHtmlRenderer.ParseNavItems(site.NavMenuJson);
-    var page = await cmsBuilderService.GetPageByFullPathAsync(site.Id, fullPath);
+    // includeUnpublished stays false here — real visitors on grantwatson.dev never see
+    // drafts, only the auth-aware /cms/{siteSlug}/{**pageSlug} preview route does.
+    var page = await cmsBuilderService.GetPageByFullPathAsync(site.Id, fullPath, includeUnpublished: false);
     if (page is null)
     {
         return Results.Content(

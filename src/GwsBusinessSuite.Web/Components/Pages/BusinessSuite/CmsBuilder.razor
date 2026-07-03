@@ -151,7 +151,13 @@
                                     style="padding-left:@(1 + GetPageDepth(cmsPage) * 1.25)rem"
                                     @onclick="() => OpenPageAsync(cmsPage.Id)"
                                     disabled="@IsCmsBusy">
-                                <div class="fw-semibold">@(GetPageDepth(cmsPage) > 0 ? "— " : "")@cmsPage.Title</div>
+                                <div class="fw-semibold d-flex align-items-center gap-2">
+                                    @(GetPageDepth(cmsPage) > 0 ? "— " : "")@cmsPage.Title
+                                    @if (cmsPage.Status != CmsPageStatuses.Published)
+                                    {
+                                        <span class="badge @(SelectedPageId == cmsPage.Id ? "text-bg-light" : "text-bg-secondary")">Draft</span>
+                                    }
+                                </div>
                                 <div class="small @(SelectedPageId == cmsPage.Id ? "text-white-50" : "text-secondary")">/@BuildFullPath(cmsPage)</div>
                             </button>
                         }
@@ -218,9 +224,14 @@
                     <div class="fw-semibold">Structured Page Editor</div>
                     <div class="small text-secondary">Edit JSON blocks and preview them as rendered sections without leaving the builder.</div>
                 </div>
-                <span class="badge @(SelectedPageId.HasValue ? "text-bg-primary" : "text-bg-secondary")">
-                    @(SelectedPageId.HasValue ? "Editing Existing Page" : "New Page")
-                </span>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge @(PageEditor.Status == CmsPageStatuses.Published ? "text-bg-success" : "text-bg-secondary")">
+                        @(PageEditor.Status == CmsPageStatuses.Published ? "Published" : "Draft")
+                    </span>
+                    <span class="badge @(SelectedPageId.HasValue ? "text-bg-primary" : "text-bg-secondary")">
+                        @(SelectedPageId.HasValue ? "Editing Existing Page" : "New Page")
+                    </span>
+                </div>
             </div>
             <div class="card-body">
                 @if (!SelectedSiteId.HasValue)
@@ -313,6 +324,18 @@
 
                     <div class="d-flex flex-wrap gap-2 mb-3">
                         <button class="btn btn-primary" @onclick="SavePageAsync" disabled="@IsCmsBusy">Save Page Details</button>
+                        @if (PageEditor.Status == CmsPageStatuses.Published)
+                        {
+                            <button class="btn btn-outline-secondary" @onclick="() => SetStatusAndSaveAsync(CmsPageStatuses.Draft)" disabled="@IsCmsBusy">
+                                <i class="bi bi-eye-slash me-1"></i>Unpublish
+                            </button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-success" @onclick="() => SetStatusAndSaveAsync(CmsPageStatuses.Published)" disabled="@IsCmsBusy">
+                                <i class="bi bi-cloud-upload me-1"></i>Publish
+                            </button>
+                        }
                         <button class="btn btn-outline-secondary" @onclick="CreateNewPage" disabled="@IsCmsBusy">Reset</button>
                         <button class="btn btn-outline-danger" @onclick="DeleteSelectedPageAsync" disabled="@(IsCmsBusy || !SelectedPageId.HasValue)">Delete</button>
                     </div>
@@ -801,7 +824,8 @@
             MetaTitle = page.MetaTitle,
             MetaDescription = page.MetaDescription,
             OgImageUrl = page.OgImageUrl,
-            CustomCss = page.CustomCss
+            CustomCss = page.CustomCss,
+            Status = page.Status
         };
 
         if (updateStatus)
@@ -986,6 +1010,14 @@
         {
             IsCmsBusy = false;
         }
+    }
+
+    // Publish/Unpublish is just a status flip + the normal save path — reuses SavePageAsync
+    // so it gets the same revision checkpoint (unpublishing is undoable like any other edit).
+    private async Task SetStatusAndSaveAsync(string status)
+    {
+        PageEditor.Status = status;
+        await SavePageAsync();
     }
 
     private async Task DeleteSelectedPageAsync()

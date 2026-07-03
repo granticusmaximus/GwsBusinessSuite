@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using GwsBusinessSuite.Domain.Entities;
 
 namespace GwsBusinessSuite.Application.CmsBuilder;
 
@@ -42,6 +43,8 @@ public sealed class CmsPageEditorModel
     public string OgImageUrl { get; set; } = string.Empty;
 
     public string CustomCss { get; set; } = string.Empty;
+
+    public string Status { get; set; } = CmsPageStatuses.Draft;
 }
 
 public sealed record NavMenuItem(string Id, string Label, string Href, bool OpenInNewTab);

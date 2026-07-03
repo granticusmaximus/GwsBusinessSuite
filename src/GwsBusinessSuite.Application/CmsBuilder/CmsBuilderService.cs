@@ -281,7 +281,13 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
     // parent/child relationships, rather than a single Slug lookup — slugs are only unique
     // per parent (see the composite index on CmsPage), not per site, so a bare slug lookup
     // can't disambiguate /services/pricing from /products/pricing.
-    public async Task<CmsPage?> GetPageByFullPathAsync(Guid siteId, string fullPath, CancellationToken cancellationToken = default)
+    //
+    // includeUnpublished lets an authenticated admin preview a Draft page (see the
+    // /cms/{siteSlug}/{**pageSlug} route in Program.cs) while public visitors never resolve
+    // one — only the final segment's status is checked, not intermediate ancestors, so a
+    // published child under a draft parent still resolves (matches WordPress: page hierarchy
+    // is structural, independent of each ancestor's own publish state).
+    public async Task<CmsPage?> GetPageByFullPathAsync(Guid siteId, string fullPath, bool includeUnpublished = false, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(fullPath))
         {
@@ -309,6 +315,11 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
                 return null;
             }
             parentId = current.Id;
+        }
+
+        if (current is not null && !includeUnpublished && current.Status != CmsPageStatuses.Published)
+        {
+            return null;
         }
 
         return current;
@@ -388,6 +399,8 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
             : CreateSlug(editor.Slug);
         var uniqueSlug = await GetUniquePageSlugAsync(siteId, editor.ParentPageId, requestedSlug, page.Id, cancellationToken);
 
+        var requestedStatus = editor.Status == CmsPageStatuses.Published ? CmsPageStatuses.Published : CmsPageStatuses.Draft;
+
         page.SiteId = siteId;
         page.ParentPageId = editor.ParentPageId;
         page.Title = editor.Title.Trim();
@@ -397,6 +410,13 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         page.MetaDescription = editor.MetaDescription?.Trim() ?? string.Empty;
         page.OgImageUrl = editor.OgImageUrl?.Trim() ?? string.Empty;
         page.CustomCss = editor.CustomCss?.Trim() ?? string.Empty;
+        // Stamped once, the first time a page goes live, and left alone after — re-saving an
+        // already-published page (or unpublishing and republishing) doesn't reset it.
+        if (requestedStatus == CmsPageStatuses.Published && page.PublishedAt is null)
+        {
+            page.PublishedAt = now;
+        }
+        page.Status = requestedStatus;
         page.UpdatedAt = now;
         page.UpdatedBy = "cms-ui";
 
