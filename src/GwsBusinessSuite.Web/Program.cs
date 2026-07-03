@@ -162,6 +162,12 @@ var app = builder.Build();
 
 var normalizedPathBase = NormalizePathBase(configuredPathBase);
 
+// grantwatson.dev is served by this same app/process (see the RequireHost-gated public
+// endpoints below) rather than the retired React app on Netlify — distinguished purely by
+// Host header, since admin.gwsapp.net keeps its existing admin-only behavior otherwise.
+string[] publicHosts = ["grantwatson.dev", "www.grantwatson.dev"];
+bool IsPublicHost(HttpContext ctx) => publicHosts.Contains(ctx.Request.Host.Host, StringComparer.OrdinalIgnoreCase);
+
 using (var scope = app.Services.CreateScope())
 {
     var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<ApplicationDbContext>>();
@@ -201,7 +207,12 @@ if (!app.Environment.IsDevelopment())
     // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
-app.UseStatusCodePagesWithReExecute("/admin/not-found", createScopeForStatusCodePages: true);
+// grantwatson.dev gets its own styled 404 (matching public-site.css) instead of the
+// admin's Bootstrap-styled not-found page.
+app.UseWhen(ctx => IsPublicHost(ctx),
+    branch => branch.UseStatusCodePagesWithReExecute("/__public-not-found", createScopeForStatusCodePages: true));
+app.UseWhen(ctx => !IsPublicHost(ctx),
+    branch => branch.UseStatusCodePagesWithReExecute("/admin/not-found", createScopeForStatusCodePages: true));
 // HTTP-only in Docker — remove HTTPS redirect so the container runs cleanly on port 8080
 
 // Serve Blazor static assets before auth checks.
@@ -371,6 +382,7 @@ app.MapPost("/cms/{siteSlug}/{pageSlug}/submit", async (
     string siteSlug,
     string pageSlug,
     HttpRequest request,
+    HttpContext httpContext,
     ICmsBuilderService cmsBuilderService,
     IFormSubmissionService formSubmissionService) =>
 {
@@ -380,13 +392,18 @@ app.MapPost("/cms/{siteSlug}/{pageSlug}/submit", async (
     var page = await cmsBuilderService.GetPageBySlugAsync(site.Id, pageSlug);
     if (page is null) return Results.NotFound();
 
+    // The same form widget renders on both the bare /cms/ fallback and the real public
+    // site (RequireHost-gated routes below) — send visitors back to whichever one they
+    // came from instead of always landing on the unstyled fallback thanks page.
+    var thanksUrl = IsPublicHost(httpContext) ? $"/{pageSlug}/thanks" : $"/cms/{siteSlug}/{pageSlug}/thanks";
+
     var form = await request.ReadFormAsync();
 
     // Honeypot: a hidden field real visitors never see or fill. A non-empty value means a
     // bot filled every field it found — accept silently so the bot doesn't learn it failed.
     if (!string.IsNullOrWhiteSpace(form["company"]))
     {
-        return Results.Redirect($"/cms/{siteSlug}/{pageSlug}/thanks");
+        return Results.Redirect(thanksUrl);
     }
 
     // The form widget's fields are admin-defined per page, so collect whatever was
@@ -404,7 +421,7 @@ app.MapPost("/cms/{siteSlug}/{pageSlug}/submit", async (
         return Results.BadRequest(new { error = ex.Message });
     }
 
-    return Results.Redirect($"/cms/{siteSlug}/{pageSlug}/thanks");
+    return Results.Redirect(thanksUrl);
 }).AllowAnonymous().RequireRateLimiting("public-write");
 
 app.MapGet("/cms/{siteSlug}/{pageSlug}/thanks", (string siteSlug, string pageSlug) =>
@@ -432,6 +449,104 @@ app.MapGet("/cms/{siteSlug}/{pageSlug}/thanks", (string siteSlug, string pageSlu
 
     return Results.Content(html, "text/html");
 }).AllowAnonymous().RequireRateLimiting("public-read");
+
+// ── grantwatson.dev — the real public site ──────────────────────────────────────────
+// Same app/process as admin.gwsapp.net, gated to only activate for the public host (see
+// IsPublicHost above) so admin.gwsapp.net's existing "/" -> "/admin" redirect and routes
+// are completely unaffected. See PublicSiteHtmlRenderer.cs for why this reuses the /cms/
+// rendering path (CmsBlockHtmlRenderer) instead of a separate frontend app.
+
+app.MapGet("/", (ICmsBuilderService cmsBuilderService, IConfiguration configuration) =>
+        RenderPublicCanvasPageAsync("home", cmsBuilderService, configuration))
+    .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
+
+app.MapGet("/{pageSlug}", (string pageSlug, ICmsBuilderService cmsBuilderService, IConfiguration configuration) =>
+        RenderPublicCanvasPageAsync(pageSlug, cmsBuilderService, configuration))
+    .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
+
+app.MapGet("/{pageSlug}/thanks", (string pageSlug) =>
+        Results.Content(
+            PublicSiteHtmlRenderer.Layout("Thanks!", string.Empty, null, PublicSiteHtmlRenderer.ThanksBody($"/{pageSlug}")),
+            "text/html"))
+    .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
+
+app.MapGet("/blog", async (
+        IDbContextFactory<ApplicationDbContext> dbFactory,
+        string? keyword,
+        int page = 1,
+        int pageSize = 10) =>
+    {
+        page = page < 1 ? 1 : page;
+        pageSize = pageSize is 10 or 25 or 50 ? pageSize : 10;
+
+        await using var db = await dbFactory.CreateDbContextAsync();
+        // SQLite can't translate ORDER BY on a DateTimeOffset column, so order client-side
+        // after materializing (same pattern as the existing /api/blog handler above).
+        var articles = (await db.Articles
+            .AsNoTracking()
+            .Where(a => a.Status == ArticleStatuses.Published)
+            .ToListAsync())
+            .OrderByDescending(a => a.PublishedAt)
+            .ToList();
+
+        var keywords = articles
+            .Select(a => a.PrimaryKeyword)
+            .Where(k => !string.IsNullOrWhiteSpace(k))
+            .Distinct()
+            .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var filtered = string.IsNullOrWhiteSpace(keyword)
+            ? articles
+            : articles.Where(a => a.PrimaryKeyword == keyword).ToList();
+
+        var totalPages = Math.Max(1, (int)Math.Ceiling(filtered.Count / (double)pageSize));
+        page = Math.Min(page, totalPages);
+
+        var pageItems = filtered
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(a => new PublicSiteHtmlRenderer.ArticleSummary(
+                a.Slug, a.Title, a.MetaDescription, a.PrimaryKeyword, a.EstimatedReadingTime, a.PublishedAt,
+                a.HeroImageUrl ?? (a.HeroImageDataUri != "" ? $"/og-image/{a.Slug}" : null)))
+            .ToList();
+
+        var bodyHtml = PublicSiteHtmlRenderer.BlogListBody(pageItems, keywords, keyword, page, pageSize, filtered.Count, totalPages);
+        var html = PublicSiteHtmlRenderer.Layout("Blog — Grant Watson", "Thoughts on software, building products, and the web.", null, bodyHtml);
+        return Results.Content(html, "text/html");
+    })
+    .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
+
+app.MapGet("/blog/{slug}", async (
+        string slug,
+        IDbContextFactory<ApplicationDbContext> dbFactory) =>
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var a = await db.Articles
+            .Include(x => x.AffiliatePlacements)
+            .Where(x => x.Slug == slug && x.Status == ArticleStatuses.Published)
+            .FirstOrDefaultAsync();
+
+        if (a is null)
+        {
+            return Results.Content(PublicSiteHtmlRenderer.FullPage404("Article not found."), "text/html", statusCode: StatusCodes.Status404NotFound);
+        }
+
+        var heroImageUrl = a.HeroImageUrl ?? (a.HeroImageDataUri != "" ? $"/og-image/{a.Slug}" : null);
+        var renderedMarkdown = ArticleMarkdownRenderer.Render(a.BodyMarkdown, a.AffiliatePlacements.OrderBy(p => p.SortOrder).ToList());
+
+        var bodyHtml = PublicSiteHtmlRenderer.BlogPostBody(
+            a.Title, a.MetaDescription, a.Author, a.PublishedAt, a.EstimatedReadingTime, a.PrimaryKeyword,
+            heroImageUrl, a.HeroImageAltText, a.HeroImageCaption, renderedMarkdown);
+
+        var html = PublicSiteHtmlRenderer.Layout(a.Title, a.MetaDescription, heroImageUrl, bodyHtml);
+        return Results.Content(html, "text/html");
+    })
+    .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
+
+app.MapGet("/__public-not-found", () =>
+        Results.Content(PublicSiteHtmlRenderer.FullPage404("Sorry, the content you are looking for does not exist."), "text/html"))
+    .AllowAnonymous();
 
 // Admin: exports a full CmsSite as a self-contained static ZIP so the output can be
 // deployed to any host that serves static files. Each page becomes its own HTML file
@@ -853,6 +968,34 @@ app.MapRazorComponents<App>()
 app.MapGet("/", () => Results.Redirect("/admin")).AllowAnonymous();
 
 app.Run();
+
+// Renders a Canvas page (by slug, under the Canvas:SiteSlug-configured site) as a full
+// grantwatson.dev document — shared by GET "/" (slug "home") and GET "/{pageSlug}".
+static async Task<IResult> RenderPublicCanvasPageAsync(string pageSlug, ICmsBuilderService cmsBuilderService, IConfiguration configuration)
+{
+    var siteSlug = configuration["Canvas:SiteSlug"] ?? string.Empty;
+    var site = string.IsNullOrWhiteSpace(siteSlug) ? null : await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
+    if (site is null)
+    {
+        return Results.Content(PublicSiteHtmlRenderer.FullPage404("Page not found."), "text/html", statusCode: StatusCodes.Status404NotFound);
+    }
+
+    var page = await cmsBuilderService.GetPageBySlugAsync(site.Id, pageSlug);
+    if (page is null)
+    {
+        return Results.Content(PublicSiteHtmlRenderer.FullPage404("Page not found."), "text/html", statusCode: StatusCodes.Status404NotFound);
+    }
+
+    var bodyHtml = CmsBlockHtmlRenderer.Render(page.BlocksJson, siteSlug, pageSlug);
+    var customCss = string.Join('\n', new[] { site.CustomCss, page.CustomCss }.Where(css => !string.IsNullOrWhiteSpace(css)));
+    var wrappedBody = string.IsNullOrWhiteSpace(customCss)
+        ? bodyHtml
+        : $"<style>{SanitizeInlineCss(customCss)}</style>{bodyHtml}";
+
+    var pageTitle = string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle;
+    var html = PublicSiteHtmlRenderer.Layout(pageTitle, page.MetaDescription, page.OgImageUrl, wrappedBody);
+    return Results.Content(html, "text/html");
+}
 
 // CSS isn't HTML-encoded before going into a <style> tag (encoding it would break the
 // CSS), so the only injection vector worth closing is a literal "</style" that would let

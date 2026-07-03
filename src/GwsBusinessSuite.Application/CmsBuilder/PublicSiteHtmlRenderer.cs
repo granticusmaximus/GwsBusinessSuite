@@ -1,0 +1,288 @@
+using System.Net;
+using System.Text;
+using Markdig;
+
+namespace GwsBusinessSuite.Application.CmsBuilder;
+
+/// <summary>
+/// Renders the shared page shell (head/nav/footer), blog list/post markup, and the public
+/// 404 for grantwatson.dev — the server-rendered replacement for the retired
+/// apps/public-site React app. Ported class-for-class from that app's App.css-driven markup
+/// (Navbar/Footer in App.jsx, ArticleCard.jsx, BlogList.jsx, BlogPost.jsx) so
+/// wwwroot/public-site.css didn't need to change shape. Canvas page bodies (Home/About/
+/// Contact/etc.) are still rendered by <see cref="CmsBlockHtmlRenderer"/> and just get
+/// wrapped in <see cref="Layout"/> here.
+/// </summary>
+public static class PublicSiteHtmlRenderer
+{
+    private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .Build();
+
+    public static string RenderMarkdown(string markdown) =>
+        string.IsNullOrWhiteSpace(markdown) ? string.Empty : Markdown.ToHtml(markdown, MarkdownPipeline);
+
+    public sealed record ArticleSummary(
+        string Slug,
+        string Title,
+        string MetaDescription,
+        string PrimaryKeyword,
+        string EstimatedReadingTime,
+        DateTimeOffset? PublishedAt,
+        string? HeroImageUrl);
+
+    // ── Page shell ───────────────────────────────────────────────────────────
+
+    public static string Layout(string pageTitle, string metaDescription, string? ogImageUrl, string bodyHtml)
+    {
+        var ogImageTag = string.IsNullOrWhiteSpace(ogImageUrl)
+            ? string.Empty
+            : $"""<meta property="og:image" content="{Html(ogImageUrl)}" />""";
+
+        return $"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+              <meta charset="UTF-8" />
+              <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+              <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+              <title>{Html(pageTitle)}</title>
+              <meta name="description" content="{Html(metaDescription)}" />
+              {ogImageTag}
+              <link rel="preconnect" href="https://fonts.googleapis.com" />
+              <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+              <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+              <link rel="stylesheet" href="/public-site.css" />
+            </head>
+            <body>
+              {Nav()}
+              {bodyHtml}
+              {Footer()}
+            </body>
+            </html>
+            """;
+    }
+
+    private static string Nav() => """
+        <nav class="site-nav">
+          <a href="/" class="site-logo">
+            <img src="/logo-mark.svg" alt="" />
+            <span class="site-logo-wordmark">
+              <span>grantwatson</span>
+              <span class="site-logo-domain">.dev</span>
+            </span>
+          </a>
+          <div class="nav-links">
+            <a href="/about">About</a>
+            <a href="/blog">Blog</a>
+            <a href="/contact">Contact</a>
+          </div>
+        </nav>
+        """;
+
+    private static string Footer() => $"""
+        <footer class="site-footer">
+          <p>&copy; {DateTimeOffset.UtcNow.Year} Grant Watson</p>
+          <a href="/admin" class="footer-admin-link">admin</a>
+        </footer>
+        """;
+
+    // ── 404 ──────────────────────────────────────────────────────────────────
+
+    public static string NotFoundBody(string message, string backHref, string backLabel) => $"""
+        <main class="page-not-found">
+          <h1>404</h1>
+          <p>{Html(message)}</p>
+          <a href="{Html(backHref)}">&larr; {Html(backLabel)}</a>
+        </main>
+        """;
+
+    public static string FullPage404(string message) =>
+        Layout("404 — Not Found", string.Empty, null, NotFoundBody(message, "/", "Back to Home"));
+
+    // ── Form thanks page ─────────────────────────────────────────────────────
+
+    public static string ThanksBody(string backHref) => $"""
+        <main class="page-not-found">
+          <h1 style="font-size:3rem">Thanks!</h1>
+          <p>Your message was sent — I'll get back to you soon.</p>
+          <a href="{Html(backHref)}">&larr; Back</a>
+        </main>
+        """;
+
+    // ── Blog list ────────────────────────────────────────────────────────────
+
+    public static string BlogListBody(
+        IReadOnlyList<ArticleSummary> pageItems,
+        IReadOnlyList<string> keywords,
+        string? activeKeyword,
+        int page,
+        int pageSize,
+        int totalCount,
+        int totalPages)
+    {
+        var sb = new StringBuilder();
+        sb.Append("""
+            <main class="blog-page">
+              <header class="blog-page-header">
+                <h1>Blog</h1>
+                <div class="blog-page-accent"></div>
+                <p>Thoughts on software, building products, and the web.</p>
+              </header>
+            """);
+
+        if (totalCount == 0)
+        {
+            sb.Append("""<p style="color:var(--text-2)">No articles yet. Check back soon.</p></main>""");
+            return sb.ToString();
+        }
+
+        if (keywords.Count > 0)
+        {
+            sb.Append("""<section class="keyword-cloud" aria-label="Filter by keyword"><span class="keyword-cloud-label">Filter:</span>""");
+            foreach (var kw in keywords)
+            {
+                var isActive = string.Equals(kw, activeKeyword, StringComparison.Ordinal);
+                var href = isActive ? "/blog" : $"/blog?keyword={Uri.EscapeDataString(kw)}";
+                sb.Append($"""<a class="keyword-pill{(isActive ? " active" : "")}" href="{Html(href)}">{Html(kw)}</a>""");
+            }
+            if (!string.IsNullOrWhiteSpace(activeKeyword))
+            {
+                sb.Append("""<a class="keyword-clear" href="/blog">Clear</a>""");
+            }
+            sb.Append("</section>");
+        }
+
+        var resultCountLabel = string.IsNullOrWhiteSpace(activeKeyword)
+            ? $"{totalCount} article{(totalCount != 1 ? "s" : "")}"
+            : $"{totalCount} of {totalCount} articles";
+
+        sb.Append($"""
+            <div class="blog-controls">
+              <span class="blog-result-count">{Html(resultCountLabel)}</span>
+              <div class="blog-pagesize">
+                <span>Show:</span>
+            """);
+        foreach (var n in new[] { 10, 25, 50 })
+        {
+            var isActive = n == pageSize;
+            var href = QueryString(activeKeyword, page: 1, pageSize: n);
+            sb.Append($"""<a class="pagesize-btn{(isActive ? " active" : "")}" href="{Html(href)}">{n}</a>""");
+        }
+        sb.Append("</div></div>");
+
+        sb.Append("""<div class="blog-grid">""");
+        foreach (var a in pageItems)
+        {
+            sb.Append(ArticleCard(a));
+        }
+        sb.Append("</div>");
+
+        if (totalPages > 1)
+        {
+            sb.Append("""<nav class="blog-pagination" aria-label="Page navigation">""");
+            var prevHref = QueryString(activeKeyword, Math.Max(1, page - 1), pageSize);
+            sb.Append($"""<a class="pagination-btn{(page == 1 ? " disabled" : "")}" href="{Html(prevHref)}" aria-label="Previous page">&larr; Prev</a>""");
+
+            for (var n = 1; n <= totalPages; n++)
+            {
+                var href = QueryString(activeKeyword, n, pageSize);
+                sb.Append($"""<a class="pagination-btn{(n == page ? " active" : "")}" href="{Html(href)}">{n}</a>""");
+            }
+
+            var nextHref = QueryString(activeKeyword, Math.Min(totalPages, page + 1), pageSize);
+            sb.Append($"""<a class="pagination-btn{(page == totalPages ? " disabled" : "")}" href="{Html(nextHref)}" aria-label="Next page">Next &rarr;</a>""");
+            sb.Append("</nav>");
+        }
+
+        sb.Append("</main>");
+        return sb.ToString();
+    }
+
+    private static string QueryString(string? keyword, int page, int pageSize)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(keyword)) parts.Add($"keyword={Uri.EscapeDataString(keyword)}");
+        if (page > 1) parts.Add($"page={page}");
+        if (pageSize != 10) parts.Add($"pageSize={pageSize}");
+        return parts.Count == 0 ? "/blog" : $"/blog?{string.Join('&', parts)}";
+    }
+
+    private static string ArticleCard(ArticleSummary a)
+    {
+        var desc = a.MetaDescription is { Length: > 125 }
+            ? a.MetaDescription[..125] + "…"
+            : a.MetaDescription;
+        var dateLabel = a.PublishedAt?.ToString("MMM yyyy") ?? "";
+
+        var imageHtml = string.IsNullOrWhiteSpace(a.HeroImageUrl)
+            ? """<div class="article-card-img-placeholder">No image</div>"""
+            : $"""<img src="{Html(a.HeroImageUrl)}" alt="{Html(a.Title)}" class="article-card-img" loading="lazy" />""";
+
+        return $"""
+            <a href="/blog/{Html(a.Slug)}" class="article-card">
+              {imageHtml}
+              <div class="article-card-body">
+                <div class="article-card-title">{Html(a.Title)}</div>
+                {(string.IsNullOrWhiteSpace(desc) ? "" : $"""<p class="article-card-desc">{Html(desc)}</p>""")}
+                <div class="article-card-meta">
+                  {(string.IsNullOrWhiteSpace(a.EstimatedReadingTime) ? "" : $"""<span>{Html(a.EstimatedReadingTime)} read</span>""")}
+                  {(string.IsNullOrWhiteSpace(a.PrimaryKeyword) ? "" : $"""<span class="article-tag">{Html(a.PrimaryKeyword)}</span>""")}
+                  <span>{Html(dateLabel)}</span>
+                </div>
+              </div>
+            </a>
+            """;
+    }
+
+    // ── Blog post ────────────────────────────────────────────────────────────
+
+    public static string BlogPostBody(
+        string title,
+        string metaDescription,
+        string author,
+        DateTimeOffset? publishedAt,
+        string estimatedReadingTime,
+        string primaryKeyword,
+        string? heroImageUrl,
+        string heroImageAltText,
+        string heroImageCaption,
+        string bodyMarkdown)
+    {
+        var dateLabel = publishedAt?.ToString("MMMM d, yyyy") ?? "";
+        var heroHtml = string.IsNullOrWhiteSpace(heroImageUrl)
+            ? string.Empty
+            : $"""
+                <div class="blog-post-hero-wrap">
+                  <img src="{Html(heroImageUrl)}" alt="{Html(string.IsNullOrWhiteSpace(heroImageAltText) ? title : heroImageAltText)}" />
+                </div>
+                {(string.IsNullOrWhiteSpace(heroImageCaption) ? "" : $"""<p class="blog-post-hero-caption">{Html(heroImageCaption)}</p>""")}
+                """;
+
+        var bodyHtml = string.IsNullOrWhiteSpace(bodyMarkdown)
+            ? """<p style="color:var(--text-3);font-style:italic">No content available for this article.</p>"""
+            : RenderMarkdown(bodyMarkdown);
+
+        return $"""
+            <article>
+              {heroHtml}
+              <div class="blog-post-content">
+                <div class="blog-post-meta-row">
+                  <span>{Html(dateLabel)}</span>
+                  {(string.IsNullOrWhiteSpace(estimatedReadingTime) ? "" : $"""<span>&middot; {Html(estimatedReadingTime)} read</span>""")}
+                  {(string.IsNullOrWhiteSpace(primaryKeyword) ? "" : $"""<span class="article-tag">{Html(primaryKeyword)}</span>""")}
+                </div>
+                <h1 class="blog-post-title">{Html(title)}</h1>
+                {(string.IsNullOrWhiteSpace(metaDescription) ? "" : $"""<p class="blog-post-lead">{Html(metaDescription)}</p>""")}
+                <p class="blog-post-author">By {Html(author)}</p>
+                <div class="blog-post-body">{bodyHtml}</div>
+                <footer class="blog-post-footer">
+                  <a href="/blog">&larr; All articles</a>
+                </footer>
+              </div>
+            </article>
+            """;
+    }
+
+    private static string Html(string? value) => WebUtility.HtmlEncode(value ?? string.Empty);
+}
