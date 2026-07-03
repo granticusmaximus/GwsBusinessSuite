@@ -1,81 +1,98 @@
-/* ── Shell layout ───────────────────────────────────────── */
+/* ── Shell layout ───────────────────────────────────────────
+   Two independently-scrolling panes (topics sidebar + feed), each
+   styled as its own glass panel to match .page-header/.card conventions
+   used elsewhere in the admin. Height accounts for the real topbar
+   (--gws-topbar-height) plus .gws-content's own vertical padding, since
+   this shell lives inside that already-scrollable container. */
 .ni-shell {
     display: flex;
-    height: calc(100vh - 60px); /* subtract topbar */
+    gap: 1.5rem;
+    height: calc(100vh - var(--gws-topbar-height) - 4.5rem);
     overflow: hidden;
 }
 
 /* ── Sidebar ────────────────────────────────────────────── */
 .ni-sidebar {
-    width: 260px;
+    width: 280px;
     flex-shrink: 0;
-    border-right: 1px solid var(--bs-border-color);
+    border-radius: 24px;
+    border: 1px solid var(--gws-panel-border);
+    background: var(--gws-panel-bg);
+    box-shadow: var(--gws-shadow-lg);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
     display: flex;
     flex-direction: column;
     overflow-y: auto;
-    background: var(--bs-body-bg);
 }
 
 .ni-sidebar-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 1rem 1rem 0.5rem;
+    padding: 1.1rem 1.1rem 0.6rem;
     position: sticky;
     top: 0;
-    background: var(--bs-body-bg);
+    background: rgba(255, 255, 255, 0.75);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-radius: 24px 24px 0 0;
     z-index: 1;
 }
 
 .ni-sidebar-title {
     font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
+    font-weight: 800;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: var(--bs-secondary-color);
+    color: var(--gws-text-soft);
 }
 
 .ni-icon-btn {
-    background: none;
-    border: none;
-    color: var(--bs-body-color);
-    padding: 0.25rem 0.35rem;
-    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.1rem;
+    height: 2.1rem;
+    border-radius: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    background: rgba(255, 255, 255, 0.7);
+    color: #334155;
     cursor: pointer;
-    font-size: 1rem;
+    font-size: 0.95rem;
     line-height: 1;
-    transition: background 0.15s;
+    transition: background 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
 }
 
-.ni-icon-btn:hover { background: var(--bs-tertiary-bg); }
+.ni-icon-btn:hover { background: #fff; color: #0f172a; box-shadow: var(--gws-shadow-md); }
 
 /* ── Topic form ─────────────────────────────────────────── */
 .ni-topic-form {
-    margin: 0.5rem 0.75rem;
-    padding: 0.75rem;
-    border: 1px solid var(--bs-border-color);
-    border-radius: 8px;
-    background: var(--bs-tertiary-bg);
+    margin: 0.6rem 0.75rem 0;
+    padding: 1rem;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.6);
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.6rem;
 }
 
 .ni-input {
     width: 100%;
-    padding: 0.35rem 0.5rem;
-    border: 1px solid var(--bs-border-color);
-    border-radius: 6px;
-    background: var(--bs-body-bg);
-    color: var(--bs-body-color);
-    font-size: 0.875rem;
+    padding: 0.55rem 0.8rem;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.85);
+    color: var(--gws-text-strong);
+    font-size: 0.85rem;
     box-sizing: border-box;
 }
 
 .ni-input:focus {
     outline: none;
-    border-color: var(--bs-primary);
-    box-shadow: 0 0 0 2px rgba(var(--bs-primary-rgb), 0.2);
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
 
 .ni-textarea { resize: vertical; }
@@ -86,13 +103,13 @@
     gap: 0.5rem;
 }
 
-.ni-label { font-size: 0.8rem; color: var(--bs-secondary-color); }
+.ni-label { font-size: 0.78rem; color: var(--gws-text-soft); font-weight: 600; }
 
 .ni-color-picker {
-    width: 2rem;
-    height: 1.5rem;
-    border: 1px solid var(--bs-border-color);
-    border-radius: 4px;
+    width: 2.2rem;
+    height: 1.7rem;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 8px;
     padding: 0;
     cursor: pointer;
 }
@@ -100,8 +117,9 @@
 .ni-form-actions { display: flex; gap: 0.5rem; }
 
 .ni-form-error {
-    font-size: 0.8rem;
-    color: var(--bs-danger);
+    font-size: 0.78rem;
+    color: #dc2626;
+    font-weight: 600;
     margin: 0;
 }
 
@@ -109,40 +127,42 @@
 .ni-btn {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
-    padding: 0.4rem 0.85rem;
-    border-radius: 6px;
+    gap: 0.45rem;
+    padding: 0.6rem 1.1rem;
+    border-radius: 999px;
     border: none;
-    font-size: 0.875rem;
-    font-weight: 500;
+    font-size: 0.82rem;
+    font-weight: 700;
     cursor: pointer;
-    transition: opacity 0.15s, background 0.15s;
+    transition: opacity 0.15s, box-shadow 0.15s, transform 0.15s;
 }
 
 .ni-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .ni-btn-primary {
-    background: var(--bs-primary);
+    background: linear-gradient(135deg, #0f172a, #2563eb);
     color: #fff;
+    box-shadow: 0 14px 28px rgba(37, 99, 235, 0.22);
 }
 
-.ni-btn-primary:hover:not(:disabled) { opacity: 0.88; }
+.ni-btn-primary:hover:not(:disabled) { transform: translateY(-1px); }
 
 .ni-btn-ghost {
-    background: var(--bs-tertiary-bg);
-    color: var(--bs-body-color);
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    color: var(--gws-text-strong);
 }
 
-.ni-btn-ghost:hover { background: var(--bs-secondary-bg); }
+.ni-btn-ghost:hover { background: rgba(255, 255, 255, 0.95); }
 
 .ni-btn--loading { cursor: wait; }
 
 /* ── Topic list ─────────────────────────────────────────── */
 .ni-topic-list {
-    padding: 0.5rem 0.5rem 1rem;
+    padding: 0.6rem 0.6rem 1.1rem;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
 }
 
 .ni-topic-row {
@@ -156,30 +176,31 @@
 .ni-topic-item {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.6rem;
     width: 100%;
-    padding: 0.4rem 0.6rem;
+    padding: 0.65rem 0.75rem;
     border: none;
     background: none;
-    border-radius: 6px;
+    border-radius: 14px;
     cursor: pointer;
     text-align: left;
-    color: var(--bs-body-color);
-    font-size: 0.875rem;
-    transition: background 0.12s;
+    color: #475569;
+    font-size: 0.88rem;
+    font-weight: 600;
+    transition: background 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
 }
 
-.ni-topic-item:hover { background: var(--bs-tertiary-bg); }
+.ni-topic-item:hover { background: rgba(148, 163, 184, 0.14); color: #0f172a; }
 
 .ni-topic-item--active {
-    background: rgba(var(--bs-primary-rgb), 0.12);
-    color: var(--bs-primary);
-    font-weight: 500;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.8));
+    color: #1d4ed8;
+    box-shadow: var(--gws-shadow-md);
 }
 
 .ni-topic-dot {
-    width: 8px;
-    height: 8px;
+    width: 9px;
+    height: 9px;
     border-radius: 50%;
     flex-shrink: 0;
 }
@@ -189,12 +210,12 @@
 .ni-topic-name--inactive { opacity: 0.5; text-decoration: line-through; }
 
 .ni-topic-count {
-    font-size: 0.72rem;
-    background: var(--bs-secondary-bg);
-    color: var(--bs-secondary-color);
-    padding: 0.05rem 0.4rem;
+    font-size: 0.68rem;
+    background: rgba(148, 163, 184, 0.16);
+    color: #475569;
+    padding: 0.1rem 0.5rem;
     border-radius: 999px;
-    font-weight: 600;
+    font-weight: 700;
 }
 
 .ni-topic-actions {
@@ -207,29 +228,39 @@
 .ni-topic-row:hover .ni-topic-actions { opacity: 1; }
 
 .ni-icon-btn-sm {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.7rem;
+    height: 1.7rem;
     background: none;
     border: none;
-    color: var(--bs-secondary-color);
-    padding: 0.25rem 0.3rem;
-    border-radius: 4px;
+    color: #94a3b8;
+    border-radius: 8px;
     cursor: pointer;
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     line-height: 1;
     transition: background 0.12s, color 0.12s;
 }
 
-.ni-icon-btn-sm:hover { background: var(--bs-tertiary-bg); color: var(--bs-body-color); }
+.ni-icon-btn-sm:hover { background: rgba(148, 163, 184, 0.16); color: #0f172a; }
 
-.ni-icon-btn-danger:hover { color: var(--bs-danger) !important; }
+.ni-icon-btn-danger:hover { color: #ef4444 !important; }
 
 /* ── Feed area ──────────────────────────────────────────── */
 .ni-feed {
     flex: 1;
     overflow-y: auto;
-    padding: 1.25rem 1.5rem;
+    border-radius: 24px;
+    border: 1px solid var(--gws-panel-border);
+    background: var(--gws-panel-bg);
+    box-shadow: var(--gws-shadow-lg);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    padding: 1.5rem 1.75rem 1.75rem;
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: 1.25rem;
 }
 
 .ni-feed-header {
@@ -237,127 +268,178 @@
     align-items: baseline;
     justify-content: space-between;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: 0.6rem;
 }
 
 .ni-feed-title {
     display: flex;
     align-items: baseline;
-    gap: 0.75rem;
-    font-size: 1.25rem;
-    font-weight: 700;
+    gap: 0.85rem;
+    font-size: 1.3rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--gws-text-strong);
 }
 
 .ni-last-refresh {
     font-size: 0.75rem;
-    color: var(--bs-secondary-color);
-    font-weight: 400;
+    color: var(--gws-text-soft);
+    font-weight: 500;
 }
 
 /* ── Alerts ─────────────────────────────────────────────── */
 .ni-alert {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.6rem 0.85rem;
-    border-radius: 8px;
-    font-size: 0.875rem;
+    gap: 0.55rem;
+    padding: 0.75rem 1rem;
+    border-radius: 14px;
+    font-size: 0.85rem;
+    font-weight: 600;
 }
 
-.ni-alert-info { background: rgba(var(--bs-info-rgb), 0.1); color: var(--bs-info); }
+.ni-alert-info { background: rgba(37, 99, 235, 0.1); color: #1d4ed8; }
 
-.ni-alert-error { background: rgba(var(--bs-danger-rgb), 0.1); color: var(--bs-danger); }
+.ni-alert-error { background: rgba(239, 68, 68, 0.1); color: #b91c1c; }
 
-/* ── Empty / loading ─────────────────────────────────────── */
-.ni-empty {
+/* ── Empty / loading ─────────────────────────────────────────
+   .ni-empty is used both from razor markup (scoped normally) and from
+   RenderAllView()'s RenderTreeBuilder tree (unscoped) - ::deep covers both. */
+::deep .ni-empty {
     flex: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.75rem;
-    color: var(--bs-secondary-color);
+    gap: 0.85rem;
+    color: var(--gws-text-soft);
     text-align: center;
     padding: 3rem;
 }
 
-.ni-empty i { font-size: 2.5rem; opacity: 0.4; }
+::deep .ni-empty i {
+    font-size: 1.5rem;
+    width: 3.2rem;
+    height: 3.2rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: rgba(37, 99, 235, 0.1);
+    color: #2563eb;
+}
 
 .ni-loading {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    color: var(--bs-secondary-color);
+    color: var(--gws-text-soft);
     font-size: 0.9rem;
+    font-weight: 600;
     padding: 2rem 0;
 }
 
-/* ── Sections ────────────────────────────────────────────── */
-.ni-section { display: flex; flex-direction: column; gap: 0.75rem; }
+/* ── Sections + cards ────────────────────────────────────────
+   These are built by RenderCard()/RenderAllView() via RenderTreeBuilder
+   in the @code block, not razor markup - the compiler only injects the
+   CSS-isolation scope attribute (b-xxxx) for elements written as <tag>
+   markup, so manually-built render trees never get scoped automatically.
+   ::deep drops that requirement so these rules still match. */
+::deep .ni-section { display: flex; flex-direction: column; gap: 0.85rem; }
 
-.ni-section-heading {
-    font-size: 0.8rem;
-    font-weight: 700;
-    letter-spacing: 0.06em;
+::deep .ni-section-heading {
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.07em;
     text-transform: uppercase;
-    color: var(--bs-secondary-color);
+    color: var(--gws-text-soft);
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.55rem;
     margin: 0;
 }
 
-.ni-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+::deep .ni-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 
-.ni-section-count { font-weight: 400; }
+::deep .ni-section-count { font-weight: 500; }
 
-/* ── Card grid ───────────────────────────────────────────── */
-.ni-card-grid {
+::deep .ni-card-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-    gap: 0.75rem;
+    gap: 1rem;
 }
 
-.ni-card {
-    background: var(--bs-tertiary-bg);
-    border: 1px solid var(--bs-border-color);
-    border-radius: 10px;
-    padding: 1rem;
+::deep .ni-card {
+    position: relative;
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 20px;
+    padding: 1.1rem 1.2rem 1.1rem 1.4rem;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    transition: border-color 0.15s, box-shadow 0.15s;
+    gap: 0.6rem;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+    transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+    overflow: hidden;
 }
 
-.ni-card:hover {
-    border-color: var(--bs-primary);
-    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+/* Topic-color accent bar, set per-card via inline --ni-accent custom property. */
+::deep .ni-card::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: var(--ni-accent, #94a3b8);
 }
 
-.ni-card-meta {
+::deep .ni-card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--gws-shadow-md);
+    border-color: rgba(37, 99, 235, 0.28);
+}
+
+::deep .ni-card-meta {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.55rem;
 }
 
-.ni-card-source {
-    font-size: 0.72rem;
-    font-weight: 600;
+::deep .ni-card-avatar {
+    width: 1.6rem;
+    height: 1.6rem;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: var(--ni-accent, #64748b);
+    color: #fff;
+    font-size: 0.68rem;
+    font-weight: 800;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--bs-primary);
 }
 
-.ni-card-time {
+::deep .ni-card-source {
     font-size: 0.72rem;
-    color: var(--bs-secondary-color);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #475569;
+}
+
+::deep .ni-card-time {
+    font-size: 0.72rem;
+    color: #94a3b8;
     margin-left: auto;
 }
 
-.ni-card-title {
-    font-size: 0.95rem;
-    font-weight: 600;
-    color: var(--bs-body-color);
+::deep .ni-card-title {
+    font-size: 0.96rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--gws-text-strong);
     text-decoration: none;
     line-height: 1.35;
     display: -webkit-box;
@@ -366,31 +448,34 @@
     overflow: hidden;
 }
 
-.ni-card-title:hover { color: var(--bs-primary); }
+::deep .ni-card-title:hover { color: #2563eb; }
 
-.ni-card-take {
+::deep .ni-card-take {
     font-size: 0.82rem;
-    color: var(--bs-secondary-color);
-    font-style: italic;
+    color: var(--gws-text-soft);
     margin: 0;
-    line-height: 1.4;
+    line-height: 1.5;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
 
-.ni-card-open {
+::deep .ni-card-open {
     margin-top: auto;
-    font-size: 0.78rem;
-    font-weight: 600;
-    color: var(--bs-primary);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: #2563eb;
     text-decoration: none;
     align-self: flex-start;
-    padding: 0.2rem 0;
+    padding-top: 0.2rem;
+    transition: gap 0.14s;
 }
 
-.ni-card-open:hover { text-decoration: underline; }
+::deep .ni-card-open:hover { gap: 0.5rem; }
 
 /* ── Spin animation ──────────────────────────────────────── */
 @keyframes ni-spin {
@@ -398,3 +483,17 @@
 }
 
 .ni-spin { animation: ni-spin 0.9s linear infinite; display: inline-block; }
+
+/* ── Responsive ──────────────────────────────────────────── */
+@media (max-width: 900px) {
+    .ni-shell {
+        flex-direction: column;
+        height: auto;
+        overflow: visible;
+    }
+
+    .ni-sidebar {
+        width: 100%;
+        max-height: 320px;
+    }
+}
