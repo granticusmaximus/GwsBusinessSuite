@@ -452,13 +452,14 @@ app.MapGet("/cms/{siteSlug}/{pageSlug}/thanks", (string siteSlug, string pageSlu
 
 // ── grantwatson.dev — the real public site ──────────────────────────────────────────
 // Same app/process as admin.gwsapp.net, gated to only activate for the public host (see
-// IsPublicHost above) so admin.gwsapp.net's existing "/" -> "/admin" redirect and routes
-// are completely unaffected. See PublicSiteHtmlRenderer.cs for why this reuses the /cms/
-// rendering path (CmsBlockHtmlRenderer) instead of a separate frontend app.
-
-app.MapGet("/", (ICmsBuilderService cmsBuilderService, IConfiguration configuration) =>
-        RenderPublicCanvasPageAsync("home", cmsBuilderService, configuration))
-    .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
+// IsPublicHost above) so admin.gwsapp.net's existing routes are completely unaffected.
+// See PublicSiteHtmlRenderer.cs for why this reuses the /cms/ rendering path
+// (CmsBlockHtmlRenderer) instead of a separate frontend app.
+//
+// "/" is handled by the single MapGet("/", ...) further down (it branches on IsPublicHost
+// internally) rather than a second RequireHost-gated one here — two endpoints on the exact
+// same template, one host-restricted and one not, both stay "valid" candidates for a
+// matching host under ASP.NET Core's host matching, which throws AmbiguousMatchException.
 
 app.MapGet("/{pageSlug}", (string pageSlug, ICmsBuilderService cmsBuilderService, IConfiguration configuration) =>
         RenderPublicCanvasPageAsync(pageSlug, cmsBuilderService, configuration))
@@ -964,8 +965,14 @@ app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
-// Root redirect to admin for anyone who hits the backend URL directly.
-app.MapGet("/", () => Results.Redirect("/admin")).AllowAnonymous();
+// "/" on the public host renders the Canvas home page; anywhere else (admin.gwsapp.net,
+// localhost, direct IP) redirects to /admin as before. One endpoint, not two — see the note
+// above the /{pageSlug} route for why a second RequireHost-gated "/" registration breaks.
+app.MapGet("/", (HttpContext httpContext, ICmsBuilderService cmsBuilderService, IConfiguration configuration) =>
+    IsPublicHost(httpContext)
+        ? RenderPublicCanvasPageAsync("home", cmsBuilderService, configuration)
+        : Task.FromResult(Results.Redirect("/admin")))
+    .AllowAnonymous().RequireRateLimiting("public-read");
 
 app.Run();
 
