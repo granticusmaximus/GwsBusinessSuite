@@ -5,6 +5,7 @@
 @using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Infrastructure.Data
 @using Microsoft.EntityFrameworkCore
+@using System.Text.RegularExpressions
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject NavigationManager Navigation
 @inject ILogger<ArticleEditor> Logger
@@ -16,11 +17,52 @@
         <h1><i class="bi bi-pencil me-2 text-primary"></i>Article Editor</h1>
         <p>Write and publish articles manually, or manage all articles regardless of source.</p>
     </div>
-    <button class="btn btn-primary d-inline-flex align-items-center gap-2" @onclick="CreateNewArticle" disabled="@IsBusy">
-        <i class="bi bi-plus-lg"></i>
-        <span>New Article</span>
-    </button>
+    <div class="d-inline-flex gap-2">
+        <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2" @onclick="ToggleCategoryManager" disabled="@IsBusy">
+            <i class="bi bi-tags"></i>
+            <span>Manage Categories</span>
+        </button>
+        <button class="btn btn-primary d-inline-flex align-items-center gap-2" @onclick="CreateNewArticle" disabled="@IsBusy">
+            <i class="bi bi-plus-lg"></i>
+            <span>New Article</span>
+        </button>
+    </div>
 </div>
+
+@if (ShowCategoryManager)
+{
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white border-bottom py-3">
+            <span class="fw-semibold">Categories</span>
+        </div>
+        <div class="card-body">
+            <div class="d-flex gap-2 mb-3">
+                <input class="form-control" style="max-width:280px" placeholder="New category name"
+                       value="@NewCategoryName" @oninput="e => NewCategoryName = e.Value?.ToString() ?? string.Empty" />
+                <button class="btn btn-sm btn-primary" @onclick="AddCategoryAsync" disabled="@IsBusy">Add</button>
+            </div>
+            @if (Categories.Count == 0)
+            {
+                <p class="text-secondary mb-0 small">No categories yet — articles default to "Uncategorized".</p>
+            }
+            else
+            {
+                <div class="d-flex flex-wrap gap-2">
+                    @foreach (var cat in Categories)
+                    {
+                        <span class="badge text-bg-light d-inline-flex align-items-center gap-2 py-2 px-3">
+                            @cat.Name
+                            <button class="btn btn-sm p-0 border-0 text-danger lh-1" title="Delete category"
+                                    @onclick="() => DeleteCategoryAsync(cat.Id)" disabled="@IsBusy">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                        </span>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
@@ -45,7 +87,7 @@
     </div>
     <div class="card-body">
         <div class="row g-3 mb-3">
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <label class="form-label fw-semibold small">Status</label>
                 <select class="form-select" @bind="StatusFilter">
                     <option value="">All</option>
@@ -53,7 +95,7 @@
                     <option value="Published">Published</option>
                 </select>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <label class="form-label fw-semibold small">Source</label>
                 <select class="form-select" @bind="SourceFilter">
                     <option value="">All</option>
@@ -61,7 +103,18 @@
                     <option value="OllamaGenerated">Ollama Generated</option>
                 </select>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
+                <label class="form-label fw-semibold small">Category</label>
+                <select class="form-select" @bind="CategoryFilter">
+                    <option value="">All</option>
+                    <option value="uncategorized">Uncategorized</option>
+                    @foreach (var cat in Categories)
+                    {
+                        <option value="@cat.Id">@cat.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-3">
                 <label class="form-label fw-semibold small">Search</label>
                 <input class="form-control" @bind="SearchTerm" @bind:event="oninput" placeholder="Filter by title" />
             </div>
@@ -138,17 +191,24 @@
 
 @code {
     private List<Article> Articles { get; set; } = new();
+    private List<ArticleCategory> Categories { get; set; } = new();
     private bool IsBusy { get; set; }
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
     private string StatusFilter { get; set; } = string.Empty;
     private string SourceFilter { get; set; } = string.Empty;
+    private string CategoryFilter { get; set; } = string.Empty;
     private string SearchTerm { get; set; } = string.Empty;
+
+    private bool ShowCategoryManager { get; set; }
+    private string NewCategoryName { get; set; } = string.Empty;
 
     private IReadOnlyList<Article> FilteredArticles =>
         Articles
             .Where(a => string.IsNullOrEmpty(StatusFilter) || a.Status == StatusFilter)
             .Where(a => string.IsNullOrEmpty(SourceFilter) || a.Source == SourceFilter)
+            .Where(a => string.IsNullOrEmpty(CategoryFilter) ||
+                        (CategoryFilter == "uncategorized" ? a.CategoryId is null : a.CategoryId == Guid.Parse(CategoryFilter)))
             .Where(a => string.IsNullOrEmpty(SearchTerm) ||
                         a.Title.Contains(SearchTerm.Trim(), StringComparison.OrdinalIgnoreCase))
             .ToList();
@@ -156,6 +216,7 @@
     protected override async Task OnInitializedAsync()
     {
         await LoadArticles();
+        await LoadCategoriesAsync();
     }
 
     private async Task LoadArticles()
@@ -178,6 +239,74 @@
         {
             IsBusy = false;
         }
+    }
+
+    private async Task LoadCategoriesAsync()
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            Categories = await db.ArticleCategories.OrderBy(c => c.Name).ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load categories.");
+        }
+    }
+
+    private void ToggleCategoryManager() => ShowCategoryManager = !ShowCategoryManager;
+
+    private async Task AddCategoryAsync()
+    {
+        if (string.IsNullOrWhiteSpace(NewCategoryName)) return;
+        ErrorMessage = string.Empty;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            db.ArticleCategories.Add(new ArticleCategory
+            {
+                Name = NewCategoryName.Trim(),
+                Slug = ToSlug(NewCategoryName)
+            });
+            await db.SaveChangesAsync();
+            NewCategoryName = string.Empty;
+            await LoadCategoriesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to add category.");
+            ErrorMessage = $"Unable to add category. {ex.Message}";
+        }
+    }
+
+    private async Task DeleteCategoryAsync(Guid id)
+    {
+        ErrorMessage = string.Empty;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var category = await db.ArticleCategories.FindAsync(id);
+            if (category is null) return;
+            // Articles referencing this category fall back to "Uncategorized" via the
+            // CategoryId FK's SetNull delete behavior - no manual cleanup needed here.
+            db.ArticleCategories.Remove(category);
+            await db.SaveChangesAsync();
+            await LoadCategoriesAsync();
+            await LoadArticles();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to delete category.");
+            ErrorMessage = $"Unable to delete category. {ex.Message}";
+        }
+    }
+
+    private static string ToSlug(string title)
+    {
+        var s = title.ToLowerInvariant().Trim();
+        s = Regex.Replace(s, @"[^a-z0-9\s-]", string.Empty);
+        s = Regex.Replace(s, @"\s+", "-");
+        return s.Trim('-');
     }
 
     private async Task CreateNewArticle()

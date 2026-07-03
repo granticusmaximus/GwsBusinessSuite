@@ -406,6 +406,8 @@ public sealed class ContentStudioService(
                 MetaDescription = draft.MetaDescription,
                 PrimaryKeyword = draft.PrimaryKeyword,
                 SecondaryKeywords = draft.SecondaryKeywords,
+                CategoryId = draft.CategoryId,
+                Tags = draft.Tags,
                 Author = "Grant Watson",
                 EstimatedReadingTime = draft.EstimatedReadingTime,
                 HeroImageUrl = heroImageUrl,
@@ -429,6 +431,8 @@ public sealed class ContentStudioService(
             existing.MetaDescription = draft.MetaDescription;
             existing.PrimaryKeyword = draft.PrimaryKeyword;
             existing.SecondaryKeywords = draft.SecondaryKeywords;
+            existing.CategoryId = draft.CategoryId;
+            existing.Tags = draft.Tags;
             existing.Author = "Grant Watson";
             existing.EstimatedReadingTime = draft.EstimatedReadingTime;
             existing.HeroImageUrl = heroImageUrl;

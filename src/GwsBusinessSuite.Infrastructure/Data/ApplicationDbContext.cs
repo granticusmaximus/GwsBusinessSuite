@@ -20,6 +20,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SeoArticleWorkflowEvent> SeoArticleWorkflowEvents => Set<SeoArticleWorkflowEvent>();
     public DbSet<CjConnectorSettings> CjConnectorSettings => Set<CjConnectorSettings>();
     public DbSet<Article> Articles => Set<Article>();
+    public DbSet<ArticleCategory> ArticleCategories => Set<ArticleCategory>();
     public DbSet<ArticleAffiliatePlacement> ArticleAffiliatePlacements => Set<ArticleAffiliatePlacement>();
     public DbSet<AppUser> AppUsers => Set<AppUser>();
     public DbSet<WatchedTopic> WatchedTopics => Set<WatchedTopic>();
@@ -53,6 +54,13 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<Article>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<Article>().HasIndex(x => x.Status);
         modelBuilder.Entity<Article>().HasIndex(x => x.PublishedAt);
+        modelBuilder.Entity<Article>().HasIndex(x => x.CategoryId);
+        modelBuilder.Entity<Article>()
+            .HasOne<ArticleCategory>()
+            .WithMany()
+            .HasForeignKey(x => x.CategoryId)
+            .OnDelete(DeleteBehavior.SetNull);
+        modelBuilder.Entity<ArticleCategory>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<ArticleAffiliatePlacement>()
             .HasOne(x => x.Article)
             .WithMany(x => x.AffiliatePlacements)

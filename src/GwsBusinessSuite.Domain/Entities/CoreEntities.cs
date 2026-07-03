@@ -174,6 +174,9 @@ public sealed class SeoArticleDraft : AuditableEntity
     public string MetaDescription { get; set; } = string.Empty;
     public string Slug { get; set; } = string.Empty;
     public string EstimatedReadingTime { get; set; } = string.Empty;
+    public Guid? CategoryId { get; set; }
+    // Comma-separated free-form tags (same convention as SecondaryKeywords / WatchedTopic.Keywords).
+    public string Tags { get; set; } = string.Empty;
     public string OutlineMarkdown { get; set; } = string.Empty;
     public string ArticleMarkdown { get; set; } = string.Empty;
     public string SeoChecklistMarkdown { get; set; } = string.Empty;
@@ -237,6 +240,9 @@ public sealed class Article : AuditableEntity
     public string SecondaryKeywords { get; set; } = string.Empty;
     public string Author { get; set; } = "Grant Watson";
     public string EstimatedReadingTime { get; set; } = string.Empty;
+    public Guid? CategoryId { get; set; }
+    // Comma-separated free-form tags (same convention as SecondaryKeywords / WatchedTopic.Keywords).
+    public string Tags { get; set; } = string.Empty;
     public string? HeroImageUrl { get; set; }
     public string HeroImageAltText { get; set; } = string.Empty;
     public string HeroImageCaption { get; set; } = string.Empty;
@@ -246,6 +252,14 @@ public sealed class Article : AuditableEntity
     public DateTimeOffset? PublishedAt { get; set; }
     public Guid? SourceDraftId { get; set; }
     public ICollection<ArticleAffiliatePlacement> AffiliatePlacements { get; set; } = new List<ArticleAffiliatePlacement>();
+}
+
+// Flat blog taxonomy (no hierarchy) - distinct from ArticleAffiliatePlacement.Category,
+// which is an unrelated free-text CJ affiliate-network category string.
+public sealed class ArticleCategory : AuditableEntity
+{
+    public required string Name { get; set; }
+    public required string Slug { get; set; }
 }
 
 public sealed class ArticleAffiliatePlacement : AuditableEntity

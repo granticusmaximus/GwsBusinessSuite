@@ -85,4 +85,76 @@ public sealed class PublicSiteHtmlRendererTests
 
         Assert.Contains("Thanks", html);
     }
+
+    [Fact]
+    public void BlogListBody_ShouldRenderCategoryAndTagPills_OnArticleCards_WhenPresent()
+    {
+        var article = new PublicSiteHtmlRenderer.ArticleSummary(
+            "my-post", "My Post", "Description", "", "5 min", DateTimeOffset.UtcNow, null,
+            "Dev Tools", "dev-tools", ["dotnet", "blazor"]);
+
+        var html = PublicSiteHtmlRenderer.BlogListBody(
+            [article], [], null, [], null, null, page: 1, pageSize: 10, totalCount: 1, totalPages: 1);
+
+        Assert.Contains("Dev Tools", html);
+        Assert.Contains("dotnet", html);
+        Assert.Contains("blazor", html);
+    }
+
+    [Fact]
+    public void BlogListBody_ShouldOmitCategoryAndTagPills_WhenAbsent()
+    {
+        var article = new PublicSiteHtmlRenderer.ArticleSummary(
+            "my-post", "My Post", "Description", "", "5 min", DateTimeOffset.UtcNow, null,
+            null, null, []);
+
+        var html = PublicSiteHtmlRenderer.BlogListBody(
+            [article], [], null, [], null, null, page: 1, pageSize: 10, totalCount: 1, totalPages: 1);
+
+        Assert.DoesNotContain("Dev Tools", html);
+    }
+
+    [Fact]
+    public void BlogListBody_ShouldRenderCategoryFilterCloud_WhenCategoriesProvided()
+    {
+        var categories = new List<PublicSiteHtmlRenderer.CategorySummary>
+        {
+            new("Dev Tools", "dev-tools"),
+            new("Tutorials", "tutorials")
+        };
+        var article = new PublicSiteHtmlRenderer.ArticleSummary(
+            "my-post", "My Post", "Description", "", "5 min", DateTimeOffset.UtcNow, null, null, null, []);
+
+        var html = PublicSiteHtmlRenderer.BlogListBody(
+            [article], [], null, categories, "dev-tools", null, page: 1, pageSize: 10, totalCount: 1, totalPages: 1);
+
+        Assert.Contains("Dev Tools", html);
+        Assert.Contains("Tutorials", html);
+        Assert.Contains("category=dev-tools", html);
+    }
+
+    [Fact]
+    public void BlogPostBody_ShouldRenderClickableCategoryAndTagPills_WhenPresent()
+    {
+        var html = PublicSiteHtmlRenderer.BlogPostBody(
+            "Title", "Description", "Grant Watson", DateTimeOffset.UtcNow, "5 min", "",
+            null, "", "", "Body text",
+            categoryName: "Dev Tools", categorySlug: "dev-tools", tags: ["dotnet", "blazor"]);
+
+        Assert.Contains("Dev Tools", html);
+        Assert.Contains("href=\"/blog?category=dev-tools\"", html);
+        Assert.Contains("href=\"/blog?tag=dotnet\"", html);
+        Assert.Contains("href=\"/blog?tag=blazor\"", html);
+    }
+
+    [Fact]
+    public void BlogPostBody_ShouldOmitCategoryAndTagPills_WhenNotProvided()
+    {
+        var html = PublicSiteHtmlRenderer.BlogPostBody(
+            "Title", "Description", "Grant Watson", DateTimeOffset.UtcNow, "5 min", "",
+            null, "", "", "Body text");
+
+        Assert.DoesNotContain("/blog?category=", html);
+        Assert.DoesNotContain("/blog?tag=", html);
+    }
 }

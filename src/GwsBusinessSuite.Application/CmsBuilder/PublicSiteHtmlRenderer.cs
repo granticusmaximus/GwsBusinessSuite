@@ -59,7 +59,12 @@ public static class PublicSiteHtmlRenderer
         string PrimaryKeyword,
         string EstimatedReadingTime,
         DateTimeOffset? PublishedAt,
-        string? HeroImageUrl);
+        string? HeroImageUrl,
+        string? CategoryName,
+        string? CategorySlug,
+        IReadOnlyList<string> Tags);
+
+    public sealed record CategorySummary(string Name, string Slug);
 
     // ── Page shell ───────────────────────────────────────────────────────────
 
@@ -149,6 +154,9 @@ public static class PublicSiteHtmlRenderer
         IReadOnlyList<ArticleSummary> pageItems,
         IReadOnlyList<string> keywords,
         string? activeKeyword,
+        IReadOnlyList<CategorySummary> categories,
+        string? activeCategory,
+        string? activeTag,
         int page,
         int pageSize,
         int totalCount,
@@ -170,23 +178,55 @@ public static class PublicSiteHtmlRenderer
             return sb.ToString();
         }
 
+        if (categories.Count > 0)
+        {
+            sb.Append("""<section class="keyword-cloud" aria-label="Filter by category"><span class="keyword-cloud-label">Category:</span>""");
+            foreach (var cat in categories)
+            {
+                var isActive = string.Equals(cat.Slug, activeCategory, StringComparison.Ordinal);
+                var href = isActive
+                    ? QueryString(activeKeyword, null, activeTag, 1, pageSize)
+                    : QueryString(activeKeyword, cat.Slug, activeTag, 1, pageSize);
+                sb.Append($"""<a class="keyword-pill{(isActive ? " active" : "")}" href="{Html(href)}">{Html(cat.Name)}</a>""");
+            }
+            if (!string.IsNullOrWhiteSpace(activeCategory))
+            {
+                sb.Append($"""<a class="keyword-clear" href="{Html(QueryString(activeKeyword, null, activeTag, 1, pageSize))}">Clear</a>""");
+            }
+            sb.Append("</section>");
+        }
+
         if (keywords.Count > 0)
         {
             sb.Append("""<section class="keyword-cloud" aria-label="Filter by keyword"><span class="keyword-cloud-label">Filter:</span>""");
             foreach (var kw in keywords)
             {
                 var isActive = string.Equals(kw, activeKeyword, StringComparison.Ordinal);
-                var href = isActive ? "/blog" : $"/blog?keyword={Uri.EscapeDataString(kw)}";
+                var href = isActive
+                    ? QueryString(null, activeCategory, activeTag, 1, pageSize)
+                    : QueryString(kw, activeCategory, activeTag, 1, pageSize);
                 sb.Append($"""<a class="keyword-pill{(isActive ? " active" : "")}" href="{Html(href)}">{Html(kw)}</a>""");
             }
             if (!string.IsNullOrWhiteSpace(activeKeyword))
             {
-                sb.Append("""<a class="keyword-clear" href="/blog">Clear</a>""");
+                sb.Append($"""<a class="keyword-clear" href="{Html(QueryString(null, activeCategory, activeTag, 1, pageSize))}">Clear</a>""");
             }
             sb.Append("</section>");
         }
 
-        var resultCountLabel = string.IsNullOrWhiteSpace(activeKeyword)
+        if (!string.IsNullOrWhiteSpace(activeTag))
+        {
+            sb.Append($"""
+                <section class="keyword-cloud" aria-label="Filter by tag">
+                  <span class="keyword-cloud-label">Tag:</span>
+                  <a class="keyword-pill active" href="{Html(QueryString(activeKeyword, activeCategory, activeTag, 1, pageSize))}">{Html(activeTag)}</a>
+                  <a class="keyword-clear" href="{Html(QueryString(activeKeyword, activeCategory, null, 1, pageSize))}">Clear</a>
+                </section>
+                """);
+        }
+
+        var isFiltered = !string.IsNullOrWhiteSpace(activeKeyword) || !string.IsNullOrWhiteSpace(activeCategory) || !string.IsNullOrWhiteSpace(activeTag);
+        var resultCountLabel = !isFiltered
             ? $"{totalCount} article{(totalCount != 1 ? "s" : "")}"
             : $"{totalCount} of {totalCount} articles";
 
@@ -199,7 +239,7 @@ public static class PublicSiteHtmlRenderer
         foreach (var n in new[] { 10, 25, 50 })
         {
             var isActive = n == pageSize;
-            var href = QueryString(activeKeyword, page: 1, pageSize: n);
+            var href = QueryString(activeKeyword, activeCategory, activeTag, page: 1, pageSize: n);
             sb.Append($"""<a class="pagesize-btn{(isActive ? " active" : "")}" href="{Html(href)}">{n}</a>""");
         }
         sb.Append("</div></div>");
@@ -214,16 +254,16 @@ public static class PublicSiteHtmlRenderer
         if (totalPages > 1)
         {
             sb.Append("""<nav class="blog-pagination" aria-label="Page navigation">""");
-            var prevHref = QueryString(activeKeyword, Math.Max(1, page - 1), pageSize);
+            var prevHref = QueryString(activeKeyword, activeCategory, activeTag, Math.Max(1, page - 1), pageSize);
             sb.Append($"""<a class="pagination-btn{(page == 1 ? " disabled" : "")}" href="{Html(prevHref)}" aria-label="Previous page">&larr; Prev</a>""");
 
             for (var n = 1; n <= totalPages; n++)
             {
-                var href = QueryString(activeKeyword, n, pageSize);
+                var href = QueryString(activeKeyword, activeCategory, activeTag, n, pageSize);
                 sb.Append($"""<a class="pagination-btn{(n == page ? " active" : "")}" href="{Html(href)}">{n}</a>""");
             }
 
-            var nextHref = QueryString(activeKeyword, Math.Min(totalPages, page + 1), pageSize);
+            var nextHref = QueryString(activeKeyword, activeCategory, activeTag, Math.Min(totalPages, page + 1), pageSize);
             sb.Append($"""<a class="pagination-btn{(page == totalPages ? " disabled" : "")}" href="{Html(nextHref)}" aria-label="Next page">Next &rarr;</a>""");
             sb.Append("</nav>");
         }
@@ -232,10 +272,12 @@ public static class PublicSiteHtmlRenderer
         return sb.ToString();
     }
 
-    private static string QueryString(string? keyword, int page, int pageSize)
+    private static string QueryString(string? keyword, string? category, string? tag, int page, int pageSize)
     {
         var parts = new List<string>();
         if (!string.IsNullOrWhiteSpace(keyword)) parts.Add($"keyword={Uri.EscapeDataString(keyword)}");
+        if (!string.IsNullOrWhiteSpace(category)) parts.Add($"category={Uri.EscapeDataString(category)}");
+        if (!string.IsNullOrWhiteSpace(tag)) parts.Add($"tag={Uri.EscapeDataString(tag)}");
         if (page > 1) parts.Add($"page={page}");
         if (pageSize != 10) parts.Add($"pageSize={pageSize}");
         return parts.Count == 0 ? "/blog" : $"/blog?{string.Join('&', parts)}";
@@ -252,6 +294,11 @@ public static class PublicSiteHtmlRenderer
             ? """<div class="article-card-img-placeholder">No image</div>"""
             : $"""<img src="{Html(a.HeroImageUrl)}" alt="{Html(a.Title)}" class="article-card-img" loading="lazy" />""";
 
+        var categoryPillHtml = string.IsNullOrWhiteSpace(a.CategoryName)
+            ? ""
+            : $"""<span class="article-tag">{Html(a.CategoryName)}</span>""";
+        var tagPillsHtml = string.Concat(a.Tags.Select(t => $"""<span class="article-tag">{Html(t)}</span>"""));
+
         return $"""
             <a href="/blog/{Html(a.Slug)}" class="article-card">
               {imageHtml}
@@ -261,6 +308,8 @@ public static class PublicSiteHtmlRenderer
                 <div class="article-card-meta">
                   {(string.IsNullOrWhiteSpace(a.EstimatedReadingTime) ? "" : $"""<span>{Html(a.EstimatedReadingTime)} read</span>""")}
                   {(string.IsNullOrWhiteSpace(a.PrimaryKeyword) ? "" : $"""<span class="article-tag">{Html(a.PrimaryKeyword)}</span>""")}
+                  {categoryPillHtml}
+                  {tagPillsHtml}
                   <span>{Html(dateLabel)}</span>
                 </div>
               </div>
@@ -280,7 +329,10 @@ public static class PublicSiteHtmlRenderer
         string? heroImageUrl,
         string heroImageAltText,
         string heroImageCaption,
-        string bodyMarkdown)
+        string bodyMarkdown,
+        string? categoryName = null,
+        string? categorySlug = null,
+        IReadOnlyList<string>? tags = null)
     {
         var dateLabel = publishedAt?.ToString("MMMM d, yyyy") ?? "";
         var heroHtml = string.IsNullOrWhiteSpace(heroImageUrl)
@@ -296,6 +348,15 @@ public static class PublicSiteHtmlRenderer
             ? """<p style="color:var(--text-3);font-style:italic">No content available for this article.</p>"""
             : RenderMarkdown(bodyMarkdown);
 
+        // Unlike the card (which is itself a single <a> wrapping everything), a post page has
+        // no such constraint - category/tag pills here are real clickable filters back to /blog.
+        var categoryPillHtml = string.IsNullOrWhiteSpace(categoryName)
+            ? ""
+            : $"""<a class="article-tag" href="/blog?category={Uri.EscapeDataString(categorySlug ?? "")}">{Html(categoryName)}</a>""";
+        var tagPillsHtml = tags is null
+            ? ""
+            : string.Concat(tags.Select(t => $"""<a class="article-tag" href="/blog?tag={Uri.EscapeDataString(t)}">{Html(t)}</a>"""));
+
         return $"""
             <article>
               {heroHtml}
@@ -304,6 +365,8 @@ public static class PublicSiteHtmlRenderer
                   <span>{Html(dateLabel)}</span>
                   {(string.IsNullOrWhiteSpace(estimatedReadingTime) ? "" : $"""<span>&middot; {Html(estimatedReadingTime)} read</span>""")}
                   {(string.IsNullOrWhiteSpace(primaryKeyword) ? "" : $"""<span class="article-tag">{Html(primaryKeyword)}</span>""")}
+                  {categoryPillHtml}
+                  {tagPillsHtml}
                 </div>
                 <h1 class="blog-post-title">{Html(title)}</h1>
                 {(string.IsNullOrWhiteSpace(metaDescription) ? "" : $"""<p class="blog-post-lead">{Html(metaDescription)}</p>""")}

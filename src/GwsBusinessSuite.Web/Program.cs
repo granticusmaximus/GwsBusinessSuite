@@ -466,6 +466,8 @@ app.MapGet("/blog", async (
         ICmsBuilderService cmsBuilderService,
         IConfiguration configuration,
         string? keyword,
+        string? category,
+        string? tag,
         int page = 1,
         int pageSize = 10) =>
     {
@@ -482,6 +484,13 @@ app.MapGet("/blog", async (
             .OrderByDescending(a => a.PublishedAt)
             .ToList();
 
+        var categoryLookup = await db.ArticleCategories.AsNoTracking().ToDictionaryAsync(c => c.Id);
+        var categories = categoryLookup.Values
+            .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(c => new PublicSiteHtmlRenderer.CategorySummary(c.Name, c.Slug))
+            .ToList();
+        var categoryIdBySlug = categoryLookup.Values.ToDictionary(c => c.Slug, c => c.Id);
+
         var keywords = articles
             .Select(a => a.PrimaryKeyword)
             .Where(k => !string.IsNullOrWhiteSpace(k))
@@ -489,9 +498,19 @@ app.MapGet("/blog", async (
             .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var filtered = string.IsNullOrWhiteSpace(keyword)
-            ? articles
-            : articles.Where(a => a.PrimaryKeyword == keyword).ToList();
+        var filtered = articles;
+        if (!string.IsNullOrWhiteSpace(keyword))
+        {
+            filtered = filtered.Where(a => a.PrimaryKeyword == keyword).ToList();
+        }
+        if (!string.IsNullOrWhiteSpace(category) && categoryIdBySlug.TryGetValue(category, out var categoryId))
+        {
+            filtered = filtered.Where(a => a.CategoryId == categoryId).ToList();
+        }
+        if (!string.IsNullOrWhiteSpace(tag))
+        {
+            filtered = filtered.Where(a => ParseTags(a.Tags).Contains(tag, StringComparer.OrdinalIgnoreCase)).ToList();
+        }
 
         var totalPages = Math.Max(1, (int)Math.Ceiling(filtered.Count / (double)pageSize));
         page = Math.Min(page, totalPages);
@@ -499,13 +518,18 @@ app.MapGet("/blog", async (
         var pageItems = filtered
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(a => new PublicSiteHtmlRenderer.ArticleSummary(
-                a.Slug, a.Title, a.MetaDescription, a.PrimaryKeyword, a.EstimatedReadingTime, a.PublishedAt,
-                a.HeroImageUrl ?? (a.HeroImageDataUri != "" ? $"/og-image/{a.Slug}" : null)))
+            .Select(a =>
+            {
+                var articleCategory = a.CategoryId.HasValue && categoryLookup.TryGetValue(a.CategoryId.Value, out var c) ? c : null;
+                return new PublicSiteHtmlRenderer.ArticleSummary(
+                    a.Slug, a.Title, a.MetaDescription, a.PrimaryKeyword, a.EstimatedReadingTime, a.PublishedAt,
+                    a.HeroImageUrl ?? (a.HeroImageDataUri != "" ? $"/og-image/{a.Slug}" : null),
+                    articleCategory?.Name, articleCategory?.Slug, ParseTags(a.Tags));
+            })
             .ToList();
 
         var navItems = await GetPublicNavItemsAsync(cmsBuilderService, configuration);
-        var bodyHtml = PublicSiteHtmlRenderer.BlogListBody(pageItems, keywords, keyword, page, pageSize, filtered.Count, totalPages);
+        var bodyHtml = PublicSiteHtmlRenderer.BlogListBody(pageItems, keywords, keyword, categories, category, tag, page, pageSize, filtered.Count, totalPages);
         var html = PublicSiteHtmlRenderer.Layout("Blog — Grant Watson", "Thoughts on software, building products, and the web.", null, bodyHtml, navItems);
         return Results.Content(html, "text/html");
     })
@@ -534,10 +558,14 @@ app.MapGet("/blog/{slug}", async (
 
         var heroImageUrl = a.HeroImageUrl ?? (a.HeroImageDataUri != "" ? $"/og-image/{a.Slug}" : null);
         var renderedMarkdown = ArticleMarkdownRenderer.Render(a.BodyMarkdown, a.AffiliatePlacements.OrderBy(p => p.SortOrder).ToList());
+        var articleCategory = a.CategoryId.HasValue
+            ? await db.ArticleCategories.AsNoTracking().FirstOrDefaultAsync(c => c.Id == a.CategoryId.Value)
+            : null;
 
         var bodyHtml = PublicSiteHtmlRenderer.BlogPostBody(
             a.Title, a.MetaDescription, a.Author, a.PublishedAt, a.EstimatedReadingTime, a.PrimaryKeyword,
-            heroImageUrl, a.HeroImageAltText, a.HeroImageCaption, renderedMarkdown);
+            heroImageUrl, a.HeroImageAltText, a.HeroImageCaption, renderedMarkdown,
+            articleCategory?.Name, articleCategory?.Slug, ParseTags(a.Tags));
 
         var html = PublicSiteHtmlRenderer.Layout(a.Title, a.MetaDescription, heroImageUrl, bodyHtml, navItems);
         return Results.Content(html, "text/html");
@@ -1065,6 +1093,11 @@ static async Task<IResult> RenderPublicCanvasPageAsync(string fullPath, bool sho
 // the custom CSS escape into raw HTML/script. This isn't a general HTML sanitizer.
 static string SanitizeInlineCss(string css) =>
     css.Replace("</style", "<\\/style", StringComparison.OrdinalIgnoreCase);
+
+// Article.Tags is a comma-separated free-form string (same convention as SecondaryKeywords /
+// WatchedTopic.Keywords) - parsed on read rather than normalized into a join table.
+static List<string> ParseTags(string tags) =>
+    tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
 // A misconfigured deploy that ships a blank/trivial AdminAuth:Password previously seeded
 // it without any complaint — the admin login would then be guessable on day one. This is

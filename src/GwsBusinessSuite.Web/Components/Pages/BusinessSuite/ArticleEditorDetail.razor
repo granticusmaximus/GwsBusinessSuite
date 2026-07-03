@@ -96,6 +96,20 @@ else
                     <label class="form-label fw-semibold small">Secondary Keywords</label>
                     <input class="form-control" @bind="SecondaryKeywords" placeholder="comma-separated" />
                 </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold small">Category</label>
+                    <select class="form-select" @bind="CategoryId">
+                        <option value="">Uncategorized</option>
+                        @foreach (var cat in Categories)
+                        {
+                            <option value="@cat.Id">@cat.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold small">Tags</label>
+                    <input class="form-control" @bind="Tags" placeholder="comma-separated, e.g. dotnet, blazor, tutorial" />
+                </div>
                 <div class="col-12">
                     <label class="form-label fw-semibold small">Meta Description</label>
                     <textarea class="form-control" rows="2" @bind="MetaDescription"
@@ -332,6 +346,9 @@ else
     private string Author { get; set; } = "Grant Watson";
     private string PrimaryKeyword { get; set; } = string.Empty;
     private string SecondaryKeywords { get; set; } = string.Empty;
+    private Guid? CategoryId { get; set; }
+    private string Tags { get; set; } = string.Empty;
+    private List<ArticleCategory> Categories { get; set; } = new();
     private string MetaDescription { get; set; } = string.Empty;
     private string EstimatedReadingTime { get; set; } = string.Empty;
     private string? HeroImageUrl { get; set; }
@@ -403,6 +420,8 @@ else
             }
             PopulateForm(CurrentArticle);
 
+            Categories = await db.ArticleCategories.OrderBy(c => c.Name).ToListAsync();
+
             Placements = await db.ArticleAffiliatePlacements
                 .Where(x => x.ArticleId == ArticleId)
                 .OrderBy(x => x.SortOrder)
@@ -431,6 +450,8 @@ else
         Author               = a.Author;
         PrimaryKeyword       = a.PrimaryKeyword;
         SecondaryKeywords    = a.SecondaryKeywords;
+        CategoryId           = a.CategoryId;
+        Tags                 = a.Tags;
         MetaDescription      = a.MetaDescription;
         EstimatedReadingTime = a.EstimatedReadingTime;
         HeroImageUrl         = a.HeroImageUrl;
@@ -558,6 +579,8 @@ else
             article.Author            = string.IsNullOrWhiteSpace(Author) ? "Grant Watson" : Author.Trim();
             article.PrimaryKeyword    = PrimaryKeyword.Trim();
             article.SecondaryKeywords = SecondaryKeywords.Trim();
+            article.CategoryId        = CategoryId;
+            article.Tags              = Tags.Trim();
             article.MetaDescription   = MetaDescription.Trim();
             article.EstimatedReadingTime = EstimatedReadingTime.Trim();
             article.HeroImageUrl      = string.IsNullOrWhiteSpace(HeroImageUrl) ? null : HeroImageUrl.Trim();

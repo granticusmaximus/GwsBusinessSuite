@@ -160,6 +160,97 @@ public sealed class ContentStudioServiceTests
     }
 
     [Fact]
+    public async Task PublishDraftToSiteAsync_ShouldCarryCategoryAndTagsThroughToTheArticle()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var ollama = new FakeOllamaService { GenerateTextResult = "# Initial draft" };
+        var service = CreateService(db, factory, ollama);
+
+        var category = new ArticleCategory { Name = "Dev Tools", Slug = "dev-tools" };
+        db.ArticleCategories.Add(category);
+        await db.SaveChangesAsync();
+
+        var generated = await service.GenerateArticleAsync(new ArticleGenerationRequest
+        {
+            Topic = "Clean Architecture in Blazor",
+            TargetAudience = "Mid-level C# developers",
+            PrimaryKeyword = "Blazor clean architecture",
+            SecondaryKeywords = "ASP.NET Core, C#"
+        });
+
+        // GenerateArticleAsync doesn't accept Category/Tags (they're set on the draft
+        // afterward, e.g. via the admin UI) - mirror that by updating the draft row directly.
+        var draft = await db.SeoArticleDrafts.SingleAsync();
+        draft.CategoryId = category.Id;
+        draft.Tags = "dotnet, blazor, tutorial";
+        await db.SaveChangesAsync();
+
+        await service.ApproveDraftAsync(new DraftDecisionRequest
+        {
+            DraftId = generated.DraftId,
+            Notes = "Ready to publish.",
+            PerformedBy = "editor"
+        });
+
+        await service.PublishDraftToSiteAsync(new DraftPublishRequest
+        {
+            DraftId = generated.DraftId,
+            Notes = "Publish article live.",
+            PerformedBy = "publisher"
+        });
+
+        var article = await db.Articles.SingleAsync();
+        Assert.Equal(category.Id, article.CategoryId);
+        Assert.Equal("dotnet, blazor, tutorial", article.Tags);
+
+        // Republishing (update-existing-by-slug path) should carry the same fields too.
+        draft.Status = SeoArticleDraftStatuses.PendingReview;
+        await db.SaveChangesAsync();
+        await service.ApproveDraftAsync(new DraftDecisionRequest
+        {
+            DraftId = generated.DraftId,
+            Notes = "Re-approve.",
+            PerformedBy = "editor"
+        });
+        draft.Tags = "dotnet, blazor, updated";
+        await db.SaveChangesAsync();
+        await service.PublishDraftToSiteAsync(new DraftPublishRequest
+        {
+            DraftId = generated.DraftId,
+            Notes = "Republish.",
+            PerformedBy = "publisher"
+        });
+
+        var republished = await db.Articles.SingleAsync();
+        Assert.Equal(category.Id, republished.CategoryId);
+        Assert.Equal("dotnet, blazor, updated", republished.Tags);
+    }
+
+    [Fact]
+    public async Task DeletingAnArticleCategory_ShouldSetArticlesToUncategorizedRatherThanBlockOrCascade()
+    {
+        var (db, factory) = await CreateDbAsync();
+
+        var category = new ArticleCategory { Name = "Dev Tools", Slug = "dev-tools" };
+        db.ArticleCategories.Add(category);
+        var article = new Article
+        {
+            Slug = "test-article",
+            Title = "Test Article",
+            CategoryId = category.Id,
+            CreatedBy = "test"
+        };
+        db.Articles.Add(article);
+        await db.SaveChangesAsync();
+
+        db.ArticleCategories.Remove(category);
+        await db.SaveChangesAsync();
+
+        var reloaded = await db.Articles.SingleAsync();
+        Assert.Null(reloaded.CategoryId);
+    }
+
+    [Fact]
     public async Task UpdateDraftMarkdownAsync_ShouldPersistEditedMarkdownWithoutCallingOllama()
     {
         var (db, factory) = await CreateDbAsync();
