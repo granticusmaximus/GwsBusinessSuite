@@ -122,7 +122,8 @@ public sealed class CmsBlockHtmlRendererTests
             "contact");
 
         Assert.Contains("<form", html);
-        Assert.Contains("action=\"/cms/my-site/contact/submit\"", html);
+        Assert.Contains("action=\"/cms/my-site/submit\"", html);
+        Assert.Contains("name=\"_path\" value=\"contact\"", html);
         Assert.Contains("name=\"name\"", html);
         Assert.Contains("required", html);
         Assert.Contains("name=\"favoriteColor\"", html);

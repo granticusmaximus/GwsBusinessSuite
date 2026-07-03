@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Markdig;
 
 namespace GwsBusinessSuite.Application.CmsBuilder;
@@ -22,6 +23,35 @@ public static class PublicSiteHtmlRenderer
     public static string RenderMarkdown(string markdown) =>
         string.IsNullOrWhiteSpace(markdown) ? string.Empty : Markdown.ToHtml(markdown, MarkdownPipeline);
 
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    // Falls back to the original hardcoded About/Blog/Contact list when a site has no
+    // NavMenuJson set yet, so a freshly-migrated site never renders a blank nav.
+    private static readonly IReadOnlyList<NavMenuItem> DefaultNavItems =
+    [
+        new("about", "About", "/about", false),
+        new("blog", "Blog", "/blog", false),
+        new("contact", "Contact", "/contact", false)
+    ];
+
+    public static IReadOnlyList<NavMenuItem> ParseNavItems(string? navMenuJson)
+    {
+        if (string.IsNullOrWhiteSpace(navMenuJson))
+        {
+            return DefaultNavItems;
+        }
+
+        try
+        {
+            var items = JsonSerializer.Deserialize<List<NavMenuItem>>(navMenuJson, JsonOptions);
+            return items is { Count: > 0 } ? items : DefaultNavItems;
+        }
+        catch (JsonException)
+        {
+            return DefaultNavItems;
+        }
+    }
+
     public sealed record ArticleSummary(
         string Slug,
         string Title,
@@ -33,7 +63,7 @@ public static class PublicSiteHtmlRenderer
 
     // ── Page shell ───────────────────────────────────────────────────────────
 
-    public static string Layout(string pageTitle, string metaDescription, string? ogImageUrl, string bodyHtml)
+    public static string Layout(string pageTitle, string metaDescription, string? ogImageUrl, string bodyHtml, IReadOnlyList<NavMenuItem>? navItems = null)
     {
         var ogImageTag = string.IsNullOrWhiteSpace(ogImageUrl)
             ? string.Empty
@@ -55,7 +85,7 @@ public static class PublicSiteHtmlRenderer
               <link rel="stylesheet" href="/public-site.css" />
             </head>
             <body>
-              {Nav()}
+              {Nav(navItems ?? DefaultNavItems)}
               {bodyHtml}
               {Footer()}
             </body>
@@ -63,22 +93,28 @@ public static class PublicSiteHtmlRenderer
             """;
     }
 
-    private static string Nav() => """
-        <nav class="site-nav">
-          <a href="/" class="site-logo">
-            <img src="/logo-mark.svg" alt="" />
-            <span class="site-logo-wordmark">
-              <span>grantwatson</span>
-              <span class="site-logo-domain">.dev</span>
-            </span>
-          </a>
-          <div class="nav-links">
-            <a href="/about">About</a>
-            <a href="/blog">Blog</a>
-            <a href="/contact">Contact</a>
-          </div>
-        </nav>
-        """;
+    private static string Nav(IReadOnlyList<NavMenuItem> navItems)
+    {
+        var sb = new StringBuilder();
+        sb.Append("""
+            <nav class="site-nav">
+              <a href="/" class="site-logo">
+                <img src="/logo-mark.svg" alt="" />
+                <span class="site-logo-wordmark">
+                  <span>grantwatson</span>
+                  <span class="site-logo-domain">.dev</span>
+                </span>
+              </a>
+              <div class="nav-links">
+            """);
+        foreach (var item in navItems)
+        {
+            var targetAttrs = item.OpenInNewTab ? " target=\"_blank\" rel=\"noopener noreferrer\"" : "";
+            sb.Append($"""<a href="{Html(item.Href)}"{targetAttrs}>{Html(item.Label)}</a>""");
+        }
+        sb.Append("</div></nav>");
+        return sb.ToString();
+    }
 
     private static string Footer() => $"""
         <footer class="site-footer">
@@ -97,17 +133,14 @@ public static class PublicSiteHtmlRenderer
         </main>
         """;
 
-    public static string FullPage404(string message) =>
-        Layout("404 — Not Found", string.Empty, null, NotFoundBody(message, "/", "Back to Home"));
+    // ── Form submitted banner ────────────────────────────────────────────────
+    // Shown inline above a Canvas page's normal content when it's reached via
+    // ?submitted=1 (the contact-form submit handler's redirect target) — replaces a
+    // separate /{page}/thanks route, which can't coexist with the nested-page catch-all
+    // route (a fixed segment can't follow a catch-all route parameter).
 
-    // ── Form thanks page ─────────────────────────────────────────────────────
-
-    public static string ThanksBody(string backHref) => $"""
-        <main class="page-not-found">
-          <h1 style="font-size:3rem">Thanks!</h1>
-          <p>Your message was sent — I'll get back to you soon.</p>
-          <a href="{Html(backHref)}">&larr; Back</a>
-        </main>
+    public static string SubmittedBanner() => """
+        <div class="gws-submitted-banner">Thanks — your message was sent. I'll get back to you soon.</div>
         """;
 
     // ── Blog list ────────────────────────────────────────────────────────────

@@ -375,12 +375,14 @@ app.MapGet("/cms/{siteSlug}/{pageSlug}", async (
     return Results.Content(html, "text/html");
 }).AllowAnonymous().RequireRateLimiting("public-read");
 
-// Handles "form" widget submissions (see CmsBlockHtmlRenderer's "form" case).
-// Tightly rate-limited since it's an unauthenticated POST that writes to the database —
-// a much smaller budget than ordinary page views.
-app.MapPost("/cms/{siteSlug}/{pageSlug}/submit", async (
+// Handles "form" widget submissions (see CmsBlockHtmlRenderer's "form" case). Fixed URL
+// per site rather than per page — the submitted page's (possibly nested) full path travels
+// as a hidden "_path" field instead, since it can't appear in the URL before a fixed
+// "/submit" segment once the live site's page route is a catch-all (see RenderForm in
+// CmsBlockHtmlRenderer.cs). Tightly rate-limited since it's an unauthenticated POST that
+// writes to the database — a much smaller budget than ordinary page views.
+app.MapPost("/cms/{siteSlug}/submit", async (
     string siteSlug,
-    string pageSlug,
     HttpRequest request,
     HttpContext httpContext,
     ICmsBuilderService cmsBuilderService,
@@ -389,15 +391,16 @@ app.MapPost("/cms/{siteSlug}/{pageSlug}/submit", async (
     var site = await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
     if (site is null) return Results.NotFound();
 
-    var page = await cmsBuilderService.GetPageBySlugAsync(site.Id, pageSlug);
+    var form = await request.ReadFormAsync();
+    var path = form["_path"].ToString();
+
+    var page = await cmsBuilderService.GetPageByFullPathAsync(site.Id, path);
     if (page is null) return Results.NotFound();
 
     // The same form widget renders on both the bare /cms/ fallback and the real public
     // site (RequireHost-gated routes below) — send visitors back to whichever one they
-    // came from instead of always landing on the unstyled fallback thanks page.
-    var thanksUrl = IsPublicHost(httpContext) ? $"/{pageSlug}/thanks" : $"/cms/{siteSlug}/{pageSlug}/thanks";
-
-    var form = await request.ReadFormAsync();
+    // came from instead of always landing on the unstyled fallback.
+    var thanksUrl = IsPublicHost(httpContext) ? $"/{path}?submitted=1" : $"/cms/{siteSlug}/{path}";
 
     // Honeypot: a hidden field real visitors never see or fill. A non-empty value means a
     // bot filled every field it found — accept silently so the bot doesn't learn it failed.
@@ -407,9 +410,10 @@ app.MapPost("/cms/{siteSlug}/{pageSlug}/submit", async (
     }
 
     // The form widget's fields are admin-defined per page, so collect whatever was
-    // actually posted (minus the honeypot) rather than assuming fixed field names.
+    // actually posted (minus the honeypot and the routing field) rather than assuming
+    // fixed field names.
     var fields = form
-        .Where(kvp => kvp.Key != "company")
+        .Where(kvp => kvp.Key != "company" && kvp.Key != "_path")
         .ToDictionary(kvp => kvp.Key, kvp => kvp.Value.ToString());
 
     try
@@ -424,32 +428,6 @@ app.MapPost("/cms/{siteSlug}/{pageSlug}/submit", async (
     return Results.Redirect(thanksUrl);
 }).AllowAnonymous().RequireRateLimiting("public-write");
 
-app.MapGet("/cms/{siteSlug}/{pageSlug}/thanks", (string siteSlug, string pageSlug) =>
-{
-    var html = $"""
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-          <meta charset="utf-8" />
-          <meta name="viewport" content="width=device-width, initial-scale=1" />
-          <title>Thank you</title>
-          <link rel="stylesheet" href="/cms-public.css" />
-        </head>
-        <body>
-          <section class="cms-block">
-            <div class="cms-callout">
-              <h2>Thanks — your message was sent.</h2>
-              <p>We'll get back to you soon.</p>
-              <a class="cms-button" href="/cms/{System.Net.WebUtility.HtmlEncode(siteSlug)}/{System.Net.WebUtility.HtmlEncode(pageSlug)}">Back</a>
-            </div>
-          </section>
-        </body>
-        </html>
-        """;
-
-    return Results.Content(html, "text/html");
-}).AllowAnonymous().RequireRateLimiting("public-read");
-
 // ── grantwatson.dev — the real public site ──────────────────────────────────────────
 // Same app/process as admin.gwsapp.net, gated to only activate for the public host (see
 // IsPublicHost above) so admin.gwsapp.net's existing routes are completely unaffected.
@@ -460,19 +438,21 @@ app.MapGet("/cms/{siteSlug}/{pageSlug}/thanks", (string siteSlug, string pageSlu
 // internally) rather than a second RequireHost-gated one here — two endpoints on the exact
 // same template, one host-restricted and one not, both stay "valid" candidates for a
 // matching host under ASP.NET Core's host matching, which throws AmbiguousMatchException.
+//
+// {**pageSlug} is a catch-all (binds "services/web-dev", not just one segment) so nested
+// Canvas pages resolve — see ICmsBuilderService.GetPageByFullPathAsync. A catch-all must be
+// the last route segment, which is why there's no separate "/{pageSlug}/thanks" route
+// anymore (a fixed segment can't follow it) — form submissions redirect back to the page
+// itself with ?submitted=1 instead, handled inline by RenderPublicCanvasPageAsync.
 
-app.MapGet("/{pageSlug}", (string pageSlug, ICmsBuilderService cmsBuilderService, IConfiguration configuration) =>
-        RenderPublicCanvasPageAsync(pageSlug, cmsBuilderService, configuration))
-    .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
-
-app.MapGet("/{pageSlug}/thanks", (string pageSlug) =>
-        Results.Content(
-            PublicSiteHtmlRenderer.Layout("Thanks!", string.Empty, null, PublicSiteHtmlRenderer.ThanksBody($"/{pageSlug}")),
-            "text/html"))
+app.MapGet("/{**pageSlug}", (string pageSlug, HttpRequest request, ICmsBuilderService cmsBuilderService, IConfiguration configuration) =>
+        RenderPublicCanvasPageAsync(pageSlug, request.Query["submitted"] == "1", cmsBuilderService, configuration))
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
 
 app.MapGet("/blog", async (
         IDbContextFactory<ApplicationDbContext> dbFactory,
+        ICmsBuilderService cmsBuilderService,
+        IConfiguration configuration,
         string? keyword,
         int page = 1,
         int pageSize = 10) =>
@@ -512,15 +492,18 @@ app.MapGet("/blog", async (
                 a.HeroImageUrl ?? (a.HeroImageDataUri != "" ? $"/og-image/{a.Slug}" : null)))
             .ToList();
 
+        var navItems = await GetPublicNavItemsAsync(cmsBuilderService, configuration);
         var bodyHtml = PublicSiteHtmlRenderer.BlogListBody(pageItems, keywords, keyword, page, pageSize, filtered.Count, totalPages);
-        var html = PublicSiteHtmlRenderer.Layout("Blog — Grant Watson", "Thoughts on software, building products, and the web.", null, bodyHtml);
+        var html = PublicSiteHtmlRenderer.Layout("Blog — Grant Watson", "Thoughts on software, building products, and the web.", null, bodyHtml, navItems);
         return Results.Content(html, "text/html");
     })
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
 
 app.MapGet("/blog/{slug}", async (
         string slug,
-        IDbContextFactory<ApplicationDbContext> dbFactory) =>
+        IDbContextFactory<ApplicationDbContext> dbFactory,
+        ICmsBuilderService cmsBuilderService,
+        IConfiguration configuration) =>
     {
         await using var db = await dbFactory.CreateDbContextAsync();
         var a = await db.Articles
@@ -528,9 +511,13 @@ app.MapGet("/blog/{slug}", async (
             .Where(x => x.Slug == slug && x.Status == ArticleStatuses.Published)
             .FirstOrDefaultAsync();
 
+        var navItems = await GetPublicNavItemsAsync(cmsBuilderService, configuration);
+
         if (a is null)
         {
-            return Results.Content(PublicSiteHtmlRenderer.FullPage404("Article not found."), "text/html", statusCode: StatusCodes.Status404NotFound);
+            return Results.Content(
+                PublicSiteHtmlRenderer.Layout("404 — Not Found", string.Empty, null, PublicSiteHtmlRenderer.NotFoundBody("Article not found.", "/blog", "Back to Blog"), navItems),
+                "text/html", statusCode: StatusCodes.Status404NotFound);
         }
 
         var heroImageUrl = a.HeroImageUrl ?? (a.HeroImageDataUri != "" ? $"/og-image/{a.Slug}" : null);
@@ -540,13 +527,18 @@ app.MapGet("/blog/{slug}", async (
             a.Title, a.MetaDescription, a.Author, a.PublishedAt, a.EstimatedReadingTime, a.PrimaryKeyword,
             heroImageUrl, a.HeroImageAltText, a.HeroImageCaption, renderedMarkdown);
 
-        var html = PublicSiteHtmlRenderer.Layout(a.Title, a.MetaDescription, heroImageUrl, bodyHtml);
+        var html = PublicSiteHtmlRenderer.Layout(a.Title, a.MetaDescription, heroImageUrl, bodyHtml, navItems);
         return Results.Content(html, "text/html");
     })
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
 
-app.MapGet("/__public-not-found", () =>
-        Results.Content(PublicSiteHtmlRenderer.FullPage404("Sorry, the content you are looking for does not exist."), "text/html"))
+app.MapGet("/__public-not-found", async (ICmsBuilderService cmsBuilderService, IConfiguration configuration) =>
+    {
+        var navItems = await GetPublicNavItemsAsync(cmsBuilderService, configuration);
+        var html = PublicSiteHtmlRenderer.Layout("404 — Not Found", string.Empty, null,
+            PublicSiteHtmlRenderer.NotFoundBody("Sorry, the content you are looking for does not exist.", "/", "Back to Home"), navItems);
+        return Results.Content(html, "text/html");
+    })
     .AllowAnonymous();
 
 // Admin: exports a full CmsSite as a self-contained static ZIP so the output can be
@@ -967,40 +959,60 @@ app.MapRazorComponents<App>()
 
 // "/" on the public host renders the Canvas home page; anywhere else (admin.gwsapp.net,
 // localhost, direct IP) redirects to /admin as before. One endpoint, not two — see the note
-// above the /{pageSlug} route for why a second RequireHost-gated "/" registration breaks.
-app.MapGet("/", (HttpContext httpContext, ICmsBuilderService cmsBuilderService, IConfiguration configuration) =>
+// above the /{**pageSlug} route for why a second RequireHost-gated "/" registration breaks.
+app.MapGet("/", (HttpContext httpContext, HttpRequest request, ICmsBuilderService cmsBuilderService, IConfiguration configuration) =>
     IsPublicHost(httpContext)
-        ? RenderPublicCanvasPageAsync("home", cmsBuilderService, configuration)
+        ? RenderPublicCanvasPageAsync("home", request.Query["submitted"] == "1", cmsBuilderService, configuration)
         : Task.FromResult(Results.Redirect("/admin")))
     .AllowAnonymous().RequireRateLimiting("public-read");
 
 app.Run();
 
-// Renders a Canvas page (by slug, under the Canvas:SiteSlug-configured site) as a full
-// grantwatson.dev document — shared by GET "/" (slug "home") and GET "/{pageSlug}".
-static async Task<IResult> RenderPublicCanvasPageAsync(string pageSlug, ICmsBuilderService cmsBuilderService, IConfiguration configuration)
+// Fetches the configured Canvas site and returns its nav items — shared by every public-host
+// handler that renders a full page shell, not just Canvas pages (blog list/post, 404).
+static async Task<IReadOnlyList<NavMenuItem>> GetPublicNavItemsAsync(ICmsBuilderService cmsBuilderService, IConfiguration configuration)
+{
+    var siteSlug = configuration["Canvas:SiteSlug"] ?? string.Empty;
+    var site = string.IsNullOrWhiteSpace(siteSlug) ? null : await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
+    return PublicSiteHtmlRenderer.ParseNavItems(site?.NavMenuJson);
+}
+
+// Renders a Canvas page (by full path, under the Canvas:SiteSlug-configured site) as a full
+// grantwatson.dev document — shared by GET "/" (path "home") and GET "/{**pageSlug}".
+// fullPath supports nested pages ("services/web-dev") via GetPageByFullPathAsync.
+static async Task<IResult> RenderPublicCanvasPageAsync(string fullPath, bool showSubmittedBanner, ICmsBuilderService cmsBuilderService, IConfiguration configuration)
 {
     var siteSlug = configuration["Canvas:SiteSlug"] ?? string.Empty;
     var site = string.IsNullOrWhiteSpace(siteSlug) ? null : await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
     if (site is null)
     {
-        return Results.Content(PublicSiteHtmlRenderer.FullPage404("Page not found."), "text/html", statusCode: StatusCodes.Status404NotFound);
+        return Results.Content(
+            PublicSiteHtmlRenderer.Layout("404 — Not Found", string.Empty, null, PublicSiteHtmlRenderer.NotFoundBody("Page not found.", "/", "Back to Home")),
+            "text/html", statusCode: StatusCodes.Status404NotFound);
     }
 
-    var page = await cmsBuilderService.GetPageBySlugAsync(site.Id, pageSlug);
+    var navItems = PublicSiteHtmlRenderer.ParseNavItems(site.NavMenuJson);
+    var page = await cmsBuilderService.GetPageByFullPathAsync(site.Id, fullPath);
     if (page is null)
     {
-        return Results.Content(PublicSiteHtmlRenderer.FullPage404("Page not found."), "text/html", statusCode: StatusCodes.Status404NotFound);
+        return Results.Content(
+            PublicSiteHtmlRenderer.Layout("404 — Not Found", string.Empty, null, PublicSiteHtmlRenderer.NotFoundBody("Page not found.", "/", "Back to Home"), navItems),
+            "text/html", statusCode: StatusCodes.Status404NotFound);
     }
 
-    var bodyHtml = CmsBlockHtmlRenderer.Render(page.BlocksJson, siteSlug, pageSlug);
+    var bodyHtml = CmsBlockHtmlRenderer.Render(page.BlocksJson, siteSlug, fullPath);
+    if (showSubmittedBanner)
+    {
+        bodyHtml = PublicSiteHtmlRenderer.SubmittedBanner() + bodyHtml;
+    }
+
     var customCss = string.Join('\n', new[] { site.CustomCss, page.CustomCss }.Where(css => !string.IsNullOrWhiteSpace(css)));
     var wrappedBody = string.IsNullOrWhiteSpace(customCss)
         ? bodyHtml
         : $"<style>{SanitizeInlineCss(customCss)}</style>{bodyHtml}";
 
     var pageTitle = string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle;
-    var html = PublicSiteHtmlRenderer.Layout(pageTitle, page.MetaDescription, page.OgImageUrl, wrappedBody);
+    var html = PublicSiteHtmlRenderer.Layout(pageTitle, page.MetaDescription, page.OgImageUrl, wrappedBody, navItems);
     return Results.Content(html, "text/html");
 }
 

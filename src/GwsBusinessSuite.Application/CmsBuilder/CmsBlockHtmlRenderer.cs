@@ -133,11 +133,16 @@ public static class CmsBlockHtmlRenderer
     // submission via IFormSubmissionService. The "company" field is a honeypot: hidden
     // from real visitors via CSS, so a filled-in value marks the request as a bot without
     // telling the bot it was caught.
+    // Posts to a fixed /cms/{siteSlug}/submit rather than embedding the page path in the URL
+    // — a nested page's path (e.g. "services/web-dev") can't appear before a fixed "/submit"
+    // segment once the live site's page route becomes a catch-all, so the path travels as a
+    // hidden field instead, same as the honeypot.
     private static string RenderForm(IReadOnlyDictionary<string, string> p, string siteSlug, string pageSlug)
     {
         var fields = ParseFormFields(Get(p, "fieldsJson"));
         var sb = new StringBuilder();
-        sb.Append($"""<form class="gws-form" method="post" action="/cms/{Html(siteSlug)}/{Html(pageSlug)}/submit">""");
+        sb.Append($"""<form class="gws-form" method="post" action="/cms/{Html(siteSlug)}/submit">""");
+        sb.Append($"""<input type="hidden" name="_path" value="{Html(pageSlug)}" />""");
 
         foreach (var field in fields)
         {

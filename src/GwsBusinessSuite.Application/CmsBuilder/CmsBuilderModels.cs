@@ -14,6 +14,8 @@ public sealed class CmsSiteEditorModel
     public string Theme { get; set; } = "Default";
 
     public string CustomCss { get; set; } = string.Empty;
+
+    public string NavMenuJson { get; set; } = "[]";
 }
 
 public sealed class CmsPageEditorModel
@@ -22,6 +24,8 @@ public sealed class CmsPageEditorModel
 
     [Required]
     public Guid? SiteId { get; set; }
+
+    public Guid? ParentPageId { get; set; }
 
     [Required]
     public string Title { get; set; } = string.Empty;
@@ -39,6 +43,8 @@ public sealed class CmsPageEditorModel
 
     public string CustomCss { get; set; } = string.Empty;
 }
+
+public sealed record NavMenuItem(string Id, string Label, string Href, bool OpenInNewTab);
 
 public sealed class CmsWorkflowBlueprintSummary
 {

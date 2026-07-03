@@ -78,11 +78,13 @@ public sealed class CmsSite : AuditableEntity
     public required string Slug { get; set; }
     public string Theme { get; set; } = "Default";
     public string CustomCss { get; set; } = string.Empty;
+    public string NavMenuJson { get; set; } = "[]";
 }
 
 public sealed class CmsPage : AuditableEntity
 {
     public Guid SiteId { get; set; }
+    public Guid? ParentPageId { get; set; }
     public required string Title { get; set; }
     public required string Slug { get; set; }
     public string BlocksJson { get; set; } = "[]";

@@ -68,6 +68,50 @@
                 <InputTextArea class="form-control font-monospace cms-custom-css-editor" @bind-Value="SiteCustomCssInput"
                                placeholder="Applies to every page on this site. Page-level CSS below can override it." spellcheck="false" />
 
+                <hr class="my-3" />
+
+                <label class="form-label fw-semibold small d-flex align-items-center justify-content-between">
+                    Site Navigation
+                    <button type="button" class="btn btn-xs btn-outline-primary" @onclick="AddNavItem">
+                        <i class="bi bi-plus-lg"></i> Add Link
+                    </button>
+                </label>
+                @if (NavMenuItems.Count == 0)
+                {
+                    <p class="small text-secondary mb-0">No nav links yet — click "Add Link" to build the site's top navigation.</p>
+                }
+                else
+                {
+                    @for (var i = 0; i < NavMenuItems.Count; i++)
+                    {
+                        var index = i;
+                        var item = NavMenuItems[index];
+                        <div class="cms-nav-item-editor d-flex gap-2 align-items-center mb-2">
+                            <input class="form-control form-control-sm" placeholder="Label" value="@item.Label"
+                                   @oninput="(e) => UpdateNavItem(index, item with { Label = e.Value?.ToString() ?? string.Empty })" />
+                            <input class="form-control form-control-sm font-monospace" placeholder="/path" value="@item.Href"
+                                   @oninput="(e) => UpdateNavItem(index, item with { Href = e.Value?.ToString() ?? string.Empty })" />
+                            <div class="form-check form-check-inline flex-shrink-0 mb-0" title="Open in new tab">
+                                <input class="form-check-input" type="checkbox" id="@($"nav-newtab-{index}")"
+                                       checked="@item.OpenInNewTab"
+                                       @onchange="(e) => UpdateNavItem(index, item with { OpenInNewTab = (bool)(e.Value ?? false) })" />
+                                <label class="form-check-label small" for="@($"nav-newtab-{index}")">↗</label>
+                            </div>
+                            <div class="btn-group btn-group-sm flex-shrink-0">
+                                <button type="button" class="btn btn-outline-secondary" title="Move up" disabled="@(index == 0)" @onclick="() => MoveNavItem(index, -1)">
+                                    <i class="bi bi-arrow-up"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" title="Move down" disabled="@(index == NavMenuItems.Count - 1)" @onclick="() => MoveNavItem(index, 1)">
+                                    <i class="bi bi-arrow-down"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-danger" title="Remove" @onclick="() => RemoveNavItem(index)">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    }
+                }
+
                 <div class="d-flex flex-wrap gap-2 mt-3">
                     <button class="btn btn-primary btn-sm" @onclick="SaveSiteSettingsAsync" disabled="@IsCmsBusy">Save</button>
                     @if (SiteExportUrl is { } exportUrl)
@@ -100,14 +144,15 @@
                 else
                 {
                     <div class="list-group list-group-flush">
-                        @foreach (var cmsPage in CmsPages)
+                        @foreach (var cmsPage in OrderedPagesByHierarchy())
                         {
                             <button type="button"
                                     class="list-group-item list-group-item-action @(SelectedPageId == cmsPage.Id ? "active" : string.Empty)"
+                                    style="padding-left:@(1 + GetPageDepth(cmsPage) * 1.25)rem"
                                     @onclick="() => OpenPageAsync(cmsPage.Id)"
                                     disabled="@IsCmsBusy">
-                                <div class="fw-semibold">@cmsPage.Title</div>
-                                <div class="small @(SelectedPageId == cmsPage.Id ? "text-white-50" : "text-secondary")">/@cmsPage.Slug</div>
+                                <div class="fw-semibold">@(GetPageDepth(cmsPage) > 0 ? "— " : "")@cmsPage.Title</div>
+                                <div class="small @(SelectedPageId == cmsPage.Id ? "text-white-50" : "text-secondary")">/@BuildFullPath(cmsPage)</div>
                             </button>
                         }
                     </div>
@@ -185,15 +230,29 @@
                 else
                 {
                     <div class="row g-3 mb-3">
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <label class="form-label fw-semibold small">Page Title</label>
                             <InputText class="form-control" @bind-Value="PageEditor.Title" placeholder="Home" />
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <label class="form-label fw-semibold small">Slug</label>
                             <InputText class="form-control" @bind-Value="PageEditor.Slug" placeholder="home" />
                         </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold small">Parent Page</label>
+                            <select class="form-select" @bind="ParentPageIdSelection">
+                                <option value="">— Top level —</option>
+                                @foreach (var candidate in ParentPageOptions())
+                                {
+                                    <option value="@candidate.Id">/@BuildFullPath(candidate)</option>
+                                }
+                            </select>
+                        </div>
                     </div>
+                    @if (!string.IsNullOrWhiteSpace(PageEditor.Slug))
+                    {
+                        <p class="small text-secondary mb-3">Live path: <span class="font-monospace">/@PreviewFullPath()</span></p>
+                    }
 
                     <div class="row g-3 mb-3">
                         <div class="col-md-6">
@@ -217,10 +276,16 @@
 
                     @if (LivePageUrl is { } livePageUrl && SelectedPageId.HasValue)
                     {
-                        <div class="mb-3">
+                        <div class="mb-3 d-flex flex-wrap gap-2 align-items-center">
                             <a class="btn btn-sm btn-outline-success" href="@livePageUrl" target="_blank" rel="noopener noreferrer">
                                 <i class="bi bi-box-arrow-up-right me-1"></i>View Live Page
                             </a>
+                            @if (!IsCurrentPageInNav())
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddCurrentPageToNavAsync" disabled="@IsCmsBusy">
+                                    <i class="bi bi-list me-1"></i>Add to Nav
+                                </button>
+                            }
                         </div>
                     }
 
@@ -417,8 +482,11 @@
 </div>
 
 @code {
+    private static readonly JsonSerializerOptions NavJsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
     private CmsSite? CurrentSite { get; set; }
     private string SiteCustomCssInput { get; set; } = string.Empty;
+    private List<NavMenuItem> NavMenuItems { get; set; } = new();
     private List<CmsPage> CmsPages { get; set; } = new();
     private List<CmsWorkflowBlueprintSummary> CmsBlueprints { get; set; } = new();
     private CmsPageEditorModel PageEditor { get; set; } = new() { BlocksJson = "{\"sections\":[]}" };
@@ -480,6 +548,7 @@
         CurrentSite = site;
         SelectedSiteId = site.Id;
         SiteCustomCssInput = site.CustomCss;
+        NavMenuItems = ParseNavMenuJson(site.NavMenuJson);
 
         CmsPages = (await CmsBuilderService.ListPagesAsync(site.Id)).ToList();
 
@@ -512,9 +581,11 @@
                 Name = CurrentSite.Name,
                 Slug = CurrentSite.Slug,
                 Theme = CurrentSite.Theme,
-                CustomCss = SiteCustomCssInput
+                CustomCss = SiteCustomCssInput,
+                NavMenuJson = JsonSerializer.Serialize(NavMenuItems, NavJsonOptions)
             });
             CurrentSite = saved;
+            NavMenuItems = ParseNavMenuJson(saved.NavMenuJson);
             CmsStatusMessage = "Saved site settings.";
         }
         catch (Exception ex)
@@ -526,6 +597,151 @@
         {
             IsCmsBusy = false;
         }
+    }
+
+    // ── Site navigation ──────────────────────────────────────────────────────
+
+    private static List<NavMenuItem> ParseNavMenuJson(string navMenuJson)
+    {
+        if (string.IsNullOrWhiteSpace(navMenuJson))
+        {
+            return new();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<NavMenuItem>>(navMenuJson, NavJsonOptions) ?? new();
+        }
+        catch (JsonException)
+        {
+            return new();
+        }
+    }
+
+    private void AddNavItem()
+    {
+        NavMenuItems.Add(new NavMenuItem(Guid.NewGuid().ToString("N")[..8], "New Link", "/", false));
+    }
+
+    private void UpdateNavItem(int index, NavMenuItem updated)
+    {
+        if (index < 0 || index >= NavMenuItems.Count) return;
+        NavMenuItems[index] = updated;
+    }
+
+    private void RemoveNavItem(int index)
+    {
+        if (index < 0 || index >= NavMenuItems.Count) return;
+        NavMenuItems.RemoveAt(index);
+    }
+
+    private void MoveNavItem(int index, int direction)
+    {
+        var target = index + direction;
+        if (index < 0 || index >= NavMenuItems.Count || target < 0 || target >= NavMenuItems.Count) return;
+        (NavMenuItems[index], NavMenuItems[target]) = (NavMenuItems[target], NavMenuItems[index]);
+    }
+
+    private bool IsCurrentPageInNav()
+    {
+        var path = "/" + PreviewFullPath();
+        return NavMenuItems.Any(n => string.Equals(n.Href, path, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task AddCurrentPageToNavAsync()
+    {
+        if (string.IsNullOrWhiteSpace(PageEditor.Title) || string.IsNullOrWhiteSpace(PageEditor.Slug)) return;
+
+        NavMenuItems.Add(new NavMenuItem(Guid.NewGuid().ToString("N")[..8], PageEditor.Title, "/" + PreviewFullPath(), false));
+        await SaveSiteSettingsAsync();
+    }
+
+    // ── Page hierarchy ───────────────────────────────────────────────────────
+
+    // Top-level pages in their existing order, each immediately followed by its own
+    // descendants (depth-first) — a simple indented list rather than a collapsible tree,
+    // which is enough at the scale of a personal site's page count.
+    private List<CmsPage> OrderedPagesByHierarchy()
+    {
+        var byParent = CmsPages.ToLookup(p => p.ParentPageId);
+        var result = new List<CmsPage>();
+
+        void Visit(Guid? parentId)
+        {
+            foreach (var page in byParent[parentId])
+            {
+                result.Add(page);
+                Visit(page.Id);
+            }
+        }
+
+        Visit(null);
+        return result;
+    }
+
+    private int GetPageDepth(CmsPage page)
+    {
+        var byId = CmsPages.ToDictionary(p => p.Id);
+        var depth = 0;
+        var current = page;
+        var guard = 0;
+        while (current?.ParentPageId is { } parentId && byId.TryGetValue(parentId, out var parent) && guard++ < 64)
+        {
+            depth++;
+            current = parent;
+        }
+
+        return depth;
+    }
+
+    private string BuildFullPath(CmsPage page) => CmsBuilderService.BuildFullPath(page, CmsPages);
+
+    // Full path preview for the page currently being edited, which may not be saved yet —
+    // can't look it up in CmsPages, so it walks the selected parent's ancestry directly
+    // and appends the in-progress slug.
+    private string PreviewFullPath()
+    {
+        var slug = string.IsNullOrWhiteSpace(PageEditor.Slug) ? "" : PageEditor.Slug.Trim();
+        if (PageEditor.ParentPageId is not { } parentId)
+        {
+            return slug;
+        }
+
+        var byId = CmsPages.ToDictionary(p => p.Id);
+        return byId.TryGetValue(parentId, out var parent)
+            ? $"{BuildFullPath(parent)}/{slug}"
+            : slug;
+    }
+
+    // Every page in the site except the one being edited and its own descendants —
+    // choosing either as a parent would create a cycle (CmsBuilderService rejects this
+    // too, but filtering the dropdown avoids the round-trip error).
+    private List<CmsPage> ParentPageOptions()
+    {
+        if (!SelectedPageId.HasValue)
+        {
+            return CmsPages;
+        }
+
+        var byParent = CmsPages.ToLookup(p => p.ParentPageId);
+        var excluded = new HashSet<Guid> { SelectedPageId.Value };
+        var frontier = new Queue<Guid>();
+        frontier.Enqueue(SelectedPageId.Value);
+        while (frontier.Count > 0)
+        {
+            foreach (var child in byParent[frontier.Dequeue()])
+            {
+                if (excluded.Add(child.Id)) frontier.Enqueue(child.Id);
+            }
+        }
+
+        return CmsPages.Where(p => !excluded.Contains(p.Id)).ToList();
+    }
+
+    private string ParentPageIdSelection
+    {
+        get => PageEditor.ParentPageId?.ToString() ?? string.Empty;
+        set => PageEditor.ParentPageId = Guid.TryParse(value, out var id) ? id : null;
     }
 
     private void CreateNewPage()
@@ -578,6 +794,7 @@
         {
             PageId = page.Id,
             SiteId = page.SiteId,
+            ParentPageId = page.ParentPageId,
             Title = page.Title,
             Slug = page.Slug,
             BlocksJson = page.BlocksJson,
@@ -844,9 +1061,12 @@
         }
     }
 
+    // Points at the real live site (Canvas:PublicBaseUrl, e.g. https://grantwatson.dev), not
+    // the bare /cms/ SSR fallback — that stopped being the actual site once grantwatson.dev
+    // moved to the RequireHost-gated routes in Program.cs.
     private string? LivePageUrl =>
-        CurrentSite is { } selectedSite && !string.IsNullOrWhiteSpace(PageEditor.Slug)
-            ? $"/cms/{selectedSite.Slug}/{PageEditor.Slug}"
+        !string.IsNullOrWhiteSpace(PageEditor.Slug)
+            ? $"{(Configuration["Canvas:PublicBaseUrl"] ?? string.Empty).TrimEnd('/')}/{PreviewFullPath()}"
             : null;
 
     private void OpenStudio(Guid pageId) => Navigation.NavigateTo($"/admin/canvas/editor/{pageId}");

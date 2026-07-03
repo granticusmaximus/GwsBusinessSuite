@@ -29,7 +29,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     {
         modelBuilder.Entity<WikiPage>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<CmsSite>().HasIndex(x => x.Slug).IsUnique();
-        modelBuilder.Entity<CmsPage>().HasIndex(x => new { x.SiteId, x.Slug }).IsUnique();
+        // Slugs are unique per parent, not per site — /services/pricing and
+        // /products/pricing can coexist since their full paths differ.
+        modelBuilder.Entity<CmsPage>().HasIndex(x => new { x.SiteId, x.ParentPageId, x.Slug }).IsUnique();
         modelBuilder.Entity<FormSubmission>().HasIndex(x => new { x.PageId, x.CreatedAt });
         modelBuilder.Entity<CmsPageRevision>().HasIndex(x => new { x.PageId, x.RevisionNumber }).IsUnique();
         modelBuilder.Entity<SeoArticleDraft>().HasIndex(x => x.Status);

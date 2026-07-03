@@ -760,3 +760,15 @@ a { color: inherit; }
 .gws-form-field select:focus { outline: none; border-color: var(--accent); }
 .gws-form-submit { justify-self: start; border: none; cursor: pointer; }
 .gws-form-honeypot { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+.gws-submitted-banner {
+  max-width: 1100px;
+  margin: 1.5rem auto 0;
+  padding: 0.9rem 1.5rem;
+  background: var(--accent-low);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  font-size: 0.92rem;
+  font-weight: 500;
+}

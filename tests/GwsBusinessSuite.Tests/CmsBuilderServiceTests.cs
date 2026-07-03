@@ -201,6 +201,140 @@ public sealed class CmsBuilderServiceTests
     }
 
     [Fact]
+    public async Task GetPageByFullPathAsync_ShouldResolveNestedPages()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        var services = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, Title = "Services", Slug = "services" });
+        var webDev = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id,
+            ParentPageId = services.Id,
+            Title = "Web Dev",
+            Slug = "web-dev"
+        });
+
+        var resolved = await service.GetPageByFullPathAsync(site.Id, "services/web-dev");
+
+        resolved.Should().NotBeNull();
+        resolved!.Id.Should().Be(webDev.Id);
+        (await service.GetPageByFullPathAsync(site.Id, "services")).Should().NotBeNull();
+        (await service.GetPageByFullPathAsync(site.Id, "services/nope")).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SavePageAsync_ShouldAllowSameSlug_UnderDifferentParents()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        var servicesParent = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, Title = "Services", Slug = "services" });
+        var productsParent = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, Title = "Products", Slug = "products" });
+
+        var servicesPricing = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, ParentPageId = servicesParent.Id, Title = "Pricing", Slug = "pricing" });
+        var productsPricing = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, ParentPageId = productsParent.Id, Title = "Pricing", Slug = "pricing" });
+
+        servicesPricing.Slug.Should().Be("pricing");
+        productsPricing.Slug.Should().Be("pricing");
+        servicesPricing.Id.Should().NotBe(productsPricing.Id);
+    }
+
+    [Fact]
+    public async Task SavePageAsync_ShouldRejectSelfAsParent()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        var page = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, Title = "Page", Slug = "page" });
+
+        var action = async () => await service.SavePageAsync(new CmsPageEditorModel
+        {
+            PageId = page.Id,
+            SiteId = site.Id,
+            ParentPageId = page.Id,
+            Title = "Page",
+            Slug = "page"
+        });
+
+        await action.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task SavePageAsync_ShouldRejectMovingAPageUnderItsOwnDescendant()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        var parent = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, Title = "Parent", Slug = "parent" });
+        var child = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, ParentPageId = parent.Id, Title = "Child", Slug = "child" });
+
+        var action = async () => await service.SavePageAsync(new CmsPageEditorModel
+        {
+            PageId = parent.Id,
+            SiteId = site.Id,
+            ParentPageId = child.Id,
+            Title = "Parent",
+            Slug = "parent"
+        });
+
+        await action.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task DeletePageAsync_ShouldBeBlocked_WhenPageHasChildren()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        var parent = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, Title = "Parent", Slug = "parent" });
+        await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, ParentPageId = parent.Id, Title = "Child", Slug = "child" });
+
+        var action = async () => await service.DeletePageAsync(parent.Id);
+
+        await action.Should().ThrowAsync<ArgumentException>().WithMessage("*Child*");
+        (await service.GetPageAsync(parent.Id)).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task BuildFullPath_ShouldWalkParentChain()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        var services = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, Title = "Services", Slug = "services" });
+        var webDev = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, ParentPageId = services.Id, Title = "Web Dev", Slug = "web-dev" });
+
+        var allPages = await service.ListPagesAsync(site.Id);
+
+        service.BuildFullPath(webDev, allPages).Should().Be("services/web-dev");
+        service.BuildFullPath(services, allPages).Should().Be("services");
+    }
+
+    [Fact]
+    public async Task SaveSiteAsync_ShouldPersistNavMenuJson()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel
+        {
+            Name = "Site",
+            NavMenuJson = """[{"id":"1","label":"About","href":"/about","openInNewTab":false}]"""
+        });
+
+        var reloaded = await service.GetSiteAsync(site.Id);
+
+        reloaded!.NavMenuJson.Should().Contain("About");
+    }
+
+    [Fact]
     public async Task ApplyWorkflowBlueprintAsync_ShouldThrowForUnknownBlueprint()
     {
         await using var db = await CreateDbAsync();

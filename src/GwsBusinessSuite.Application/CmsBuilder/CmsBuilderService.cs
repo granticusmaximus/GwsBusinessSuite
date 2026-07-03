@@ -190,6 +190,7 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         site.Slug = uniqueSlug;
         site.Theme = string.IsNullOrWhiteSpace(editor.Theme) ? "Default" : editor.Theme.Trim();
         site.CustomCss = editor.CustomCss?.Trim() ?? string.Empty;
+        site.NavMenuJson = string.IsNullOrWhiteSpace(editor.NavMenuJson) ? "[]" : editor.NavMenuJson.Trim();
         site.UpdatedAt = now;
         site.UpdatedBy = "cms-ui";
 
@@ -276,6 +277,61 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
             .FirstOrDefaultAsync(page => page.SiteId == siteId && page.Slug == pageSlug, cancellationToken);
     }
 
+    // Resolves a nested path ("services/web-dev") by walking it segment-by-segment against
+    // parent/child relationships, rather than a single Slug lookup — slugs are only unique
+    // per parent (see the composite index on CmsPage), not per site, so a bare slug lookup
+    // can't disambiguate /services/pricing from /products/pricing.
+    public async Task<CmsPage?> GetPageByFullPathAsync(Guid siteId, string fullPath, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(fullPath))
+        {
+            return null;
+        }
+
+        var pages = await dbContext.CmsPages
+            .AsNoTracking()
+            .Where(page => page.SiteId == siteId)
+            .ToListAsync(cancellationToken);
+
+        var segments = fullPath.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0)
+        {
+            return null;
+        }
+
+        CmsPage? current = null;
+        Guid? parentId = null;
+        foreach (var segment in segments)
+        {
+            current = pages.FirstOrDefault(p => p.ParentPageId == parentId && p.Slug == segment);
+            if (current is null)
+            {
+                return null;
+            }
+            parentId = current.Id;
+        }
+
+        return current;
+    }
+
+    // Shared by the Studio's page list (display) and Program.cs (nav hrefs, "View Live Page")
+    // — walks ParentPageId back to the root. allPagesInSite must include every page for the
+    // site the given page belongs to, or ancestors won't resolve.
+    public string BuildFullPath(CmsPage page, IReadOnlyList<CmsPage> allPagesInSite)
+    {
+        var byId = allPagesInSite.ToDictionary(p => p.Id);
+        var segments = new List<string>();
+        CmsPage? current = page;
+        var guard = 0;
+        while (current is not null && guard++ < 64)
+        {
+            segments.Insert(0, current.Slug);
+            current = current.ParentPageId is { } parentId && byId.TryGetValue(parentId, out var parent) ? parent : null;
+        }
+
+        return string.Join('/', segments);
+    }
+
     public async Task<CmsPage> SavePageAsync(CmsPageEditorModel editor, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(editor);
@@ -307,12 +363,33 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
             CreatedBy = "cms-ui"
         };
 
+        if (editor.ParentPageId is { } requestedParentId)
+        {
+            if (requestedParentId == page.Id)
+            {
+                throw new ArgumentException("A page cannot be its own parent.");
+            }
+
+            var descendants = await GetDescendantIdsAsync(siteId, page.Id, cancellationToken);
+            if (descendants.Contains(requestedParentId))
+            {
+                throw new ArgumentException("A page cannot be moved under one of its own child pages.");
+            }
+
+            var parentExists = await dbContext.CmsPages.AnyAsync(p => p.Id == requestedParentId && p.SiteId == siteId, cancellationToken);
+            if (!parentExists)
+            {
+                throw new ArgumentException("The selected parent page no longer exists.");
+            }
+        }
+
         var requestedSlug = string.IsNullOrWhiteSpace(editor.Slug)
             ? CreateSlug(editor.Title)
             : CreateSlug(editor.Slug);
-        var uniqueSlug = await GetUniquePageSlugAsync(siteId, requestedSlug, page.Id, cancellationToken);
+        var uniqueSlug = await GetUniquePageSlugAsync(siteId, editor.ParentPageId, requestedSlug, page.Id, cancellationToken);
 
         page.SiteId = siteId;
+        page.ParentPageId = editor.ParentPageId;
         page.Title = editor.Title.Trim();
         page.Slug = uniqueSlug;
         page.BlocksJson = NormalizeBlocksJson(editor.BlocksJson);
@@ -338,6 +415,17 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         if (page is null)
         {
             return;
+        }
+
+        var children = await dbContext.CmsPages
+            .Where(p => p.ParentPageId == pageId)
+            .Select(p => p.Title)
+            .ToListAsync(cancellationToken);
+
+        if (children.Count > 0)
+        {
+            throw new ArgumentException(
+                $"Delete or move its child page{(children.Count == 1 ? "" : "s")} first: {string.Join(", ", children)}.");
         }
 
         var submissions = await dbContext.FormSubmissions
@@ -449,11 +537,14 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         }
     }
 
-    private async Task<string> GetUniquePageSlugAsync(Guid siteId, string requestedSlug, Guid currentPageId, CancellationToken cancellationToken)
+    // Scoped to siblings under the same parent, not every page in the site — WordPress-style,
+    // /services/pricing and /products/pricing can share the slug "pricing" since their full
+    // paths still differ (see the composite unique index on CmsPage).
+    private async Task<string> GetUniquePageSlugAsync(Guid siteId, Guid? parentPageId, string requestedSlug, Guid currentPageId, CancellationToken cancellationToken)
     {
         var baseSlug = string.IsNullOrWhiteSpace(requestedSlug) ? "cms-page" : requestedSlug;
         var slugs = await dbContext.CmsPages
-            .Where(page => page.SiteId == siteId && page.Id != currentPageId)
+            .Where(page => page.SiteId == siteId && page.ParentPageId == parentPageId && page.Id != currentPageId)
             .Select(page => page.Slug)
             .ToListAsync(cancellationToken);
 
@@ -470,6 +561,34 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
                 return candidate;
             }
         }
+    }
+
+    // BFS over ParentPageId to find every descendant of a page — used to block both
+    // "delete a page with children" and "reparent a page under its own descendant".
+    private async Task<HashSet<Guid>> GetDescendantIdsAsync(Guid siteId, Guid pageId, CancellationToken cancellationToken)
+    {
+        var allPages = await dbContext.CmsPages
+            .Where(p => p.SiteId == siteId)
+            .Select(p => new { p.Id, p.ParentPageId })
+            .ToListAsync(cancellationToken);
+
+        var descendants = new HashSet<Guid>();
+        var frontier = new Queue<Guid>();
+        frontier.Enqueue(pageId);
+
+        while (frontier.Count > 0)
+        {
+            var current = frontier.Dequeue();
+            foreach (var child in allPages.Where(p => p.ParentPageId == current))
+            {
+                if (descendants.Add(child.Id))
+                {
+                    frontier.Enqueue(child.Id);
+                }
+            }
+        }
+
+        return descendants;
     }
 
     private static string NormalizeBlocksJson(string blocksJson)
