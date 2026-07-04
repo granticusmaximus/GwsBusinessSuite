@@ -18,6 +18,8 @@ public sealed class CmsSiteEditorModel
 
     public string NavMenuJson { get; set; } = "[]";
 
+    public string FooterNavMenuJson { get; set; } = "[]";
+
     public string AccentColorHex { get; set; } = "#f59e0b";
 
     public string FontPairingKey { get; set; } = CmsFontPairings.Elegant;

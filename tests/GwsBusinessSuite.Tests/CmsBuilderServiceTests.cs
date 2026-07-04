@@ -487,6 +487,38 @@ public sealed class CmsBuilderServiceTests
     }
 
     [Fact]
+    public async Task SaveSiteAsync_ShouldPersistFooterNavMenuJson_IndependentlyOfPrimaryNav()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel
+        {
+            Name = "Site",
+            NavMenuJson = """[{"id":"1","label":"About","href":"/about","openInNewTab":false}]""",
+            FooterNavMenuJson = """[{"id":"2","label":"Privacy","href":"/privacy","openInNewTab":false}]"""
+        });
+
+        var reloaded = await service.GetSiteAsync(site.Id);
+
+        reloaded!.NavMenuJson.Should().Contain("About");
+        reloaded.NavMenuJson.Should().NotContain("Privacy");
+        reloaded.FooterNavMenuJson.Should().Contain("Privacy");
+        reloaded.FooterNavMenuJson.Should().NotContain("About");
+    }
+
+    [Fact]
+    public async Task SaveSiteAsync_ShouldDefaultFooterNavMenuJson_ToEmptyArray_WhenNotProvided()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+
+        site.FooterNavMenuJson.Should().Be("[]");
+    }
+
+    [Fact]
     public async Task ApplyWorkflowBlueprintAsync_ShouldThrowForUnknownBlueprint()
     {
         await using var db = await CreateDbAsync();

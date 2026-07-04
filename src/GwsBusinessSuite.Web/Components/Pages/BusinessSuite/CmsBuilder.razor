@@ -88,41 +88,59 @@
 
                 <hr class="my-3" />
 
-                <label class="form-label fw-semibold small d-flex align-items-center justify-content-between">
-                    Site Navigation
-                    <button type="button" class="btn btn-xs btn-outline-primary" @onclick="AddNavItem">
+                <label class="form-label fw-semibold small mb-2">Navigation Menus</label>
+                <div class="btn-group btn-group-sm mb-2" role="group" aria-label="Navigation menu location">
+                    <button type="button" class="btn @(ActiveNavLocation == "Primary" ? "btn-primary" : "btn-outline-primary")"
+                            @onclick='() => ActiveNavLocation = "Primary"'>
+                        Primary
+                    </button>
+                    <button type="button" class="btn @(ActiveNavLocation == "Footer" ? "btn-primary" : "btn-outline-primary")"
+                            @onclick='() => ActiveNavLocation = "Footer"'>
+                        Footer
+                    </button>
+                </div>
+
+                @{
+                    var isFooterLocation = ActiveNavLocation == "Footer";
+                    var activeNavItems = isFooterLocation ? FooterNavMenuItems : NavMenuItems;
+                }
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="small text-secondary">@(isFooterLocation ? "Shown in the site footer." : "Shown in the site header.")</span>
+                    <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => AddNavItem(activeNavItems)">
                         <i class="bi bi-plus-lg"></i> Add Link
                     </button>
-                </label>
-                @if (NavMenuItems.Count == 0)
+                </div>
+                @if (activeNavItems.Count == 0)
                 {
-                    <p class="small text-secondary mb-0">No nav links yet — click "Add Link" to build the site's top navigation.</p>
+                    <p class="small text-secondary mb-0">
+                        No @(isFooterLocation ? "footer" : "nav") links yet — click "Add Link" to build @(isFooterLocation ? "the site's footer links" : "the site's top navigation").
+                    </p>
                 }
                 else
                 {
-                    @for (var i = 0; i < NavMenuItems.Count; i++)
+                    @for (var i = 0; i < activeNavItems.Count; i++)
                     {
                         var index = i;
-                        var item = NavMenuItems[index];
+                        var item = activeNavItems[index];
                         <div class="cms-nav-item-editor d-flex gap-2 align-items-center mb-2">
                             <input class="form-control form-control-sm" placeholder="Label" value="@item.Label"
-                                   @oninput="(e) => UpdateNavItem(index, item with { Label = e.Value?.ToString() ?? string.Empty })" />
+                                   @oninput="(e) => UpdateNavItem(activeNavItems, index, item with { Label = e.Value?.ToString() ?? string.Empty })" />
                             <input class="form-control form-control-sm font-monospace" placeholder="/path" value="@item.Href"
-                                   @oninput="(e) => UpdateNavItem(index, item with { Href = e.Value?.ToString() ?? string.Empty })" />
+                                   @oninput="(e) => UpdateNavItem(activeNavItems, index, item with { Href = e.Value?.ToString() ?? string.Empty })" />
                             <div class="form-check form-check-inline flex-shrink-0 mb-0" title="Open in new tab">
-                                <input class="form-check-input" type="checkbox" id="@($"nav-newtab-{index}")"
+                                <input class="form-check-input" type="checkbox" id="@($"nav-newtab-{ActiveNavLocation}-{index}")"
                                        checked="@item.OpenInNewTab"
-                                       @onchange="(e) => UpdateNavItem(index, item with { OpenInNewTab = (bool)(e.Value ?? false) })" />
-                                <label class="form-check-label small" for="@($"nav-newtab-{index}")">↗</label>
+                                       @onchange="(e) => UpdateNavItem(activeNavItems, index, item with { OpenInNewTab = (bool)(e.Value ?? false) })" />
+                                <label class="form-check-label small" for="@($"nav-newtab-{ActiveNavLocation}-{index}")">↗</label>
                             </div>
                             <div class="btn-group btn-group-sm flex-shrink-0">
-                                <button type="button" class="btn btn-outline-secondary" title="Move up" disabled="@(index == 0)" @onclick="() => MoveNavItem(index, -1)">
+                                <button type="button" class="btn btn-outline-secondary" title="Move up" disabled="@(index == 0)" @onclick="() => MoveNavItem(activeNavItems, index, -1)">
                                     <i class="bi bi-arrow-up"></i>
                                 </button>
-                                <button type="button" class="btn btn-outline-secondary" title="Move down" disabled="@(index == NavMenuItems.Count - 1)" @onclick="() => MoveNavItem(index, 1)">
+                                <button type="button" class="btn btn-outline-secondary" title="Move down" disabled="@(index == activeNavItems.Count - 1)" @onclick="() => MoveNavItem(activeNavItems, index, 1)">
                                     <i class="bi bi-arrow-down"></i>
                                 </button>
-                                <button type="button" class="btn btn-outline-danger" title="Remove" @onclick="() => RemoveNavItem(index)">
+                                <button type="button" class="btn btn-outline-danger" title="Remove" @onclick="() => RemoveNavItem(activeNavItems, index)">
                                     <i class="bi bi-trash"></i>
                                 </button>
                             </div>
@@ -569,6 +587,8 @@
     private string SiteAccentColorInput { get; set; } = "#f59e0b";
     private string SiteFontPairingInput { get; set; } = CmsFontPairings.Elegant;
     private List<NavMenuItem> NavMenuItems { get; set; } = new();
+    private List<NavMenuItem> FooterNavMenuItems { get; set; } = new();
+    private string ActiveNavLocation { get; set; } = "Primary";
     private List<CmsPage> CmsPages { get; set; } = new();
     private List<CmsWorkflowBlueprintSummary> CmsBlueprints { get; set; } = new();
     private CmsPageEditorModel PageEditor { get; set; } = new() { BlocksJson = "{\"sections\":[]}" };
@@ -633,6 +653,7 @@
         SiteAccentColorInput = site.AccentColorHex;
         SiteFontPairingInput = site.FontPairingKey;
         NavMenuItems = ParseNavMenuJson(site.NavMenuJson);
+        FooterNavMenuItems = ParseNavMenuJson(site.FooterNavMenuJson);
 
         CmsPages = (await CmsBuilderService.ListPagesAsync(site.Id)).ToList();
         TrashedPages = (await CmsBuilderService.ListTrashedPagesAsync(site.Id)).ToList();
@@ -668,6 +689,7 @@
                 Theme = CurrentSite.Theme,
                 CustomCss = SiteCustomCssInput,
                 NavMenuJson = JsonSerializer.Serialize(NavMenuItems, NavJsonOptions),
+                FooterNavMenuJson = JsonSerializer.Serialize(FooterNavMenuItems, NavJsonOptions),
                 AccentColorHex = SiteAccentColorInput,
                 FontPairingKey = SiteFontPairingInput
             });
@@ -675,6 +697,7 @@
             SiteAccentColorInput = saved.AccentColorHex;
             SiteFontPairingInput = saved.FontPairingKey;
             NavMenuItems = ParseNavMenuJson(saved.NavMenuJson);
+            FooterNavMenuItems = ParseNavMenuJson(saved.FooterNavMenuJson);
             CmsStatusMessage = "Saved site settings.";
         }
         catch (Exception ex)
@@ -707,28 +730,31 @@
         }
     }
 
-    private void AddNavItem()
+    // Shared by both the Primary and Footer editors below — each just passes in whichever
+    // list ("NavMenuItems" or "FooterNavMenuItems") is currently active, so there's one copy
+    // of the add/update/remove/reorder logic instead of two.
+    private void AddNavItem(List<NavMenuItem> items)
     {
-        NavMenuItems.Add(new NavMenuItem(Guid.NewGuid().ToString("N")[..8], "New Link", "/", false));
+        items.Add(new NavMenuItem(Guid.NewGuid().ToString("N")[..8], "New Link", "/", false));
     }
 
-    private void UpdateNavItem(int index, NavMenuItem updated)
+    private void UpdateNavItem(List<NavMenuItem> items, int index, NavMenuItem updated)
     {
-        if (index < 0 || index >= NavMenuItems.Count) return;
-        NavMenuItems[index] = updated;
+        if (index < 0 || index >= items.Count) return;
+        items[index] = updated;
     }
 
-    private void RemoveNavItem(int index)
+    private void RemoveNavItem(List<NavMenuItem> items, int index)
     {
-        if (index < 0 || index >= NavMenuItems.Count) return;
-        NavMenuItems.RemoveAt(index);
+        if (index < 0 || index >= items.Count) return;
+        items.RemoveAt(index);
     }
 
-    private void MoveNavItem(int index, int direction)
+    private void MoveNavItem(List<NavMenuItem> items, int index, int direction)
     {
         var target = index + direction;
-        if (index < 0 || index >= NavMenuItems.Count || target < 0 || target >= NavMenuItems.Count) return;
-        (NavMenuItems[index], NavMenuItems[target]) = (NavMenuItems[target], NavMenuItems[index]);
+        if (index < 0 || index >= items.Count || target < 0 || target >= items.Count) return;
+        (items[index], items[target]) = (items[target], items[index]);
     }
 
     private bool IsCurrentPageInNav()

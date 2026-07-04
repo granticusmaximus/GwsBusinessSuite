@@ -35,21 +35,30 @@ public static class PublicSiteHtmlRenderer
         new("contact", "Contact", "/contact", false)
     ];
 
-    public static IReadOnlyList<NavMenuItem> ParseNavItems(string? navMenuJson)
+    public static IReadOnlyList<NavMenuItem> ParseNavItems(string? navMenuJson) =>
+        ParseNavItems(navMenuJson, DefaultNavItems);
+
+    // The Footer location has no hardcoded fallback list — unlike Primary, there's no
+    // pre-existing footer nav a freshly-migrated site needs to keep looking like, so an
+    // empty/missing FooterNavMenuJson just means "no footer links", not "show a guess".
+    public static IReadOnlyList<NavMenuItem> ParseFooterNavItems(string? footerNavMenuJson) =>
+        ParseNavItems(footerNavMenuJson, []);
+
+    private static IReadOnlyList<NavMenuItem> ParseNavItems(string? navMenuJson, IReadOnlyList<NavMenuItem> defaultItems)
     {
         if (string.IsNullOrWhiteSpace(navMenuJson))
         {
-            return DefaultNavItems;
+            return defaultItems;
         }
 
         try
         {
             var items = JsonSerializer.Deserialize<List<NavMenuItem>>(navMenuJson, JsonOptions);
-            return items is { Count: > 0 } ? items : DefaultNavItems;
+            return items is { Count: > 0 } ? items : defaultItems;
         }
         catch (JsonException)
         {
-            return DefaultNavItems;
+            return defaultItems;
         }
     }
 
@@ -95,7 +104,8 @@ public static class PublicSiteHtmlRenderer
 
     public static string Layout(
         string pageTitle, string metaDescription, string? ogImageUrl, string bodyHtml,
-        IReadOnlyList<NavMenuItem>? navItems = null, string? accentColorHex = null, string? fontPairingKey = null)
+        IReadOnlyList<NavMenuItem>? navItems = null, IReadOnlyList<NavMenuItem>? footerNavItems = null,
+        string? accentColorHex = null, string? fontPairingKey = null)
     {
         var ogImageTag = string.IsNullOrWhiteSpace(ogImageUrl)
             ? string.Empty
@@ -140,10 +150,16 @@ public static class PublicSiteHtmlRenderer
             <body>
               {Nav(navItems ?? DefaultNavItems)}
               {bodyHtml}
-              {Footer()}
+              {Footer(footerNavItems ?? [])}
             </body>
             </html>
             """;
+    }
+
+    private static string NavLink(NavMenuItem item)
+    {
+        var targetAttrs = item.OpenInNewTab ? " target=\"_blank\" rel=\"noopener noreferrer\"" : "";
+        return $"""<a href="{Html(item.Href)}"{targetAttrs}>{Html(item.Label)}</a>""";
     }
 
     private static string Nav(IReadOnlyList<NavMenuItem> navItems)
@@ -162,19 +178,26 @@ public static class PublicSiteHtmlRenderer
             """);
         foreach (var item in navItems)
         {
-            var targetAttrs = item.OpenInNewTab ? " target=\"_blank\" rel=\"noopener noreferrer\"" : "";
-            sb.Append($"""<a href="{Html(item.Href)}"{targetAttrs}>{Html(item.Label)}</a>""");
+            sb.Append(NavLink(item));
         }
         sb.Append("</div></nav>");
         return sb.ToString();
     }
 
-    private static string Footer() => $"""
-        <footer class="site-footer">
-          <p>&copy; {DateTimeOffset.UtcNow.Year} Grant Watson</p>
-          <a href="/admin" class="footer-admin-link">admin</a>
-        </footer>
-        """;
+    private static string Footer(IReadOnlyList<NavMenuItem> footerNavItems)
+    {
+        var linksHtml = footerNavItems.Count == 0
+            ? string.Empty
+            : $"""<nav class="footer-links" aria-label="Footer">{string.Concat(footerNavItems.Select(NavLink))}</nav>""";
+
+        return $"""
+            <footer class="site-footer">
+              {linksHtml}
+              <p>&copy; {DateTimeOffset.UtcNow.Year} Grant Watson</p>
+              <a href="/admin" class="footer-admin-link">admin</a>
+            </footer>
+            """;
+    }
 
     // ── 404 ──────────────────────────────────────────────────────────────────
 

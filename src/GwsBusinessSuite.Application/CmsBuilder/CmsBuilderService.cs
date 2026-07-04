@@ -191,6 +191,7 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         site.Theme = string.IsNullOrWhiteSpace(editor.Theme) ? "Default" : editor.Theme.Trim();
         site.CustomCss = editor.CustomCss?.Trim() ?? string.Empty;
         site.NavMenuJson = string.IsNullOrWhiteSpace(editor.NavMenuJson) ? "[]" : editor.NavMenuJson.Trim();
+        site.FooterNavMenuJson = string.IsNullOrWhiteSpace(editor.FooterNavMenuJson) ? "[]" : editor.FooterNavMenuJson.Trim();
         site.AccentColorHex = string.IsNullOrWhiteSpace(editor.AccentColorHex) ? "#f59e0b" : editor.AccentColorHex.Trim();
         site.FontPairingKey = string.IsNullOrWhiteSpace(editor.FontPairingKey) ? CmsFontPairings.Elegant : editor.FontPairingKey.Trim();
         site.UpdatedAt = now;

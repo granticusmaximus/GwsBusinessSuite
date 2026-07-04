@@ -528,10 +528,9 @@ app.MapGet("/blog", async (
             })
             .ToList();
 
-        var navItems = await GetPublicNavItemsAsync(cmsBuilderService, configuration);
-        var (accentColorHex, fontPairingKey) = await GetPublicDesignTokensAsync(cmsBuilderService, configuration);
+        var navMenus = await GetPublicNavMenusAsync(cmsBuilderService, configuration);
         var bodyHtml = PublicSiteHtmlRenderer.BlogListBody(pageItems, keywords, keyword, categories, category, tag, page, pageSize, filtered.Count, totalPages);
-        var html = PublicSiteHtmlRenderer.Layout("Blog — Grant Watson", "Thoughts on software, building products, and the web.", null, bodyHtml, navItems, accentColorHex, fontPairingKey);
+        var html = PublicSiteHtmlRenderer.Layout("Blog — Grant Watson", "Thoughts on software, building products, and the web.", null, bodyHtml, navMenus.Primary, navMenus.Footer, navMenus.AccentColorHex, navMenus.FontPairingKey);
         return Results.Content(html, "text/html");
     })
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
@@ -548,13 +547,12 @@ app.MapGet("/blog/{slug}", async (
             .Where(x => x.Slug == slug && x.Status == ArticleStatuses.Published)
             .FirstOrDefaultAsync();
 
-        var navItems = await GetPublicNavItemsAsync(cmsBuilderService, configuration);
-        var (accentColorHex, fontPairingKey) = await GetPublicDesignTokensAsync(cmsBuilderService, configuration);
+        var navMenus = await GetPublicNavMenusAsync(cmsBuilderService, configuration);
 
         if (a is null)
         {
             return Results.Content(
-                PublicSiteHtmlRenderer.Layout("404 — Not Found", string.Empty, null, PublicSiteHtmlRenderer.NotFoundBody("Article not found.", "/blog", "Back to Blog"), navItems, accentColorHex, fontPairingKey),
+                PublicSiteHtmlRenderer.Layout("404 — Not Found", string.Empty, null, PublicSiteHtmlRenderer.NotFoundBody("Article not found.", "/blog", "Back to Blog"), navMenus.Primary, navMenus.Footer, navMenus.AccentColorHex, navMenus.FontPairingKey),
                 "text/html", statusCode: StatusCodes.Status404NotFound);
         }
 
@@ -569,7 +567,7 @@ app.MapGet("/blog/{slug}", async (
             heroImageUrl, a.HeroImageAltText, a.HeroImageCaption, renderedMarkdown,
             articleCategory?.Name, articleCategory?.Slug, ParseTags(a.Tags));
 
-        var html = PublicSiteHtmlRenderer.Layout(a.Title, a.MetaDescription, heroImageUrl, bodyHtml, navItems, accentColorHex, fontPairingKey);
+        var html = PublicSiteHtmlRenderer.Layout(a.Title, a.MetaDescription, heroImageUrl, bodyHtml, navMenus.Primary, navMenus.Footer, navMenus.AccentColorHex, navMenus.FontPairingKey);
         return Results.Content(html, "text/html");
     })
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
@@ -584,10 +582,9 @@ app.MapGet("/__not-found", async (HttpContext httpContext, ICmsBuilderService cm
     {
         if (IsPublicHost(httpContext))
         {
-            var navItems = await GetPublicNavItemsAsync(cmsBuilderService, configuration);
-            var (accentColorHex, fontPairingKey) = await GetPublicDesignTokensAsync(cmsBuilderService, configuration);
+            var navMenus = await GetPublicNavMenusAsync(cmsBuilderService, configuration);
             var html = PublicSiteHtmlRenderer.Layout("404 — Not Found", string.Empty, null,
-                PublicSiteHtmlRenderer.NotFoundBody("Sorry, the content you are looking for does not exist.", "/", "Back to Home"), navItems, accentColorHex, fontPairingKey);
+                PublicSiteHtmlRenderer.NotFoundBody("Sorry, the content you are looking for does not exist.", "/", "Back to Home"), navMenus.Primary, navMenus.Footer, navMenus.AccentColorHex, navMenus.FontPairingKey);
             return Results.Content(html, "text/html");
         }
 
@@ -1041,23 +1038,19 @@ app.MapGet("/", (HttpContext httpContext, HttpRequest request, ICmsBuilderServic
 
 app.Run();
 
-// Fetches the configured Canvas site and returns its nav items — shared by every public-host
-// handler that renders a full page shell, not just Canvas pages (blog list/post, 404).
-static async Task<IReadOnlyList<NavMenuItem>> GetPublicNavItemsAsync(ICmsBuilderService cmsBuilderService, IConfiguration configuration)
+// Fetches the configured Canvas site and returns its Primary + Footer nav menus plus its
+// global design tokens (accent color + font pairing) — shared by every public-host handler
+// that renders a full page shell, not just Canvas pages (blog list/post, 404), since all of
+// them funnel through PublicSiteHtmlRenderer.Layout.
+static async Task<PublicNavMenus> GetPublicNavMenusAsync(ICmsBuilderService cmsBuilderService, IConfiguration configuration)
 {
     var siteSlug = configuration["Canvas:SiteSlug"] ?? string.Empty;
     var site = string.IsNullOrWhiteSpace(siteSlug) ? null : await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
-    return PublicSiteHtmlRenderer.ParseNavItems(site?.NavMenuJson);
-}
-
-// Global design tokens (accent color + font pairing) apply to every public page — blog and
-// Canvas alike, since both funnel through PublicSiteHtmlRenderer.Layout — fetched the same
-// way as nav items rather than duplicated per-route.
-static async Task<(string? AccentColorHex, string? FontPairingKey)> GetPublicDesignTokensAsync(ICmsBuilderService cmsBuilderService, IConfiguration configuration)
-{
-    var siteSlug = configuration["Canvas:SiteSlug"] ?? string.Empty;
-    var site = string.IsNullOrWhiteSpace(siteSlug) ? null : await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
-    return (site?.AccentColorHex, site?.FontPairingKey);
+    return new PublicNavMenus(
+        PublicSiteHtmlRenderer.ParseNavItems(site?.NavMenuJson),
+        PublicSiteHtmlRenderer.ParseFooterNavItems(site?.FooterNavMenuJson),
+        site?.AccentColorHex,
+        site?.FontPairingKey);
 }
 
 // Renders a Canvas page (by full path, under the Canvas:SiteSlug-configured site) as a full
@@ -1075,13 +1068,14 @@ static async Task<IResult> RenderPublicCanvasPageAsync(string fullPath, bool sho
     }
 
     var navItems = PublicSiteHtmlRenderer.ParseNavItems(site.NavMenuJson);
+    var footerNavItems = PublicSiteHtmlRenderer.ParseFooterNavItems(site.FooterNavMenuJson);
     // includeUnpublished stays false here — real visitors on grantwatson.dev never see
     // drafts, only the auth-aware /cms/{siteSlug}/{**pageSlug} preview route does.
     var page = await cmsBuilderService.GetPageByFullPathAsync(site.Id, fullPath, includeUnpublished: false);
     if (page is null)
     {
         return Results.Content(
-            PublicSiteHtmlRenderer.Layout("404 — Not Found", string.Empty, null, PublicSiteHtmlRenderer.NotFoundBody("Page not found.", "/", "Back to Home"), navItems, site.AccentColorHex, site.FontPairingKey),
+            PublicSiteHtmlRenderer.Layout("404 — Not Found", string.Empty, null, PublicSiteHtmlRenderer.NotFoundBody("Page not found.", "/", "Back to Home"), navItems, footerNavItems, site.AccentColorHex, site.FontPairingKey),
             "text/html", statusCode: StatusCodes.Status404NotFound);
     }
 
@@ -1097,7 +1091,7 @@ static async Task<IResult> RenderPublicCanvasPageAsync(string fullPath, bool sho
         : $"<style>{SanitizeInlineCss(customCss)}</style>{bodyHtml}";
 
     var pageTitle = string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle;
-    var html = PublicSiteHtmlRenderer.Layout(pageTitle, page.MetaDescription, page.OgImageUrl, wrappedBody, navItems, site.AccentColorHex, site.FontPairingKey);
+    var html = PublicSiteHtmlRenderer.Layout(pageTitle, page.MetaDescription, page.OgImageUrl, wrappedBody, navItems, footerNavItems, site.AccentColorHex, site.FontPairingKey);
     return Results.Content(html, "text/html");
 }
 
@@ -1206,3 +1200,7 @@ record ArticleUpsertRequest(
     string HeroImageAltText,
     string HeroImageCaption,
     string BodyMarkdown);
+
+// Bundles both named theme locations (Primary/header, Footer) so callers that render a full
+// page shell only need one site lookup instead of two.
+sealed record PublicNavMenus(IReadOnlyList<NavMenuItem> Primary, IReadOnlyList<NavMenuItem> Footer, string? AccentColorHex, string? FontPairingKey);

@@ -3,6 +3,7 @@ using System;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GwsBusinessSuite.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260704160835_AddCmsSiteFooterNavMenu")]
+    partial class AddCmsSiteFooterNavMenu
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
@@ -66,7 +69,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("AffiliateOffers", (string)null);
+                    b.ToTable("AffiliateOffers");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.AppUser", b =>
@@ -110,7 +113,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.HasIndex("Username")
                         .IsUnique();
 
-                    b.ToTable("AppUsers", (string)null);
+                    b.ToTable("AppUsers");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.Article", b =>
@@ -214,7 +217,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
                     b.HasIndex("Status");
 
-                    b.ToTable("Articles", (string)null);
+                    b.ToTable("Articles");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.ArticleAffiliatePlacement", b =>
@@ -270,7 +273,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
                     b.HasIndex("ArticleId", "SortOrder");
 
-                    b.ToTable("ArticleAffiliatePlacements", (string)null);
+                    b.ToTable("ArticleAffiliatePlacements");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.ArticleCategory", b =>
@@ -305,7 +308,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.HasIndex("Slug")
                         .IsUnique();
 
-                    b.ToTable("ArticleCategories", (string)null);
+                    b.ToTable("ArticleCategories");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.CjConnectorSettings", b =>
@@ -348,7 +351,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("CjConnectorSettings", (string)null);
+                    b.ToTable("CjConnectorSettings");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.CmsPage", b =>
@@ -419,7 +422,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.HasIndex("SiteId", "ParentPageId", "Slug")
                         .IsUnique();
 
-                    b.ToTable("CmsPages", (string)null);
+                    b.ToTable("CmsPages");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.CmsPageRevision", b =>
@@ -484,17 +487,13 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.HasIndex("PageId", "RevisionNumber")
                         .IsUnique();
 
-                    b.ToTable("CmsPageRevisions", (string)null);
+                    b.ToTable("CmsPageRevisions");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.CmsSite", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("AccentColorHex")
-                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -505,10 +504,6 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("CustomCss")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("FontPairingKey")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -543,7 +538,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.HasIndex("Slug")
                         .IsUnique();
 
-                    b.ToTable("CmsSites", (string)null);
+                    b.ToTable("CmsSites");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.Contact", b =>
@@ -581,7 +576,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Contacts", (string)null);
+                    b.ToTable("Contacts");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.FormSubmission", b =>
@@ -617,7 +612,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
                     b.HasIndex("PageId", "CreatedAt");
 
-                    b.ToTable("FormSubmissions", (string)null);
+                    b.ToTable("FormSubmissions");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.MediaAsset", b =>
@@ -660,7 +655,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("MediaAssets", (string)null);
+                    b.ToTable("MediaAssets");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.NewsItem", b =>
@@ -717,7 +712,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
                     b.HasIndex("TopicId", "FetchedAt");
 
-                    b.ToTable("NewsItems", (string)null);
+                    b.ToTable("NewsItems");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SeoArticleAffiliateInteraction", b =>
@@ -760,7 +755,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
                     b.HasIndex("SeoArticleDraftId", "SlotToken", "CreatedAt");
 
-                    b.ToTable("SeoArticleAffiliateInteractions", (string)null);
+                    b.ToTable("SeoArticleAffiliateInteractions");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SeoArticleAffiliatePlacement", b =>
@@ -816,7 +811,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
                     b.HasIndex("SeoArticleDraftId", "SortOrder");
 
-                    b.ToTable("SeoArticleAffiliatePlacements", (string)null);
+                    b.ToTable("SeoArticleAffiliatePlacements");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SeoArticleDraft", b =>
@@ -957,7 +952,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
                     b.HasIndex("Status");
 
-                    b.ToTable("SeoArticleDrafts", (string)null);
+                    b.ToTable("SeoArticleDrafts");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SeoArticleWorkflowEvent", b =>
@@ -994,7 +989,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
                     b.HasIndex("SeoArticleDraftId", "CreatedAt");
 
-                    b.ToTable("SeoArticleWorkflowEvents", (string)null);
+                    b.ToTable("SeoArticleWorkflowEvents");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.WatchedTopic", b =>
@@ -1036,7 +1031,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("WatchedTopics", (string)null);
+                    b.ToTable("WatchedTopics");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.WikiPage", b =>
@@ -1075,7 +1070,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.HasIndex("Slug")
                         .IsUnique();
 
-                    b.ToTable("WikiPages", (string)null);
+                    b.ToTable("WikiPages");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.Article", b =>
