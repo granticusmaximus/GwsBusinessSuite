@@ -192,13 +192,13 @@
                         <div class="list-group list-group-flush">
                             @foreach (var trashedPage in TrashedPages)
                             {
-                                <div class="list-group-item">
+                                <div class="list-group-item wp-list-row">
                                     <div class="d-flex justify-content-between align-items-start gap-2">
                                         <div>
                                             <div class="fw-semibold">@trashedPage.Title</div>
                                             <div class="small text-secondary">/@trashedPage.Slug &middot; trashed @trashedPage.TrashedAt?.ToLocalTime().ToString("g")</div>
                                         </div>
-                                        <div class="d-flex gap-1 flex-shrink-0">
+                                        <div class="d-flex gap-1 flex-shrink-0 wp-row-actions">
                                             <button class="btn btn-xs btn-outline-primary" @onclick="() => RestoreTrashedPageAsync(trashedPage.Id)" disabled="@IsCmsBusy">Restore</button>
                                             <button class="btn btn-xs btn-outline-danger" @onclick="() => PermanentlyDeleteTrashedPageAsync(trashedPage.Id)" disabled="@IsCmsBusy">Delete Permanently</button>
                                         </div>
@@ -216,23 +216,36 @@
                 }
                 else
                 {
+                    @if (SelectedPageIdsForBulk.Count > 0)
+                    {
+                        <div class="d-flex align-items-center gap-2 p-2 border-bottom">
+                            <button class="btn btn-sm btn-outline-danger" @onclick="BulkTrashSelectedPagesAsync" disabled="@IsCmsBusy">
+                                <i class="bi bi-trash3 me-1"></i>Move to Trash
+                            </button>
+                            <span class="small text-secondary">@SelectedPageIdsForBulk.Count selected</span>
+                        </div>
+                    }
                     <div class="list-group list-group-flush">
                         @foreach (var cmsPage in OrderedPagesByHierarchy())
                         {
-                            <button type="button"
-                                    class="list-group-item list-group-item-action @(SelectedPageId == cmsPage.Id ? "active" : string.Empty)"
-                                    style="padding-left:@(1 + GetPageDepth(cmsPage) * 1.25)rem"
-                                    @onclick="() => OpenPageAsync(cmsPage.Id)"
-                                    disabled="@IsCmsBusy">
-                                <div class="fw-semibold d-flex align-items-center gap-2">
-                                    @(GetPageDepth(cmsPage) > 0 ? "— " : "")@cmsPage.Title
-                                    @if (cmsPage.Status != CmsPageStatuses.Published)
-                                    {
-                                        <span class="badge @(SelectedPageId == cmsPage.Id ? "text-bg-light" : "text-bg-secondary")">Draft</span>
-                                    }
-                                </div>
-                                <div class="small @(SelectedPageId == cmsPage.Id ? "text-white-50" : "text-secondary")">/@BuildFullPath(cmsPage)</div>
-                            </button>
+                            <div class="list-group-item d-flex align-items-center gap-2 wp-list-row @(SelectedPageId == cmsPage.Id ? "active" : string.Empty) p-0">
+                                <input type="checkbox" class="form-check-input flex-shrink-0 ms-3" checked="@SelectedPageIdsForBulk.Contains(cmsPage.Id)"
+                                       @onchange="e => TogglePageSelect(cmsPage.Id, (bool)(e.Value ?? false))" />
+                                <button type="button"
+                                        class="list-group-item-action bg-transparent border-0 text-start flex-grow-1 py-2 pe-3"
+                                        style="padding-left:@(0.5 + GetPageDepth(cmsPage) * 1.25)rem; color:inherit;"
+                                        @onclick="() => OpenPageAsync(cmsPage.Id)"
+                                        disabled="@IsCmsBusy">
+                                    <div class="fw-semibold d-flex align-items-center gap-2">
+                                        @(GetPageDepth(cmsPage) > 0 ? "— " : "")@cmsPage.Title
+                                        @if (cmsPage.Status != CmsPageStatuses.Published)
+                                        {
+                                            <span class="badge @(SelectedPageId == cmsPage.Id ? "text-bg-light" : "text-bg-secondary")">Draft</span>
+                                        }
+                                    </div>
+                                    <div class="small @(SelectedPageId == cmsPage.Id ? "text-white-50" : "text-secondary")">/@BuildFullPath(cmsPage)</div>
+                                </button>
+                            </div>
                         }
                     </div>
                 }
@@ -590,6 +603,7 @@
     private List<NavMenuItem> FooterNavMenuItems { get; set; } = new();
     private string ActiveNavLocation { get; set; } = "Primary";
     private List<CmsPage> CmsPages { get; set; } = new();
+    private HashSet<Guid> SelectedPageIdsForBulk { get; set; } = new();
     private List<CmsWorkflowBlueprintSummary> CmsBlueprints { get; set; } = new();
     private CmsPageEditorModel PageEditor { get; set; } = new() { BlocksJson = "{\"sections\":[]}" };
     private Guid? SelectedSiteId { get; set; }
@@ -1152,6 +1166,54 @@
         {
             IsCmsBusy = false;
         }
+    }
+
+    private void TogglePageSelect(Guid pageId, bool selected)
+    {
+        if (selected) SelectedPageIdsForBulk.Add(pageId);
+        else SelectedPageIdsForBulk.Remove(pageId);
+    }
+
+    private async Task BulkTrashSelectedPagesAsync()
+    {
+        if (SelectedPageIdsForBulk.Count == 0 || !SelectedSiteId.HasValue) return;
+
+        var siteId = SelectedSiteId.Value;
+        var ids = SelectedPageIdsForBulk.ToList();
+        IsCmsBusy = true;
+        CmsErrorMessage = string.Empty;
+        CmsStatusMessage = string.Empty;
+        var failures = new List<string>();
+
+        foreach (var pageId in ids)
+        {
+            try
+            {
+                await CmsBuilderService.TrashPageAsync(pageId);
+            }
+            catch (Exception ex)
+            {
+                // A page with active (non-trashed) children throws — same guard
+                // TrashSelectedPageAsync relies on. Collect and keep going so one
+                // blocked page doesn't stop the rest of the bulk action.
+                failures.Add($"{CmsPages.FirstOrDefault(p => p.Id == pageId)?.Title ?? pageId.ToString()}: {ex.Message}");
+            }
+        }
+
+        SelectedPageIdsForBulk.Clear();
+        CmsPages = (await CmsBuilderService.ListPagesAsync(siteId)).ToList();
+        TrashedPages = (await CmsBuilderService.ListTrashedPagesAsync(siteId)).ToList();
+
+        if (failures.Count > 0)
+        {
+            CmsErrorMessage = string.Join(" ", failures);
+        }
+        else
+        {
+            CmsStatusMessage = $"Moved {ids.Count} page(s) to Trash.";
+        }
+
+        IsCmsBusy = false;
     }
 
     // ── Trash ────────────────────────────────────────────────────────────────

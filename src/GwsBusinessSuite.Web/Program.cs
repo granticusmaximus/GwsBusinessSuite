@@ -479,7 +479,7 @@ app.MapGet("/blog", async (
         // after materializing (same pattern as the existing /api/blog handler above).
         var articles = (await db.Articles
             .AsNoTracking()
-            .Where(a => a.Status == ArticleStatuses.Published)
+            .Where(a => a.Status == ArticleStatuses.Published && a.TrashedAt == null)
             .ToListAsync())
             .OrderByDescending(a => a.PublishedAt)
             .ToList();
@@ -544,7 +544,7 @@ app.MapGet("/blog/{slug}", async (
         await using var db = await dbFactory.CreateDbContextAsync();
         var a = await db.Articles
             .Include(x => x.AffiliatePlacements)
-            .Where(x => x.Slug == slug && x.Status == ArticleStatuses.Published)
+            .Where(x => x.Slug == slug && x.Status == ArticleStatuses.Published && x.TrashedAt == null)
             .FirstOrDefaultAsync();
 
         var navMenus = await GetPublicNavMenusAsync(cmsBuilderService, configuration);

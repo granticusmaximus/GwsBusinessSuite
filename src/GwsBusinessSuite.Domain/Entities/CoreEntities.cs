@@ -271,6 +271,7 @@ public sealed class Article : AuditableEntity
     public string Source { get; set; } = ArticleSource.Manual;
     public DateTimeOffset? PublishedAt { get; set; }
     public Guid? SourceDraftId { get; set; }
+    public DateTimeOffset? TrashedAt { get; set; }
     public ICollection<ArticleAffiliatePlacement> AffiliatePlacements { get; set; } = new List<ArticleAffiliatePlacement>();
 }
 

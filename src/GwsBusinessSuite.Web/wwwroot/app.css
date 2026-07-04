@@ -294,6 +294,47 @@ h1:focus { outline: none; }
 .form-select:focus {
     border-radius: 3px;
 }
+
+/* ── WordPress-style list tables (Posts, Pages) ────────────
+   Row actions ("Edit | Trash | View") stay in the DOM for accessibility
+   and touch devices, but are visually hidden until the row is hovered on
+   pointer devices — the same wp-admin list-table interaction pattern. */
+.wp-list-table thead th {
+    font-size: .8rem;
+    font-weight: 600;
+    color: var(--gws-text-soft);
+    border-bottom-width: 1px;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.wp-list-table thead th[role="button"]:hover {
+    color: var(--gws-text-strong);
+}
+
+.wp-row-actions {
+    margin-top: .15rem;
+}
+
+.wp-row-actions a {
+    text-decoration: none;
+}
+
+.wp-row-actions a:hover {
+    text-decoration: underline;
+}
+
+@media (hover: hover) {
+    .wp-row-actions {
+        opacity: 0;
+        transition: opacity .1s ease;
+    }
+
+    .wp-list-row:hover .wp-row-actions {
+        opacity: 1;
+    }
+}
+
 /* ── Dashboard cards ─────────────────────────────────────── */
 .gws-stat-icon {
     width: 38px;

@@ -82,109 +82,170 @@
 
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-header bg-white border-bottom py-3 d-flex align-items-center gap-2">
-        <span class="fw-semibold">All Articles</span>
-        <span class="badge text-bg-secondary ms-auto">@FilteredArticles.Count</span>
+        <span class="fw-semibold">@(ShowTrash ? "Trash" : "All Articles")</span>
+        <span class="badge text-bg-secondary">@(ShowTrash ? TrashedArticles.Count : FilteredArticles.Count)</span>
+        <button class="btn btn-sm @(ShowTrash ? "btn-secondary" : "btn-outline-secondary") ms-auto"
+                @onclick="ToggleTrashViewAsync" disabled="@IsBusy">
+            <i class="bi bi-trash3 me-1"></i>Trash@(TrashedArticles.Count > 0 ? $" ({TrashedArticles.Count})" : "")
+        </button>
     </div>
     <div class="card-body">
-        <div class="row g-3 mb-3">
-            <div class="col-md-3">
-                <label class="form-label fw-semibold small">Status</label>
-                <select class="form-select" @bind="StatusFilter">
-                    <option value="">All</option>
-                    <option value="Draft">Draft</option>
-                    <option value="Published">Published</option>
-                </select>
-            </div>
-            <div class="col-md-3">
-                <label class="form-label fw-semibold small">Source</label>
-                <select class="form-select" @bind="SourceFilter">
-                    <option value="">All</option>
-                    <option value="Manual">Manual</option>
-                    <option value="OllamaGenerated">Ollama Generated</option>
-                </select>
-            </div>
-            <div class="col-md-3">
-                <label class="form-label fw-semibold small">Category</label>
-                <select class="form-select" @bind="CategoryFilter">
-                    <option value="">All</option>
-                    <option value="uncategorized">Uncategorized</option>
-                    @foreach (var cat in Categories)
-                    {
-                        <option value="@cat.Id">@cat.Name</option>
-                    }
-                </select>
-            </div>
-            <div class="col-md-3">
-                <label class="form-label fw-semibold small">Search</label>
-                <input class="form-control" @bind="SearchTerm" @bind:event="oninput" placeholder="Filter by title" />
-            </div>
-        </div>
-
-        @if (Articles.Count == 0 && !IsBusy)
+        @if (!ShowTrash)
         {
-            <p class="text-secondary mb-0">No articles yet. Click <strong>New Article</strong> to write your first one.</p>
-        }
-        else if (FilteredArticles.Count == 0)
-        {
-            <p class="text-secondary mb-0">No articles match the current filter.</p>
-        }
-        else
-        {
-            <div class="table-responsive">
-                <table class="table align-middle mb-0">
-                    <thead>
-                        <tr>
-                            <th>Title</th>
-                            <th>Status</th>
-                            <th>Source</th>
-                            <th>Published</th>
-                            <th>Updated</th>
-                            <th class="text-end">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var article in FilteredArticles)
+            <div class="row g-3 mb-3">
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold small">Status</label>
+                    <select class="form-select" @bind="StatusFilter">
+                        <option value="">All</option>
+                        <option value="Draft">Draft</option>
+                        <option value="Published">Published</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold small">Source</label>
+                    <select class="form-select" @bind="SourceFilter">
+                        <option value="">All</option>
+                        <option value="Manual">Manual</option>
+                        <option value="OllamaGenerated">Ollama Generated</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold small">Category</label>
+                    <select class="form-select" @bind="CategoryFilter">
+                        <option value="">All</option>
+                        <option value="uncategorized">Uncategorized</option>
+                        @foreach (var cat in Categories)
                         {
+                            <option value="@cat.Id">@cat.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold small">Search</label>
+                    <input class="form-control" @bind="SearchTerm" @bind:event="oninput" placeholder="Filter by title" />
+                </div>
+            </div>
+
+            @if (SelectedIds.Count > 0)
+            {
+                <div class="d-flex align-items-center gap-2 mb-3">
+                    <select class="form-select form-select-sm" style="width:auto" @bind="BulkAction">
+                        <option value="">Bulk actions</option>
+                        <option value="trash">Move to Trash</option>
+                    </select>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="ApplyBulkActionAsync" disabled="@(IsBusy || string.IsNullOrEmpty(BulkAction))">Apply</button>
+                    <span class="small text-secondary">@SelectedIds.Count selected</span>
+                </div>
+            }
+
+            @if (Articles.Count == 0 && !IsBusy)
+            {
+                <p class="text-secondary mb-0">No articles yet. Click <strong>New Article</strong> to write your first one.</p>
+            }
+            else if (FilteredArticles.Count == 0)
+            {
+                <p class="text-secondary mb-0">No articles match the current filter.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table align-middle mb-0 wp-list-table">
+                        <thead>
                             <tr>
-                                <td>
-                                    <div class="fw-semibold">@article.Title</div>
-                                    <div class="small text-secondary font-monospace">/@article.Slug</div>
-                                </td>
-                                <td><span class="badge @GetStatusBadgeClass(article.Status)">@article.Status</span></td>
-                                <td><span class="badge text-bg-light">@FormatSource(article.Source)</span></td>
-                                <td class="small">@(article.PublishedAt.HasValue ? FormatDate(article.PublishedAt.Value) : "—")</td>
-                                <td class="small">@FormatDate(article.UpdatedAt ?? article.CreatedAt)</td>
-                                <td class="text-end">
-                                    <div class="d-inline-flex gap-2">
-                                        <button class="btn btn-sm btn-outline-primary"
-                                                @onclick="() => EditArticle(article.Id)" disabled="@IsBusy">
-                                            Edit
-                                        </button>
+                                <th style="width:2rem">
+                                    <input type="checkbox" class="form-check-input" checked="@(SelectedIds.Count > 0 && SelectedIds.Count == FilteredArticles.Count)"
+                                           @onchange="e => ToggleSelectAll((bool)(e.Value ?? false))" />
+                                </th>
+                                <th role="button" @onclick='() => SetSort("Title")'>Title @SortIndicator("Title")</th>
+                                <th role="button" @onclick='() => SetSort("Status")'>Status @SortIndicator("Status")</th>
+                                <th>Source</th>
+                                <th role="button" @onclick='() => SetSort("Published")'>Published @SortIndicator("Published")</th>
+                                <th role="button" @onclick='() => SetSort("Updated")'>Updated @SortIndicator("Updated")</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var article in FilteredArticles)
+                            {
+                                <tr class="wp-list-row">
+                                    <td>
+                                        <input type="checkbox" class="form-check-input" checked="@SelectedIds.Contains(article.Id)"
+                                               @onchange="e => ToggleSelect(article.Id, (bool)(e.Value ?? false))" />
+                                    </td>
+                                    <td>
+                                        <div class="fw-semibold">
+                                            <a href="javascript:void(0)" @onclick="() => EditArticle(article.Id)" @onclick:preventDefault>@article.Title</a>
+                                        </div>
+                                        <div class="small text-secondary font-monospace">/@article.Slug</div>
+                                        <div class="wp-row-actions small">
+                                            <a href="javascript:void(0)" @onclick="() => EditArticle(article.Id)" @onclick:preventDefault>Edit</a>
+                                            <span class="text-secondary"> | </span>
+                                            <a href="javascript:void(0)" class="text-danger" @onclick="() => TrashArticleAsync(article.Id)" @onclick:preventDefault>Trash</a>
+                                            @if (article.Status == ArticleStatuses.Published)
+                                            {
+                                                <span class="text-secondary"> | </span>
+                                                <a href="/blog/@article.Slug" target="_blank">View</a>
+                                            }
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <span class="badge @GetStatusBadgeClass(article.Status)">@article.Status</span>
                                         @if (article.Status == ArticleStatuses.Draft)
                                         {
-                                            <button class="btn btn-sm btn-success"
-                                                    @onclick="() => PublishArticle(article.Id)" disabled="@IsBusy">
-                                                Publish
-                                            </button>
-                                            <button class="btn btn-sm btn-outline-danger"
-                                                    @onclick="() => DeleteArticle(article.Id)" disabled="@IsBusy">
-                                                Delete
-                                            </button>
+                                            <button class="btn btn-xs btn-link p-0 ms-1" @onclick="() => PublishArticle(article.Id)" disabled="@IsBusy">Publish</button>
                                         }
                                         else
                                         {
-                                            <button class="btn btn-sm btn-outline-secondary"
-                                                    @onclick="() => UnpublishArticle(article.Id)" disabled="@IsBusy">
-                                                Unpublish
-                                            </button>
+                                            <button class="btn btn-xs btn-link p-0 ms-1" @onclick="() => UnpublishArticle(article.Id)" disabled="@IsBusy">Unpublish</button>
                                         }
-                                    </div>
-                                </td>
+                                    </td>
+                                    <td><span class="badge text-bg-light">@FormatSource(article.Source)</span></td>
+                                    <td class="small">@(article.PublishedAt.HasValue ? FormatDate(article.PublishedAt.Value) : "—")</td>
+                                    <td class="small">@FormatDate(article.UpdatedAt ?? article.CreatedAt)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        }
+        else
+        {
+            @if (TrashedArticles.Count == 0)
+            {
+                <p class="text-secondary mb-0">Trash is empty.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table align-middle mb-0 wp-list-table">
+                        <thead>
+                            <tr>
+                                <th>Title</th>
+                                <th>Trashed</th>
+                                <th class="text-end">Actions</th>
                             </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
+                        </thead>
+                        <tbody>
+                            @foreach (var article in TrashedArticles)
+                            {
+                                <tr class="wp-list-row">
+                                    <td>
+                                        <div class="fw-semibold">@article.Title</div>
+                                        <div class="small text-secondary font-monospace">/@article.Slug</div>
+                                    </td>
+                                    <td class="small">@(article.TrashedAt.HasValue ? FormatDate(article.TrashedAt.Value) : "—")</td>
+                                    <td class="text-end">
+                                        <div class="d-inline-flex gap-2">
+                                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => RestoreArticleAsync(article.Id)" disabled="@IsBusy">Restore</button>
+                                            <button class="btn btn-sm btn-outline-danger" @onclick="() => PermanentlyDeleteArticleAsync(article.Id)" disabled="@IsBusy">Delete Permanently</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
         }
     </div>
 </div>
@@ -203,20 +264,83 @@
     private bool ShowCategoryManager { get; set; }
     private string NewCategoryName { get; set; } = string.Empty;
 
-    private IReadOnlyList<Article> FilteredArticles =>
-        Articles
-            .Where(a => string.IsNullOrEmpty(StatusFilter) || a.Status == StatusFilter)
-            .Where(a => string.IsNullOrEmpty(SourceFilter) || a.Source == SourceFilter)
-            .Where(a => string.IsNullOrEmpty(CategoryFilter) ||
-                        (CategoryFilter == "uncategorized" ? a.CategoryId is null : a.CategoryId == Guid.Parse(CategoryFilter)))
-            .Where(a => string.IsNullOrEmpty(SearchTerm) ||
-                        a.Title.Contains(SearchTerm.Trim(), StringComparison.OrdinalIgnoreCase))
-            .ToList();
+    // ── List-table state: bulk select, sort, trash ──────────────────────────
+    private HashSet<Guid> SelectedIds { get; set; } = new();
+    private string BulkAction { get; set; } = string.Empty;
+    private string SortColumn { get; set; } = "Updated";
+    private bool SortDescending { get; set; } = true;
+    private bool ShowTrash { get; set; }
+    private List<Article> TrashedArticles { get; set; } = new();
+
+    private IReadOnlyList<Article> FilteredArticles
+    {
+        get
+        {
+            IEnumerable<Article> query = Articles
+                .Where(a => string.IsNullOrEmpty(StatusFilter) || a.Status == StatusFilter)
+                .Where(a => string.IsNullOrEmpty(SourceFilter) || a.Source == SourceFilter)
+                .Where(a => string.IsNullOrEmpty(CategoryFilter) ||
+                            (CategoryFilter == "uncategorized" ? a.CategoryId is null : a.CategoryId == Guid.Parse(CategoryFilter)))
+                .Where(a => string.IsNullOrEmpty(SearchTerm) ||
+                            a.Title.Contains(SearchTerm.Trim(), StringComparison.OrdinalIgnoreCase));
+
+            query = SortColumn switch
+            {
+                "Title" => SortDescending ? query.OrderByDescending(a => a.Title) : query.OrderBy(a => a.Title),
+                "Status" => SortDescending ? query.OrderByDescending(a => a.Status) : query.OrderBy(a => a.Status),
+                "Published" => SortDescending ? query.OrderByDescending(a => a.PublishedAt) : query.OrderBy(a => a.PublishedAt),
+                _ => SortDescending ? query.OrderByDescending(a => a.UpdatedAt ?? a.CreatedAt) : query.OrderBy(a => a.UpdatedAt ?? a.CreatedAt),
+            };
+
+            return query.ToList();
+        }
+    }
+
+    private void SetSort(string column)
+    {
+        if (SortColumn == column)
+        {
+            SortDescending = !SortDescending;
+        }
+        else
+        {
+            SortColumn = column;
+            SortDescending = false;
+        }
+    }
+
+    private string SortIndicator(string column) =>
+        SortColumn != column ? "" : (SortDescending ? "▼" : "▲");
+
+    private void ToggleSelect(Guid id, bool selected)
+    {
+        if (selected) SelectedIds.Add(id);
+        else SelectedIds.Remove(id);
+    }
+
+    private void ToggleSelectAll(bool selected)
+    {
+        SelectedIds = selected ? FilteredArticles.Select(a => a.Id).ToHashSet() : new HashSet<Guid>();
+    }
+
+    private async Task ApplyBulkActionAsync()
+    {
+        if (BulkAction != "trash" || SelectedIds.Count == 0) return;
+        var ids = SelectedIds.ToList();
+        foreach (var id in ids)
+        {
+            await TrashArticleAsync(id, reload: false);
+        }
+        SelectedIds.Clear();
+        BulkAction = string.Empty;
+        await LoadArticles();
+    }
 
     protected override async Task OnInitializedAsync()
     {
         await LoadArticles();
         await LoadCategoriesAsync();
+        await LoadTrashedArticlesAsync();
     }
 
     private async Task LoadArticles()
@@ -225,7 +349,7 @@
         try
         {
             await using var db = await DbFactory.CreateDbContextAsync();
-            var rows = await db.Articles.ToListAsync();
+            var rows = await db.Articles.Where(a => a.TrashedAt == null).ToListAsync();
             Articles = rows
                 .OrderByDescending(a => a.UpdatedAt ?? a.CreatedAt)
                 .ToList();
@@ -255,6 +379,32 @@
     }
 
     private void ToggleCategoryManager() => ShowCategoryManager = !ShowCategoryManager;
+
+    private async Task LoadTrashedArticlesAsync()
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            // SQLite can't translate ORDER BY on a DateTimeOffset column, so order
+            // client-side after materializing (same pattern used for the public /blog
+            // listing in Program.cs).
+            var rows = await db.Articles.Where(a => a.TrashedAt != null).ToListAsync();
+            TrashedArticles = rows.OrderByDescending(a => a.TrashedAt).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load trashed articles.");
+        }
+    }
+
+    private async Task ToggleTrashViewAsync()
+    {
+        ShowTrash = !ShowTrash;
+        if (ShowTrash)
+        {
+            await LoadTrashedArticlesAsync();
+        }
+    }
 
     private async Task AddCategoryAsync()
     {
@@ -367,14 +517,100 @@
         });
     }
 
-    private async Task DeleteArticle(Guid id)
+    private async Task TrashArticleAsync(Guid id, bool reload = true)
     {
-        await RunAction(id, async (db, article) =>
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        IsBusy = true;
+        try
         {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var article = await db.Articles.FindAsync(id);
+            if (article is null) { ErrorMessage = "Article not found."; return; }
+
+            article.TrashedAt = DateTimeOffset.UtcNow;
+            article.UpdatedAt = DateTimeOffset.UtcNow;
+            article.UpdatedBy = "manual-editor";
+            await db.SaveChangesAsync();
+            StatusMessage = $"'{article.Title}' moved to Trash.";
+
+            if (reload)
+            {
+                await LoadArticles();
+                await LoadTrashedArticlesAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to trash article {Id}.", id);
+            ErrorMessage = $"Unable to move to Trash. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task RestoreArticleAsync(Guid id)
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        IsBusy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var article = await db.Articles.FindAsync(id);
+            if (article is null) { ErrorMessage = "Article not found."; return; }
+
+            article.TrashedAt = null;
+            article.UpdatedAt = DateTimeOffset.UtcNow;
+            article.UpdatedBy = "manual-editor";
+            await db.SaveChangesAsync();
+            StatusMessage = $"'{article.Title}' restored.";
+            await LoadArticles();
+            await LoadTrashedArticlesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to restore article {Id}.", id);
+            ErrorMessage = $"Unable to restore. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task PermanentlyDeleteArticleAsync(Guid id)
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        IsBusy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var article = await db.Articles.FindAsync(id);
+            if (article is null) { ErrorMessage = "Article not found."; return; }
+            if (article.TrashedAt is null)
+            {
+                ErrorMessage = "Move this article to Trash before deleting it permanently.";
+                return;
+            }
+
             db.Articles.Remove(article);
             await db.SaveChangesAsync();
-            StatusMessage = $"'{article.Title}' deleted.";
-        });
+            StatusMessage = $"'{article.Title}' deleted permanently.";
+            await LoadTrashedArticlesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to permanently delete article {Id}.", id);
+            ErrorMessage = $"Unable to delete. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     private async Task RunAction(Guid id, Func<ApplicationDbContext, Article, Task> action)
