@@ -1,60 +1,120 @@
-/* ── Design tokens ───────────────────────────────────────── */
+/* ── Design tokens ───────────────────────────────────────────
+   Flat, dense wp-admin-inspired chrome: a dark sidebar + a slim full-width
+   admin bar above it, light-gray content area, small-radius flat panels.
+   Values are deliberately our own (not copies of WordPress's exact admin
+   scheme) — see the icon set (Bootstrap Icons, not Dashicons) and color
+   values below, which lean on this app's existing blue brand accent
+   rather than WordPress's blue/gray. */
 :root {
-    --gws-sidebar-width: 290px;
-        --gws-sidebar-accent: #2563eb;
-        --gws-topbar-height: 80px;
-        --gws-body-bg: #f4f7fb;
-        --gws-panel-bg: rgba(255, 255, 255, 0.8);
-        --gws-panel-border: rgba(148, 163, 184, 0.22);
-        --gws-shadow-lg: 0 24px 60px rgba(15, 23, 42, 0.08);
-        --gws-shadow-md: 0 14px 32px rgba(15, 23, 42, 0.08);
-        --gws-text-strong: #0f172a;
-        --gws-text-soft: #5b6477;
+    --gws-sidebar-width: 200px;
+    --gws-sidebar-accent: #2563eb;
+    --gws-admin-bar-height: 36px;
+    --gws-sidebar-bg: #161b26;
+    --gws-sidebar-hover-bg: #232a38;
+    --gws-sidebar-text: #c7ccd6;
+    --gws-sidebar-text-soft: #8891a1;
+    --gws-admin-bar-bg: #10141d;
+    --gws-body-bg: #eef1f5;
+    --gws-panel-bg: #ffffff;
+    --gws-panel-border: #dcdfe4;
+    --gws-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+    --gws-shadow-md: 0 2px 8px rgba(15, 23, 42, 0.08);
+    --gws-text-strong: #1e2430;
+    --gws-text-soft: #646b78;
+    /* Kept for any component still referencing the old glass tokens by name. */
+    --gws-shadow-lg: var(--gws-shadow-md);
 }
 
 /* ── Base ────────────────────────────────────────────────── */
 html, body {
     height: 100%;
     font-family: "SF Pro Display", "SF Pro Text", "Segoe UI Variable", "Inter Tight", "Aptos", system-ui, sans-serif;
-        background:
-            radial-gradient(circle at top left, rgba(96, 165, 250, 0.18), transparent 28%),
-            radial-gradient(circle at top right, rgba(251, 191, 36, 0.14), transparent 26%),
-            linear-gradient(180deg, #fbfdff 0%, var(--gws-body-bg) 56%, #edf3f9 100%);
-        color: var(--gws-text-strong);
-    }
-    
-    body {
-        margin: 0;
+    background: var(--gws-body-bg);
+    color: var(--gws-text-strong);
+}
+
+body {
+    margin: 0;
 }
 
 h1:focus { outline: none; }
 
 /* ── App layout ──────────────────────────────────────────── */
 .gws-layout {
-    display: flex;
     min-height: 100vh;
-    overflow: hidden;
-    position: relative;
+}
+
+/* The admin bar is a slim full-width strip in normal document flow (not
+   fixed) — everything below it just flows naturally, no top-margin math
+   needed the way a fixed bar would require. */
+.gws-admin-bar {
+    height: var(--gws-admin-bar-height);
+    min-height: var(--gws-admin-bar-height);
+    background: var(--gws-admin-bar-bg);
+    color: var(--gws-sidebar-text);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 1rem;
+    font-size: .8rem;
+}
+
+.gws-admin-bar-brand {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    font-weight: 700;
+    color: #fff;
+}
+
+.gws-admin-bar-icon {
+    width: 1.1rem;
+    height: 1.1rem;
+    display: block;
+}
+
+.gws-admin-bar-actions {
+    display: flex;
+    align-items: center;
+    gap: 1.1rem;
+}
+
+.gws-admin-bar-user {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    color: var(--gws-sidebar-text-soft);
+}
+
+.gws-admin-bar-link {
+    color: var(--gws-sidebar-text);
+    text-decoration: none;
+}
+
+.gws-admin-bar-link:hover {
+    color: #fff;
+    text-decoration: underline;
+}
+
+.gws-layout-body {
+    display: flex;
+    min-height: calc(100vh - var(--gws-admin-bar-height));
 }
 
 .gws-sidebar {
     position: fixed;
-    top: 0;
+    top: var(--gws-admin-bar-height);
     left: 0;
     z-index: 20;
     width: var(--gws-sidebar-width);
     min-width: var(--gws-sidebar-width);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.58));
-        backdrop-filter: blur(24px);
-        -webkit-backdrop-filter: blur(24px);
-        border-right: 1px solid rgba(148, 163, 184, 0.16);
-        box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.55);
+    background: var(--gws-sidebar-bg);
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: calc(100vh - var(--gws-admin-bar-height));
     overflow-y: auto;
     flex-shrink: 0;
-    padding: 1.1rem 1rem;
+    padding: .5rem 0;
 }
 
 /* The sidebar is fixed and taken out of flow, so .gws-body reserves its own
@@ -65,94 +125,29 @@ h1:focus { outline: none; }
     margin-left: var(--gws-sidebar-width);
 }
 
-.gws-layout.gws-sidebar-collapsed:not(.gws-builder-mode) .gws-body {
-    margin-left: 84px;
-}
-
 .gws-body {
     flex: 1;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
     min-width: 0;
-}
-
-.gws-topbar {
-    height: var(--gws-topbar-height);
-    min-height: var(--gws-topbar-height);
-    background: rgba(255, 255, 255, 0.5);
-        backdrop-filter: blur(18px);
-        -webkit-backdrop-filter: blur(18px);
-        border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-        padding: 0 2rem;
 }
 
 .gws-content {
     flex: 1;
     overflow-y: auto;
-    padding: 2rem 2rem 2.5rem;
-}
-
-/* ── Collapsible sidebar ─────────────────────────────────── */
-.gws-topbar-left {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-}
-
-.gws-sidebar-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 2.6rem;
-    height: 2.6rem;
-    border-radius: 12px;
-    border: 1px solid rgba(148, 163, 184, 0.22);
-    background: rgba(255, 255, 255, 0.7);
-    color: #334155;
-    font-size: 1.05rem;
-    cursor: pointer;
-    transition: background .14s ease, color .14s ease, box-shadow .14s ease;
-}
-
-.gws-sidebar-toggle:hover {
-    background: rgba(255, 255, 255, 0.95);
-    color: #0f172a;
-    box-shadow: var(--gws-shadow-md);
-}
-
-.gws-sidebar-collapsed .gws-sidebar {
-    width: 84px;
-    min-width: 84px;
-    padding: 1.1rem .5rem;
-}
-
-.gws-sidebar-collapsed .gws-brand {
-    justify-content: center;
-    padding: .35rem .35rem .9rem;
-}
-
-.gws-sidebar-collapsed .gws-brand-name,
-.gws-sidebar-collapsed .gws-brand-sub,
-.gws-sidebar-collapsed .gws-nav-section,
-.gws-sidebar-collapsed .gws-nav-link-copy {
-    display: none;
-}
-
-.gws-sidebar-collapsed .gws-nav-link {
-    justify-content: center;
-    padding: .7rem;
+    padding: 1.5rem 1.75rem 2rem;
 }
 
 /* ── Canvas fullscreen mode ──────────────────────────────────
    Mirrors how WordPress/Elementor/Squarespace take over the full
-   viewport while editing — no app sidebar/topbar, the builder's own
-   header and panels fill the screen edge-to-edge. */
+   viewport while editing — no app sidebar/topbar/admin-bar, the builder's
+   own header and panels fill the screen edge-to-edge. */
 .gws-builder-mode {
     height: 100vh;
+}
+
+.gws-builder-mode .gws-layout-body {
+    min-height: 100vh;
 }
 
 .gws-builder-mode .gws-body {
@@ -167,247 +162,129 @@ h1:focus { outline: none; }
     height: 100vh;
 }
 
-/* ── Sidebar brand ───────────────────────────────────────── */
-.gws-brand {
-    display: flex;
-    align-items: center;
-    gap: .9rem;
-        padding: .35rem .35rem 1.1rem;
-        border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-    flex-shrink: 0;
-    margin-bottom: .8rem;
-    }
-    
-    .gws-brand-mark {
-        width: 2.8rem;
-        height: 2.8rem;
-        min-width: 2.8rem;
-        border-radius: 15px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        overflow: hidden;
-        box-shadow: 0 12px 28px rgba(37, 99, 235, 0.28);
-}
-
-.gws-brand-icon {
-    width: 100%;
-    height: 100%;
-    display: block;
-}
-
-.gws-brand-name {
-    font-size: 1rem;
-    font-weight: 700;
-    color: var(--gws-text-strong);
-        letter-spacing: -.01em;
-    line-height: 1.2;
-}
-
-.gws-brand-sub {
-    font-size: .72rem;
-        color: #64748b;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: .08em;
-}
-
 /* ── Sidebar nav ─────────────────────────────────────────── */
 .gws-nav {
-    padding: .2rem .1rem .5rem;
     display: flex;
     flex-direction: column;
-    gap: .25rem;
     flex: 1;
 }
 
 .gws-nav-section {
-    font-size: .66rem;
+    font-size: .68rem;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: .12em;
-        color: #94a3b8;
-        padding: .9rem .7rem .3rem;
+    letter-spacing: .08em;
+    color: var(--gws-sidebar-text-soft);
+    padding: 1rem 1rem .4rem;
 }
 
 .gws-nav-link {
     display: flex;
-    align-items: flex-start;
-        gap: .8rem;
-        padding: .85rem .95rem;
-        border-radius: 18px;
-        color: #475569;
+    align-items: center;
+    gap: .65rem;
+    padding: .55rem 1rem;
+    border-left: 3px solid transparent;
+    color: var(--gws-sidebar-text);
     text-decoration: none;
-    font-size: .92rem;
-        font-weight: 600;
-        transition: background .16s ease, color .16s ease, transform .16s ease, box-shadow .16s ease;
+    font-size: .86rem;
+    font-weight: 500;
+    transition: background .12s ease, color .12s ease, border-color .12s ease;
     white-space: nowrap;
 }
 
 .gws-nav-link i {
-    width: 2rem;
-        height: 2rem;
-        border-radius: 12px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        background: rgba(148, 163, 184, 0.12);
-        color: #334155;
-        font-size: 1rem;
+    width: 1.1rem;
+    text-align: center;
+    color: var(--gws-sidebar-text-soft);
+    font-size: .95rem;
     flex-shrink: 0;
-    margin-top: .05rem;
-    }
-    
-    .gws-nav-link-copy {
-        display: flex;
-        flex-direction: column;
-        min-width: 0;
-    }
-    
-    .gws-nav-link-copy small {
-        color: #94a3b8;
-        font-size: .74rem;
-        font-weight: 500;
-        letter-spacing: .01em;
+}
+
+.gws-nav-link-copy {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.gws-nav-link-copy small {
+    display: none;
 }
 
 .gws-nav-link:hover {
-    background: rgba(255, 255, 255, 0.72);
-        color: #0f172a;
-        box-shadow: var(--gws-shadow-md);
-        transform: translateY(-1px);
+    background: var(--gws-sidebar-hover-bg);
+    color: #fff;
+}
+
+.gws-nav-link:hover i {
+    color: #fff;
 }
 
 .gws-nav-link.active {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.84));
-        color: #0f172a;
-        box-shadow: var(--gws-shadow-md);
-    }
-    
-    .gws-nav-link.active i {
-        background: linear-gradient(145deg, #1d4ed8, #60a5fa);
-        color: #eff6ff;
-    }
-    
-    .gws-topbar-kicker {
-        text-transform: uppercase;
-        letter-spacing: .18em;
-        font-size: .66rem;
-        font-weight: 700;
-        color: #64748b;
-        margin-bottom: .25rem;
-    }
-    
-    .gws-topbar-title {
-        font-size: 1.15rem;
-        font-weight: 700;
-        letter-spacing: -.02em;
-    }
-    
-    .gws-topbar-actions {
-        display: inline-flex;
-        align-items: center;
-        gap: .75rem;
-    }
-    
-    .gws-topbar-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: .45rem;
-        padding: .55rem .9rem;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.84);
-        border: 1px solid rgba(148, 163, 184, 0.18);
-        box-shadow: 0 10px 25px rgba(15, 23, 42, 0.06);
-        color: #0f172a;
-        font-size: .78rem;
-        font-weight: 700;
-    }
-    
-    .gws-topbar-pill i {
-        color: #22c55e;
-        font-size: .55rem;
-    }
-    
-    .gws-topbar-pill-subtle {
-        color: #475569;
-    }
-    
-    .gws-topbar-button {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        padding: .7rem 1rem;
-        border-radius: 999px;
-        background: #0f172a;
-        color: #f8fafc;
-        text-decoration: none;
-        font-size: .82rem;
-        font-weight: 700;
-        box-shadow: 0 14px 30px rgba(15, 23, 42, 0.18);
-    }
-    
-    .gws-topbar-button:hover {
-        color: #fff;
-        background: #020617;
+    background: var(--gws-sidebar-hover-bg);
+    border-left-color: var(--gws-sidebar-accent);
+    color: #fff;
+}
+
+.gws-nav-link.active i {
+    color: var(--gws-sidebar-accent);
 }
 
 /* ── Page header ─────────────────────────────────────────── */
 .page-header {
-    margin-bottom: 1.75rem;
-        padding: 1.5rem 1.6rem;
-        border: 1px solid rgba(148, 163, 184, 0.18);
-        border-radius: 28px;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.74));
-        box-shadow: var(--gws-shadow-lg);
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
+    margin-bottom: 1.25rem;
+    padding: 1rem 1.25rem;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: 4px;
+    background: var(--gws-panel-bg);
+    box-shadow: var(--gws-shadow-sm);
 }
 
 .page-header h1 {
-    font-size: 1.6rem;
-    font-weight: 700;
+    font-size: 1.4rem;
+    font-weight: 600;
     color: var(--gws-text-strong);
-        margin-bottom: .35rem;
-        letter-spacing: -.03em;
+    margin-bottom: .3rem;
+    letter-spacing: -.01em;
 }
 
 .page-header p {
     color: var(--gws-text-soft);
-        font-size: .98rem;
+    font-size: .92rem;
     margin-bottom: 0;
 }
 
 .card {
-    border-radius: 24px !important;
+    border-radius: 4px !important;
 }
 
 .card.border-0.shadow-sm,
 .surface-panel {
     background: var(--gws-panel-bg);
     border: 1px solid var(--gws-panel-border) !important;
-    box-shadow: var(--gws-shadow-lg) !important;
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
+    box-shadow: var(--gws-shadow-sm) !important;
 }
 
 .btn {
-    border-radius: 999px;
+    border-radius: 3px;
     font-weight: 600;
 }
 
 .btn-primary {
-    background: linear-gradient(135deg, #0f172a, #2563eb);
+    background: var(--gws-sidebar-accent);
     border: none;
-    box-shadow: 0 14px 28px rgba(37, 99, 235, 0.22);
+    box-shadow: none;
+}
+
+.btn-primary:hover {
+    background: #1d4ed8;
 }
 
 .btn-outline-secondary,
 .btn-outline-success,
 .btn-outline-primary,
 .btn-outline-danger {
-    background: rgba(255, 255, 255, 0.72);
-    border-color: rgba(148, 163, 184, 0.24);
+    background: #fff;
+    border-color: var(--gws-panel-border);
 }
 
 .form-control,
@@ -415,7 +292,7 @@ h1:focus { outline: none; }
 .form-check-input,
 .form-control:focus,
 .form-select:focus {
-    border-radius: 18px;
+    border-radius: 3px;
 }
 /* ── Dashboard cards ─────────────────────────────────────── */
 .gws-stat-icon {
@@ -658,22 +535,7 @@ h1:focus { outline: none; }
 /* ── Responsive ──────────────────────────────────────────── */
 @media (max-width: 767.98px) {
     .gws-sidebar { display: none; }
-    .gws-sidebar-toggle { display: none; }
     .gws-layout .gws-body { margin-left: 0; }
-                .gws-topbar {
-                    padding: 0 1.1rem;
-                    height: auto;
-                    min-height: auto;
-                    flex-wrap: wrap;
-                    gap: .8rem;
-                    padding-top: 1rem;
-                    padding-bottom: 1rem;
-                }
-        
-                .gws-topbar-actions {
-                    width: 100%;
-                    justify-content: space-between;
-                    flex-wrap: wrap;
-                }
+    .gws-admin-bar { padding: 0 .8rem; }
     .gws-content { padding: 1.25rem; }
 }

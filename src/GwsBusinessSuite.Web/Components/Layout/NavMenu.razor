@@ -3,16 +3,6 @@
 @using System.Security.Claims
 @inject AuthenticationStateProvider AuthProvider
 
-<div class="gws-brand">
-    <div class="gws-brand-mark">
-        <img src="favicon.svg" alt="GWS Suite" class="gws-brand-icon" />
-    </div>
-    <div>
-        <div class="gws-brand-name">GWS Suite</div>
-        <div class="gws-brand-sub">Builder-grade operations</div>
-    </div>
-</div>
-
 <nav class="gws-nav">
     @if (IsAdmin)
     {
@@ -25,26 +15,51 @@
         </NavLink>
     }
 
-    <div class="gws-nav-section">Content</div>
-
-    <NavLink class="gws-nav-link" href="admin/content-studio">
-        <i class="bi bi-pencil-square"></i>
-        <span class="gws-nav-link-copy">
-            <span>Content Studio</span>
-            <small>Editorial workflows</small>
-        </span>
-    </NavLink>
+    <div class="gws-nav-section">Posts</div>
 
     <NavLink class="gws-nav-link" href="admin/article-editor">
         <i class="bi bi-pencil"></i>
         <span class="gws-nav-link-copy">
-            <span>Article Editor</span>
+            <span>All Posts</span>
             <small>Write &amp; publish</small>
         </span>
     </NavLink>
 
+    <NavLink class="gws-nav-link" href="admin/content-studio">
+        <i class="bi bi-magic"></i>
+        <span class="gws-nav-link-copy">
+            <span>Generate with AI</span>
+            <small>Ollama-assisted drafts</small>
+        </span>
+    </NavLink>
+
+    @if (IsContributorOrAbove)
+    {
+        <div class="gws-nav-section">Appearance</div>
+
+        <NavLink class="gws-nav-link" href="admin/canvas">
+            <i class="bi bi-layout-three-columns"></i>
+            <span class="gws-nav-link-copy">
+                <span>Pages</span>
+                <small>Page builder &amp; site design</small>
+            </span>
+        </NavLink>
+    }
+
     @if (IsAdmin)
     {
+        <div class="gws-nav-section">Users</div>
+
+        <NavLink class="gws-nav-link" href="admin/users">
+            <i class="bi bi-people-fill"></i>
+            <span class="gws-nav-link-copy">
+                <span>User Management</span>
+                <small>Accounts &amp; roles</small>
+            </span>
+        </NavLink>
+
+        <div class="gws-nav-section">Tools</div>
+
         <NavLink class="gws-nav-link" href="admin/cj-ads">
             <i class="bi bi-tags-fill"></i>
             <span class="gws-nav-link-copy">
@@ -52,8 +67,6 @@
                 <small>Affiliate campaigns</small>
             </span>
         </NavLink>
-
-        <div class="gws-nav-section">Business</div>
 
         <NavLink class="gws-nav-link" href="admin/crm">
             <i class="bi bi-people-fill"></i>
@@ -70,23 +83,7 @@
                 <small>Operational reference</small>
             </span>
         </NavLink>
-    }
 
-    @if (IsContributorOrAbove)
-    {
-        <div class="gws-nav-section">Builder</div>
-
-        <NavLink class="gws-nav-link" href="admin/canvas">
-            <i class="bi bi-layout-three-columns"></i>
-            <span class="gws-nav-link-copy">
-                <span>Canvas</span>
-                <small>Live page studio</small>
-            </span>
-        </NavLink>
-    }
-
-    @if (IsAdmin)
-    {
         <NavLink class="gws-nav-link" href="admin/live-show">
             <i class="bi bi-camera-video-fill"></i>
             <span class="gws-nav-link-copy">
@@ -108,16 +105,6 @@
             <span class="gws-nav-link-copy">
                 <span>Ollama Console</span>
                 <small>Local model console</small>
-            </span>
-        </NavLink>
-
-        <div class="gws-nav-section">Admin</div>
-
-        <NavLink class="gws-nav-link" href="admin/users">
-            <i class="bi bi-people-fill"></i>
-            <span class="gws-nav-link-copy">
-                <span>User Management</span>
-                <small>Accounts &amp; roles</small>
             </span>
         </NavLink>
     }
