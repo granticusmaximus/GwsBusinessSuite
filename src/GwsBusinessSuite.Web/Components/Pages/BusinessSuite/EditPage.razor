@@ -1,0 +1,798 @@
+@page "/admin/pages/edit/{PageId:guid?}"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContributorAccess")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.CmsBuilder
+@using GwsBusinessSuite.Domain.Entities
+@using Microsoft.AspNetCore.Components.Forms
+@using System.Text.Json
+@inject ICmsBuilderService CmsBuilderService
+@inject IFormSubmissionService FormSubmissionService
+@inject IPageRevisionService PageRevisionService
+@inject NavigationManager Navigation
+@inject IConfiguration Configuration
+@inject IJSRuntime JS
+@inject ILogger<EditPage> Logger
+
+<PageTitle>@(PageId.HasValue ? "Edit Page" : "New Page")</PageTitle>
+
+<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-file-earmark-text me-2 text-primary"></i>@(PageId.HasValue ? "Edit Page" : "New Page")</h1>
+        <p>
+            <a href="/admin/pages">Pages</a> &middot;
+            @(PageId.HasValue ? PageEditorModel.Title : "New page")
+        </p>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(CmsErrorMessage))
+{
+    <div class="alert alert-danger" role="alert">@CmsErrorMessage</div>
+}
+@if (!string.IsNullOrWhiteSpace(CmsStatusMessage))
+{
+    <div class="alert alert-info" role="alert">@CmsStatusMessage</div>
+}
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
+        <div>
+            <div class="fw-semibold">Page Details</div>
+            <div class="small text-secondary">Title, path, SEO, and publish status.</div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge @(PageEditorModel.Status == CmsPageStatuses.Published ? "text-bg-success" : "text-bg-secondary")">
+                @(PageEditorModel.Status == CmsPageStatuses.Published ? "Published" : "Draft")
+            </span>
+            <span class="badge @(PageId.HasValue ? "text-bg-primary" : "text-bg-secondary")">
+                @(PageId.HasValue ? "Editing Existing Page" : "New Page")
+            </span>
+        </div>
+    </div>
+    <div class="card-body">
+        @if (!SelectedSiteId.HasValue)
+        {
+            <p class="text-secondary mb-0">Loading site…</p>
+        }
+        else
+        {
+            <div class="row g-3 mb-3">
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold small">Page Title</label>
+                    <InputText class="form-control" @bind-Value="PageEditorModel.Title" placeholder="Home" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold small">Slug</label>
+                    <InputText class="form-control" @bind-Value="PageEditorModel.Slug" placeholder="home" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold small">Parent Page</label>
+                    <select class="form-select" @bind="ParentPageIdSelection">
+                        <option value="">— Top level —</option>
+                        @foreach (var candidate in ParentPageOptions())
+                        {
+                            <option value="@candidate.Id">/@BuildFullPath(candidate)</option>
+                        }
+                    </select>
+                </div>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(PageEditorModel.Slug))
+            {
+                <p class="small text-secondary mb-3">Live path: <span class="font-monospace">/@PreviewFullPath()</span></p>
+            }
+
+            <div class="row g-3 mb-3">
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold small">SEO Meta Title</label>
+                    <InputText class="form-control" @bind-Value="PageEditorModel.MetaTitle" placeholder="Falls back to Page Title if blank" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold small">OG Image URL</label>
+                    <InputText class="form-control" @bind-Value="PageEditorModel.OgImageUrl" placeholder="/media/{id} or external URL" />
+                </div>
+                <div class="col-12">
+                    <label class="form-label fw-semibold small">SEO Meta Description</label>
+                    <InputText class="form-control" @bind-Value="PageEditorModel.MetaDescription" placeholder="Shown in search results and link previews" />
+                </div>
+                <div class="col-12">
+                    <label class="form-label fw-semibold small">Page Custom CSS</label>
+                    <InputTextArea class="form-control font-monospace cms-custom-css-editor" @bind-Value="PageEditorModel.CustomCss"
+                                   placeholder="Applies only to this page, after the site-wide CSS." spellcheck="false" />
+                </div>
+            </div>
+
+            @if (LivePageUrl is { } livePageUrl && PageId.HasValue)
+            {
+                <div class="mb-3 d-flex flex-wrap gap-2 align-items-center">
+                    <a class="btn btn-sm btn-outline-success" href="@livePageUrl" target="_blank" rel="noopener noreferrer">
+                        <i class="bi bi-box-arrow-up-right me-1"></i>View Live Page
+                    </a>
+                    @if (!IsCurrentPageInNav())
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddCurrentPageToNavAsync" disabled="@IsCmsBusy">
+                            <i class="bi bi-list me-1"></i>Add to Nav
+                        </button>
+                    }
+                </div>
+            }
+
+            <div class="cms-structured-toolbar mb-3">
+                <div class="cms-structured-toolbar-group">
+                    <label class="form-label fw-semibold small mb-1">Workflow Blueprint</label>
+                    <select class="form-select" @bind="SelectedBlueprintKey">
+                        <option value="">Select blueprint</option>
+                        @foreach (var blueprint in CmsBlueprints)
+                        {
+                            <option value="@blueprint.Key">@blueprint.Name (@blueprint.Category)</option>
+                        }
+                    </select>
+                </div>
+                <div class="form-check mt-4">
+                    <input class="form-check-input" type="checkbox" id="replaceExistingBlocks" @bind="ReplaceExistingBlocks" />
+                    <label class="form-check-label small" for="replaceExistingBlocks">Replace existing blocks</label>
+                </div>
+                <div class="d-flex gap-2 mt-4">
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="ApplyBlueprintAsync" disabled="@(IsCmsBusy || !PageId.HasValue || string.IsNullOrWhiteSpace(SelectedBlueprintKey))">
+                        Apply Blueprint
+                    </button>
+                </div>
+            </div>
+
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <button class="btn btn-primary" @onclick="SavePageAsync" disabled="@IsCmsBusy">Save Page Details</button>
+                @if (PageEditorModel.Status == CmsPageStatuses.Published)
+                {
+                    <button class="btn btn-outline-secondary" @onclick="() => SetStatusAndSaveAsync(CmsPageStatuses.Draft)" disabled="@IsCmsBusy">
+                        <i class="bi bi-eye-slash me-1"></i>Unpublish
+                    </button>
+                }
+                else
+                {
+                    <button class="btn btn-success" @onclick="() => SetStatusAndSaveAsync(CmsPageStatuses.Published)" disabled="@IsCmsBusy">
+                        <i class="bi bi-cloud-upload me-1"></i>Publish
+                    </button>
+                }
+                <button class="btn btn-outline-secondary" @onclick='() => Navigation.NavigateTo("/admin/pages/edit")' disabled="@IsCmsBusy">Reset</button>
+                <button class="btn btn-outline-danger" @onclick="TrashSelectedPageAsync" disabled="@(IsCmsBusy || !PageId.HasValue)">
+                    <i class="bi bi-trash3 me-1"></i>Move to Trash
+                </button>
+            </div>
+
+            @if (PageId.HasValue)
+            {
+                <div class="cms-block-preview-empty">
+                    <i class="bi bi-magic"></i>
+                    <div>
+                        <strong>Edit this page's content in the Studio.</strong>
+                        <div class="text-secondary mb-2">Add sections and widgets, write copy, and build forms visually — changes go live the moment you save.</div>
+                        <button class="btn btn-primary" @onclick="() => OpenStudio(PageId.Value)">
+                            <i class="bi bi-magic me-1"></i>Open Studio
+                        </button>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <p class="text-secondary small mb-0">Save this page's details first, then open the Studio to build its content.</p>
+            }
+        }
+    </div>
+</div>
+
+@if (PageId.HasValue)
+{
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
+            <div>
+                <div class="fw-semibold">Form Submissions</div>
+                <div class="small text-secondary">Visitor submissions from this page's form widgets.</div>
+            </div>
+            <button class="btn btn-sm btn-outline-secondary" @onclick="LoadFormSubmissionsAsync" disabled="@IsSubmissionsBusy">
+                <i class="bi bi-arrow-repeat me-1"></i>Refresh
+            </button>
+        </div>
+        <div class="card-body p-0">
+            @if (!string.IsNullOrEmpty(SubmissionsErrorMessage))
+            {
+                <div class="alert alert-danger m-3 mb-0 py-2 small">@SubmissionsErrorMessage</div>
+            }
+            @if (FormSubmissions.Count == 0)
+            {
+                <div class="p-4">
+                    <p class="text-secondary mb-0">No submissions yet.</p>
+                </div>
+            }
+            else
+            {
+                <div class="list-group list-group-flush">
+                    @foreach (var submission in FormSubmissions)
+                    {
+                        <div class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <div>
+                                    <div class="fw-semibold">
+                                        @submission.CreatedAt.ToLocalTime().ToString("g")
+                                        @if (!submission.IsRead)
+                                        {
+                                            <span class="badge text-bg-primary ms-2">New</span>
+                                        }
+                                    </div>
+                                    <dl class="row small mb-0 mt-2">
+                                        @foreach (var field in ParseSubmissionFields(submission.FieldsJson))
+                                        {
+                                            <dt class="col-4 text-secondary">@field.Key</dt>
+                                            <dd class="col-8">@field.Value</dd>
+                                        }
+                                    </dl>
+                                </div>
+                                <div class="d-flex flex-column gap-1 flex-shrink-0">
+                                    @if (!submission.IsRead)
+                                    {
+                                        <button class="btn btn-xs btn-outline-secondary" @onclick="() => MarkSubmissionReadAsync(submission.Id)">Mark read</button>
+                                    }
+                                    <button class="btn btn-xs btn-outline-danger" @onclick="() => DeleteSubmissionAsync(submission.Id)">Delete</button>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
+            <div>
+                <div class="fw-semibold">Revision History</div>
+                <div class="small text-secondary">Snapshots captured before each save. Restoring a revision saves a checkpoint first so you can undo it.</div>
+            </div>
+            <span class="badge text-bg-secondary">@PageRevisions.Count revision@(PageRevisions.Count == 1 ? "" : "s")</span>
+        </div>
+        <div class="card-body p-0">
+            @if (!string.IsNullOrEmpty(RevisionErrorMessage))
+            {
+                <div class="alert alert-danger m-3 mb-0 py-2 small">@RevisionErrorMessage</div>
+            }
+            @if (PageRevisions.Count == 0)
+            {
+                <div class="p-4">
+                    <p class="text-secondary mb-0">No revisions yet — a snapshot is captured automatically before each save.</p>
+                </div>
+            }
+            else
+            {
+                <div class="list-group list-group-flush">
+                    @foreach (var rev in PageRevisions)
+                    {
+                        <div class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <div>
+                                    <div class="fw-semibold small">
+                                        <span class="badge text-bg-secondary me-1">#@rev.RevisionNumber</span>
+                                        @if (!string.IsNullOrWhiteSpace(rev.Label))
+                                        {
+                                            <span class="text-secondary">@rev.Label</span>
+                                        }
+                                        else
+                                        {
+                                            <span>@rev.Title</span>
+                                        }
+                                    </div>
+                                    <div class="small text-secondary mt-1">
+                                        @rev.CreatedAt.ToLocalTime().ToString("g")
+                                        @if (!string.IsNullOrWhiteSpace(rev.Label) && rev.Label != rev.Title)
+                                        {
+                                            <span> · @rev.Title</span>
+                                        }
+                                    </div>
+                                </div>
+                                <div class="d-flex gap-1 flex-shrink-0">
+                                    <button class="btn btn-xs btn-outline-secondary" @onclick="() => PreviewRevision(rev)">
+                                        Preview
+                                    </button>
+                                    <button class="btn btn-xs btn-outline-primary" @onclick="() => RestoreRevisionAsync(rev.Id)"
+                                            disabled="@IsRevisionBusy">
+                                        Restore
+                                    </button>
+                                    <button class="btn btn-xs btn-outline-danger" @onclick="() => DeleteRevisionAsync(rev.Id)"
+                                            disabled="@IsRevisionBusy">
+                                        Delete
+                                    </button>
+                                </div>
+                            </div>
+                            @if (PreviewedRevisionId == rev.Id)
+                            {
+                                <div class="mt-3 border-top pt-3">
+                                    <div class="small fw-semibold text-secondary mb-2">Preview of revision #@rev.RevisionNumber</div>
+                                    <CmsBlockPreview BlocksJson="@rev.BlocksJson" />
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly JsonSerializerOptions NavJsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    [Parameter]
+    public Guid? PageId { get; set; }
+
+    // Post-redirect-get flash flag: after a new page's first save, the URL is
+    // canonicalized to include the real page id via a fresh navigation (a new
+    // component instance), so any in-memory "just saved" state doesn't survive -
+    // the confirmation message is instead driven by this query flag, the same
+    // pattern WordPress itself uses for its admin notices after a redirect.
+    [SupplyParameterFromQuery(Name = "saved")]
+    public bool Saved { get; set; }
+
+    private CmsSite? CurrentSite { get; set; }
+    private List<CmsPage> CmsPages { get; set; } = new();
+    private List<CmsWorkflowBlueprintSummary> CmsBlueprints { get; set; } = new();
+    private CmsPageEditorModel PageEditorModel { get; set; } = new() { BlocksJson = "{\"sections\":[]}" };
+    private Guid? SelectedSiteId { get; set; }
+    private bool IsCmsBusy { get; set; }
+    private string CmsStatusMessage { get; set; } = string.Empty;
+    private string CmsErrorMessage { get; set; } = string.Empty;
+    private string SelectedBlueprintKey { get; set; } = string.Empty;
+    private bool ReplaceExistingBlocks { get; set; }
+    private List<NavMenuItem> NavMenuItems { get; set; } = new();
+
+    private List<FormSubmission> FormSubmissions { get; set; } = new();
+    private bool IsSubmissionsBusy { get; set; }
+    private string SubmissionsErrorMessage { get; set; } = string.Empty;
+
+    private List<CmsPageRevision> PageRevisions { get; set; } = new();
+    private bool IsRevisionBusy { get; set; }
+    private string RevisionErrorMessage { get; set; } = string.Empty;
+    private Guid? PreviewedRevisionId { get; set; }
+
+    private Guid? _loadedForPageId;
+    private bool _hasLoadedOnce;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_hasLoadedOnce && _loadedForPageId == PageId)
+        {
+            return;
+        }
+
+        _hasLoadedOnce = true;
+        _loadedForPageId = PageId;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        IsCmsBusy = true;
+        CmsErrorMessage = string.Empty;
+        CmsStatusMessage = string.Empty;
+
+        try
+        {
+            CmsBlueprints = (await CmsBuilderService.ListWorkflowBlueprintsAsync()).ToList();
+
+            var slug = Configuration["Canvas:SiteSlug"] ?? "grantwatson-dev";
+            var name = Configuration["Canvas:SiteName"] ?? slug;
+            var site = await CmsBuilderService.GetSiteBySlugAsync(slug);
+            if (site is null)
+            {
+                site = await CmsBuilderService.SaveSiteAsync(new CmsSiteEditorModel { Name = name, Slug = slug, Theme = "Default" });
+            }
+
+            CurrentSite = site;
+            SelectedSiteId = site.Id;
+            NavMenuItems = ParseNavMenuJson(site.NavMenuJson);
+            CmsPages = (await CmsBuilderService.ListPagesAsync(site.Id)).ToList();
+
+            if (PageId.HasValue)
+            {
+                var page = await CmsBuilderService.GetPageAsync(PageId.Value);
+                if (page is null)
+                {
+                    CmsErrorMessage = "The requested page no longer exists.";
+                    Navigation.NavigateTo("/admin/pages/edit");
+                    return;
+                }
+
+                PageEditorModel = new CmsPageEditorModel
+                {
+                    PageId = page.Id,
+                    SiteId = page.SiteId,
+                    ParentPageId = page.ParentPageId,
+                    Title = page.Title,
+                    Slug = page.Slug,
+                    BlocksJson = page.BlocksJson,
+                    MetaTitle = page.MetaTitle,
+                    MetaDescription = page.MetaDescription,
+                    OgImageUrl = page.OgImageUrl,
+                    CustomCss = page.CustomCss,
+                    Status = page.Status
+                };
+
+                await LoadFormSubmissionsAsync();
+                await LoadRevisionsAsync();
+
+                if (Saved)
+                {
+                    CmsStatusMessage = $"Saved CMS page '{page.Title}'.";
+                }
+            }
+            else
+            {
+                PageEditorModel = new CmsPageEditorModel
+                {
+                    SiteId = SelectedSiteId,
+                    BlocksJson = "{\"sections\":[]}"
+                };
+                SelectedBlueprintKey = string.Empty;
+                ReplaceExistingBlocks = false;
+                FormSubmissions = new();
+                PageRevisions = new();
+                PreviewedRevisionId = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load page editor.");
+            CmsErrorMessage = $"Unable to load page editor. {ex.Message}";
+        }
+        finally
+        {
+            IsCmsBusy = false;
+        }
+    }
+
+    private static List<NavMenuItem> ParseNavMenuJson(string navMenuJson)
+    {
+        if (string.IsNullOrWhiteSpace(navMenuJson))
+        {
+            return new();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<NavMenuItem>>(navMenuJson, NavJsonOptions) ?? new();
+        }
+        catch (JsonException)
+        {
+            return new();
+        }
+    }
+
+    private bool IsCurrentPageInNav()
+    {
+        var path = "/" + PreviewFullPath();
+        return NavMenuItems.Any(n => string.Equals(n.Href, path, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // Self-contained partial save: re-fetch the freshest site so this doesn't clobber
+    // whatever Appearance > Menus/Customize may have changed since this page loaded,
+    // and only appends to NavMenuJson - every other field is carried through unchanged.
+    private async Task AddCurrentPageToNavAsync()
+    {
+        if (string.IsNullOrWhiteSpace(PageEditorModel.Title) || string.IsNullOrWhiteSpace(PageEditorModel.Slug) || CurrentSite is null) return;
+
+        IsCmsBusy = true;
+        try
+        {
+            var freshSite = await CmsBuilderService.GetSiteBySlugAsync(CurrentSite.Slug) ?? CurrentSite;
+            var navItems = ParseNavMenuJson(freshSite.NavMenuJson);
+            navItems.Add(new NavMenuItem(Guid.NewGuid().ToString("N")[..8], PageEditorModel.Title, "/" + PreviewFullPath(), false));
+
+            var saved = await CmsBuilderService.SaveSiteAsync(new CmsSiteEditorModel
+            {
+                SiteId = freshSite.Id,
+                Name = freshSite.Name,
+                Slug = freshSite.Slug,
+                Theme = freshSite.Theme,
+                CustomCss = freshSite.CustomCss,
+                NavMenuJson = JsonSerializer.Serialize(navItems, NavJsonOptions),
+                FooterNavMenuJson = freshSite.FooterNavMenuJson,
+                AccentColorHex = freshSite.AccentColorHex,
+                FontPairingKey = freshSite.FontPairingKey
+            });
+
+            CurrentSite = saved;
+            NavMenuItems = ParseNavMenuJson(saved.NavMenuJson);
+            CmsStatusMessage = "Added this page to the primary navigation menu.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to add page to nav.");
+            CmsErrorMessage = $"Unable to add page to nav. {ex.Message}";
+        }
+        finally
+        {
+            IsCmsBusy = false;
+        }
+    }
+
+    private string BuildFullPath(CmsPage page) => CmsBuilderService.BuildFullPath(page, CmsPages);
+
+    private string PreviewFullPath()
+    {
+        var slug = string.IsNullOrWhiteSpace(PageEditorModel.Slug) ? "" : PageEditorModel.Slug.Trim();
+        if (PageEditorModel.ParentPageId is not { } parentId)
+        {
+            return slug;
+        }
+
+        var byId = CmsPages.ToDictionary(p => p.Id);
+        return byId.TryGetValue(parentId, out var parent)
+            ? $"{BuildFullPath(parent)}/{slug}"
+            : slug;
+    }
+
+    private List<CmsPage> ParentPageOptions()
+    {
+        if (!PageId.HasValue)
+        {
+            return CmsPages;
+        }
+
+        var byParent = CmsPages.ToLookup(p => p.ParentPageId);
+        var excluded = new HashSet<Guid> { PageId.Value };
+        var frontier = new Queue<Guid>();
+        frontier.Enqueue(PageId.Value);
+        while (frontier.Count > 0)
+        {
+            foreach (var child in byParent[frontier.Dequeue()])
+            {
+                if (excluded.Add(child.Id)) frontier.Enqueue(child.Id);
+            }
+        }
+
+        return CmsPages.Where(p => !excluded.Contains(p.Id)).ToList();
+    }
+
+    private string ParentPageIdSelection
+    {
+        get => PageEditorModel.ParentPageId?.ToString() ?? string.Empty;
+        set => PageEditorModel.ParentPageId = Guid.TryParse(value, out var id) ? id : null;
+    }
+
+    private async Task LoadFormSubmissionsAsync()
+    {
+        if (!PageId.HasValue)
+        {
+            FormSubmissions = new();
+            return;
+        }
+
+        IsSubmissionsBusy = true;
+        SubmissionsErrorMessage = string.Empty;
+
+        try
+        {
+            FormSubmissions = (await FormSubmissionService.ListAsync(PageId.Value)).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load form submissions for page {PageId}.", PageId);
+            SubmissionsErrorMessage = $"Unable to load form submissions. {ex.Message}";
+        }
+        finally
+        {
+            IsSubmissionsBusy = false;
+        }
+    }
+
+    private async Task MarkSubmissionReadAsync(Guid submissionId)
+    {
+        await FormSubmissionService.MarkReadAsync(submissionId);
+        await LoadFormSubmissionsAsync();
+    }
+
+    private async Task DeleteSubmissionAsync(Guid submissionId)
+    {
+        await FormSubmissionService.DeleteAsync(submissionId);
+        await LoadFormSubmissionsAsync();
+    }
+
+    private static Dictionary<string, string> ParseSubmissionFields(string fieldsJson)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(
+                string.IsNullOrWhiteSpace(fieldsJson) ? "{}" : fieldsJson) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private async Task LoadRevisionsAsync()
+    {
+        if (!PageId.HasValue)
+        {
+            PageRevisions = new();
+            return;
+        }
+
+        try
+        {
+            PageRevisions = (await PageRevisionService.ListAsync(PageId.Value)).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load revisions for page {PageId}.", PageId);
+            RevisionErrorMessage = $"Unable to load revisions. {ex.Message}";
+        }
+    }
+
+    private void PreviewRevision(CmsPageRevision revision)
+    {
+        PreviewedRevisionId = PreviewedRevisionId == revision.Id ? null : revision.Id;
+    }
+
+    private async Task RestoreRevisionAsync(Guid revisionId)
+    {
+        if (!PageId.HasValue) return;
+
+        IsRevisionBusy = true;
+        RevisionErrorMessage = string.Empty;
+
+        try
+        {
+            var restored = await PageRevisionService.RestoreAsync(PageId.Value, revisionId);
+            await LoadAsync();
+            PreviewedRevisionId = null;
+            CmsStatusMessage = "Revision restored. A checkpoint of the previous state was saved as the latest revision.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to restore revision {RevisionId}.", revisionId);
+            RevisionErrorMessage = $"Unable to restore revision. {ex.Message}";
+        }
+        finally
+        {
+            IsRevisionBusy = false;
+        }
+    }
+
+    private async Task DeleteRevisionAsync(Guid revisionId)
+    {
+        IsRevisionBusy = true;
+        try
+        {
+            await PageRevisionService.DeleteAsync(revisionId);
+            await LoadRevisionsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to delete revision {RevisionId}.", revisionId);
+            RevisionErrorMessage = $"Unable to delete revision. {ex.Message}";
+        }
+        finally
+        {
+            IsRevisionBusy = false;
+        }
+    }
+
+    private async Task SavePageAsync()
+    {
+        if (!SelectedSiteId.HasValue)
+        {
+            CmsErrorMessage = "The site failed to load. Refresh and try again.";
+            return;
+        }
+
+        IsCmsBusy = true;
+        CmsErrorMessage = string.Empty;
+        CmsStatusMessage = string.Empty;
+
+        try
+        {
+            // Checkpoint the current state before overwriting so any save is undoable.
+            if (PageId.HasValue)
+            {
+                var currentPage = await CmsBuilderService.GetPageAsync(PageId.Value);
+                if (currentPage is not null)
+                {
+                    await PageRevisionService.CreateRevisionAsync(currentPage);
+                }
+            }
+
+            PageEditorModel.SiteId = SelectedSiteId;
+            var saved = await CmsBuilderService.SavePageAsync(PageEditorModel);
+            CmsStatusMessage = $"Saved CMS page '{saved.Title}'.";
+
+            if (!PageId.HasValue || PageId.Value != saved.Id)
+            {
+                // Canonicalize the URL to include the real page id now that it exists,
+                // without adding a browser-history entry for the pre-save "new page" state.
+                Navigation.NavigateTo($"/admin/pages/edit/{saved.Id}?saved=true", replace: true);
+                return;
+            }
+
+            CmsPages = (await CmsBuilderService.ListPagesAsync(SelectedSiteId.Value)).ToList();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to save CMS page.");
+            CmsErrorMessage = $"Unable to save CMS page. {ex.Message}";
+        }
+        finally
+        {
+            IsCmsBusy = false;
+        }
+    }
+
+    private async Task SetStatusAndSaveAsync(string status)
+    {
+        PageEditorModel.Status = status;
+        await SavePageAsync();
+    }
+
+    private async Task TrashSelectedPageAsync()
+    {
+        if (!PageId.HasValue || !SelectedSiteId.HasValue)
+        {
+            return;
+        }
+
+        IsCmsBusy = true;
+        CmsErrorMessage = string.Empty;
+        CmsStatusMessage = string.Empty;
+
+        try
+        {
+            await CmsBuilderService.TrashPageAsync(PageId.Value);
+            Navigation.NavigateTo("/admin/pages");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to trash CMS page {PageId}.", PageId);
+            CmsErrorMessage = $"Unable to move page to Trash. {ex.Message}";
+            IsCmsBusy = false;
+        }
+    }
+
+    private async Task ApplyBlueprintAsync()
+    {
+        if (!PageId.HasValue || string.IsNullOrWhiteSpace(SelectedBlueprintKey))
+        {
+            return;
+        }
+
+        IsCmsBusy = true;
+        CmsErrorMessage = string.Empty;
+        CmsStatusMessage = string.Empty;
+
+        try
+        {
+            var updated = await CmsBuilderService.ApplyWorkflowBlueprintAsync(
+                PageId.Value,
+                SelectedBlueprintKey,
+                ReplaceExistingBlocks);
+
+            await LoadAsync();
+            CmsStatusMessage = $"Applied blueprint '{SelectedBlueprintKey}' to '{updated.Title}'.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to apply blueprint {BlueprintKey} to page {PageId}.", SelectedBlueprintKey, PageId);
+            CmsErrorMessage = $"Unable to apply blueprint. {ex.Message}";
+        }
+        finally
+        {
+            IsCmsBusy = false;
+        }
+    }
+
+    // Points at the real live site (Canvas:PublicBaseUrl, e.g. https://grantwatson.dev), not
+    // the bare /cms/ SSR fallback.
+    private string? LivePageUrl =>
+        !string.IsNullOrWhiteSpace(PageEditorModel.Slug)
+            ? $"{(Configuration["Canvas:PublicBaseUrl"] ?? string.Empty).TrimEnd('/')}/{PreviewFullPath()}"
+            : null;
+
+    private void OpenStudio(Guid pageId) => Navigation.NavigateTo($"/admin/canvas/editor/{pageId}");
+}

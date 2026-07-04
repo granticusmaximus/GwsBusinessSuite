@@ -1,0 +1,205 @@
+@page "/admin/appearance/menus"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContributorAccess")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.CmsBuilder
+@using GwsBusinessSuite.Domain.Entities
+@using System.Text.Json
+@inject ICmsBuilderService CmsBuilderService
+@inject IConfiguration Configuration
+@inject ILogger<AppearanceMenus> Logger
+
+<PageTitle>Menus</PageTitle>
+
+<div class="page-header">
+    <h1><i class="bi bi-list me-2 text-primary"></i>Menus</h1>
+    <p>Edit the header (primary) and footer navigation for @(CurrentSite?.Name ?? "the live site").</p>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+}
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-info" role="alert">@StatusMessage</div>
+}
+
+<div class="card border-0 shadow-sm" style="max-width: 720px;">
+    <div class="card-body">
+        <div class="btn-group btn-group-sm mb-3" role="group" aria-label="Navigation menu location">
+            <button type="button" class="btn @(ActiveNavLocation == "Primary" ? "btn-primary" : "btn-outline-primary")"
+                    @onclick='() => ActiveNavLocation = "Primary"'>
+                Primary
+            </button>
+            <button type="button" class="btn @(ActiveNavLocation == "Footer" ? "btn-primary" : "btn-outline-primary")"
+                    @onclick='() => ActiveNavLocation = "Footer"'>
+                Footer
+            </button>
+        </div>
+
+        @{
+            var isFooterLocation = ActiveNavLocation == "Footer";
+            var activeNavItems = isFooterLocation ? FooterNavMenuItems : NavMenuItems;
+        }
+        <div class="d-flex align-items-center justify-content-between mb-2">
+            <span class="small text-secondary">@(isFooterLocation ? "Shown in the site footer." : "Shown in the site header.")</span>
+            <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => AddNavItem(activeNavItems)">
+                <i class="bi bi-plus-lg"></i> Add Link
+            </button>
+        </div>
+        @if (activeNavItems.Count == 0)
+        {
+            <p class="small text-secondary mb-0">
+                No @(isFooterLocation ? "footer" : "nav") links yet — click "Add Link" to build @(isFooterLocation ? "the site's footer links" : "the site's top navigation").
+            </p>
+        }
+        else
+        {
+            @for (var i = 0; i < activeNavItems.Count; i++)
+            {
+                var index = i;
+                var item = activeNavItems[index];
+                <div class="d-flex gap-2 align-items-center mb-2">
+                    <input class="form-control form-control-sm" placeholder="Label" value="@item.Label"
+                           @oninput="(e) => UpdateNavItem(activeNavItems, index, item with { Label = e.Value?.ToString() ?? string.Empty })" />
+                    <input class="form-control form-control-sm font-monospace" placeholder="/path" value="@item.Href"
+                           @oninput="(e) => UpdateNavItem(activeNavItems, index, item with { Href = e.Value?.ToString() ?? string.Empty })" />
+                    <div class="form-check form-check-inline flex-shrink-0 mb-0" title="Open in new tab">
+                        <input class="form-check-input" type="checkbox" id="@($"nav-newtab-{ActiveNavLocation}-{index}")"
+                               checked="@item.OpenInNewTab"
+                               @onchange="(e) => UpdateNavItem(activeNavItems, index, item with { OpenInNewTab = (bool)(e.Value ?? false) })" />
+                        <label class="form-check-label small" for="@($"nav-newtab-{ActiveNavLocation}-{index}")">↗</label>
+                    </div>
+                    <div class="btn-group btn-group-sm flex-shrink-0">
+                        <button type="button" class="btn btn-outline-secondary" title="Move up" disabled="@(index == 0)" @onclick="() => MoveNavItem(activeNavItems, index, -1)">
+                            <i class="bi bi-arrow-up"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" title="Move down" disabled="@(index == activeNavItems.Count - 1)" @onclick="() => MoveNavItem(activeNavItems, index, 1)">
+                            <i class="bi bi-arrow-down"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-danger" title="Remove" @onclick="() => RemoveNavItem(activeNavItems, index)">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            }
+        }
+
+        <button class="btn btn-primary btn-sm mt-3" @onclick="SaveAsync" disabled="@IsBusy">Save changes</button>
+    </div>
+</div>
+
+@code {
+    private static readonly JsonSerializerOptions NavJsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    private CmsSite? CurrentSite { get; set; }
+    private List<NavMenuItem> NavMenuItems { get; set; } = new();
+    private List<NavMenuItem> FooterNavMenuItems { get; set; } = new();
+    private string ActiveNavLocation { get; set; } = "Primary";
+    private bool IsBusy { get; set; }
+    private string StatusMessage { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var slug = Configuration["Canvas:SiteSlug"] ?? "grantwatson-dev";
+        var name = Configuration["Canvas:SiteName"] ?? slug;
+
+        var site = await CmsBuilderService.GetSiteBySlugAsync(slug);
+        if (site is null)
+        {
+            site = await CmsBuilderService.SaveSiteAsync(new CmsSiteEditorModel { Name = name, Slug = slug, Theme = "Default" });
+        }
+
+        CurrentSite = site;
+        NavMenuItems = ParseNavMenuJson(site.NavMenuJson);
+        FooterNavMenuItems = ParseNavMenuJson(site.FooterNavMenuJson);
+    }
+
+    private static List<NavMenuItem> ParseNavMenuJson(string navMenuJson)
+    {
+        if (string.IsNullOrWhiteSpace(navMenuJson))
+        {
+            return new();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<NavMenuItem>>(navMenuJson, NavJsonOptions) ?? new();
+        }
+        catch (JsonException)
+        {
+            return new();
+        }
+    }
+
+    // Shared by both the Primary and Footer editors above.
+    private void AddNavItem(List<NavMenuItem> items)
+    {
+        items.Add(new NavMenuItem(Guid.NewGuid().ToString("N")[..8], "New Link", "/", false));
+    }
+
+    private void UpdateNavItem(List<NavMenuItem> items, int index, NavMenuItem updated)
+    {
+        if (index < 0 || index >= items.Count) return;
+        items[index] = updated;
+    }
+
+    private void RemoveNavItem(List<NavMenuItem> items, int index)
+    {
+        if (index < 0 || index >= items.Count) return;
+        items.RemoveAt(index);
+    }
+
+    private void MoveNavItem(List<NavMenuItem> items, int index, int direction)
+    {
+        var target = index + direction;
+        if (index < 0 || index >= items.Count || target < 0 || target >= items.Count) return;
+        (items[index], items[target]) = (items[target], items[index]);
+    }
+
+    // Partial save: re-fetch the freshest site so a concurrent edit on
+    // Appearance > Customize isn't clobbered - only NavMenuJson/FooterNavMenuJson
+    // come from this screen, everything else carries through unchanged.
+    private async Task SaveAsync()
+    {
+        if (CurrentSite is null) return;
+
+        IsBusy = true;
+        StatusMessage = string.Empty;
+        ErrorMessage = string.Empty;
+
+        try
+        {
+            var freshSite = await CmsBuilderService.GetSiteBySlugAsync(CurrentSite.Slug) ?? CurrentSite;
+
+            var saved = await CmsBuilderService.SaveSiteAsync(new CmsSiteEditorModel
+            {
+                SiteId = freshSite.Id,
+                Name = freshSite.Name,
+                Slug = freshSite.Slug,
+                Theme = freshSite.Theme,
+                CustomCss = freshSite.CustomCss,
+                NavMenuJson = JsonSerializer.Serialize(NavMenuItems, NavJsonOptions),
+                FooterNavMenuJson = JsonSerializer.Serialize(FooterNavMenuItems, NavJsonOptions),
+                AccentColorHex = freshSite.AccentColorHex,
+                FontPairingKey = freshSite.FontPairingKey
+            });
+
+            CurrentSite = saved;
+            NavMenuItems = ParseNavMenuJson(saved.NavMenuJson);
+            FooterNavMenuItems = ParseNavMenuJson(saved.FooterNavMenuJson);
+            StatusMessage = "Saved navigation menus.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to save nav menus.");
+            ErrorMessage = $"Unable to save navigation menus. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+}

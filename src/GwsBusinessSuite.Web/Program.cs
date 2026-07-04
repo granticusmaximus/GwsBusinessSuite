@@ -327,7 +327,7 @@ app.MapGet("/og-image/{slug}", async (
     return Results.Bytes(bytes, mime);
 }).AllowAnonymous().RequireRateLimiting("public-read");
 
-// Serves a CmsSite/CmsPage built in Canvas ("/admin/canvas") as a
+// Serves a CmsSite/CmsPage built via the admin Pages screens ("/admin/pages") as a
 // standalone public HTML page. These pages are independent of the apps/public-site React
 // app — the structured builder targets sites that don't have a hand-written frontend.
 // Catch-all so nested pages resolve (see GetPageByFullPathAsync) — a bare {pageSlug} segment

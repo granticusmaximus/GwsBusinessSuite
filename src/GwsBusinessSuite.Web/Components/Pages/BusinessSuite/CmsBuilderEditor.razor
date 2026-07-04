@@ -69,7 +69,7 @@ else if (_page is null)
     <div class="canvas-empty-state">
         <div class="canvas-empty-icon"><i class="bi bi-exclamation-triangle"></i></div>
         <h3>Page not found</h3>
-        <p>This page may have been deleted. <a href="/admin/canvas">Back to Canvas</a>.</p>
+        <p>This page may have been deleted. <a href="/admin/pages">Back to Pages</a>.</p>
     </div>
 }
 else
@@ -1452,5 +1452,5 @@ else
     private static string GetPropStatic(LayoutWidget w, string key, string def) =>
         w.Props.TryGetValue(key, out var v) ? v : def;
 
-    private void BackToList() => Navigation.NavigateTo("/admin/canvas");
+    private void BackToList() => Navigation.NavigateTo($"/admin/pages/edit/{PageId}");
 }

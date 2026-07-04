@@ -1,0 +1,28 @@
+.cms-structured-toolbar {
+    display: grid;
+    grid-template-columns: minmax(220px, 320px) auto auto;
+    gap: 1rem;
+    align-items: end;
+}
+
+.cms-structured-toolbar-group {
+    min-width: 0;
+}
+
+.cms-custom-css-editor {
+    min-height: 140px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.82rem;
+}
+
+.btn-xs {
+    padding: 0.15rem 0.5rem;
+    font-size: 0.72rem;
+}
+
+@media (max-width: 991.98px) {
+    .cms-structured-toolbar {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+    }
+}

@@ -1,0 +1,132 @@
+@page "/admin/appearance/customize"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContributorAccess")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.CmsBuilder
+@using GwsBusinessSuite.Domain.Entities
+@using Microsoft.AspNetCore.Components.Forms
+@inject ICmsBuilderService CmsBuilderService
+@inject IConfiguration Configuration
+@inject ILogger<AppearanceCustomize> Logger
+
+<PageTitle>Customize</PageTitle>
+
+<div class="page-header">
+    <h1><i class="bi bi-palette me-2 text-primary"></i>Customize</h1>
+    <p>Global design tokens for @(CurrentSite?.Name ?? "the live site") — applies site-wide, across every page and the blog.</p>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+}
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-info" role="alert">@StatusMessage</div>
+}
+
+<div class="card border-0 shadow-sm" style="max-width: 640px;">
+    <div class="card-body">
+        <label class="form-label fw-semibold small">Global Design</label>
+        <div class="row g-2 mb-3">
+            <div class="col-6">
+                <label class="form-label small text-secondary mb-1">Accent Color</label>
+                <input type="color" class="form-control form-control-color w-100" @bind="AccentColorInput" />
+            </div>
+            <div class="col-6">
+                <label class="form-label small text-secondary mb-1">Font Pairing</label>
+                <select class="form-select form-select-sm" @bind="FontPairingInput">
+                    <option value="@CmsFontPairings.Elegant">Elegant (Playfair + Inter)</option>
+                    <option value="@CmsFontPairings.Modern">Modern (Manrope + Inter)</option>
+                    <option value="@CmsFontPairings.Classic">Classic (Merriweather + Source Sans)</option>
+                </select>
+            </div>
+        </div>
+
+        <label class="form-label fw-semibold small">Site-wide Custom CSS</label>
+        <InputTextArea class="form-control font-monospace customize-css-editor" @bind-Value="CustomCssInput"
+                       placeholder="Applies to every page on this site. Page-level CSS can override it." spellcheck="false" />
+
+        <div class="d-flex flex-wrap gap-2 mt-3">
+            <button class="btn btn-primary btn-sm" @onclick="SaveAsync" disabled="@IsBusy">Save changes</button>
+            @if (ExportUrl is { } exportUrl)
+            {
+                <a class="btn btn-sm btn-outline-secondary" href="@exportUrl" download>
+                    <i class="bi bi-file-zip me-1"></i>Export ZIP
+                </a>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private CmsSite? CurrentSite { get; set; }
+    private string CustomCssInput { get; set; } = string.Empty;
+    private string AccentColorInput { get; set; } = "#f59e0b";
+    private string FontPairingInput { get; set; } = CmsFontPairings.Elegant;
+    private bool IsBusy { get; set; }
+    private string StatusMessage { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+
+    private string? ExportUrl =>
+        CurrentSite is { } site ? $"/admin/api/cms/{site.Slug}/export.zip" : null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var slug = Configuration["Canvas:SiteSlug"] ?? "grantwatson-dev";
+        var name = Configuration["Canvas:SiteName"] ?? slug;
+
+        var site = await CmsBuilderService.GetSiteBySlugAsync(slug);
+        if (site is null)
+        {
+            site = await CmsBuilderService.SaveSiteAsync(new CmsSiteEditorModel { Name = name, Slug = slug, Theme = "Default" });
+        }
+
+        CurrentSite = site;
+        CustomCssInput = site.CustomCss;
+        AccentColorInput = site.AccentColorHex;
+        FontPairingInput = site.FontPairingKey;
+    }
+
+    // Partial save: re-fetch the freshest site so a concurrent edit on
+    // Appearance > Menus isn't clobbered - only these design fields come from this
+    // screen, NavMenuJson/FooterNavMenuJson carry through unchanged.
+    private async Task SaveAsync()
+    {
+        if (CurrentSite is null) return;
+
+        IsBusy = true;
+        StatusMessage = string.Empty;
+        ErrorMessage = string.Empty;
+
+        try
+        {
+            var freshSite = await CmsBuilderService.GetSiteBySlugAsync(CurrentSite.Slug) ?? CurrentSite;
+
+            var saved = await CmsBuilderService.SaveSiteAsync(new CmsSiteEditorModel
+            {
+                SiteId = freshSite.Id,
+                Name = freshSite.Name,
+                Slug = freshSite.Slug,
+                Theme = freshSite.Theme,
+                CustomCss = CustomCssInput,
+                NavMenuJson = freshSite.NavMenuJson,
+                FooterNavMenuJson = freshSite.FooterNavMenuJson,
+                AccentColorHex = AccentColorInput,
+                FontPairingKey = FontPairingInput
+            });
+
+            CurrentSite = saved;
+            StatusMessage = "Saved design settings.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to save site design settings.");
+            ErrorMessage = $"Unable to save design settings. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+}
