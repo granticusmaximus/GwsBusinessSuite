@@ -78,7 +78,14 @@ public sealed class CmsSite : AuditableEntity
     public required string Slug { get; set; }
     public string Theme { get; set; } = "Default";
     public string CustomCss { get; set; } = string.Empty;
+
+    // WordPress-style "theme locations": NavMenuJson is the Primary (header) menu — the
+    // original single nav menu field, kept under its original name so existing sites'
+    // menus survive untouched — and FooterNavMenuJson is the new Footer location. Two
+    // flat, named locations (matching what a typical WordPress default theme registers)
+    // rather than a generic n-location system, since that's all this site needs.
     public string NavMenuJson { get; set; } = "[]";
+    public string FooterNavMenuJson { get; set; } = "[]";
 }
 
 public static class CmsPageStatuses

@@ -79,6 +79,62 @@ public sealed class PublicSiteHtmlRendererTests
     }
 
     [Fact]
+    public void ParseFooterNavItems_ShouldReturnEmptyList_WhenJsonIsEmpty()
+    {
+        var items = PublicSiteHtmlRenderer.ParseFooterNavItems(null);
+
+        Assert.Empty(items);
+    }
+
+    [Fact]
+    public void ParseFooterNavItems_ShouldReturnEmptyList_WhenJsonIsInvalid()
+    {
+        var items = PublicSiteHtmlRenderer.ParseFooterNavItems("not json");
+
+        Assert.Empty(items);
+    }
+
+    [Fact]
+    public void ParseFooterNavItems_ShouldReturnEmptyList_WhenArrayIsEmpty()
+    {
+        var items = PublicSiteHtmlRenderer.ParseFooterNavItems("[]");
+
+        Assert.Empty(items);
+    }
+
+    [Fact]
+    public void ParseFooterNavItems_ShouldReturnStoredItems_InOrder()
+    {
+        var json = """[{"id":"1","label":"Privacy","href":"/privacy","openInNewTab":false},{"id":"2","label":"Terms","href":"/terms","openInNewTab":false}]""";
+
+        var items = PublicSiteHtmlRenderer.ParseFooterNavItems(json);
+
+        Assert.Equal(2, items.Count);
+        Assert.Equal("Privacy", items[0].Label);
+        Assert.Equal("Terms", items[1].Label);
+    }
+
+    [Fact]
+    public void Layout_ShouldRenderFooterNavItems_WhenProvided()
+    {
+        var footerItems = new List<NavMenuItem> { new("1", "Privacy", "/privacy", false) };
+
+        var html = PublicSiteHtmlRenderer.Layout("Title", "Description", null, "<p>body</p>", footerNavItems: footerItems);
+
+        Assert.Contains("footer-links", html);
+        Assert.Contains("Privacy", html);
+        Assert.Contains("href=\"/privacy\"", html);
+    }
+
+    [Fact]
+    public void Layout_ShouldOmitFooterLinksSection_WhenFooterNavItemsEmptyOrOmitted()
+    {
+        var html = PublicSiteHtmlRenderer.Layout("Title", "Description", null, "<p>body</p>");
+
+        Assert.DoesNotContain("footer-links", html);
+    }
+
+    [Fact]
     public void SubmittedBanner_ShouldRenderThanksMessage()
     {
         var html = PublicSiteHtmlRenderer.SubmittedBanner();

@@ -17,6 +17,8 @@ public sealed class CmsSiteEditorModel
     public string CustomCss { get; set; } = string.Empty;
 
     public string NavMenuJson { get; set; } = "[]";
+
+    public string FooterNavMenuJson { get; set; } = "[]";
 }
 
 public sealed class CmsPageEditorModel

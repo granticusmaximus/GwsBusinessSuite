@@ -191,6 +191,7 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         site.Theme = string.IsNullOrWhiteSpace(editor.Theme) ? "Default" : editor.Theme.Trim();
         site.CustomCss = editor.CustomCss?.Trim() ?? string.Empty;
         site.NavMenuJson = string.IsNullOrWhiteSpace(editor.NavMenuJson) ? "[]" : editor.NavMenuJson.Trim();
+        site.FooterNavMenuJson = string.IsNullOrWhiteSpace(editor.FooterNavMenuJson) ? "[]" : editor.FooterNavMenuJson.Trim();
         site.UpdatedAt = now;
         site.UpdatedBy = "cms-ui";
 
