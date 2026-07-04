@@ -127,6 +127,20 @@ public sealed class MediaLibraryService(IAppDbContext dbContext, ISiteSettingsSe
         return (asset.ContentType, Convert.FromBase64String(base64Payload));
     }
 
+    public async Task<MediaAssetSummary?> UpdateAltTextAsync(Guid mediaAssetId, string altText, CancellationToken cancellationToken = default)
+    {
+        var asset = await dbContext.MediaAssets.FirstOrDefaultAsync(item => item.Id == mediaAssetId, cancellationToken);
+        if (asset is null)
+        {
+            return null;
+        }
+
+        asset.AltText = altText?.Trim() ?? string.Empty;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return ToSummary(asset);
+    }
+
     public async Task DeleteAsync(Guid mediaAssetId, CancellationToken cancellationToken = default)
     {
         var asset = await dbContext.MediaAssets.FirstOrDefaultAsync(item => item.Id == mediaAssetId, cancellationToken);

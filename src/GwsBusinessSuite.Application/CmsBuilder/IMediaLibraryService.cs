@@ -16,5 +16,7 @@ public interface IMediaLibraryService
 
     Task<(string ContentType, byte[] Content)?> GetContentAsync(Guid mediaAssetId, CancellationToken cancellationToken = default);
 
+    Task<MediaAssetSummary?> UpdateAltTextAsync(Guid mediaAssetId, string altText, CancellationToken cancellationToken = default);
+
     Task DeleteAsync(Guid mediaAssetId, CancellationToken cancellationToken = default);
 }

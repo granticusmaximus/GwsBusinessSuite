@@ -1,0 +1,256 @@
+@page "/admin/media"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContributorAccess")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.CmsBuilder
+@inject IMediaLibraryService MediaLibraryService
+@inject ILogger<Media> Logger
+@inject IJSRuntime JS
+
+<PageTitle>Media Library</PageTitle>
+
+<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-images me-2 text-primary"></i>Media Library</h1>
+        <p>Upload and manage every image available to Posts, Content Studio, and page builder blocks.</p>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-success" role="alert">@StatusMessage</div>
+}
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+}
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-5">
+                <label class="form-label small text-secondary">Alt text (applied to next upload)</label>
+                <input class="form-control" @bind="UploadAltTextInput" placeholder="Describe the image" />
+            </div>
+            <div class="col-md-5">
+                <label class="form-label small text-secondary">Upload image</label>
+                <InputFile OnChange="OnFileSelectedAsync" disabled="@IsBusy" class="form-control" accept="image/*" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small text-secondary">&nbsp;</label>
+                <input class="form-control" placeholder="Search filename…" @bind="SearchInput" @bind:event="oninput" />
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (!_loaded)
+{
+    <div class="d-flex align-items-center gap-2 text-secondary">
+        <span class="spinner-border spinner-border-sm"></span>
+        <span>Loading media…</span>
+    </div>
+}
+else if (FilteredAssets.Count == 0)
+{
+    <p class="text-secondary">@(MediaAssets.Count == 0 ? "No media uploaded yet." : "No media matches your search.")</p>
+}
+else
+{
+    <div class="media-grid">
+        @foreach (var asset in FilteredAssets)
+        {
+            <div class="media-card" @onclick="() => OpenDetails(asset)">
+                <img src="@asset.Url" alt="@asset.AltText" />
+                <div class="media-card-body">
+                    <div class="small text-truncate fw-semibold" title="@asset.FileName">@asset.FileName</div>
+                    <div class="small text-secondary">@FormatSize(asset.SizeBytes) · @asset.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")</div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@if (SelectedAsset is not null)
+{
+    <div class="modal d-block" tabindex="-1" style="background: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@SelectedAsset.FileName</h5>
+                    <button type="button" class="btn-close" @onclick="CloseDetails"></button>
+                </div>
+                <div class="modal-body">
+                    <img src="@SelectedAsset.Url" alt="@SelectedAsset.AltText" class="img-fluid rounded mb-3" />
+                    <dl class="row small mb-3">
+                        <dt class="col-4 text-secondary">Type</dt>
+                        <dd class="col-8">@SelectedAsset.ContentType</dd>
+                        <dt class="col-4 text-secondary">Size</dt>
+                        <dd class="col-8">@FormatSize(SelectedAsset.SizeBytes)</dd>
+                        <dt class="col-4 text-secondary">Uploaded</dt>
+                        <dd class="col-8">@SelectedAsset.CreatedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</dd>
+                        <dt class="col-4 text-secondary">URL</dt>
+                        <dd class="col-8">
+                            <code class="small">@SelectedAsset.Url</code>
+                            <button class="btn btn-sm btn-link p-0 ms-1" @onclick="CopyUrlAsync">Copy</button>
+                        </dd>
+                    </dl>
+                    <div class="mb-2">
+                        <label class="form-label small text-secondary">Alt text</label>
+                        <input class="form-control" @bind="DetailsAltTextInput" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-danger me-auto" @onclick="DeleteSelectedAsync" disabled="@IsBusy">
+                        <i class="bi bi-trash me-1"></i>Delete
+                    </button>
+                    <button class="btn btn-secondary" @onclick="CloseDetails">Close</button>
+                    <button class="btn btn-primary" @onclick="SaveAltTextAsync" disabled="@IsBusy">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<MediaAssetSummary> MediaAssets { get; set; } = new();
+    private MediaAssetSummary? SelectedAsset { get; set; }
+    private string DetailsAltTextInput { get; set; } = string.Empty;
+    private string UploadAltTextInput { get; set; } = string.Empty;
+    private string SearchInput { get; set; } = string.Empty;
+
+    private bool _loaded;
+    private bool IsBusy { get; set; }
+    private string StatusMessage { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+
+    private IReadOnlyList<MediaAssetSummary> FilteredAssets =>
+        string.IsNullOrWhiteSpace(SearchInput)
+            ? MediaAssets
+            : MediaAssets.Where(a => a.FileName.Contains(SearchInput, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAssetsAsync();
+        _loaded = true;
+    }
+
+    private async Task LoadAssetsAsync()
+    {
+        MediaAssets = (await MediaLibraryService.ListAsync()).ToList();
+    }
+
+    private async Task OnFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        IsBusy = true;
+        try
+        {
+            const long maxBytes = 25 * 1024 * 1024;
+            using var stream = e.File.OpenReadStream(maxAllowedSize: maxBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+
+            await MediaLibraryService.UploadAsync(e.File.Name, ms.ToArray(), UploadAltTextInput);
+            UploadAltTextInput = string.Empty;
+            await LoadAssetsAsync();
+            StatusMessage = "Image uploaded.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Media upload failed.");
+            ErrorMessage = $"Upload failed. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void OpenDetails(MediaAssetSummary asset)
+    {
+        SelectedAsset = asset;
+        DetailsAltTextInput = asset.AltText;
+        StatusMessage = string.Empty;
+        ErrorMessage = string.Empty;
+    }
+
+    private void CloseDetails()
+    {
+        SelectedAsset = null;
+    }
+
+    private async Task SaveAltTextAsync()
+    {
+        if (SelectedAsset is null) return;
+
+        IsBusy = true;
+        try
+        {
+            var updated = await MediaLibraryService.UpdateAltTextAsync(SelectedAsset.Id, DetailsAltTextInput);
+            if (updated is not null)
+            {
+                await LoadAssetsAsync();
+                SelectedAsset = updated;
+                StatusMessage = "Alt text saved.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save alt text for media asset {MediaAssetId}.", SelectedAsset.Id);
+            ErrorMessage = $"Unable to save alt text. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task DeleteSelectedAsync()
+    {
+        if (SelectedAsset is null) return;
+        var assetId = SelectedAsset.Id;
+
+        IsBusy = true;
+        try
+        {
+            await MediaLibraryService.DeleteAsync(assetId);
+            await LoadAssetsAsync();
+            SelectedAsset = null;
+            StatusMessage = "Media deleted.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to delete media asset {MediaAssetId}.", assetId);
+            ErrorMessage = $"Unable to delete. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task CopyUrlAsync()
+    {
+        if (SelectedAsset is null) return;
+        var absoluteUrl = $"{SelectedAsset.Url}";
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", absoluteUrl);
+        StatusMessage = "URL copied.";
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1024)
+        {
+            return $"{bytes} B";
+        }
+
+        if (bytes < 1024 * 1024)
+        {
+            return $"{bytes / 1024.0:0.#} KB";
+        }
+
+        return $"{bytes / (1024.0 * 1024.0):0.#} MB";
+    }
+}

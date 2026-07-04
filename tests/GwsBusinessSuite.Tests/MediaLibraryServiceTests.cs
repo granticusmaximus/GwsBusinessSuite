@@ -108,6 +108,31 @@ public sealed class MediaLibraryServiceTests
     }
 
     [Fact]
+    public async Task UpdateAltTextAsync_ShouldPersistTrimmedAltText_AndReturnUpdatedSummary()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new MediaLibraryService(db, new GwsBusinessSuite.Application.Settings.SiteSettingsService(db));
+        var uploaded = await service.UploadAsync("logo.png", PngBytes, "Old alt text");
+
+        var updated = await service.UpdateAltTextAsync(uploaded.Id, "  New alt text  ");
+
+        updated.Should().NotBeNull();
+        updated!.AltText.Should().Be("New alt text");
+
+        var reloaded = (await service.ListAsync()).Single(a => a.Id == uploaded.Id);
+        reloaded.AltText.Should().Be("New alt text");
+    }
+
+    [Fact]
+    public async Task UpdateAltTextAsync_ShouldReturnNull_ForUnknownId()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new MediaLibraryService(db, new GwsBusinessSuite.Application.Settings.SiteSettingsService(db));
+
+        (await service.UpdateAltTextAsync(Guid.NewGuid(), "Alt text")).Should().BeNull();
+    }
+
+    [Fact]
     public async Task GetContentAsync_ShouldReturnNull_ForUnknownId()
     {
         await using var db = await CreateDbAsync();
