@@ -2,9 +2,11 @@
 @rendermode InteractiveServer
 @using GwsBusinessSuite.Application.Abstractions
 @using GwsBusinessSuite.Application.ContentStudio
+@using GwsBusinessSuite.Application.Settings
 @using Microsoft.Extensions.Options
 @inject IOllamaService Ollama
 @inject IOptions<ContentStudioOptions> StudioOptions
+@inject ISiteSettingsService SiteSettingsService
 @inject ILogger<OllamaConsole> Logger
 
 <PageTitle>Ollama Console</PageTitle>
@@ -194,10 +196,14 @@
     protected override async Task OnInitializedAsync()
     {
         var options = StudioOptions.Value;
+        var settings = await SiteSettingsService.GetSettingsAsync();
+
         _baseUrl = options.BaseUrl;
-        _configuredModel = options.Model;
-        _timeoutMinutes = options.GenerationTimeoutMinutes;
-        _promptModel = options.Model;
+        _configuredModel = string.IsNullOrWhiteSpace(settings.OllamaModelOverride)
+            ? options.Model
+            : settings.OllamaModelOverride;
+        _timeoutMinutes = settings.OllamaTimeoutMinutesOverride ?? options.GenerationTimeoutMinutes;
+        _promptModel = _configuredModel;
 
         await CheckConnectionAsync();
     }
@@ -243,7 +249,9 @@
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            _response = await Ollama.GenerateAsync(_promptModel, _systemPrompt, _userPrompt);
+            var timeoutMinutes = _timeoutMinutes <= 0 ? ContentStudioOptions.DefaultGenerationTimeoutMinutes : _timeoutMinutes;
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(timeoutMinutes));
+            _response = await Ollama.GenerateAsync(_promptModel, _systemPrompt, _userPrompt, cts.Token);
         }
         catch (Exception ex)
         {

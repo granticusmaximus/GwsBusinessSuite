@@ -5,6 +5,7 @@ using GwsBusinessSuite.Application.Crm;
 using GwsBusinessSuite.Application.CjAds;
 using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.NewsIntelligence;
+using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
@@ -44,12 +45,13 @@ public static class DependencyInjection
             var baseUrl = string.IsNullOrWhiteSpace(options.BaseUrl)
                 ? ContentStudioOptions.DefaultBaseUrl
                 : options.BaseUrl;
-            var timeoutMinutes = options.GenerationTimeoutMinutes <= 0
-                ? ContentStudioOptions.DefaultGenerationTimeoutMinutes
-                : options.GenerationTimeoutMinutes;
 
             client.BaseAddress = new Uri(baseUrl);
-            client.Timeout = TimeSpan.FromMinutes(timeoutMinutes);
+            // This is a generous outer safety net only. The actual per-call timeout can be
+            // overridden per-site via Settings > AI without an app restart, so it's enforced
+            // with a linked CancellationTokenSource around each generation call instead
+            // (see ContentStudioService.GetEffectiveTimeoutAsync).
+            client.Timeout = TimeSpan.FromHours(2);
         }).AddResilienceHandler("ollama-transient-retry", builder =>
         {
             // Only retries connection-level failures (Ollama not yet up, dropped socket,
@@ -68,6 +70,7 @@ public static class DependencyInjection
         services.AddHttpClient<ITrendResearchService, TrendResearchService>();
         services.AddScoped<IDockerDeploymentService, DockerDeploymentService>();
         services.AddScoped<ICjAdsService, CjAdsService>();
+        services.AddScoped<ISiteSettingsService, SiteSettingsService>();
         services.AddScoped<IAffiliateOfferScoringService, AffiliateOfferScoringService>();
         services.AddScoped<ICmsBuilderService, CmsBuilderService>();
         services.AddScoped<IMediaLibraryService, MediaLibraryService>();

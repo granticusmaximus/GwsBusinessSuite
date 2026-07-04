@@ -18,6 +18,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<SeoArticleAffiliateInteraction> SeoArticleAffiliateInteractions { get; }
     DbSet<SeoArticleWorkflowEvent> SeoArticleWorkflowEvents { get; }
     DbSet<CjConnectorSettings> CjConnectorSettings { get; }
+    DbSet<SiteSettings> SiteSettings { get; }
     DbSet<Article> Articles { get; }
     DbSet<ArticleAffiliatePlacement> ArticleAffiliatePlacements { get; }
     DbSet<AppUser> AppUsers { get; }

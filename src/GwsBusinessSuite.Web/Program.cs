@@ -4,6 +4,7 @@ using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure;
 using GwsBusinessSuite.Application.ContentStudio;
+using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Web.Components;
 using Microsoft.AspNetCore.Antiforgery;
@@ -464,15 +465,19 @@ app.MapGet("/{**pageSlug}", (string pageSlug, HttpRequest request, ICmsBuilderSe
 app.MapGet("/blog", async (
         IDbContextFactory<ApplicationDbContext> dbFactory,
         ICmsBuilderService cmsBuilderService,
+        ISiteSettingsService siteSettingsService,
         IConfiguration configuration,
         string? keyword,
         string? category,
         string? tag,
         int page = 1,
-        int pageSize = 10) =>
+        int? pageSize = null) =>
     {
         page = page < 1 ? 1 : page;
-        pageSize = pageSize is 10 or 25 or 50 ? pageSize : 10;
+        // A missing ?pageSize= falls back to the site's configured default (Settings >
+        // Reading) rather than a hardcoded 10 - an explicit query param still overrides it.
+        var effectivePageSize = pageSize ?? (await siteSettingsService.GetSettingsAsync()).PostsPerPage;
+        effectivePageSize = effectivePageSize is 10 or 25 or 50 ? effectivePageSize : 10;
 
         await using var db = await dbFactory.CreateDbContextAsync();
         // SQLite can't translate ORDER BY on a DateTimeOffset column, so order client-side
@@ -512,12 +517,12 @@ app.MapGet("/blog", async (
             filtered = filtered.Where(a => ParseTags(a.Tags).Contains(tag, StringComparer.OrdinalIgnoreCase)).ToList();
         }
 
-        var totalPages = Math.Max(1, (int)Math.Ceiling(filtered.Count / (double)pageSize));
+        var totalPages = Math.Max(1, (int)Math.Ceiling(filtered.Count / (double)effectivePageSize));
         page = Math.Min(page, totalPages);
 
         var pageItems = filtered
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
+            .Skip((page - 1) * effectivePageSize)
+            .Take(effectivePageSize)
             .Select(a =>
             {
                 var articleCategory = a.CategoryId.HasValue && categoryLookup.TryGetValue(a.CategoryId.Value, out var c) ? c : null;
@@ -529,7 +534,7 @@ app.MapGet("/blog", async (
             .ToList();
 
         var navMenus = await GetPublicNavMenusAsync(cmsBuilderService, configuration);
-        var bodyHtml = PublicSiteHtmlRenderer.BlogListBody(pageItems, keywords, keyword, categories, category, tag, page, pageSize, filtered.Count, totalPages);
+        var bodyHtml = PublicSiteHtmlRenderer.BlogListBody(pageItems, keywords, keyword, categories, category, tag, page, effectivePageSize, filtered.Count, totalPages);
         var html = PublicSiteHtmlRenderer.Layout("Blog — Grant Watson", "Thoughts on software, building products, and the web.", null, bodyHtml, navMenus.Primary, navMenus.Footer, navMenus.AccentColorHex, navMenus.FontPairingKey);
         return Results.Content(html, "text/html");
     })

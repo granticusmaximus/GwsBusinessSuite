@@ -4,12 +4,14 @@
 @implements IAsyncDisposable
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.Articles
+@using GwsBusinessSuite.Application.Settings
 @using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Infrastructure.Data
 @using Markdig
 @using Microsoft.EntityFrameworkCore
 @using System.Text.RegularExpressions
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ISiteSettingsService SiteSettingsService
 @inject NavigationManager Navigation
 @inject ILogger<ArticleEditorDetail> Logger
 @inject IJSRuntime JS
@@ -136,7 +138,7 @@ else
                         <div class="upload-prompt">
                             <i class="bi bi-cloud-upload fs-4 mb-1"></i>
                             <span>@(string.IsNullOrWhiteSpace(HeroImageDataUri) && string.IsNullOrWhiteSpace(HeroImageUrl) ? "Upload hero image" : "Replace hero image")</span>
-                            <small class="text-secondary">PNG, JPG, WebP · max 5 MB · drag &amp; drop or click</small>
+                            <small class="text-secondary">PNG, JPG, WebP · max @MaxUploadSizeMb MB · drag &amp; drop or click</small>
                         </div>
                     </div>
                     @if (!string.IsNullOrWhiteSpace(HeroUploadError))
@@ -357,6 +359,7 @@ else
     private string HeroUploadError { get; set; } = string.Empty;
     private string BodyMarkdown { get; set; } = string.Empty;
     private bool SlugManuallyEdited { get; set; }
+    private int MaxUploadSizeMb { get; set; } = 8;
 
     private const string MarkdownEditorElementId = "article-body-textarea";
     private bool _markdownEditorInitialized;
@@ -405,6 +408,8 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
+        var settings = await SiteSettingsService.GetSettingsAsync();
+        MaxUploadSizeMb = settings.MaxMediaUploadSizeMb;
         await LoadArticle();
     }
 
@@ -553,11 +558,11 @@ else
     private async Task HandleHeroImageUpload(InputFileChangeEventArgs e)
     {
         HeroUploadError = string.Empty;
-        const long maxBytes = 5 * 1024 * 1024;
+        var maxBytes = MaxUploadSizeMb * 1024L * 1024L;
 
         if (e.File.Size > maxBytes)
         {
-            HeroUploadError = "Image must be under 5 MB.";
+            HeroUploadError = $"Image must be under {MaxUploadSizeMb} MB.";
             return;
         }
 

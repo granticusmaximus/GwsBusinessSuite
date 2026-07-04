@@ -1,16 +1,17 @@
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace GwsBusinessSuite.Application.CmsBuilder;
 
-public sealed class MediaLibraryService(IAppDbContext dbContext) : IMediaLibraryService
+public sealed class MediaLibraryService(IAppDbContext dbContext, ISiteSettingsService siteSettingsService) : IMediaLibraryService
 {
-    // Matches the unbounded-TEXT base64-in-DB pattern already used for article hero images
-    // (see ArticleMarkdownRenderer/SeoArticleDraft), but media assets are uploaded by hand
-    // rather than AI-generated, so a hard cap guards against someone dropping a multi-MB
-    // file into a SQLite TEXT column.
-    private const long MaxContentBytes = 8 * 1024 * 1024;
+    // Default matches the unbounded-TEXT base64-in-DB pattern already used for article hero
+    // images (see ArticleMarkdownRenderer/SeoArticleDraft), but media assets are uploaded by
+    // hand rather than AI-generated, so a hard cap guards against someone dropping a
+    // multi-MB file into a SQLite TEXT column. Configurable via Settings > Media.
+    private const long DefaultMaxContentBytes = 8 * 1024 * 1024;
 
     // Raster-format magic bytes. A browser's reported Content-Type is attacker-controlled
     // (trivial to relabel an .svg or .html payload as "image/png" before upload), and that
@@ -54,9 +55,14 @@ public sealed class MediaLibraryService(IAppDbContext dbContext) : IMediaLibrary
             throw new ArgumentException("Uploaded file is empty.", nameof(content));
         }
 
-        if (content.Length > MaxContentBytes)
+        var settings = await siteSettingsService.GetSettingsAsync(cancellationToken);
+        var maxContentBytes = settings.MaxMediaUploadSizeMb > 0
+            ? settings.MaxMediaUploadSizeMb * 1024L * 1024L
+            : DefaultMaxContentBytes;
+
+        if (content.Length > maxContentBytes)
         {
-            throw new ArgumentException($"File exceeds the {MaxContentBytes / 1024 / 1024} MB upload limit.", nameof(content));
+            throw new ArgumentException($"File exceeds the {maxContentBytes / 1024 / 1024} MB upload limit.", nameof(content));
         }
 
         var detectedContentType = DetectImageContentType(content);

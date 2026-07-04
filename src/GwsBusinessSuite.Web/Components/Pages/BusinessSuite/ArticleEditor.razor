@@ -6,7 +6,9 @@
 @using GwsBusinessSuite.Infrastructure.Data
 @using Microsoft.EntityFrameworkCore
 @using System.Text.RegularExpressions
+@using GwsBusinessSuite.Application.Settings
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ISiteSettingsService SiteSettingsService
 @inject NavigationManager Navigation
 @inject ILogger<ArticleEditor> Logger
 
@@ -467,14 +469,20 @@
         try
         {
             await using var db = await DbFactory.CreateDbContextAsync();
+            var settings = await SiteSettingsService.GetSettingsAsync();
             var article = new Article
             {
-                Title     = "Untitled Article",
-                Slug      = $"untitled-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}",
-                Status    = ArticleStatuses.Draft,
-                Source    = ArticleSource.Manual,
-                CreatedBy = "manual-editor"
+                Title      = "Untitled Article",
+                Slug       = $"untitled-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}",
+                Status     = ArticleStatuses.Draft,
+                Source     = ArticleSource.Manual,
+                CategoryId = settings.DefaultArticleCategoryId,
+                CreatedBy  = "manual-editor"
             };
+            if (!string.IsNullOrWhiteSpace(settings.DefaultAuthorByline))
+            {
+                article.Author = settings.DefaultAuthorByline;
+            }
             db.Articles.Add(article);
             await db.SaveChangesAsync();
             Navigation.NavigateTo($"/admin/article-editor/{article.Id}");

@@ -171,6 +171,21 @@ public sealed class CjConnectorSettings : AuditableEntity
     public int MaxResults { get; set; } = 100;
 }
 
+// WordPress-style "Settings" (General/Reading/Writing/Media/AI) — a singleton row for
+// site-wide configuration that previously had no admin UI at all (see CmsSite for the
+// site's Name/Slug/branding, which this deliberately does not duplicate).
+public sealed class SiteSettings : AuditableEntity
+{
+    public static readonly Guid WellKnownId = new("51771145-0000-0000-0000-000000000001");
+
+    public int PostsPerPage { get; set; } = 10;
+    public Guid? DefaultArticleCategoryId { get; set; }
+    public string? DefaultAuthorByline { get; set; }
+    public string? OllamaModelOverride { get; set; }
+    public int? OllamaTimeoutMinutesOverride { get; set; }
+    public int MaxMediaUploadSizeMb { get; set; } = 8;
+}
+
 public sealed class AffiliateOffer : AuditableEntity
 {
     public required string Network { get; set; }

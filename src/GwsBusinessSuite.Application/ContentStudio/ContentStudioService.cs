@@ -1,5 +1,6 @@
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Articles;
+using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -12,6 +13,7 @@ public sealed class ContentStudioService(
     IAppDbContextFactory dbContextFactory,
     IOllamaService ollama,
     IAffiliateOfferScoringService offerScoringService,
+    ISiteSettingsService siteSettingsService,
     IOptions<ContentStudioOptions> options,
     ILogger<ContentStudioService> logger) : IContentStudioService
 {
@@ -154,10 +156,8 @@ public sealed class ContentStudioService(
 
         var scoredOffers = await offerScoringService.ScoreOffersAsync(request, maxOffers: AffiliateSlotTokens.Length, cancellationToken);
         var prompt = BuildPrompt(request, scoredOffers);
-        var configuredOptions = options.Value;
-        var model = string.IsNullOrWhiteSpace(configuredOptions.Model)
-            ? ContentStudioOptions.DefaultModel
-            : configuredOptions.Model;
+        var model = await GetEffectiveModelAsync(cancellationToken);
+        var timeout = await GetEffectiveTimeoutAsync(cancellationToken);
 
         logger.LogInformation(
             "Generating Content Studio draft for topic '{Topic}' using Ollama model '{Model}'.",
@@ -168,7 +168,9 @@ public sealed class ContentStudioService(
         // A Blazor Server circuit can disconnect and have its DI scope (and the
         // constructor-injected db context) disposed during that wait, so the save
         // below uses a freshly created context instead of the field-level `db`.
-        var markdown = (await ollama.GenerateAsync(model, BuildSystemPrompt(), prompt, cancellationToken)).Trim();
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(timeout);
+        var markdown = (await ollama.GenerateAsync(model, BuildSystemPrompt(), prompt, timeoutCts.Token)).Trim();
 
         if (string.IsNullOrWhiteSpace(markdown))
         {
@@ -258,15 +260,16 @@ public sealed class ContentStudioService(
         var scoredOffers = await offerScoringService.ScoreOffersAsync(baseRequest, maxOffers: AffiliateSlotTokens.Length, cancellationToken);
         var prompt = BuildPrompt(baseRequest, scoredOffers) + $"\n\nRequested revisions:\n- {revisionNotes}";
 
-        var configuredModel = string.IsNullOrWhiteSpace(options.Value.Model)
-            ? ContentStudioOptions.DefaultModel
-            : options.Value.Model;
+        var configuredModel = await GetEffectiveModelAsync(cancellationToken);
+        var timeout = await GetEffectiveTimeoutAsync(cancellationToken);
 
         // Ollama generation can take several minutes; a Blazor Server circuit can
         // disconnect and dispose the field-level db context during that wait, so the
         // save below re-loads the draft on a freshly created context instead of
         // reusing the entity tracked by the original context.
-        var revisedMarkdown = (await ollama.GenerateAsync(configuredModel, BuildSystemPrompt(), prompt, cancellationToken)).Trim();
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(timeout);
+        var revisedMarkdown = (await ollama.GenerateAsync(configuredModel, BuildSystemPrompt(), prompt, timeoutCts.Token)).Trim();
         if (string.IsNullOrWhiteSpace(revisedMarkdown))
         {
             throw new InvalidOperationException("Ollama returned an empty revised draft.");
@@ -906,6 +909,30 @@ public sealed class ContentStudioService(
             .Include(x => x.AffiliatePlacements)
             .Include(x => x.WorkflowEvents)
             .FirstOrDefaultAsync(x => x.Id == draftId, cancellationToken);
+    }
+
+    private async Task<string> GetEffectiveModelAsync(CancellationToken cancellationToken)
+    {
+        var settings = await siteSettingsService.GetSettingsAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(settings.OllamaModelOverride))
+        {
+            return settings.OllamaModelOverride;
+        }
+
+        return string.IsNullOrWhiteSpace(options.Value.Model)
+            ? ContentStudioOptions.DefaultModel
+            : options.Value.Model;
+    }
+
+    private async Task<TimeSpan> GetEffectiveTimeoutAsync(CancellationToken cancellationToken)
+    {
+        var settings = await siteSettingsService.GetSettingsAsync(cancellationToken);
+        var minutes = settings.OllamaTimeoutMinutesOverride
+            ?? (options.Value.GenerationTimeoutMinutes <= 0
+                ? ContentStudioOptions.DefaultGenerationTimeoutMinutes
+                : options.Value.GenerationTimeoutMinutes);
+
+        return TimeSpan.FromMinutes(minutes);
     }
 
     private string GetAuthorName()

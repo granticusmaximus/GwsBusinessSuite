@@ -16,7 +16,7 @@ public sealed class MediaLibraryServiceTests
     public async Task UploadAsync_ShouldStoreAndReturnRetrievableAsset()
     {
         await using var db = await CreateDbAsync();
-        var service = new MediaLibraryService(db);
+        var service = new MediaLibraryService(db, new GwsBusinessSuite.Application.Settings.SiteSettingsService(db));
 
         var uploaded = await service.UploadAsync("logo.png", PngBytes, "Site logo");
 
@@ -33,7 +33,7 @@ public sealed class MediaLibraryServiceTests
     public async Task UploadAsync_ShouldDetectContentTypeFromBytes_IgnoringAnyClaimedFileName()
     {
         await using var db = await CreateDbAsync();
-        var service = new MediaLibraryService(db);
+        var service = new MediaLibraryService(db, new GwsBusinessSuite.Application.Settings.SiteSettingsService(db));
 
         // A .png extension with non-image bytes must still be rejected — the file name
         // is purely cosmetic and is never trusted for the content-type decision.
@@ -48,7 +48,7 @@ public sealed class MediaLibraryServiceTests
     public async Task UploadAsync_ShouldRejectContentWithoutARecognizedImageSignature()
     {
         await using var db = await CreateDbAsync();
-        var service = new MediaLibraryService(db);
+        var service = new MediaLibraryService(db, new GwsBusinessSuite.Application.Settings.SiteSettingsService(db));
 
         var action = async () => await service.UploadAsync("doc.pdf", [1, 2, 3], string.Empty);
 
@@ -59,7 +59,7 @@ public sealed class MediaLibraryServiceTests
     public async Task UploadAsync_ShouldRejectSvg_EvenThoughItIsAnImageMimeType()
     {
         await using var db = await CreateDbAsync();
-        var service = new MediaLibraryService(db);
+        var service = new MediaLibraryService(db, new GwsBusinessSuite.Application.Settings.SiteSettingsService(db));
         var svg = "<svg onload=\"alert(1)\"></svg>"u8.ToArray();
 
         var action = async () => await service.UploadAsync("icon.svg", svg, string.Empty);
@@ -71,7 +71,7 @@ public sealed class MediaLibraryServiceTests
     public async Task UploadAsync_ShouldRejectFilesOverTheSizeLimit()
     {
         await using var db = await CreateDbAsync();
-        var service = new MediaLibraryService(db);
+        var service = new MediaLibraryService(db, new GwsBusinessSuite.Application.Settings.SiteSettingsService(db));
         var tooLarge = new byte[9 * 1024 * 1024];
 
         var action = async () => await service.UploadAsync("big.png", tooLarge, string.Empty);
@@ -83,7 +83,7 @@ public sealed class MediaLibraryServiceTests
     public async Task ListAsync_ShouldReturnMostRecentlyUploadedFirst()
     {
         await using var db = await CreateDbAsync();
-        var service = new MediaLibraryService(db);
+        var service = new MediaLibraryService(db, new GwsBusinessSuite.Application.Settings.SiteSettingsService(db));
 
         await service.UploadAsync("first.png", PngBytes, string.Empty);
         await service.UploadAsync("second.png", PngBytes, string.Empty);
@@ -98,7 +98,7 @@ public sealed class MediaLibraryServiceTests
     public async Task DeleteAsync_ShouldRemoveAssetSoItCanNoLongerBeFetched()
     {
         await using var db = await CreateDbAsync();
-        var service = new MediaLibraryService(db);
+        var service = new MediaLibraryService(db, new GwsBusinessSuite.Application.Settings.SiteSettingsService(db));
         var uploaded = await service.UploadAsync("temp.png", PngBytes, string.Empty);
 
         await service.DeleteAsync(uploaded.Id);
@@ -111,7 +111,7 @@ public sealed class MediaLibraryServiceTests
     public async Task GetContentAsync_ShouldReturnNull_ForUnknownId()
     {
         await using var db = await CreateDbAsync();
-        var service = new MediaLibraryService(db);
+        var service = new MediaLibraryService(db, new GwsBusinessSuite.Application.Settings.SiteSettingsService(db));
 
         (await service.GetContentAsync(Guid.NewGuid())).Should().BeNull();
     }

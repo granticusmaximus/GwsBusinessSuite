@@ -1,0 +1,281 @@
+@page "/admin/settings"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.CmsBuilder
+@using GwsBusinessSuite.Application.ContentStudio
+@using GwsBusinessSuite.Application.Settings
+@using GwsBusinessSuite.Domain.Entities
+@using GwsBusinessSuite.Infrastructure.Data
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.Extensions.Options
+@inject ISiteSettingsService SiteSettingsService
+@inject ICmsBuilderService CmsBuilderService
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject IOptions<ContentStudioOptions> StudioOptions
+@inject IConfiguration Configuration
+@inject ILogger<Settings> Logger
+
+<PageTitle>Settings</PageTitle>
+
+<div class="page-header">
+    <h1><i class="bi bi-gear-fill me-2 text-primary"></i>Settings</h1>
+    <p>Site-wide configuration for reading, writing, media, and AI generation defaults.</p>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-success" role="alert">@StatusMessage</div>
+}
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+}
+
+@if (!_loaded)
+{
+    <div class="d-flex align-items-center gap-2 text-secondary">
+        <span class="spinner-border spinner-border-sm"></span>
+        <span>Loading settings…</span>
+    </div>
+}
+else
+{
+    <ul class="nav nav-tabs mb-4">
+        @foreach (var tab in Tabs)
+        {
+            <li class="nav-item">
+                <button type="button" class="nav-link @(ActiveTab == tab ? "active" : string.Empty)" @onclick="() => ActiveTab = tab">
+                    @tab
+                </button>
+            </li>
+        }
+    </ul>
+
+    @if (ActiveTab == "General")
+    {
+        <div class="card border-0 shadow-sm" style="max-width: 640px;">
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label small text-secondary">Site name</label>
+                    <input class="form-control" @bind="SiteNameInput" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small text-secondary">Site slug</label>
+                    <input class="form-control" @bind="SiteSlugInput" />
+                    <div class="form-text">Changing this affects any URLs or references built from the site slug.</div>
+                </div>
+                <button class="btn btn-primary" @onclick="SaveGeneralAsync" disabled="@IsBusy">Save changes</button>
+            </div>
+        </div>
+    }
+    else if (ActiveTab == "Reading")
+    {
+        <div class="card border-0 shadow-sm" style="max-width: 480px;">
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label small text-secondary">Blog posts per page</label>
+                    <select class="form-select" @bind="PostsPerPageInput">
+                        <option value="10">10</option>
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                    </select>
+                    <div class="form-text">Applies to the public /blog listing.</div>
+                </div>
+                <button class="btn btn-primary" @onclick="SaveReadingAsync" disabled="@IsBusy">Save changes</button>
+            </div>
+        </div>
+    }
+    else if (ActiveTab == "Writing")
+    {
+        <div class="card border-0 shadow-sm" style="max-width: 560px;">
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label small text-secondary">Default category for new posts</label>
+                    <select class="form-select" @bind="DefaultCategoryIdInput">
+                        <option value="">None</option>
+                        @foreach (var category in Categories)
+                        {
+                            <option value="@category.Id">@category.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small text-secondary">Default author byline</label>
+                    <input class="form-control" @bind="DefaultAuthorBylineInput" placeholder="e.g. Grant Watson" />
+                    <div class="form-text">Leave blank to have new posts default to whatever the editor currently uses.</div>
+                </div>
+                <button class="btn btn-primary" @onclick="SaveWritingAsync" disabled="@IsBusy">Save changes</button>
+            </div>
+        </div>
+    }
+    else if (ActiveTab == "Media")
+    {
+        <div class="card border-0 shadow-sm" style="max-width: 480px;">
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label small text-secondary">Max upload size (MB)</label>
+                    <input class="form-control" type="number" min="1" max="100" @bind="MaxUploadSizeMbInput" />
+                    <div class="form-text">Applies to hero images and the media library.</div>
+                </div>
+                <button class="btn btn-primary" @onclick="SaveMediaAsync" disabled="@IsBusy">Save changes</button>
+            </div>
+        </div>
+    }
+    else if (ActiveTab == "AI (Ollama)")
+    {
+        <div class="card border-0 shadow-sm" style="max-width: 560px;">
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label small text-secondary">Model override</label>
+                    <input class="form-control" @bind="OllamaModelOverrideInput" placeholder="@StudioOptions.Value.Model" />
+                    <div class="form-text">Leave blank to use the server default (<code>@StudioOptions.Value.Model</code>).</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small text-secondary">Generation timeout override (minutes)</label>
+                    <input class="form-control" type="number" min="1" max="180" @bind="OllamaTimeoutOverrideInput" placeholder="@StudioOptions.Value.GenerationTimeoutMinutes" />
+                    <div class="form-text">Leave blank to use the server default (@StudioOptions.Value.GenerationTimeoutMinutes minutes).</div>
+                </div>
+                <div class="form-text mb-3">The Ollama endpoint (@StudioOptions.Value.BaseUrl) is a deployment setting and isn't editable here.</div>
+                <button class="btn btn-primary" @onclick="SaveAiAsync" disabled="@IsBusy">Save changes</button>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private static readonly string[] Tabs = ["General", "Reading", "Writing", "Media", "AI (Ollama)"];
+    private string ActiveTab { get; set; } = "General";
+
+    private bool _loaded;
+    private bool IsBusy { get; set; }
+    private string StatusMessage { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+
+    private CmsSite? CurrentSite { get; set; }
+    private string SiteNameInput { get; set; } = string.Empty;
+    private string SiteSlugInput { get; set; } = string.Empty;
+
+    private int PostsPerPageInput { get; set; } = 10;
+    private string DefaultCategoryIdInput { get; set; } = string.Empty;
+    private string DefaultAuthorBylineInput { get; set; } = string.Empty;
+    private int MaxUploadSizeMbInput { get; set; } = 8;
+    private string OllamaModelOverrideInput { get; set; } = string.Empty;
+    private int? OllamaTimeoutOverrideInput { get; set; }
+
+    private List<ArticleCategory> Categories { get; set; } = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var slug = Configuration["Canvas:SiteSlug"] ?? "grantwatson-dev";
+        CurrentSite = await CmsBuilderService.GetSiteBySlugAsync(slug);
+        if (CurrentSite is not null)
+        {
+            SiteNameInput = CurrentSite.Name;
+            SiteSlugInput = CurrentSite.Slug;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        Categories = await db.ArticleCategories.OrderBy(c => c.Name).ToListAsync();
+
+        var settings = await SiteSettingsService.GetSettingsAsync();
+        PostsPerPageInput = settings.PostsPerPage;
+        DefaultCategoryIdInput = settings.DefaultArticleCategoryId?.ToString() ?? string.Empty;
+        DefaultAuthorBylineInput = settings.DefaultAuthorByline ?? string.Empty;
+        MaxUploadSizeMbInput = settings.MaxMediaUploadSizeMb;
+        OllamaModelOverrideInput = settings.OllamaModelOverride ?? string.Empty;
+        OllamaTimeoutOverrideInput = settings.OllamaTimeoutMinutesOverride;
+
+        _loaded = true;
+    }
+
+    private async Task<SiteSettingsView> GetCurrentSettingsAsync() => await SiteSettingsService.GetSettingsAsync();
+
+    private async Task SaveGeneralAsync()
+    {
+        if (CurrentSite is null) return;
+
+        await RunSaveAsync(async () =>
+        {
+            var saved = await CmsBuilderService.SaveSiteAsync(new CmsSiteEditorModel
+            {
+                SiteId = CurrentSite.Id,
+                Name = SiteNameInput,
+                Slug = SiteSlugInput,
+                Theme = CurrentSite.Theme,
+                CustomCss = CurrentSite.CustomCss,
+                NavMenuJson = CurrentSite.NavMenuJson,
+                FooterNavMenuJson = CurrentSite.FooterNavMenuJson,
+                AccentColorHex = CurrentSite.AccentColorHex,
+                FontPairingKey = CurrentSite.FontPairingKey
+            });
+            CurrentSite = saved;
+        });
+    }
+
+    private async Task SaveReadingAsync()
+    {
+        await RunSaveAsync(async () =>
+        {
+            var current = await GetCurrentSettingsAsync();
+            await SiteSettingsService.SaveSettingsAsync(current with { PostsPerPage = PostsPerPageInput });
+        });
+    }
+
+    private async Task SaveWritingAsync()
+    {
+        await RunSaveAsync(async () =>
+        {
+            var current = await GetCurrentSettingsAsync();
+            var categoryId = Guid.TryParse(DefaultCategoryIdInput, out var parsed) ? parsed : (Guid?)null;
+            await SiteSettingsService.SaveSettingsAsync(current with
+            {
+                DefaultArticleCategoryId = categoryId,
+                DefaultAuthorByline = DefaultAuthorBylineInput
+            });
+        });
+    }
+
+    private async Task SaveMediaAsync()
+    {
+        await RunSaveAsync(async () =>
+        {
+            var current = await GetCurrentSettingsAsync();
+            await SiteSettingsService.SaveSettingsAsync(current with { MaxMediaUploadSizeMb = MaxUploadSizeMbInput });
+        });
+    }
+
+    private async Task SaveAiAsync()
+    {
+        await RunSaveAsync(async () =>
+        {
+            var current = await GetCurrentSettingsAsync();
+            await SiteSettingsService.SaveSettingsAsync(current with
+            {
+                OllamaModelOverride = OllamaModelOverrideInput,
+                OllamaTimeoutMinutesOverride = OllamaTimeoutOverrideInput
+            });
+        });
+    }
+
+    private async Task RunSaveAsync(Func<Task> save)
+    {
+        IsBusy = true;
+        StatusMessage = string.Empty;
+        ErrorMessage = string.Empty;
+        try
+        {
+            await save();
+            StatusMessage = "Settings saved.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save site settings.");
+            ErrorMessage = $"Unable to save settings. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+}

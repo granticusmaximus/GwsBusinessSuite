@@ -1,5 +1,6 @@
 using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.Data.Sqlite;
@@ -73,6 +74,30 @@ public sealed class ContentStudioServiceTests
         Assert.Equal("PendingReview", savedDraft.Status);
         Assert.Equal(1, await db.SeoArticleWorkflowEvents.CountAsync());
         Assert.Equal("Generated", (await db.SeoArticleWorkflowEvents.SingleAsync()).EventType);
+        Assert.Equal("llama3.2", ollama.LastRequestedModel);
+    }
+
+    [Fact]
+    public async Task GenerateArticleAsync_ShouldUseSiteSettingsModelOverride_WhenSet()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var ollama = new FakeOllamaService { GenerateTextResult = "# Title" };
+        var service = CreateService(db, factory, ollama);
+
+        await new SiteSettingsService(db).SaveSettingsAsync(
+            new SiteSettingsView(10, null, null, "mistral", null, 8));
+
+        await service.GenerateArticleAsync(new ArticleGenerationRequest
+        {
+            Topic = "Clean Architecture in Blazor",
+            TargetAudience = "Mid-level C# developers",
+            PrimaryKeyword = "Blazor clean architecture",
+            SecondaryKeywords = "ASP.NET Core, C#"
+        });
+
+        // The site-configured override takes precedence over the appsettings.json
+        // default ("llama3.2") baked into CreateService's ContentStudioOptions.
+        Assert.Equal("mistral", ollama.LastRequestedModel);
     }
 
     [Fact]
@@ -354,6 +379,7 @@ public sealed class ContentStudioServiceTests
             factory,
             ollama,
             new FakeAffiliateOfferScoringService(),
+            new SiteSettingsService(db),
             options,
             NullLogger<ContentStudioService>.Instance);
     }
@@ -379,9 +405,11 @@ public sealed class ContentStudioServiceTests
     {
         public string GenerateTextResult { get; set; } = string.Empty;
         public IReadOnlyCollection<string> Models { get; set; } = Array.Empty<string>();
+        public string? LastRequestedModel { get; private set; }
 
         public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
         {
+            LastRequestedModel = model;
             return Task.FromResult(GenerateTextResult);
         }
 

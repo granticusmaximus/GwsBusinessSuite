@@ -4,11 +4,13 @@
 @using Microsoft.AspNetCore.Authorization
 @implements IAsyncDisposable
 @using GwsBusinessSuite.Application.ContentStudio
+@using GwsBusinessSuite.Application.Settings
 @using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Infrastructure.Data
 @using Microsoft.EntityFrameworkCore
 @inject IContentStudioService ContentStudioService
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ISiteSettingsService SiteSettingsService
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
 @inject ILogger<ContentStudioDraft> Logger
@@ -110,7 +112,7 @@ else
                     <div class="upload-prompt">
                         <i class="bi bi-cloud-upload fs-4 mb-1"></i>
                         <span>@(string.IsNullOrWhiteSpace(CurrentDraft.HeroImage?.DataUri) ? "Upload hero image" : "Replace hero image")</span>
-                        <small class="text-secondary">PNG, JPG, WebP · max 5 MB · drag &amp; drop or click</small>
+                        <small class="text-secondary">PNG, JPG, WebP · max @MaxUploadSizeMb MB · drag &amp; drop or click</small>
                     </div>
                 </div>
                 @if (!string.IsNullOrWhiteSpace(HeroUploadError))
@@ -271,8 +273,12 @@ else
         ? "Elapsed: 00:00"
         : $"Elapsed: {FormatElapsed(DateTimeOffset.UtcNow - BusyStartedAt.Value)}";
 
+    private int MaxUploadSizeMb { get; set; } = 8;
+
     protected override async Task OnParametersSetAsync()
     {
+        var settings = await SiteSettingsService.GetSettingsAsync();
+        MaxUploadSizeMb = settings.MaxMediaUploadSizeMb;
         await LoadDraft();
     }
 
@@ -343,11 +349,11 @@ else
     private async Task HandleHeroImageUpload(InputFileChangeEventArgs e)
     {
         HeroUploadError = string.Empty;
-        const long maxBytes = 5 * 1024 * 1024;
+        var maxBytes = MaxUploadSizeMb * 1024L * 1024L;
 
         if (e.File.Size > maxBytes)
         {
-            HeroUploadError = "Image must be under 5 MB.";
+            HeroUploadError = $"Image must be under {MaxUploadSizeMb} MB.";
             return;
         }
 
