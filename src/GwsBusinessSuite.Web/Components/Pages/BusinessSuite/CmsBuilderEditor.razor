@@ -136,8 +136,16 @@ else
                                 {
                                     @foreach (var w in col.Widgets)
                                     {
-                                        <button class="studio-layer-item studio-layer-widget-item @(_selectedWidgetId == w.Id ? "is-active" : "")"
-                                                @onclick="() => SelectWidget(section.Id, w.Id)">
+                                        <button class="studio-layer-item studio-layer-widget-item @(_selectedWidgetId == w.Id ? "is-active" : "") @(_draggedWidgetId == w.Id ? "is-dragging" : "")"
+                                                draggable="true"
+                                                @onclick="() => SelectWidget(section.Id, w.Id)"
+                                                @ondragstart="() => StartDragWidget(w, col)"
+                                                @ondragend="EndDragWidget"
+                                                @ondragover:preventDefault
+                                                @ondrop="() => DropWidgetOnto(section.Id, col, w)">
+                                            <span class="studio-layer-icon studio-layer-icon-sm studio-layer-drag-handle">
+                                                <i class="bi bi-grip-vertical"></i>
+                                            </span>
                                             <span class="studio-layer-icon studio-layer-icon-sm">
                                                 <i class="@GetWidgetIconClass(w.WidgetType)"></i>
                                             </span>
@@ -314,6 +322,22 @@ else
                                 </select>
                             </div>
                         }
+                        else if (selWidget.WidgetType == "richtext")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">Content (Markdown)</label>
+                                <textarea class="form-control studio-inspector-textarea font-monospace" rows="8" value='@GetProp(selWidget, "content")'
+                                          @oninput='(e) => SetProp(selWidget, "content", e.Value?.ToString() ?? string.Empty)'
+                                          placeholder="**Bold**, *italics*, [links](https://example.com), lists, etc."></textarea>
+                                <div class="small text-secondary mt-1">Supports Markdown — the same formatting used in blog posts.</div>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Preview</label>
+                                <div class="studio-richtext-preview">
+                                    @((MarkupString)PublicSiteHtmlRenderer.RenderMarkdown(GetProp(selWidget, "content")))
+                                </div>
+                            </div>
+                        }
                         else if (selWidget.WidgetType == "button")
                         {
                             <div>
@@ -444,6 +468,59 @@ else
                                 <label class="form-label small fw-semibold">Link URL</label>
                                 <input class="form-control font-monospace" value='@GetProp(selWidget, "link")'
                                        @oninput='(e) => SetProp(selWidget, "link", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "testimonial")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">Quote</label>
+                                <textarea class="form-control studio-inspector-textarea" value='@GetProp(selWidget, "quote")'
+                                          @oninput='(e) => SetProp(selWidget, "quote", e.Value?.ToString() ?? string.Empty)'></textarea>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Author Name</label>
+                                <input class="form-control" value='@GetProp(selWidget, "authorName")'
+                                       @oninput='(e) => SetProp(selWidget, "authorName", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Author Role / Company</label>
+                                <input class="form-control" value='@GetProp(selWidget, "authorRole")'
+                                       @oninput='(e) => SetProp(selWidget, "authorRole", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "accordion")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold d-flex align-items-center justify-content-between">
+                                    Items
+                                    <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => AddAccordionItem(selWidget)">
+                                        <i class="bi bi-plus-lg"></i> Add item
+                                    </button>
+                                </label>
+                                @{ var accordionItems = GetAccordionItems(selWidget); }
+                                @if (accordionItems.Count == 0)
+                                {
+                                    <p class="small text-secondary mb-0">No items yet — click "Add item" to build this FAQ.</p>
+                                }
+                                else
+                                {
+                                    @for (var i = 0; i < accordionItems.Count; i++)
+                                    {
+                                        var index = i;
+                                        var item = accordionItems[index];
+                                        <div class="studio-form-field-editor">
+                                            <div class="d-flex gap-2 mb-2">
+                                                <input class="form-control form-control-sm" placeholder="Question" value="@item.Question"
+                                                       @oninput="(e) => UpdateAccordionItem(selWidget, index, i => i with { Question = e.Value?.ToString() ?? string.Empty })" />
+                                                <button type="button" class="btn btn-sm btn-outline-danger flex-shrink-0" @onclick="() => RemoveAccordionItem(selWidget, index)">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </div>
+                                            <textarea class="form-control form-control-sm" rows="2" placeholder="Answer"
+                                                      @oninput="(e) => UpdateAccordionItem(selWidget, index, i => i with { Answer = e.Value?.ToString() ?? string.Empty })">@item.Answer</textarea>
+                                        </div>
+                                    }
+                                }
                             </div>
                         }
                         else if (selWidget.WidgetType == "spacer")
@@ -752,16 +829,19 @@ else
 
     private static readonly WidgetDef[] WidgetCatalog =
     [
-        new("hero",      "bi bi-stars",                    "Hero",      "Full-width headline + CTAs"),
-        new("heading",   "bi bi-type-h1",                  "Heading",   "H1–H4 title text"),
-        new("paragraph", "bi bi-text-paragraph",           "Paragraph", "Body copy"),
-        new("button",    "bi bi-hand-index-thumb",         "Button",    "CTA or navigation link"),
-        new("image",     "bi bi-image",                    "Image",     "Photo or graphic"),
-        new("card",      "bi bi-card-heading",             "Card",      "Title + body + optional image"),
-        new("form",      "bi bi-ui-checks",                "Form",      "Custom fields, posts to submissions"),
-        new("spacer",    "bi bi-arrows-expand-vertical",   "Spacer",    "Vertical whitespace"),
-        new("divider",   "bi bi-dash-lg",                  "Divider",   "Horizontal rule"),
-        new("html",      "bi bi-code-slash",               "HTML",      "Raw HTML block"),
+        new("hero",        "bi bi-stars",                  "Hero",        "Full-width headline + CTAs"),
+        new("heading",     "bi bi-type-h1",                "Heading",     "H1–H4 title text"),
+        new("paragraph",   "bi bi-text-paragraph",         "Paragraph",   "Body copy"),
+        new("richtext",    "bi bi-file-richtext",          "Rich Text",   "Markdown: bold, links, lists, etc."),
+        new("button",      "bi bi-hand-index-thumb",       "Button",      "CTA or navigation link"),
+        new("image",       "bi bi-image",                  "Image",       "Photo or graphic"),
+        new("card",        "bi bi-card-heading",           "Card",        "Title + body + optional image"),
+        new("testimonial", "bi bi-chat-quote",             "Testimonial", "Quote + author"),
+        new("accordion",   "bi bi-list-nested",            "Accordion",   "Collapsible FAQ-style items"),
+        new("form",        "bi bi-ui-checks",              "Form",        "Custom fields, posts to submissions"),
+        new("spacer",      "bi bi-arrows-expand-vertical", "Spacer",      "Vertical whitespace"),
+        new("divider",     "bi bi-dash-lg",                "Divider",     "Horizontal rule"),
+        new("html",        "bi bi-code-slash",             "HTML",        "Raw HTML block"),
     ];
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
@@ -973,6 +1053,65 @@ else
         MoveWidgetInColumn(sec.Id, col.Id, idx, 1);
     }
 
+    // ── Drag-and-drop reordering (Layers panel) ─────────────────────────────
+    // Native HTML5 drag events — no JS interop or extra library needed. Reordering works
+    // within a column, across columns, and across sections, since every drop handler
+    // already has direct object references to both the source and target LayoutColumn.
+    private string? _draggedWidgetId;
+    private LayoutColumn? _draggedFromColumn;
+
+    private void StartDragWidget(LayoutWidget widget, LayoutColumn fromColumn)
+    {
+        _draggedWidgetId = widget.Id;
+        _draggedFromColumn = fromColumn;
+    }
+
+    private void EndDragWidget()
+    {
+        _draggedWidgetId = null;
+        _draggedFromColumn = null;
+    }
+
+    private void DropWidgetOnto(string targetSectionId, LayoutColumn targetColumn, LayoutWidget targetWidget)
+    {
+        if (_draggedWidgetId is null || _draggedFromColumn is null || _draggedWidgetId == targetWidget.Id)
+        {
+            EndDragWidget();
+            return;
+        }
+
+        var draggedWidget = _draggedFromColumn.Widgets.FirstOrDefault(w => w.Id == _draggedWidgetId);
+        if (draggedWidget is null)
+        {
+            EndDragWidget();
+            return;
+        }
+
+        // Dragging downward within the same column needs "insert after target" — "insert
+        // before target" (the only case that matters cross-column) cancels out to a no-op
+        // when the target was already the very next item, since removing the dragged widget
+        // shifts everything after it up by one, landing the target back where it started.
+        var draggedFromIndex = _draggedFromColumn.Widgets.IndexOf(draggedWidget);
+        var targetIndexBeforeRemoval = targetColumn.Widgets.IndexOf(targetWidget);
+        var isDraggingDownwardInSameColumn = ReferenceEquals(_draggedFromColumn, targetColumn)
+            && targetIndexBeforeRemoval > draggedFromIndex;
+
+        _draggedFromColumn.Widgets.Remove(draggedWidget);
+        var targetIndex = targetColumn.Widgets.IndexOf(targetWidget);
+        if (targetIndex < 0)
+        {
+            targetIndex = targetColumn.Widgets.Count;
+        }
+        else if (isDraggingDownwardInSameColumn)
+        {
+            targetIndex += 1;
+        }
+        targetColumn.Widgets.Insert(targetIndex, draggedWidget);
+
+        SelectWidget(targetSectionId, draggedWidget.Id);
+        EndDragWidget();
+    }
+
     private void DuplicateWidget(string sectionId, string columnId, int index)
     {
         var col = FindSection(sectionId)?.Columns.FirstOrDefault(c => c.Id == columnId);
@@ -1120,6 +1259,60 @@ else
         SaveFormFields(widget, fields);
     }
 
+    // ── Accordion widget items ──────────────────────────────────────────────
+    private sealed record AccordionItemDef(string Question, string Answer);
+
+    private static List<AccordionItemDef> GetAccordionItems(LayoutWidget widget)
+    {
+        try
+        {
+            var raw = GetProp(widget, "itemsJson");
+            if (string.IsNullOrWhiteSpace(raw)) return [];
+
+            var parsed = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(raw);
+            if (parsed is null) return [];
+
+            return parsed.Select(i => new AccordionItemDef(
+                i.TryGetValue("question", out var q) ? q.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("answer", out var a) ? a.GetString() ?? string.Empty : string.Empty
+            )).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static void SaveAccordionItems(LayoutWidget widget, List<AccordionItemDef> items)
+    {
+        var json = JsonSerializer.Serialize(items.Select(i => new { question = i.Question, answer = i.Answer }));
+        SetProp(widget, "itemsJson", json);
+    }
+
+    private void AddAccordionItem(LayoutWidget widget)
+    {
+        var items = GetAccordionItems(widget);
+        var n = items.Count + 1;
+        items.Add(new AccordionItemDef($"Question {n}?", "Answer."));
+        SaveAccordionItems(widget, items);
+    }
+
+    private void UpdateAccordionItem(LayoutWidget widget, int index, Func<AccordionItemDef, AccordionItemDef> update)
+    {
+        var items = GetAccordionItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items[index] = update(items[index]);
+        SaveAccordionItems(widget, items);
+    }
+
+    private void RemoveAccordionItem(LayoutWidget widget, int index)
+    {
+        var items = GetAccordionItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items.RemoveAt(index);
+        SaveAccordionItems(widget, items);
+    }
+
     // ── Media library picker ────────────────────────────────────────────────
     private bool _showMediaPicker;
     private string _mediaPickerError = string.Empty;
@@ -1161,6 +1354,9 @@ else
     {
         "heading"   => new() { WidgetType = "heading",   Props = new() { ["level"] = "h2", ["text"] = "Heading",                      ["align"] = "left" } },
         "paragraph" => new() { WidgetType = "paragraph", Props = new() { ["text"] = "Your paragraph text here.",                       ["align"] = "left" } },
+        "richtext"  => new() { WidgetType = "richtext",  Props = new() { ["content"] = "Write **rich** copy here — *italics*, [links](#), lists, and more." } },
+        "testimonial" => new() { WidgetType = "testimonial", Props = new() { ["quote"] = "This product changed how we work.", ["authorName"] = "Jane Doe", ["authorRole"] = "CEO, Example Co." } },
+        "accordion" => new() { WidgetType = "accordion", Props = new() { ["itemsJson"] = """[{"question":"Question one?","answer":"Answer one."}]""" } },
         "button"    => new() { WidgetType = "button",    Props = new() { ["label"] = "Click me",  ["href"] = "#", ["variant"] = "primary", ["size"] = "md", ["align"] = "left" } },
         "image"     => new() { WidgetType = "image",     Props = new() { ["src"] = "",  ["alt"] = "", ["caption"] = "", ["width"] = "full" } },
         "hero"      => new() { WidgetType = "hero",      Props = new() { ["headline"] = "Your Headline", ["subline"] = "Your supporting description.", ["cta1Label"] = "Get Started", ["cta1Href"] = "#", ["cta2Label"] = "", ["cta2Href"] = "", ["align"] = "left" } },
@@ -1198,48 +1394,57 @@ else
 
     private static string GetWidgetTypeLabel(string type) => type switch
     {
-        "heading"   => "Heading",
-        "paragraph" => "Paragraph",
-        "button"    => "Button",
-        "image"     => "Image",
-        "hero"      => "Hero",
-        "card"      => "Card",
-        "form"      => "Form",
-        "spacer"    => "Spacer",
-        "divider"   => "Divider",
-        "html"      => "HTML",
-        _           => type
+        "heading"     => "Heading",
+        "paragraph"   => "Paragraph",
+        "richtext"    => "Rich Text",
+        "button"      => "Button",
+        "image"       => "Image",
+        "hero"        => "Hero",
+        "card"        => "Card",
+        "testimonial" => "Testimonial",
+        "accordion"   => "Accordion",
+        "form"        => "Form",
+        "spacer"      => "Spacer",
+        "divider"     => "Divider",
+        "html"        => "HTML",
+        _             => type
     };
 
     private static string GetWidgetIconClass(string type) => type switch
     {
-        "heading"   => "bi bi-type-h1",
-        "paragraph" => "bi bi-text-paragraph",
-        "button"    => "bi bi-hand-index-thumb",
-        "image"     => "bi bi-image",
-        "hero"      => "bi bi-stars",
-        "card"      => "bi bi-card-heading",
-        "form"      => "bi bi-ui-checks",
-        "spacer"    => "bi bi-arrows-expand-vertical",
-        "divider"   => "bi bi-dash-lg",
-        "html"      => "bi bi-code-slash",
-        _           => "bi bi-square"
+        "heading"     => "bi bi-type-h1",
+        "paragraph"   => "bi bi-text-paragraph",
+        "richtext"    => "bi bi-file-richtext",
+        "button"      => "bi bi-hand-index-thumb",
+        "image"       => "bi bi-image",
+        "hero"        => "bi bi-stars",
+        "card"        => "bi bi-card-heading",
+        "testimonial" => "bi bi-chat-quote",
+        "accordion"   => "bi bi-list-nested",
+        "form"        => "bi bi-ui-checks",
+        "spacer"      => "bi bi-arrows-expand-vertical",
+        "divider"     => "bi bi-dash-lg",
+        "html"        => "bi bi-code-slash",
+        _             => "bi bi-square"
     };
 
     private static string GetWidgetLayerSummary(LayoutWidget w)
     {
         var raw = w.WidgetType switch
         {
-            "heading"   => GetPropStatic(w, "text", "Heading"),
-            "paragraph" => GetPropStatic(w, "text", ""),
-            "button"    => GetPropStatic(w, "label", "Button"),
-            "image"     => GetPropStatic(w, "alt", GetPropStatic(w, "src", "Image")),
-            "hero"      => GetPropStatic(w, "headline", "Hero"),
-            "card"      => GetPropStatic(w, "title", "Card"),
-            "form"      => $"{GetFormFields(w).Count} field(s)",
-            "spacer"    => $"{GetPropStatic(w, "height", "48")}px",
-            "html"      => "Custom HTML",
-            _           => w.WidgetType
+            "heading"     => GetPropStatic(w, "text", "Heading"),
+            "paragraph"   => GetPropStatic(w, "text", ""),
+            "richtext"    => GetPropStatic(w, "content", ""),
+            "button"      => GetPropStatic(w, "label", "Button"),
+            "image"       => GetPropStatic(w, "alt", GetPropStatic(w, "src", "Image")),
+            "hero"        => GetPropStatic(w, "headline", "Hero"),
+            "card"        => GetPropStatic(w, "title", "Card"),
+            "testimonial" => GetPropStatic(w, "authorName", "Testimonial"),
+            "accordion"   => $"{GetAccordionItems(w).Count} item(s)",
+            "form"        => $"{GetFormFields(w).Count} field(s)",
+            "spacer"      => $"{GetPropStatic(w, "height", "48")}px",
+            "html"        => "Custom HTML",
+            _             => w.WidgetType
         };
         return raw.Length <= 38 ? raw : raw[..38] + "…";
     }

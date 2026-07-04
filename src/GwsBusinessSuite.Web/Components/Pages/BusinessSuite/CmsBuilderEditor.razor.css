@@ -248,6 +248,20 @@
 	box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
+.studio-layer-widget-item {
+	cursor: grab;
+}
+
+.studio-layer-widget-item.is-dragging {
+	opacity: 0.4;
+}
+
+.studio-layer-drag-handle {
+	background: transparent;
+	color: #94a3b8;
+	cursor: grab;
+}
+
 .studio-layer-icon {
 	width: 2rem;
 	height: 2rem;
@@ -431,6 +445,18 @@
 .studio-inspector-textarea-sm {
 	min-height: 72px;
 	resize: vertical;
+}
+
+.studio-richtext-preview {
+	border: 1px solid rgba(148, 163, 184, 0.22);
+	border-radius: 10px;
+	padding: 0.85rem 1rem;
+	font-size: 0.9rem;
+	line-height: 1.7;
+	color: #334155;
+	background: rgba(255, 255, 255, 0.6);
+	max-height: 220px;
+	overflow-y: auto;
 }
 
 .studio-action-row {

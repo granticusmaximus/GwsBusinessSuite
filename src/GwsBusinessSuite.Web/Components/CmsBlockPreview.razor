@@ -95,6 +95,10 @@ else
                 <span class="cms-block-chip">Paragraph</span>
                 <p>@Get(p, "text", "Paragraph text.")</p>
                 break;
+            case "richtext":
+                <span class="cms-block-chip">Rich Text</span>
+                <div>@((MarkupString)PublicSiteHtmlRenderer.RenderMarkdown(Get(p, "content", "*Empty*")))</div>
+                break;
             case "button":
                 <span class="cms-block-chip">Button</span>
                 <div><button type="button" class="btn btn-primary btn-sm">@Get(p, "label", "Button label")</button></div>
@@ -114,6 +118,31 @@ else
                 <span class="cms-block-chip">Card</span>
                 <h3>@Get(p, "title", "Card title")</h3>
                 <p>@Get(p, "body", "Card body text.")</p>
+                break;
+            case "testimonial":
+                <span class="cms-block-chip">Testimonial</span>
+                <p class="fst-italic">&ldquo;@Get(p, "quote", "Quote text.")&rdquo;</p>
+                <div class="small text-secondary">
+                    @Get(p, "authorName", "Author Name")
+                    @if (!string.IsNullOrWhiteSpace(Get(p, "authorRole")))
+                    {
+                        <text> — @Get(p, "authorRole")</text>
+                    }
+                </div>
+                break;
+            case "accordion":
+                <span class="cms-block-chip">Accordion</span>
+                @if (ParseAccordionItems(Get(p, "itemsJson")).Count == 0)
+                {
+                    <div class="small text-secondary">No items yet.</div>
+                }
+                else
+                {
+                    @foreach (var item in ParseAccordionItems(Get(p, "itemsJson")))
+                    {
+                        <div class="small mb-1"><strong>@item.Question</strong></div>
+                    }
+                }
                 break;
             case "spacer":
                 <span class="cms-block-chip">Spacer</span>
@@ -158,6 +187,26 @@ else
     };
 
     private sealed record FormFieldPreview(string Label, string Type, bool Required);
+    private sealed record AccordionItemPreview(string Question, string Answer);
+
+    private static List<AccordionItemPreview> ParseAccordionItems(string itemsJson)
+    {
+        try
+        {
+            var nodes = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(
+                string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson);
+            if (nodes is null) return [];
+
+            return nodes.Select(i => new AccordionItemPreview(
+                i.TryGetValue("question", out var q) ? q.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("answer", out var a) ? a.GetString() ?? string.Empty : string.Empty
+            )).Where(i => !string.IsNullOrWhiteSpace(i.Question)).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
 
     private static List<FormFieldPreview> ParseFormFields(string fieldsJson)
     {

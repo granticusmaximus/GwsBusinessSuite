@@ -194,4 +194,47 @@ public sealed class CmsBlockHtmlRendererTests
         Assert.Equal(string.Empty, style.ToInlineStyle());
         Assert.False(style.HasAnyOverride);
     }
+
+    [Fact]
+    public void Render_ShouldRenderRichTextWidget_AsHtmlFromMarkdown()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"richtext","props":{"content":"Some **bold** and a [link](https://example.com)."}}"""));
+
+        Assert.Contains("gws-richtext", html);
+        Assert.Contains("<strong>bold</strong>", html);
+        Assert.Contains("<a href=\"https://example.com\">link</a>", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderTestimonialWidget_WithQuoteAndAuthor()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"testimonial","props":{"quote":"Great product","authorName":"Jane Doe","authorRole":"CEO"}}"""));
+
+        Assert.Contains("Great product", html);
+        Assert.Contains("Jane Doe", html);
+        Assert.Contains("CEO", html);
+        Assert.Contains("gws-testimonial", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderAccordionWidget_WithCollapsibleItems()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"accordion","props":{"itemsJson":"[{\"question\":\"Q1?\",\"answer\":\"A1.\"}]"}}"""));
+
+        Assert.Contains("<details", html);
+        Assert.Contains("Q1?", html);
+        Assert.Contains("A1.", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderNoDetailsElements_ForAccordionWidget_WithNoItems()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"accordion","props":{"itemsJson":"[]"}}"""));
+
+        Assert.DoesNotContain("<details", html);
+    }
 }

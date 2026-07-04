@@ -109,6 +109,11 @@ public static class CmsBlockHtmlRenderer
                 """,
             "heading" => $"""<{Tag(p)} class="gws-heading gws-align-{Html(Align(p))}">{Html(Get(p, "text"))}</{Tag(p)}>""",
             "paragraph" => $"""<p class="gws-paragraph gws-align-{Html(Align(p))}">{Html(Get(p, "text"))}</p>""",
+            // Same trust boundary as blog articles: only authenticated Contributor/Author/
+            // Admin roles can edit Canvas widgets, so rendering Markdown -> HTML here (rather
+            // than HTML-encoding it, which would show raw asterisks/brackets) is consistent
+            // with how ArticleMarkdownRenderer already treats admin-authored content.
+            "richtext" => $"""<div class="gws-richtext">{Markdown.ToHtml(Get(p, "content"), MarkdownPipeline)}</div>""",
             "button" => $"""
                 <div class="gws-button-wrap gws-align-{Html(Align(p))}">
                   <a href="{Html(HrefOrHash(Get(p, "href")))}" class="btn btn-{Html(Get(p, "variant", "primary"))}"{OpenInNewTabAttrs(p)}>{Html(Get(p, "label"))}</a>
@@ -132,12 +137,54 @@ public static class CmsBlockHtmlRenderer
                   </div>
                 </div>
                 """,
+            "testimonial" => $"""
+                <blockquote class="gws-testimonial">
+                  <p class="gws-testimonial-quote">&ldquo;{Html(Get(p, "quote"))}&rdquo;</p>
+                  <footer class="gws-testimonial-author">
+                    <span class="gws-testimonial-name">{Html(Get(p, "authorName"))}</span>
+                    {(HasValue(p, "authorRole") ? $"""<span class="gws-testimonial-role">{Html(Get(p, "authorRole"))}</span>""" : "")}
+                  </footer>
+                </blockquote>
+                """,
+            "accordion" => RenderAccordion(Get(p, "itemsJson")),
             "spacer" => $"""<div class="gws-spacer" style="height:{GetInt(p, "height", 48)}px"></div>""",
             "divider" => $"""<hr class="gws-divider gws-divider-{Html(Get(p, "style", "solid"))}" />""",
             "html" => Get(p, "content"),
             "form" => RenderForm(p, siteSlug, pageSlug),
             _ => string.Empty
         };
+    }
+
+    // <details>/<summary> gives collapsible behavior natively, no JS needed — matches this
+    // codebase's preference for the simplest mechanism that actually works.
+    private static string RenderAccordion(string itemsJson)
+    {
+        try
+        {
+            var node = JsonNode.Parse(string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson) as JsonArray;
+            if (node is null || node.Count == 0) return string.Empty;
+
+            var sb = new StringBuilder("""<div class="gws-accordion">""");
+            foreach (var item in node.OfType<JsonObject>())
+            {
+                var question = item["question"]?.GetValue<string>() ?? string.Empty;
+                var answer = item["answer"]?.GetValue<string>() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(question)) continue;
+
+                sb.Append($"""
+                    <details class="gws-accordion-item">
+                      <summary class="gws-accordion-question">{Html(question)}</summary>
+                      <div class="gws-accordion-answer">{Html(answer)}</div>
+                    </details>
+                    """);
+            }
+            sb.Append("</div>");
+            return sb.ToString();
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     // Posts to /cms/{siteSlug}/{pageSlug}/submit (see Program.cs), which stores the
