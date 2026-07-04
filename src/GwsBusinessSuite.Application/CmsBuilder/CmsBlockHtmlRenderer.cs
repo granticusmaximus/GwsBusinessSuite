@@ -72,13 +72,24 @@ public static class CmsBlockHtmlRenderer
             sb.Append("""<div class="gws-column">""");
             foreach (var widget in column.Widgets)
             {
-                sb.Append(RenderWidget(widget, siteSlug, pageSlug));
+                sb.Append(WrapWithStyle(RenderWidget(widget, siteSlug, pageSlug), widget.Style));
             }
             sb.Append("</div>");
         }
 
         sb.Append("</div></section>\n");
         return sb.ToString();
+    }
+
+    // Wraps a widget's rendered HTML in a styled container when it has any per-widget
+    // style override set (Phase 6) — otherwise returns the inner HTML untouched, so
+    // widgets with no overrides render byte-for-byte as they did before this feature.
+    private static string WrapWithStyle(string innerHtml, WidgetStyle style)
+    {
+        var inlineStyle = style.ToInlineStyle();
+        return inlineStyle.Length == 0
+            ? innerHtml
+            : $"""<div class="gws-widget-style" style="{Html(inlineStyle)}">{innerHtml}</div>""";
     }
 
     private static string RenderWidget(LayoutWidget widget, string siteSlug, string pageSlug)

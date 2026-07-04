@@ -535,6 +535,70 @@ else
                             </div>
                         }
 
+                        @* Style — applies uniformly across every widget type, layered on top of the
+                           Content fields above and the site's global design tokens (Phase 5). *@
+                        <hr class="my-2" />
+                        <div class="small text-secondary fw-semibold text-uppercase mb-1" style="letter-spacing:.05em;">Style</div>
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <label class="form-label small fw-semibold d-flex align-items-center justify-content-between">
+                                    Text Color
+                                    @if (!string.IsNullOrWhiteSpace(selWidget.Style.TextColor))
+                                    {
+                                        <button type="button" class="btn btn-link btn-xs p-0" @onclick='() => SetStyleTextColor(selWidget, "")'>Reset</button>
+                                    }
+                                </label>
+                                <input type="color" class="form-control form-control-color w-100"
+                                       value="@(string.IsNullOrWhiteSpace(selWidget.Style.TextColor) ? "#0f172a" : selWidget.Style.TextColor)"
+                                       @oninput="(e) => SetStyleTextColor(selWidget, e.Value?.ToString() ?? string.Empty)" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small fw-semibold d-flex align-items-center justify-content-between">
+                                    Background
+                                    @if (!string.IsNullOrWhiteSpace(selWidget.Style.BackgroundColor))
+                                    {
+                                        <button type="button" class="btn btn-link btn-xs p-0" @onclick='() => SetStyleBackgroundColor(selWidget, "")'>Reset</button>
+                                    }
+                                </label>
+                                <input type="color" class="form-control form-control-color w-100"
+                                       value="@(string.IsNullOrWhiteSpace(selWidget.Style.BackgroundColor) ? "#ffffff" : selWidget.Style.BackgroundColor)"
+                                       @oninput="(e) => SetStyleBackgroundColor(selWidget, e.Value?.ToString() ?? string.Empty)" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small fw-semibold">Padding</label>
+                                <select class="form-select form-select-sm" value="@selWidget.Style.Padding"
+                                        @onchange='(e) => selWidget.Style.Padding = e.Value?.ToString() ?? "none"'>
+                                    <option value="none">None</option>
+                                    <option value="sm">Small</option>
+                                    <option value="md">Medium</option>
+                                    <option value="lg">Large</option>
+                                    <option value="xl">Extra Large</option>
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small fw-semibold">Corner Radius</label>
+                                <select class="form-select form-select-sm" value="@selWidget.Style.BorderRadius"
+                                        @onchange='(e) => selWidget.Style.BorderRadius = e.Value?.ToString() ?? "none"'>
+                                    <option value="none">None</option>
+                                    <option value="sm">Small</option>
+                                    <option value="md">Medium</option>
+                                    <option value="lg">Large</option>
+                                    <option value="full">Full (pill)</option>
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small fw-semibold">Font Size</label>
+                                <select class="form-select form-select-sm" value="@selWidget.Style.FontSize"
+                                        @onchange='(e) => selWidget.Style.FontSize = e.Value?.ToString() ?? "default"'>
+                                    <option value="default">Default</option>
+                                    <option value="sm">Small</option>
+                                    <option value="md">Medium</option>
+                                    <option value="lg">Large</option>
+                                    <option value="xl">Extra Large</option>
+                                </select>
+                            </div>
+                        </div>
+
                         @* Action row *@
                         <div class="studio-action-row mt-1">
                             <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedWidgetUp"
@@ -973,6 +1037,13 @@ else
 
     private static void SetProp(LayoutWidget widget, string key, string value) =>
         widget.Props[key] = value;
+
+    // ── Style helpers (Phase 6) ─────────────────────────────────────────────
+    private static void SetStyleTextColor(LayoutWidget widget, string value) =>
+        widget.Style.TextColor = value;
+
+    private static void SetStyleBackgroundColor(LayoutWidget widget, string value) =>
+        widget.Style.BackgroundColor = value;
 
     // ── Form widget field editor ─────────────────────────────────────────
     private static readonly string[] FormFieldTypes = ["text", "email", "tel", "textarea", "select", "checkbox"];

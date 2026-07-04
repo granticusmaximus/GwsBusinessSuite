@@ -29,7 +29,7 @@ else
                 {
                     @foreach (var widget in column.Widgets)
                     {
-                        <section class="cms-block-preview-card mb-3">
+                        <section class="cms-block-preview-card mb-3" style="@WidgetStylePreviewAttr(widget)">
                             @RenderWidget(widget)
                         </section>
                     }
@@ -178,6 +178,12 @@ else
             return [];
         }
     }
+
+    // Previews a widget's Style overrides (Phase 6) on its preview card wrapper — this
+    // preview is already a simplified "chip + fields" summary rather than a pixel-match of
+    // the live render, so applying the override here (rather than reimplementing every
+    // widget type's real markup) is enough to make style choices visible while editing.
+    private static string WidgetStylePreviewAttr(LayoutWidget widget) => widget.Style.ToInlineStyle();
 
     private static string Get(IReadOnlyDictionary<string, string> p, string key, string fallback = "") =>
         p.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v) ? v : fallback;

@@ -162,4 +162,36 @@ public sealed class CmsBlockHtmlRendererTests
         var columnCount = html.Split("class=\"gws-column\"").Length - 1;
         Assert.Equal(2, columnCount);
     }
+
+    [Fact]
+    public void Render_ShouldNotWrapWidget_WhenStyleHasNoOverrides()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"Hello"}}"""));
+
+        Assert.DoesNotContain("gws-widget-style", html);
+    }
+
+    [Fact]
+    public void Render_ShouldWrapWidgetInStyledDiv_WhenStyleOverridesAreSet()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"Hello"},"style":{"textColor":"#2563eb","backgroundColor":"#f1f5f9","padding":"md","borderRadius":"lg","fontSize":"xl"}}"""));
+
+        Assert.Contains("gws-widget-style", html);
+        Assert.Contains("color:#2563eb", html);
+        Assert.Contains("background-color:#f1f5f9", html);
+        Assert.Contains("padding:1.5rem", html);
+        Assert.Contains("border-radius:20px", html);
+        Assert.Contains("font-size:1.75rem", html);
+    }
+
+    [Fact]
+    public void WidgetStyle_ToInlineStyle_ShouldReturnEmptyString_WhenAllFieldsAreDefault()
+    {
+        var style = new WidgetStyle();
+
+        Assert.Equal(string.Empty, style.ToInlineStyle());
+        Assert.False(style.HasAnyOverride);
+    }
 }
