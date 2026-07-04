@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using GwsBusinessSuite.Domain.Entities;
 using Markdig;
 
 namespace GwsBusinessSuite.Application.CmsBuilder;
@@ -66,13 +67,59 @@ public static class PublicSiteHtmlRenderer
 
     public sealed record CategorySummary(string Name, string Slug);
 
+    // ── Global design tokens (Elementor-style "Global Colors/Fonts") ─────────
+    // Font pairings are a small curated set rather than an open-ended picker — matches
+    // this codebase's "don't over-engineer" convention and avoids needing a font-loading
+    // UI. "elegant" reproduces the original hardcoded Playfair+Inter pairing exactly.
+    private sealed record FontPairing(string HeadingFamily, string BodyFamily, string GoogleFontsHref);
+
+    private static readonly Dictionary<string, FontPairing> FontPairingsByKey = new()
+    {
+        [CmsFontPairings.Elegant] = new(
+            "'Playfair Display', Georgia, 'Times New Roman', serif",
+            "'Inter', system-ui, -apple-system, sans-serif",
+            "https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800;900&family=Inter:wght@300;400;500;600;700&display=swap"),
+        [CmsFontPairings.Modern] = new(
+            "'Manrope', system-ui, -apple-system, sans-serif",
+            "'Inter', system-ui, -apple-system, sans-serif",
+            "https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Inter:wght@300;400;500;600;700&display=swap"),
+        [CmsFontPairings.Classic] = new(
+            "'Merriweather', Georgia, 'Times New Roman', serif",
+            "'Source Sans 3', system-ui, -apple-system, sans-serif",
+            "https://fonts.googleapis.com/css2?family=Merriweather:wght@700;900&family=Source+Sans+3:wght@300;400;500;600;700&display=swap"),
+    };
+
+    private const string DefaultAccentColorHex = "#f59e0b";
+
     // ── Page shell ───────────────────────────────────────────────────────────
 
-    public static string Layout(string pageTitle, string metaDescription, string? ogImageUrl, string bodyHtml, IReadOnlyList<NavMenuItem>? navItems = null)
+    public static string Layout(
+        string pageTitle, string metaDescription, string? ogImageUrl, string bodyHtml,
+        IReadOnlyList<NavMenuItem>? navItems = null, string? accentColorHex = null, string? fontPairingKey = null)
     {
         var ogImageTag = string.IsNullOrWhiteSpace(ogImageUrl)
             ? string.Empty
             : $"""<meta property="og:image" content="{Html(ogImageUrl)}" />""";
+
+        var accent = string.IsNullOrWhiteSpace(accentColorHex) ? DefaultAccentColorHex : accentColorHex;
+        var pairing = fontPairingKey is not null && FontPairingsByKey.TryGetValue(fontPairingKey, out var p)
+            ? p
+            : FontPairingsByKey[CmsFontPairings.Elegant];
+
+        // color-mix() derives the hover/low-opacity accent shades from whatever single
+        // color an admin picks, so there's no hex-math to hand-roll in C# for a custom
+        // accent color to look consistent everywhere --accent-hover/--accent-low are used.
+        var designTokensStyle = $$"""
+            <style>
+              :root {
+                --accent: {{accent}};
+                --accent-low: color-mix(in srgb, {{accent}} 12%, transparent);
+                --accent-hover: color-mix(in srgb, {{accent}} 85%, black);
+                --font-serif: {{pairing.HeadingFamily}};
+                --font-sans: {{pairing.BodyFamily}};
+              }
+            </style>
+            """;
 
         return $"""
             <!DOCTYPE html>
@@ -86,8 +133,9 @@ public static class PublicSiteHtmlRenderer
               {ogImageTag}
               <link rel="preconnect" href="https://fonts.googleapis.com" />
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-              <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+              <link href="{pairing.GoogleFontsHref}" rel="stylesheet" />
               <link rel="stylesheet" href="/public-site.css" />
+              {designTokensStyle}
             </head>
             <body>
               {Nav(navItems ?? DefaultNavItems)}

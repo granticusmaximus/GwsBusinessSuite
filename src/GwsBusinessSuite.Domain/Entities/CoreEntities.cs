@@ -72,6 +72,13 @@ public sealed class WikiPage : AuditableEntity
     public string Markdown { get; set; } = string.Empty;
 }
 
+public static class CmsFontPairings
+{
+    public const string Elegant = "elegant";
+    public const string Modern = "modern";
+    public const string Classic = "classic";
+}
+
 public sealed class CmsSite : AuditableEntity
 {
     public required string Name { get; set; }
@@ -79,6 +86,12 @@ public sealed class CmsSite : AuditableEntity
     public string Theme { get; set; } = "Default";
     public string CustomCss { get; set; } = string.Empty;
     public string NavMenuJson { get; set; } = "[]";
+
+    // Global design tokens (Elementor-style "Global Colors/Fonts") applied site-wide via
+    // PublicSiteHtmlRenderer.Layout — defaults match the hardcoded values public-site.css
+    // already shipped with, so existing sites render identically until an admin changes them.
+    public string AccentColorHex { get; set; } = "#f59e0b";
+    public string FontPairingKey { get; set; } = CmsFontPairings.Elegant;
 }
 
 public static class CmsPageStatuses

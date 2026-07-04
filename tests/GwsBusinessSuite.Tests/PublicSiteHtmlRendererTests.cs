@@ -1,4 +1,5 @@
 using GwsBusinessSuite.Application.CmsBuilder;
+using GwsBusinessSuite.Domain.Entities;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -76,6 +77,43 @@ public sealed class PublicSiteHtmlRendererTests
         Assert.Contains(">About<", html);
         Assert.Contains(">Blog<", html);
         Assert.Contains(">Contact<", html);
+    }
+
+    [Fact]
+    public void Layout_ShouldFallBackToDefaultAccentAndFontPairing_WhenTokensOmitted()
+    {
+        var html = PublicSiteHtmlRenderer.Layout("Title", "Description", null, "<p>body</p>");
+
+        Assert.Contains("--accent: #f59e0b;", html);
+        Assert.Contains("'Playfair Display'", html);
+        Assert.Contains("'Inter'", html);
+    }
+
+    [Fact]
+    public void Layout_ShouldRenderCustomAccentColor()
+    {
+        var html = PublicSiteHtmlRenderer.Layout("Title", "Description", null, "<p>body</p>", accentColorHex: "#2563eb");
+
+        Assert.Contains("--accent: #2563eb;", html);
+        Assert.Contains("color-mix(in srgb, #2563eb 12%, transparent)", html);
+        Assert.Contains("color-mix(in srgb, #2563eb 85%, black)", html);
+    }
+
+    [Fact]
+    public void Layout_ShouldRenderModernFontPairing()
+    {
+        var html = PublicSiteHtmlRenderer.Layout("Title", "Description", null, "<p>body</p>", fontPairingKey: CmsFontPairings.Modern);
+
+        Assert.Contains("'Manrope'", html);
+        Assert.Contains("Manrope:wght", html);
+    }
+
+    [Fact]
+    public void Layout_ShouldFallBackToElegantPairing_WhenKeyIsUnrecognized()
+    {
+        var html = PublicSiteHtmlRenderer.Layout("Title", "Description", null, "<p>body</p>", fontPairingKey: "not-a-real-key");
+
+        Assert.Contains("'Playfair Display'", html);
     }
 
     [Fact]

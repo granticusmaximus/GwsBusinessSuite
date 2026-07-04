@@ -529,8 +529,9 @@ app.MapGet("/blog", async (
             .ToList();
 
         var navItems = await GetPublicNavItemsAsync(cmsBuilderService, configuration);
+        var (accentColorHex, fontPairingKey) = await GetPublicDesignTokensAsync(cmsBuilderService, configuration);
         var bodyHtml = PublicSiteHtmlRenderer.BlogListBody(pageItems, keywords, keyword, categories, category, tag, page, pageSize, filtered.Count, totalPages);
-        var html = PublicSiteHtmlRenderer.Layout("Blog — Grant Watson", "Thoughts on software, building products, and the web.", null, bodyHtml, navItems);
+        var html = PublicSiteHtmlRenderer.Layout("Blog — Grant Watson", "Thoughts on software, building products, and the web.", null, bodyHtml, navItems, accentColorHex, fontPairingKey);
         return Results.Content(html, "text/html");
     })
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
@@ -548,11 +549,12 @@ app.MapGet("/blog/{slug}", async (
             .FirstOrDefaultAsync();
 
         var navItems = await GetPublicNavItemsAsync(cmsBuilderService, configuration);
+        var (accentColorHex, fontPairingKey) = await GetPublicDesignTokensAsync(cmsBuilderService, configuration);
 
         if (a is null)
         {
             return Results.Content(
-                PublicSiteHtmlRenderer.Layout("404 — Not Found", string.Empty, null, PublicSiteHtmlRenderer.NotFoundBody("Article not found.", "/blog", "Back to Blog"), navItems),
+                PublicSiteHtmlRenderer.Layout("404 — Not Found", string.Empty, null, PublicSiteHtmlRenderer.NotFoundBody("Article not found.", "/blog", "Back to Blog"), navItems, accentColorHex, fontPairingKey),
                 "text/html", statusCode: StatusCodes.Status404NotFound);
         }
 
@@ -567,7 +569,7 @@ app.MapGet("/blog/{slug}", async (
             heroImageUrl, a.HeroImageAltText, a.HeroImageCaption, renderedMarkdown,
             articleCategory?.Name, articleCategory?.Slug, ParseTags(a.Tags));
 
-        var html = PublicSiteHtmlRenderer.Layout(a.Title, a.MetaDescription, heroImageUrl, bodyHtml, navItems);
+        var html = PublicSiteHtmlRenderer.Layout(a.Title, a.MetaDescription, heroImageUrl, bodyHtml, navItems, accentColorHex, fontPairingKey);
         return Results.Content(html, "text/html");
     })
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
@@ -583,8 +585,9 @@ app.MapGet("/__not-found", async (HttpContext httpContext, ICmsBuilderService cm
         if (IsPublicHost(httpContext))
         {
             var navItems = await GetPublicNavItemsAsync(cmsBuilderService, configuration);
+            var (accentColorHex, fontPairingKey) = await GetPublicDesignTokensAsync(cmsBuilderService, configuration);
             var html = PublicSiteHtmlRenderer.Layout("404 — Not Found", string.Empty, null,
-                PublicSiteHtmlRenderer.NotFoundBody("Sorry, the content you are looking for does not exist.", "/", "Back to Home"), navItems);
+                PublicSiteHtmlRenderer.NotFoundBody("Sorry, the content you are looking for does not exist.", "/", "Back to Home"), navItems, accentColorHex, fontPairingKey);
             return Results.Content(html, "text/html");
         }
 
@@ -1047,6 +1050,16 @@ static async Task<IReadOnlyList<NavMenuItem>> GetPublicNavItemsAsync(ICmsBuilder
     return PublicSiteHtmlRenderer.ParseNavItems(site?.NavMenuJson);
 }
 
+// Global design tokens (accent color + font pairing) apply to every public page — blog and
+// Canvas alike, since both funnel through PublicSiteHtmlRenderer.Layout — fetched the same
+// way as nav items rather than duplicated per-route.
+static async Task<(string? AccentColorHex, string? FontPairingKey)> GetPublicDesignTokensAsync(ICmsBuilderService cmsBuilderService, IConfiguration configuration)
+{
+    var siteSlug = configuration["Canvas:SiteSlug"] ?? string.Empty;
+    var site = string.IsNullOrWhiteSpace(siteSlug) ? null : await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
+    return (site?.AccentColorHex, site?.FontPairingKey);
+}
+
 // Renders a Canvas page (by full path, under the Canvas:SiteSlug-configured site) as a full
 // grantwatson.dev document — shared by GET "/" (path "home") and GET "/{**pageSlug}".
 // fullPath supports nested pages ("services/web-dev") via GetPageByFullPathAsync.
@@ -1068,7 +1081,7 @@ static async Task<IResult> RenderPublicCanvasPageAsync(string fullPath, bool sho
     if (page is null)
     {
         return Results.Content(
-            PublicSiteHtmlRenderer.Layout("404 — Not Found", string.Empty, null, PublicSiteHtmlRenderer.NotFoundBody("Page not found.", "/", "Back to Home"), navItems),
+            PublicSiteHtmlRenderer.Layout("404 — Not Found", string.Empty, null, PublicSiteHtmlRenderer.NotFoundBody("Page not found.", "/", "Back to Home"), navItems, site.AccentColorHex, site.FontPairingKey),
             "text/html", statusCode: StatusCodes.Status404NotFound);
     }
 
@@ -1084,7 +1097,7 @@ static async Task<IResult> RenderPublicCanvasPageAsync(string fullPath, bool sho
         : $"<style>{SanitizeInlineCss(customCss)}</style>{bodyHtml}";
 
     var pageTitle = string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle;
-    var html = PublicSiteHtmlRenderer.Layout(pageTitle, page.MetaDescription, page.OgImageUrl, wrappedBody, navItems);
+    var html = PublicSiteHtmlRenderer.Layout(pageTitle, page.MetaDescription, page.OgImageUrl, wrappedBody, navItems, site.AccentColorHex, site.FontPairingKey);
     return Results.Content(html, "text/html");
 }
 

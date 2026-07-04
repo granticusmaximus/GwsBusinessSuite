@@ -17,6 +17,10 @@ public sealed class CmsSiteEditorModel
     public string CustomCss { get; set; } = string.Empty;
 
     public string NavMenuJson { get; set; } = "[]";
+
+    public string AccentColorHex { get; set; } = "#f59e0b";
+
+    public string FontPairingKey { get; set; } = CmsFontPairings.Elegant;
 }
 
 public sealed class CmsPageEditorModel
