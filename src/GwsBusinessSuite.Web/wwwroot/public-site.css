@@ -472,6 +472,19 @@ a { color: inherit; }
   text-align: left;
 }
 
+.blog-post-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 1.5rem;
+  color: var(--text-3);
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: color 0.15s;
+}
+.blog-post-back-link:hover { color: var(--accent); }
+
 .blog-post-meta-row {
   display: flex;
   flex-wrap: wrap;

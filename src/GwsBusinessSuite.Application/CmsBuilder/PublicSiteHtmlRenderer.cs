@@ -432,6 +432,7 @@ public static class PublicSiteHtmlRenderer
             <article>
               {heroHtml}
               <div class="blog-post-content">
+                <a href="/blog" class="blog-post-back-link">&larr; Back to all articles</a>
                 <div class="blog-post-meta-row">
                   <span>{Html(dateLabel)}</span>
                   {(string.IsNullOrWhiteSpace(estimatedReadingTime) ? "" : $"""<span>&middot; {Html(estimatedReadingTime)} read</span>""")}
