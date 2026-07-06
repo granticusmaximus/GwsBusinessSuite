@@ -4,6 +4,7 @@
 @implements IAsyncDisposable
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.Articles
+@using GwsBusinessSuite.Application.ContentStudio
 @using GwsBusinessSuite.Application.Settings
 @using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Infrastructure.Data
@@ -12,6 +13,7 @@
 @using System.Text.RegularExpressions
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject ISiteSettingsService SiteSettingsService
+@inject IContentStudioService ContentStudioService
 @inject NavigationManager Navigation
 @inject ILogger<ArticleEditorDetail> Logger
 @inject IJSRuntime JS
@@ -23,12 +25,23 @@
         <h1><i class="bi bi-pencil me-2 text-primary"></i>@(CurrentArticle?.Title ?? "Article")</h1>
         @if (CurrentArticle is not null)
         {
-            <div class="d-flex align-items-center gap-2 mt-1">
+            <div class="d-flex align-items-center gap-2 mt-1 flex-wrap">
                 <span class="badge @GetStatusBadgeClass(CurrentArticle.Status)">@CurrentArticle.Status</span>
                 <span class="badge text-bg-light">@FormatSource(CurrentArticle.Source)</span>
                 @if (CurrentArticle.PublishedAt.HasValue)
                 {
                     <span class="small text-secondary">Published @FormatDate(CurrentArticle.PublishedAt.Value)</span>
+                }
+                @if (CurrentArticle.SourceDraftId.HasValue)
+                {
+                    <a href="/admin/content-studio/draft/@CurrentArticle.SourceDraftId" class="small">
+                        <i class="bi bi-box-arrow-up-right me-1"></i>View AI Draft
+                    </a>
+                    <button class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-1"
+                            @onclick="ToggleReviseWithAiPanel" disabled="@IsBusy">
+                        <i class="bi bi-magic"></i>
+                        <span>Revise with AI</span>
+                    </button>
                 }
             </div>
         }
@@ -37,6 +50,39 @@
         <i class="bi bi-arrow-left-circle-fill"></i>
     </button>
 </div>
+
+@if (ShowReviseWithAiPanel && CurrentArticle is not null)
+{
+    <div class="card border-0 shadow-sm mb-4 border-start border-primary border-3">
+        <div class="card-header bg-white border-bottom py-3">
+            <span class="fw-semibold"><i class="bi bi-magic me-1 text-primary"></i>Revise with AI</span>
+            <div class="small text-secondary">Ollama regenerates the article from your notes, then republishes it live in place.</div>
+        </div>
+        <div class="card-body">
+            <label class="form-label fw-semibold small">Revision notes</label>
+            <textarea class="form-control mb-3" rows="3" @bind="ReviseWithAiNotes" @bind:event="oninput"
+                      placeholder="e.g. Make the introduction shorter and add a section on error handling."></textarea>
+            @if (!string.IsNullOrWhiteSpace(ReviseWithAiError))
+            {
+                <div class="alert alert-danger py-2 small mb-3">@ReviseWithAiError</div>
+            }
+            <div class="d-flex gap-2">
+                <button class="btn btn-primary" @onclick="ReviseWithAiAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(ReviseWithAiNotes))">
+                    @if (IsBusy)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1"></span>
+                        <span>Regenerating…</span>
+                    }
+                    else
+                    {
+                        <span>Regenerate &amp; Republish</span>
+                    }
+                </button>
+                <button class="btn btn-outline-secondary" @onclick="ToggleReviseWithAiPanel" disabled="@IsBusy">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
@@ -361,6 +407,13 @@ else
     private bool SlugManuallyEdited { get; set; }
     private int MaxUploadSizeMb { get; set; } = 8;
 
+    // Revise with AI (Phase 12: bridges back into the Content Studio draft this
+    // article was published from, so a live AI post can be regenerated without
+    // hunting it down in a separate list).
+    private bool ShowReviseWithAiPanel { get; set; }
+    private string ReviseWithAiNotes { get; set; } = string.Empty;
+    private string ReviseWithAiError { get; set; } = string.Empty;
+
     private const string MarkdownEditorElementId = "article-body-textarea";
     private bool _markdownEditorInitialized;
     private string? _lastSyncedMarkdown;
@@ -655,6 +708,63 @@ else
     private void BackToList()
     {
         Navigation.NavigateTo("/admin/article-editor");
+    }
+
+    private void ToggleReviseWithAiPanel()
+    {
+        ShowReviseWithAiPanel = !ShowReviseWithAiPanel;
+        ReviseWithAiError = string.Empty;
+        if (!ShowReviseWithAiPanel)
+        {
+            ReviseWithAiNotes = string.Empty;
+        }
+    }
+
+    // Reuses the same Ollama revision loop Content Studio's own draft workspace
+    // uses (RequestRevisionAsync then PublishDraftToSiteAsync) - publishing again
+    // updates the existing Article row in place since it matches by slug, so this
+    // never creates a duplicate post.
+    private async Task ReviseWithAiAsync()
+    {
+        if (CurrentArticle?.SourceDraftId is not { } draftId || string.IsNullOrWhiteSpace(ReviseWithAiNotes))
+        {
+            return;
+        }
+
+        IsBusy = true;
+        ReviseWithAiError = string.Empty;
+        StatusMessage = string.Empty;
+
+        try
+        {
+            await ContentStudioService.RequestRevisionAsync(new DraftRevisionRequest
+            {
+                DraftId = draftId,
+                RequestedModifications = ReviseWithAiNotes,
+                PerformedBy = "article-editor-ui"
+            });
+
+            await ContentStudioService.PublishDraftToSiteAsync(new DraftPublishRequest
+            {
+                DraftId = draftId,
+                Notes = ReviseWithAiNotes,
+                PerformedBy = "article-editor-ui"
+            });
+
+            ShowReviseWithAiPanel = false;
+            ReviseWithAiNotes = string.Empty;
+            await LoadArticle();
+            StatusMessage = "Article regenerated with AI and republished live.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to revise article {Id} with AI via draft {DraftId}.", ArticleId, draftId);
+            ReviseWithAiError = $"Unable to regenerate with AI. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     private void OpenPlacementModal(ArticleAffiliatePlacement? existing)

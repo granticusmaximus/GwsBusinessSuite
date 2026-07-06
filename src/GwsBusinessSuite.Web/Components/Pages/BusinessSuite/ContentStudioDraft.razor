@@ -428,6 +428,18 @@ else
             }),
             "Publishing the approved article live to the site blog.",
             updated => $"Draft published live and can be shared at /blog/{updated.Slug}.");
+
+        // Hand off into Article Editor - once a draft is live, day-to-day editing
+        // (typos, ad placements, hero image) happens there, not on this screen.
+        if (string.IsNullOrWhiteSpace(ErrorMessage) && CurrentDraft is not null)
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var article = await db.Articles.FirstOrDefaultAsync(a => a.Slug == CurrentDraft.Slug);
+            if (article is not null)
+            {
+                Navigation.NavigateTo($"/admin/article-editor/{article.Id}");
+            }
+        }
     }
 
     private async Task RequestRevision()
