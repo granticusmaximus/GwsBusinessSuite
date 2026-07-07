@@ -103,6 +103,23 @@
             </button>
         </div>
 
+        @if (AvailableSources.Count > 1)
+        {
+            <div class="ni-source-filter">
+                <button class="ni-source-chip @(_selectedSources.Count == 0 ? "ni-source-chip--active" : "")"
+                        @onclick="ClearSourceFilter">
+                    All Sources
+                </button>
+                @foreach (var source in AvailableSources)
+                {
+                    <button class="ni-source-chip @(_selectedSources.Contains(source) ? "ni-source-chip--active" : "")"
+                            @onclick="() => ToggleSource(source)">
+                        @source
+                    </button>
+                }
+            </div>
+        }
+
         @if (!string.IsNullOrWhiteSpace(_statusMessage))
         {
             <div class="ni-alert ni-alert-info">
@@ -159,6 +176,10 @@
     private string _statusMessage = string.Empty;
     private string _errorMessage = string.Empty;
 
+    // Empty means "no filter" (show every source). Populated with the sources the user
+    // has explicitly chosen to show - can combine any number of sources at once.
+    private readonly HashSet<string> _selectedSources = [];
+
     // Topic form
     private bool _showTopicForm;
     private Guid? _editingTopicId;
@@ -208,8 +229,22 @@
     private async Task SelectFilter(string filter)
     {
         _activeFilter = filter;
+        // Sources are scoped to whatever's in the newly selected view - a source picked
+        // in one topic may not exist in another, so carrying it over would silently
+        // empty the feed with no visible explanation.
+        _selectedSources.Clear();
         await LoadFeedAsync();
     }
+
+    private void ToggleSource(string source)
+    {
+        if (!_selectedSources.Add(source))
+        {
+            _selectedSources.Remove(source);
+        }
+    }
+
+    private void ClearSourceFilter() => _selectedSources.Clear();
 
     private async Task RefreshAllAsync()
     {
@@ -334,12 +369,21 @@
         _ => _topics.FirstOrDefault(t => t.Id.ToString() == _activeFilter)?.Name ?? "Feed"
     };
 
+    private List<string> AvailableSources =>
+        _feed is null
+            ? []
+            : _feed.Items.Select(x => x.Source).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().OrderBy(s => s).ToList();
+
+    private bool SourceMatches(NewsItemDto item) =>
+        _selectedSources.Count == 0 || _selectedSources.Contains(item.Source);
+
     private List<NewsItemDto> CurrentItems()
     {
         if (_feed is null) return [];
-        return _activeFilter == "top"
-            ? _feed.Items.Where(x => x.TopicId == null).ToList()
-            : _feed.Items.ToList();
+        var items = _activeFilter == "top"
+            ? _feed.Items.Where(x => x.TopicId == null)
+            : _feed.Items.AsEnumerable();
+        return items.Where(SourceMatches).ToList();
     }
 
     private RenderFragment RenderAllView() => __builder =>
@@ -358,14 +402,30 @@
             return;
         }
 
-        var topNews = _feed.Items.Where(x => x.TopicId == null).ToList();
-        var topicGroups = _feed.Items
+        var filteredItems = _feed.Items.Where(SourceMatches).ToList();
+
+        if (filteredItems.Count == 0)
+        {
+            __builder.OpenElement(6, "div");
+            __builder.AddAttribute(7, "class", "ni-empty");
+            __builder.OpenElement(8, "i");
+            __builder.AddAttribute(9, "class", "bi bi-funnel");
+            __builder.CloseElement();
+            __builder.OpenElement(10, "p");
+            __builder.AddContent(11, "No articles match the selected source filter.");
+            __builder.CloseElement();
+            __builder.CloseElement();
+            return;
+        }
+
+        var topNews = filteredItems.Where(x => x.TopicId == null).ToList();
+        var topicGroups = filteredItems
             .Where(x => x.TopicId != null)
             .GroupBy(x => x.TopicId)
             .OrderBy(g => g.First().TopicName)
             .ToList();
 
-        var seq = 10;
+        var seq = 20;
 
         if (topNews.Count > 0)
         {

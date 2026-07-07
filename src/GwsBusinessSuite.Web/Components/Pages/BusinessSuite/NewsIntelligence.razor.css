@@ -287,6 +287,33 @@
     font-weight: 500;
 }
 
+/* ── Source filter chips ────────────────────────────────── */
+.ni-source-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.ni-source-chip {
+    padding: 0.35rem 0.85rem;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    background: rgba(255, 255, 255, 0.6);
+    color: #475569;
+    font-size: 0.75rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.ni-source-chip:hover { background: rgba(255, 255, 255, 0.95); color: #0f172a; }
+
+.ni-source-chip--active {
+    background: linear-gradient(135deg, #0f172a, #2563eb);
+    border-color: transparent;
+    color: #fff;
+}
+
 /* ── Alerts ─────────────────────────────────────────────── */
 .ni-alert {
     display: flex;
