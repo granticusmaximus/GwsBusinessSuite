@@ -98,6 +98,22 @@ a { color: inherit; }
 }
 .nav-links a:hover { color: var(--text-1); }
 
+/* Social links (GitHub, X, LinkedIn, dev.to, etc.) render as an icon instead of text -
+   shared between .nav-links and .footer-links since both come from the same NavMenuItem
+   list rendered by PublicSiteHtmlRenderer.NavLink. */
+.nav-link-social {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.nav-link-social i,
+.nav-link-social svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  font-size: 1.15rem;
+  fill: currentColor;
+}
+
 .nav-admin {
   padding: 0.35rem 0.9rem !important;
   border: 1px solid var(--border) !important;

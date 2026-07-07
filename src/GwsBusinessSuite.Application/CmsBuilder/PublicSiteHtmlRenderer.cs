@@ -145,6 +145,7 @@ public static class PublicSiteHtmlRenderer
               <link rel="preconnect" href="https://fonts.googleapis.com" />
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
               <link href="{pairing.GoogleFontsHref}" rel="stylesheet" />
+              <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
               <link rel="stylesheet" href="/public-site.css" />
               {designTokensStyle}
             </head>
@@ -157,9 +158,66 @@ public static class PublicSiteHtmlRenderer
             """;
     }
 
+    // Recognized purely from the link's host, not a manual picker in the Menus admin UI -
+    // paste a github.com/x.com/linkedin.com/etc. URL as a nav or footer link and it renders
+    // as that platform's logo instead of the raw label text. Covers the common set requested
+    // plus a few obvious siblings; anything unrecognized falls back to the plain text link.
+    private static readonly (string[] Hosts, string IconClass)[] SocialIconsByHost =
+    [
+        (["github.com", "www.github.com"], "bi-github"),
+        (["x.com", "www.x.com", "twitter.com", "www.twitter.com"], "bi-twitter-x"),
+        (["linkedin.com", "www.linkedin.com"], "bi-linkedin"),
+        (["facebook.com", "www.facebook.com", "fb.com"], "bi-facebook"),
+        (["instagram.com", "www.instagram.com"], "bi-instagram"),
+        (["youtube.com", "www.youtube.com", "youtu.be"], "bi-youtube"),
+        (["tiktok.com", "www.tiktok.com"], "bi-tiktok"),
+        (["threads.net", "www.threads.net"], "bi-threads"),
+        (["discord.com", "www.discord.com", "discord.gg"], "bi-discord"),
+        (["reddit.com", "www.reddit.com"], "bi-reddit"),
+        (["bsky.app", "www.bsky.app"], "bi-bluesky"),
+    ];
+
+    // dev.to has no Bootstrap Icons glyph, so it's the one platform rendered as an inline
+    // SVG instead of a "bi-*" font class. Path data is dev.to's actual logo (via Simple
+    // Icons, MIT licensed) used verbatim rather than redrawn from memory.
+    private const string DevToIconSvg = """
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M7.42 10.05c-.18-.16-.46-.23-.84-.23H6l.02 2.44.04 2.45.56-.02c.41 0 .63-.07.83-.26.24-.24.26-.36.26-2.2 0-1.91-.02-1.96-.29-2.18zM0 4.94v14.12h24V4.94H0zM8.56 15.3c-.44.58-1.06.77-2.53.77H4.71V8.53h1.4c1.67 0 2.16.18 2.6.9.27.43.29.6.32 2.57.05 2.23-.02 2.73-.47 3.3zm5.09-5.47h-2.47v1.77h1.52v1.28l-.72.04-.75.03v1.77l1.22.03 1.2.04v1.28h-1.6c-1.53 0-1.6-.01-1.87-.3l-.3-.28v-3.16c0-3.02.01-3.18.25-3.48.23-.31.25-.31 1.88-.31h1.64v1.3zm4.68 5.45c-.17.43-.64.79-1 .79-.18 0-.45-.15-.67-.39-.32-.32-.45-.63-.82-2.08l-.9-3.39-.45-1.67h.76c.4 0 .75.02.75.05 0 .06 1.16 4.54 1.26 4.83.04.15.32-.7.73-2.3l.66-2.52.74-.04c.4-.02.73 0 .73.04 0 .14-1.67 6.38-1.8 6.68z"/></svg>
+        """;
+
+    private static string? DetectSocialIconHtml(string href)
+    {
+        if (!Uri.TryCreate(href, UriKind.Absolute, out var uri))
+        {
+            return null;
+        }
+
+        if (uri.Host.Equals("dev.to", StringComparison.OrdinalIgnoreCase) ||
+            uri.Host.Equals("www.dev.to", StringComparison.OrdinalIgnoreCase))
+        {
+            return DevToIconSvg;
+        }
+
+        foreach (var (hosts, iconClass) in SocialIconsByHost)
+        {
+            if (hosts.Any(h => uri.Host.Equals(h, StringComparison.OrdinalIgnoreCase)))
+            {
+                return $"""<i class="bi {iconClass}" aria-hidden="true"></i>""";
+            }
+        }
+
+        return null;
+    }
+
     private static string NavLink(NavMenuItem item)
     {
         var targetAttrs = item.OpenInNewTab ? " target=\"_blank\" rel=\"noopener noreferrer\"" : "";
+        var icon = DetectSocialIconHtml(item.Href);
+        if (icon is not null)
+        {
+            // aria-label carries the accessible name since the visible content is icon-only.
+            return $"""<a href="{Html(item.Href)}"{targetAttrs} class="nav-link-social" aria-label="{Html(item.Label)}">{icon}</a>""";
+        }
+
         return $"""<a href="{Html(item.Href)}"{targetAttrs}>{Html(item.Label)}</a>""";
     }
 

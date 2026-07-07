@@ -172,6 +172,66 @@ public sealed class PublicSiteHtmlRendererTests
         Assert.DoesNotContain("footer-links", html);
     }
 
+    [Theory]
+    [InlineData("https://github.com/granticusmaximus", "bi-github")]
+    [InlineData("https://www.github.com/granticusmaximus", "bi-github")]
+    [InlineData("https://x.com/grantwatson", "bi-twitter-x")]
+    [InlineData("https://twitter.com/grantwatson", "bi-twitter-x")]
+    [InlineData("https://www.linkedin.com/in/grantwatson", "bi-linkedin")]
+    [InlineData("https://www.facebook.com/grantwatson", "bi-facebook")]
+    [InlineData("https://www.instagram.com/grantwatson", "bi-instagram")]
+    [InlineData("https://www.youtube.com/@grantwatson", "bi-youtube")]
+    [InlineData("https://www.tiktok.com/@grantwatson", "bi-tiktok")]
+    [InlineData("https://www.reddit.com/user/grantwatson", "bi-reddit")]
+    public void Layout_ShouldRenderSocialIcon_InsteadOfLabelText_ForKnownPlatforms(string href, string expectedIconClass)
+    {
+        var items = new List<NavMenuItem> { new("1", "My Profile", href, true) };
+
+        var html = PublicSiteHtmlRenderer.Layout("Title", "Description", null, "<p>body</p>", items);
+
+        Assert.Contains(expectedIconClass, html);
+        Assert.Contains("aria-label=\"My Profile\"", html);
+        Assert.Contains("nav-link-social", html);
+        // The label text itself must not appear as visible link content - only as the
+        // accessible name via aria-label - since the whole point is icon instead of text.
+        Assert.DoesNotContain(">My Profile<", html);
+    }
+
+    [Fact]
+    public void Layout_ShouldRenderDevToIcon_AsInlineSvg_NotBootstrapIconClass()
+    {
+        var items = new List<NavMenuItem> { new("1", "Dev.to", "https://dev.to/grantwatson", true) };
+
+        var html = PublicSiteHtmlRenderer.Layout("Title", "Description", null, "<p>body</p>", items);
+
+        Assert.Contains("<svg", html);
+        Assert.Contains("nav-link-social", html);
+        Assert.Contains("aria-label=\"Dev.to\"", html);
+    }
+
+    [Fact]
+    public void Layout_ShouldRenderPlainTextLink_ForNonSocialUrls()
+    {
+        var items = new List<NavMenuItem> { new("1", "Services", "/services", false) };
+
+        var html = PublicSiteHtmlRenderer.Layout("Title", "Description", null, "<p>body</p>", items);
+
+        Assert.Contains(">Services<", html);
+        Assert.DoesNotContain("nav-link-social", html);
+    }
+
+    [Fact]
+    public void Layout_ShouldRenderSocialIcon_InFooterLinksToo()
+    {
+        var footerItems = new List<NavMenuItem> { new("1", "GitHub", "https://github.com/granticusmaximus", true) };
+
+        var html = PublicSiteHtmlRenderer.Layout("Title", "Description", null, "<p>body</p>", footerNavItems: footerItems);
+
+        Assert.Contains("footer-links", html);
+        Assert.Contains("bi-github", html);
+        Assert.Contains("aria-label=\"GitHub\"", html);
+    }
+
     [Fact]
     public void SubmittedBanner_ShouldRenderThanksMessage()
     {
