@@ -351,5 +351,10 @@ public sealed class NewsItem : AuditableEntity
     public DateTimeOffset? PublishedAt { get; set; }
     public string Description { get; set; } = string.Empty;
     public string OllamaSummary { get; set; } = string.Empty;
+
+    // Only ever populated for sources that reliably provide one (e.g. dev.to's
+    // cover_image) - Google News RSS items essentially never carry an image.
+    public string? ImageUrl { get; set; }
+
     public DateTimeOffset FetchedAt { get; set; } = DateTimeOffset.UtcNow;
 }

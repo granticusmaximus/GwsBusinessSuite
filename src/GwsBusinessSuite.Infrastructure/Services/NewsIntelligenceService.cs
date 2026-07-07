@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using CodeHollow.FeedReader;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.ContentStudio;
@@ -133,7 +134,7 @@ public sealed class NewsIntelligenceService(
             var topicName  = n.TopicId.HasValue && topicMap.TryGetValue(n.TopicId.Value, out var t)  ? t.Name     : "Top News";
             var topicColor = n.TopicId.HasValue && topicMap.TryGetValue(n.TopicId.Value, out var tc) ? tc.ColorHex : "#64748b";
             return new NewsItemDto(n.Id, n.TopicId, topicName, topicColor, n.Title, n.Url,
-                n.Source, n.PublishedAt, n.Description, n.OllamaSummary, n.FetchedAt);
+                n.Source, n.PublishedAt, n.Description, n.OllamaSummary, n.FetchedAt, n.ImageUrl);
         }).ToList();
 
         var lastRefresh = items.Count > 0 ? (DateTimeOffset?)items.Max(n => n.FetchedAt) : null;
@@ -162,7 +163,7 @@ public sealed class NewsIntelligenceService(
 
         logger.LogInformation("Refreshing topic '{Name}': {Keywords}", topic.Name, string.Join(", ", keywords));
 
-        var articles = await FetchGoogleNewsAsync(keywords, ct);
+        var articles = await FetchArticlesAsync(keywords, ct);
         logger.LogInformation("Topic '{Name}': fetched {Count} articles", topic.Name, articles.Count);
 
         await PruneAndSaveItemsAsync(db, topicId, articles, MaxItemsPerTopic, ct);
@@ -176,7 +177,7 @@ public sealed class NewsIntelligenceService(
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
         logger.LogInformation("Refreshing top news");
-        var articles = await FetchGoogleNewsAsync(keywords: null, ct);
+        var articles = await FetchArticlesAsync(keywords: null, ct);
         logger.LogInformation("Top news: fetched {Count} articles", articles.Count);
         await PruneAndSaveItemsAsync(db, topicId: null, articles, MaxTopNewsItems, ct);
     }
@@ -220,6 +221,33 @@ public sealed class NewsIntelligenceService(
             : 0;
         if (pruned > 0)
             logger.LogInformation("Pruned {Count} expired news items", pruned);
+    }
+
+    // ── Combined sources ─────────────────────────────────────
+
+    /// <summary>
+    /// Fetches and merges articles from every source (Google News RSS + dev.to).
+    /// When <paramref name="keywords"/> is null, returns each source's general/top feed.
+    /// When keywords are provided, runs one search per keyword per source and merges everything.
+    /// </summary>
+    private async Task<List<RawArticle>> FetchArticlesAsync(string[]? keywords, CancellationToken ct)
+    {
+        var googleTask = FetchGoogleNewsAsync(keywords, ct);
+        var devToTask = FetchDevToAsync(keywords, ct);
+        await Task.WhenAll(googleTask, devToTask);
+
+        var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var merged = new List<RawArticle>();
+
+        foreach (var article in googleTask.Result.Concat(devToTask.Result))
+        {
+            if (seenUrls.Add(article.Url))
+                merged.Add(article);
+        }
+
+        return merged
+            .OrderByDescending(a => a.PublishedAt ?? DateTimeOffset.MinValue)
+            .ToList();
     }
 
     // ── Google News RSS ───────────────────────────────────────
@@ -303,6 +331,78 @@ public sealed class NewsIntelligenceService(
     private static string BuildGoogleSearchUrl(string keyword) =>
         $"https://news.google.com/rss/search?q={Uri.EscapeDataString(keyword)}&hl=en-US&gl=US&ceid=US:en";
 
+    // ── dev.to ────────────────────────────────────────────────
+    // dev.to's public API needs no auth for reading, and unlike Google News RSS it
+    // reliably returns a real cover image per article - the source this app's image
+    // display actually depends on. Tags are dev.to's only filter axis, so a free-text
+    // topic keyword is normalized (lowercased, spaces stripped) and tried as a tag;
+    // keywords that aren't real dev.to tags just contribute zero extra articles rather
+    // than erroring, same graceful-degradation the Google News per-keyword fetch uses.
+
+    private const string DevToTopUrl = "https://dev.to/api/articles?per_page=25";
+    private const int DevToPerKeywordCount = 15;
+
+    private async Task<List<RawArticle>> FetchDevToAsync(string[]? keywords, CancellationToken ct)
+    {
+        var urls = keywords is null or { Length: 0 }
+            ? [DevToTopUrl]
+            : keywords.Select(BuildDevToTagUrl).ToArray();
+
+        var tasks = urls.Select(url => FetchDevToFeedAsync(url, ct)).ToArray();
+        var allResults = await Task.WhenAll(tasks);
+
+        var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var merged = new List<RawArticle>();
+        foreach (var batch in allResults)
+        {
+            foreach (var article in batch)
+            {
+                if (seenUrls.Add(article.Url))
+                    merged.Add(article);
+            }
+        }
+
+        return merged;
+    }
+
+    private async Task<List<RawArticle>> FetchDevToFeedAsync(string url, CancellationToken ct)
+    {
+        try
+        {
+            var articles = await http.GetFromJsonAsync<List<DevToArticleJson>>(url, ct);
+            if (articles is null) return [];
+
+            return articles
+                .Where(a => !string.IsNullOrWhiteSpace(a.Url))
+                .Select(a => new RawArticle(
+                    a.Title ?? string.Empty,
+                    a.Url!,
+                    "dev.to",
+                    a.PublishedAt,
+                    StripHtml(a.Description ?? string.Empty),
+                    a.CoverImage))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to fetch dev.to feed: {Url}", url);
+            return [];
+        }
+    }
+
+    private static string BuildDevToTagUrl(string keyword)
+    {
+        var tag = new string(keyword.Trim().ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+        return $"https://dev.to/api/articles?tag={Uri.EscapeDataString(tag)}&per_page={DevToPerKeywordCount}";
+    }
+
+    private sealed record DevToArticleJson(
+        [property: System.Text.Json.Serialization.JsonPropertyName("title")] string? Title,
+        [property: System.Text.Json.Serialization.JsonPropertyName("url")] string? Url,
+        [property: System.Text.Json.Serialization.JsonPropertyName("description")] string? Description,
+        [property: System.Text.Json.Serialization.JsonPropertyName("published_at")] DateTimeOffset? PublishedAt,
+        [property: System.Text.Json.Serialization.JsonPropertyName("cover_image")] string? CoverImage);
+
     // ── Ollama summarisation ──────────────────────────────────
 
     private async Task PruneAndSaveItemsAsync(
@@ -329,6 +429,7 @@ public sealed class NewsIntelligenceService(
                 PublishedAt  = a.PublishedAt,
                 Description  = Truncate(a.Description, 1000),
                 OllamaSummary = summaries.ElementAtOrDefault(i) ?? string.Empty,
+                ImageUrl     = string.IsNullOrWhiteSpace(a.ImageUrl) ? null : Truncate(a.ImageUrl, 1000),
                 FetchedAt    = DateTimeOffset.UtcNow
             });
         }
@@ -403,5 +504,6 @@ public sealed class NewsIntelligenceService(
         string Url,
         string Source,
         DateTimeOffset? PublishedAt,
-        string Description);
+        string Description,
+        string? ImageUrl = null);
 }

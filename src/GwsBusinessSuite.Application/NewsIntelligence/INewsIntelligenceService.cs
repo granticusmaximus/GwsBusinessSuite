@@ -34,7 +34,8 @@ public sealed record NewsItemDto(
     DateTimeOffset? PublishedAt,
     string Description,
     string OllamaSummary,
-    DateTimeOffset FetchedAt);
+    DateTimeOffset FetchedAt,
+    string? ImageUrl = null);
 
 public sealed record NewsFeedResult(
     IReadOnlyList<NewsItemDto> Items,

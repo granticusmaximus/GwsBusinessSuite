@@ -431,47 +431,57 @@
         __builder.AddAttribute(1, "class", "ni-card");
         __builder.AddAttribute(2, "style", $"--ni-accent:{accent}");
 
-        __builder.OpenElement(3, "div");
-        __builder.AddAttribute(4, "class", "ni-card-meta");
-        __builder.OpenElement(5, "span");
-        __builder.AddAttribute(6, "class", "ni-card-avatar");
-        __builder.AddContent(7, avatarInitial);
+        if (!string.IsNullOrWhiteSpace(item.ImageUrl))
+        {
+            __builder.OpenElement(3, "img");
+            __builder.AddAttribute(4, "class", "ni-card-image");
+            __builder.AddAttribute(5, "src", item.ImageUrl);
+            __builder.AddAttribute(6, "alt", string.Empty);
+            __builder.AddAttribute(7, "loading", "lazy");
+            __builder.CloseElement();
+        }
+
+        __builder.OpenElement(8, "div");
+        __builder.AddAttribute(9, "class", "ni-card-meta");
+        __builder.OpenElement(10, "span");
+        __builder.AddAttribute(11, "class", "ni-card-avatar");
+        __builder.AddContent(12, avatarInitial);
         __builder.CloseElement();
-        __builder.OpenElement(8, "span");
-        __builder.AddAttribute(9, "class", "ni-card-source");
-        __builder.AddContent(10, item.Source);
+        __builder.OpenElement(13, "span");
+        __builder.AddAttribute(14, "class", "ni-card-source");
+        __builder.AddContent(15, item.Source);
         __builder.CloseElement();
         if (item.PublishedAt.HasValue)
         {
-            __builder.OpenElement(11, "span");
-            __builder.AddAttribute(12, "class", "ni-card-time");
-            __builder.AddContent(13, TimeAgo(item.PublishedAt.Value));
+            __builder.OpenElement(16, "span");
+            __builder.AddAttribute(17, "class", "ni-card-time");
+            __builder.AddContent(18, TimeAgo(item.PublishedAt.Value));
             __builder.CloseElement();
         }
         __builder.CloseElement();
 
-        __builder.OpenElement(14, "a");
-        __builder.AddAttribute(15, "href", item.Url);
-        __builder.AddAttribute(16, "target", "_blank");
-        __builder.AddAttribute(17, "rel", "noopener noreferrer");
-        __builder.AddAttribute(18, "class", "ni-card-title");
-        __builder.AddContent(19, item.Title);
+        __builder.OpenElement(19, "a");
+        __builder.AddAttribute(20, "href", item.Url);
+        __builder.AddAttribute(21, "target", "_blank");
+        __builder.AddAttribute(22, "rel", "noopener noreferrer");
+        __builder.AddAttribute(23, "class", "ni-card-title");
+        __builder.AddContent(24, item.Title);
         __builder.CloseElement();
 
         if (!string.IsNullOrWhiteSpace(takeText))
         {
-            __builder.OpenElement(20, "p");
-            __builder.AddAttribute(21, "class", "ni-card-take");
-            __builder.AddContent(22, takeText);
+            __builder.OpenElement(25, "p");
+            __builder.AddAttribute(26, "class", "ni-card-take");
+            __builder.AddContent(27, takeText);
             __builder.CloseElement();
         }
 
-        __builder.OpenElement(23, "a");
-        __builder.AddAttribute(24, "href", item.Url);
-        __builder.AddAttribute(25, "target", "_blank");
-        __builder.AddAttribute(26, "rel", "noopener noreferrer");
-        __builder.AddAttribute(27, "class", "ni-card-open");
-        __builder.AddContent(28, "Open ↗");
+        __builder.OpenElement(28, "a");
+        __builder.AddAttribute(29, "href", item.Url);
+        __builder.AddAttribute(30, "target", "_blank");
+        __builder.AddAttribute(31, "rel", "noopener noreferrer");
+        __builder.AddAttribute(32, "class", "ni-card-open");
+        __builder.AddContent(33, "Open ↗");
         __builder.CloseElement();
 
         __builder.CloseElement();

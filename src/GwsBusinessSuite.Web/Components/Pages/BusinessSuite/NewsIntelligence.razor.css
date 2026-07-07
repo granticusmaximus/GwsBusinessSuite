@@ -400,6 +400,15 @@
     border-color: rgba(37, 99, 235, 0.28);
 }
 
+::deep .ni-card-image {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    border-radius: 12px;
+    background: rgba(148, 163, 184, 0.12);
+    display: block;
+}
+
 ::deep .ni-card-meta {
     display: flex;
     align-items: center;
