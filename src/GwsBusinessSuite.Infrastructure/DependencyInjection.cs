@@ -4,6 +4,7 @@ using GwsBusinessSuite.Application.CmsKnowledge;
 using GwsBusinessSuite.Application.Comments;
 using GwsBusinessSuite.Application.Crm;
 using GwsBusinessSuite.Application.DockerHealth;
+using GwsBusinessSuite.Application.DigitalOcean;
 using GwsBusinessSuite.Application.CjAds;
 using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.NewsIntelligence;
@@ -81,6 +82,11 @@ public static class DependencyInjection
         services.AddScoped<IDockerHealthService, DockerHealthService>();
         services.AddSingleton<DockerHealthNotifier>();
         services.AddHostedService<DockerHealthMonitorBackgroundService>();
+        services.AddHttpClient<IDigitalOceanService, DigitalOceanService>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.digitalocean.com/v2/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
         services.AddScoped<IPageRevisionService, PageRevisionService>();
         services.AddScoped<ICmsKnowledgeService, CmsKnowledgeService>();
         services.AddScoped<IContentStudioService, ContentStudioService>();

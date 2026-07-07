@@ -14,6 +14,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<FormSubmission> FormSubmissions => Set<FormSubmission>();
     public DbSet<Comment> Comments => Set<Comment>();
     public DbSet<DockerHealthAlert> DockerHealthAlerts => Set<DockerHealthAlert>();
+    public DbSet<DockerActionLog> DockerActionLogs => Set<DockerActionLog>();
+    public DbSet<DigitalOceanSettings> DigitalOceanSettings => Set<DigitalOceanSettings>();
     public DbSet<CmsPageRevision> CmsPageRevisions => Set<CmsPageRevision>();
     public DbSet<AffiliateOffer> AffiliateOffers => Set<AffiliateOffer>();
     public DbSet<SeoArticleDraft> SeoArticleDrafts => Set<SeoArticleDraft>();
@@ -39,6 +41,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<FormSubmission>().HasIndex(x => new { x.PageId, x.CreatedAt });
         modelBuilder.Entity<Comment>().HasIndex(x => new { x.ArticleId, x.Status });
         modelBuilder.Entity<DockerHealthAlert>().HasIndex(x => new { x.ContainerName, x.IsRead });
+        modelBuilder.Entity<DockerActionLog>().HasIndex(x => new { x.ContainerName, x.CreatedAt });
         modelBuilder.Entity<CmsPageRevision>().HasIndex(x => new { x.PageId, x.RevisionNumber }).IsUnique();
         modelBuilder.Entity<SeoArticleDraft>().HasIndex(x => x.Status);
         modelBuilder.Entity<SeoArticleAffiliatePlacement>()

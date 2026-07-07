@@ -2,19 +2,23 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "AdminOnly")]
 @using Microsoft.AspNetCore.Authorization
+@using System.Security.Claims
 @using GwsBusinessSuite.Application.DockerHealth
+@using GwsBusinessSuite.Application.DigitalOcean
 @inject IDockerHealthService DockerHealthService
+@inject IDigitalOceanService DigitalOceanService
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 @inject ILogger<DockerHealth> Logger
 
-<PageTitle>Docker Health</PageTitle>
+<PageTitle>Docker Management</PageTitle>
 
 <div class="page-header d-flex align-items-center justify-content-between gap-3">
     <div>
-        <h1><i class="bi bi-box-seam me-2 text-primary"></i>Docker Health</h1>
-        <p>Live status for every container running alongside this app on the droplet.</p>
+        <h1><i class="bi bi-box-seam me-2 text-primary"></i>Docker Management</h1>
+        <p>Manage every container on the droplet, and bridge into DigitalOcean for droplet-level actions.</p>
     </div>
-    <button class="btn btn-outline-primary d-inline-flex align-items-center gap-2" @onclick="LoadAsync" disabled="@IsBusy">
+    <button class="btn btn-outline-primary d-inline-flex align-items-center gap-2" @onclick="LoadContainersAsync" disabled="@IsBusy">
         @if (IsBusy)
         {
             <span class="spinner-border spinner-border-sm"></span>
@@ -31,6 +35,84 @@
 {
     <div class="alert alert-danger" role="alert">@ErrorMessage</div>
 }
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white border-bottom py-3">
+        <span class="fw-semibold"><i class="bi bi-cloud-fill me-1 text-primary"></i>DigitalOcean Connection</span>
+    </div>
+    <div class="card-body">
+        @if (!_doLoaded)
+        {
+            <div class="d-flex align-items-center gap-2 text-secondary">
+                <span class="spinner-border spinner-border-sm"></span>
+                <span>Loading...</span>
+            </div>
+        }
+        else
+        {
+            <div class="row g-3 mb-3">
+                <div class="col-md-6">
+                    <label class="form-label small text-secondary">API Token</label>
+                    <input type="password" class="form-control" @bind="DoApiToken" @bind:event="oninput"
+                           placeholder="@(DoTokenUnreadable ? "Saved token could not be decrypted - re-enter it" : "dop_v1_...")" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small text-secondary">Droplet ID <span class="text-muted">(optional - auto-detected in production)</span></label>
+                    <input type="text" class="form-control" @bind="DoDropletId" @bind:event="oninput" placeholder="Leave blank to auto-detect" />
+                </div>
+            </div>
+            <button class="btn btn-sm btn-primary" @onclick="SaveDoSettingsAsync" disabled="@IsDoSaving">
+                @(IsDoSaving ? "Saving..." : "Save Connection")
+            </button>
+            @if (!string.IsNullOrWhiteSpace(DoSaveMessage))
+            {
+                <span class="small text-secondary ms-2">@DoSaveMessage</span>
+            }
+
+            @if (DropletResult is { Available: true, Droplet: { } droplet })
+            {
+                <hr />
+                <div class="row g-3 align-items-center">
+                    <div class="col-md-8">
+                        <div class="fw-semibold">@droplet.Name <span class="badge text-bg-success ms-1">@droplet.Status</span></div>
+                        <div class="small text-secondary">
+                            @droplet.Region &middot; @droplet.Size
+                            @if (droplet.VcpuDescription is not null) { <text> &middot; @droplet.VcpuDescription</text> }
+                            @if (droplet.MemoryDescription is not null) { <text> &middot; @droplet.MemoryDescription</text> }
+                            @if (droplet.DiskDescription is not null) { <text> &middot; @droplet.DiskDescription</text> }
+                        </div>
+                        @if (droplet.PublicIpAddress is not null)
+                        {
+                            <div class="small text-secondary">IP: @droplet.PublicIpAddress</div>
+                        }
+                    </div>
+                    <div class="col-md-4 d-flex flex-wrap gap-2 justify-content-md-end">
+                        <button class="btn btn-sm btn-outline-danger" @onclick="RebootDropletAsync" disabled="@IsDoActionBusy">Reboot</button>
+                        <button class="btn btn-sm btn-outline-warning" @onclick="ShowResizePrompt" disabled="@IsDoActionBusy">Resize</button>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="ShowSnapshotPrompt" disabled="@IsDoActionBusy">Snapshot</button>
+                    </div>
+                </div>
+
+                @if (DropletActions.Count > 0)
+                {
+                    <div class="small text-secondary mt-3">
+                        <strong>Recent droplet actions</strong>
+                        <ul class="list-unstyled mb-0 mt-1">
+                            @foreach (var a in DropletActions.Take(5))
+                            {
+                                <li>@a.Type &mdash; @a.Status &mdash; @a.StartedAt.ToLocalTime().ToString("MMM d, h:mm tt")</li>
+                            }
+                        </ul>
+                    </div>
+                }
+            }
+            else if (DropletResult is { Available: false, UnavailableReason: { } reason })
+            {
+                <div class="small text-secondary mt-2"><i class="bi bi-info-circle me-1"></i>@reason</div>
+            }
+        }
+    </div>
+</div>
 
 @if (!_loaded)
 {
@@ -68,6 +150,22 @@ else
                         {
                             <div class="small text-secondary mb-1">Restarts: @container.RestartCount</div>
                         }
+                        <div class="d-flex flex-wrap gap-1 mt-2">
+                            @if (container.State == "running")
+                            {
+                                <button class="btn btn-sm btn-outline-secondary" disabled="@IsContainerBusy(container.Name)" @onclick="() => StopAsync(container.Name)">Stop</button>
+                                <button class="btn btn-sm btn-outline-secondary" disabled="@IsContainerBusy(container.Name)" @onclick="() => RestartAsync(container.Name)">Restart</button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-sm btn-outline-success" disabled="@IsContainerBusy(container.Name)" @onclick="() => StartAsync(container.Name)">Start</button>
+                            }
+                            <button class="btn btn-sm btn-outline-primary" disabled="@IsContainerBusy(container.Name)" @onclick="() => PullAsync(container.Name)">Pull Latest</button>
+                        </div>
+                        @if (ActionMessages.TryGetValue(container.Name, out var msg))
+                        {
+                            <div class="small mt-2 @(msg.Succeeded ? "text-success" : "text-danger")">@msg.Message</div>
+                        }
                         <a href="/admin/docker-health/@Uri.EscapeDataString(container.Name)" class="btn btn-sm btn-outline-secondary mt-2">
                             View Details
                         </a>
@@ -79,20 +177,44 @@ else
 }
 
 @code {
+    [CascadingParameter]
+    private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? AuthState { get; set; }
+
     private List<ContainerHealthView> Containers { get; set; } = new();
     private bool _loaded;
     private bool _available;
     private string UnavailableReason { get; set; } = string.Empty;
     private bool IsBusy { get; set; }
     private string ErrorMessage { get; set; } = string.Empty;
+    private readonly HashSet<string> _busyContainers = new();
+    private Dictionary<string, DockerActionResult> ActionMessages { get; } = new();
+
+    private bool _doLoaded;
+    private string DoApiToken { get; set; } = string.Empty;
+    private string DoDropletId { get; set; } = string.Empty;
+    private bool DoTokenUnreadable { get; set; }
+    private bool IsDoSaving { get; set; }
+    private bool IsDoActionBusy { get; set; }
+    private string DoSaveMessage { get; set; } = string.Empty;
+    private DropletInfoResult? DropletResult { get; set; }
+    private List<DropletActionView> DropletActions { get; set; } = new();
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadAsync();
+        await LoadContainersAsync();
         _loaded = true;
+        await LoadDoAsync();
+        _doLoaded = true;
     }
 
-    private async Task LoadAsync()
+    private async Task<string> CurrentUserNameAsync()
+    {
+        if (AuthState is null) return "admin";
+        var state = await AuthState;
+        return state.User.Identity?.Name ?? "admin";
+    }
+
+    private async Task LoadContainersAsync()
     {
         IsBusy = true;
         ErrorMessage = string.Empty;
@@ -111,6 +233,150 @@ else
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    private async Task LoadDoAsync()
+    {
+        var settings = await DigitalOceanService.GetSettingsAsync();
+        DoApiToken = settings?.ApiToken ?? string.Empty;
+        DoDropletId = settings?.DropletId ?? string.Empty;
+        DoTokenUnreadable = settings?.ApiTokenUnreadable ?? false;
+
+        if (!string.IsNullOrWhiteSpace(DoApiToken))
+        {
+            DropletResult = await DigitalOceanService.GetDropletInfoAsync();
+            if (DropletResult.Available)
+            {
+                DropletActions = (await DigitalOceanService.ListRecentActionsAsync()).ToList();
+            }
+        }
+    }
+
+    private async Task SaveDoSettingsAsync()
+    {
+        IsDoSaving = true;
+        DoSaveMessage = string.Empty;
+        try
+        {
+            await DigitalOceanService.SaveSettingsAsync(new DigitalOceanSettingsView { ApiToken = DoApiToken, DropletId = DoDropletId });
+            DoSaveMessage = "Saved.";
+            DoTokenUnreadable = false;
+            DropletResult = await DigitalOceanService.GetDropletInfoAsync();
+            if (DropletResult.Available)
+            {
+                DropletActions = (await DigitalOceanService.ListRecentActionsAsync()).ToList();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to save DigitalOcean settings.");
+            DoSaveMessage = $"Failed to save: {ex.Message}";
+        }
+        finally
+        {
+            IsDoSaving = false;
+        }
+    }
+
+    private async Task RebootDropletAsync()
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            "This restarts the entire droplet, taking every container (including this app and any other services running here) down for roughly a minute. Continue?");
+        if (!confirmed) return;
+
+        IsDoActionBusy = true;
+        try
+        {
+            var user = await CurrentUserNameAsync();
+            var result = await DigitalOceanService.RebootDropletAsync(user);
+            DoSaveMessage = result.Message;
+            DropletActions = (await DigitalOceanService.ListRecentActionsAsync()).ToList();
+        }
+        finally
+        {
+            IsDoActionBusy = false;
+        }
+    }
+
+    private async Task ShowResizePrompt()
+    {
+        var newSize = await JS.InvokeAsync<string?>("prompt",
+            "Enter the target DigitalOcean size slug (e.g. s-2vcpu-4gb). Disk-size changes require the droplet to be powered off; CPU/RAM-only resizes can be applied live.");
+        if (string.IsNullOrWhiteSpace(newSize)) return;
+
+        var resizeDisk = await JS.InvokeAsync<bool>("confirm",
+            "Also resize the disk? Disk resizes are irreversible and require the droplet to be powered off first. Choose Cancel for a live CPU/RAM-only resize.");
+
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Resize droplet to {newSize}{(resizeDisk ? " (including disk)" : "")}. Continue?");
+        if (!confirmed) return;
+
+        IsDoActionBusy = true;
+        try
+        {
+            var user = await CurrentUserNameAsync();
+            var result = await DigitalOceanService.ResizeDropletAsync(newSize, resizeDisk, user);
+            DoSaveMessage = result.Message;
+            DropletActions = (await DigitalOceanService.ListRecentActionsAsync()).ToList();
+        }
+        finally
+        {
+            IsDoActionBusy = false;
+        }
+    }
+
+    private async Task ShowSnapshotPrompt()
+    {
+        var name = await JS.InvokeAsync<string?>("prompt", "Snapshot name:", $"gwssuite-{DateTime.UtcNow:yyyyMMdd-HHmm}");
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            "Creating a snapshot can take several minutes. The droplet stays usable throughout. Continue?");
+        if (!confirmed) return;
+
+        IsDoActionBusy = true;
+        try
+        {
+            var user = await CurrentUserNameAsync();
+            var result = await DigitalOceanService.CreateSnapshotAsync(name, user);
+            DoSaveMessage = result.Message;
+            DropletActions = (await DigitalOceanService.ListRecentActionsAsync()).ToList();
+        }
+        finally
+        {
+            IsDoActionBusy = false;
+        }
+    }
+
+    private bool IsContainerBusy(string name) => _busyContainers.Contains(name);
+
+    private Task StartAsync(string name) => RunContainerActionAsync(name, DockerHealthService.StartContainerAsync);
+
+    private async Task StopAsync(string name)
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Stop {name}?");
+        if (!confirmed) return;
+        await RunContainerActionAsync(name, DockerHealthService.StopContainerAsync);
+    }
+
+    private Task RestartAsync(string name) => RunContainerActionAsync(name, DockerHealthService.RestartContainerAsync);
+
+    private Task PullAsync(string name) => RunContainerActionAsync(name, DockerHealthService.PullImageAsync);
+
+    private async Task RunContainerActionAsync(string name, Func<string, string, CancellationToken, Task<DockerActionResult>> action)
+    {
+        _busyContainers.Add(name);
+        StateHasChanged();
+        try
+        {
+            var user = await CurrentUserNameAsync();
+            var result = await action(name, user, CancellationToken.None);
+            ActionMessages[name] = result;
+            await LoadContainersAsync();
+        }
+        finally
+        {
+            _busyContainers.Remove(name);
         }
     }
 

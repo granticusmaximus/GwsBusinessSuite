@@ -4,18 +4,24 @@
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.DockerHealth
 @inject IDockerHealthService DockerHealthService
+@inject IJSRuntime JS
 @inject ILogger<DockerHealthDetail> Logger
 
-<PageTitle>@ContainerName - Docker Health</PageTitle>
+<PageTitle>@ContainerName - Docker Management</PageTitle>
 
 <div class="page-header">
-    <p><a href="/admin/docker-health">&larr; Docker Health</a></p>
+    <p><a href="/admin/docker-health">&larr; Docker Management</a></p>
     <h1><i class="bi bi-box-seam me-2 text-primary"></i>@ContainerName</h1>
 </div>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
     <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+}
+
+@if (!string.IsNullOrWhiteSpace(ActionMessage))
+{
+    <div class="alert @(LastActionSucceeded ? "alert-success" : "alert-danger")" role="alert">@ActionMessage</div>
 }
 
 @if (!_loaded)
@@ -41,7 +47,7 @@ else
             </span>
         </div>
         <div class="card-body">
-            <dl class="row small mb-0">
+            <dl class="row small mb-3">
                 <dt class="col-4 text-secondary">Image</dt>
                 <dd class="col-8">@container.Image</dd>
                 <dt class="col-4 text-secondary">Status</dt>
@@ -63,6 +69,21 @@ else
                     <dd class="col-8">@container.FinishedAt.Value.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</dd>
                 }
             </dl>
+
+            <div class="d-flex flex-wrap gap-2">
+                @if (container.State == "running")
+                {
+                    <button class="btn btn-sm btn-outline-secondary" disabled="@IsBusy" @onclick="StopAsync">Stop</button>
+                    <button class="btn btn-sm btn-outline-secondary" disabled="@IsBusy" @onclick="RestartAsync">Restart</button>
+                }
+                else
+                {
+                    <button class="btn btn-sm btn-outline-success" disabled="@IsBusy" @onclick="StartAsync">Start</button>
+                }
+                <button class="btn btn-sm btn-outline-primary" disabled="@IsBusy" @onclick="PullAsync">Pull Latest Image</button>
+                <button class="btn btn-sm btn-outline-warning" disabled="@IsBusy" @onclick="RecreateAsync">Recreate Container</button>
+                <button class="btn btn-sm btn-outline-danger" disabled="@IsBusy" @onclick="RemoveAsync">Remove</button>
+            </div>
         </div>
     </div>
 
@@ -80,6 +101,61 @@ else
         </div>
         <div class="card-body">
             <pre class="docker-log-tail">@Detail.LogTail</pre>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white border-bottom py-3">
+            <span class="fw-semibold"><i class="bi bi-terminal me-1"></i>Exec Console</span>
+            <div class="small text-secondary mt-1">Runs a single command inside the container via <code>/bin/sh -c</code> and shows its output. Not an interactive terminal.</div>
+        </div>
+        <div class="card-body">
+            <div class="input-group mb-2">
+                <input type="text" class="form-control font-monospace" @bind="ExecCommand" @bind:event="oninput"
+                       placeholder="e.g. cat /etc/os-release" @onkeydown="OnExecKeyDown" />
+                <button class="btn btn-primary" disabled="@(IsBusy || string.IsNullOrWhiteSpace(ExecCommand))" @onclick="RunExecAsync">Run</button>
+            </div>
+            @if (ExecOutput is not null)
+            {
+                <pre class="docker-log-tail">@ExecOutput</pre>
+            }
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white border-bottom py-3">
+            <span class="fw-semibold">Action History</span>
+        </div>
+        <div class="card-body p-0">
+            @if (ActionLogs.Count == 0)
+            {
+                <p class="text-secondary p-3 mb-0">No management actions have been taken on this container yet.</p>
+            }
+            else
+            {
+                <div class="list-group list-group-flush">
+                    @foreach (var log in ActionLogs)
+                    {
+                        <div class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <div>
+                                    <span class="badge @(log.Succeeded ? "text-bg-success" : "text-bg-danger") me-2">@log.Action</span>
+                                    @if (!string.IsNullOrWhiteSpace(log.Command))
+                                    {
+                                        <code class="me-2">@log.Command</code>
+                                    }
+                                    <span class="small text-secondary">by @log.PerformedBy</span>
+                                    @if (!string.IsNullOrWhiteSpace(log.ResultSummary))
+                                    {
+                                        <div class="small text-secondary">@log.ResultSummary</div>
+                                    }
+                                </div>
+                                <span class="small text-secondary text-nowrap">@log.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</span>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
         </div>
     </div>
 
@@ -113,17 +189,32 @@ else
     [Parameter]
     public string ContainerName { get; set; } = string.Empty;
 
+    [CascadingParameter]
+    private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? AuthState { get; set; }
+
     private ContainerDetailView? Detail { get; set; }
+    private List<DockerActionLogView> ActionLogs { get; set; } = new();
     private bool _loaded;
     private string ErrorMessage { get; set; } = string.Empty;
+    private bool IsBusy { get; set; }
+    private string ActionMessage { get; set; } = string.Empty;
+    private bool LastActionSucceeded { get; set; }
+    private string ExecCommand { get; set; } = string.Empty;
+    private string? ExecOutput { get; set; }
 
     protected override async Task OnParametersSetAsync()
+    {
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
     {
         _loaded = false;
         ErrorMessage = string.Empty;
         try
         {
             Detail = await DockerHealthService.GetContainerDetailsAsync(ContainerName);
+            ActionLogs = (await DockerHealthService.ListActionLogsAsync(ContainerName)).ToList();
         }
         catch (Exception ex)
         {
@@ -133,6 +224,87 @@ else
         finally
         {
             _loaded = true;
+        }
+    }
+
+    private async Task<string> CurrentUserNameAsync()
+    {
+        if (AuthState is null) return "admin";
+        var state = await AuthState;
+        return state.User.Identity?.Name ?? "admin";
+    }
+
+    private async Task RunActionAsync(Func<string, string, CancellationToken, Task<DockerActionResult>> action)
+    {
+        IsBusy = true;
+        StateHasChanged();
+        try
+        {
+            var user = await CurrentUserNameAsync();
+            var result = await action(ContainerName, user, CancellationToken.None);
+            ActionMessage = result.Message;
+            LastActionSucceeded = result.Succeeded;
+            await ReloadAsync();
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private Task StartAsync() => RunActionAsync(DockerHealthService.StartContainerAsync);
+
+    private async Task StopAsync()
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Stop {ContainerName}?");
+        if (!confirmed) return;
+        await RunActionAsync(DockerHealthService.StopContainerAsync);
+    }
+
+    private Task RestartAsync() => RunActionAsync(DockerHealthService.RestartContainerAsync);
+
+    private Task PullAsync() => RunActionAsync(DockerHealthService.PullImageAsync);
+
+    private async Task RecreateAsync()
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            $"Stop, remove, and recreate {ContainerName} from its current config and image? Any pulled-but-not-yet-applied image update will be applied now.");
+        if (!confirmed) return;
+        await RunActionAsync(DockerHealthService.RecreateContainerAsync);
+    }
+
+    private async Task RemoveAsync()
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            $"This permanently removes {ContainerName}. This cannot be undone. Continue?");
+        if (!confirmed) return;
+        await RunActionAsync(DockerHealthService.RemoveContainerAsync);
+    }
+
+    private async Task RunExecAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ExecCommand)) return;
+
+        IsBusy = true;
+        StateHasChanged();
+        try
+        {
+            var user = await CurrentUserNameAsync();
+            var result = await DockerHealthService.ExecCommandAsync(ContainerName, ExecCommand, user);
+            ExecOutput = result.Message;
+            ActionLogs = (await DockerHealthService.ListActionLogsAsync(ContainerName)).ToList();
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task OnExecKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !IsBusy && !string.IsNullOrWhiteSpace(ExecCommand))
+        {
+            await RunExecAsync();
         }
     }
 }

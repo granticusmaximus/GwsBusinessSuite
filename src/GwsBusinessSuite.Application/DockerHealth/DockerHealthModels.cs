@@ -38,3 +38,19 @@ public sealed class DockerHealthAlertView
     public bool IsRead { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
 }
+
+// Returned from every write action instead of throwing, so callers (Blazor pages) can
+// show the outcome inline without a try/catch around every button handler.
+public sealed record DockerActionResult(bool Succeeded, string Message);
+
+public sealed class DockerActionLogView
+{
+    public Guid Id { get; init; }
+    public string ContainerName { get; init; } = string.Empty;
+    public string Action { get; init; } = string.Empty;
+    public string? Command { get; init; }
+    public bool Succeeded { get; init; }
+    public string? ResultSummary { get; init; }
+    public string PerformedBy { get; init; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; init; }
+}

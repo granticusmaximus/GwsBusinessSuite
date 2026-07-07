@@ -197,6 +197,38 @@ public sealed class DockerHealthAlert : AuditableEntity
     public bool IsRead { get; set; }
 }
 
+public sealed class DockerActionLog : AuditableEntity
+{
+    // "droplet" for DigitalOcean-level actions (Reboot/Resize/Snapshot) that
+    // aren't scoped to a single container.
+    public string ContainerName { get; set; } = string.Empty;
+
+    // Start/Stop/Restart/Remove/Pull/Recreate/Exec/Reboot/Resize/Snapshot
+    public string Action { get; set; } = string.Empty;
+
+    // Set only for Exec.
+    public string? Command { get; set; }
+
+    public bool Succeeded { get; set; }
+
+    // Truncated output on success, error message on failure.
+    public string? ResultSummary { get; set; }
+
+    public string PerformedBy { get; set; } = string.Empty;
+}
+
+public sealed class DigitalOceanSettings : AuditableEntity
+{
+    // Singleton row — always upserted using WellKnownId.
+    public static readonly Guid WellKnownId = new("d0000000-0000-0000-0000-000000000001");
+
+    public string ApiToken { get; set; } = string.Empty;
+
+    // Optional manual override; auto-detected from the droplet's local metadata
+    // service (169.254.169.254) when blank and reachable.
+    public string DropletId { get; set; } = string.Empty;
+}
+
 public sealed class CjConnectorSettings : AuditableEntity
 {
     // Singleton row — always upserted using WellKnownId.

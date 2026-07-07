@@ -125,6 +125,163 @@ public sealed class DockerHealthService(IAppDbContext dbContext) : IDockerHealth
         return await dbContext.DockerHealthAlerts.CountAsync(a => !a.IsRead, cancellationToken);
     }
 
+    public async Task<DockerActionResult> StartContainerAsync(string containerName, string performedBy, CancellationToken cancellationToken = default) =>
+        await RunActionAsync(containerName, "Start", null, performedBy, async client =>
+        {
+            await client.Containers.StartContainerAsync(containerName, new ContainerStartParameters(), cancellationToken);
+            return "Container started.";
+        }, cancellationToken);
+
+    public async Task<DockerActionResult> StopContainerAsync(string containerName, string performedBy, CancellationToken cancellationToken = default) =>
+        await RunActionAsync(containerName, "Stop", null, performedBy, async client =>
+        {
+            await client.Containers.StopContainerAsync(containerName, new ContainerStopParameters(), cancellationToken);
+            return "Container stopped.";
+        }, cancellationToken);
+
+    public async Task<DockerActionResult> RestartContainerAsync(string containerName, string performedBy, CancellationToken cancellationToken = default) =>
+        await RunActionAsync(containerName, "Restart", null, performedBy, async client =>
+        {
+            await client.Containers.RestartContainerAsync(containerName, new ContainerRestartParameters(), cancellationToken);
+            return "Container restarted.";
+        }, cancellationToken);
+
+    public async Task<DockerActionResult> RemoveContainerAsync(string containerName, string performedBy, CancellationToken cancellationToken = default) =>
+        await RunActionAsync(containerName, "Remove", null, performedBy, async client =>
+        {
+            await client.Containers.RemoveContainerAsync(containerName, new ContainerRemoveParameters(), cancellationToken);
+            return "Container removed.";
+        }, cancellationToken);
+
+    public async Task<DockerActionResult> PullImageAsync(string containerName, string performedBy, CancellationToken cancellationToken = default) =>
+        await RunActionAsync(containerName, "Pull", null, performedBy, async client =>
+        {
+            var inspect = await client.Containers.InspectContainerAsync(containerName, cancellationToken);
+            var image = inspect.Config?.Image ?? throw new InvalidOperationException("Container has no image reference.");
+            await client.Images.CreateImageAsync(
+                new ImagesCreateParameters { FromImage = image },
+                new AuthConfig(),
+                new Progress<JSONMessage>(),
+                cancellationToken);
+            return $"Pulled latest image for {image}. Use Recreate Container to apply it.";
+        }, cancellationToken);
+
+    public async Task<DockerActionResult> RecreateContainerAsync(string containerName, string performedBy, CancellationToken cancellationToken = default) =>
+        await RunActionAsync(containerName, "Recreate", null, performedBy, async client =>
+        {
+            var inspect = await client.Containers.InspectContainerAsync(containerName, cancellationToken);
+            var name = inspect.Name.TrimStart('/');
+
+            await client.Containers.StopContainerAsync(containerName, new ContainerStopParameters(), cancellationToken);
+            await client.Containers.RemoveContainerAsync(containerName, new ContainerRemoveParameters(), cancellationToken);
+
+            // Recreates from the container's own inspected Config/HostConfig. Custom
+            // Docker networks beyond the default bridge aren't reattached (no
+            // NetworkingConfig carried over) - acceptable for this app's own
+            // restart-in-place use case; a full multi-network recreate is out of scope.
+            var createParams = new CreateContainerParameters(inspect.Config)
+            {
+                Name = name,
+                HostConfig = inspect.HostConfig
+            };
+            var created = await client.Containers.CreateContainerAsync(createParams, cancellationToken);
+            await client.Containers.StartContainerAsync(created.ID, new ContainerStartParameters(), cancellationToken);
+            return "Container recreated from the freshly pulled image and started.";
+        }, cancellationToken);
+
+    public async Task<DockerActionResult> ExecCommandAsync(string containerName, string command, string performedBy, CancellationToken cancellationToken = default) =>
+        await RunActionAsync(containerName, "Exec", command, performedBy, async client =>
+        {
+            var execCreate = await client.Exec.ExecCreateContainerAsync(containerName, new ContainerExecCreateParameters
+            {
+                AttachStdout = true,
+                AttachStderr = true,
+                Cmd = ["/bin/sh", "-c", command]
+            }, cancellationToken);
+
+            using var stream = await client.Exec.StartWithConfigContainerExecAsync(
+                execCreate.ID, new ContainerExecStartParameters(), cancellationToken);
+            var (stdout, stderr) = await stream.ReadOutputToEndAsync(cancellationToken);
+            var output = string.Join("\n", new[] { stdout, stderr }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            return string.IsNullOrWhiteSpace(output) ? "(no output)" : output;
+        }, cancellationToken);
+
+    public async Task<IReadOnlyList<DockerActionLogView>> ListActionLogsAsync(string? containerName, CancellationToken cancellationToken = default)
+    {
+        var query = dbContext.DockerActionLogs.AsNoTracking().AsQueryable();
+        if (!string.IsNullOrWhiteSpace(containerName))
+        {
+            query = query.Where(a => a.ContainerName == containerName);
+        }
+
+        var logs = await query.ToListAsync(cancellationToken);
+        return logs
+            .OrderByDescending(a => a.CreatedAt)
+            .Take(50)
+            .Select(a => new DockerActionLogView
+            {
+                Id = a.Id,
+                ContainerName = a.ContainerName,
+                Action = a.Action,
+                Command = a.Command,
+                Succeeded = a.Succeeded,
+                ResultSummary = a.ResultSummary,
+                PerformedBy = a.PerformedBy,
+                CreatedAt = a.CreatedAt
+            })
+            .ToList();
+    }
+
+    // Shared plumbing for every write action: opens a client, runs the action, and always
+    // records a DockerActionLog row - success or failure - before returning.
+    private async Task<DockerActionResult> RunActionAsync(
+        string containerName,
+        string action,
+        string? command,
+        string performedBy,
+        Func<DockerClient, Task<string>> operation,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var client = CreateClient();
+            var resultSummary = await operation(client);
+            await LogActionAsync(containerName, action, command, true, Truncate(resultSummary), performedBy, cancellationToken);
+            return new DockerActionResult(true, resultSummary);
+        }
+        catch (Exception ex) when (IsSocketUnavailable(ex) || ex is DockerContainerNotFoundException || ex is DockerApiException)
+        {
+            await LogActionAsync(containerName, action, command, false, Truncate(ex.Message), performedBy, cancellationToken);
+            return new DockerActionResult(false, ex.Message);
+        }
+    }
+
+    private async Task LogActionAsync(
+        string containerName,
+        string action,
+        string? command,
+        bool succeeded,
+        string? resultSummary,
+        string performedBy,
+        CancellationToken cancellationToken)
+    {
+        dbContext.DockerActionLogs.Add(new DockerActionLog
+        {
+            ContainerName = containerName,
+            Action = action,
+            Command = command,
+            Succeeded = succeeded,
+            ResultSummary = resultSummary,
+            PerformedBy = performedBy,
+            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedBy = performedBy
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string Truncate(string? value) =>
+        string.IsNullOrEmpty(value) ? string.Empty : value.Length > 2000 ? value[..2000] : value;
+
     private static DockerClient CreateClient() =>
         new DockerClientConfiguration(new Uri(DockerSocketUri)).CreateClient();
 

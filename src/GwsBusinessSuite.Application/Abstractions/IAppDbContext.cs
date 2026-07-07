@@ -13,6 +13,8 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<FormSubmission> FormSubmissions { get; }
     DbSet<Comment> Comments { get; }
     DbSet<DockerHealthAlert> DockerHealthAlerts { get; }
+    DbSet<DockerActionLog> DockerActionLogs { get; }
+    DbSet<DigitalOceanSettings> DigitalOceanSettings { get; }
     DbSet<CmsPageRevision> CmsPageRevisions { get; }
     DbSet<AffiliateOffer> AffiliateOffers { get; }
     DbSet<SeoArticleDraft> SeoArticleDrafts { get; }

@@ -127,6 +127,57 @@ public sealed class DockerHealthServiceTests
         (await service.CountUnreadAlertsAsync()).Should().Be(2);
     }
 
+    // ── Action logging ───────────────────────────────────────────
+
+    [Fact]
+    public async Task ListActionLogsAsync_ShouldReturnMostRecentFirst_FilteredByContainer()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new DockerHealthService(db);
+
+        db.DockerActionLogs.Add(NewLog("gwssuite", "Start", DateTimeOffset.UtcNow.AddMinutes(-5)));
+        db.DockerActionLogs.Add(NewLog("gwssuite", "Restart", DateTimeOffset.UtcNow));
+        db.DockerActionLogs.Add(NewLog("ollama", "Stop", DateTimeOffset.UtcNow));
+        await db.SaveChangesAsync();
+
+        var logs = await service.ListActionLogsAsync("gwssuite");
+
+        logs.Should().HaveCount(2);
+        logs[0].Action.Should().Be("Restart");
+    }
+
+    [Fact]
+    public async Task ListActionLogsAsync_ShouldReturnAllContainers_WhenNoFilterGiven()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new DockerHealthService(db);
+
+        db.DockerActionLogs.Add(NewLog("gwssuite", "Start", DateTimeOffset.UtcNow));
+        db.DockerActionLogs.Add(NewLog("ollama", "Stop", DateTimeOffset.UtcNow));
+        await db.SaveChangesAsync();
+
+        var logs = await service.ListActionLogsAsync(null);
+
+        logs.Should().HaveCount(2);
+    }
+
+    private static DockerActionLog NewLog(string containerName, string action, DateTimeOffset createdAt) => new()
+    {
+        ContainerName = containerName,
+        Action = action,
+        Succeeded = true,
+        ResultSummary = $"{action} completed.",
+        PerformedBy = "test",
+        CreatedAt = createdAt,
+        CreatedBy = "test"
+    };
+
+    // Start/Stop/Restart/Remove/Pull/Recreate/ExecCommandAsync themselves aren't covered
+    // here either, for the same reason as ListContainersAsync/GetContainerDetailsAsync
+    // below - they require a real Docker socket. RunActionAsync's audit-logging plumbing
+    // (success and failure paths) is exercised indirectly by DigitalOceanServiceTests,
+    // which shares the same DockerActionLog write path for droplet-level actions.
+
     // ListContainersAsync/GetContainerDetailsAsync themselves aren't covered here -
     // whether a Docker socket is reachable varies by environment (GitHub Actions
     // runners have a real one; a plain local `dotnet test` usually doesn't), so
