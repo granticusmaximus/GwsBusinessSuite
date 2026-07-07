@@ -14,6 +14,10 @@ services:
     restart: always
     volumes:
       - gwssuite-data:/app/data
+      # Read-only: lets the Docker Health admin page inspect (never control) sibling
+      # containers on this droplet. Only two containers run here, both part of this
+      # app's own stack.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       ollama:
         condition: service_healthy

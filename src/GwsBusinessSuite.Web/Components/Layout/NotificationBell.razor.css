@@ -1,0 +1,95 @@
+.notif-bell-wrap {
+    position: relative;
+    display: inline-flex;
+}
+
+.notif-bell-btn {
+    background: none;
+    border: none;
+    color: var(--gws-sidebar-text, #c7ccd6);
+    font-size: 0.9rem;
+    cursor: pointer;
+    position: relative;
+    padding: 0.2rem 0.3rem;
+    display: inline-flex;
+    align-items: center;
+}
+
+.notif-bell-btn:hover {
+    color: #fff;
+}
+
+.notif-bell-badge {
+    position: absolute;
+    top: -0.3rem;
+    right: -0.3rem;
+    background: #dc2626;
+    color: #fff;
+    font-size: 0.6rem;
+    font-weight: 700;
+    line-height: 1;
+    padding: 0.2rem 0.32rem;
+    border-radius: 999px;
+    min-width: 1rem;
+    text-align: center;
+}
+
+.notif-bell-panel {
+    position: absolute;
+    top: calc(100% + 0.6rem);
+    right: 0;
+    width: 320px;
+    max-height: 420px;
+    overflow-y: auto;
+    background: #fff;
+    color: #1e2430;
+    border-radius: 8px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+    z-index: 1000;
+}
+
+.notif-bell-panel-header {
+    padding: 0.75rem 1rem;
+    font-weight: 700;
+    font-size: 0.85rem;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.notif-bell-empty {
+    padding: 1.25rem 1rem;
+    font-size: 0.82rem;
+    color: #6b7280;
+}
+
+.notif-bell-item {
+    display: block;
+    padding: 0.65rem 1rem;
+    text-decoration: none;
+    color: inherit;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.notif-bell-item:hover {
+    background: #f8fafc;
+}
+
+.notif-bell-item-unread {
+    background: #fef2f2;
+}
+
+.notif-bell-item-title {
+    font-weight: 700;
+    font-size: 0.82rem;
+}
+
+.notif-bell-item-message {
+    font-size: 0.78rem;
+    color: #475569;
+    margin-top: 0.1rem;
+}
+
+.notif-bell-item-time {
+    font-size: 0.7rem;
+    color: #94a3b8;
+    margin-top: 0.2rem;
+}

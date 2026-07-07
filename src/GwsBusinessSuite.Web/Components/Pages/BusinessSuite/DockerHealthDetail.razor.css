@@ -1,0 +1,13 @@
+.docker-log-tail {
+    max-height: 420px;
+    overflow-y: auto;
+    background: #0f172a;
+    color: #cbd5e1;
+    padding: 1rem;
+    border-radius: 6px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin: 0;
+}

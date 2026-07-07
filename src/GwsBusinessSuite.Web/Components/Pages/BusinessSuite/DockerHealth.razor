@@ -1,0 +1,122 @@
+@page "/admin/docker-health"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.DockerHealth
+@inject IDockerHealthService DockerHealthService
+@inject NavigationManager Navigation
+@inject ILogger<DockerHealth> Logger
+
+<PageTitle>Docker Health</PageTitle>
+
+<div class="page-header d-flex align-items-center justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-box-seam me-2 text-primary"></i>Docker Health</h1>
+        <p>Live status for every container running alongside this app on the droplet.</p>
+    </div>
+    <button class="btn btn-outline-primary d-inline-flex align-items-center gap-2" @onclick="LoadAsync" disabled="@IsBusy">
+        @if (IsBusy)
+        {
+            <span class="spinner-border spinner-border-sm"></span>
+        }
+        else
+        {
+            <i class="bi bi-arrow-clockwise"></i>
+        }
+        <span>Refresh Now</span>
+    </button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+}
+
+@if (!_loaded)
+{
+    <div class="d-flex align-items-center gap-2 text-secondary">
+        <span class="spinner-border spinner-border-sm"></span>
+        <span>Checking Docker...</span>
+    </div>
+}
+else if (!_available)
+{
+    <div class="alert alert-warning" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-1"></i>
+        @UnavailableReason
+    </div>
+}
+else if (Containers.Count == 0)
+{
+    <p class="text-secondary">No containers found.</p>
+}
+else
+{
+    <div class="row g-3">
+        @foreach (var container in Containers)
+        {
+            <div class="col-md-6 col-lg-4">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <span class="fw-semibold">@container.Name</span>
+                            <span class="badge @StatusBadgeClass(container)">@StatusLabel(container)</span>
+                        </div>
+                        <div class="small text-secondary mb-1">@container.Image</div>
+                        <div class="small text-secondary mb-1">@container.Status</div>
+                        @if (container.RestartCount > 0)
+                        {
+                            <div class="small text-secondary mb-1">Restarts: @container.RestartCount</div>
+                        }
+                        <a href="/admin/docker-health/@Uri.EscapeDataString(container.Name)" class="btn btn-sm btn-outline-secondary mt-2">
+                            View Details
+                        </a>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<ContainerHealthView> Containers { get; set; } = new();
+    private bool _loaded;
+    private bool _available;
+    private string UnavailableReason { get; set; } = string.Empty;
+    private bool IsBusy { get; set; }
+    private string ErrorMessage { get; set; } = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _loaded = true;
+    }
+
+    private async Task LoadAsync()
+    {
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            var result = await DockerHealthService.ListContainersAsync();
+            _available = result.Available;
+            UnavailableReason = result.UnavailableReason ?? string.Empty;
+            Containers = result.Containers.ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load container health.");
+            ErrorMessage = $"Unable to load container health. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private static string StatusLabel(ContainerHealthView c) =>
+        c.IsError ? "Error" : c.State;
+
+    private static string StatusBadgeClass(ContainerHealthView c) =>
+        c.IsError ? "text-bg-danger" : c.State == "running" ? "text-bg-success" : "text-bg-secondary";
+}

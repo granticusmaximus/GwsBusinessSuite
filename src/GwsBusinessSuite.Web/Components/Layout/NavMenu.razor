@@ -1,9 +1,11 @@
 @using GwsBusinessSuite.Application.Comments
+@using GwsBusinessSuite.Application.DockerHealth
 @using GwsBusinessSuite.Domain.Entities
 @using Microsoft.AspNetCore.Components.Authorization
 @using System.Security.Claims
 @inject AuthenticationStateProvider AuthProvider
 @inject ICommentService CommentService
+@inject IDockerHealthService DockerHealthService
 
 <nav class="gws-nav">
     @if (IsAdmin)
@@ -148,6 +150,14 @@
             </span>
         </NavLink>
 
+        <NavLink class="gws-nav-link" href="admin/docker-health">
+            <i class="bi bi-box-seam"></i>
+            <span class="gws-nav-link-copy">
+                <span>Docker Health@(_unreadDockerAlertCount > 0 ? $" ({_unreadDockerAlertCount})" : "")</span>
+                <small>Container status &amp; alerts</small>
+            </span>
+        </NavLink>
+
         <div class="gws-nav-section">Settings</div>
 
         <NavLink class="gws-nav-link" href="admin/settings">
@@ -163,6 +173,7 @@
 @code {
     private string _role = string.Empty;
     private int _pendingCommentCount;
+    private int _unreadDockerAlertCount;
 
     protected override async Task OnInitializedAsync()
     {
@@ -172,6 +183,7 @@
         if (state.User.Identity?.IsAuthenticated == true)
         {
             _pendingCommentCount = await CommentService.CountPendingAsync();
+            _unreadDockerAlertCount = await DockerHealthService.CountUnreadAlertsAsync();
         }
     }
 

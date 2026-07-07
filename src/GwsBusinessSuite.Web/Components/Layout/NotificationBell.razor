@@ -1,0 +1,84 @@
+@using GwsBusinessSuite.Application.DockerHealth
+@implements IDisposable
+@inject IDockerHealthService DockerHealthService
+@inject DockerHealthNotifier Notifier
+@inject NavigationManager Navigation
+
+<div class="notif-bell-wrap">
+    <button class="notif-bell-btn" @onclick="ToggleOpen" title="Notifications">
+        <i class="bi bi-bell-fill"></i>
+        @if (UnreadCount > 0)
+        {
+            <span class="notif-bell-badge">@(UnreadCount > 9 ? "9+" : UnreadCount.ToString())</span>
+        }
+    </button>
+
+    @if (IsOpen)
+    {
+        <div class="notif-bell-panel">
+            <div class="notif-bell-panel-header">Notifications</div>
+            @if (RecentAlerts.Count == 0)
+            {
+                <div class="notif-bell-empty">No alerts. All containers healthy.</div>
+            }
+            else
+            {
+                @foreach (var alert in RecentAlerts)
+                {
+                    <a href="javascript:void(0)" class="notif-bell-item @(alert.IsRead ? "" : "notif-bell-item-unread")"
+                       @onclick="() => OpenAlertAsync(alert)" @onclick:preventDefault>
+                        <div class="notif-bell-item-title">@alert.ContainerName</div>
+                        <div class="notif-bell-item-message">@alert.Message</div>
+                        <div class="notif-bell-item-time">@alert.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</div>
+                    </a>
+                }
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private bool IsOpen { get; set; }
+    private int UnreadCount { get; set; }
+    private List<DockerHealthAlertView> RecentAlerts { get; set; } = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        UnreadCount = await DockerHealthService.CountUnreadAlertsAsync();
+        RecentAlerts = (await DockerHealthService.ListAlertsAsync(unreadOnly: false)).Take(10).ToList();
+        Notifier.OnAlert += HandleAlert;
+    }
+
+    private void HandleAlert(DockerHealthAlertView alert)
+    {
+        _ = InvokeAsync(() =>
+        {
+            RecentAlerts.Insert(0, alert);
+            if (RecentAlerts.Count > 10) RecentAlerts.RemoveAt(RecentAlerts.Count - 1);
+            UnreadCount++;
+            StateHasChanged();
+        });
+    }
+
+    private void ToggleOpen()
+    {
+        IsOpen = !IsOpen;
+    }
+
+    private async Task OpenAlertAsync(DockerHealthAlertView alert)
+    {
+        if (!alert.IsRead)
+        {
+            await DockerHealthService.MarkAlertReadAsync(alert.Id);
+            UnreadCount = Math.Max(0, UnreadCount - 1);
+        }
+
+        IsOpen = false;
+        Navigation.NavigateTo($"/admin/docker-health/{Uri.EscapeDataString(alert.ContainerName)}");
+    }
+
+    public void Dispose()
+    {
+        Notifier.OnAlert -= HandleAlert;
+    }
+}

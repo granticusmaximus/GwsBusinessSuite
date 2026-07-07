@@ -179,6 +179,24 @@ public sealed class Comment : AuditableEntity
     public string Status { get; set; } = CommentStatuses.Pending;
 }
 
+public static class DockerHealthAlertSeverity
+{
+    public const string Warning = "Warning";
+    public const string Error = "Error";
+}
+
+public sealed class DockerHealthAlert : AuditableEntity
+{
+    public string ContainerName { get; set; } = string.Empty;
+    public string Severity { get; set; } = DockerHealthAlertSeverity.Error;
+
+    // e.g. "Exited with code 137 (out of memory)" - the human-readable summary shown
+    // in the notification bell and the alert history on the container's detail page.
+    public string Message { get; set; } = string.Empty;
+
+    public bool IsRead { get; set; }
+}
+
 public sealed class CjConnectorSettings : AuditableEntity
 {
     // Singleton row — always upserted using WellKnownId.

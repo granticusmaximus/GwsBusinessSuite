@@ -12,6 +12,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<MediaAsset> MediaAssets { get; }
     DbSet<FormSubmission> FormSubmissions { get; }
     DbSet<Comment> Comments { get; }
+    DbSet<DockerHealthAlert> DockerHealthAlerts { get; }
     DbSet<CmsPageRevision> CmsPageRevisions { get; }
     DbSet<AffiliateOffer> AffiliateOffers { get; }
     DbSet<SeoArticleDraft> SeoArticleDrafts { get; }

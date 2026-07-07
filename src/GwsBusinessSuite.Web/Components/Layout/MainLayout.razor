@@ -12,6 +12,7 @@
                         <span>GWS Business Suite</span>
                     </div>
                     <div class="gws-admin-bar-actions">
+                        <NotificationBell @rendermode="InteractiveServer" />
                         <span class="gws-admin-bar-user">
                             <i class="bi bi-person-circle"></i>
                             @authState.User.Identity?.Name

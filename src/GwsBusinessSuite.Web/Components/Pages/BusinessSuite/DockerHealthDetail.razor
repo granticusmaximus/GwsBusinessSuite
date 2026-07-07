@@ -1,0 +1,138 @@
+@page "/admin/docker-health/{ContainerName}"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.DockerHealth
+@inject IDockerHealthService DockerHealthService
+@inject ILogger<DockerHealthDetail> Logger
+
+<PageTitle>@ContainerName - Docker Health</PageTitle>
+
+<div class="page-header">
+    <p><a href="/admin/docker-health">&larr; Docker Health</a></p>
+    <h1><i class="bi bi-box-seam me-2 text-primary"></i>@ContainerName</h1>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+}
+
+@if (!_loaded)
+{
+    <div class="d-flex align-items-center gap-2 text-secondary">
+        <span class="spinner-border spinner-border-sm"></span>
+        <span>Loading...</span>
+    </div>
+}
+else if (Detail?.Container is null)
+{
+    <p class="text-secondary">Container not found. It may have been removed or renamed.</p>
+}
+else
+{
+    var container = Detail.Container;
+
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+            <span class="fw-semibold">Status</span>
+            <span class="badge @(container.IsError ? "text-bg-danger" : container.State == "running" ? "text-bg-success" : "text-bg-secondary")">
+                @(container.IsError ? "Error" : container.State)
+            </span>
+        </div>
+        <div class="card-body">
+            <dl class="row small mb-0">
+                <dt class="col-4 text-secondary">Image</dt>
+                <dd class="col-8">@container.Image</dd>
+                <dt class="col-4 text-secondary">Status</dt>
+                <dd class="col-8">@container.Status</dd>
+                <dt class="col-4 text-secondary">Health</dt>
+                <dd class="col-8">@container.Health</dd>
+                <dt class="col-4 text-secondary">Restart Count</dt>
+                <dd class="col-8">@container.RestartCount</dd>
+                <dt class="col-4 text-secondary">Exit Code</dt>
+                <dd class="col-8">@container.ExitCode</dd>
+                @if (container.StartedAt.HasValue)
+                {
+                    <dt class="col-4 text-secondary">Started</dt>
+                    <dd class="col-8">@container.StartedAt.Value.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</dd>
+                }
+                @if (container.FinishedAt.HasValue)
+                {
+                    <dt class="col-4 text-secondary">Finished</dt>
+                    <dd class="col-8">@container.FinishedAt.Value.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</dd>
+                }
+            </dl>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Detail.SuggestedTip))
+    {
+        <div class="alert alert-warning">
+            <strong><i class="bi bi-lightbulb-fill me-1"></i>Suggested tip</strong>
+            <div class="mt-1">@Detail.SuggestedTip</div>
+        </div>
+    }
+
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white border-bottom py-3">
+            <span class="fw-semibold">Recent Logs</span>
+        </div>
+        <div class="card-body">
+            <pre class="docker-log-tail">@Detail.LogTail</pre>
+        </div>
+    </div>
+
+    @if (Detail.RecentAlerts.Count > 0)
+    {
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3">
+                <span class="fw-semibold">Alert History</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="list-group list-group-flush">
+                    @foreach (var alert in Detail.RecentAlerts)
+                    {
+                        <div class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <div>
+                                    <span class="badge @(alert.Severity == "Error" ? "text-bg-danger" : "text-bg-warning") me-2">@alert.Severity</span>
+                                    @alert.Message
+                                </div>
+                                <span class="small text-secondary">@alert.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</span>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter]
+    public string ContainerName { get; set; } = string.Empty;
+
+    private ContainerDetailView? Detail { get; set; }
+    private bool _loaded;
+    private string ErrorMessage { get; set; } = string.Empty;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loaded = false;
+        ErrorMessage = string.Empty;
+        try
+        {
+            Detail = await DockerHealthService.GetContainerDetailsAsync(ContainerName);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load details for container {ContainerName}.", ContainerName);
+            ErrorMessage = $"Unable to load container details. {ex.Message}";
+        }
+        finally
+        {
+            _loaded = true;
+        }
+    }
+}
