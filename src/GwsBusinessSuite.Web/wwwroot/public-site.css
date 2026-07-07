@@ -609,6 +609,129 @@ a { color: inherit; }
 }
 .blog-post-footer a:hover { color: var(--accent); }
 
+/* ─── Comments ────────────────────────────────────────── */
+.comments-section {
+  margin-top: 3rem;
+  padding-top: 2.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.comments-heading {
+  font-family: var(--font-serif);
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-1);
+  margin-bottom: 1.5rem;
+}
+
+.comments-empty {
+  color: var(--text-3);
+  font-size: 0.9rem;
+  margin-bottom: 2rem;
+}
+
+.comment-item {
+  padding: 1.25rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.comment-item:first-child { padding-top: 0; }
+
+.comment-item-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-bottom: 0.4rem;
+}
+
+.comment-item-author {
+  font-weight: 700;
+  color: var(--text-1);
+  font-size: 0.9rem;
+}
+
+.comment-item-date {
+  color: var(--text-3);
+  font-size: 0.78rem;
+}
+
+.comment-item-body {
+  color: var(--text-2);
+  font-size: 0.92rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.comment-form {
+  margin-top: 2rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--border);
+}
+
+/* Visually hidden but present in the DOM/tab order via a negative tabindex - real
+   visitors never see or fill this; a filled value marks the submission as a bot. */
+.comment-form-honeypot {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.comment-form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.comment-form-field {
+  margin-bottom: 1rem;
+}
+
+.comment-form-field label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 0.35rem;
+}
+
+.comment-form-field input,
+.comment-form-field textarea {
+  width: 100%;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.75rem;
+  font-size: 0.9rem;
+  color: var(--text-1);
+  font-family: inherit;
+}
+.comment-form-field input:focus,
+.comment-form-field textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.comment-form-submit {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  padding: 0.65rem 1.5rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.comment-form-submit:hover { background: var(--accent-hover); }
+
+.comment-form-note {
+  margin-top: 0.75rem;
+  font-size: 0.78rem;
+  color: var(--text-3);
+}
+
 /* ─── Footer ──────────────────────────────────────────── */
 .site-footer {
   border-top: 1px solid var(--border);

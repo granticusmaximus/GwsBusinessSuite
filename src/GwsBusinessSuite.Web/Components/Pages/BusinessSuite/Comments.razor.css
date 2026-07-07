@@ -1,0 +1,5 @@
+.comment-excerpt {
+    max-width: 420px;
+    overflow-wrap: break-word;
+    color: var(--gws-text-strong, #1e2430);
+}

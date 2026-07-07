@@ -1,6 +1,7 @@
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.CmsKnowledge;
+using GwsBusinessSuite.Application.Comments;
 using GwsBusinessSuite.Application.Crm;
 using GwsBusinessSuite.Application.CjAds;
 using GwsBusinessSuite.Application.ContentStudio;
@@ -75,6 +76,7 @@ public static class DependencyInjection
         services.AddScoped<ICmsBuilderService, CmsBuilderService>();
         services.AddScoped<IMediaLibraryService, MediaLibraryService>();
         services.AddScoped<IFormSubmissionService, FormSubmissionService>();
+        services.AddScoped<ICommentService, CommentService>();
         services.AddScoped<IPageRevisionService, PageRevisionService>();
         services.AddScoped<ICmsKnowledgeService, CmsKnowledgeService>();
         services.AddScoped<IContentStudioService, ContentStudioService>();

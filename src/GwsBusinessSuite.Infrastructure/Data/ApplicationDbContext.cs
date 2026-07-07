@@ -12,6 +12,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<CmsPage> CmsPages => Set<CmsPage>();
     public DbSet<MediaAsset> MediaAssets => Set<MediaAsset>();
     public DbSet<FormSubmission> FormSubmissions => Set<FormSubmission>();
+    public DbSet<Comment> Comments => Set<Comment>();
     public DbSet<CmsPageRevision> CmsPageRevisions => Set<CmsPageRevision>();
     public DbSet<AffiliateOffer> AffiliateOffers => Set<AffiliateOffer>();
     public DbSet<SeoArticleDraft> SeoArticleDrafts => Set<SeoArticleDraft>();
@@ -35,6 +36,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         // /products/pricing can coexist since their full paths differ.
         modelBuilder.Entity<CmsPage>().HasIndex(x => new { x.SiteId, x.ParentPageId, x.Slug }).IsUnique();
         modelBuilder.Entity<FormSubmission>().HasIndex(x => new { x.PageId, x.CreatedAt });
+        modelBuilder.Entity<Comment>().HasIndex(x => new { x.ArticleId, x.Status });
         modelBuilder.Entity<CmsPageRevision>().HasIndex(x => new { x.PageId, x.RevisionNumber }).IsUnique();
         modelBuilder.Entity<SeoArticleDraft>().HasIndex(x => x.Status);
         modelBuilder.Entity<SeoArticleAffiliatePlacement>()

@@ -1,0 +1,290 @@
+@page "/admin/comments"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContentAccess")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Comments
+@using GwsBusinessSuite.Domain.Entities
+@inject ICommentService CommentService
+@inject IJSRuntime JS
+@inject ILogger<Comments> Logger
+
+<PageTitle>Comments</PageTitle>
+
+<div class="page-header">
+    <h1><i class="bi bi-chat-left-text me-2 text-primary"></i>Comments</h1>
+    <p>Moderate visitor comments before they appear on published articles.</p>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+}
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-info" role="alert">@StatusMessage</div>
+}
+
+<ul class="nav nav-tabs mb-3">
+    @foreach (var tab in Tabs)
+    {
+        <li class="nav-item">
+            <button type="button" class="nav-link @(ActiveFilter == tab.Value ? "active" : string.Empty)" @onclick="() => SetFilterAsync(tab.Value)">
+                @tab.Label
+            </button>
+        </li>
+    }
+</ul>
+
+<div class="card border-0 shadow-sm">
+    <div class="card-body p-0">
+        @if (!_loaded)
+        {
+            <div class="p-4 d-flex align-items-center gap-2 text-secondary">
+                <span class="spinner-border spinner-border-sm"></span>
+                <span>Loading comments…</span>
+            </div>
+        }
+        else if (FilteredComments.Count == 0)
+        {
+            <div class="p-4">
+                <p class="text-secondary mb-0">No comments here.</p>
+            </div>
+        }
+        else
+        {
+            @if (SelectedIds.Count > 0)
+            {
+                <div class="d-flex align-items-center gap-2 p-2 border-bottom">
+                    <button class="btn btn-sm btn-outline-success" @onclick="() => BulkApplyAsync(CommentStatuses.Approved)" disabled="@IsBusy">Approve</button>
+                    <button class="btn btn-sm btn-outline-warning" @onclick="() => BulkApplyAsync(CommentStatuses.Spam)" disabled="@IsBusy">Mark Spam</button>
+                    <button class="btn btn-sm btn-outline-danger" @onclick="BulkDeleteAsync" disabled="@IsBusy">Delete</button>
+                    <span class="small text-secondary">@SelectedIds.Count selected</span>
+                </div>
+            }
+            <table class="table wp-list-table align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th style="width: 2.5rem;"></th>
+                        <th>Author</th>
+                        <th>Comment</th>
+                        <th>Article</th>
+                        <th>Submitted</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var comment in FilteredComments)
+                    {
+                        <tr class="wp-list-row">
+                            <td>
+                                <input type="checkbox" class="form-check-input" checked="@SelectedIds.Contains(comment.Id)"
+                                       @onchange="e => ToggleSelect(comment.Id, (bool)(e.Value ?? false))" />
+                            </td>
+                            <td>
+                                <div class="fw-semibold">@comment.AuthorName</div>
+                                <div class="small text-secondary">@comment.AuthorEmail</div>
+                            </td>
+                            <td>
+                                <div class="comment-excerpt">@Excerpt(comment.Body)</div>
+                                <div class="wp-row-actions">
+                                    @if (comment.Status != CommentStatuses.Approved)
+                                    {
+                                        <a href="javascript:void(0)" @onclick="() => ApplyAsync(comment.Id, CommentStatuses.Approved)" @onclick:preventDefault>Approve</a>
+                                        <span> | </span>
+                                    }
+                                    @if (comment.Status != CommentStatuses.Spam)
+                                    {
+                                        <a href="javascript:void(0)" @onclick="() => ApplyAsync(comment.Id, CommentStatuses.Spam)" @onclick:preventDefault>Spam</a>
+                                        <span> | </span>
+                                    }
+                                    <a href="javascript:void(0)" class="text-danger" @onclick="() => DeleteAsync(comment.Id)" @onclick:preventDefault>Delete</a>
+                                </div>
+                            </td>
+                            <td>
+                                <a href="/blog/@comment.ArticleSlug" target="_blank" rel="noopener noreferrer">@comment.ArticleTitle</a>
+                            </td>
+                            <td class="small text-secondary">@comment.CreatedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</td>
+                            <td>
+                                <span class="badge @StatusBadgeClass(comment.Status)">@comment.Status</span>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+</div>
+
+@code {
+    private static readonly (string Label, string? Value)[] Tabs =
+    [
+        ("All", null),
+        ("Pending", CommentStatuses.Pending),
+        ("Approved", CommentStatuses.Approved),
+        ("Spam", CommentStatuses.Spam)
+    ];
+
+    private List<CommentView> AllComments { get; set; } = new();
+    private HashSet<Guid> SelectedIds { get; set; } = new();
+    private string? ActiveFilter { get; set; }
+    private bool _loaded;
+    private bool IsBusy { get; set; }
+    private string StatusMessage { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+
+    private IReadOnlyList<CommentView> FilteredComments =>
+        ActiveFilter is null ? AllComments : AllComments.Where(c => c.Status == ActiveFilter).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _loaded = true;
+    }
+
+    private async Task LoadAsync()
+    {
+        ErrorMessage = string.Empty;
+        try
+        {
+            AllComments = (await CommentService.ListForModerationAsync(null)).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load comments.");
+            ErrorMessage = $"Unable to load comments. {ex.Message}";
+        }
+    }
+
+    private async Task SetFilterAsync(string? filter)
+    {
+        ActiveFilter = filter;
+        SelectedIds.Clear();
+        await Task.CompletedTask;
+    }
+
+    private void ToggleSelect(Guid commentId, bool selected)
+    {
+        if (selected) SelectedIds.Add(commentId);
+        else SelectedIds.Remove(commentId);
+    }
+
+    private async Task ApplyAsync(Guid commentId, string status)
+    {
+        IsBusy = true;
+        StatusMessage = string.Empty;
+        ErrorMessage = string.Empty;
+        try
+        {
+            if (status == CommentStatuses.Approved) await CommentService.ApproveAsync(commentId);
+            else if (status == CommentStatuses.Spam) await CommentService.MarkSpamAsync(commentId);
+            await LoadAsync();
+            StatusMessage = $"Comment marked {status}.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to update comment {CommentId}.", commentId);
+            ErrorMessage = $"Unable to update comment. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task DeleteAsync(Guid commentId)
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", "Permanently delete this comment? This cannot be undone.");
+        if (!confirmed) return;
+
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            await CommentService.DeleteAsync(commentId);
+            SelectedIds.Remove(commentId);
+            await LoadAsync();
+            StatusMessage = "Comment deleted.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to delete comment {CommentId}.", commentId);
+            ErrorMessage = $"Unable to delete comment. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task BulkApplyAsync(string status)
+    {
+        if (SelectedIds.Count == 0) return;
+
+        IsBusy = true;
+        StatusMessage = string.Empty;
+        ErrorMessage = string.Empty;
+        var ids = SelectedIds.ToList();
+        try
+        {
+            foreach (var id in ids)
+            {
+                if (status == CommentStatuses.Approved) await CommentService.ApproveAsync(id);
+                else if (status == CommentStatuses.Spam) await CommentService.MarkSpamAsync(id);
+            }
+            SelectedIds.Clear();
+            await LoadAsync();
+            StatusMessage = $"Marked {ids.Count} comment(s) as {status}.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Bulk comment status update failed.");
+            ErrorMessage = $"Unable to update comments. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task BulkDeleteAsync()
+    {
+        if (SelectedIds.Count == 0) return;
+
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Permanently delete {SelectedIds.Count} comment(s)? This cannot be undone.");
+        if (!confirmed) return;
+
+        IsBusy = true;
+        StatusMessage = string.Empty;
+        ErrorMessage = string.Empty;
+        var ids = SelectedIds.ToList();
+        try
+        {
+            foreach (var id in ids)
+            {
+                await CommentService.DeleteAsync(id);
+            }
+            SelectedIds.Clear();
+            await LoadAsync();
+            StatusMessage = $"Deleted {ids.Count} comment(s).";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Bulk comment delete failed.");
+            ErrorMessage = $"Unable to delete comments. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private static string Excerpt(string body) =>
+        body.Length > 140 ? body[..140].Trim() + "…" : body;
+
+    private static string StatusBadgeClass(string status) => status switch
+    {
+        CommentStatuses.Approved => "text-bg-success",
+        CommentStatuses.Spam => "text-bg-danger",
+        _ => "text-bg-warning"
+    };
+}

@@ -1,7 +1,9 @@
+@using GwsBusinessSuite.Application.Comments
 @using GwsBusinessSuite.Domain.Entities
 @using Microsoft.AspNetCore.Components.Authorization
 @using System.Security.Claims
 @inject AuthenticationStateProvider AuthProvider
+@inject ICommentService CommentService
 
 <nav class="gws-nav">
     @if (IsAdmin)
@@ -73,6 +75,16 @@
             </span>
         </NavLink>
     }
+
+    <div class="gws-nav-section">Comments</div>
+
+    <NavLink class="gws-nav-link" href="admin/comments">
+        <i class="bi bi-chat-left-text"></i>
+        <span class="gws-nav-link-copy">
+            <span>Comments@(_pendingCommentCount > 0 ? $" ({_pendingCommentCount})" : "")</span>
+            <small>Moderate visitor comments</small>
+        </span>
+    </NavLink>
 
     @if (IsAdmin)
     {
@@ -150,11 +162,17 @@
 
 @code {
     private string _role = string.Empty;
+    private int _pendingCommentCount;
 
     protected override async Task OnInitializedAsync()
     {
         var state = await AuthProvider.GetAuthenticationStateAsync();
         _role = state.User.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
+
+        if (state.User.Identity?.IsAuthenticated == true)
+        {
+            _pendingCommentCount = await CommentService.CountPendingAsync();
+        }
     }
 
     private bool IsAdmin              => _role == AppRoles.Admin;

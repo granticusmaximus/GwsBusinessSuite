@@ -1,6 +1,7 @@
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Articles;
 using GwsBusinessSuite.Application.CmsBuilder;
+using GwsBusinessSuite.Application.Comments;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure;
 using GwsBusinessSuite.Application.ContentStudio;
@@ -542,8 +543,10 @@ app.MapGet("/blog", async (
 
 app.MapGet("/blog/{slug}", async (
         string slug,
+        HttpRequest request,
         IDbContextFactory<ApplicationDbContext> dbFactory,
         ICmsBuilderService cmsBuilderService,
+        ICommentService commentService,
         IConfiguration configuration) =>
     {
         await using var db = await dbFactory.CreateDbContextAsync();
@@ -566,16 +569,64 @@ app.MapGet("/blog/{slug}", async (
         var articleCategory = a.CategoryId.HasValue
             ? await db.ArticleCategories.AsNoTracking().FirstOrDefaultAsync(c => c.Id == a.CategoryId.Value)
             : null;
+        var approvedComments = await commentService.ListApprovedForArticleAsync(a.Id);
 
         var bodyHtml = PublicSiteHtmlRenderer.BlogPostBody(
             a.Title, a.MetaDescription, a.Author, a.PublishedAt, a.EstimatedReadingTime, a.PrimaryKeyword,
             heroImageUrl, a.HeroImageAltText, a.HeroImageCaption, renderedMarkdown,
-            articleCategory?.Name, articleCategory?.Slug, ParseTags(a.Tags));
+            articleCategory?.Name, articleCategory?.Slug, ParseTags(a.Tags), a.Slug, approvedComments);
+
+        if (request.Query["comment"] == "1")
+        {
+            bodyHtml = PublicSiteHtmlRenderer.CommentPendingBanner() + bodyHtml;
+        }
 
         var html = PublicSiteHtmlRenderer.Layout(a.Title, a.MetaDescription, heroImageUrl, bodyHtml, navMenus.Primary, navMenus.Footer, navMenus.AccentColorHex, navMenus.FontPairingKey);
         return Results.Content(html, "text/html");
     })
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
+
+// Handles the public comment form's POST from BlogPostBody. Looks the article up by slug
+// (not a client-supplied id) so a forged/stale id can't attach a comment to the wrong
+// article, matching the read route's own lookup. Honeypot + rate limit mirror the CMS
+// "form" widget's submission endpoint above.
+app.MapPost("/blog/{slug}/comments", async (
+    string slug,
+    HttpRequest request,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    ICommentService commentService) =>
+{
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var article = await db.Articles
+        .Where(x => x.Slug == slug && x.Status == ArticleStatuses.Published && x.TrashedAt == null)
+        .FirstOrDefaultAsync();
+    if (article is null) return Results.NotFound();
+
+    var form = await request.ReadFormAsync();
+    var thanksUrl = $"/blog/{slug}?comment=1";
+
+    // Honeypot: a hidden field real visitors never see or fill. A non-empty value means a
+    // bot filled every field it found — accept silently so the bot doesn't learn it failed.
+    if (!string.IsNullOrWhiteSpace(form["website"]))
+    {
+        return Results.Redirect(thanksUrl);
+    }
+
+    try
+    {
+        await commentService.SubmitAsync(
+            article.Id,
+            form["authorName"].ToString(),
+            form["authorEmail"].ToString(),
+            form["body"].ToString());
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+
+    return Results.Redirect(thanksUrl);
+}).RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-write");
 
 // One re-execute target for every 404 in the app, branching internally on IsPublicHost —
 // not two UseWhen-branched re-execute targets (see the note above

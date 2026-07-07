@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using GwsBusinessSuite.Application.Comments;
 using GwsBusinessSuite.Domain.Entities;
 using Markdig;
 
@@ -219,6 +220,10 @@ public static class PublicSiteHtmlRenderer
         <div class="gws-submitted-banner">Thanks — your message was sent. I'll get back to you soon.</div>
         """;
 
+    public static string CommentPendingBanner() => """
+        <div class="gws-submitted-banner">Thanks for your comment — it's awaiting moderation and will appear once approved.</div>
+        """;
+
     // ── Blog list ────────────────────────────────────────────────────────────
 
     public static string BlogListBody(
@@ -403,7 +408,9 @@ public static class PublicSiteHtmlRenderer
         string bodyMarkdown,
         string? categoryName = null,
         string? categorySlug = null,
-        IReadOnlyList<string>? tags = null)
+        IReadOnlyList<string>? tags = null,
+        string slug = "",
+        IReadOnlyList<CommentView>? approvedComments = null)
     {
         var dateLabel = publishedAt?.ToString("MMMM d, yyyy") ?? "";
         var heroHtml = string.IsNullOrWhiteSpace(heroImageUrl)
@@ -428,6 +435,48 @@ public static class PublicSiteHtmlRenderer
             ? ""
             : string.Concat(tags.Select(t => $"""<a class="article-tag" href="/blog?tag={Uri.EscapeDataString(t)}">{Html(t)}</a>"""));
 
+        var comments = approvedComments ?? Array.Empty<CommentView>();
+        var commentListHtml = comments.Count == 0
+            ? """<p class="comments-empty">No comments yet — be the first to share your thoughts.</p>"""
+            : string.Concat(comments.Select(c => $"""
+                <div class="comment-item">
+                  <div class="comment-item-meta">
+                    <span class="comment-item-author">{Html(c.AuthorName)}</span>
+                    <span class="comment-item-date">{Html(c.CreatedAt.ToString("MMMM d, yyyy"))}</span>
+                  </div>
+                  <p class="comment-item-body">{Html(c.Body)}</p>
+                </div>
+                """));
+
+        var commentsHtml = $"""
+            <section class="comments-section" aria-labelledby="comments-heading">
+              <h2 id="comments-heading" class="comments-heading">Comments ({comments.Count})</h2>
+              {commentListHtml}
+              <form class="comment-form" method="post" action="/blog/{Html(slug)}/comments">
+                <div class="comment-form-honeypot" aria-hidden="true">
+                  <label for="website">Website</label>
+                  <input type="text" id="website" name="website" tabindex="-1" autocomplete="off" />
+                </div>
+                <div class="comment-form-row">
+                  <div class="comment-form-field">
+                    <label for="authorName">Name</label>
+                    <input type="text" id="authorName" name="authorName" required maxlength="100" />
+                  </div>
+                  <div class="comment-form-field">
+                    <label for="authorEmail">Email (not published)</label>
+                    <input type="email" id="authorEmail" name="authorEmail" required maxlength="200" />
+                  </div>
+                </div>
+                <div class="comment-form-field">
+                  <label for="body">Comment</label>
+                  <textarea id="body" name="body" rows="4" required maxlength="5000"></textarea>
+                </div>
+                <button type="submit" class="comment-form-submit">Post Comment</button>
+                <p class="comment-form-note">Comments are moderated and may take a moment to appear.</p>
+              </form>
+            </section>
+            """;
+
         return $"""
             <article>
               {heroHtml}
@@ -447,6 +496,7 @@ public static class PublicSiteHtmlRenderer
                 <footer class="blog-post-footer">
                   <a href="/blog">&larr; All articles</a>
                 </footer>
+                {commentsHtml}
               </div>
             </article>
             """;

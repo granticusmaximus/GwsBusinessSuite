@@ -159,6 +159,26 @@ public sealed class FormSubmission : AuditableEntity
     public bool IsRead { get; set; }
 }
 
+public static class CommentStatuses
+{
+    public const string Pending = "Pending";
+    public const string Approved = "Approved";
+    public const string Spam = "Spam";
+}
+
+public sealed class Comment : AuditableEntity
+{
+    public Guid ArticleId { get; set; }
+    public string AuthorName { get; set; } = string.Empty;
+
+    // Collected for the admin's own reference (spam-pattern review, potential future
+    // notification/Gravatar) but never rendered on the public site.
+    public string AuthorEmail { get; set; } = string.Empty;
+
+    public string Body { get; set; } = string.Empty;
+    public string Status { get; set; } = CommentStatuses.Pending;
+}
+
 public sealed class CjConnectorSettings : AuditableEntity
 {
     // Singleton row — always upserted using WellKnownId.
