@@ -52,6 +52,39 @@
 .gws-heading { color: var(--text-1); font-family: var(--font-serif); line-height: 1.2; margin: 0; }
 .gws-paragraph { color: var(--text-2); line-height: 1.6; margin: 0; }
 
+/* text-align: left is explicit, not incidental - index.css's leftover Vite-
+   template "body { text-align: center }" rule otherwise leaks through here
+   (unlike paragraph/heading, richtext has no per-widget align prop/class to
+   override it with). */
+.gws-richtext { color: var(--text-2); line-height: 1.6; text-align: left; }
+.gws-richtext p { margin: 0 0 0.85rem; }
+.gws-richtext p:last-child { margin-bottom: 0; }
+.gws-richtext ul, .gws-richtext ol { margin: 0 0 0.85rem; padding-left: 1.4rem; }
+.gws-richtext li { margin-bottom: 0.35rem; }
+.gws-richtext a { color: var(--accent); }
+
+.gws-testimonial {
+  margin: 0;
+  padding: 1.5rem;
+  border-left: 3px solid var(--accent);
+  background: var(--bg-surface);
+  border-radius: var(--radius);
+  text-align: left;
+}
+.gws-testimonial-quote { color: var(--text-1); font-size: 1.1rem; font-style: italic; margin: 0 0 0.75rem; }
+.gws-testimonial-author { color: var(--text-3); font-size: 0.9rem; }
+
+.gws-accordion { display: flex; flex-direction: column; gap: 0.75rem; text-align: left; }
+.gws-accordion-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.85rem 1.1rem;
+  background: var(--bg-surface);
+}
+.gws-accordion-item summary { color: var(--text-1); font-weight: 600; cursor: pointer; }
+.gws-accordion-item[open] summary { margin-bottom: 0.6rem; }
+.gws-accordion-item div { color: var(--text-2); line-height: 1.6; }
+
 .gws-button-wrap { display: flex; }
 .gws-align-center.gws-button-wrap { justify-content: center; }
 .gws-align-right.gws-button-wrap { justify-content: flex-end; }

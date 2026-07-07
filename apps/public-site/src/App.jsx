@@ -21,6 +21,7 @@ function Navbar() {
       </Link>
       <div className="nav-links">
         <Link to="/about">About</Link>
+        <Link to="/resume">Resume</Link>
         <Link to="/blog">Blog</Link>
         <Link to="/contact">Contact</Link>
         {import.meta.env.DEV && <a href={ADMIN_URL} className="nav-admin">Admin ↗</a>}

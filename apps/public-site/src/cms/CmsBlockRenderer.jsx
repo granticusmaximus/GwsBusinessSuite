@@ -1,5 +1,19 @@
 import { useEffect, useState } from 'react';
+import { Marked } from 'marked';
 import { API_BASE_URL } from '../apiBase';
+
+// Same Marked instance/options as BlogPost.jsx's renderMarkdown - kept local
+// since importing across pages/ vs cms/ isn't currently set up for sharing.
+const md = new Marked({ gfm: true, breaks: true, async: false });
+
+function renderMarkdown(text) {
+  if (!text) return '';
+  try {
+    return md.parse(text);
+  } catch {
+    return `<pre>${text}</pre>`;
+  }
+}
 
 /**
  * Renders a Canvas page layout (Section -> Column -> Widget JSON, the shape
@@ -148,6 +162,42 @@ function Widget({ widget, resolvedProps: p = {}, siteSlug, pageSlug }) {
           {p.text}
         </p>
       );
+
+    case 'richtext':
+      return (
+        <div className="gws-richtext" dangerouslySetInnerHTML={{ __html: renderMarkdown(p.content) }} />
+      );
+
+    case 'testimonial':
+      return (
+        <blockquote className="gws-testimonial">
+          <p className="gws-testimonial-quote">&ldquo;{p.quote}&rdquo;</p>
+          {(p.authorName || p.authorRole) && (
+            <footer className="gws-testimonial-author">
+              {p.authorName}{p.authorName && p.authorRole ? ', ' : ''}{p.authorRole}
+            </footer>
+          )}
+        </blockquote>
+      );
+
+    case 'accordion': {
+      let items;
+      try {
+        items = JSON.parse(p.itemsJson || '[]');
+      } catch {
+        items = [];
+      }
+      return (
+        <div className="gws-accordion">
+          {items.map((item, i) => (
+            <details key={i} className="gws-accordion-item">
+              <summary>{item.question}</summary>
+              <div dangerouslySetInnerHTML={{ __html: renderMarkdown(item.answer) }} />
+            </details>
+          ))}
+        </div>
+      );
+    }
 
     case 'button':
       return (
