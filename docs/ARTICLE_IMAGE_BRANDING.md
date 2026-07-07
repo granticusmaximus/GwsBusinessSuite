@@ -12,8 +12,6 @@ This is a required brand rule, not an optional preference.
 
 Use these existing project assets as the source of truth:
 
-- `apps/public-site/public/favicon.svg`
-- `apps/public-site/public/logo-mark.svg`
 - `src/GwsBusinessSuite.Web/wwwroot/favicon.svg`
 - `src/GwsBusinessSuite.Web/wwwroot/logo-mark.svg`
 
