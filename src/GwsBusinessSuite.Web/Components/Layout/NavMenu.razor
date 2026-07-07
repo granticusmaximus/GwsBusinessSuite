@@ -10,7 +10,7 @@
 <nav class="gws-nav">
     @if (IsAdmin)
     {
-        <NavLink class="gws-nav-link" href="admin" Match="NavLinkMatch.All">
+        <NavLink class="gws-nav-link" href="admin" Match="NavLinkMatch.All" title="Dashboard">
             <i class="bi bi-speedometer2"></i>
             <span class="gws-nav-link-copy">
                 <span>Dashboard</span>
@@ -21,7 +21,7 @@
 
     <div class="gws-nav-section">Posts</div>
 
-    <NavLink class="gws-nav-link" href="admin/article-editor">
+    <NavLink class="gws-nav-link" href="admin/article-editor" title="All Posts">
         <i class="bi bi-pencil"></i>
         <span class="gws-nav-link-copy">
             <span>All Posts</span>
@@ -29,7 +29,7 @@
         </span>
     </NavLink>
 
-    <NavLink class="gws-nav-link" href="admin/content-studio">
+    <NavLink class="gws-nav-link" href="admin/content-studio" title="Generate with AI">
         <i class="bi bi-magic"></i>
         <span class="gws-nav-link-copy">
             <span>Generate with AI</span>
@@ -41,7 +41,7 @@
     {
         <div class="gws-nav-section">Media</div>
 
-        <NavLink class="gws-nav-link" href="admin/media">
+        <NavLink class="gws-nav-link" href="admin/media" title="Media Library">
             <i class="bi bi-images"></i>
             <span class="gws-nav-link-copy">
                 <span>Media Library</span>
@@ -51,7 +51,7 @@
 
         <div class="gws-nav-section">Pages</div>
 
-        <NavLink class="gws-nav-link" href="admin/pages">
+        <NavLink class="gws-nav-link" href="admin/pages" title="Pages">
             <i class="bi bi-layout-three-columns"></i>
             <span class="gws-nav-link-copy">
                 <span>Pages</span>
@@ -61,7 +61,7 @@
 
         <div class="gws-nav-section">Appearance</div>
 
-        <NavLink class="gws-nav-link" href="admin/appearance/menus">
+        <NavLink class="gws-nav-link" href="admin/appearance/menus" title="Menus">
             <i class="bi bi-list"></i>
             <span class="gws-nav-link-copy">
                 <span>Menus</span>
@@ -69,7 +69,7 @@
             </span>
         </NavLink>
 
-        <NavLink class="gws-nav-link" href="admin/appearance/customize">
+        <NavLink class="gws-nav-link" href="admin/appearance/customize" title="Customize">
             <i class="bi bi-palette"></i>
             <span class="gws-nav-link-copy">
                 <span>Customize</span>
@@ -80,7 +80,7 @@
 
     <div class="gws-nav-section">Comments</div>
 
-    <NavLink class="gws-nav-link" href="admin/comments">
+    <NavLink class="gws-nav-link" href="admin/comments" title="Comments">
         <i class="bi bi-chat-left-text"></i>
         <span class="gws-nav-link-copy">
             <span>Comments@(_pendingCommentCount > 0 ? $" ({_pendingCommentCount})" : "")</span>
@@ -92,7 +92,7 @@
     {
         <div class="gws-nav-section">Users</div>
 
-        <NavLink class="gws-nav-link" href="admin/users">
+        <NavLink class="gws-nav-link" href="admin/users" title="User Management">
             <i class="bi bi-people-fill"></i>
             <span class="gws-nav-link-copy">
                 <span>User Management</span>
@@ -102,7 +102,7 @@
 
         <div class="gws-nav-section">Tools</div>
 
-        <NavLink class="gws-nav-link" href="admin/cj-ads">
+        <NavLink class="gws-nav-link" href="admin/cj-ads" title="CJ Ads">
             <i class="bi bi-tags-fill"></i>
             <span class="gws-nav-link-copy">
                 <span>CJ Ads</span>
@@ -110,7 +110,7 @@
             </span>
         </NavLink>
 
-        <NavLink class="gws-nav-link" href="admin/crm">
+        <NavLink class="gws-nav-link" href="admin/crm" title="CRM">
             <i class="bi bi-people-fill"></i>
             <span class="gws-nav-link-copy">
                 <span>CRM</span>
@@ -118,7 +118,7 @@
             </span>
         </NavLink>
 
-        <NavLink class="gws-nav-link" href="admin/wiki">
+        <NavLink class="gws-nav-link" href="admin/wiki" title="Knowledge Base">
             <i class="bi bi-journal-bookmark-fill"></i>
             <span class="gws-nav-link-copy">
                 <span>Knowledge Base</span>
@@ -126,7 +126,7 @@
             </span>
         </NavLink>
 
-        <NavLink class="gws-nav-link" href="admin/live-show">
+        <NavLink class="gws-nav-link" href="admin/live-show" title="Live Show">
             <i class="bi bi-camera-video-fill"></i>
             <span class="gws-nav-link-copy">
                 <span>Live Show</span>
@@ -134,7 +134,7 @@
             </span>
         </NavLink>
 
-        <NavLink class="gws-nav-link" href="admin/news-intelligence">
+        <NavLink class="gws-nav-link" href="admin/news-intelligence" title="News Intelligence">
             <i class="bi bi-newspaper"></i>
             <span class="gws-nav-link-copy">
                 <span>News Intelligence</span>
@@ -142,7 +142,7 @@
             </span>
         </NavLink>
 
-        <NavLink class="gws-nav-link" href="admin/ollama-console">
+        <NavLink class="gws-nav-link" href="admin/ollama-console" title="Ollama Console">
             <i class="bi bi-cpu-fill"></i>
             <span class="gws-nav-link-copy">
                 <span>Ollama Console</span>
@@ -150,7 +150,7 @@
             </span>
         </NavLink>
 
-        <NavLink class="gws-nav-link" href="admin/docker-health">
+        <NavLink class="gws-nav-link" href="admin/docker-health" title="Docker Management">
             <i class="bi bi-box-seam"></i>
             <span class="gws-nav-link-copy">
                 <span>Docker Management@(_unreadDockerAlertCount > 0 ? $" ({_unreadDockerAlertCount})" : "")</span>
@@ -160,7 +160,7 @@
 
         <div class="gws-nav-section">Settings</div>
 
-        <NavLink class="gws-nav-link" href="admin/settings">
+        <NavLink class="gws-nav-link" href="admin/settings" title="General">
             <i class="bi bi-gear-fill"></i>
             <span class="gws-nav-link-copy">
                 <span>General</span>

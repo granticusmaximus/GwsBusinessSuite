@@ -7,6 +7,7 @@
    rather than WordPress's blue/gray. */
 :root {
     --gws-sidebar-width: 200px;
+    --gws-sidebar-collapsed-width: 60px;
     --gws-sidebar-accent: #2563eb;
     --gws-admin-bar-height: 36px;
     --gws-sidebar-bg: #161b26;
@@ -44,10 +45,16 @@ h1:focus { outline: none; }
     min-height: 100vh;
 }
 
-/* The admin bar is a slim full-width strip in normal document flow (not
-   fixed) — everything below it just flows naturally, no top-margin math
-   needed the way a fixed bar would require. */
+/* Sticky rather than fixed: as the very first element in the document it
+   behaves identically to fixed (there's no scroll distance to travel before
+   it engages), but sticky keeps it participating in normal flow so no
+   compensating margin/padding is needed anywhere else - unlike the sidebar
+   below, which is fixed and needs .gws-body's margin-left to reserve its
+   space. */
 .gws-admin-bar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
     height: var(--gws-admin-bar-height);
     min-height: var(--gws-admin-bar-height);
     background: var(--gws-admin-bar-bg);
@@ -57,6 +64,40 @@ h1:focus { outline: none; }
     justify-content: space-between;
     padding: 0 1rem;
     font-size: .8rem;
+}
+
+.gws-admin-bar-start {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+}
+
+.gws-sidebar-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    border: none;
+    background: transparent;
+    color: var(--gws-sidebar-text);
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: .95rem;
+    transition: background .12s ease, color .12s ease;
+}
+
+.gws-sidebar-toggle:hover {
+    background: var(--gws-sidebar-hover-bg);
+    color: #fff;
+}
+
+.gws-sidebar-toggle i {
+    transition: transform .15s ease;
+}
+
+.gws-layout.gws-sidebar-collapsed .gws-sidebar-toggle i {
+    transform: rotate(180deg);
 }
 
 .gws-admin-bar-brand {
@@ -227,6 +268,46 @@ h1:focus { outline: none; }
 
 .gws-nav-link.active i {
     color: var(--gws-sidebar-accent);
+}
+
+/* ── Collapsible sidebar ─────────────────────────────────────
+   Toggled by plain (non-Blazor) JS - see gwsInitSidebarToggle in app.js,
+   which flips this class on .gws-layout and remembers it in localStorage.
+   Kept outside Blazor's interactivity entirely because MainLayout isn't
+   always rendered interactively (e.g. the static Dashboard route), so a
+   @onclick handler here wouldn't reliably wire up. */
+.gws-layout.gws-sidebar-collapsed .gws-sidebar {
+    width: var(--gws-sidebar-collapsed-width);
+    min-width: var(--gws-sidebar-collapsed-width);
+}
+
+.gws-layout.gws-sidebar-collapsed:not(.gws-builder-mode) .gws-body {
+    margin-left: var(--gws-sidebar-collapsed-width);
+}
+
+.gws-layout.gws-sidebar-collapsed .gws-nav-section {
+    display: none;
+}
+
+.gws-layout.gws-sidebar-collapsed .gws-nav-link {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+    border-left: none;
+}
+
+.gws-layout.gws-sidebar-collapsed .gws-nav-link.active {
+    background: var(--gws-sidebar-hover-bg);
+}
+
+/* Labels are hidden outright rather than shown in a custom hover flyout - a
+   CSS-positioned flyout would get clipped by .gws-sidebar's own
+   overflow-y: auto (browsers force overflow-x to auto too once overflow-y
+   isn't visible, so it can't escape past the sidebar's right edge). Each
+   NavLink instead carries a native title attribute, which renders as a
+   normal OS tooltip unaffected by any of that. */
+.gws-layout.gws-sidebar-collapsed .gws-nav-link-copy {
+    display: none;
 }
 
 /* ── Page header ─────────────────────────────────────────── */

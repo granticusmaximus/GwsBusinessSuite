@@ -7,9 +7,14 @@
             @if (!IsBuilderRoute)
             {
                 <header class="gws-admin-bar">
-                    <div class="gws-admin-bar-brand">
-                        <img src="favicon.svg" alt="" class="gws-admin-bar-icon" />
-                        <span>GWS Business Suite</span>
+                    <div class="gws-admin-bar-start">
+                        <button type="button" class="gws-sidebar-toggle" title="Collapse sidebar">
+                            <i class="bi bi-chevron-bar-left"></i>
+                        </button>
+                        <div class="gws-admin-bar-brand">
+                            <img src="favicon.svg" alt="" class="gws-admin-bar-icon" />
+                            <span>GWS Business Suite</span>
+                        </div>
                     </div>
                     <div class="gws-admin-bar-actions">
                         <NotificationBell @rendermode="InteractiveServer" />
