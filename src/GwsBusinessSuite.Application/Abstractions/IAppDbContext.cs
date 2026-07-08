@@ -29,6 +29,8 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<AppUser> AppUsers { get; }
     DbSet<WatchedTopic> WatchedTopics { get; }
     DbSet<NewsItem> NewsItems { get; }
+    DbSet<PodcastShow> PodcastShows { get; }
+    DbSet<PodcastEpisode> PodcastEpisodes { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
 

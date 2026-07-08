@@ -8,6 +8,7 @@ using GwsBusinessSuite.Application.DigitalOcean;
 using GwsBusinessSuite.Application.CjAds;
 using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.NewsIntelligence;
+using GwsBusinessSuite.Application.Podcasts;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Infrastructure.Data;
@@ -99,6 +100,12 @@ public static class DependencyInjection
             client.DefaultRequestHeaders.UserAgent.ParseAdd(
                 "Mozilla/5.0 (compatible; GWSuite/1.0; +https://grantwatson.dev)");
             client.Timeout = TimeSpan.FromSeconds(15);
+        });
+        services.AddHttpClient<IPodcastDirectoryService, PodcastDirectoryService>(client =>
+        {
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(
+                "Mozilla/5.0 (compatible; GWSuite/1.0; +https://grantwatson.dev)");
+            client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddHostedService<NewsRefreshBackgroundService>();
 

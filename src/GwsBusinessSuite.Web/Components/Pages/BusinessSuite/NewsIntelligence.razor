@@ -103,20 +103,37 @@
             </button>
         </div>
 
-        @if (AvailableSources.Count > 1)
+        @if (ShowSourceFilters)
         {
-            <div class="ni-source-filter">
-                <button class="ni-source-chip @(_selectedSources.Count == 0 ? "ni-source-chip--active" : "")"
-                        @onclick="ClearSourceFilter">
-                    All Sources
-                </button>
-                @foreach (var source in AvailableSources)
-                {
-                    <button class="ni-source-chip @(_selectedSources.Contains(source) ? "ni-source-chip--active" : "")"
-                            @onclick="() => ToggleSource(source)">
-                        @source
+            <div class="ni-source-panel">
+                <div class="ni-source-panel-header">
+                    <div>
+                        <span class="ni-source-label">Outlet Filters</span>
+                        <p class="ni-source-summary">@SourceFilterSummary()</p>
+                    </div>
+                    @if (HiddenSourceFilterCount > 0)
+                    {
+                        <span class="ni-source-note">
+                            Showing @VisibleSourceFilters.Count of @AllSourceFilters.Count outlets
+                        </span>
+                    }
+                </div>
+
+                <div class="ni-source-filter">
+                    <button class="ni-source-chip @(_selectedSources.Count == 0 ? "ni-source-chip--active" : "")"
+                            @onclick="ClearSourceFilter">
+                        <span>All outlets</span>
+                        <span class="ni-source-chip-count">@CurrentViewItems().Count</span>
                     </button>
-                }
+                    @foreach (var source in VisibleSourceFilters)
+                    {
+                        <button class="ni-source-chip @(_selectedSources.Contains(source.Name) ? "ni-source-chip--active" : "")"
+                                @onclick="() => ToggleSource(source.Name)">
+                            <span>@source.Name</span>
+                            <span class="ni-source-chip-count">@source.ArticleCount</span>
+                        </button>
+                    }
+                </div>
             </div>
         }
 
@@ -171,6 +188,7 @@
     private List<WatchedTopicSummary> _topics = [];
     private NewsFeedResult? _feed;
     private string _activeFilter = "all";   // "all" | "top" | topic-id string
+    private const int MaxVisibleSourceFilters = 10;
     private bool _loading;
     private bool _refreshing;
     private string _statusMessage = string.Empty;
@@ -178,7 +196,7 @@
 
     // Empty means "no filter" (show every source). Populated with the sources the user
     // has explicitly chosen to show - can combine any number of sources at once.
-    private readonly HashSet<string> _selectedSources = [];
+    private readonly HashSet<string> _selectedSources = new(StringComparer.OrdinalIgnoreCase);
 
     // Topic form
     private bool _showTopicForm;
@@ -215,6 +233,7 @@
                 : Guid.Parse(_activeFilter);
 
             _feed = await NewsService.GetFeedAsync(queryTopicId);
+            PruneSelectedSources();
         }
         catch (Exception ex)
         {
@@ -369,21 +388,57 @@
         _ => _topics.FirstOrDefault(t => t.Id.ToString() == _activeFilter)?.Name ?? "Feed"
     };
 
-    private List<string> AvailableSources =>
-        _feed is null
-            ? []
-            : _feed.Items.Select(x => x.Source).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().OrderBy(s => s).ToList();
+    private List<SourceFilterOption> AllSourceFilters =>
+        CurrentViewItems()
+            .Select(x => NormalizeSourceName(x.Source))
+            .Where(source => source.Length > 0)
+            .GroupBy(source => source, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new SourceFilterOption(group.First(), group.Count()))
+            .OrderByDescending(option => option.ArticleCount)
+            .ThenBy(option => option.Name)
+            .ToList();
+
+    private List<SourceFilterOption> VisibleSourceFilters
+    {
+        get
+        {
+            var visible = new List<SourceFilterOption>();
+
+            foreach (var option in AllSourceFilters)
+            {
+                if (_selectedSources.Contains(option.Name) || visible.Count < MaxVisibleSourceFilters)
+                {
+                    visible.Add(option);
+                }
+            }
+
+            return visible
+                .OrderByDescending(option => _selectedSources.Contains(option.Name))
+                .ThenByDescending(option => option.ArticleCount)
+                .ThenBy(option => option.Name)
+                .ToList();
+        }
+    }
+
+    private bool ShowSourceFilters => _activeFilter == "all" && AllSourceFilters.Count > 1;
+
+    private int HiddenSourceFilterCount => Math.Max(0, AllSourceFilters.Count - VisibleSourceFilters.Count);
 
     private bool SourceMatches(NewsItemDto item) =>
-        _selectedSources.Count == 0 || _selectedSources.Contains(item.Source);
+        _selectedSources.Count == 0 || _selectedSources.Contains(NormalizeSourceName(item.Source));
+
+    private List<NewsItemDto> CurrentViewItems()
+    {
+        if (_feed is null) return [];
+
+        return _activeFilter == "top"
+            ? _feed.Items.Where(x => x.TopicId == null).ToList()
+            : _feed.Items.ToList();
+    }
 
     private List<NewsItemDto> CurrentItems()
     {
-        if (_feed is null) return [];
-        var items = _activeFilter == "top"
-            ? _feed.Items.Where(x => x.TopicId == null)
-            : _feed.Items.AsEnumerable();
-        return items.Where(SourceMatches).ToList();
+        return CurrentViewItems().Where(SourceMatches).ToList();
     }
 
     private RenderFragment RenderAllView() => __builder =>
@@ -402,7 +457,7 @@
             return;
         }
 
-        var filteredItems = _feed.Items.Where(SourceMatches).ToList();
+        var filteredItems = CurrentViewItems().Where(SourceMatches).ToList();
 
         if (filteredItems.Count == 0)
         {
@@ -554,4 +609,36 @@
         if (diff.TotalHours < 24) return $"{(int)diff.TotalHours}h ago";
         return $"{(int)diff.TotalDays}d ago";
     }
+
+    private string SourceFilterSummary()
+    {
+        var itemCount = CurrentViewItems().Count;
+        var outletCount = AllSourceFilters.Count;
+
+        return HiddenSourceFilterCount > 0
+            ? $"{itemCount} {Pluralize(itemCount, "article")} across {outletCount} {Pluralize(outletCount, "outlet")}. Showing the busiest outlets first."
+            : $"{itemCount} {Pluralize(itemCount, "article")} across {outletCount} {Pluralize(outletCount, "outlet")}.";
+    }
+
+    private void PruneSelectedSources()
+    {
+        if (_selectedSources.Count == 0)
+        {
+            return;
+        }
+
+        var availableSources = CurrentViewItems()
+            .Select(x => NormalizeSourceName(x.Source))
+            .Where(source => source.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        _selectedSources.RemoveWhere(source => !availableSources.Contains(source));
+    }
+
+    private static string NormalizeSourceName(string? source) => source?.Trim() ?? string.Empty;
+
+    private static string Pluralize(int count, string singular) =>
+        count == 1 ? singular : $"{singular}s";
+
+    private sealed record SourceFilterOption(string Name, int ArticleCount);
 }

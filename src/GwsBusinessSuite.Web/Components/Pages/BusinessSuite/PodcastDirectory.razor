@@ -1,0 +1,767 @@
+@page "/admin/podcasts"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContributorAccess")]
+@using GwsBusinessSuite.Application.Podcasts
+@using Microsoft.AspNetCore.Authorization
+@inject IPodcastDirectoryService PodcastService
+@inject ILogger<PodcastDirectory> Logger
+@inject IJSRuntime JS
+
+<PageTitle>Podcast Directory</PageTitle>
+
+<div class="pd-page">
+    <div class="page-header pd-header">
+        <div>
+            <h1><i class="bi bi-mic-fill me-2 text-danger"></i>Podcast Directory</h1>
+            <p>Search Apple Podcasts, curate a saved library, and refresh live episodes from each show's RSS feed.</p>
+        </div>
+        <div class="pd-header-actions">
+            <button class="pd-tab @(_activeTab == "discover" ? "pd-tab--active" : "")" @onclick='() => _activeTab = "discover"'>
+                Discover
+            </button>
+            <button class="pd-tab @(_activeTab == "library" ? "pd-tab--active" : "")" @onclick='() => _activeTab = "library"'>
+                Library <span class="pd-pill">@_library.Count</span>
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_statusMessage))
+    {
+        <div class="alert alert-success" role="alert">@_statusMessage</div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger" role="alert">@_errorMessage</div>
+    }
+
+    @if (_initialLoading)
+    {
+        <div class="pd-loading">
+            <span class="spinner-border spinner-border-sm"></span>
+            <span>Loading podcast directory…</span>
+        </div>
+    }
+    else if (_activeTab == "discover")
+    {
+        <section class="pd-panel">
+            <div class="pd-search-row">
+                <form class="pd-search-form" @onsubmit="SubmitDiscoverSearchAsync">
+                    <label class="pd-label" for="podcast-search">Search Apple Podcasts</label>
+                    <div class="pd-search-input-wrap">
+                        <i class="bi bi-search"></i>
+                        <input id="podcast-search"
+                               class="pd-search-input"
+                               placeholder="Search for podcasts, hosts, or topics"
+                               @bind="_discoverSearchInput" />
+                    </div>
+                </form>
+
+                <div class="pd-search-actions">
+                    <button class="btn btn-primary" @onclick="SubmitDiscoverSearchAsync" disabled="@_discoverLoading">Search</button>
+                    <button class="btn btn-outline-secondary" @onclick="ResetDiscoverView" disabled="@_discoverLoading">Reset</button>
+                </div>
+            </div>
+
+            <div class="pd-chip-row">
+                <button class="pd-chip @(_activeDiscoverChip == "Featured" ? "pd-chip--active" : "")"
+                        @onclick="ResetDiscoverView">
+                    Featured
+                </button>
+                <button class="pd-chip @(_activeDiscoverChip == "All" ? "pd-chip--active" : "")"
+                        @onclick='() => LoadDiscoverCategoryAsync("All")'>
+                    All
+                </button>
+                @foreach (var category in DiscoverCategories)
+                {
+                    <button class="pd-chip @(_activeDiscoverChip == category ? "pd-chip--active" : "")"
+                            @onclick='() => LoadDiscoverCategoryAsync(category)'>
+                        @category
+                    </button>
+                }
+            </div>
+
+            @if (_discoverLoading)
+            {
+                <div class="pd-loading">
+                    <span class="spinner-border spinner-border-sm"></span>
+                    <span>Loading podcasts…</span>
+                </div>
+            }
+            else if (_showFeaturedSections)
+            {
+                <div class="pd-featured-stack">
+                    @foreach (var section in _featuredSections)
+                    {
+                        <section class="pd-section">
+                            <div class="pd-section-header">
+                                <div>
+                                    <div class="pd-section-kicker">@section.Icon Featured Category</div>
+                                    <h2>@section.Category</h2>
+                                </div>
+                                <button class="btn btn-sm btn-outline-secondary"
+                                        @onclick='() => LoadDiscoverCategoryAsync(section.Category)'>
+                                    View More
+                                </button>
+                            </div>
+
+                            @if (section.Podcasts.Count == 0)
+                            {
+                                <p class="pd-muted">No podcasts are available in this category right now.</p>
+                            }
+                            else
+                            {
+                                <div class="pd-grid">
+                                    @foreach (var item in section.Podcasts)
+                                    {
+                                        @RenderDiscoverCard(item)
+                                    }
+                                </div>
+                            }
+                        </section>
+                    }
+                </div>
+            }
+            else if (_discoverResults.Count == 0)
+            {
+                <div class="pd-empty">
+                    <i class="bi bi-broadcast"></i>
+                    <h2>No podcasts found</h2>
+                    <p>Try a different search term or switch to another category.</p>
+                </div>
+            }
+            else
+            {
+                <div class="pd-section-header">
+                    <div>
+                        <div class="pd-section-kicker">Discover Results</div>
+                        <h2>@_discoverHeading</h2>
+                    </div>
+                    <span class="pd-muted">@_discoverResults.Count podcast@(_discoverResults.Count == 1 ? "" : "s")</span>
+                </div>
+
+                <div class="pd-grid">
+                    @foreach (var item in _discoverResults)
+                    {
+                        @RenderDiscoverCard(item)
+                    }
+                </div>
+            }
+        </section>
+    }
+    else
+    {
+        <section class="pd-panel">
+            <div class="pd-library-toolbar">
+                <div class="pd-library-search">
+                    <label class="pd-label" for="library-search">Search saved library</label>
+                    <div class="pd-search-input-wrap">
+                        <i class="bi bi-search"></i>
+                        <input id="library-search"
+                               class="pd-search-input"
+                               placeholder="Filter by title, author, or description"
+                               @bind="_librarySearch"
+                               @bind:event="oninput" />
+                    </div>
+                </div>
+
+                <div class="pd-library-meta">
+                    <div class="pd-library-count">@FilteredLibrary.Count podcast@((FilteredLibrary.Count == 1) ? "" : "s")</div>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="ReloadLibraryAsync">Refresh Library</button>
+                </div>
+            </div>
+
+            @if (LibraryCategories.Count > 0)
+            {
+                <div class="pd-chip-row">
+                    <button class="pd-chip @(_selectedLibraryCategory == "All" ? "pd-chip--active" : "")"
+                            @onclick='() => _selectedLibraryCategory = "All"'>
+                        All <span class="pd-pill">@_library.Count</span>
+                    </button>
+                    @foreach (var category in LibraryCategories)
+                    {
+                        <button class="pd-chip @(_selectedLibraryCategory == category.Name ? "pd-chip--active" : "")"
+                                @onclick='() => _selectedLibraryCategory = category.Name'>
+                            @category.Name <span class="pd-pill">@category.Count</span>
+                        </button>
+                    }
+                </div>
+            }
+
+            @if (_library.Count == 0)
+            {
+                <div class="pd-empty">
+                    <i class="bi bi-journal-plus"></i>
+                    <h2>Your library is empty</h2>
+                    <p>Save a show from the Discover tab to start tracking episodes here.</p>
+                </div>
+            }
+            else if (FilteredLibrary.Count == 0)
+            {
+                <div class="pd-empty">
+                    <i class="bi bi-funnel"></i>
+                    <h2>No saved podcasts match</h2>
+                    <p>Clear the current search or category filter to see the rest of your library.</p>
+                </div>
+            }
+            else
+            {
+                <div class="pd-grid">
+                    @foreach (var item in FilteredLibrary)
+                    {
+                        <article class="pd-card pd-card--library">
+                            <div class="pd-card-cover">
+                                @if (!string.IsNullOrWhiteSpace(item.ImageUrl))
+                                {
+                                    <img src="@item.ImageUrl" alt="" loading="lazy" />
+                                }
+                                else
+                                {
+                                    <div class="pd-cover-fallback">@GetInitial(item.Title)</div>
+                                }
+                            </div>
+                            <div class="pd-card-body">
+                                <div class="pd-card-meta">
+                                    <span class="pd-badge">@item.Category</span>
+                                    <span class="pd-card-count">@item.EpisodeCount episode@(item.EpisodeCount == 1 ? "" : "s")</span>
+                                </div>
+                                <h3>@item.Title</h3>
+                                @if (!string.IsNullOrWhiteSpace(item.Author))
+                                {
+                                    <p class="pd-card-author">by @item.Author</p>
+                                }
+                                <p class="pd-card-description">@Describe(item.Description)</p>
+                                <div class="pd-card-footer">
+                                    <button class="btn btn-primary btn-sm" @onclick='() => OpenPodcastAsync(item.Id)'>Open Episodes</button>
+                                    @if (!string.IsNullOrWhiteSpace(item.AppleUrl))
+                                    {
+                                        <a class="btn btn-outline-secondary btn-sm" href="@item.AppleUrl" target="_blank" rel="noopener noreferrer">Apple</a>
+                                    }
+                                </div>
+                                @if (item.LastEpisodeRefreshAt.HasValue)
+                                {
+                                    <div class="pd-card-refresh">Updated @TimeAgo(item.LastEpisodeRefreshAt.Value)</div>
+                                }
+                            </div>
+                        </article>
+                    }
+                </div>
+            }
+        </section>
+    }
+</div>
+
+@if (_detailOpen)
+{
+    <div class="pd-modal-backdrop" @onclick="CloseDetail">
+        <div class="pd-modal" @onclick:stopPropagation="true">
+            <div class="pd-modal-header">
+                <div>
+                    <div class="pd-section-kicker">Podcast Detail</div>
+                    <h2>@(_selectedDetail?.Podcast.Title ?? "Loading…")</h2>
+                </div>
+                <button class="pd-close" @onclick="CloseDetail" aria-label="Close">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+
+            @if (_detailLoading)
+            {
+                <div class="pd-loading">
+                    <span class="spinner-border spinner-border-sm"></span>
+                    <span>Loading podcast detail…</span>
+                </div>
+            }
+            else if (_selectedDetail is { } detail)
+            {
+                <div class="pd-detail-hero">
+                    <div class="pd-detail-cover">
+                        @if (!string.IsNullOrWhiteSpace(detail.Podcast.ImageUrl))
+                        {
+                            <img src="@detail.Podcast.ImageUrl" alt="" loading="lazy" />
+                        }
+                        else
+                        {
+                            <div class="pd-cover-fallback pd-cover-fallback--large">@GetInitial(detail.Podcast.Title)</div>
+                        }
+                    </div>
+
+                    <div class="pd-detail-copy">
+                        <div class="pd-card-meta">
+                            <span class="pd-badge">@detail.Podcast.Category</span>
+                            <span class="pd-card-count">@detail.Podcast.EpisodeCount episode@(detail.Podcast.EpisodeCount == 1 ? "" : "s")</span>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(detail.Podcast.Author))
+                        {
+                            <p class="pd-card-author">by @detail.Podcast.Author</p>
+                        }
+                        <p class="pd-detail-description">@Describe(detail.Podcast.Description, 320)</p>
+                        <div class="pd-detail-actions">
+                            <button class="btn btn-primary btn-sm" @onclick="RefreshSelectedPodcastAsync">Refresh Episodes</button>
+                            <button class="btn btn-outline-danger btn-sm" @onclick='() => RemoveSavedPodcastAsync(detail.Podcast.Id, detail.Podcast.Title)'>Remove</button>
+                            @if (!string.IsNullOrWhiteSpace(detail.Podcast.FeedUrl))
+                            {
+                                <a class="btn btn-outline-secondary btn-sm" href="@detail.Podcast.FeedUrl" target="_blank" rel="noopener noreferrer">Feed</a>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(detail.Podcast.AppleUrl))
+                            {
+                                <a class="btn btn-outline-secondary btn-sm" href="@detail.Podcast.AppleUrl" target="_blank" rel="noopener noreferrer">Apple</a>
+                            }
+                        </div>
+                        @if (detail.Podcast.LastEpisodeRefreshAt.HasValue)
+                        {
+                            <div class="pd-card-refresh">Episodes refreshed @TimeAgo(detail.Podcast.LastEpisodeRefreshAt.Value)</div>
+                        }
+                    </div>
+                </div>
+
+                <div class="pd-episode-header">
+                    <div>
+                        <div class="pd-section-kicker">Episodes</div>
+                        <h3>@detail.Episodes.Count episode@(detail.Episodes.Count == 1 ? "" : "s") ready</h3>
+                    </div>
+                    <select class="form-select form-select-sm pd-sort" @bind="_episodeSort">
+                        <option value="newest">Newest first</option>
+                        <option value="oldest">Oldest first</option>
+                    </select>
+                </div>
+
+                @if (SortedEpisodes.Count == 0)
+                {
+                    <div class="pd-empty pd-empty--compact">
+                        <i class="bi bi-radioactive"></i>
+                        <h2>No episodes yet</h2>
+                        <p>This feed did not return any playable episodes. Try refreshing the feed.</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="pd-episode-list">
+                        @foreach (var episode in SortedEpisodes)
+                        {
+                            <article class="pd-episode-card">
+                                <div class="pd-episode-topline">
+                                    <h4>@episode.Title</h4>
+                                    <div class="pd-episode-meta">
+                                        @if (episode.PublishedAt.HasValue)
+                                        {
+                                            <span>@episode.PublishedAt.Value.ToLocalTime().ToString("MMM d, yyyy")</span>
+                                        }
+                                        @if (episode.DurationSeconds.HasValue)
+                                        {
+                                            <span>@FormatDuration(episode.DurationSeconds.Value)</span>
+                                        }
+                                    </div>
+                                </div>
+                                <p class="pd-episode-description">@Describe(episode.Description, 380)</p>
+                                <div class="pd-episode-audio">
+                                    <audio controls preload="none" src="@episode.AudioUrl"></audio>
+                                    <a href="@episode.AudioUrl" target="_blank" rel="noopener noreferrer">Open audio</a>
+                                </div>
+                            </article>
+                        }
+                    </div>
+                }
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly string[] DiscoverCategories =
+    [
+        "Comedy",
+        "True Crime",
+        "News",
+        "Technology",
+        "Business",
+        "Health",
+        "Sports",
+        "Music",
+        "Arts",
+        "Science",
+        "History",
+        "Education"
+    ];
+
+    private readonly StringComparer _categoryComparer = StringComparer.OrdinalIgnoreCase;
+    private List<FeaturedPodcastSection> _featuredSections = [];
+    private List<PodcastCatalogItem> _discoverResults = [];
+    private List<SavedPodcastSummary> _library = [];
+    private Dictionary<string, SavedPodcastSummary> _libraryIndex = new(StringComparer.OrdinalIgnoreCase);
+
+    private bool _initialLoading = true;
+    private bool _discoverLoading;
+    private bool _detailLoading;
+    private bool _detailOpen;
+
+    private string _activeTab = "discover";
+    private string _activeDiscoverChip = "Featured";
+    private bool _showFeaturedSections = true;
+    private string _discoverHeading = "Explore by Category";
+    private string _discoverSearchInput = string.Empty;
+    private string _librarySearch = string.Empty;
+    private string _selectedLibraryCategory = "All";
+    private string _episodeSort = "newest";
+    private string _statusMessage = string.Empty;
+    private string _errorMessage = string.Empty;
+
+    private PodcastDetailView? _selectedDetail;
+
+    private IReadOnlyList<SavedPodcastSummary> FilteredLibrary =>
+        _library
+            .Where(item =>
+                _selectedLibraryCategory == "All" ||
+                _categoryComparer.Equals(item.Category, _selectedLibraryCategory))
+            .Where(item =>
+                string.IsNullOrWhiteSpace(_librarySearch) ||
+                MatchesLibrarySearch(item, _librarySearch))
+            .ToList();
+
+    private IReadOnlyList<LibraryCategoryOption> LibraryCategories =>
+        _library
+            .GroupBy(item => item.Category)
+            .Select(group => new LibraryCategoryOption(group.Key, group.Count()))
+            .OrderByDescending(option => option.Count)
+            .ThenBy(option => option.Name)
+            .ToList();
+
+    private IReadOnlyList<PodcastEpisodeView> SortedEpisodes =>
+        _selectedDetail is null
+            ? []
+            : (_episodeSort == "oldest"
+                ? _selectedDetail.Episodes.OrderBy(x => x.PublishedAt ?? DateTimeOffset.MinValue).ToList()
+                : _selectedDetail.Episodes.OrderByDescending(x => x.PublishedAt ?? DateTimeOffset.MinValue).ToList());
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await Task.WhenAll(LoadLibraryAsync(), LoadFeaturedAsync());
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to initialize podcast directory");
+            _errorMessage = "Failed to load the podcast directory.";
+        }
+        finally
+        {
+            _initialLoading = false;
+        }
+    }
+
+    private async Task LoadFeaturedAsync()
+    {
+        _featuredSections = (await PodcastService.GetFeaturedSectionsAsync()).ToList();
+    }
+
+    private async Task LoadLibraryAsync()
+    {
+        _library = (await PodcastService.ListLibraryAsync()).ToList();
+        RebuildLibraryIndex();
+    }
+
+    private void RebuildLibraryIndex()
+    {
+        _libraryIndex = new Dictionary<string, SavedPodcastSummary>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in _library)
+        {
+            foreach (var key in PodcastDirectoryIdentity.BuildKeys(item.ItunesId, item.FeedUrl, item.AppleUrl, item.Title, item.Author))
+            {
+                _libraryIndex[key] = item;
+            }
+        }
+    }
+
+    private async Task SubmitDiscoverSearchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_discoverSearchInput))
+        {
+            _errorMessage = "Enter a podcast search term first.";
+            return;
+        }
+
+        _discoverLoading = true;
+        _errorMessage = string.Empty;
+        _statusMessage = string.Empty;
+
+        try
+        {
+            _discoverResults = (await PodcastService.SearchCatalogAsync(_discoverSearchInput.Trim())).ToList();
+            _discoverHeading = $"Search results for \"{_discoverSearchInput.Trim()}\"";
+            _activeDiscoverChip = string.Empty;
+            _showFeaturedSections = false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Podcast search failed");
+            _errorMessage = "Podcast search failed.";
+        }
+        finally
+        {
+            _discoverLoading = false;
+        }
+    }
+
+    private async Task LoadDiscoverCategoryAsync(string category)
+    {
+        _discoverLoading = true;
+        _errorMessage = string.Empty;
+        _statusMessage = string.Empty;
+
+        try
+        {
+            _discoverResults = (await PodcastService.DiscoverAsync(category == "All" ? null : category)).ToList();
+            _discoverHeading = category == "All" ? "All categories" : category;
+            _activeDiscoverChip = category;
+            _showFeaturedSections = false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load discover category {Category}", category);
+            _errorMessage = "Failed to load podcasts for that category.";
+        }
+        finally
+        {
+            _discoverLoading = false;
+        }
+    }
+
+    private void ResetDiscoverView()
+    {
+        _discoverResults = [];
+        _discoverHeading = "Explore by Category";
+        _discoverSearchInput = string.Empty;
+        _activeDiscoverChip = "Featured";
+        _showFeaturedSections = true;
+        _errorMessage = string.Empty;
+        _statusMessage = string.Empty;
+    }
+
+    private async Task ReloadLibraryAsync()
+    {
+        _errorMessage = string.Empty;
+        _statusMessage = string.Empty;
+
+        try
+        {
+            await LoadLibraryAsync();
+            _statusMessage = "Library refreshed.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to reload podcast library");
+            _errorMessage = "Failed to refresh the library.";
+        }
+    }
+
+    private SavedPodcastSummary? FindSavedMatch(PodcastCatalogItem item)
+    {
+        foreach (var key in PodcastDirectoryIdentity.BuildKeys(item.ItunesId, item.FeedUrl, item.AppleUrl, item.Title, item.Author))
+        {
+            if (_libraryIndex.TryGetValue(key, out var saved))
+            {
+                return saved;
+            }
+        }
+
+        return null;
+    }
+
+    private async Task SavePodcastAsync(PodcastCatalogItem item)
+    {
+        _errorMessage = string.Empty;
+        _statusMessage = string.Empty;
+
+        try
+        {
+            var result = await PodcastService.SavePodcastAsync(item);
+            await LoadLibraryAsync();
+            _statusMessage = result.AlreadySaved
+                ? $"\"{result.Podcast.Title}\" is already in your library."
+                : $"\"{result.Podcast.Title}\" was added to your library.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save podcast {Title}", item.Title);
+            _errorMessage = ex.Message;
+        }
+    }
+
+    private async Task OpenPodcastAsync(Guid podcastId, bool forceRefresh = false)
+    {
+        _detailOpen = true;
+        _detailLoading = true;
+        _errorMessage = string.Empty;
+
+        try
+        {
+            _selectedDetail = await PodcastService.GetPodcastDetailAsync(podcastId, forceRefresh);
+            if (_selectedDetail is not null)
+            {
+                await LoadLibraryAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load podcast detail {PodcastId}", podcastId);
+            _errorMessage = "Failed to load the podcast detail.";
+        }
+        finally
+        {
+            _detailLoading = false;
+        }
+    }
+
+    private async Task OpenSavedFromDiscoverAsync(PodcastCatalogItem item)
+    {
+        var saved = FindSavedMatch(item);
+        if (saved is not null)
+        {
+            await OpenPodcastAsync(saved.Id);
+        }
+    }
+
+    private async Task RefreshSelectedPodcastAsync()
+    {
+        if (_selectedDetail is null)
+        {
+            return;
+        }
+
+        await OpenPodcastAsync(_selectedDetail.Podcast.Id, forceRefresh: true);
+        _statusMessage = "Episodes refreshed.";
+    }
+
+    private async Task RemoveSavedPodcastAsync(Guid podcastId, string title)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Remove \"{title}\" from the library?"))
+        {
+            return;
+        }
+
+        _errorMessage = string.Empty;
+        _statusMessage = string.Empty;
+
+        try
+        {
+            await PodcastService.DeletePodcastAsync(podcastId);
+            await LoadLibraryAsync();
+
+            if (_selectedDetail?.Podcast.Id == podcastId)
+            {
+                CloseDetail();
+            }
+
+            _statusMessage = $"\"{title}\" was removed from the library.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to remove podcast {PodcastId}", podcastId);
+            _errorMessage = "Failed to remove that podcast.";
+        }
+    }
+
+    private void CloseDetail()
+    {
+        _detailOpen = false;
+        _selectedDetail = null;
+        _detailLoading = false;
+    }
+
+    private static bool MatchesLibrarySearch(SavedPodcastSummary item, string search)
+    {
+        var query = search.Trim();
+        return item.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+               item.Author.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+               item.Description.Contains(query, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private RenderFragment RenderDiscoverCard(PodcastCatalogItem item) => @<article class="pd-card">
+        <div class="pd-card-cover">
+            @if (!string.IsNullOrWhiteSpace(item.ImageUrl))
+            {
+                <img src="@item.ImageUrl" alt="" loading="lazy" />
+            }
+            else
+            {
+                <div class="pd-cover-fallback">@GetInitial(item.Title)</div>
+            }
+        </div>
+        <div class="pd-card-body">
+            <div class="pd-card-meta">
+                <span class="pd-badge">@item.Category</span>
+                @if (FindSavedMatch(item) is not null)
+                {
+                    <span class="pd-card-count">Saved</span>
+                }
+            </div>
+            <h3>@item.Title</h3>
+            @if (!string.IsNullOrWhiteSpace(item.Author))
+            {
+                <p class="pd-card-author">by @item.Author</p>
+            }
+            <p class="pd-card-description">@Describe(item.Description)</p>
+            <div class="pd-card-footer">
+                @if (FindSavedMatch(item) is { } saved)
+                {
+                    <button class="btn btn-primary btn-sm" @onclick='() => OpenPodcastAsync(saved.Id)'>Open Library Entry</button>
+                }
+                else if (string.IsNullOrWhiteSpace(item.FeedUrl))
+                {
+                    <button class="btn btn-outline-secondary btn-sm" disabled>Feed unavailable</button>
+                }
+                else
+                {
+                    <button class="btn btn-primary btn-sm" @onclick='() => SavePodcastAsync(item)'>Save to Library</button>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(item.AppleUrl))
+                {
+                    <a class="btn btn-outline-secondary btn-sm" href="@item.AppleUrl" target="_blank" rel="noopener noreferrer">Apple</a>
+                }
+            </div>
+        </div>
+    </article>;
+
+    private static string GetInitial(string value) =>
+        string.IsNullOrWhiteSpace(value) ? "?" : value.Trim()[..1].ToUpperInvariant();
+
+    private static string Describe(string? value, int maxLength = 180)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "No summary is available for this podcast yet.";
+        }
+
+        var trimmed = value.Trim();
+        return trimmed.Length <= maxLength ? trimmed : $"{trimmed[..maxLength].TrimEnd()}…";
+    }
+
+    private static string TimeAgo(DateTimeOffset value)
+    {
+        var diff = DateTimeOffset.UtcNow - value;
+        if (diff.TotalMinutes < 60)
+        {
+            return $"{Math.Max(1, (int)diff.TotalMinutes)}m ago";
+        }
+
+        if (diff.TotalHours < 24)
+        {
+            return $"{(int)diff.TotalHours}h ago";
+        }
+
+        return $"{(int)diff.TotalDays}d ago";
+    }
+
+    private static string FormatDuration(int seconds)
+    {
+        var duration = TimeSpan.FromSeconds(seconds);
+        return duration.TotalHours >= 1
+            ? $"{(int)duration.TotalHours}h {duration.Minutes}m"
+            : $"{Math.Max(1, duration.Minutes)}m";
+    }
+
+    private sealed record LibraryCategoryOption(string Name, int Count);
+}

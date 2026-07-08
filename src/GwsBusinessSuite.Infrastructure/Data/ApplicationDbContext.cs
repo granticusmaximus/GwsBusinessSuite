@@ -31,6 +31,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<AppUser> AppUsers => Set<AppUser>();
     public DbSet<WatchedTopic> WatchedTopics => Set<WatchedTopic>();
     public DbSet<NewsItem> NewsItems => Set<NewsItem>();
+    public DbSet<PodcastShow> PodcastShows => Set<PodcastShow>();
+    public DbSet<PodcastEpisode> PodcastEpisodes => Set<PodcastEpisode>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -83,5 +85,16 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
 
         modelBuilder.Entity<NewsItem>().HasIndex(x => new { x.TopicId, x.FetchedAt });
         modelBuilder.Entity<NewsItem>().HasIndex(x => x.Url);
+
+        modelBuilder.Entity<PodcastShow>().HasIndex(x => x.Category);
+        modelBuilder.Entity<PodcastShow>().HasIndex(x => x.ItunesId);
+        modelBuilder.Entity<PodcastShow>().HasIndex(x => x.FeedUrl);
+        modelBuilder.Entity<PodcastEpisode>()
+            .HasOne<PodcastShow>()
+            .WithMany()
+            .HasForeignKey(x => x.PodcastShowId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<PodcastEpisode>().HasIndex(x => new { x.PodcastShowId, x.PublishedAt });
+        modelBuilder.Entity<PodcastEpisode>().HasIndex(x => new { x.PodcastShowId, x.ExternalId });
     }
 }

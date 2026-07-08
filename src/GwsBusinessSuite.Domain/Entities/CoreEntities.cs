@@ -423,3 +423,27 @@ public sealed class NewsItem : AuditableEntity
 
     public DateTimeOffset FetchedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+public sealed class PodcastShow : AuditableEntity
+{
+    public required string Title { get; set; }
+    public string Author { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string Category { get; set; } = "General";
+    public string FeedUrl { get; set; } = string.Empty;
+    public string ImageUrl { get; set; } = string.Empty;
+    public string AppleUrl { get; set; } = string.Empty;
+    public string? ItunesId { get; set; }
+    public DateTimeOffset? LastEpisodeRefreshAt { get; set; }
+}
+
+public sealed class PodcastEpisode : AuditableEntity
+{
+    public Guid PodcastShowId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string AudioUrl { get; set; } = string.Empty;
+    public int? DurationSeconds { get; set; }
+    public DateTimeOffset? PublishedAt { get; set; }
+    public string ExternalId { get; set; } = string.Empty;
+}
