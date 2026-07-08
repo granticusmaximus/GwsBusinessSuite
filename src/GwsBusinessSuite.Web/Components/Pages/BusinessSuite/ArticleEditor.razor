@@ -175,13 +175,13 @@
                                     </td>
                                     <td>
                                         <div class="fw-semibold">
-                                            <a href="javascript:void(0)" @onclick="() => EditArticle(article.Id)" @onclick:preventDefault>@article.Title</a>
+                                            <a href="/admin/article-editor/@article.Id">@article.Title</a>
                                         </div>
                                         <div class="small text-secondary font-monospace">/@article.Slug</div>
                                         <div class="wp-row-actions small">
-                                            <a href="javascript:void(0)" @onclick="() => EditArticle(article.Id)" @onclick:preventDefault>Edit</a>
+                                            <a href="/admin/article-editor/@article.Id">Edit</a>
                                             <span class="text-secondary"> | </span>
-                                            <a href="javascript:void(0)" class="text-danger" @onclick="() => TrashArticleAsync(article.Id)" @onclick:preventDefault>Trash</a>
+                                            <button type="button" class="text-danger" @onclick="() => TrashArticleAsync(article.Id)">Trash</button>
                                             @if (article.Status == ArticleStatuses.Published)
                                             {
                                                 <span class="text-secondary"> | </span>

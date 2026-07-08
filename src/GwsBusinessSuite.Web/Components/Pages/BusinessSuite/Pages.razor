@@ -114,7 +114,7 @@
                             <div class="small text-secondary">/@BuildFullPath(cmsPage)</div>
                         </button>
                         <div class="d-flex gap-1 flex-shrink-0 wp-row-actions me-3">
-                            <a href="javascript:void(0)" @onclick="() => EditPage(cmsPage.Id)" @onclick:preventDefault>Edit</a>
+                            <a href="/admin/pages/edit/@cmsPage.Id">Edit</a>
                         </div>
                     </div>
                 }

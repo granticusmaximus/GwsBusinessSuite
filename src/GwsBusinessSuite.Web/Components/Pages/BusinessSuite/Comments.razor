@@ -89,15 +89,15 @@
                                 <div class="wp-row-actions">
                                     @if (comment.Status != CommentStatuses.Approved)
                                     {
-                                        <a href="javascript:void(0)" @onclick="() => ApplyAsync(comment.Id, CommentStatuses.Approved)" @onclick:preventDefault>Approve</a>
+                                        <button type="button" @onclick="() => ApplyAsync(comment.Id, CommentStatuses.Approved)">Approve</button>
                                         <span> | </span>
                                     }
                                     @if (comment.Status != CommentStatuses.Spam)
                                     {
-                                        <a href="javascript:void(0)" @onclick="() => ApplyAsync(comment.Id, CommentStatuses.Spam)" @onclick:preventDefault>Spam</a>
+                                        <button type="button" @onclick="() => ApplyAsync(comment.Id, CommentStatuses.Spam)">Spam</button>
                                         <span> | </span>
                                     }
-                                    <a href="javascript:void(0)" class="text-danger" @onclick="() => DeleteAsync(comment.Id)" @onclick:preventDefault>Delete</a>
+                                    <button type="button" class="text-danger" @onclick="() => DeleteAsync(comment.Id)">Delete</button>
                                 </div>
                             </td>
                             <td>

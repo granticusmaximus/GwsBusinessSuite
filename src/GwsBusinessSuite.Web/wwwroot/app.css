@@ -405,6 +405,30 @@ h1:focus { outline: none; }
     text-decoration: underline;
 }
 
+/* State-mutating row actions (Trash/Approve/Spam/Delete) are real <button> elements, not
+   href="javascript:void(0)" anchors - a plain button always reaches its @onclick handler,
+   where a javascript: href combined with @onclick:preventDefault inside an opacity-0
+   (until hover) container proved unreliable. Reset to look identical to the <a> links
+   next to it. */
+.wp-row-actions button {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: var(--gws-sidebar-accent);
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.wp-row-actions button:hover {
+    text-decoration: underline;
+}
+
+.wp-row-actions button.text-danger:hover {
+    color: #dc2626 !important;
+}
+
 @media (hover: hover) {
     .wp-row-actions {
         opacity: 0;
