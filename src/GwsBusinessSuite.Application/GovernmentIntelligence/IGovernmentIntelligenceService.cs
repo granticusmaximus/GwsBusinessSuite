@@ -16,7 +16,8 @@ public sealed record CommunityCoverage(
     string Summary,
     IReadOnlyList<CivicUpdate> Announcements,
     IReadOnlyList<CivicMeeting> Meetings,
-    IReadOnlyList<CivicResourceSection> ResourceSections);
+    IReadOnlyList<CivicResourceSection> ResourceSections,
+    IReadOnlyList<LegislationDetailBrief> LegislationBriefs);
 
 public sealed record StateGovernmentCoverage(
     string Summary,
@@ -60,7 +61,8 @@ public sealed record LawSummary(
     string DocumentNumber,
     string Title,
     string Url,
-    string Source);
+    string Source,
+    LegislationDetailBrief? Legislation);
 
 public sealed record ChamberVoteSummary(
     string Chamber,
@@ -75,7 +77,8 @@ public sealed record ChamberVoteSummary(
     int NayCount,
     int PresentCount,
     int NotVotingCount,
-    IReadOnlyList<MemberVoteRecord> Votes);
+    IReadOnlyList<MemberVoteRecord> Votes,
+    LegislationDetailBrief? Legislation);
 
 public sealed record StateLegislativeVoteSummary(
     string Chamber,
@@ -90,7 +93,8 @@ public sealed record StateLegislativeVoteSummary(
     int NayCount,
     int NotVotingCount,
     int ExcusedCount,
-    IReadOnlyList<StateMemberVoteRecord> Votes);
+    IReadOnlyList<StateMemberVoteRecord> Votes,
+    LegislationDetailBrief? Legislation);
 
 public sealed record StateMemberVoteRecord(
     string Name,
@@ -101,3 +105,30 @@ public sealed record MemberVoteRecord(
     string Party,
     string State,
     string Vote);
+
+public sealed record LegislationDetailBrief(
+    string Kind,
+    string Jurisdiction,
+    string GoverningBody,
+    string Measure,
+    string Title,
+    string Status,
+    string Summary,
+    string OfficialUrl,
+    IReadOnlyList<LegislationFact> Facts,
+    IReadOnlyList<LegislationLink> Links,
+    IReadOnlyList<LegislationTimelineEntry> Timeline);
+
+public sealed record LegislationFact(
+    string Label,
+    string Value);
+
+public sealed record LegislationLink(
+    string Title,
+    string Url,
+    string Description);
+
+public sealed record LegislationTimelineEntry(
+    string Label,
+    string Detail,
+    string When);

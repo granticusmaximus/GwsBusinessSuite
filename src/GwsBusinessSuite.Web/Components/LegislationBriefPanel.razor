@@ -1,0 +1,192 @@
+@using GwsBusinessSuite.Application.GovernmentIntelligence
+
+<details class="gi-brief-panel">
+    <summary>@SummaryLabel</summary>
+    <div class="gi-brief-body">
+        <div class="gi-brief-topline">
+            <span class="gi-brief-kind">@Brief.Kind</span>
+            <span>@Brief.Jurisdiction</span>
+        </div>
+
+        <h5 class="gi-brief-title">@GetHeadline()</h5>
+        <p class="gi-brief-summary">@Brief.Summary</p>
+        <div class="gi-brief-status">Status: @Brief.Status</div>
+
+        <div class="gi-brief-grid">
+            @if (Brief.Facts.Count > 0)
+            {
+                <section class="gi-brief-block">
+                    <h6>Key facts</h6>
+                    <dl class="gi-brief-facts">
+                        @foreach (var fact in Brief.Facts)
+                        {
+                            <div class="gi-brief-fact">
+                                <dt>@fact.Label</dt>
+                                <dd>@fact.Value</dd>
+                            </div>
+                        }
+                    </dl>
+                </section>
+            }
+
+            @if (Brief.Timeline.Count > 0)
+            {
+                <section class="gi-brief-block">
+                    <h6>Timeline</h6>
+                    <div class="gi-brief-timeline">
+                        @foreach (var item in Brief.Timeline)
+                        {
+                            <article class="gi-brief-timeline-item">
+                                <div class="gi-brief-timeline-topline">
+                                    <strong>@item.Label</strong>
+                                    <span>@item.When</span>
+                                </div>
+                                <p>@item.Detail</p>
+                            </article>
+                        }
+                    </div>
+                </section>
+            }
+        </div>
+
+        @if (Brief.Links.Count > 0)
+        {
+            <div class="gi-brief-links">
+                @foreach (var link in Brief.Links)
+                {
+                    <a class="btn btn-outline-dark btn-sm" href="@link.Url" target="_blank" rel="noopener noreferrer" title="@link.Description">
+                        @link.Title
+                    </a>
+                }
+            </div>
+        }
+    </div>
+</details>
+
+@code {
+    [Parameter, EditorRequired]
+    public LegislationDetailBrief Brief { get; set; } = null!;
+
+    [Parameter]
+    public string SummaryLabel { get; set; } = "Open legislation brief";
+
+    private string GetHeadline()
+    {
+        if (string.IsNullOrWhiteSpace(Brief.Measure) ||
+            string.Equals(Brief.Measure, Brief.Title, StringComparison.OrdinalIgnoreCase))
+        {
+            return Brief.Title;
+        }
+
+        return $"{Brief.Measure} · {Brief.Title}";
+    }
+}
+
+<style>
+    .gi-brief-panel {
+        margin-top: 1rem;
+        border-top: 1px solid #e5e7eb;
+        padding-top: .95rem;
+    }
+
+    .gi-brief-panel summary {
+        cursor: pointer;
+        font-weight: 600;
+    }
+
+    .gi-brief-body {
+        margin-top: .95rem;
+        padding: 1rem;
+        border-radius: 1rem;
+        border: 1px solid #e5e7eb;
+        background:
+            linear-gradient(180deg, rgba(250, 245, 235, .85), rgba(255, 255, 255, .98)),
+            #fff;
+    }
+
+    .gi-brief-topline,
+    .gi-brief-timeline-topline {
+        display: flex;
+        justify-content: space-between;
+        gap: .75rem;
+        flex-wrap: wrap;
+    }
+
+    .gi-brief-topline {
+        font-size: .78rem;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        color: #6b7280;
+    }
+
+    .gi-brief-kind {
+        font-weight: 700;
+        color: #92400e;
+    }
+
+    .gi-brief-title {
+        margin: .65rem 0 .5rem;
+        color: #111827;
+    }
+
+    .gi-brief-summary,
+    .gi-brief-status,
+    .gi-brief-facts dd,
+    .gi-brief-timeline-item p {
+        color: #374151;
+    }
+
+    .gi-brief-grid {
+        display: grid;
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+
+    .gi-brief-block {
+        padding: 1rem;
+        border-radius: .95rem;
+        background: rgba(255, 255, 255, .9);
+        border: 1px solid #e5e7eb;
+    }
+
+    .gi-brief-block h6 {
+        margin-bottom: .8rem;
+        font-size: .82rem;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        color: #6b7280;
+    }
+
+    .gi-brief-facts {
+        display: grid;
+        gap: .8rem;
+        margin-bottom: 0;
+    }
+
+    .gi-brief-fact dt {
+        font-size: .78rem;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        color: #6b7280;
+    }
+
+    .gi-brief-fact dd {
+        margin: .2rem 0 0;
+    }
+
+    .gi-brief-timeline {
+        display: grid;
+        gap: .85rem;
+    }
+
+    .gi-brief-timeline-item p {
+        margin: .35rem 0 0;
+    }
+
+    .gi-brief-links {
+        display: flex;
+        gap: .6rem;
+        flex-wrap: wrap;
+        margin-top: 1rem;
+    }
+</style>

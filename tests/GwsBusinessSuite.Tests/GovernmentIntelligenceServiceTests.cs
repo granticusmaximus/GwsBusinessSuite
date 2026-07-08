@@ -25,6 +25,9 @@ public sealed class GovernmentIntelligenceServiceTests
         snapshot.Community.Meetings[0].Title.Should().Be("Commissioners Meeting, Warner Robins");
         snapshot.Community.Meetings[0].Location.Should().Be("Warner Robins");
         snapshot.Community.Meetings[0].MeetingDate.Should().Be(new DateOnly(2026, 7, 21));
+        snapshot.Community.LegislationBriefs.Should().HaveCount(3);
+        snapshot.Community.LegislationBriefs[0].Measure.Should().Be("County Code of Ordinances");
+        snapshot.Community.LegislationBriefs[0].Links.Should().Contain(x => x.Title == "Code of ordinances");
     }
 
     [Fact]
@@ -41,6 +44,10 @@ public sealed class GovernmentIntelligenceServiceTests
         snapshot.State.SignedLegislation[0].DocumentNumber.Should().Be("HB 1020");
         snapshot.State.SignedLegislation[0].Title.Should().Be("Judicial Retirement System; payment of monthly retirement benefits for creditable service as a district attorney at the age of 65 years; provide");
         snapshot.State.SignedLegislation[0].Url.Should().Be("https://gov.georgia.gov/document/2026-signed-legislation/hb-1020/download");
+        var signedLawBrief = snapshot.State.SignedLegislation[0].Legislation;
+        signedLawBrief.Should().NotBeNull();
+        signedLawBrief!.Status.Should().Be("Signed by Governor");
+        signedLawBrief.Links.Should().Contain(x => x.Title == "Signed law PDF");
     }
 
     [Fact]
@@ -66,6 +73,10 @@ public sealed class GovernmentIntelligenceServiceTests
         houseVote.Votes.Should().Contain(x => x.Name == "GRIFFIN, 149TH" && x.Vote == "Excused");
         houseVote.Votes.Should().Contain(x => x.Name == "BURNS, 159TH" && x.Vote == "Not Voting");
         houseVote.Votes.Should().NotContain(x => x.Name == "VACANT");
+        houseVote.Legislation.Should().NotBeNull();
+        houseVote.Legislation!.Facts.Should().Contain(x => x.Label == "Sponsors" && x.Value.Contains("Rep. Penny Houston"));
+        houseVote.Legislation.Links.Should().Contain(x => x.Title == "Current bill text");
+        houseVote.Legislation.Timeline.Should().Contain(x => x.Label.Contains("Vetoed by Governor"));
 
         snapshot.State.SenateVotes.Should().ContainSingle();
         var senateVote = snapshot.State.SenateVotes[0];
@@ -82,6 +93,8 @@ public sealed class GovernmentIntelligenceServiceTests
         senateVote.Votes.Should().Contain(x => x.Name == "BEARDEN, 30TH" && x.Vote == "Nay");
         senateVote.Votes.Should().Contain(x => x.Name == "HATCHETT, 50TH" && x.Vote == "Not Voting");
         senateVote.Votes.Should().Contain(x => x.Name == "MCNEEL, 18TH" && x.Vote == "Excused");
+        senateVote.Legislation.Should().NotBeNull();
+        senateVote.Legislation!.Facts.Should().Contain(x => x.Label == "Committees" && x.Value.Contains("State and Local Governmental Operations"));
     }
 
     [Fact]
@@ -100,6 +113,8 @@ public sealed class GovernmentIntelligenceServiceTests
         senateVote.NayCount.Should().Be(50);
         senateVote.Votes.Should().Contain(x => x.Name == "Ossoff (D-GA)" && x.Vote == "Yea");
         senateVote.Votes.Should().Contain(x => x.Name == "Warnock (D-GA)" && x.Vote == "Yea");
+        senateVote.Legislation.Should().NotBeNull();
+        senateVote.Legislation!.Links.Should().Contain(x => x.Title == "Congress bill search");
 
         snapshot.Federal.HouseVotes.Should().ContainSingle();
         var houseVote = snapshot.Federal.HouseVotes[0];
@@ -110,6 +125,8 @@ public sealed class GovernmentIntelligenceServiceTests
         houseVote.NayCount.Should().Be(201);
         houseVote.Votes.Should().Contain(x => x.Name == "Allen" && x.State == "GA" && x.Vote == "Yea");
         houseVote.Votes.Should().Contain(x => x.Name == "Bishop" && x.State == "GA" && x.Vote == "Nay");
+        houseVote.Legislation.Should().NotBeNull();
+        houseVote.Legislation!.Facts.Should().Contain(x => x.Label == "Georgia delegation" && x.Value.Contains("Allen Yea"));
     }
 
     private static GovernmentIntelligenceService CreateService()
@@ -196,7 +213,21 @@ public sealed class GovernmentIntelligenceServiceTests
                 {
                   "title": "Domestic relations; revise mandated reporting of child abuse",
                   "status": "House Date Vetoed by Governor ",
-                  "firstReader": "A BILL to revise mandated reporting of child abuse."
+                  "firstReader": "A BILL to revise mandated reporting of child abuse.",
+                  "sponsors": [
+                    { "name": "Rep. Penny Houston" },
+                    { "name": "Rep. Soo Hong" }
+                  ],
+                  "committees": [
+                    { "name": "Juvenile Justice" }
+                  ],
+                  "versions": [
+                    { "description": "Current bill text", "url": "https://www.legis.ga.gov/api/legislation/document/73462/current" }
+                  ],
+                  "statusHistory": [
+                    { "date": "2026-04-03T00:53:00", "status": "House agreed to Senate substitute", "description": "Final House floor action completed." },
+                    { "date": "2026-05-10T00:00:00", "status": "Vetoed by Governor", "description": "Returned without approval." }
+                  ]
                 }
                 """,
             ["https://www.legis.ga.gov/api/Vote/list/2/1033"] =
@@ -222,7 +253,20 @@ public sealed class GovernmentIntelligenceServiceTests
                 {
                   "title": "Henry County; Board of Commissioners; code of ethics; revise and restate provisions",
                   "status": "Senate Date Signed by Governor ",
-                  "firstReader": "A BILL to revise Henry County board ethics provisions."
+                  "firstReader": "A BILL to revise Henry County board ethics provisions.",
+                  "sponsors": [
+                    { "name": "Sen. Emanuel Jones" }
+                  ],
+                  "committees": [
+                    { "name": "State and Local Governmental Operations" }
+                  ],
+                  "versions": [
+                    { "description": "Signed version", "url": "https://www.legis.ga.gov/api/legislation/document/71630/signed" }
+                  ],
+                  "statusHistory": [
+                    { "date": "2026-04-03T01:02:00", "status": "Senate agreed to House substitute", "description": "Final Senate action completed." },
+                    { "date": "2026-05-14T00:00:00", "status": "Signed by Governor", "description": "The Governor signed the measure into law." }
+                  ]
                 }
                 """,
             ["https://www.senate.gov/legislative/LIS/roll_call_lists/vote_menu_119_2.xml"] =
