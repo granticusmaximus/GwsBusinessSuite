@@ -435,18 +435,33 @@
 
     protected override async Task OnInitializedAsync()
     {
+        await Task.WhenAll(InitializeLibraryAsync(), InitializeFeaturedAsync());
+        _initialLoading = false;
+    }
+
+    private async Task InitializeLibraryAsync()
+    {
         try
         {
-            await Task.WhenAll(LoadLibraryAsync(), LoadFeaturedAsync());
+            await LoadLibraryAsync();
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to initialize podcast directory");
-            _errorMessage = "Failed to load the podcast directory.";
+            Logger.LogError(ex, "Failed to initialize podcast library");
+            AppendError("Saved podcasts are temporarily unavailable.");
         }
-        finally
+    }
+
+    private async Task InitializeFeaturedAsync()
+    {
+        try
         {
-            _initialLoading = false;
+            await LoadFeaturedAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to initialize featured podcasts");
+            AppendError("Featured podcast recommendations are temporarily unavailable.");
         }
     }
 
@@ -459,6 +474,20 @@
     {
         _library = (await PodcastService.ListLibraryAsync()).ToList();
         RebuildLibraryIndex();
+    }
+
+    private void AppendError(string message)
+    {
+        if (string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            _errorMessage = message;
+            return;
+        }
+
+        if (!_errorMessage.Contains(message, StringComparison.OrdinalIgnoreCase))
+        {
+            _errorMessage = $"{_errorMessage} {message}";
+        }
     }
 
     private void RebuildLibraryIndex()

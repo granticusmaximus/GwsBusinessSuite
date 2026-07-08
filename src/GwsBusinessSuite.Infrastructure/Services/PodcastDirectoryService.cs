@@ -5,6 +5,7 @@ using CodeHollow.FeedReader;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Podcasts;
 using GwsBusinessSuite.Domain.Entities;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -85,11 +86,18 @@ public sealed class PodcastDirectoryService(
     public async Task<IReadOnlyList<SavedPodcastSummary>> ListLibraryAsync(
         CancellationToken cancellationToken = default)
     {
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        return await ExecuteWithPodcastSchemaRecoveryAsync(
+            ListLibraryCoreAsync,
+            "list the podcast library",
+            cancellationToken);
+    }
 
+    private static async Task<IReadOnlyList<SavedPodcastSummary>> ListLibraryCoreAsync(
+        IAppDbContext db,
+        CancellationToken cancellationToken)
+    {
         var shows = await db.PodcastShows
             .AsNoTracking()
-            .OrderByDescending(show => show.CreatedAt)
             .ToListAsync(cancellationToken);
 
         var counts = await db.PodcastEpisodes
@@ -99,6 +107,7 @@ public sealed class PodcastDirectoryService(
             .ToDictionaryAsync(x => x.PodcastShowId, x => x.Count, cancellationToken);
 
         return shows
+            .OrderByDescending(show => show.CreatedAt)
             .Select(show => ToSummary(show, counts.GetValueOrDefault(show.Id, 0)))
             .ToList();
     }
@@ -112,49 +121,51 @@ public sealed class PodcastDirectoryService(
             throw new InvalidOperationException("This podcast cannot be saved because it does not expose an RSS feed URL.");
         }
 
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-
-        var existing = await FindExistingShowAsync(db, podcast, cancellationToken);
-        if (existing is not null)
+        return await ExecuteWithPodcastSchemaRecoveryAsync(async (db, ct) =>
         {
-            var episodeCount = await db.PodcastEpisodes.CountAsync(x => x.PodcastShowId == existing.Id, cancellationToken);
-            return new PodcastSaveResult(ToSummary(existing, episodeCount), AlreadySaved: true);
-        }
+            var existing = await FindExistingShowAsync(db, podcast, ct);
+            if (existing is not null)
+            {
+                var episodeCount = await db.PodcastEpisodes.CountAsync(x => x.PodcastShowId == existing.Id, ct);
+                return new PodcastSaveResult(ToSummary(existing, episodeCount), AlreadySaved: true);
+            }
 
-        var show = new PodcastShow
-        {
-            Title = Truncate(podcast.Title.Trim(), 500),
-            Author = Truncate(podcast.Author.Trim(), 300),
-            Description = Truncate(CleanText(podcast.Description), 4000),
-            Category = Truncate(NormalizeCategory(podcast.Category), 200),
-            FeedUrl = Truncate(podcast.FeedUrl.Trim(), 1000),
-            ImageUrl = Truncate(podcast.ImageUrl.Trim(), 1000),
-            AppleUrl = Truncate(podcast.AppleUrl.Trim(), 1000),
-            ItunesId = string.IsNullOrWhiteSpace(podcast.ItunesId) ? null : podcast.ItunesId.Trim()
-        };
+            var show = new PodcastShow
+            {
+                Title = Truncate(podcast.Title.Trim(), 500),
+                Author = Truncate(podcast.Author.Trim(), 300),
+                Description = Truncate(CleanText(podcast.Description), 4000),
+                Category = Truncate(NormalizeCategory(podcast.Category), 200),
+                FeedUrl = Truncate(podcast.FeedUrl.Trim(), 1000),
+                ImageUrl = Truncate(podcast.ImageUrl.Trim(), 1000),
+                AppleUrl = Truncate(podcast.AppleUrl.Trim(), 1000),
+                ItunesId = string.IsNullOrWhiteSpace(podcast.ItunesId) ? null : podcast.ItunesId.Trim()
+            };
 
-        db.PodcastShows.Add(show);
-        await db.SaveChangesAsync(cancellationToken);
+            db.PodcastShows.Add(show);
+            await db.SaveChangesAsync(ct);
 
-        return new PodcastSaveResult(ToSummary(show, 0), AlreadySaved: false);
+            return new PodcastSaveResult(ToSummary(show, 0), AlreadySaved: false);
+        }, "save a podcast", cancellationToken);
     }
 
     public async Task DeletePodcastAsync(
         Guid podcastId,
         CancellationToken cancellationToken = default)
     {
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-
-        await db.PodcastEpisodes.Where(x => x.PodcastShowId == podcastId).ExecuteDeleteAsync(cancellationToken);
-
-        var show = await db.PodcastShows.FirstOrDefaultAsync(x => x.Id == podcastId, cancellationToken);
-        if (show is null)
+        await ExecuteWithPodcastSchemaRecoveryAsync(async (db, ct) =>
         {
-            return;
-        }
+            await db.PodcastEpisodes.Where(x => x.PodcastShowId == podcastId).ExecuteDeleteAsync(ct);
 
-        db.PodcastShows.Remove(show);
-        await db.SaveChangesAsync(cancellationToken);
+            var show = await db.PodcastShows.FirstOrDefaultAsync(x => x.Id == podcastId, ct);
+            if (show is null)
+            {
+                return;
+            }
+
+            db.PodcastShows.Remove(show);
+            await db.SaveChangesAsync(ct);
+        }, "delete a podcast", cancellationToken);
     }
 
     public async Task<PodcastDetailView?> GetPodcastDetailAsync(
@@ -162,38 +173,39 @@ public sealed class PodcastDirectoryService(
         bool refreshEpisodes = false,
         CancellationToken cancellationToken = default)
     {
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-
-        var show = await db.PodcastShows.FirstOrDefaultAsync(x => x.Id == podcastId, cancellationToken);
-        if (show is null)
+        return await ExecuteWithPodcastSchemaRecoveryAsync(async (db, ct) =>
         {
-            return null;
-        }
+            var show = await db.PodcastShows.FirstOrDefaultAsync(x => x.Id == podcastId, ct);
+            if (show is null)
+            {
+                return null;
+            }
 
-        var shouldRefresh = !string.IsNullOrWhiteSpace(show.FeedUrl) &&
-            (refreshEpisodes ||
-             show.LastEpisodeRefreshAt is null ||
-             show.LastEpisodeRefreshAt < DateTimeOffset.UtcNow.AddHours(-EpisodeRefreshHours) ||
-             !await db.PodcastEpisodes.AnyAsync(x => x.PodcastShowId == show.Id, cancellationToken));
+            var shouldRefresh = !string.IsNullOrWhiteSpace(show.FeedUrl) &&
+                (refreshEpisodes ||
+                 show.LastEpisodeRefreshAt is null ||
+                 show.LastEpisodeRefreshAt < DateTimeOffset.UtcNow.AddHours(-EpisodeRefreshHours) ||
+                 !await db.PodcastEpisodes.AnyAsync(x => x.PodcastShowId == show.Id, ct));
 
-        if (shouldRefresh)
-        {
-            await RefreshEpisodesAsync(db, show, cancellationToken);
-        }
+            if (shouldRefresh)
+            {
+                await RefreshEpisodesAsync(db, show, ct);
+            }
 
-        var episodes = await db.PodcastEpisodes
-            .AsNoTracking()
-            .Where(x => x.PodcastShowId == show.Id)
-            .ToListAsync(cancellationToken);
+            var episodes = await db.PodcastEpisodes
+                .AsNoTracking()
+                .Where(x => x.PodcastShowId == show.Id)
+                .ToListAsync(ct);
 
-        episodes = episodes
-            .OrderByDescending(x => x.PublishedAt ?? x.CreatedAt)
-            .ThenByDescending(x => x.CreatedAt)
-            .ToList();
+            episodes = episodes
+                .OrderByDescending(x => x.PublishedAt ?? x.CreatedAt)
+                .ThenByDescending(x => x.CreatedAt)
+                .ToList();
 
-        return new PodcastDetailView(
-            ToSummary(show, episodes.Count),
-            episodes.Select(ToEpisodeView).ToList());
+            return new PodcastDetailView(
+                ToSummary(show, episodes.Count),
+                episodes.Select(ToEpisodeView).ToList());
+        }, "load podcast details", cancellationToken);
     }
 
     private async Task<IReadOnlyList<PodcastCatalogItem>> SearchAppleAsync(
@@ -445,6 +457,61 @@ public sealed class PodcastDirectoryService(
         }
 
         return null;
+    }
+
+    private async Task<T> ExecuteWithPodcastSchemaRecoveryAsync<T>(
+        Func<IAppDbContext, CancellationToken, Task<T>> operation,
+        string operationName,
+        CancellationToken cancellationToken)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        try
+        {
+            return await operation(db, cancellationToken);
+        }
+        catch (Exception ex) when (IsMissingPodcastSchema(ex))
+        {
+            logger.LogWarning(ex, "Podcast schema missing during {Operation}. Applying migrations and retrying.", operationName);
+            await ApplyMigrationsAsync(db, cancellationToken);
+        }
+
+        await using var retryDb = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        return await operation(retryDb, cancellationToken);
+    }
+
+    private async Task ExecuteWithPodcastSchemaRecoveryAsync(
+        Func<IAppDbContext, CancellationToken, Task> operation,
+        string operationName,
+        CancellationToken cancellationToken)
+    {
+        await ExecuteWithPodcastSchemaRecoveryAsync<object?>(async (db, ct) =>
+        {
+            await operation(db, ct);
+            return null;
+        }, operationName, cancellationToken);
+    }
+
+    private static async Task ApplyMigrationsAsync(IAppDbContext db, CancellationToken cancellationToken)
+    {
+        if (db is not DbContext efDb)
+        {
+            throw new InvalidOperationException("The podcast directory service requires an EF Core DbContext to apply migrations.");
+        }
+
+        await efDb.Database.MigrateAsync(cancellationToken);
+    }
+
+    private static bool IsMissingPodcastSchema(Exception ex)
+    {
+        if (ex is SqliteException sqliteEx)
+        {
+            return sqliteEx.SqliteErrorCode == 1 &&
+                (sqliteEx.Message.Contains("PodcastShows", StringComparison.OrdinalIgnoreCase) ||
+                 sqliteEx.Message.Contains("PodcastEpisodes", StringComparison.OrdinalIgnoreCase));
+        }
+
+        return ex.InnerException is not null && IsMissingPodcastSchema(ex.InnerException);
     }
 
     private sealed record ParsedEpisode(

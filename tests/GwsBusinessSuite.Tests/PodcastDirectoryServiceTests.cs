@@ -132,6 +132,31 @@ public sealed class PodcastDirectoryServiceTests
     }
 
     [Fact]
+    public async Task ListLibraryAsync_ShouldApplyMigrations_WhenPodcastTablesAreMissing()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        using var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"results":[]}""", Encoding.UTF8, "application/json")
+        });
+        var service = CreateService(new FakeAppDbContextFactory(options), handler);
+
+        var library = await service.ListLibraryAsync();
+
+        library.Should().BeEmpty();
+
+        await using var verifyDb = new ApplicationDbContext(options);
+        (await verifyDb.PodcastShows.CountAsync()).Should().Be(0);
+        (await verifyDb.PodcastEpisodes.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
     public async Task GetPodcastDetailAsync_ShouldRefreshEpisodesFromRssFeed()
     {
         var (db, factory) = await CreateDbAsync();
