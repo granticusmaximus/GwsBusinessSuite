@@ -6,7 +6,7 @@
    values below, which lean on this app's existing blue brand accent
    rather than WordPress's blue/gray. */
 :root {
-    --gws-sidebar-width: 200px;
+    --gws-sidebar-width: 224px;
     --gws-sidebar-collapsed-width: 60px;
     --gws-sidebar-accent: #2563eb;
     --gws-admin-bar-height: 36px;
