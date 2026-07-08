@@ -1,5 +1,9 @@
 using System.Globalization;
 using System.Net;
+using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using GwsBusinessSuite.Application.GovernmentIntelligence;
@@ -32,6 +36,14 @@ public sealed class GovernmentIntelligenceService(
     private const string GovernorSignedLegislationUrl = "https://gov.georgia.gov/executive-action/legislation/signed-legislation/2026";
     private const string GovernorVetoedLegislationUrl = "https://gov.georgia.gov/executive-action/legislation/vetoed-legislation/2026";
     private const string GeorgiaGeneralAssemblyUrl = "https://www.legis.ga.gov/";
+    private const string GeorgiaApiBaseUrl = "https://www.legis.ga.gov/api/";
+    private const string GeorgiaAuthenticationTokenUrl = "https://www.legis.ga.gov/api/authentication/token";
+    private const string GeorgiaAllLegislationUrl = "https://www.legis.ga.gov/legislation/all";
+    private const string GeorgiaSignedByGovernorUrl = "https://www.legis.ga.gov/legislation/signed-by-governor";
+    private const string GeorgiaHouseVotesUrl = "https://www.legis.ga.gov/votes/house";
+    private const string GeorgiaSenateVotesUrl = "https://www.legis.ga.gov/votes/senate";
+    private const string GeorgiaLegislationPageUrl = "https://www.legis.ga.gov/legislation/";
+    private const string GeorgiaApiObscureKey = "jVEXFFwSu36BwwcP83xYgxLAhLYmKk";
     private const string SenateSummaryUrl = "https://www.senate.gov/legislative/LIS/roll_call_lists/vote_menu_119_2.xml";
     private const string SenateVotesUrl = "https://www.senate.gov/legislative/LIS/roll_call_lists/vote_menu_119_2.htm";
     private const string HouseVotesListUrl = "https://clerk.house.gov/Votes/MemberVotes?CongressNum=119&Session=2nd";
@@ -39,12 +51,24 @@ public sealed class GovernmentIntelligenceService(
     private const string CongressSearchUrl = "https://www.congress.gov/search?q=%7B%22source%22:%22legislation%22%7D";
     private const string CongressPublicLawsUrl = "https://www.congress.gov/public-laws/119th-congress";
     private const string AreaLabel = "Kathleen, Houston County, Georgia";
+    private const string GeorgiaAccessTokenCacheKey = "government-intelligence:georgia:token";
+    private const string GeorgiaCurrentSessionCacheKey = "government-intelligence:georgia:session";
+    private const int GeorgiaHouseChamber = 1;
+    private const int GeorgiaSenateChamber = 2;
     private static readonly TimeSpan SnapshotCacheDuration = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan GeorgiaAccessTokenCacheDuration = TimeSpan.FromMinutes(4);
+    private static readonly TimeSpan GeorgiaSessionCacheDuration = TimeSpan.FromHours(6);
     private const int MaxCountyAnnouncements = 6;
     private const int MaxCountyMeetings = 6;
     private const int MaxStatePressReleases = 8;
     private const int MaxStateSignedLaws = 16;
+    private const int MaxStateVotesPerChamber = 4;
+    private const int MaxStateVoteCandidatesPerChamber = 12;
     private const int MaxFederalVotesPerChamber = 4;
+    private static readonly JsonSerializerOptions GeorgiaJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
 
     private static readonly Regex CountyAnnouncementRegex = new(
         """<a\s+class="news"\s+href="(?<href>[^"]+)".*?<h4>(?<title>.*?)</h4>""",
@@ -144,8 +168,15 @@ public sealed class GovernmentIntelligenceService(
 
     private async Task<StateGovernmentCoverage> BuildStateCoverageAsync(CancellationToken ct)
     {
-        var pressReleaseHtml = await GetStringOrNullAsync(GovernorPressReleasesUrl, ct);
-        var signedLawHtml = await GetStringOrNullAsync(GovernorSignedLegislationUrl, ct);
+        var pressReleaseHtmlTask = GetStringOrNullAsync(GovernorPressReleasesUrl, ct);
+        var signedLawHtmlTask = GetStringOrNullAsync(GovernorSignedLegislationUrl, ct);
+        var houseVotesTask = LoadGeorgiaLegislativeVotesAsync(GeorgiaHouseChamber, "House", ct);
+        var senateVotesTask = LoadGeorgiaLegislativeVotesAsync(GeorgiaSenateChamber, "Senate", ct);
+
+        await Task.WhenAll(pressReleaseHtmlTask, signedLawHtmlTask, houseVotesTask, senateVotesTask);
+
+        var pressReleaseHtml = pressReleaseHtmlTask.Result;
+        var signedLawHtml = signedLawHtmlTask.Result;
 
         var pressReleases = pressReleaseHtml is null
             ? []
@@ -155,9 +186,11 @@ public sealed class GovernmentIntelligenceService(
             : ParseGeorgiaSignedLaws(signedLawHtml).Take(MaxStateSignedLaws).ToList();
 
         return new StateGovernmentCoverage(
-            "This section tracks statewide executive action through the Governor's office and links out to the Georgia General Assembly for bill and resolution work.",
+            "This section tracks statewide executive action, signed laws, and official Georgia House and Senate floor votes tied back to the bills moving through the General Assembly.",
             pressReleases,
             signedLaws,
+            houseVotesTask.Result,
+            senateVotesTask.Result,
             [
                 new CivicResourceSection("Governor and Executive Action",
                 [
@@ -168,7 +201,11 @@ public sealed class GovernmentIntelligenceService(
                 ]),
                 new CivicResourceSection("Georgia Legislature",
                 [
-                    new CivicResourceLink("Georgia General Assembly", GeorgiaGeneralAssemblyUrl, "Official state legislature site for bills, calendars, and member pages.")
+                    new CivicResourceLink("Georgia General Assembly", GeorgiaGeneralAssemblyUrl, "Official state legislature site for bills, calendars, and member pages."),
+                    new CivicResourceLink("All Legislation", GeorgiaAllLegislationUrl, "Current Georgia bills and resolutions across both chambers."),
+                    new CivicResourceLink("Signed by Governor", GeorgiaSignedByGovernorUrl, "Georgia legislature view of measures signed by the Governor."),
+                    new CivicResourceLink("House Votes", GeorgiaHouseVotesUrl, "Official Georgia House floor-vote archive."),
+                    new CivicResourceLink("Senate Votes", GeorgiaSenateVotesUrl, "Official Georgia Senate floor-vote archive.")
                 ])
             ]);
     }
@@ -364,6 +401,166 @@ public sealed class GovernmentIntelligenceService(
         }
     }
 
+    private async Task<IReadOnlyList<StateLegislativeVoteSummary>> LoadGeorgiaLegislativeVotesAsync(
+        int chamber,
+        string chamberLabel,
+        CancellationToken ct)
+    {
+        var token = await GetGeorgiaAccessTokenAsync(ct);
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return [];
+        }
+
+        var currentSessionId = await GetCurrentGeorgiaSessionIdAsync(token, ct);
+        if (currentSessionId <= 0)
+        {
+            return [];
+        }
+
+        var voteList = await GetGeorgiaJsonAsync<GeorgiaVoteListItem[]>(
+            $"Vote/list/{chamber}/{currentSessionId}",
+            token,
+            ct);
+        if (voteList is null || voteList.Length == 0)
+        {
+            return [];
+        }
+
+        var summaries = new List<StateLegislativeVoteSummary>();
+        var legislationCache = new Dictionary<int, GeorgiaLegislationDetailResponse?>();
+
+        foreach (var vote in voteList.Take(MaxStateVoteCandidatesPerChamber))
+        {
+            if (summaries.Count >= MaxStateVotesPerChamber)
+            {
+                break;
+            }
+
+            var detail = await GetGeorgiaJsonAsync<GeorgiaVoteDetailResponse>(
+                $"Vote/detail/{vote.Id}",
+                token,
+                ct);
+            if (detail?.Legislation is null || detail.Legislation.Length == 0)
+            {
+                continue;
+            }
+
+            var primaryLegislation = detail.Legislation[0];
+            if (!legislationCache.TryGetValue(primaryLegislation.LegislationId, out var legislationDetail))
+            {
+                legislationDetail = await GetGeorgiaJsonAsync<GeorgiaLegislationDetailResponse>(
+                    $"legislation/detail/{primaryLegislation.LegislationId}",
+                    token,
+                    ct);
+                legislationCache[primaryLegislation.LegislationId] = legislationDetail;
+            }
+
+            var memberVotes = detail.Votes?
+                .Where(row => row.Member.Id > 0 && !string.Equals(row.Member.Name, "VACANT", StringComparison.OrdinalIgnoreCase))
+                .Select(row => new StateMemberVoteRecord(
+                    CleanText(row.Member.Name),
+                    MapGeorgiaMemberVote(row.MemberVoted)))
+                .OrderBy(row => StateVoteSortOrder(row.Vote))
+                .ThenBy(row => row.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList() ?? [];
+
+            var title = CleanText(legislationDetail?.Title);
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                title = CleanText(legislationDetail?.FirstReader);
+            }
+
+            summaries.Add(new StateLegislativeVoteSummary(
+                chamberLabel,
+                vote.Number.ToString(CultureInfo.InvariantCulture),
+                CleanText(vote.Caption),
+                CleanText(primaryLegislation.Description),
+                string.IsNullOrWhiteSpace(title) ? CleanText(primaryLegislation.Description) : title,
+                CleanText(legislationDetail?.Status),
+                ParseDateTime(vote.Date),
+                BuildGeorgiaLegislationUrl(primaryLegislation.LegislationId),
+                vote.Yea,
+                vote.Nay,
+                vote.NotVoting,
+                vote.Excused,
+                memberVotes));
+        }
+
+        return summaries;
+    }
+
+    private async Task<string?> GetGeorgiaAccessTokenAsync(CancellationToken ct) =>
+        await cache.GetOrCreateAsync(GeorgiaAccessTokenCacheKey, async entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = GeorgiaAccessTokenCacheDuration;
+
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var key = ComputeGeorgiaAuthenticationKey(timestamp);
+            var tokenUrl = $"{GeorgiaAuthenticationTokenUrl}?key={Uri.EscapeDataString(key)}&ms={timestamp.ToString(CultureInfo.InvariantCulture)}";
+            var rawToken = await GetStringOrNullAsync(tokenUrl, ct);
+            if (string.IsNullOrWhiteSpace(rawToken))
+            {
+                return null;
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize<string>(rawToken, GeorgiaJsonOptions);
+            }
+            catch (JsonException ex)
+            {
+                logger.LogWarning(ex, "Failed to parse Georgia General Assembly access token");
+                return rawToken.Trim().Trim('"');
+            }
+        });
+
+    private async Task<int> GetCurrentGeorgiaSessionIdAsync(string token, CancellationToken ct) =>
+        await cache.GetOrCreateAsync(GeorgiaCurrentSessionCacheKey, async entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = GeorgiaSessionCacheDuration;
+
+            var sessions = await GetGeorgiaJsonAsync<GeorgiaSessionResponse[]>("sessions", token, ct);
+            return sessions?
+                .OrderByDescending(session => session.IsCurrent)
+                .ThenByDescending(session => session.Id)
+                .Select(session => session.Id)
+                .FirstOrDefault() ?? 0;
+        });
+
+    private async Task<T?> GetGeorgiaJsonAsync<T>(string relativeUrl, string token, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return default;
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(new Uri(GeorgiaApiBaseUrl), relativeUrl));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        request.Headers.Accept.ParseAdd("application/json");
+
+        try
+        {
+            using var response = await http.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogWarning(
+                    "Government Intelligence fetch failed for {Url} with status code {StatusCode}",
+                    request.RequestUri,
+                    (int)response.StatusCode);
+                return default;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(ct);
+            return await JsonSerializer.DeserializeAsync<T>(stream, GeorgiaJsonOptions, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Government Intelligence fetch failed for {Url}", request.RequestUri);
+            return default;
+        }
+    }
+
     private async Task<string?> GetStringOrNullAsync(string url, CancellationToken ct)
     {
         try
@@ -498,6 +695,36 @@ public sealed class GovernmentIntelligenceService(
         return $"{primary}: {secondary}";
     }
 
+    private static string ComputeGeorgiaAuthenticationKey(long timestamp)
+    {
+        var payload = $"QFpCwKfd7f{GeorgiaApiObscureKey}letvarconst{timestamp.ToString(CultureInfo.InvariantCulture)}";
+        var hash = SHA512.HashData(Encoding.UTF8.GetBytes(payload));
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private static string BuildGeorgiaLegislationUrl(int legislationId) =>
+        $"{GeorgiaLegislationPageUrl}{legislationId.ToString(CultureInfo.InvariantCulture)}";
+
+    private static string MapGeorgiaMemberVote(int memberVoteCode) =>
+        memberVoteCode switch
+        {
+            0 => "Yea",
+            1 => "Nay",
+            2 => "Excused",
+            3 => "Not Voting",
+            _ => "Unknown"
+        };
+
+    private static int StateVoteSortOrder(string vote) =>
+        vote switch
+        {
+            "Yea" => 0,
+            "Nay" => 1,
+            "Not Voting" => 2,
+            "Excused" => 3,
+            _ => 4
+        };
+
     private static string ToAbsoluteUrl(string href, string baseUrl)
     {
         var decoded = WebUtility.HtmlDecode(href).Trim();
@@ -625,6 +852,8 @@ public sealed class GovernmentIntelligenceService(
             "State coverage is temporarily unavailable.",
             [],
             [],
+            [],
+            [],
             []);
 
     private static FederalGovernmentCoverage EmptyFederalCoverage() =>
@@ -634,4 +863,39 @@ public sealed class GovernmentIntelligenceService(
             [],
             [],
             []);
+
+    private sealed record GeorgiaSessionResponse(
+        int Id,
+        bool IsCurrent);
+
+    private sealed record GeorgiaVoteListItem(
+        int Id,
+        int Number,
+        string Caption,
+        string Date,
+        int Yea,
+        int Nay,
+        int NotVoting,
+        int Excused);
+
+    private sealed record GeorgiaVoteDetailResponse(
+        GeorgiaVoteMemberResponse[] Votes,
+        GeorgiaVoteLegislationReference[] Legislation);
+
+    private sealed record GeorgiaVoteMemberResponse(
+        GeorgiaVoteMember Member,
+        int MemberVoted);
+
+    private sealed record GeorgiaVoteMember(
+        int Id,
+        string Name);
+
+    private sealed record GeorgiaVoteLegislationReference(
+        string Description,
+        int LegislationId);
+
+    private sealed record GeorgiaLegislationDetailResponse(
+        string Title,
+        string Status,
+        string FirstReader);
 }

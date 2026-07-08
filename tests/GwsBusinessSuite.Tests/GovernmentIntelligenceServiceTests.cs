@@ -44,6 +44,47 @@ public sealed class GovernmentIntelligenceServiceTests
     }
 
     [Fact]
+    public async Task GetSnapshotAsync_ShouldLoadGeorgiaLegislativeVotesAndMemberBreakdown()
+    {
+        var service = CreateService();
+
+        var snapshot = await service.GetSnapshotAsync(forceRefresh: true);
+
+        snapshot.State.HouseVotes.Should().ContainSingle();
+        var houseVote = snapshot.State.HouseVotes[0];
+        houseVote.RollCallNumber.Should().Be("880");
+        houseVote.Measure.Should().Be("HB 1409");
+        houseVote.Title.Should().Be("Domestic relations; revise mandated reporting of child abuse");
+        houseVote.Status.Should().Be("House Date Vetoed by Governor");
+        houseVote.YeaCount.Should().Be(155);
+        houseVote.NayCount.Should().Be(12);
+        houseVote.NotVotingCount.Should().Be(11);
+        houseVote.ExcusedCount.Should().Be(2);
+        houseVote.DetailUrl.Should().Be("https://www.legis.ga.gov/legislation/73462");
+        houseVote.Votes.Should().Contain(x => x.Name == "ALEXANDER, 66TH" && x.Vote == "Yea");
+        houseVote.Votes.Should().Contain(x => x.Name == "BARNES, 86TH" && x.Vote == "Nay");
+        houseVote.Votes.Should().Contain(x => x.Name == "GRIFFIN, 149TH" && x.Vote == "Excused");
+        houseVote.Votes.Should().Contain(x => x.Name == "BURNS, 159TH" && x.Vote == "Not Voting");
+        houseVote.Votes.Should().NotContain(x => x.Name == "VACANT");
+
+        snapshot.State.SenateVotes.Should().ContainSingle();
+        var senateVote = snapshot.State.SenateVotes[0];
+        senateVote.RollCallNumber.Should().Be("990");
+        senateVote.Measure.Should().Be("SB 359");
+        senateVote.Title.Should().Be("Henry County; Board of Commissioners; code of ethics; revise and restate provisions");
+        senateVote.Status.Should().Be("Senate Date Signed by Governor");
+        senateVote.YeaCount.Should().Be(44);
+        senateVote.NayCount.Should().Be(6);
+        senateVote.NotVotingCount.Should().Be(5);
+        senateVote.ExcusedCount.Should().Be(1);
+        senateVote.DetailUrl.Should().Be("https://www.legis.ga.gov/legislation/71630");
+        senateVote.Votes.Should().Contain(x => x.Name == "ALBERS, 56TH" && x.Vote == "Yea");
+        senateVote.Votes.Should().Contain(x => x.Name == "BEARDEN, 30TH" && x.Vote == "Nay");
+        senateVote.Votes.Should().Contain(x => x.Name == "HATCHETT, 50TH" && x.Vote == "Not Voting");
+        senateVote.Votes.Should().Contain(x => x.Name == "MCNEEL, 18TH" && x.Vote == "Excused");
+    }
+
+    [Fact]
     public async Task GetSnapshotAsync_ShouldParseFederalVotesAndGeorgiaDelegation()
     {
         var service = CreateService();
@@ -126,6 +167,63 @@ public sealed class GovernmentIntelligenceServiceTests
                         <td headers="view-field-document-description-table-column" class="views-field views-field-field-document-description">&quot;Georgia Consumer Privacy Protection Act&quot;; enact</td>
                     </tr>
                 </table>
+                """,
+            ["https://www.legis.ga.gov/api/sessions"] =
+                """
+                [{"id":1033,"isCurrent":true},{"id":1034,"isCurrent":false}]
+                """,
+            ["https://www.legis.ga.gov/api/Vote/list/1/1033"] =
+                """
+                [{"id":26581,"number":880,"caption":"Agree to Senate Substitute","date":"2026-04-03T00:53:00","yea":155,"nay":12,"notVoting":11,"excused":2}]
+                """,
+            ["https://www.legis.ga.gov/api/Vote/detail/26581"] =
+                """
+                {
+                  "votes": [
+                    { "member": { "id": 806, "name": "ALEXANDER, 66TH" }, "memberVoted": 0 },
+                    { "member": { "id": 5037, "name": "BARNES, 86TH" }, "memberVoted": 1 },
+                    { "member": { "id": 5083, "name": "GRIFFIN, 149TH" }, "memberVoted": 2 },
+                    { "member": { "id": 73, "name": "BURNS, 159TH" }, "memberVoted": 3 },
+                    { "member": { "id": 0, "name": "VACANT" }, "memberVoted": 3 }
+                  ],
+                  "legislation": [
+                    { "description": "HB 1409", "legislationId": 73462 }
+                  ]
+                }
+                """,
+            ["https://www.legis.ga.gov/api/legislation/detail/73462"] =
+                """
+                {
+                  "title": "Domestic relations; revise mandated reporting of child abuse",
+                  "status": "House Date Vetoed by Governor ",
+                  "firstReader": "A BILL to revise mandated reporting of child abuse."
+                }
+                """,
+            ["https://www.legis.ga.gov/api/Vote/list/2/1033"] =
+                """
+                [{"id":26646,"number":990,"caption":"AGREE TO HOUSE SUBSTITUTE","date":"2026-04-03T01:02:00","yea":44,"nay":6,"notVoting":5,"excused":1}]
+                """,
+            ["https://www.legis.ga.gov/api/Vote/detail/26646"] =
+                """
+                {
+                  "votes": [
+                    { "member": { "id": 754, "name": "ALBERS, 56TH" }, "memberVoted": 0 },
+                    { "member": { "id": 62, "name": "BEARDEN, 30TH" }, "memberVoted": 1 },
+                    { "member": { "id": 4984, "name": "HATCHETT, 50TH" }, "memberVoted": 3 },
+                    { "member": { "id": 5093, "name": "MCNEEL, 18TH" }, "memberVoted": 2 }
+                  ],
+                  "legislation": [
+                    { "description": "SB 359", "legislationId": 71630 }
+                  ]
+                }
+                """,
+            ["https://www.legis.ga.gov/api/legislation/detail/71630"] =
+                """
+                {
+                  "title": "Henry County; Board of Commissioners; code of ethics; revise and restate provisions",
+                  "status": "Senate Date Signed by Governor ",
+                  "firstReader": "A BILL to revise Henry County board ethics provisions."
+                }
                 """,
             ["https://www.senate.gov/legislative/LIS/roll_call_lists/vote_menu_119_2.xml"] =
                 """
@@ -228,7 +326,15 @@ public sealed class GovernmentIntelligenceServiceTests
         var handler = new RecordingHandler(request =>
         {
             var url = request.RequestUri!.AbsoluteUri;
-            responses.TryGetValue(url, out var body).Should().BeTrue($"Missing test fixture for {url}");
+            string? body = null;
+            if (url.StartsWith("https://www.legis.ga.gov/api/authentication/token?", StringComparison.OrdinalIgnoreCase))
+            {
+                body = "\"test-georgia-token\"";
+            }
+            else
+            {
+                responses.TryGetValue(url, out body).Should().BeTrue($"Missing test fixture for {url}");
+            }
 
             return new HttpResponseMessage(HttpStatusCode.OK)
             {

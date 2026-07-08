@@ -245,6 +245,38 @@
                     }
                 </div>
             </div>
+
+            <div class="row g-4 mt-0">
+                <div class="col-12 col-xxl-6">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <div>
+                                    <span class="gi-kicker">Georgia House</span>
+                                    <h3 class="h4 mb-0">Recent floor votes</h3>
+                                </div>
+                                <span class="badge text-bg-light">@_snapshot.State.HouseVotes.Count</span>
+                            </div>
+                            @RenderStateVotes(_snapshot.State.HouseVotes)
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-xxl-6">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <div>
+                                    <span class="gi-kicker">Georgia Senate</span>
+                                    <h3 class="h4 mb-0">Recent floor votes</h3>
+                                </div>
+                                <span class="badge text-bg-light">@_snapshot.State.SenateVotes.Count</span>
+                            </div>
+                            @RenderStateVotes(_snapshot.State.SenateVotes)
+                        </div>
+                    </div>
+                </div>
+            </div>
         }
         else
         {
@@ -373,6 +405,133 @@
 
     private static string FormatDate(DateOnly? value) =>
         value is null ? "Date unavailable" : value.Value.ToString("MMMM dd, yyyy", CultureInfo.InvariantCulture);
+
+    private RenderFragment RenderStateVotes(IReadOnlyList<StateLegislativeVoteSummary> votes) => builder =>
+    {
+        if (votes.Count == 0)
+        {
+            builder.OpenElement(0, "p");
+            builder.AddAttribute(1, "class", "text-muted mb-0");
+            builder.AddContent(2, "No Georgia floor-vote data was returned.");
+            builder.CloseElement();
+            return;
+        }
+
+        var sequence = 10;
+        builder.OpenElement(sequence++, "div");
+        builder.AddAttribute(sequence++, "class", "gi-vote-stack");
+
+        foreach (var vote in votes)
+        {
+            builder.OpenElement(sequence++, "article");
+            builder.AddAttribute(sequence++, "class", "gi-vote-card");
+
+            builder.OpenElement(sequence++, "div");
+            builder.AddAttribute(sequence++, "class", "gi-vote-topline");
+            builder.AddContent(sequence++, $"{vote.Chamber} Vote {vote.RollCallNumber}");
+            builder.OpenElement(sequence++, "span");
+            builder.AddContent(sequence++, FormatTimestamp(vote.VotedAt));
+            builder.CloseElement();
+            builder.CloseElement();
+
+            builder.OpenElement(sequence++, "h4");
+            builder.AddAttribute(sequence++, "class", "gi-vote-title");
+            builder.AddContent(sequence++, $"{vote.Measure} · {vote.Title}");
+            builder.CloseElement();
+
+            builder.OpenElement(sequence++, "p");
+            builder.AddAttribute(sequence++, "class", "gi-vote-question");
+            builder.AddContent(sequence++, vote.Caption);
+            builder.CloseElement();
+
+            if (!string.IsNullOrWhiteSpace(vote.Status))
+            {
+                builder.OpenElement(sequence++, "p");
+                builder.AddAttribute(sequence++, "class", "gi-state-status");
+                builder.AddContent(sequence++, $"Latest bill status: {vote.Status}");
+                builder.CloseElement();
+            }
+
+            builder.OpenElement(sequence++, "div");
+            builder.AddAttribute(sequence++, "class", "gi-vote-meta");
+            builder.OpenElement(sequence++, "span");
+            builder.AddAttribute(sequence++, "class", "badge text-bg-dark");
+            builder.AddContent(sequence++, $"Yea {vote.YeaCount}");
+            builder.CloseElement();
+            builder.OpenElement(sequence++, "span");
+            builder.AddAttribute(sequence++, "class", "badge text-bg-light");
+            builder.AddContent(sequence++, $"Nay {vote.NayCount}");
+            builder.CloseElement();
+            if (vote.NotVotingCount > 0)
+            {
+                builder.OpenElement(sequence++, "span");
+                builder.AddAttribute(sequence++, "class", "badge text-bg-light");
+                builder.AddContent(sequence++, $"Not Voting {vote.NotVotingCount}");
+                builder.CloseElement();
+            }
+            if (vote.ExcusedCount > 0)
+            {
+                builder.OpenElement(sequence++, "span");
+                builder.AddAttribute(sequence++, "class", "badge text-bg-light");
+                builder.AddContent(sequence++, $"Excused {vote.ExcusedCount}");
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+
+            builder.OpenElement(sequence++, "details");
+            builder.AddAttribute(sequence++, "class", "gi-vote-details");
+            builder.OpenElement(sequence++, "summary");
+            builder.AddContent(sequence++, "Open Georgia member vote breakdown");
+            builder.CloseElement();
+
+            builder.OpenElement(sequence++, "div");
+            builder.AddAttribute(sequence++, "class", "table-responsive mt-3");
+            builder.OpenElement(sequence++, "table");
+            builder.AddAttribute(sequence++, "class", "table table-sm align-middle mb-0");
+            builder.OpenElement(sequence++, "thead");
+            builder.OpenElement(sequence++, "tr");
+            foreach (var heading in new[] { "Member", "Vote" })
+            {
+                builder.OpenElement(sequence++, "th");
+                builder.AddContent(sequence++, heading);
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+            builder.CloseElement();
+
+            builder.OpenElement(sequence++, "tbody");
+            foreach (var member in vote.Votes)
+            {
+                builder.OpenElement(sequence++, "tr");
+                builder.OpenElement(sequence++, "td");
+                builder.AddContent(sequence++, member.Name);
+                builder.CloseElement();
+                builder.OpenElement(sequence++, "td");
+                builder.AddContent(sequence++, member.Vote);
+                builder.CloseElement();
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+            builder.CloseElement();
+            builder.CloseElement();
+            builder.CloseElement();
+
+            builder.OpenElement(sequence++, "div");
+            builder.AddAttribute(sequence++, "class", "mt-3");
+            builder.OpenElement(sequence++, "a");
+            builder.AddAttribute(sequence++, "class", "btn btn-outline-dark btn-sm");
+            builder.AddAttribute(sequence++, "href", vote.DetailUrl);
+            builder.AddAttribute(sequence++, "target", "_blank");
+            builder.AddAttribute(sequence++, "rel", "noopener noreferrer");
+            builder.AddContent(sequence++, "Open official bill detail");
+            builder.CloseElement();
+            builder.CloseElement();
+
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+    };
 
     private RenderFragment RenderVotes(IReadOnlyList<ChamberVoteSummary> votes) => builder =>
     {
@@ -660,6 +819,12 @@
         color: #6b7280;
     }
 
+    .gi-state-status {
+        margin-bottom: .9rem;
+        color: #374151;
+        font-size: .92rem;
+    }
+
     .gi-resource-grid {
         display: grid;
         gap: .85rem;
@@ -748,7 +913,7 @@
         animation: gi-spin 1s linear infinite;
     }
 
-    @keyframes gi-spin {
+    @@keyframes gi-spin {
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
     }

@@ -22,6 +22,8 @@ public sealed record StateGovernmentCoverage(
     string Summary,
     IReadOnlyList<CivicUpdate> PressReleases,
     IReadOnlyList<LawSummary> SignedLegislation,
+    IReadOnlyList<StateLegislativeVoteSummary> HouseVotes,
+    IReadOnlyList<StateLegislativeVoteSummary> SenateVotes,
     IReadOnlyList<CivicResourceSection> ResourceSections);
 
 public sealed record FederalGovernmentCoverage(
@@ -74,6 +76,25 @@ public sealed record ChamberVoteSummary(
     int PresentCount,
     int NotVotingCount,
     IReadOnlyList<MemberVoteRecord> Votes);
+
+public sealed record StateLegislativeVoteSummary(
+    string Chamber,
+    string RollCallNumber,
+    string Caption,
+    string Measure,
+    string Title,
+    string Status,
+    DateTimeOffset? VotedAt,
+    string DetailUrl,
+    int YeaCount,
+    int NayCount,
+    int NotVotingCount,
+    int ExcusedCount,
+    IReadOnlyList<StateMemberVoteRecord> Votes);
+
+public sealed record StateMemberVoteRecord(
+    string Name,
+    string Vote);
 
 public sealed record MemberVoteRecord(
     string Name,
