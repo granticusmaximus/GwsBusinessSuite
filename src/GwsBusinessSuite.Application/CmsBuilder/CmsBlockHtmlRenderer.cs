@@ -55,11 +55,82 @@ public static class CmsBlockHtmlRenderer
           .gws-editor-selected { outline: 2px solid #2563eb !important; outline-offset: -2px; }
           [data-gws-section-id]:hover { outline: 1px dashed rgba(148, 163, 184, 0.5); outline-offset: -1px; }
           [data-gws-inline-prop]:focus { outline: 2px solid #16a34a !important; outline-offset: 2px; cursor: text; }
+          .gws-drag-handle {
+            position: absolute; top: 4px; left: 4px; z-index: 40;
+            width: 22px; height: 22px; border-radius: 6px;
+            background: #2563eb; color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 13px; line-height: 1; cursor: grab;
+            opacity: 0; transition: opacity 0.1s ease;
+          }
+          .gws-editable:hover .gws-drag-handle { opacity: 1; }
+          .gws-drag-handle:active { cursor: grabbing; }
         </style>
         <script>
         (function () {
           var ORIGIN = window.location.origin;
           function send(msg) { window.parent.postMessage(msg, ORIGIN); }
+
+          // Canvas drag-and-drop: tracked entirely within this document rather than handed
+          // off to the parent frame. Once a mousedown lands inside an iframe, the browser
+          // keeps routing subsequent mousemove/mouseup here for the rest of the gesture
+          // regardless of what's stacked on top of the iframe in the parent document - so a
+          // parent-side interception overlay never actually receives the events. Tracking
+          // and hit-testing locally sidesteps that entirely; only the final drop needs to
+          // reach the parent, since that's the only side that can mutate Blazor state.
+          var drag = null;
+
+          document.addEventListener('mousedown', function (e) {
+            var handle = e.target.closest('[data-gws-drag-handle-for]');
+            if (!handle) return;
+            e.preventDefault();
+            var indicator = document.createElement('div');
+            indicator.style.cssText = 'position:fixed;left:0;top:0;width:0;height:3px;background:#2563eb;z-index:100000;pointer-events:none;display:none;border-radius:2px;box-shadow:0 0 0 1px rgba(255,255,255,0.8);';
+            document.body.appendChild(indicator);
+            document.body.style.userSelect = 'none';
+            drag = { widgetId: handle.getAttribute('data-gws-drag-handle-for'), indicator: indicator, target: null, raf: null, pendingEvent: null };
+          });
+
+          function processDragMove() {
+            if (!drag) return;
+            drag.raf = null;
+            var e = drag.pendingEvent;
+            if (!e) return;
+            var el = document.elementFromPoint(e.clientX, e.clientY);
+            var widgetEl = el && el.closest ? el.closest('[data-gws-widget-id]') : null;
+            if (!widgetEl || widgetEl.getAttribute('data-gws-widget-id') === drag.widgetId) {
+              drag.indicator.style.display = 'none';
+              drag.target = null;
+              return;
+            }
+            var rect = widgetEl.getBoundingClientRect();
+            var insertAfter = e.clientY > rect.top + rect.height / 2;
+            drag.indicator.style.display = 'block';
+            drag.indicator.style.left = rect.left + 'px';
+            drag.indicator.style.top = (insertAfter ? rect.bottom : rect.top) + 'px';
+            drag.indicator.style.width = rect.width + 'px';
+            drag.target = { widgetId: widgetEl.getAttribute('data-gws-widget-id'), insertAfter: insertAfter };
+          }
+
+          document.addEventListener('mousemove', function (e) {
+            if (!drag) return;
+            drag.pendingEvent = e;
+            if (drag.raf) return;
+            drag.raf = requestAnimationFrame(processDragMove);
+          });
+
+          document.addEventListener('mouseup', function () {
+            if (!drag) return;
+            var draggedId = drag.widgetId;
+            var target = drag.target;
+            if (drag.raf) cancelAnimationFrame(drag.raf);
+            drag.indicator.remove();
+            document.body.style.userSelect = '';
+            drag = null;
+            if (target) {
+              send({ type: 'cms:drop', widgetId: draggedId, targetWidgetId: target.widgetId, insertAfter: target.insertAfter });
+            }
+          });
 
           function highlight(widgetId) {
             var prev = document.querySelector('.gws-editor-selected');
@@ -170,7 +241,7 @@ public static class CmsBlockHtmlRenderer
                 // widget-id]') in the edit-mode script always resolves reliably regardless
                 // of per-widget style config.
                 sb.Append(editMode
-                    ? $"""<div class="gws-editable" data-gws-widget-id="{Html(widget.Id)}" data-gws-widget-type="{Html(widget.WidgetType)}">{inner}</div>"""
+                    ? $"""<div class="gws-editable" data-gws-widget-id="{Html(widget.Id)}" data-gws-widget-type="{Html(widget.WidgetType)}"><div class="gws-drag-handle" data-gws-drag-handle-for="{Html(widget.Id)}">&#10247;</div>{inner}</div>"""
                     : inner);
             }
             sb.Append("</div>");

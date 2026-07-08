@@ -55,6 +55,11 @@ window.gwsCmsBuilderBridge = (function () {
             case 'cms:edit':
                 _dotNetRef.invokeMethodAsync('OnWidgetPropEditedFromIframe', data.sectionId || '', data.widgetId || '', data.prop || '', data.value || '');
                 break;
+            case 'cms:drop':
+                if (data.widgetId && data.targetWidgetId && _dotNetRef) {
+                    _dotNetRef.invokeMethodAsync('OnCanvasDropAsync', data.widgetId, data.targetWidgetId, !!data.insertAfter);
+                }
+                break;
             case 'cms:ready':
                 _dotNetRef.invokeMethodAsync('OnIframeReady');
                 break;

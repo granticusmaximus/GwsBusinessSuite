@@ -962,6 +962,55 @@ else
         return Task.CompletedTask;
     }
 
+    // Fired once, on mouseup, at the end of a canvas drag (see the 'cms:drop' handler in
+    // CmsBlockHtmlRenderer.BuildEditModeScript - the drag itself is tracked entirely inside
+    // the iframe's own document, since a mousedown that lands there keeps the browser
+    // routing subsequent mousemove/mouseup events to that document for the rest of the
+    // gesture regardless of what's stacked on top of the iframe in the parent page).
+    // Reorders the widget within/across columns using the same "compute the target index
+    // AFTER removing the dragged widget" approach as DropWidgetOnto, then autosaves
+    // immediately - per the approved plan, a structural reorder needs the iframe reloaded to
+    // reflect the new column/section layout (unlike a text edit, which patches live without
+    // a reload), and unlike Save-button edits, a drag-drop shouldn't require a separate
+    // explicit Save to take effect, matching WordPress/Elementor's own behavior.
+    [JSInvokable]
+    public async Task OnCanvasDropAsync(string draggedWidgetId, string targetWidgetId, bool insertAfter)
+    {
+        if (string.IsNullOrEmpty(draggedWidgetId) || string.IsNullOrEmpty(targetWidgetId) || draggedWidgetId == targetWidgetId)
+        {
+            return;
+        }
+
+        var (_, fromColumn) = FindWidgetLocation(draggedWidgetId);
+        var draggedWidget = fromColumn?.Widgets.FirstOrDefault(w => w.Id == draggedWidgetId);
+        if (fromColumn is null || draggedWidget is null)
+        {
+            return;
+        }
+
+        var (toSection, toColumn) = FindWidgetLocation(targetWidgetId);
+        if (toColumn is null)
+        {
+            return;
+        }
+
+        fromColumn.Widgets.Remove(draggedWidget);
+
+        var targetIndex = toColumn.Widgets.FindIndex(w => w.Id == targetWidgetId);
+        if (targetIndex < 0)
+        {
+            toColumn.Widgets.Add(draggedWidget);
+        }
+        else
+        {
+            toColumn.Widgets.Insert(insertAfter ? targetIndex + 1 : targetIndex, draggedWidget);
+        }
+
+        SelectWidget(toSection?.Id ?? string.Empty, draggedWidget.Id);
+        StateHasChanged();
+        await SaveAsync();
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_bridgeInitialized)
