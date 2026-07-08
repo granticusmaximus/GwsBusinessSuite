@@ -7,6 +7,7 @@ using GwsBusinessSuite.Application.DockerHealth;
 using GwsBusinessSuite.Application.DigitalOcean;
 using GwsBusinessSuite.Application.CjAds;
 using GwsBusinessSuite.Application.ContentStudio;
+using GwsBusinessSuite.Application.GovernmentIntelligence;
 using GwsBusinessSuite.Application.NewsIntelligence;
 using GwsBusinessSuite.Application.Podcasts;
 using GwsBusinessSuite.Application.Settings;
@@ -100,6 +101,12 @@ public static class DependencyInjection
             client.DefaultRequestHeaders.UserAgent.ParseAdd(
                 "Mozilla/5.0 (compatible; GWSuite/1.0; +https://grantwatson.dev)");
             client.Timeout = TimeSpan.FromSeconds(15);
+        });
+        services.AddHttpClient<IGovernmentIntelligenceService, GovernmentIntelligenceService>(client =>
+        {
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(
+                "Mozilla/5.0 (compatible; GWSuite/1.0; +https://grantwatson.dev)");
+            client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddHttpClient<IPodcastDirectoryService, PodcastDirectoryService>(client =>
         {

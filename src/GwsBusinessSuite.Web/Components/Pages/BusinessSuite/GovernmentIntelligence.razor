@@ -1,0 +1,755 @@
+@page "/admin/government-intelligence"
+@rendermode InteractiveServer
+@using System.Globalization
+@using GwsBusinessSuite.Application.GovernmentIntelligence
+@inject IGovernmentIntelligenceService GovernmentService
+@inject ILogger<GovernmentIntelligence> Logger
+
+<PageTitle>Government Intelligence</PageTitle>
+
+<div class="gi-shell">
+    <div class="page-header mb-3">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-end">
+            <div>
+                <h1 class="mb-1">Government Intelligence</h1>
+                <p class="mb-0 text-muted">Official-source tracking for @(_snapshot?.AreaLabel ?? "Kathleen, Houston County, Georgia").</p>
+            </div>
+            <button class="btn btn-dark" @onclick="RefreshAsync" disabled="@_loading">
+                <i class="bi bi-arrow-clockwise me-2 @( _loading ? "gi-spin" : string.Empty)"></i>
+                @(_loading ? "Refreshing..." : "Refresh")
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <div class="alert alert-danger" role="alert">
+            <i class="bi bi-exclamation-triangle me-2"></i>@_errorMessage
+        </div>
+    }
+
+    @if (_loading && _snapshot is null)
+    {
+        <div class="gi-loading">
+            <i class="bi bi-hourglass-split gi-spin"></i>
+            <span>Loading government coverage...</span>
+        </div>
+    }
+    else if (_snapshot is not null)
+    {
+        <div class="card border-0 shadow-sm mb-4 gi-overview-card">
+            <div class="card-body">
+                <div class="gi-overview-topline">
+                    <span class="gi-kicker">Coverage Focus</span>
+                    <span class="gi-refresh-stamp">Updated @FormatTimestamp(_snapshot.RetrievedAt)</span>
+                </div>
+                <h2 class="gi-overview-title">@_snapshot.AreaLabel</h2>
+                <p class="gi-overview-copy mb-0">@CurrentSummary()</p>
+            </div>
+        </div>
+
+        <div class="gi-tabs mb-4">
+            <button class="gi-tab @TabClass("community")" @onclick='() => SelectSection("community")'>
+                <i class="bi bi-geo-alt"></i>
+                <span>Houston County &amp; Community</span>
+            </button>
+            <button class="gi-tab @TabClass("state")" @onclick='() => SelectSection("state")'>
+                <i class="bi bi-bank"></i>
+                <span>Georgia</span>
+            </button>
+            <button class="gi-tab @TabClass("federal")" @onclick='() => SelectSection("federal")'>
+                <i class="bi bi-building"></i>
+                <span>Congress</span>
+            </button>
+        </div>
+
+        @if (_activeSection == "community")
+        {
+            <div class="row g-4">
+                <div class="col-xl-7">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="gi-section-head">
+                                <div>
+                                    <span class="gi-kicker">Community Watch</span>
+                                    <h2 class="h4 mb-1">County notices and meetings</h2>
+                                    <p class="text-muted mb-0">@_snapshot.Community.Summary</p>
+                                </div>
+                            </div>
+
+                            <div class="gi-stack mt-4">
+                                <section>
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <h3 class="h6 text-uppercase text-muted mb-0">Announcements</h3>
+                                        <span class="badge text-bg-light">@_snapshot.Community.Announcements.Count</span>
+                                    </div>
+                                    @if (_snapshot.Community.Announcements.Count == 0)
+                                    {
+                                        <p class="text-muted mb-0">No county announcements were returned.</p>
+                                    }
+                                    else
+                                    {
+                                        <div class="gi-list">
+                                            @foreach (var item in _snapshot.Community.Announcements)
+                                            {
+                                                <a class="gi-list-item" href="@item.Url" target="_blank" rel="noopener noreferrer">
+                                                    <div>
+                                                        <div class="gi-list-title">@item.Title</div>
+                                                        <div class="gi-list-meta">@item.Source</div>
+                                                    </div>
+                                                    <i class="bi bi-box-arrow-up-right"></i>
+                                                </a>
+                                            }
+                                        </div>
+                                    }
+                                </section>
+
+                                <section>
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <h3 class="h6 text-uppercase text-muted mb-0">Meetings</h3>
+                                        <span class="badge text-bg-light">@_snapshot.Community.Meetings.Count</span>
+                                    </div>
+                                    @if (_snapshot.Community.Meetings.Count == 0)
+                                    {
+                                        <p class="text-muted mb-0">No county meeting dates were returned.</p>
+                                    }
+                                    else
+                                    {
+                                        <div class="gi-list">
+                                            @foreach (var meeting in _snapshot.Community.Meetings)
+                                            {
+                                                <a class="gi-list-item" href="@meeting.Url" target="_blank" rel="noopener noreferrer">
+                                                    <div>
+                                                        <div class="gi-list-title">@meeting.Title</div>
+                                                        <div class="gi-list-meta">
+                                                            @FormatDate(meeting.MeetingDate)
+                                                            @if (!string.IsNullOrWhiteSpace(meeting.Location))
+                                                            {
+                                                                <span>· @meeting.Location</span>
+                                                            }
+                                                        </div>
+                                                    </div>
+                                                    <i class="bi bi-box-arrow-up-right"></i>
+                                                </a>
+                                            }
+                                        </div>
+                                    }
+                                </section>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-xl-5">
+                    @foreach (var section in _snapshot.Community.ResourceSections)
+                    {
+                        <div class="card border-0 shadow-sm mb-4">
+                            <div class="card-body">
+                                <h3 class="h5 mb-3">@section.Title</h3>
+                                <div class="gi-resource-grid">
+                                    @foreach (var link in section.Links)
+                                    {
+                                        <a class="gi-resource-card" href="@link.Url" target="_blank" rel="noopener noreferrer">
+                                            <div class="gi-resource-title">@link.Title</div>
+                                            <div class="gi-resource-copy">@link.Description</div>
+                                        </a>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+        else if (_activeSection == "state")
+        {
+            <div class="row g-4">
+                <div class="col-xl-7">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <span class="gi-kicker">State Executive</span>
+                            <h2 class="h4 mb-1">Governor updates and signed legislation</h2>
+                            <p class="text-muted">@_snapshot.State.Summary</p>
+
+                            <div class="gi-stack mt-4">
+                                <section>
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <h3 class="h6 text-uppercase text-muted mb-0">Recent press releases</h3>
+                                        <span class="badge text-bg-light">@_snapshot.State.PressReleases.Count</span>
+                                    </div>
+                                    @if (_snapshot.State.PressReleases.Count == 0)
+                                    {
+                                        <p class="text-muted mb-0">No current press releases were returned.</p>
+                                    }
+                                    else
+                                    {
+                                        <div class="gi-list">
+                                            @foreach (var release in _snapshot.State.PressReleases)
+                                            {
+                                                <a class="gi-list-item" href="@release.Url" target="_blank" rel="noopener noreferrer">
+                                                    <div>
+                                                        <div class="gi-list-title">@release.Title</div>
+                                                        <div class="gi-list-meta">@FormatTimestamp(release.PublishedAt)</div>
+                                                    </div>
+                                                    <i class="bi bi-box-arrow-up-right"></i>
+                                                </a>
+                                            }
+                                        </div>
+                                    }
+                                </section>
+
+                                <section>
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <h3 class="h6 text-uppercase text-muted mb-0">Signed into law</h3>
+                                        <span class="badge text-bg-light">@_snapshot.State.SignedLegislation.Count</span>
+                                    </div>
+                                    @if (_snapshot.State.SignedLegislation.Count == 0)
+                                    {
+                                        <p class="text-muted mb-0">No current signed legislation entries were returned.</p>
+                                    }
+                                    else
+                                    {
+                                        <div class="gi-law-list">
+                                            @foreach (var law in _snapshot.State.SignedLegislation)
+                                            {
+                                                <a class="gi-law-item" href="@law.Url" target="_blank" rel="noopener noreferrer">
+                                                    <span class="gi-law-code">@law.DocumentNumber</span>
+                                                    <span class="gi-law-title">@law.Title</span>
+                                                </a>
+                                            }
+                                        </div>
+                                    }
+                                </section>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-xl-5">
+                    @foreach (var section in _snapshot.State.ResourceSections)
+                    {
+                        <div class="card border-0 shadow-sm mb-4">
+                            <div class="card-body">
+                                <h3 class="h5 mb-3">@section.Title</h3>
+                                <div class="gi-resource-grid">
+                                    @foreach (var link in section.Links)
+                                    {
+                                        <a class="gi-resource-card" href="@link.Url" target="_blank" rel="noopener noreferrer">
+                                            <div class="gi-resource-title">@link.Title</div>
+                                            <div class="gi-resource-copy">@link.Description</div>
+                                        </a>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-body">
+                    <span class="gi-kicker">Congress</span>
+                    <h2 class="h4 mb-1">Federal floor action and vote detail</h2>
+                    <p class="text-muted mb-2">@_snapshot.Federal.Summary</p>
+                    <div class="alert alert-warning mb-0">
+                        <i class="bi bi-info-circle me-2"></i>@_snapshot.Federal.StatusNote
+                    </div>
+                </div>
+            </div>
+
+            <div class="row g-4">
+                <div class="col-12 col-xxl-6">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <div>
+                                    <span class="gi-kicker">U.S. Senate</span>
+                                    <h3 class="h4 mb-0">Recent roll calls</h3>
+                                </div>
+                                <span class="badge text-bg-light">@_snapshot.Federal.SenateVotes.Count</span>
+                            </div>
+                            @RenderVotes(_snapshot.Federal.SenateVotes)
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-xxl-6">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <div>
+                                    <span class="gi-kicker">U.S. House</span>
+                                    <h3 class="h4 mb-0">Recent roll calls</h3>
+                                </div>
+                                <span class="badge text-bg-light">@_snapshot.Federal.HouseVotes.Count</span>
+                            </div>
+                            @RenderVotes(_snapshot.Federal.HouseVotes)
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card border-0 shadow-sm mt-4">
+                <div class="card-body">
+                    <h3 class="h5 mb-3">Official federal links</h3>
+                    <div class="gi-resource-grid">
+                        @foreach (var section in _snapshot.Federal.ResourceSections)
+                        {
+                            @foreach (var link in section.Links)
+                            {
+                                <a class="gi-resource-card" href="@link.Url" target="_blank" rel="noopener noreferrer">
+                                    <div class="gi-resource-title">@link.Title</div>
+                                    <div class="gi-resource-copy">@link.Description</div>
+                                </a>
+                            }
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private GovernmentIntelligenceSnapshot? _snapshot;
+    private bool _loading;
+    private string _activeSection = "community";
+    private string _errorMessage = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSnapshotAsync(forceRefresh: false);
+    }
+
+    private async Task RefreshAsync()
+    {
+        await LoadSnapshotAsync(forceRefresh: true);
+    }
+
+    private async Task LoadSnapshotAsync(bool forceRefresh)
+    {
+        _loading = true;
+        _errorMessage = string.Empty;
+
+        try
+        {
+            _snapshot = await GovernmentService.GetSnapshotAsync(forceRefresh);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load Government Intelligence");
+            _errorMessage = "Failed to load government coverage.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void SelectSection(string section) => _activeSection = section;
+
+    private string TabClass(string section) =>
+        _activeSection == section ? "gi-tab--active" : string.Empty;
+
+    private string CurrentSummary()
+    {
+        if (_snapshot is null)
+        {
+            return string.Empty;
+        }
+
+        return _activeSection switch
+        {
+            "state" => _snapshot.State.Summary,
+            "federal" => _snapshot.Federal.Summary,
+            _ => _snapshot.Community.Summary
+        };
+    }
+
+    private string FormatTimestamp(DateTimeOffset? value) =>
+        value is null ? "Unavailable" : value.Value.ToString("MMMM dd, yyyy h:mm tt", CultureInfo.InvariantCulture);
+
+    private static string FormatDate(DateOnly? value) =>
+        value is null ? "Date unavailable" : value.Value.ToString("MMMM dd, yyyy", CultureInfo.InvariantCulture);
+
+    private RenderFragment RenderVotes(IReadOnlyList<ChamberVoteSummary> votes) => builder =>
+    {
+        if (votes.Count == 0)
+        {
+            builder.OpenElement(0, "p");
+            builder.AddAttribute(1, "class", "text-muted mb-0");
+            builder.AddContent(2, "No vote data was returned.");
+            builder.CloseElement();
+            return;
+        }
+
+        var sequence = 10;
+        builder.OpenElement(sequence++, "div");
+        builder.AddAttribute(sequence++, "class", "gi-vote-stack");
+
+        foreach (var vote in votes)
+        {
+            builder.OpenElement(sequence++, "article");
+            builder.AddAttribute(sequence++, "class", "gi-vote-card");
+
+            builder.OpenElement(sequence++, "div");
+            builder.AddAttribute(sequence++, "class", "gi-vote-topline");
+            builder.AddContent(sequence++, $"{vote.Chamber} Roll Call {vote.RollCallNumber}");
+            builder.CloseElement();
+
+            builder.OpenElement(sequence++, "h4");
+            builder.AddAttribute(sequence++, "class", "gi-vote-title");
+            builder.AddContent(sequence++, string.IsNullOrWhiteSpace(vote.Measure) ? vote.Title : $"{vote.Measure} · {vote.Title}");
+            builder.CloseElement();
+
+            builder.OpenElement(sequence++, "p");
+            builder.AddAttribute(sequence++, "class", "gi-vote-question");
+            builder.AddContent(sequence++, vote.Question);
+            builder.CloseElement();
+
+            builder.OpenElement(sequence++, "div");
+            builder.AddAttribute(sequence++, "class", "gi-vote-meta");
+            builder.OpenElement(sequence++, "span");
+            builder.AddAttribute(sequence++, "class", "badge text-bg-dark");
+            builder.AddContent(sequence++, vote.Result);
+            builder.CloseElement();
+            builder.OpenElement(sequence++, "span");
+            builder.AddAttribute(sequence++, "class", "badge text-bg-light");
+            builder.AddContent(sequence++, $"Yea {vote.YeaCount}");
+            builder.CloseElement();
+            builder.OpenElement(sequence++, "span");
+            builder.AddAttribute(sequence++, "class", "badge text-bg-light");
+            builder.AddContent(sequence++, $"Nay {vote.NayCount}");
+            builder.CloseElement();
+            if (vote.PresentCount > 0)
+            {
+                builder.OpenElement(sequence++, "span");
+                builder.AddAttribute(sequence++, "class", "badge text-bg-light");
+                builder.AddContent(sequence++, $"Present {vote.PresentCount}");
+                builder.CloseElement();
+            }
+            if (vote.NotVotingCount > 0)
+            {
+                builder.OpenElement(sequence++, "span");
+                builder.AddAttribute(sequence++, "class", "badge text-bg-light");
+                builder.AddContent(sequence++, $"Not Voting {vote.NotVotingCount}");
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+
+            var georgiaVotes = vote.Votes
+                .Where(member => string.Equals(member.State, "GA", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (georgiaVotes.Count > 0)
+            {
+                builder.OpenElement(sequence++, "div");
+                builder.AddAttribute(sequence++, "class", "gi-georgia-box");
+                builder.OpenElement(sequence++, "div");
+                builder.AddAttribute(sequence++, "class", "gi-georgia-label");
+                builder.AddContent(sequence++, "Georgia delegation");
+                builder.CloseElement();
+
+                builder.OpenElement(sequence++, "div");
+                builder.AddAttribute(sequence++, "class", "gi-georgia-pills");
+                foreach (var member in georgiaVotes)
+                {
+                    builder.OpenElement(sequence++, "span");
+                    builder.AddAttribute(sequence++, "class", "gi-georgia-pill");
+                    builder.AddContent(sequence++, $"{member.Name} ({member.Party}) · {member.Vote}");
+                    builder.CloseElement();
+                }
+                builder.CloseElement();
+                builder.CloseElement();
+            }
+
+            builder.OpenElement(sequence++, "details");
+            builder.AddAttribute(sequence++, "class", "gi-vote-details");
+            builder.OpenElement(sequence++, "summary");
+            builder.AddContent(sequence++, "Open full member vote breakdown");
+            builder.CloseElement();
+
+            builder.OpenElement(sequence++, "div");
+            builder.AddAttribute(sequence++, "class", "table-responsive mt-3");
+            builder.OpenElement(sequence++, "table");
+            builder.AddAttribute(sequence++, "class", "table table-sm align-middle mb-0");
+            builder.OpenElement(sequence++, "thead");
+            builder.OpenElement(sequence++, "tr");
+            foreach (var heading in new[] { "Member", "Party", "State", "Vote" })
+            {
+                builder.OpenElement(sequence++, "th");
+                builder.AddContent(sequence++, heading);
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+            builder.CloseElement();
+
+            builder.OpenElement(sequence++, "tbody");
+            foreach (var member in vote.Votes)
+            {
+                builder.OpenElement(sequence++, "tr");
+
+                builder.OpenElement(sequence++, "td");
+                builder.AddContent(sequence++, member.Name);
+                builder.CloseElement();
+
+                builder.OpenElement(sequence++, "td");
+                builder.AddContent(sequence++, member.Party);
+                builder.CloseElement();
+
+                builder.OpenElement(sequence++, "td");
+                builder.AddContent(sequence++, member.State);
+                builder.CloseElement();
+
+                builder.OpenElement(sequence++, "td");
+                builder.AddContent(sequence++, member.Vote);
+                builder.CloseElement();
+
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+            builder.CloseElement();
+            builder.CloseElement();
+            builder.CloseElement();
+
+            builder.OpenElement(sequence++, "div");
+            builder.AddAttribute(sequence++, "class", "mt-3");
+            builder.OpenElement(sequence++, "a");
+            builder.AddAttribute(sequence++, "class", "btn btn-outline-dark btn-sm");
+            builder.AddAttribute(sequence++, "href", vote.DetailUrl);
+            builder.AddAttribute(sequence++, "target", "_blank");
+            builder.AddAttribute(sequence++, "rel", "noopener noreferrer");
+            builder.AddContent(sequence++, "Open official vote detail");
+            builder.CloseElement();
+            builder.CloseElement();
+
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+    };
+}
+
+<style>
+    .gi-shell {
+        max-width: 1500px;
+    }
+
+    .gi-overview-card {
+        background:
+            radial-gradient(circle at top right, rgba(15, 23, 42, 0.08), transparent 40%),
+            linear-gradient(135deg, #ffffff, #f7f4ea);
+    }
+
+    .gi-overview-topline,
+    .gi-vote-topline,
+    .gi-georgia-label {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: .75rem;
+        font-size: .78rem;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        color: #6b7280;
+    }
+
+    .gi-kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: .35rem;
+        font-size: .76rem;
+        font-weight: 700;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        color: #92400e;
+    }
+
+    .gi-overview-title {
+        margin-top: .75rem;
+        margin-bottom: .6rem;
+        font-size: clamp(1.7rem, 2.3vw, 2.35rem);
+        line-height: 1.05;
+    }
+
+    .gi-overview-copy {
+        max-width: 60rem;
+        color: #4b5563;
+    }
+
+    .gi-tabs {
+        display: flex;
+        gap: .75rem;
+        flex-wrap: wrap;
+    }
+
+    .gi-tab {
+        display: inline-flex;
+        align-items: center;
+        gap: .55rem;
+        border: 1px solid #d1d5db;
+        border-radius: 999px;
+        background: #fff;
+        color: #111827;
+        padding: .8rem 1rem;
+        font-weight: 600;
+    }
+
+    .gi-tab--active {
+        border-color: #111827;
+        background: #111827;
+        color: #fff;
+    }
+
+    .gi-section-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+
+    .gi-stack {
+        display: grid;
+        gap: 2rem;
+    }
+
+    .gi-list,
+    .gi-law-list,
+    .gi-vote-stack {
+        display: grid;
+        gap: .85rem;
+    }
+
+    .gi-list-item,
+    .gi-law-item,
+    .gi-resource-card,
+    .gi-vote-card {
+        border: 1px solid #e5e7eb;
+        border-radius: 1rem;
+        background: #fff;
+        color: inherit;
+        text-decoration: none;
+    }
+
+    .gi-list-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        padding: 1rem 1.05rem;
+    }
+
+    .gi-list-item:hover,
+    .gi-law-item:hover,
+    .gi-resource-card:hover {
+        border-color: #9ca3af;
+        box-shadow: 0 .5rem 1.2rem rgba(15, 23, 42, .06);
+    }
+
+    .gi-list-title,
+    .gi-resource-title,
+    .gi-vote-title {
+        font-weight: 700;
+        color: #111827;
+    }
+
+    .gi-list-meta,
+    .gi-resource-copy,
+    .gi-vote-question {
+        color: #6b7280;
+    }
+
+    .gi-resource-grid {
+        display: grid;
+        gap: .85rem;
+    }
+
+    .gi-resource-card {
+        display: block;
+        padding: 1rem 1.05rem;
+    }
+
+    .gi-law-item {
+        display: grid;
+        gap: .35rem;
+        padding: .95rem 1rem;
+    }
+
+    .gi-law-code {
+        font-size: .76rem;
+        font-weight: 700;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        color: #92400e;
+    }
+
+    .gi-vote-card {
+        padding: 1rem 1rem 1.1rem;
+    }
+
+    .gi-vote-title {
+        margin: .45rem 0;
+        font-size: 1.02rem;
+        line-height: 1.25;
+    }
+
+    .gi-vote-question {
+        margin-bottom: .85rem;
+    }
+
+    .gi-vote-meta,
+    .gi-georgia-pills {
+        display: flex;
+        gap: .45rem;
+        flex-wrap: wrap;
+    }
+
+    .gi-georgia-box {
+        margin-top: 1rem;
+        padding: .85rem;
+        border-radius: .95rem;
+        background: #f8fafc;
+        border: 1px solid #e5e7eb;
+    }
+
+    .gi-georgia-pill {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        background: #fff;
+        border: 1px solid #d1d5db;
+        padding: .35rem .65rem;
+        font-size: .82rem;
+    }
+
+    .gi-vote-details {
+        margin-top: 1rem;
+        border-top: 1px solid #e5e7eb;
+        padding-top: .9rem;
+    }
+
+    .gi-vote-details summary {
+        cursor: pointer;
+        font-weight: 600;
+    }
+
+    .gi-loading {
+        display: inline-flex;
+        align-items: center;
+        gap: .65rem;
+        padding: 1rem 1.2rem;
+        border-radius: 999px;
+        background: #fff;
+        border: 1px solid #e5e7eb;
+    }
+
+    .gi-spin {
+        animation: gi-spin 1s linear infinite;
+    }
+
+    @keyframes gi-spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+</style>
