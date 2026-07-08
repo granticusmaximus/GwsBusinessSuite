@@ -37,6 +37,14 @@
             <span class="studio-pill studio-pill-subtle">@TotalWidgetCount widget@(TotalWidgetCount == 1 ? "" : "s")</span>
             <span class="studio-pill studio-pill-subtle">@GetViewportLabel()</span>
         </div>
+        <div class="studio-device-switcher">
+            <button class="studio-device-button" @onclick="Undo" disabled="@(!CanUndo)" title="Undo (Ctrl+Z)">
+                <i class="bi bi-arrow-counterclockwise"></i>
+            </button>
+            <button class="studio-device-button" @onclick="Redo" disabled="@(!CanRedo)" title="Redo (Ctrl+Shift+Z)">
+                <i class="bi bi-arrow-clockwise"></i>
+            </button>
+        </div>
         <button class="btn btn-outline-secondary" @onclick="BackToList">Back</button>
         <button class="btn btn-primary" @onclick="SaveAsync" disabled="@(_isBusy || _page is null)">
             <i class="bi bi-cloud-check me-1"></i>@(_isBusy ? "Saving…" : "Save")
@@ -810,6 +818,78 @@ else
 
     // ── Data ──────────────────────────────────────────────────────────────
     private PageLayout _layout = new();
+
+    // ── Undo/redo ─────────────────────────────────────────────────────────
+    // In-memory only, capped, lost on page reload - matches the scope of every other
+    // page builder's undo stack (not a substitute for CmsPageRevision's persisted history).
+    // A capped stack of full-layout JSON snapshots is simple and cheap enough at this
+    // page's realistic size that a diff-based structure isn't worth the complexity.
+    private const int MaxUndoDepth = 50;
+    private readonly List<string> _undoStack = new();
+    private readonly List<string> _redoStack = new();
+    // Tracks which (widget, prop) a burst of rapid oninput keystrokes is currently editing,
+    // so typing a sentence produces one undo step instead of one per character - reset to
+    // null by PushUndo() itself, so any discrete action (a button click, a drop) always
+    // starts a fresh step regardless of what text field was focused beforehand.
+    private string? _lastUndoEditKey;
+
+    private bool CanUndo => _undoStack.Count > 0;
+    private bool CanRedo => _redoStack.Count > 0;
+
+    private void PushUndo()
+    {
+        _undoStack.Add(JsonSerializer.Serialize(_layout, JsonOptions));
+        if (_undoStack.Count > MaxUndoDepth) _undoStack.RemoveAt(0);
+        _redoStack.Clear();
+        _lastUndoEditKey = null;
+    }
+
+    [JSInvokable]
+    public async Task Undo()
+    {
+        if (_undoStack.Count == 0) return;
+        var snapshot = _undoStack[^1];
+        _undoStack.RemoveAt(_undoStack.Count - 1);
+        _redoStack.Add(JsonSerializer.Serialize(_layout, JsonOptions));
+        _layout = JsonSerializer.Deserialize<PageLayout>(snapshot, JsonOptions) ?? new();
+        _lastUndoEditKey = null;
+        RestoreSelectionIfStillPresent();
+        StateHasChanged();
+        await SaveAsync();
+    }
+
+    [JSInvokable]
+    public async Task Redo()
+    {
+        if (_redoStack.Count == 0) return;
+        var snapshot = _redoStack[^1];
+        _redoStack.RemoveAt(_redoStack.Count - 1);
+        _undoStack.Add(JsonSerializer.Serialize(_layout, JsonOptions));
+        _layout = JsonSerializer.Deserialize<PageLayout>(snapshot, JsonOptions) ?? new();
+        _lastUndoEditKey = null;
+        RestoreSelectionIfStillPresent();
+        StateHasChanged();
+        await SaveAsync();
+    }
+
+    // Undoing/redoing a text edit shouldn't collapse the Inspector back to "nothing
+    // selected" - the whole point is to show the widget with its reverted content. Only
+    // fall back to clearing selection when the previously-selected node genuinely no
+    // longer exists in the restored layout (e.g. undoing the Add that created it).
+    private void RestoreSelectionIfStillPresent()
+    {
+        if (!string.IsNullOrEmpty(_selectedWidgetId) && FindWidget(_selectedWidgetId) is not null)
+        {
+            return;
+        }
+        if (!string.IsNullOrEmpty(_selectedSectionId) && FindSection(_selectedSectionId) is not null)
+        {
+            _selectedWidgetId = string.Empty;
+            return;
+        }
+        ClearSelection();
+    }
+
     private CmsPage? _page;
     private CmsSite? _site;
     private List<CmsPage> _allPagesInSite = new();
@@ -950,7 +1030,7 @@ else
         _suppressCanvasSync = true;
         try
         {
-            SetProp(widget, propKey, value);
+            SetProp(widget, propKey, value, forceNewUndoStep: true);
         }
         finally
         {
@@ -994,6 +1074,7 @@ else
             return;
         }
 
+        PushUndo();
         fromColumn.Widgets.Remove(draggedWidget);
 
         var targetIndex = toColumn.Widgets.FindIndex(w => w.Id == targetWidgetId);
@@ -1139,6 +1220,7 @@ else
     // ── Section CRUD ──────────────────────────────────────────────────────
     private void AddSectionAtEnd()
     {
+        PushUndo();
         var section = CreateDefaultSection();
         _layout.Sections.Add(section);
         _leftTab = "layers";
@@ -1147,6 +1229,7 @@ else
 
     private void DeleteSection(string sectionId)
     {
+        PushUndo();
         _layout.Sections.RemoveAll(s => s.Id == sectionId);
         if (_selectedSectionId == sectionId) ClearSelection();
     }
@@ -1180,6 +1263,7 @@ else
     // ── Widget CRUD ───────────────────────────────────────────────────────
     private void QuickAddWidget(string widgetType)
     {
+        PushUndo();
         LayoutSection? targetSection = null;
         if (!string.IsNullOrEmpty(_selectedSectionId))
             targetSection = FindSection(_selectedSectionId);
@@ -1212,6 +1296,7 @@ else
         if (col is null) return;
         var target = index + direction;
         if (target < 0 || target >= col.Widgets.Count) return;
+        PushUndo();
         (col.Widgets[index], col.Widgets[target]) = (col.Widgets[target], col.Widgets[index]);
     }
 
@@ -1267,6 +1352,8 @@ else
             return;
         }
 
+        PushUndo();
+
         // Dragging downward within the same column needs "insert after target" — "insert
         // before target" (the only case that matters cross-column) cancels out to a no-op
         // when the target was already the very next item, since removing the dragged widget
@@ -1317,6 +1404,8 @@ else
             return;
         }
 
+        PushUndo();
+
         var fromIndex = _layout.Sections.IndexOf(dragged);
         var targetIndexBeforeRemoval = _layout.Sections.IndexOf(targetSection);
         var isDraggingDownward = targetIndexBeforeRemoval > fromIndex;
@@ -1343,6 +1432,7 @@ else
         var original = FindSection(sectionId);
         if (original is null) return;
 
+        PushUndo();
         var clone = new LayoutSection
         {
             Id = Guid.NewGuid().ToString("N"),
@@ -1383,6 +1473,7 @@ else
         var index = _layout.Sections.IndexOf(section);
         var target = index + direction;
         if (target < 0 || target >= _layout.Sections.Count) return;
+        PushUndo();
         (_layout.Sections[index], _layout.Sections[target]) = (_layout.Sections[target], _layout.Sections[index]);
     }
 
@@ -1413,6 +1504,7 @@ else
     {
         var col = FindSection(sectionId)?.Columns.FirstOrDefault(c => c.Id == columnId);
         if (col is null || index >= col.Widgets.Count) return;
+        PushUndo();
         var orig = col.Widgets[index];
         var clone = new LayoutWidget
         {
@@ -1434,6 +1526,7 @@ else
 
     private void DeleteWidget(string sectionId, string columnId, string widgetId)
     {
+        PushUndo();
         var col = FindSection(sectionId)?.Columns.FirstOrDefault(c => c.Id == columnId);
         col?.Widgets.RemoveAll(w => w.Id == widgetId);
         if (_selectedWidgetId == widgetId) ClearSelection();
@@ -1478,8 +1571,19 @@ else
     // straight back to the element the user is actively typing in.
     private bool _suppressCanvasSync;
 
-    private void SetProp(LayoutWidget widget, string key, string value)
+    // forceNewUndoStep: false (the default, used by every @oninput-bound Inspector field)
+    // collapses a burst of rapid keystrokes into the same widget+key into a single undo
+    // step; true (used by discrete actions like Add/Remove Field and canvas inline edits,
+    // which route through this same method) always starts a fresh step regardless of what
+    // was being typed immediately beforehand.
+    private void SetProp(LayoutWidget widget, string key, string value, bool forceNewUndoStep = false)
     {
+        var editKey = $"{widget.Id}:{key}";
+        if (forceNewUndoStep || editKey != _lastUndoEditKey)
+        {
+            PushUndo();
+            _lastUndoEditKey = editKey;
+        }
         widget.Props[key] = value;
         if (!_suppressCanvasSync)
         {
@@ -1543,7 +1647,7 @@ else
         }
     }
 
-    private void SaveFormFields(LayoutWidget widget, List<FormFieldDef> fields)
+    private void SaveFormFields(LayoutWidget widget, List<FormFieldDef> fields, bool forceNewUndoStep = false)
     {
         var json = JsonSerializer.Serialize(fields.Select(f => new
         {
@@ -1553,7 +1657,7 @@ else
             required = f.Required,
             optionsJson = f.Options.Count > 0 ? JsonSerializer.Serialize(f.Options) : null
         }));
-        SetProp(widget, "fieldsJson", json);
+        SetProp(widget, "fieldsJson", json, forceNewUndoStep);
     }
 
     private void AddFormField(LayoutWidget widget)
@@ -1561,7 +1665,7 @@ else
         var fields = GetFormFields(widget);
         var n = fields.Count + 1;
         fields.Add(new FormFieldDef($"field{n}", $"Field {n}", "text", false, []));
-        SaveFormFields(widget, fields);
+        SaveFormFields(widget, fields, forceNewUndoStep: true);
     }
 
     private void UpdateFormField(LayoutWidget widget, int index, Func<FormFieldDef, FormFieldDef> update)
@@ -1584,7 +1688,7 @@ else
         var fields = GetFormFields(widget);
         if (index < 0 || index >= fields.Count) return;
         fields.RemoveAt(index);
-        SaveFormFields(widget, fields);
+        SaveFormFields(widget, fields, forceNewUndoStep: true);
     }
 
     // ── Accordion widget items ──────────────────────────────────────────────
@@ -1611,10 +1715,10 @@ else
         }
     }
 
-    private void SaveAccordionItems(LayoutWidget widget, List<AccordionItemDef> items)
+    private void SaveAccordionItems(LayoutWidget widget, List<AccordionItemDef> items, bool forceNewUndoStep = false)
     {
         var json = JsonSerializer.Serialize(items.Select(i => new { question = i.Question, answer = i.Answer }));
-        SetProp(widget, "itemsJson", json);
+        SetProp(widget, "itemsJson", json, forceNewUndoStep);
     }
 
     private void AddAccordionItem(LayoutWidget widget)
@@ -1622,7 +1726,7 @@ else
         var items = GetAccordionItems(widget);
         var n = items.Count + 1;
         items.Add(new AccordionItemDef($"Question {n}?", "Answer."));
-        SaveAccordionItems(widget, items);
+        SaveAccordionItems(widget, items, forceNewUndoStep: true);
     }
 
     private void UpdateAccordionItem(LayoutWidget widget, int index, Func<AccordionItemDef, AccordionItemDef> update)
@@ -1638,7 +1742,7 @@ else
         var items = GetAccordionItems(widget);
         if (index < 0 || index >= items.Count) return;
         items.RemoveAt(index);
-        SaveAccordionItems(widget, items);
+        SaveAccordionItems(widget, items, forceNewUndoStep: true);
     }
 
     // ── Media library picker ────────────────────────────────────────────────
@@ -1668,7 +1772,7 @@ else
 
     private void SelectMediaAsset(LayoutWidget widget, MediaAssetSummary asset)
     {
-        SetProp(widget, "src", asset.Url);
+        SetProp(widget, "src", asset.Url, forceNewUndoStep: true);
         if (string.IsNullOrWhiteSpace(GetProp(widget, "alt")) && !string.IsNullOrWhiteSpace(asset.AltText))
         {
             SetProp(widget, "alt", asset.AltText);

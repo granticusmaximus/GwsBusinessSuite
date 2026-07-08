@@ -15,6 +15,7 @@ window.gwsCmsBuilderBridge = (function () {
         _dotNetRef = dotNetRef;
         _boundHandler = handleMessage;
         window.addEventListener('message', _boundHandler);
+        window.addEventListener('keydown', handleKeydown);
     }
 
     function dispose() {
@@ -22,7 +23,32 @@ window.gwsCmsBuilderBridge = (function () {
             window.removeEventListener('message', _boundHandler);
             _boundHandler = null;
         }
+        window.removeEventListener('keydown', handleKeydown);
         _dotNetRef = null;
+    }
+
+    // Undo/redo shortcuts, listened for on the parent document only (not inside the
+    // iframe) - deliberately scoped out while a native text field or contenteditable has
+    // focus, so this never fights with the browser's own per-field text-undo while someone
+    // is mid-edit; Ctrl+Z there does what it always does in a text field.
+    function isEditableFocus() {
+        var el = document.activeElement;
+        if (!el) return false;
+        var tag = el.tagName;
+        return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+    }
+
+    function handleKeydown(e) {
+        if (!_dotNetRef || isEditableFocus()) return;
+        var mod = e.ctrlKey || e.metaKey;
+        if (!mod) return;
+        if (e.key === 'z' && !e.shiftKey) {
+            e.preventDefault();
+            _dotNetRef.invokeMethodAsync('Undo');
+        } else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') {
+            e.preventDefault();
+            _dotNetRef.invokeMethodAsync('Redo');
+        }
     }
 
     function sendToIframe(message) {

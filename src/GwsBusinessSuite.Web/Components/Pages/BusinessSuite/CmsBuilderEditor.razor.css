@@ -365,6 +365,11 @@
 	color: #64748b;
 }
 
+.studio-device-button:disabled {
+	opacity: 0.35;
+	cursor: not-allowed;
+}
+
 .studio-device-button.is-active {
 	background: linear-gradient(145deg, #0f172a, #2563eb);
 	color: white;
