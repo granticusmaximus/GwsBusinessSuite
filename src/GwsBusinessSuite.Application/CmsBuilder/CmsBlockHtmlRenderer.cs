@@ -54,6 +54,7 @@ public static class CmsBlockHtmlRenderer
           .gws-editable:hover { outline: 1px dashed rgba(37, 99, 235, 0.45); outline-offset: -1px; cursor: pointer; }
           .gws-editor-selected { outline: 2px solid #2563eb !important; outline-offset: -2px; }
           [data-gws-section-id]:hover { outline: 1px dashed rgba(148, 163, 184, 0.5); outline-offset: -1px; }
+          [data-gws-inline-prop]:focus { outline: 2px solid #16a34a !important; outline-offset: 2px; cursor: text; }
         </style>
         <script>
         (function () {
@@ -73,6 +74,10 @@ public static class CmsBlockHtmlRenderer
             var widgetEl = e.target.closest('[data-gws-widget-id]');
             var sectionEl = e.target.closest('[data-gws-section-id]');
             if (widgetEl) {
+              // Focus/cursor placement for a contenteditable target already happened on
+              // mousedown, before this capture-phase click listener runs - preventDefault
+              // here only stops a real <a>/<form>'s own default action, it can't undo the
+              // focus that's already landed.
               e.preventDefault();
               highlight(widgetEl.getAttribute('data-gws-widget-id'));
               send({ type: 'cms:select', sectionId: sectionEl ? sectionEl.getAttribute('data-gws-section-id') : '', widgetId: widgetEl.getAttribute('data-gws-widget-id') });
@@ -83,10 +88,43 @@ public static class CmsBlockHtmlRenderer
             }
           }, true);
 
+          // Single-line fields (heading/paragraph/button label/hero headline+CTAs) commit
+          // on Enter instead of inserting a line break, matching how a normal text input
+          // behaves - blur() below is what actually sends the edit (see the blur listener).
+          document.addEventListener('keydown', function (e) {
+            if (e.key !== 'Enter') return;
+            var el = e.target.closest('[data-gws-inline-prop]');
+            if (el) { e.preventDefault(); el.blur(); }
+          }, true);
+
+          // blur doesn't bubble, so this must be a capture-phase listener to observe it via
+          // delegation rather than one listener per editable element.
+          document.addEventListener('blur', function (e) {
+            var el = e.target;
+            if (!(el instanceof Element) || !el.hasAttribute('data-gws-inline-prop')) return;
+            var widgetEl = el.closest('[data-gws-widget-id]');
+            var sectionEl = el.closest('[data-gws-section-id]');
+            if (!widgetEl) return;
+            send({
+              type: 'cms:edit',
+              sectionId: sectionEl ? sectionEl.getAttribute('data-gws-section-id') : '',
+              widgetId: widgetEl.getAttribute('data-gws-widget-id'),
+              prop: el.getAttribute('data-gws-inline-prop'),
+              value: el.innerText
+            });
+          }, true);
+
           window.addEventListener('message', function (e) {
             if (e.origin !== ORIGIN || !e.data || typeof e.data !== 'object') return;
             if (e.data.type === 'cms:sync-selection') {
               highlight(e.data.widgetId || null);
+            } else if (e.data.type === 'cms:prop-changed') {
+              var el = document.querySelector('[data-gws-widget-id="' + e.data.widgetId + '"] [data-gws-inline-prop="' + e.data.prop + '"], [data-gws-widget-id="' + e.data.widgetId + '"][data-gws-inline-prop="' + e.data.prop + '"]');
+              // Don't clobber an in-progress edit - only patch elements the user isn't
+              // actively typing in (e.g. the same prop edited from the Inspector instead).
+              if (el && document.activeElement !== el) {
+                el.innerText = e.data.value;
+              }
             }
           });
 
@@ -126,7 +164,7 @@ public static class CmsBlockHtmlRenderer
             sb.Append("""<div class="gws-column">""");
             foreach (var widget in column.Widgets)
             {
-                var inner = WrapWithStyle(RenderWidget(widget, siteSlug, pageSlug), widget.Style);
+                var inner = WrapWithStyle(RenderWidget(widget, siteSlug, pageSlug, editMode), widget.Style);
                 // Wrapped OUTSIDE WrapWithStyle so a widget's own background/padding
                 // overrides can never clip the selection outline, and closest('[data-gws-
                 // widget-id]') in the edit-mode script always resolves reliably regardless
@@ -153,31 +191,35 @@ public static class CmsBlockHtmlRenderer
             : $"""<div class="gws-widget-style" style="{Html(inlineStyle)}">{innerHtml}</div>""";
     }
 
-    private static string RenderWidget(LayoutWidget widget, string siteSlug, string pageSlug)
+    private static string RenderWidget(LayoutWidget widget, string siteSlug, string pageSlug, bool editMode = false)
     {
         var p = widget.Props;
         return widget.WidgetType switch
         {
             "hero" => $"""
                 <div class="gws-hero gws-align-{Html(Align(p))}">
-                  <h1 class="gws-hero-headline">{Html(Get(p, "headline"))}</h1>
-                  {(HasValue(p, "subline") ? $"""<p class="gws-hero-subline">{Html(Get(p, "subline"))}</p>""" : "")}
+                  <h1 class="gws-hero-headline"{InlineEditAttrs(editMode, "headline")}>{Html(Get(p, "headline"))}</h1>
+                  {(HasValue(p, "subline") ? $"""<p class="gws-hero-subline"{InlineEditAttrs(editMode, "subline")}>{Html(Get(p, "subline"))}</p>""" : "")}
                   <div class="gws-hero-actions">
-                    {HeroCta(Get(p, "cta1Label"), Get(p, "cta1Href"), "btn-primary")}
-                    {HeroCta(Get(p, "cta2Label"), Get(p, "cta2Href"), "btn-ghost")}
+                    {HeroCta(Get(p, "cta1Label"), Get(p, "cta1Href"), "btn-primary", editMode, "cta1Label")}
+                    {HeroCta(Get(p, "cta2Label"), Get(p, "cta2Href"), "btn-ghost", editMode, "cta2Label")}
                   </div>
                 </div>
                 """,
-            "heading" => $"""<{Tag(p)} class="gws-heading gws-align-{Html(Align(p))}">{Html(Get(p, "text"))}</{Tag(p)}>""",
-            "paragraph" => $"""<p class="gws-paragraph gws-align-{Html(Align(p))}">{Html(Get(p, "text"))}</p>""",
+            "heading" => $"""<{Tag(p)} class="gws-heading gws-align-{Html(Align(p))}"{InlineEditAttrs(editMode, "text")}>{Html(Get(p, "text"))}</{Tag(p)}>""",
+            "paragraph" => $"""<p class="gws-paragraph gws-align-{Html(Align(p))}"{InlineEditAttrs(editMode, "text")}>{Html(Get(p, "text"))}</p>""",
             // Same trust boundary as blog articles: only authenticated Contributor/Author/
             // Admin roles can edit Canvas widgets, so rendering Markdown -> HTML here (rather
             // than HTML-encoding it, which would show raw asterisks/brackets) is consistent
             // with how ArticleMarkdownRenderer already treats admin-authored content.
+            // Deliberately NOT inline-contenteditable (see BuildEditModeScript's caller) -
+            // this prop is Markdown, contenteditable produces HTML, and reconciling
+            // HTML-from-contenteditable back into Markdown is a lossy conversion for no
+            // real gain. Stays click-to-select -> edit in the Inspector's Markdown textarea.
             "richtext" => $"""<div class="gws-richtext">{Markdown.ToHtml(Get(p, "content"), MarkdownPipeline)}</div>""",
             "button" => $"""
                 <div class="gws-button-wrap gws-align-{Html(Align(p))}">
-                  <a href="{Html(HrefOrHash(Get(p, "href")))}" class="btn btn-{Html(Get(p, "variant", "primary"))}"{OpenInNewTabAttrs(p)}>{Html(Get(p, "label"))}</a>
+                  <a href="{Html(HrefOrHash(Get(p, "href")))}" class="btn btn-{Html(Get(p, "variant", "primary"))}"{OpenInNewTabAttrs(p)}{InlineEditAttrs(editMode, "label")}>{Html(Get(p, "label"))}</a>
                 </div>
                 """,
             "image" => HasValue(p, "src")
@@ -334,10 +376,19 @@ public static class CmsBlockHtmlRenderer
 
     private sealed record FormFieldDefinition(string Key, string Label, string Type, bool Required, string OptionsJson);
 
-    private static string HeroCta(string label, string href, string cssClass) =>
+    private static string HeroCta(string label, string href, string cssClass, bool editMode, string inlinePropKey) =>
         string.IsNullOrWhiteSpace(label)
             ? string.Empty
-            : $"""<a href="{Html(HrefOrHash(href))}" class="btn {cssClass}">{Html(label)}</a>""";
+            : $"""<a href="{Html(HrefOrHash(href))}" class="btn {cssClass}"{InlineEditAttrs(editMode, inlinePropKey)}>{Html(label)}</a>""";
+
+    // Emitted only in edit mode - lets the click-to-select script's contenteditable
+    // affordance target the right widget prop when the user types directly on canvas.
+    // Focus/cursor placement for a contenteditable element happens on mousedown, before
+    // the edit-mode script's capture-phase click listener runs its e.preventDefault() -
+    // so preventDefault (needed to stop a real <a>/<form>'s own default action) never
+    // interferes with the native "click to place cursor and type" behavior here.
+    private static string InlineEditAttrs(bool editMode, string propKey) =>
+        editMode ? $" contenteditable=\"plaintext-only\" data-gws-inline-prop=\"{propKey}\"" : "";
 
     private static string HrefOrHash(string href) => string.IsNullOrWhiteSpace(href) ? "#" : href;
 

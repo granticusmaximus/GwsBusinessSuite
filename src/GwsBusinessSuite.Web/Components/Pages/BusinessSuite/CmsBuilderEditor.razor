@@ -938,6 +938,30 @@ else
         return Task.CompletedTask;
     }
 
+    // Fired on blur of a contenteditable element in the canvas (see BuildEditModeScript).
+    // _suppressCanvasSync stops SetProp from immediately pushing this same value straight
+    // back to the iframe element the user just finished typing in.
+    [JSInvokable]
+    public Task OnWidgetPropEditedFromIframe(string sectionId, string widgetId, string propKey, string value)
+    {
+        var widget = FindWidget(widgetId);
+        if (widget is null) return Task.CompletedTask;
+
+        _suppressCanvasSync = true;
+        try
+        {
+            SetProp(widget, propKey, value);
+        }
+        finally
+        {
+            _suppressCanvasSync = false;
+        }
+
+        SelectWidget(sectionId, widgetId);
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_bridgeInitialized)
@@ -1398,8 +1422,39 @@ else
     private static string GetProp(LayoutWidget widget, string key, string defaultValue = "") =>
         widget.Props.TryGetValue(key, out var val) ? val : defaultValue;
 
-    private static void SetProp(LayoutWidget widget, string key, string value) =>
+    // Instance method (not static) so it can push live edits out to the canvas iframe as
+    // they happen - every content edit, whether typed in the Inspector or made inline on
+    // the canvas (Phase 3), funnels through this one method. _suppressCanvasSync is set
+    // while applying an edit that originated FROM the iframe, so that push doesn't echo
+    // straight back to the element the user is actively typing in.
+    private bool _suppressCanvasSync;
+
+    private void SetProp(LayoutWidget widget, string key, string value)
+    {
         widget.Props[key] = value;
+        if (!_suppressCanvasSync)
+        {
+            _ = PushPropToCanvasAsync(widget.Id, key, value);
+        }
+    }
+
+    private async Task PushPropToCanvasAsync(string widgetId, string key, string value)
+    {
+        if (!_bridgeInitialized) return;
+        try
+        {
+            await JS.InvokeVoidAsync("gwsCmsBuilderBridge.sendToIframe",
+                new { type = "cms:prop-changed", widgetId, prop = key, value });
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit already gone - nothing left to push to.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to push live edit to canvas for widget {WidgetId}.", widgetId);
+        }
+    }
 
     // ── Style helpers (Phase 6) ─────────────────────────────────────────────
     private static void SetStyleTextColor(LayoutWidget widget, string value) =>
@@ -1439,7 +1494,7 @@ else
         }
     }
 
-    private static void SaveFormFields(LayoutWidget widget, List<FormFieldDef> fields)
+    private void SaveFormFields(LayoutWidget widget, List<FormFieldDef> fields)
     {
         var json = JsonSerializer.Serialize(fields.Select(f => new
         {
@@ -1507,7 +1562,7 @@ else
         }
     }
 
-    private static void SaveAccordionItems(LayoutWidget widget, List<AccordionItemDef> items)
+    private void SaveAccordionItems(LayoutWidget widget, List<AccordionItemDef> items)
     {
         var json = JsonSerializer.Serialize(items.Select(i => new { question = i.Question, answer = i.Answer }));
         SetProp(widget, "itemsJson", json);

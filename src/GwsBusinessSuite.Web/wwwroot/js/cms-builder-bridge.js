@@ -52,6 +52,9 @@ window.gwsCmsBuilderBridge = (function () {
             case 'cms:select-section':
                 _dotNetRef.invokeMethodAsync('OnSectionSelectedFromIframe', data.sectionId || '');
                 break;
+            case 'cms:edit':
+                _dotNetRef.invokeMethodAsync('OnWidgetPropEditedFromIframe', data.sectionId || '', data.widgetId || '', data.prop || '', data.value || '');
+                break;
             case 'cms:ready':
                 _dotNetRef.invokeMethodAsync('OnIframeReady');
                 break;
