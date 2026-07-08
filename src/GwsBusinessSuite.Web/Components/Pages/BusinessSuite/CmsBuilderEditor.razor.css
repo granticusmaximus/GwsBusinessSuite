@@ -489,6 +489,27 @@
 	border-bottom: 1px solid rgba(148, 163, 184, 0.14);
 }
 
+.studio-global-meta {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	flex-wrap: wrap;
+	margin-top: -0.25rem;
+}
+
+.studio-global-badge {
+	display: inline-flex;
+	align-items: center;
+	padding: 0.25rem 0.6rem;
+	border-radius: 999px;
+	background: rgba(37, 99, 235, 0.12);
+	color: #1d4ed8;
+	font-size: 0.72rem;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+}
+
 .studio-inspector-textarea {
 	min-height: 120px;
 	resize: vertical;

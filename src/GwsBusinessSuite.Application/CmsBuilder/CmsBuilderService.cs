@@ -218,6 +218,10 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
             .Where(page => page.SiteId == siteId)
             .ToListAsync(cancellationToken);
 
+        var globalBlocks = await dbContext.GlobalBlocks
+            .Where(block => block.SiteId == siteId)
+            .ToListAsync(cancellationToken);
+
         if (pages.Count > 0)
         {
             var pageIds = pages.Select(page => page.Id).ToList();
@@ -240,6 +244,11 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
             }
 
             dbContext.CmsPages.RemoveRange(pages);
+        }
+
+        if (globalBlocks.Count > 0)
+        {
+            dbContext.GlobalBlocks.RemoveRange(globalBlocks);
         }
 
         dbContext.CmsSites.Remove(site);

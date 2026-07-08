@@ -10,6 +10,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<WikiPage> WikiPages => Set<WikiPage>();
     public DbSet<CmsSite> CmsSites => Set<CmsSite>();
     public DbSet<CmsPage> CmsPages => Set<CmsPage>();
+    public DbSet<GlobalBlock> GlobalBlocks => Set<GlobalBlock>();
     public DbSet<MediaAsset> MediaAssets => Set<MediaAsset>();
     public DbSet<FormSubmission> FormSubmissions => Set<FormSubmission>();
     public DbSet<Comment> Comments => Set<Comment>();
@@ -38,6 +39,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         // Slugs are unique per parent, not per site — /services/pricing and
         // /products/pricing can coexist since their full paths differ.
         modelBuilder.Entity<CmsPage>().HasIndex(x => new { x.SiteId, x.ParentPageId, x.Slug }).IsUnique();
+        modelBuilder.Entity<GlobalBlock>().HasIndex(x => new { x.SiteId, x.Kind, x.Name });
         modelBuilder.Entity<FormSubmission>().HasIndex(x => new { x.PageId, x.CreatedAt });
         modelBuilder.Entity<Comment>().HasIndex(x => new { x.ArticleId, x.Status });
         modelBuilder.Entity<DockerHealthAlert>().HasIndex(x => new { x.ContainerName, x.IsRead });

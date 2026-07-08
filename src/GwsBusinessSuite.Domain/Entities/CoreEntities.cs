@@ -137,6 +137,21 @@ public sealed class CmsPageRevision : AuditableEntity
     public string Label { get; set; } = string.Empty;
 }
 
+public static class GlobalBlockKinds
+{
+    public const string Widget = "Widget";
+    public const string Section = "Section";
+}
+
+public sealed class GlobalBlock : AuditableEntity
+{
+    public Guid SiteId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Kind { get; set; } = GlobalBlockKinds.Widget;
+    public string? WidgetType { get; set; }
+    public string Json { get; set; } = "{}";
+}
+
 public sealed class MediaAsset : AuditableEntity
 {
     public required string FileName { get; set; }

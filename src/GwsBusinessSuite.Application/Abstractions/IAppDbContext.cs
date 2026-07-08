@@ -9,6 +9,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<WikiPage> WikiPages { get; }
     DbSet<CmsSite> CmsSites { get; }
     DbSet<CmsPage> CmsPages { get; }
+    DbSet<GlobalBlock> GlobalBlocks { get; }
     DbSet<MediaAsset> MediaAssets { get; }
     DbSet<FormSubmission> FormSubmissions { get; }
     DbSet<Comment> Comments { get; }

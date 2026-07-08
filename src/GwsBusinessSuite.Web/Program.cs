@@ -340,7 +340,8 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     string siteSlug,
     string pageSlug,
     HttpContext httpContext,
-    ICmsBuilderService cmsBuilderService) =>
+    ICmsBuilderService cmsBuilderService,
+    GlobalBlockResolver globalBlockResolver) =>
 {
     var site = await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
     if (site is null) return Results.NotFound();
@@ -358,7 +359,12 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
         && (httpContext.User.IsInRole(AppRoles.Admin) || httpContext.User.IsInRole(AppRoles.Contributor));
     var editMode = isStudioUser && httpContext.Request.Query["edit"] == "1";
 
-    var bodyHtml = CmsBlockHtmlRenderer.Render(page.BlocksJson, siteSlug, pageSlug, editMode);
+    var layout = CmsBuilderJson.ParseLayout(page.BlocksJson);
+    if (layout is not null)
+    {
+        await globalBlockResolver.ResolveAsync(site.Id, layout);
+    }
+    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, pageSlug, editMode);
     var pageTitle = System.Net.WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle);
     var metaDescription = System.Net.WebUtility.HtmlEncode(page.MetaDescription);
     var ogImageTag = string.IsNullOrWhiteSpace(page.OgImageUrl)
@@ -470,8 +476,13 @@ app.MapPost("/cms/{siteSlug}/submit", async (
 // anymore (a fixed segment can't follow it) — form submissions redirect back to the page
 // itself with ?submitted=1 instead, handled inline by RenderPublicCanvasPageAsync.
 
-app.MapGet("/{**pageSlug}", (string pageSlug, HttpRequest request, ICmsBuilderService cmsBuilderService, IConfiguration configuration) =>
-        RenderPublicCanvasPageAsync(pageSlug, request.Query["submitted"] == "1", cmsBuilderService, configuration))
+app.MapGet("/{**pageSlug}", (
+        string pageSlug,
+        HttpRequest request,
+        ICmsBuilderService cmsBuilderService,
+        GlobalBlockResolver globalBlockResolver,
+        IConfiguration configuration) =>
+        RenderPublicCanvasPageAsync(pageSlug, request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration))
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
 
 app.MapGet("/blog", async (
@@ -682,7 +693,8 @@ app.MapGet("/__not-found", async (HttpContext httpContext, ICmsBuilderService cm
 app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
     string siteSlug,
     ICmsBuilderService cmsBuilderService,
-    IWebHostEnvironment env) =>
+    IWebHostEnvironment env,
+    GlobalBlockResolver globalBlockResolver) =>
 {
     var site = await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
     if (site is null) return Results.NotFound();
@@ -698,7 +710,12 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
     {
         foreach (var page in pages)
         {
-            var bodySections = CmsBlockHtmlRenderer.Render(page.BlocksJson, site.Slug, page.Slug);
+            var layout = CmsBuilderJson.ParseLayout(page.BlocksJson);
+            if (layout is not null)
+            {
+                await globalBlockResolver.ResolveAsync(site.Id, layout);
+            }
+            var bodySections = CmsBlockHtmlRenderer.Render(layout, site.Slug, page.Slug);
             var pageTitle = System.Net.WebUtility.HtmlEncode(
                 string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle);
             var metaDescription = System.Net.WebUtility.HtmlEncode(page.MetaDescription);
@@ -1097,9 +1114,14 @@ app.MapRazorComponents<App>()
 // "/" on the public host renders the Canvas home page; anywhere else (admin.gwsapp.net,
 // localhost, direct IP) redirects to /admin as before. One endpoint, not two — see the note
 // above the /{**pageSlug} route for why a second RequireHost-gated "/" registration breaks.
-app.MapGet("/", (HttpContext httpContext, HttpRequest request, ICmsBuilderService cmsBuilderService, IConfiguration configuration) =>
+app.MapGet("/", (
+    HttpContext httpContext,
+    HttpRequest request,
+    ICmsBuilderService cmsBuilderService,
+    GlobalBlockResolver globalBlockResolver,
+    IConfiguration configuration) =>
     IsPublicHost(httpContext)
-        ? RenderPublicCanvasPageAsync("home", request.Query["submitted"] == "1", cmsBuilderService, configuration)
+        ? RenderPublicCanvasPageAsync("home", request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration)
         : Task.FromResult(Results.Redirect("/admin")))
     .AllowAnonymous().RequireRateLimiting("public-read");
 
@@ -1123,7 +1145,12 @@ static async Task<PublicNavMenus> GetPublicNavMenusAsync(ICmsBuilderService cmsB
 // Renders a Canvas page (by full path, under the Canvas:SiteSlug-configured site) as a full
 // grantwatson.dev document — shared by GET "/" (path "home") and GET "/{**pageSlug}".
 // fullPath supports nested pages ("services/web-dev") via GetPageByFullPathAsync.
-static async Task<IResult> RenderPublicCanvasPageAsync(string fullPath, bool showSubmittedBanner, ICmsBuilderService cmsBuilderService, IConfiguration configuration)
+static async Task<IResult> RenderPublicCanvasPageAsync(
+    string fullPath,
+    bool showSubmittedBanner,
+    ICmsBuilderService cmsBuilderService,
+    GlobalBlockResolver globalBlockResolver,
+    IConfiguration configuration)
 {
     var siteSlug = configuration["Canvas:SiteSlug"] ?? string.Empty;
     var site = string.IsNullOrWhiteSpace(siteSlug) ? null : await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
@@ -1146,7 +1173,12 @@ static async Task<IResult> RenderPublicCanvasPageAsync(string fullPath, bool sho
             "text/html", statusCode: StatusCodes.Status404NotFound);
     }
 
-    var bodyHtml = CmsBlockHtmlRenderer.Render(page.BlocksJson, siteSlug, fullPath);
+    var layout = CmsBuilderJson.ParseLayout(page.BlocksJson);
+    if (layout is not null)
+    {
+        await globalBlockResolver.ResolveAsync(site.Id, layout);
+    }
+    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, fullPath);
     if (showSubmittedBanner)
     {
         bodyHtml = PublicSiteHtmlRenderer.SubmittedBanner() + bodyHtml;

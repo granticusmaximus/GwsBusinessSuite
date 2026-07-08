@@ -1,6 +1,5 @@
 using System.Net;
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using Markdig;
 
@@ -17,18 +16,15 @@ namespace GwsBusinessSuite.Application.CmsBuilder;
 /// </summary>
 public static class CmsBlockHtmlRenderer
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
-
     private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
         .Build();
 
     public static string Render(string blocksJson, string siteSlug = "", string pageSlug = "", bool editMode = false)
+        => Render(CmsBuilderJson.ParseLayout(blocksJson), siteSlug, pageSlug, editMode);
+
+    public static string Render(PageLayout? layout, string siteSlug = "", string pageSlug = "", bool editMode = false)
     {
-        var layout = ParseLayout(blocksJson);
         if (layout is null || layout.Sections.Count == 0)
         {
             return string.Empty;
@@ -203,23 +199,6 @@ public static class CmsBlockHtmlRenderer
         })();
         </script>
         """;
-
-    private static PageLayout? ParseLayout(string blocksJson)
-    {
-        if (string.IsNullOrWhiteSpace(blocksJson))
-        {
-            return null;
-        }
-
-        try
-        {
-            return JsonSerializer.Deserialize<PageLayout>(blocksJson, JsonOptions);
-        }
-        catch
-        {
-            return null;
-        }
-    }
 
     private static string RenderSection(LayoutSection section, string siteSlug, string pageSlug, bool editMode)
     {

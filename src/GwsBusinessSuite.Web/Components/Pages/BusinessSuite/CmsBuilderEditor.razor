@@ -7,6 +7,8 @@
 @using GwsBusinessSuite.Domain.Entities
 @using System.Text.Json
 @inject ICmsBuilderService CmsBuilderService
+@inject IGlobalBlockService GlobalBlockService
+@inject GlobalBlockResolver GlobalBlockResolver
 @inject IMediaLibraryService MediaLibraryService
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
@@ -93,6 +95,9 @@ else
             <button class="studio-tab @(_leftTab == "widgets" ? "is-active" : "")" @onclick='() => _leftTab = "widgets"'>
                 <i class="bi bi-grid-3x2-gap me-1"></i>Widgets
             </button>
+            <button class="studio-tab @(_leftTab == "global" ? "is-active" : "")" @onclick='() => _leftTab = "global"'>
+                <i class="bi bi-globe2 me-1"></i>Global
+            </button>
             <button class="studio-tab @(_leftTab == "layers" ? "is-active" : "")" @onclick='() => _leftTab = "layers"'>
                 <i class="bi bi-layers me-1"></i>Layers
             </button>
@@ -114,6 +119,35 @@ else
                         </button>
                     }
                 </div>
+            </div>
+        }
+        else if (_leftTab == "global")
+        {
+            <div class="studio-panel-section">
+                <div class="studio-section-eyebrow mb-2 px-1">Saved once, synced everywhere</div>
+                @if (_globalBlocks.Count == 0)
+                {
+                    <div class="studio-empty-card">
+                        <p>No global blocks yet. Save a widget or section as global from the Inspector, then reuse it here.</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="studio-widget-grid">
+                        @foreach (var globalBlock in _globalBlocks)
+                        {
+                            <button class="studio-widget-card" @onclick="() => InsertGlobalBlock(globalBlock)">
+                                <span class="studio-widget-icon">
+                                    <i class="@(globalBlock.Kind == GlobalBlockKinds.Section ? "bi bi-layout-text-window" : GetWidgetIconClass(globalBlock.WidgetType ?? "paragraph"))"></i>
+                                </span>
+                                <span class="studio-widget-copy">
+                                    <strong>@globalBlock.Name</strong>
+                                    <small>@GetGlobalBlockCatalogSummary(globalBlock)</small>
+                                </span>
+                            </button>
+                        }
+                    </div>
+                }
             </div>
         }
         else
@@ -263,6 +297,16 @@ else
                                 <div class="small text-secondary">Widget properties</div>
                             </div>
                         </div>
+                        @if (selWidget.GlobalBlockId is { } globalWidgetId)
+                        {
+                            <div class="studio-global-meta">
+                                <span class="studio-global-badge">Global</span>
+                                <span class="small text-secondary">@GetGlobalBlockName(globalWidgetId)</span>
+                                <button class="btn btn-sm btn-outline-secondary ms-auto" @onclick="DetachSelectedWidget">
+                                    <i class="bi bi-scissors me-1"></i>Detach
+                                </button>
+                            </div>
+                        }
 
                         @* ── Per-type inspector fields ─────────────────────── *@
                         @if (selWidget.WidgetType == "hero")
@@ -718,6 +762,12 @@ else
                             <button class="btn btn-sm btn-outline-secondary" @onclick="DuplicateSelectedWidget">
                                 <i class="bi bi-copy me-1"></i>Dup
                             </button>
+                            @if (selWidget.GlobalBlockId is null)
+                            {
+                                <button class="btn btn-sm btn-outline-primary" @onclick="SaveSelectedWidgetAsGlobalAsync">
+                                    <i class="bi bi-globe2 me-1"></i>Save as Global
+                                </button>
+                            }
                             <button class="btn btn-sm btn-outline-danger" @onclick="DeleteSelectedWidget">
                                 <i class="bi bi-trash"></i>
                             </button>
@@ -741,6 +791,16 @@ else
                                 <div class="small text-secondary">@sel.Label</div>
                             </div>
                         </div>
+                        @if (sel.GlobalBlockId is { } globalSectionId)
+                        {
+                            <div class="studio-global-meta">
+                                <span class="studio-global-badge">Global</span>
+                                <span class="small text-secondary">@GetGlobalBlockName(globalSectionId)</span>
+                                <button class="btn btn-sm btn-outline-secondary ms-auto" @onclick="DetachSelectedSection">
+                                    <i class="bi bi-scissors me-1"></i>Detach
+                                </button>
+                            </div>
+                        }
                         <div>
                             <label class="form-label small fw-semibold">Label</label>
                             <input class="form-control" value="@sel.Label"
@@ -788,6 +848,12 @@ else
                             <button class="btn btn-sm btn-outline-secondary" @onclick="() => DuplicateSection(_selectedSectionId)">
                                 <i class="bi bi-copy me-1"></i>Dup
                             </button>
+                            @if (sel.GlobalBlockId is null)
+                            {
+                                <button class="btn btn-sm btn-outline-primary" @onclick="SaveSelectedSectionAsGlobalAsync">
+                                    <i class="bi bi-globe2 me-1"></i>Save as Global
+                                </button>
+                            }
                             <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteSection(_selectedSectionId)">
                                 <i class="bi bi-trash me-1"></i>Delete Section
                             </button>
@@ -811,13 +877,9 @@ else
 @code {
     [Parameter] public Guid PageId { get; set; }
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
-
     // ── Data ──────────────────────────────────────────────────────────────
     private PageLayout _layout = new();
+    private List<GlobalBlock> _globalBlocks = new();
 
     // ── Undo/redo ─────────────────────────────────────────────────────────
     // In-memory only, capped, lost on page reload - matches the scope of every other
@@ -838,7 +900,7 @@ else
 
     private void PushUndo()
     {
-        _undoStack.Add(JsonSerializer.Serialize(_layout, JsonOptions));
+        _undoStack.Add(CmsBuilderJson.Serialize(_layout));
         if (_undoStack.Count > MaxUndoDepth) _undoStack.RemoveAt(0);
         _redoStack.Clear();
         _lastUndoEditKey = null;
@@ -850,8 +912,8 @@ else
         if (_undoStack.Count == 0) return;
         var snapshot = _undoStack[^1];
         _undoStack.RemoveAt(_undoStack.Count - 1);
-        _redoStack.Add(JsonSerializer.Serialize(_layout, JsonOptions));
-        _layout = JsonSerializer.Deserialize<PageLayout>(snapshot, JsonOptions) ?? new();
+        _redoStack.Add(CmsBuilderJson.Serialize(_layout));
+        _layout = CmsBuilderJson.ParseLayoutOrEmpty(snapshot);
         _lastUndoEditKey = null;
         RestoreSelectionIfStillPresent();
         StateHasChanged();
@@ -864,8 +926,8 @@ else
         if (_redoStack.Count == 0) return;
         var snapshot = _redoStack[^1];
         _redoStack.RemoveAt(_redoStack.Count - 1);
-        _undoStack.Add(JsonSerializer.Serialize(_layout, JsonOptions));
-        _layout = JsonSerializer.Deserialize<PageLayout>(snapshot, JsonOptions) ?? new();
+        _undoStack.Add(CmsBuilderJson.Serialize(_layout));
+        _layout = CmsBuilderJson.ParseLayoutOrEmpty(snapshot);
         _lastUndoEditKey = null;
         RestoreSelectionIfStillPresent();
         StateHasChanged();
@@ -1122,7 +1184,9 @@ else
 
             _site = await CmsBuilderService.GetSiteAsync(_page.SiteId);
             _allPagesInSite = (await CmsBuilderService.ListPagesAsync(_page.SiteId)).ToList();
-            _layout = ParseLayout(_page.BlocksJson);
+            _globalBlocks = (await GlobalBlockService.ListAsync(_page.SiteId)).ToList();
+            _layout = CmsBuilderJson.ParseLayoutOrEmpty(_page.BlocksJson);
+            await GlobalBlockResolver.ResolveAsync(_page.SiteId, _layout);
             _statusMessage = $"Loaded '{_page.Title}'.";
         }
         catch (Exception ex)
@@ -1136,19 +1200,6 @@ else
         }
     }
 
-    private static PageLayout ParseLayout(string blocksJson)
-    {
-        try
-        {
-            return JsonSerializer.Deserialize<PageLayout>(
-                string.IsNullOrWhiteSpace(blocksJson) ? "{}" : blocksJson, JsonOptions) ?? new PageLayout();
-        }
-        catch
-        {
-            return new PageLayout();
-        }
-    }
-
     // ── Save ──────────────────────────────────────────────────────────────
     private async Task SaveAsync()
     {
@@ -1159,6 +1210,7 @@ else
         _statusMessage = string.Empty;
         try
         {
+            var storedLayout = await BuildStoredLayoutAsync(_layout, _page.SiteId);
             var editor = new CmsPageEditorModel
             {
                 PageId = _page.Id,
@@ -1166,7 +1218,7 @@ else
                 ParentPageId = _page.ParentPageId,
                 Title = _page.Title,
                 Slug = _page.Slug,
-                BlocksJson = JsonSerializer.Serialize(_layout, JsonOptions),
+                BlocksJson = CmsBuilderJson.Serialize(storedLayout),
                 MetaTitle = _page.MetaTitle,
                 MetaDescription = _page.MetaDescription,
                 OgImageUrl = _page.OgImageUrl,
@@ -1174,6 +1226,7 @@ else
                 Status = _page.Status
             };
             _page = await CmsBuilderService.SavePageAsync(editor);
+            _globalBlocks = (await GlobalBlockService.ListAsync(_page.SiteId)).ToList();
             _statusMessage = "Saved — live now.";
             ReloadPreview();
         }
@@ -1185,6 +1238,137 @@ else
         finally
         {
             _isBusy = false;
+        }
+    }
+
+    private async Task<PageLayout> BuildStoredLayoutAsync(PageLayout layout, Guid siteId)
+    {
+        var storedSections = new List<LayoutSection>(layout.Sections.Count);
+        foreach (var section in layout.Sections)
+        {
+            storedSections.Add(await BuildStoredSectionAsync(section, siteId));
+        }
+
+        return new PageLayout { Sections = storedSections };
+    }
+
+    private async Task<LayoutSection> BuildStoredSectionAsync(LayoutSection section, Guid siteId)
+    {
+        foreach (var widget in section.Columns.SelectMany(column => column.Widgets))
+        {
+            if (widget.GlobalBlockId is not null)
+            {
+                await GlobalBlockService.SyncWidgetAsync(siteId, widget);
+            }
+        }
+
+        if (section.GlobalBlockId is not null)
+        {
+            await GlobalBlockService.SyncSectionAsync(siteId, section);
+            return GlobalBlockMaterializer.CreateSectionPlaceholder(section);
+        }
+
+        return new LayoutSection
+        {
+            Id = section.Id,
+            Label = section.Label,
+            Background = section.Background,
+            Padding = section.Padding,
+            ColumnLayout = section.ColumnLayout,
+            Columns = section.Columns.Select(column => new LayoutColumn
+            {
+                Id = column.Id,
+                Span = column.Span,
+                Widgets = column.Widgets.Select(widget =>
+                    widget.GlobalBlockId is not null
+                        ? GlobalBlockMaterializer.CreateWidgetPlaceholder(widget)
+                        : CmsBuilderJson.Clone(widget)).ToList()
+            }).ToList()
+        };
+    }
+
+    private async Task SaveSelectedWidgetAsGlobalAsync()
+    {
+        if (_page is null || string.IsNullOrEmpty(_selectedWidgetId)) return;
+        var widget = FindWidget(_selectedWidgetId);
+        if (widget is null || widget.GlobalBlockId is not null) return;
+
+        try
+        {
+            var suggestedName = GetWidgetLayerSummary(widget);
+            var name = await JS.InvokeAsync<string?>("prompt", "Global widget name:", suggestedName);
+            if (string.IsNullOrWhiteSpace(name)) return;
+
+            var globalBlock = await GlobalBlockService.CreateWidgetAsync(_page.SiteId, name, widget);
+            PushUndo();
+            widget.GlobalBlockId = globalBlock.Id;
+            _globalBlocks = (await GlobalBlockService.ListAsync(_page.SiteId)).ToList();
+            _statusMessage = $"Saved '{globalBlock.Name}' as a global widget.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save widget {WidgetId} as a global block.", _selectedWidgetId);
+            _errorMessage = $"Failed to save as global. {ex.Message}";
+        }
+    }
+
+    private async Task SaveSelectedSectionAsGlobalAsync()
+    {
+        if (_page is null || string.IsNullOrEmpty(_selectedSectionId)) return;
+        var section = FindSection(_selectedSectionId);
+        if (section is null || section.GlobalBlockId is not null) return;
+
+        try
+        {
+            var suggestedName = string.IsNullOrWhiteSpace(section.Label) ? "Section" : section.Label;
+            var name = await JS.InvokeAsync<string?>("prompt", "Global section name:", suggestedName);
+            if (string.IsNullOrWhiteSpace(name)) return;
+
+            var globalBlock = await GlobalBlockService.CreateSectionAsync(_page.SiteId, name, section);
+            PushUndo();
+            section.GlobalBlockId = globalBlock.Id;
+            _globalBlocks = (await GlobalBlockService.ListAsync(_page.SiteId)).ToList();
+            _statusMessage = $"Saved '{globalBlock.Name}' as a global section.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save section {SectionId} as a global block.", _selectedSectionId);
+            _errorMessage = $"Failed to save as global. {ex.Message}";
+        }
+    }
+
+    private void DetachSelectedWidget()
+    {
+        if (string.IsNullOrEmpty(_selectedWidgetId)) return;
+        var widget = FindWidget(_selectedWidgetId);
+        if (widget?.GlobalBlockId is null) return;
+
+        PushUndo();
+        widget.GlobalBlockId = null;
+        _statusMessage = "Detached widget from its global source.";
+    }
+
+    private void DetachSelectedSection()
+    {
+        if (string.IsNullOrEmpty(_selectedSectionId)) return;
+        var section = FindSection(_selectedSectionId);
+        if (section?.GlobalBlockId is null) return;
+
+        PushUndo();
+        section.GlobalBlockId = null;
+        _statusMessage = "Detached section from its global source.";
+    }
+
+    private void InsertGlobalBlock(GlobalBlock globalBlock)
+    {
+        PushUndo();
+        if (globalBlock.Kind == GlobalBlockKinds.Section)
+        {
+            AddSectionPlacement(GlobalBlockMaterializer.CreateSectionPlacement(globalBlock));
+        }
+        else
+        {
+            AddWidgetPlacement(GlobalBlockMaterializer.CreateWidgetPlacement(globalBlock));
         }
     }
 
@@ -1260,10 +1444,35 @@ else
             section.Columns[0].Widgets.AddRange(allWidgets);
     }
 
+    private void AddSectionPlacement(LayoutSection section)
+    {
+        LayoutSection? anchorSection = null;
+        if (!string.IsNullOrEmpty(_selectedSectionId))
+        {
+            anchorSection = FindSection(_selectedSectionId);
+        }
+        else if (!string.IsNullOrEmpty(_selectedWidgetId))
+        {
+            anchorSection = FindWidgetLocation(_selectedWidgetId).Section;
+        }
+
+        var insertAt = anchorSection is null
+            ? _layout.Sections.Count
+            : _layout.Sections.IndexOf(anchorSection) + 1;
+        _layout.Sections.Insert(insertAt, section);
+        _leftTab = "layers";
+        SelectSection(section.Id);
+    }
+
     // ── Widget CRUD ───────────────────────────────────────────────────────
     private void QuickAddWidget(string widgetType)
     {
         PushUndo();
+        AddWidgetPlacement(CreateDefaultWidget(widgetType));
+    }
+
+    private void AddWidgetPlacement(LayoutWidget widget)
+    {
         LayoutSection? targetSection = null;
         if (!string.IsNullOrEmpty(_selectedSectionId))
             targetSection = FindSection(_selectedSectionId);
@@ -1285,7 +1494,6 @@ else
         targetColumn ??= targetSection.Columns.FirstOrDefault();
         if (targetColumn is null) return;
 
-        var widget = CreateDefaultWidget(widgetType);
         targetColumn.Widgets.Add(widget);
         SelectWidget(targetSection.Id, widget.Id);
     }
@@ -1436,6 +1644,7 @@ else
         var clone = new LayoutSection
         {
             Id = Guid.NewGuid().ToString("N"),
+            GlobalBlockId = original.GlobalBlockId,
             Label = original.Label,
             Background = original.Background,
             Padding = original.Padding,
@@ -1447,6 +1656,7 @@ else
                 Widgets = col.Widgets.Select(w => new LayoutWidget
                 {
                     Id = Guid.NewGuid().ToString("N"),
+                    GlobalBlockId = w.GlobalBlockId,
                     WidgetType = w.WidgetType,
                     Props = new Dictionary<string, string>(w.Props),
                     Style = new WidgetStyle
@@ -1509,8 +1719,17 @@ else
         var clone = new LayoutWidget
         {
             Id = Guid.NewGuid().ToString("N"),
+            GlobalBlockId = orig.GlobalBlockId,
             WidgetType = orig.WidgetType,
-            Props = new Dictionary<string, string>(orig.Props)
+            Props = new Dictionary<string, string>(orig.Props),
+            Style = new WidgetStyle
+            {
+                TextColor = orig.Style.TextColor,
+                BackgroundColor = orig.Style.BackgroundColor,
+                Padding = orig.Style.Padding,
+                BorderRadius = orig.Style.BorderRadius,
+                FontSize = orig.Style.FontSize
+            }
         };
         col.Widgets.Insert(index + 1, clone);
         SelectWidget(sectionId, clone.Id);
@@ -1841,6 +2060,14 @@ else
         "html"        => "HTML",
         _             => type
     };
+
+    private string GetGlobalBlockName(Guid globalBlockId) =>
+        _globalBlocks.FirstOrDefault(block => block.Id == globalBlockId)?.Name ?? "Global block";
+
+    private string GetGlobalBlockCatalogSummary(GlobalBlock globalBlock) =>
+        globalBlock.Kind == GlobalBlockKinds.Section
+            ? "Global section"
+            : $"Global {GetWidgetTypeLabel(globalBlock.WidgetType ?? "paragraph").ToLowerInvariant()}";
 
     private static string GetWidgetIconClass(string type) => type switch
     {

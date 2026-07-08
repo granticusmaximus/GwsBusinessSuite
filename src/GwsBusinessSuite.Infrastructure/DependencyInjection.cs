@@ -76,6 +76,8 @@ public static class DependencyInjection
         services.AddScoped<ISiteSettingsService, SiteSettingsService>();
         services.AddScoped<IAffiliateOfferScoringService, AffiliateOfferScoringService>();
         services.AddScoped<ICmsBuilderService, CmsBuilderService>();
+        services.AddScoped<IGlobalBlockService, GlobalBlockService>();
+        services.AddScoped<GlobalBlockResolver>();
         services.AddScoped<IMediaLibraryService, MediaLibraryService>();
         services.AddScoped<IFormSubmissionService, FormSubmissionService>();
         services.AddScoped<ICommentService, CommentService>();

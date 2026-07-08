@@ -1,11 +1,9 @@
 namespace GwsBusinessSuite.Application.CmsBuilder;
 
 // The schema stored in CmsPage.BlocksJson — a page is a list of sections, each split
-// into columns, each holding widgets. Edited by the Studio (CmsBuilderEditor.razor) and
-// rendered by two renderers that must stay in sync: CmsBlockHtmlRenderer.cs (the live,
-// server-rendered page) and CmsBlockPreview.razor (the admin Studio's preview pane).
-// (A third renderer, CmsBlockRenderer.jsx in the now-retired apps/public-site React app,
-// no longer runs — grantwatson.dev is served natively by this Blazor app.)
+// into columns, each holding widgets. Canvas Studio edits this in CmsBuilderEditor.razor;
+// the real page render comes from CmsBlockHtmlRenderer.cs, and CmsBlockPreview.razor still
+// exists only as a simplified revision-history preview in EditPage.razor.
 public sealed class PageLayout
 {
     public List<LayoutSection> Sections { get; set; } = new();
@@ -14,6 +12,7 @@ public sealed class PageLayout
 public sealed class LayoutSection
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public Guid? GlobalBlockId { get; set; }
     public string Label { get; set; } = "Section";
 
     // transparent | light | dark | accent
@@ -38,6 +37,7 @@ public sealed class LayoutColumn
 public sealed class LayoutWidget
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public Guid? GlobalBlockId { get; set; }
 
     // heading | paragraph | button | image | hero | card | form | spacer | divider | html
     public string WidgetType { get; set; } = "paragraph";

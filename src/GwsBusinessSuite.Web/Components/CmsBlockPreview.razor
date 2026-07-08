@@ -1,6 +1,6 @@
-@using System.Text.Json
 @using GwsBusinessSuite.Application.CmsBuilder
 @using Markdig
+@inject GlobalBlockResolver GlobalBlockResolver
 
 @if (!string.IsNullOrWhiteSpace(ParseError))
 {
@@ -41,11 +41,7 @@ else
 
 @code {
     [Parameter] public string BlocksJson { get; set; } = "[]";
-
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
+    [Parameter] public Guid? SiteId { get; set; }
 
     private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
@@ -54,19 +50,22 @@ else
     private PageLayout? Layout { get; set; }
     private string ParseError { get; set; } = string.Empty;
 
-    protected override void OnParametersSet()
+    protected override async Task OnParametersSetAsync()
     {
         ParseError = string.Empty;
         Layout = null;
 
         try
         {
-            Layout = JsonSerializer.Deserialize<PageLayout>(
-                string.IsNullOrWhiteSpace(BlocksJson) ? "{}" : BlocksJson.Trim(), JsonOptions);
+            Layout = CmsBuilderJson.ParseLayout(BlocksJson);
+            if (Layout is not null && SiteId is { } siteId)
+            {
+                await GlobalBlockResolver.ResolveAsync(siteId, Layout);
+            }
         }
         catch (Exception ex)
         {
-            ParseError = $"Unable to parse page layout. {ex.Message}";
+            ParseError = $"Unable to render page layout. {ex.Message}";
         }
     }
 
