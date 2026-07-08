@@ -1124,7 +1124,6 @@ app.MapGet("/", (
         : Task.FromResult(Results.Redirect("/admin")))
     .AllowAnonymous().RequireRateLimiting("public-read");
 
-StartupMark("before-run");
 app.Run();
 
 // Fetches the configured Canvas site and returns its Primary + Footer nav menus plus its
