@@ -262,6 +262,50 @@
 	cursor: grab;
 }
 
+/* Section rows (studio-layer-section-group) are draggable divs now, not buttons - they
+   wrap two real buttons (collapse toggle + the select-this-section main button) since a
+   single <button> can't nest interactive children. */
+.studio-layer-section-group[draggable="true"] {
+	cursor: grab;
+}
+
+.studio-layer-section-group.is-dragging {
+	opacity: 0.4;
+}
+
+.studio-layer-collapse-toggle {
+	flex-shrink: 0;
+	width: 1.4rem;
+	height: 1.4rem;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	background: none;
+	border: none;
+	color: #94a3b8;
+	cursor: pointer;
+	border-radius: 6px;
+	font-size: 0.7rem;
+}
+
+.studio-layer-collapse-toggle:hover {
+	background: rgba(148, 163, 184, 0.16);
+	color: #0f172a;
+}
+
+.studio-layer-item-main {
+	display: flex;
+	align-items: center;
+	gap: 0.65rem;
+	flex: 1;
+	min-width: 0;
+	background: none;
+	border: none;
+	padding: 0;
+	text-align: left;
+	color: inherit;
+}
+
 .studio-layer-icon {
 	width: 2rem;
 	height: 2rem;
@@ -390,9 +434,12 @@
 }
 
 /* ── Canvas body ─────────────────────────────────────────────────────────── */
-/* Section/column/drop-zone/widget rendering classes that used to live here were
-   removed — the live canvas is the React dev server in an iframe now (see
-   .studio-live-iframe above), not a Blazor-rendered canvas. */
+/* Section/column/widget rendering classes that used to live here were removed - the live
+   canvas is a same-origin iframe pointing at the real /cms/{siteSlug}/{path} route (see
+   .studio-live-iframe above), rendered by CmsBlockHtmlRenderer, not a Blazor-rendered
+   canvas. Edit-mode selection/hover/drag styles injected INTO that iframe's document
+   (.gws-editable, .gws-editor-selected, etc.) live in CmsBlockHtmlRenderer's
+   BuildEditModeScript, not here - this stylesheet only covers the Studio chrome itself. */
 
 .canvas-loading {
 	flex: 1;

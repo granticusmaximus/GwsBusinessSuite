@@ -9,10 +9,11 @@ namespace GwsBusinessSuite.Application.CmsBuilder;
 /// <summary>
 /// Renders a CmsPage's BlocksJson — a PageLayout-shaped Section/Column/Widget document,
 /// the same schema the Studio (CmsBuilderEditor.razor) edits — to a public-facing HTML
-/// fragment. Mirrors the widget vocabulary and prop-key conventions of the React renderer
-/// (CmsBlockRenderer.jsx) and the admin preview (CmsBlockPreview.razor) so all three stay
-/// in sync, but this one produces plain HTML strings so it can run outside the Blazor
-/// render pipeline, from a minimal API endpoint.
+/// fragment. Mirrors the widget vocabulary and prop-key conventions of the admin preview
+/// (CmsBlockPreview.razor) so both stay in sync, but this one produces plain HTML strings
+/// so it can run outside the Blazor render pipeline, from a minimal API endpoint. This is
+/// the single rendering codepath shared by the Studio's own live-preview iframe, the real
+/// public site, and the static export feature — see Program.cs's three call sites.
 /// </summary>
 public static class CmsBlockHtmlRenderer
 {

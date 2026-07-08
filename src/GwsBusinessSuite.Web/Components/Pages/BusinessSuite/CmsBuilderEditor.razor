@@ -123,37 +123,56 @@ else
                     <div class="studio-layer-list">
                         @foreach (var section in _layout.Sections)
                         {
-                            <div class="studio-layer-section-group">
-                                <button class="studio-layer-item studio-layer-section-item @(_selectedSectionId == section.Id && string.IsNullOrEmpty(_selectedWidgetId) ? "is-active" : "")"
-                                        @onclick="() => SelectSection(section.Id)">
-                                    <span class="studio-layer-icon"><i class="bi bi-layout-text-window"></i></span>
-                                    <span class="studio-layer-copy">
-                                        <strong>@(section.Label)</strong>
-                                        <small>@GetColumnLayoutLabel(section.ColumnLayout) · @GetSectionWidgetCount(section) widget@(GetSectionWidgetCount(section) == 1 ? "" : "s")</small>
-                                    </span>
-                                </button>
-                                @foreach (var col in section.Columns)
+                            var isCollapsed = IsSectionCollapsed(section.Id);
+                            <div class="studio-layer-section-group @(_draggedSectionId == section.Id ? "is-dragging" : "")"
+                                 draggable="true"
+                                 @ondragstart="() => StartDragSection(section)"
+                                 @ondragend="EndDragSection"
+                                 @ondragover:preventDefault
+                                 @ondrop="() => DropSectionOnto(section)">
+                                <div class="studio-layer-item studio-layer-section-item @(_selectedSectionId == section.Id && string.IsNullOrEmpty(_selectedWidgetId) ? "is-active" : "")">
+                                    <button type="button" class="studio-layer-collapse-toggle" title="@(isCollapsed ? "Expand" : "Collapse")"
+                                            @onclick="() => ToggleSectionCollapsed(section.Id)" @onclick:stopPropagation>
+                                        <i class="bi @(isCollapsed ? "bi-chevron-right" : "bi-chevron-down")"></i>
+                                    </button>
+                                    <button type="button" class="studio-layer-item-main" @onclick="() => SelectSection(section.Id)">
+                                        <span class="studio-layer-icon studio-layer-icon-sm studio-layer-drag-handle">
+                                            <i class="bi bi-grip-vertical"></i>
+                                        </span>
+                                        <span class="studio-layer-icon"><i class="bi bi-layout-text-window"></i></span>
+                                        <span class="studio-layer-copy">
+                                            <strong>@(section.Label)</strong>
+                                            <small>@GetColumnLayoutLabel(section.ColumnLayout) · @GetSectionWidgetCount(section) widget@(GetSectionWidgetCount(section) == 1 ? "" : "s")</small>
+                                        </span>
+                                    </button>
+                                </div>
+                                @if (!isCollapsed)
                                 {
-                                    @foreach (var w in col.Widgets)
+                                    @foreach (var col in section.Columns)
                                     {
-                                        <button class="studio-layer-item studio-layer-widget-item @(_selectedWidgetId == w.Id ? "is-active" : "") @(_draggedWidgetId == w.Id ? "is-dragging" : "")"
-                                                draggable="true"
-                                                @onclick="() => SelectWidget(section.Id, w.Id)"
-                                                @ondragstart="() => StartDragWidget(w, col)"
-                                                @ondragend="EndDragWidget"
-                                                @ondragover:preventDefault
-                                                @ondrop="() => DropWidgetOnto(section.Id, col, w)">
-                                            <span class="studio-layer-icon studio-layer-icon-sm studio-layer-drag-handle">
-                                                <i class="bi bi-grip-vertical"></i>
-                                            </span>
-                                            <span class="studio-layer-icon studio-layer-icon-sm">
-                                                <i class="@GetWidgetIconClass(w.WidgetType)"></i>
-                                            </span>
-                                            <span class="studio-layer-copy">
-                                                <strong>@GetWidgetTypeLabel(w.WidgetType)</strong>
-                                                <small>@GetWidgetLayerSummary(w)</small>
-                                            </span>
-                                        </button>
+                                        @foreach (var w in col.Widgets)
+                                        {
+                                            <button class="studio-layer-item studio-layer-widget-item @(_selectedWidgetId == w.Id ? "is-active" : "") @(_draggedWidgetId == w.Id ? "is-dragging" : "")"
+                                                    draggable="true"
+                                                    @onclick="() => SelectWidget(section.Id, w.Id)"
+                                                    @ondragstart="() => StartDragWidget(w, col)"
+                                                    @ondragstart:stopPropagation
+                                                    @ondragend="EndDragWidget"
+                                                    @ondragover:preventDefault
+                                                    @ondrop="() => DropWidgetOnto(section.Id, col, w)"
+                                                    @ondrop:stopPropagation>
+                                                <span class="studio-layer-icon studio-layer-icon-sm studio-layer-drag-handle">
+                                                    <i class="bi bi-grip-vertical"></i>
+                                                </span>
+                                                <span class="studio-layer-icon studio-layer-icon-sm">
+                                                    <i class="@GetWidgetIconClass(w.WidgetType)"></i>
+                                                </span>
+                                                <span class="studio-layer-copy">
+                                                    <strong>@GetWidgetTypeLabel(w.WidgetType)</strong>
+                                                    <small>@GetWidgetLayerSummary(w)</small>
+                                                </span>
+                                            </button>
+                                        }
                                     }
                                 }
                             </div>
@@ -748,6 +767,17 @@ else
                             </select>
                         </div>
                         <div class="studio-action-row mt-1">
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => MoveSection(_selectedSectionId, -1)"
+                                    disabled="@(!CanMoveSectionUp(_selectedSectionId))">
+                                <i class="bi bi-arrow-up"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => MoveSection(_selectedSectionId, 1)"
+                                    disabled="@(!CanMoveSectionDown(_selectedSectionId))">
+                                <i class="bi bi-arrow-down"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => DuplicateSection(_selectedSectionId)">
+                                <i class="bi bi-copy me-1"></i>Dup
+                            </button>
                             <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteSection(_selectedSectionId)">
                                 <i class="bi bi-trash me-1"></i>Delete Section
                             </button>
@@ -1110,6 +1140,123 @@ else
 
         SelectWidget(targetSectionId, draggedWidget.Id);
         EndDragWidget();
+    }
+
+    // ── Drag-and-drop reordering (Layers panel — sections) ──────────────────
+    // Exact mirror of the widget drag-and-drop above, operating on _layout.Sections
+    // instead of a column's Widgets list. dragReorder.js's global [draggable="true"]
+    // listener already covers these elements too — no JS changes needed.
+    private string? _draggedSectionId;
+
+    private void StartDragSection(LayoutSection section) => _draggedSectionId = section.Id;
+
+    private void EndDragSection() => _draggedSectionId = null;
+
+    private void DropSectionOnto(LayoutSection targetSection)
+    {
+        if (_draggedSectionId is null || _draggedSectionId == targetSection.Id)
+        {
+            EndDragSection();
+            return;
+        }
+
+        var dragged = _layout.Sections.FirstOrDefault(s => s.Id == _draggedSectionId);
+        if (dragged is null)
+        {
+            EndDragSection();
+            return;
+        }
+
+        var fromIndex = _layout.Sections.IndexOf(dragged);
+        var targetIndexBeforeRemoval = _layout.Sections.IndexOf(targetSection);
+        var isDraggingDownward = targetIndexBeforeRemoval > fromIndex;
+
+        _layout.Sections.Remove(dragged);
+        var targetIndex = _layout.Sections.IndexOf(targetSection);
+        if (targetIndex < 0)
+        {
+            targetIndex = _layout.Sections.Count;
+        }
+        else if (isDraggingDownward)
+        {
+            targetIndex += 1;
+        }
+        _layout.Sections.Insert(targetIndex, dragged);
+
+        SelectSection(dragged.Id);
+        EndDragSection();
+    }
+
+    // ── Section CRUD (continued) ─────────────────────────────────────────────
+    private void DuplicateSection(string sectionId)
+    {
+        var original = FindSection(sectionId);
+        if (original is null) return;
+
+        var clone = new LayoutSection
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Label = original.Label,
+            Background = original.Background,
+            Padding = original.Padding,
+            ColumnLayout = original.ColumnLayout,
+            Columns = original.Columns.Select(col => new LayoutColumn
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Span = col.Span,
+                Widgets = col.Widgets.Select(w => new LayoutWidget
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    WidgetType = w.WidgetType,
+                    Props = new Dictionary<string, string>(w.Props),
+                    Style = new WidgetStyle
+                    {
+                        TextColor = w.Style.TextColor,
+                        BackgroundColor = w.Style.BackgroundColor,
+                        Padding = w.Style.Padding,
+                        BorderRadius = w.Style.BorderRadius,
+                        FontSize = w.Style.FontSize
+                    }
+                }).ToList()
+            }).ToList()
+        };
+
+        var insertAt = _layout.Sections.IndexOf(original) + 1;
+        _layout.Sections.Insert(insertAt, clone);
+        SelectSection(clone.Id);
+    }
+
+    private void MoveSection(string sectionId, int direction)
+    {
+        var section = FindSection(sectionId);
+        if (section is null) return;
+        var index = _layout.Sections.IndexOf(section);
+        var target = index + direction;
+        if (target < 0 || target >= _layout.Sections.Count) return;
+        (_layout.Sections[index], _layout.Sections[target]) = (_layout.Sections[target], _layout.Sections[index]);
+    }
+
+    private bool CanMoveSectionUp(string sectionId) => _layout.Sections.FindIndex(s => s.Id == sectionId) > 0;
+
+    private bool CanMoveSectionDown(string sectionId)
+    {
+        var index = _layout.Sections.FindIndex(s => s.Id == sectionId);
+        return index >= 0 && index < _layout.Sections.Count - 1;
+    }
+
+    // ── Section collapse/expand (Layers panel) ───────────────────────────────
+    // Client-only display state, not persisted to BlocksJson — purely a convenience for
+    // navigating pages with many widgets, resets to "all expanded" on next load.
+    private readonly HashSet<string> _collapsedSectionIds = new();
+
+    private bool IsSectionCollapsed(string sectionId) => _collapsedSectionIds.Contains(sectionId);
+
+    private void ToggleSectionCollapsed(string sectionId)
+    {
+        if (!_collapsedSectionIds.Add(sectionId))
+        {
+            _collapsedSectionIds.Remove(sectionId);
+        }
     }
 
     private void DuplicateWidget(string sectionId, string columnId, int index)
