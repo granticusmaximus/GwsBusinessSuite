@@ -1,6 +1,7 @@
 @page "/admin/canvas/editor/{PageId:guid}"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @attribute [Authorize(Policy = "ContributorAccess")]
+@implements IAsyncDisposable
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Domain.Entities
@@ -8,6 +9,7 @@
 @inject ICmsBuilderService CmsBuilderService
 @inject IMediaLibraryService MediaLibraryService
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 @inject ILogger<CmsBuilderEditor> Logger
 
 <PageTitle>Canvas Studio — @(_page?.Title ?? "Loading…")</PageTitle>
@@ -218,7 +220,7 @@ else
                     <div class="studio-stage-route">/@CurrentFullPath</div>
                 </div>
 
-                <iframe class="studio-live-iframe"
+                <iframe id="cms-builder-iframe" class="studio-live-iframe"
                         src="@BuildIframeUrl()"
                         title="Live preview — @_page.Title"></iframe>
             </div>
@@ -877,6 +879,81 @@ else
     // ── Lifecycle ─────────────────────────────────────────────────────────
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
+    // ── Live-preview click-to-select bridge ─────────────────────────────────
+    // See wwwroot/js/cms-builder-bridge.js and CmsBlockHtmlRenderer.BuildEditModeScript
+    // for the other two-thirds of this - the iframe (rendered with ?edit=1) posts clicks
+    // back here via postMessage; this pushes selection changes that originated elsewhere
+    // (the Layers tree) back into the iframe so its outline stays in sync.
+    private DotNetObjectReference<CmsBuilderEditor>? _bridgeRef;
+    private bool _bridgeInitialized;
+    private string _lastSyncedSelectionKey = string.Empty;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && _page is not null)
+        {
+            _bridgeRef = DotNetObjectReference.Create(this);
+            try
+            {
+                await JS.InvokeVoidAsync("gwsCmsBuilderBridge.init", _bridgeRef);
+                _bridgeInitialized = true;
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit tore down before init reached the client - nothing to clean up.
+            }
+        }
+
+        var currentKey = $"{_selectedSectionId}|{_selectedWidgetId}";
+        if (_bridgeInitialized && currentKey != _lastSyncedSelectionKey)
+        {
+            _lastSyncedSelectionKey = currentKey;
+            try
+            {
+                await JS.InvokeVoidAsync("gwsCmsBuilderBridge.sendToIframe",
+                    new { type = "cms:sync-selection", widgetId = _selectedWidgetId });
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+    }
+
+    [JSInvokable]
+    public Task OnIframeReady() => Task.CompletedTask;
+
+    [JSInvokable]
+    public Task OnSectionSelectedFromIframe(string sectionId)
+    {
+        SelectSection(sectionId);
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task OnWidgetSelectedFromIframe(string sectionId, string widgetId)
+    {
+        SelectWidget(sectionId, widgetId);
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_bridgeInitialized)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("gwsCmsBuilderBridge.dispose");
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit already gone - nothing left to dispose client-side.
+            }
+        }
+        _bridgeRef?.Dispose();
+    }
+
     private async Task LoadAsync()
     {
         _isLoading = true;
@@ -965,7 +1042,7 @@ else
     private string BuildIframeUrl() =>
         _site is null || _page is null
             ? "about:blank"
-            : $"/cms/{_site.Slug}/{CurrentFullPath}?_t={_previewTimestamp}";
+            : $"/cms/{_site.Slug}/{CurrentFullPath}?_t={_previewTimestamp}&edit=1";
 
     // ── Selection ─────────────────────────────────────────────────────────
     private void SelectSection(string sectionId)

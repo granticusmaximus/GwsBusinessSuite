@@ -1,51 +1,62 @@
-// CMS Builder — postMessage bridge between Blazor and the React iframe.
-// Loaded as a JS module by CmsBuilderEditor.razor.
+// CMS Builder — postMessage bridge between Canvas Studio (CmsBuilderEditor.razor) and the
+// live-preview iframe (a real, same-origin /cms/{siteSlug}/{path}?edit=1 page, rendered by
+// CmsBlockHtmlRenderer.BuildEditModeScript on the iframe side). Global-object convention,
+// matching gwsMarkdownEditor/dragReorder.js rather than an ES module — this app has no
+// import-map precedent for JS modules.
+window.gwsCmsBuilderBridge = (function () {
+    let _dotNetRef = null;
+    let _boundHandler = null;
 
-let _dotNetRef = null;
-let _boundHandler = null;
-
-export function init(dotNetRef) {
-    _dotNetRef = dotNetRef;
-    _boundHandler = handleMessage.bind(null, dotNetRef);
-    window.addEventListener('message', _boundHandler);
-}
-
-export function dispose() {
-    if (_boundHandler) {
-        window.removeEventListener('message', _boundHandler);
-        _boundHandler = null;
+    function iframe() {
+        return document.getElementById('cms-builder-iframe');
     }
-    _dotNetRef = null;
-}
 
-export function sendToIframe(message) {
-    const iframe = document.getElementById('cms-builder-iframe');
-    if (iframe?.contentWindow) {
-        iframe.contentWindow.postMessage(message, '*');
+    function init(dotNetRef) {
+        _dotNetRef = dotNetRef;
+        _boundHandler = handleMessage;
+        window.addEventListener('message', _boundHandler);
     }
-}
 
-export function reloadIframe() {
-    const iframe = document.getElementById('cms-builder-iframe');
-    if (iframe) {
-        iframe.src = iframe.src;
+    function dispose() {
+        if (_boundHandler) {
+            window.removeEventListener('message', _boundHandler);
+            _boundHandler = null;
+        }
+        _dotNetRef = null;
     }
-}
 
-function handleMessage(dotNetRef, event) {
-    const data = event.data;
-    if (!data || typeof data !== 'object') return;
-
-    switch (data.type) {
-        case 'cms:select':
-            dotNetRef.invokeMethodAsync('OnWidgetSelectedFromIframe', data.sectionId ?? '', data.widgetId ?? '');
-            break;
-        case 'cms:select-section':
-            dotNetRef.invokeMethodAsync('OnSectionSelectedFromIframe', data.sectionId ?? '');
-            break;
-        case 'cms:ready':
-            // iframe signals it is in edit mode and ready; send current selection if any
-            dotNetRef.invokeMethodAsync('OnIframeReady');
-            break;
+    function sendToIframe(message) {
+        const el = iframe();
+        if (el && el.contentWindow) {
+            el.contentWindow.postMessage(message, window.location.origin);
+        }
     }
-}
+
+    function reloadIframe() {
+        const el = iframe();
+        if (el) {
+            // eslint-disable-next-line no-self-assign
+            el.src = el.src;
+        }
+    }
+
+    function handleMessage(event) {
+        if (event.origin !== window.location.origin) return;
+        const data = event.data;
+        if (!data || typeof data !== 'object' || !_dotNetRef) return;
+
+        switch (data.type) {
+            case 'cms:select':
+                _dotNetRef.invokeMethodAsync('OnWidgetSelectedFromIframe', data.sectionId || '', data.widgetId || '');
+                break;
+            case 'cms:select-section':
+                _dotNetRef.invokeMethodAsync('OnSectionSelectedFromIframe', data.sectionId || '');
+                break;
+            case 'cms:ready':
+                _dotNetRef.invokeMethodAsync('OnIframeReady');
+                break;
+        }
+    }
+
+    return { init, dispose, sendToIframe, reloadIframe };
+})();

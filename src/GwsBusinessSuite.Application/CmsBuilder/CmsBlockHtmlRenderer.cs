@@ -26,7 +26,7 @@ public static class CmsBlockHtmlRenderer
         .UseAdvancedExtensions()
         .Build();
 
-    public static string Render(string blocksJson, string siteSlug = "", string pageSlug = "")
+    public static string Render(string blocksJson, string siteSlug = "", string pageSlug = "", bool editMode = false)
     {
         var layout = ParseLayout(blocksJson);
         if (layout is null || layout.Sections.Count == 0)
@@ -37,11 +37,63 @@ public static class CmsBlockHtmlRenderer
         var html = new StringBuilder();
         foreach (var section in layout.Sections)
         {
-            html.Append(RenderSection(section, siteSlug, pageSlug));
+            html.Append(RenderSection(section, siteSlug, pageSlug, editMode));
         }
 
         return html.ToString();
     }
+
+    // Emitted only when editMode is true (see Program.cs's /cms/{siteSlug}/{**pageSlug}
+    // gating - never reaches a real visitor). Lets Canvas Studio's live-preview iframe
+    // report clicks back to the parent page via postMessage instead of navigating away,
+    // and highlights the currently-selected element. See cms-builder-bridge.js for the
+    // parent-side half of this bridge.
+    public static string BuildEditModeScript() => """
+        <style>
+          .gws-editable { position: relative; }
+          .gws-editable:hover { outline: 1px dashed rgba(37, 99, 235, 0.45); outline-offset: -1px; cursor: pointer; }
+          .gws-editor-selected { outline: 2px solid #2563eb !important; outline-offset: -2px; }
+          [data-gws-section-id]:hover { outline: 1px dashed rgba(148, 163, 184, 0.5); outline-offset: -1px; }
+        </style>
+        <script>
+        (function () {
+          var ORIGIN = window.location.origin;
+          function send(msg) { window.parent.postMessage(msg, ORIGIN); }
+
+          function highlight(widgetId) {
+            var prev = document.querySelector('.gws-editor-selected');
+            if (prev) prev.classList.remove('gws-editor-selected');
+            if (widgetId) {
+              var el = document.querySelector('[data-gws-widget-id="' + widgetId + '"]');
+              if (el) el.classList.add('gws-editor-selected');
+            }
+          }
+
+          document.addEventListener('click', function (e) {
+            var widgetEl = e.target.closest('[data-gws-widget-id]');
+            var sectionEl = e.target.closest('[data-gws-section-id]');
+            if (widgetEl) {
+              e.preventDefault();
+              highlight(widgetEl.getAttribute('data-gws-widget-id'));
+              send({ type: 'cms:select', sectionId: sectionEl ? sectionEl.getAttribute('data-gws-section-id') : '', widgetId: widgetEl.getAttribute('data-gws-widget-id') });
+            } else if (sectionEl) {
+              e.preventDefault();
+              highlight(null);
+              send({ type: 'cms:select-section', sectionId: sectionEl.getAttribute('data-gws-section-id') });
+            }
+          }, true);
+
+          window.addEventListener('message', function (e) {
+            if (e.origin !== ORIGIN || !e.data || typeof e.data !== 'object') return;
+            if (e.data.type === 'cms:sync-selection') {
+              highlight(e.data.widgetId || null);
+            }
+          });
+
+          send({ type: 'cms:ready' });
+        })();
+        </script>
+        """;
 
     private static PageLayout? ParseLayout(string blocksJson)
     {
@@ -60,20 +112,28 @@ public static class CmsBlockHtmlRenderer
         }
     }
 
-    private static string RenderSection(LayoutSection section, string siteSlug, string pageSlug)
+    private static string RenderSection(LayoutSection section, string siteSlug, string pageSlug, bool editMode)
     {
         var sectionClass = $"gws-section {BgClass(section.Background)} {PadClass(section.Padding)}".TrimEnd();
         var columnsClass = ColsClass(section.ColumnLayout);
+        var sectionAttrs = editMode ? $" data-gws-section-id=\"{Html(section.Id)}\"" : "";
 
         var sb = new StringBuilder();
-        sb.Append($"""<section class="{Html(sectionClass)}"><div class="{Html(columnsClass)}">""");
+        sb.Append($"""<section class="{Html(sectionClass)}"{sectionAttrs}><div class="{Html(columnsClass)}">""");
 
         foreach (var column in section.Columns)
         {
             sb.Append("""<div class="gws-column">""");
             foreach (var widget in column.Widgets)
             {
-                sb.Append(WrapWithStyle(RenderWidget(widget, siteSlug, pageSlug), widget.Style));
+                var inner = WrapWithStyle(RenderWidget(widget, siteSlug, pageSlug), widget.Style);
+                // Wrapped OUTSIDE WrapWithStyle so a widget's own background/padding
+                // overrides can never clip the selection outline, and closest('[data-gws-
+                // widget-id]') in the edit-mode script always resolves reliably regardless
+                // of per-widget style config.
+                sb.Append(editMode
+                    ? $"""<div class="gws-editable" data-gws-widget-id="{Html(widget.Id)}" data-gws-widget-type="{Html(widget.WidgetType)}">{inner}</div>"""
+                    : inner);
             }
             sb.Append("</div>");
         }

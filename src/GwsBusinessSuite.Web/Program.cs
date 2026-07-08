@@ -349,7 +349,16 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     var page = await cmsBuilderService.GetPageByFullPathAsync(site.Id, pageSlug, includeUnpublished);
     if (page is null) return Results.NotFound();
 
-    var bodyHtml = CmsBlockHtmlRenderer.Render(page.BlocksJson, siteSlug, pageSlug);
+    // Edit-mode markup/script (Canvas Studio's live-preview click-to-select) must never
+    // reach a real visitor - gated on BOTH an explicit query flag AND the same role check
+    // as the Studio page itself ([Authorize(Policy = "ContributorAccess")]), not just
+    // "authenticated", so a Contributor casually browsing their own live page in another
+    // tab doesn't silently render editable overlays.
+    var isStudioUser = httpContext.User.Identity?.IsAuthenticated == true
+        && (httpContext.User.IsInRole(AppRoles.Admin) || httpContext.User.IsInRole(AppRoles.Contributor));
+    var editMode = isStudioUser && httpContext.Request.Query["edit"] == "1";
+
+    var bodyHtml = CmsBlockHtmlRenderer.Render(page.BlocksJson, siteSlug, pageSlug, editMode);
     var pageTitle = System.Net.WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle);
     var metaDescription = System.Net.WebUtility.HtmlEncode(page.MetaDescription);
     var ogImageTag = string.IsNullOrWhiteSpace(page.OgImageUrl)
@@ -363,6 +372,7 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     var customStyleTag = string.IsNullOrWhiteSpace(customCss)
         ? string.Empty
         : $"<style>{SanitizeInlineCss(customCss)}</style>";
+    var editModeTag = editMode ? CmsBlockHtmlRenderer.BuildEditModeScript() : string.Empty;
 
     var html = $"""
         <!DOCTYPE html>
@@ -378,6 +388,7 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
         </head>
         <body>
           {bodyHtml}
+          {editModeTag}
         </body>
         </html>
         """;
