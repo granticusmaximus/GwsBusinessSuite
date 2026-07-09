@@ -30,11 +30,33 @@ public sealed class DigitalOceanService(
         }
 
         var (apiToken, isUnreadable) = UnprotectApiToken(row.ApiToken);
+        var sshPrivateKeyUnreadable = false;
+        if (!string.IsNullOrWhiteSpace(row.SshPrivateKey))
+        {
+            try
+            {
+                secretProtector.Unprotect(row.SshPrivateKey);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Unable to decrypt stored SSH private key. The key ring may have changed since it was saved.");
+                sshPrivateKeyUnreadable = true;
+            }
+        }
+
         return new DigitalOceanSettingsView
         {
             ApiToken = apiToken,
             DropletId = row.DropletId,
-            ApiTokenUnreadable = isUnreadable
+            ApiTokenUnreadable = isUnreadable,
+            // Existing rows created before the SSH columns existed have "" / 0 from the
+            // migration's column defaults (EF uses the CLR default, not the C# property
+            // initializer) rather than the app's intended "root" / 22 defaults.
+            SshUsername = string.IsNullOrWhiteSpace(row.SshUsername) ? "root" : row.SshUsername,
+            SshPort = row.SshPort <= 0 ? 22 : row.SshPort,
+            HasPrivateKey = !string.IsNullOrWhiteSpace(row.SshPrivateKey),
+            SshPrivateKeyUnreadable = sshPrivateKeyUnreadable,
+            SshHostKeyFingerprint = row.SshHostKeyFingerprint
         };
     }
 
@@ -49,6 +71,42 @@ public sealed class DigitalOceanService(
 
         row.ApiToken = ProtectApiToken(settings.ApiToken);
         row.DropletId = settings.DropletId.Trim();
+        row.UpdatedAt = DateTimeOffset.UtcNow;
+        row.UpdatedBy = "user";
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task SaveSshSettingsAsync(SshSettingsInput settings, CancellationToken cancellationToken = default)
+    {
+        var row = await dbContext.DigitalOceanSettings.FirstOrDefaultAsync(cancellationToken);
+        if (row is null)
+        {
+            row = new DigitalOceanSettings();
+            dbContext.DigitalOceanSettings.Add(row);
+        }
+
+        row.SshUsername = string.IsNullOrWhiteSpace(settings.Username) ? "root" : settings.Username.Trim();
+        row.SshPort = settings.Port <= 0 ? 22 : settings.Port;
+
+        if (settings.ClearPrivateKey)
+        {
+            row.SshPrivateKey = string.Empty;
+            row.SshPrivateKeyPassphrase = null;
+            row.SshHostKeyFingerprint = null;
+        }
+        else if (!string.IsNullOrWhiteSpace(settings.NewPrivateKey))
+        {
+            // Note: the pinned SshHostKeyFingerprint is intentionally left untouched here -
+            // it identifies the remote server, not the credential used to authenticate to
+            // it, so rotating the private key doesn't invalidate the existing pin.
+            row.SshPrivateKey = secretProtector.Protect(settings.NewPrivateKey.Trim());
+            row.SshPrivateKeyPassphrase = string.IsNullOrEmpty(settings.NewPrivateKeyPassphrase)
+                ? null
+                : secretProtector.Protect(settings.NewPrivateKeyPassphrase);
+        }
+        // else: NewPrivateKey left blank - leave the existing stored key untouched.
+
         row.UpdatedAt = DateTimeOffset.UtcNow;
         row.UpdatedBy = "user";
 

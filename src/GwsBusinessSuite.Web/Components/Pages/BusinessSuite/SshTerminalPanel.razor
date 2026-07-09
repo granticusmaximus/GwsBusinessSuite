@@ -1,0 +1,311 @@
+@implements IAsyncDisposable
+@using GwsBusinessSuite.Application.DigitalOcean
+@using GwsBusinessSuite.Application.SshTerminal
+@using Microsoft.AspNetCore.Components.Authorization
+@inject IDigitalOceanService DigitalOceanService
+@inject ISshTerminalService SshTerminalService
+@inject IJSRuntime JS
+@inject ILogger<SshTerminalPanel> Logger
+
+<div class="card border-0 shadow-sm mt-3">
+    <div class="card-header bg-white border-bottom py-3">
+        <span class="fw-semibold"><i class="bi bi-terminal-fill me-1 text-primary"></i>SSH Terminal</span>
+    </div>
+    <div class="card-body">
+        @if (!_settingsLoaded)
+        {
+            <div class="d-flex align-items-center gap-2 text-secondary">
+                <span class="spinner-border spinner-border-sm"></span>
+                <span>Loading...</span>
+            </div>
+        }
+        else
+        {
+            @if (_session is null)
+            {
+                <div class="row g-3 mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label small text-secondary">Username</label>
+                        <input type="text" class="form-control" @bind="_username" @bind:event="oninput" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small text-secondary">Port</label>
+                        <input type="number" class="form-control" @bind="_port" @bind:event="oninput" />
+                    </div>
+                    <div class="col-md-7">
+                        <label class="form-label small text-secondary">Passphrase <span class="text-muted">(optional)</span></label>
+                        <input type="password" class="form-control" @bind="_newPrivateKeyPassphrase" @bind:event="oninput" />
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small text-secondary">Private Key</label>
+                        <textarea class="form-control font-monospace" rows="4" @bind="_newPrivateKey" @bind:event="oninput"
+                                  placeholder="@(_hasPrivateKey ? "A private key is already saved. Paste a new one to replace it." : "-----BEGIN OPENSSH PRIVATE KEY-----")"></textarea>
+                        @if (_sshPrivateKeyUnreadable)
+                        {
+                            <div class="small text-danger mt-1">The saved key couldn't be decrypted - re-enter it.</div>
+                        }
+                    </div>
+                </div>
+
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <button class="btn btn-sm btn-primary" @onclick="SaveSettingsAsync" disabled="@_isSavingSettings">
+                        @(_isSavingSettings ? "Saving..." : "Save Connection")
+                    </button>
+                    @if (_hasPrivateKey)
+                    {
+                        <button class="btn btn-sm btn-success" @onclick="ConnectAsync" disabled="@_isConnecting">
+                            @(_isConnecting ? "Connecting..." : "Connect")
+                        </button>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_saveMessage))
+                    {
+                        <span class="small text-secondary">@_saveMessage</span>
+                    }
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(_sshHostKeyFingerprint))
+                {
+                    <div class="small text-secondary mt-2">Pinned host key: <code>@_sshHostKeyFingerprint</code></div>
+                }
+
+                @if (_hostKeyMismatch)
+                {
+                    <div class="alert alert-danger mt-3" role="alert">
+                        <p class="mb-2">
+                            <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                            The droplet's SSH host key doesn't match the one pinned on first connect.
+                            This can happen after rebuilding the droplet, or could indicate the connection is being intercepted.
+                        </p>
+                        <div class="small mb-2">
+                            <div>Expected: <code>@_expectedFingerprint</code></div>
+                            <div>Received: <code>@_actualFingerprint</code></div>
+                        </div>
+                        <button class="btn btn-sm btn-outline-danger" @onclick="TrustNewHostKeyAsync" disabled="@_isConnecting">
+                            Trust new key and retry
+                        </button>
+                    </div>
+                }
+                else if (!string.IsNullOrWhiteSpace(_connectError))
+                {
+                    <div class="alert alert-warning mt-3" role="alert">@_connectError</div>
+                }
+            }
+            else
+            {
+                <div class="d-flex justify-content-end mb-2">
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="DisconnectAsync">Disconnect</button>
+                </div>
+                <div id="@_terminalElementId" style="height:480px;"></div>
+                <div class="small text-secondary mt-2">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Resizing this panel reflows the view client-side; tools that query the terminal size on the
+                    remote shell (e.g. <code>stty size</code>, full-screen apps) may not see the new size until reconnect.
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _settingsLoaded;
+    private string _username = "root";
+    private int _port = 22;
+    private string? _newPrivateKey;
+    private string? _newPrivateKeyPassphrase;
+    private bool _hasPrivateKey;
+    private bool _sshPrivateKeyUnreadable;
+    private string? _sshHostKeyFingerprint;
+    private bool _isSavingSettings;
+    private string _saveMessage = string.Empty;
+
+    private bool _isConnecting;
+    private string? _connectError;
+    private bool _hostKeyMismatch;
+    private string? _expectedFingerprint;
+    private string? _actualFingerprint;
+
+    private ISshTerminalSession? _session;
+    private readonly string _terminalElementId = $"ssh-terminal-{Guid.NewGuid():N}";
+    private DotNetObjectReference<SshTerminalPanel>? _dotNetRef;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSettingsAsync();
+        _settingsLoaded = true;
+    }
+
+    private async Task<string> CurrentUserNameAsync()
+    {
+        if (AuthState is null) return "admin";
+        var state = await AuthState;
+        return state.User.Identity?.Name ?? "admin";
+    }
+
+    private async Task LoadSettingsAsync()
+    {
+        var settings = await DigitalOceanService.GetSettingsAsync();
+        _username = settings?.SshUsername ?? "root";
+        _port = settings?.SshPort ?? 22;
+        _hasPrivateKey = settings?.HasPrivateKey ?? false;
+        _sshPrivateKeyUnreadable = settings?.SshPrivateKeyUnreadable ?? false;
+        _sshHostKeyFingerprint = settings?.SshHostKeyFingerprint;
+    }
+
+    private async Task SaveSettingsAsync()
+    {
+        _isSavingSettings = true;
+        _saveMessage = string.Empty;
+        try
+        {
+            await DigitalOceanService.SaveSshSettingsAsync(new SshSettingsInput
+            {
+                Username = _username,
+                Port = _port,
+                NewPrivateKey = _newPrivateKey,
+                NewPrivateKeyPassphrase = _newPrivateKeyPassphrase
+            });
+
+            // Never keep the typed key/passphrase around client-side once saved - the
+            // textarea reverts to the "already saved" placeholder on reload.
+            _newPrivateKey = null;
+            _newPrivateKeyPassphrase = null;
+            _saveMessage = "Saved.";
+            await LoadSettingsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to save SSH settings.");
+            _saveMessage = $"Failed to save: {ex.Message}";
+        }
+        finally
+        {
+            _isSavingSettings = false;
+        }
+    }
+
+    private async Task ConnectAsync()
+    {
+        _isConnecting = true;
+        _connectError = null;
+        _hostKeyMismatch = false;
+        try
+        {
+            var user = await CurrentUserNameAsync();
+            var result = await SshTerminalService.OpenAsync(user, 80, 24);
+            if (!result.Succeeded || result.Session is null)
+            {
+                _connectError = result.FailureReason;
+                _hostKeyMismatch = result.HostKeyMismatch;
+                _expectedFingerprint = result.ExpectedFingerprint;
+                _actualFingerprint = result.ActualFingerprint;
+                return;
+            }
+
+            _session = result.Session;
+            _session.OutputReceived += OnOutputReceived;
+            _session.Closed += OnSessionClosed;
+
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("gwsSshTerminal.init", _terminalElementId, _dotNetRef, 80, 24);
+        }
+        finally
+        {
+            _isConnecting = false;
+        }
+    }
+
+    private async Task TrustNewHostKeyAsync()
+    {
+        if (string.IsNullOrEmpty(_actualFingerprint))
+        {
+            return;
+        }
+
+        await SshTerminalService.TrustHostKeyAsync(_actualFingerprint);
+        _hostKeyMismatch = false;
+        await LoadSettingsAsync();
+        await ConnectAsync();
+    }
+
+    private void OnOutputReceived(byte[] data)
+    {
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("gwsSshTerminal.write", _terminalElementId, data);
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit already gone; nothing to write to.
+            }
+        });
+    }
+
+    private void OnSessionClosed(string reason)
+    {
+        _ = InvokeAsync(async () =>
+        {
+            _connectError = reason;
+            await TeardownSessionAsync();
+            StateHasChanged();
+        });
+    }
+
+    [JSInvokable]
+    public async Task OnTerminalInput(byte[] data)
+    {
+        if (_session is not null)
+        {
+            await _session.WriteAsync(data);
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnTerminalResize(int columns, int rows)
+    {
+        if (_session is not null)
+        {
+            await _session.ResizeAsync(columns, rows);
+        }
+    }
+
+    private async Task DisconnectAsync()
+    {
+        await TeardownSessionAsync();
+    }
+
+    private async Task TeardownSessionAsync()
+    {
+        if (_session is null)
+        {
+            return;
+        }
+
+        _session.OutputReceived -= OnOutputReceived;
+        _session.Closed -= OnSessionClosed;
+
+        try
+        {
+            await JS.InvokeVoidAsync("gwsSshTerminal.destroy", _terminalElementId);
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit already gone; nothing to clean up client-side.
+        }
+
+        _dotNetRef?.Dispose();
+        _dotNetRef = null;
+
+        await _session.DisposeAsync();
+        _session = null;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await TeardownSessionAsync();
+    }
+}

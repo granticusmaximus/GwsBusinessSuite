@@ -91,28 +91,28 @@
             else if (_showFeaturedSections)
             {
                 <div class="pd-featured-stack">
-                    @foreach (var section in _featuredSections)
+                    @foreach (var featuredSection in _featuredSections)
                     {
                         <section class="pd-section">
                             <div class="pd-section-header">
                                 <div>
-                                    <div class="pd-section-kicker">@section.Icon Featured Category</div>
-                                    <h2>@section.Category</h2>
+                                    <div class="pd-section-kicker">@featuredSection.Icon Featured Category</div>
+                                    <h2>@featuredSection.Category</h2>
                                 </div>
                                 <button class="btn btn-sm btn-outline-secondary"
-                                        @onclick='() => LoadDiscoverCategoryAsync(section.Category)'>
+                                        @onclick='() => LoadDiscoverCategoryAsync(featuredSection.Category)'>
                                     View More
                                 </button>
                             </div>
 
-                            @if (section.Podcasts.Count == 0)
+                            @if (featuredSection.Podcasts.Count == 0)
                             {
                                 <p class="pd-muted">No podcasts are available in this category right now.</p>
                             }
                             else
                             {
                                 <div class="pd-grid">
-                                    @foreach (var item in section.Podcasts)
+                                    @foreach (var item in featuredSection.Podcasts)
                                     {
                                         @RenderDiscoverCard(item)
                                     }

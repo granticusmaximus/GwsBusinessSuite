@@ -6,6 +6,8 @@ public interface IDigitalOceanService
 
     Task SaveSettingsAsync(DigitalOceanSettingsView settings, CancellationToken cancellationToken = default);
 
+    Task SaveSshSettingsAsync(SshSettingsInput settings, CancellationToken cancellationToken = default);
+
     Task<DropletInfoResult> GetDropletInfoAsync(CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<DropletActionView>> ListRecentActionsAsync(CancellationToken cancellationToken = default);

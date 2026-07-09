@@ -141,13 +141,13 @@
                 </div>
 
                 <div class="col-xl-5">
-                    @foreach (var section in _snapshot.Community.ResourceSections)
+                    @foreach (var resourceSection in _snapshot.Community.ResourceSections)
                     {
                         <div class="card border-0 shadow-sm mb-4">
                             <div class="card-body">
-                                <h3 class="h5 mb-3">@section.Title</h3>
+                                <h3 class="h5 mb-3">@resourceSection.Title</h3>
                                 <div class="gi-resource-grid">
-                                    @foreach (var link in section.Links)
+                                    @foreach (var link in resourceSection.Links)
                                     {
                                         <a class="gi-resource-card" href="@link.Url" target="_blank" rel="noopener noreferrer">
                                             <div class="gi-resource-title">@link.Title</div>
@@ -261,13 +261,13 @@
                 </div>
 
                 <div class="col-xl-5">
-                    @foreach (var section in _snapshot.State.ResourceSections)
+                    @foreach (var resourceSection in _snapshot.State.ResourceSections)
                     {
                         <div class="card border-0 shadow-sm mb-4">
                             <div class="card-body">
-                                <h3 class="h5 mb-3">@section.Title</h3>
+                                <h3 class="h5 mb-3">@resourceSection.Title</h3>
                                 <div class="gi-resource-grid">
-                                    @foreach (var link in section.Links)
+                                    @foreach (var link in resourceSection.Links)
                                     {
                                         <a class="gi-resource-card" href="@link.Url" target="_blank" rel="noopener noreferrer">
                                             <div class="gi-resource-title">@link.Title</div>

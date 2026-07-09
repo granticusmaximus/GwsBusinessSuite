@@ -1,16 +1,20 @@
 @page "/admin/wiki"
 @rendermode InteractiveServer
+@implements IAsyncDisposable
 @using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Domain.Entities
+@using Markdig
+@using Microsoft.AspNetCore.Components.Authorization
 @inject IWikiService WikiService
+@inject IJSRuntime JS
 @inject ILogger<Wiki> Logger
 
 <PageTitle>Knowledge Base</PageTitle>
 
 <div class="page-header">
     <h1><i class="bi bi-journal-bookmark-fill me-2 text-warning"></i>Knowledge Base</h1>
-    <p>Store internal documentation, SOPs, app notes, and business operating knowledge with local SQLite persistence.
-    </p>
+    <p>Store internal documentation, SOPs, app notes, and business operating knowledge. Every save is a git commit,
+        so full history and diffs are always available.</p>
 </div>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
@@ -96,8 +100,7 @@
                         </div>
                         <div class="col-12">
                             <label class="form-label fw-semibold small">Markdown</label>
-                            <InputTextArea class="form-control" rows="14" @bind-Value="Editor.Markdown"
-                                           placeholder="Write the operating note or procedure in Markdown." />
+                            <textarea id="@MarkdownEditorElementId">@Editor.Markdown</textarea>
                         </div>
                     </div>
 
@@ -129,15 +132,95 @@
                 }
                 else
                 {
-                    <pre class="mb-0 bg-body-tertiary p-3 rounded-3 border"
-                         style="white-space: pre-wrap;">@Editor.Markdown</pre>
+                    <div class="wiki-rendered-preview">@((MarkupString)RenderedHtml)</div>
                 }
             </div>
         </div>
+
+        @if (SelectedPageId.HasValue)
+        {
+            <div class="card border-0 shadow-sm mt-4">
+                <div
+                    class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
+                    <div>
+                        <div class="fw-semibold">History</div>
+                        <div class="small text-secondary">Every save is a git commit - full history, diffs, and revert.</div>
+                    </div>
+                    <span class="badge text-bg-secondary">@History.Count commit@(History.Count == 1 ? "" : "s")</span>
+                </div>
+                <div class="card-body p-0">
+                    @if (!string.IsNullOrEmpty(HistoryErrorMessage))
+                    {
+                        <div class="alert alert-danger m-3 mb-0 py-2 small">@HistoryErrorMessage</div>
+                    }
+                    @if (History.Count == 0)
+                    {
+                        <div class="p-4">
+                            <p class="text-secondary mb-0">No commits yet - saving this page will create the first one.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="list-group list-group-flush">
+                            @for (var i = 0; i < History.Count; i++)
+                            {
+                                var revision = History[i];
+                                var previousRevision = i + 1 < History.Count ? History[i + 1] : null;
+                                <div class="list-group-item">
+                                    <div class="d-flex justify-content-between align-items-start gap-2">
+                                        <div>
+                                            <div class="fw-semibold small">
+                                                <code class="me-1">@revision.ShortSha</code>@revision.Message
+                                            </div>
+                                            <div class="small text-secondary mt-1">
+                                                @revision.AuthorName &middot; @revision.When.ToLocalTime().ToString("g")
+                                            </div>
+                                        </div>
+                                        <div class="d-flex gap-1 flex-shrink-0">
+                                            @if (previousRevision is not null)
+                                            {
+                                                <button class="btn btn-xs btn-outline-secondary" @onclick="() => ToggleDiffAsync(revision, previousRevision)">
+                                                    Diff
+                                                </button>
+                                            }
+                                            <button class="btn btn-xs btn-outline-primary" @onclick="() => RevertToRevisionAsync(revision.Sha)"
+                                                    disabled="@IsHistoryBusy">
+                                                Revert
+                                            </button>
+                                        </div>
+                                    </div>
+                                    @if (DiffShaKey == revision.Sha)
+                                    {
+                                        <div class="mt-3 border-top pt-3">
+                                            @if (string.IsNullOrEmpty(DiffText))
+                                            {
+                                                <div class="small text-secondary">No textual changes in this commit.</div>
+                                            }
+                                            else
+                                            {
+                                                <div class="p-2 rounded-3 border bg-body-tertiary">
+                                                    @foreach (var line in DiffText.Split('\n'))
+                                                    {
+                                                        <div class="@DiffLineClass(line)" style="white-space:pre-wrap;font-family:var(--bs-font-monospace, monospace);font-size:0.8125rem;">@line</div>
+                                                    }
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
     </div>
 </div>
 
 @code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthState { get; set; }
+
     private List<WikiPage> WikiPages { get; set; } = new();
     private WikiPageEditorModel Editor { get; set; } = new();
     private Guid? SelectedPageId { get; set; }
@@ -145,11 +228,59 @@
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
 
+    private List<WikiRevisionView> History { get; set; } = new();
+    private bool IsHistoryBusy { get; set; }
+    private string HistoryErrorMessage { get; set; } = string.Empty;
+    private string? DiffShaKey { get; set; }
+    private string? DiffText { get; set; }
+
+    private const string MarkdownEditorElementId = "wiki-body-textarea";
+    private bool _markdownEditorInitialized;
+    private string? _lastSyncedMarkdown;
+    private DotNetObjectReference<Wiki>? _markdownEditorRef;
+
     private string EditorHeader => SelectedPageId.HasValue ? "Edit Wiki Page" : "Create Wiki Page";
+
+    private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .Build();
+
+    private string RenderedHtml => Markdown.ToHtml(Editor.Markdown, MarkdownPipeline);
 
     protected override async Task OnInitializedAsync()
     {
         await LoadPagesAsync(selectFirstPage: false);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_markdownEditorInitialized)
+        {
+            _markdownEditorRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("gwsMarkdownEditor.init", MarkdownEditorElementId, _markdownEditorRef);
+            _markdownEditorInitialized = true;
+            _lastSyncedMarkdown = Editor.Markdown;
+        }
+        else if (!string.Equals(Editor.Markdown, _lastSyncedMarkdown, StringComparison.Ordinal))
+        {
+            await JS.InvokeVoidAsync("gwsMarkdownEditor.setValue", MarkdownEditorElementId, Editor.Markdown);
+            _lastSyncedMarkdown = Editor.Markdown;
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnMarkdownChanged(string value)
+    {
+        Editor.Markdown = value;
+        _lastSyncedMarkdown = value;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task<string> CurrentUserNameAsync()
+    {
+        if (AuthState is null) return "admin";
+        var state = await AuthState;
+        return state.User.Identity?.Name ?? "admin";
     }
 
     private async Task LoadPagesAsync(bool selectFirstPage)
@@ -173,6 +304,8 @@
     {
         SelectedPageId = null;
         Editor = new WikiPageEditorModel();
+        History = new();
+        DiffShaKey = null;
         StatusMessage = "Ready to create a new wiki page.";
         ErrorMessage = string.Empty;
     }
@@ -196,13 +329,29 @@
                 Slug = page.Slug,
                 Markdown = page.Markdown
             };
+            DiffShaKey = null;
             StatusMessage = $"Opened wiki page '{page.Title}'.";
             ErrorMessage = string.Empty;
+            await LoadHistoryAsync(page.Id);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Unable to open wiki page {WikiPageId}.", wikiPageId);
             ErrorMessage = $"Unable to open wiki page. {ex.Message}";
+        }
+    }
+
+    private async Task LoadHistoryAsync(Guid wikiPageId)
+    {
+        HistoryErrorMessage = string.Empty;
+        try
+        {
+            History = (await WikiService.GetHistoryAsync(wikiPageId)).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load wiki page history for {WikiPageId}.", wikiPageId);
+            HistoryErrorMessage = $"Unable to load history. {ex.Message}";
         }
     }
 
@@ -214,7 +363,8 @@
 
         try
         {
-            var saved = await WikiService.SavePageAsync(Editor);
+            var user = await CurrentUserNameAsync();
+            var saved = await WikiService.SavePageAsync(Editor, user);
             SelectedPageId = saved.Id;
             Editor = new WikiPageEditorModel
             {
@@ -225,6 +375,7 @@
             };
             StatusMessage = $"Saved wiki page '{saved.Title}'.";
             await LoadPagesAsync(selectFirstPage: false);
+            await LoadHistoryAsync(saved.Id);
         }
         catch (Exception ex)
         {
@@ -250,7 +401,8 @@
 
         try
         {
-            await WikiService.DeletePageAsync(wikiPageId);
+            var user = await CurrentUserNameAsync();
+            await WikiService.DeletePageAsync(wikiPageId, user);
             StatusMessage = "Wiki page deleted.";
             CreateNewPage();
             await LoadPagesAsync(selectFirstPage: false);
@@ -264,5 +416,91 @@
         {
             IsBusy = false;
         }
+    }
+
+    private async Task ToggleDiffAsync(WikiRevisionView revision, WikiRevisionView previousRevision)
+    {
+        if (DiffShaKey == revision.Sha)
+        {
+            DiffShaKey = null;
+            DiffText = null;
+            return;
+        }
+
+        if (SelectedPageId is not { } wikiPageId)
+        {
+            return;
+        }
+
+        try
+        {
+            DiffText = await WikiService.GetDiffAsync(wikiPageId, previousRevision.Sha, revision.Sha);
+            DiffShaKey = revision.Sha;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load diff for wiki page {WikiPageId} at {Sha}.", wikiPageId, revision.Sha);
+            HistoryErrorMessage = $"Unable to load diff. {ex.Message}";
+        }
+    }
+
+    private async Task RevertToRevisionAsync(string sha)
+    {
+        if (SelectedPageId is not { } wikiPageId)
+        {
+            return;
+        }
+
+        var confirmed = await JS.InvokeAsync<bool>("confirm", "Revert to this version? This creates a new commit with the old content - nothing is lost.");
+        if (!confirmed) return;
+
+        IsHistoryBusy = true;
+        try
+        {
+            var user = await CurrentUserNameAsync();
+            var reverted = await WikiService.RevertToRevisionAsync(wikiPageId, sha, user);
+            Editor = new WikiPageEditorModel
+            {
+                WikiPageId = reverted.Id,
+                Title = reverted.Title,
+                Slug = reverted.Slug,
+                Markdown = reverted.Markdown
+            };
+            DiffShaKey = null;
+            StatusMessage = $"Reverted '{reverted.Title}' to an earlier version.";
+            await LoadPagesAsync(selectFirstPage: false);
+            await LoadHistoryAsync(wikiPageId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to revert wiki page {WikiPageId} to {Sha}.", wikiPageId, sha);
+            HistoryErrorMessage = $"Unable to revert. {ex.Message}";
+        }
+        finally
+        {
+            IsHistoryBusy = false;
+        }
+    }
+
+    private static string DiffLineClass(string line) =>
+        line.StartsWith('+') && !line.StartsWith("+++") ? "text-success"
+        : line.StartsWith('-') && !line.StartsWith("---") ? "text-danger"
+        : "text-secondary";
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_markdownEditorInitialized)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("gwsMarkdownEditor.destroy", MarkdownEditorElementId);
+            }
+            catch (JSDisconnectedException)
+            {
+                // The circuit is already gone (e.g. browser closed); nothing to clean up client-side.
+            }
+        }
+
+        _markdownEditorRef?.Dispose();
     }
 }

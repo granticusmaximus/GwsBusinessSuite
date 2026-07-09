@@ -11,6 +11,7 @@ using GwsBusinessSuite.Application.GovernmentIntelligence;
 using GwsBusinessSuite.Application.NewsIntelligence;
 using GwsBusinessSuite.Application.Podcasts;
 using GwsBusinessSuite.Application.Settings;
+using GwsBusinessSuite.Application.SshTerminal;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
@@ -91,11 +92,16 @@ public static class DependencyInjection
             client.BaseAddress = new Uri("https://api.digitalocean.com/v2/");
             client.Timeout = TimeSpan.FromSeconds(20);
         });
+        services.AddScoped<ISshTerminalService, SshTerminalService>();
         services.AddScoped<IPageRevisionService, PageRevisionService>();
         services.AddScoped<ICmsKnowledgeService, CmsKnowledgeService>();
         services.AddScoped<IContentStudioService, ContentStudioService>();
         services.AddScoped<ICrmService, CrmService>();
-        services.AddScoped<IWikiService, WikiService>();
+        // Same persisted volume as the SQLite DB and DP keys in production
+        // (docker-compose.yml mounts gwssuite-data:/app/data); a relative dev-local path
+        // otherwise (see appsettings.Development.json).
+        var wikiRepoPath = configuration["Wiki:RepoPath"] ?? "/app/data/wiki-repo";
+        services.AddScoped<IWikiService>(sp => new WikiService(sp.GetRequiredService<IAppDbContext>(), wikiRepoPath));
         services.AddHttpClient<INewsIntelligenceService, NewsIntelligenceService>(client =>
         {
             client.DefaultRequestHeaders.UserAgent.ParseAdd(

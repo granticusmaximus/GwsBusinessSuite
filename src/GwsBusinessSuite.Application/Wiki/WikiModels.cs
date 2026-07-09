@@ -13,3 +13,14 @@ public sealed class WikiPageEditorModel
 
     public string Markdown { get; set; } = string.Empty;
 }
+
+// One entry per git commit touching a page's file - the source of truth for "history" is
+// the git repo itself, not a DB table (unlike CmsPageRevision's bounded snapshot rows).
+public sealed class WikiRevisionView
+{
+    public string Sha { get; init; } = string.Empty;
+    public string ShortSha => Sha.Length >= 7 ? Sha[..7] : Sha;
+    public string Message { get; init; } = string.Empty;
+    public string AuthorName { get; init; } = string.Empty;
+    public DateTimeOffset When { get; init; }
+}

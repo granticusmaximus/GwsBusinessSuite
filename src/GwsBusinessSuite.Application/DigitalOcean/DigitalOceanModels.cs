@@ -8,6 +8,30 @@ public sealed class DigitalOceanSettingsView
     // Set when a stored token exists but can no longer be decrypted (e.g. the Data
     // Protection key ring rotated) - same convention as CjConnectorSettingsView.
     public bool ApiTokenUnreadable { get; init; }
+
+    public string SshUsername { get; init; } = "root";
+    public int SshPort { get; init; } = 22;
+
+    // The private key itself never round-trips back to the browser - it's more
+    // sensitive than ApiToken, so unlike ApiToken this view only ever exposes whether
+    // one is saved, not its value.
+    public bool HasPrivateKey { get; init; }
+    public bool SshPrivateKeyUnreadable { get; init; }
+    public string? SshHostKeyFingerprint { get; init; }
+}
+
+// Save-side DTO for the SSH connection fields, kept separate from
+// DigitalOceanSettingsView because the private key has different "blank" semantics:
+// a blank ApiToken on save just re-encrypts blank, but a blank NewPrivateKey must mean
+// "leave the existing key untouched" since the field is never prefilled with the
+// current value.
+public sealed class SshSettingsInput
+{
+    public string Username { get; init; } = "root";
+    public int Port { get; init; } = 22;
+    public string? NewPrivateKey { get; init; }
+    public string? NewPrivateKeyPassphrase { get; init; }
+    public bool ClearPrivateKey { get; init; }
 }
 
 public sealed class DropletInfoView

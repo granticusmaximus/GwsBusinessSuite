@@ -218,7 +218,7 @@ public sealed class DockerActionLog : AuditableEntity
     // aren't scoped to a single container.
     public string ContainerName { get; set; } = string.Empty;
 
-    // Start/Stop/Restart/Remove/Pull/Recreate/Exec/Reboot/Resize/Snapshot
+    // Start/Stop/Restart/Remove/Pull/Recreate/Exec/Reboot/Resize/Snapshot/SshConnect/SshDisconnect
     public string Action { get; set; } = string.Empty;
 
     // Set only for Exec.
@@ -242,6 +242,19 @@ public sealed class DigitalOceanSettings : AuditableEntity
     // Optional manual override; auto-detected from the droplet's local metadata
     // service (169.254.169.254) when blank and reachable.
     public string DropletId { get; set; } = string.Empty;
+
+    // SSH terminal connection (private-key auth only). SshPrivateKey and
+    // SshPrivateKeyPassphrase are protected via ISecretProtector, same as ApiToken.
+    public string SshUsername { get; set; } = "root";
+    public int SshPort { get; set; } = 22;
+    public string SshPrivateKey { get; set; } = string.Empty;
+    public string? SshPrivateKeyPassphrase { get; set; }
+
+    // SHA256 fingerprint of the host key pinned on first successful connect. Not a
+    // secret, so it's stored in plain text - encrypting it would make the "did the
+    // host key change" check depend on decryption succeeding, when it should instead
+    // fail safe (unreadable must never be treated as "no pinned key, allow anything").
+    public string? SshHostKeyFingerprint { get; set; }
 }
 
 public sealed class CjConnectorSettings : AuditableEntity

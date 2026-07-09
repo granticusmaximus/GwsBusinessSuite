@@ -90,8 +90,16 @@
                         <button class="btn btn-sm btn-outline-danger" @onclick="RebootDropletAsync" disabled="@IsDoActionBusy">Reboot</button>
                         <button class="btn btn-sm btn-outline-warning" @onclick="ShowResizePrompt" disabled="@IsDoActionBusy">Resize</button>
                         <button class="btn btn-sm btn-outline-secondary" @onclick="ShowSnapshotPrompt" disabled="@IsDoActionBusy">Snapshot</button>
+                        <button class="btn btn-sm btn-outline-info" @onclick="() => _showTerminal = !_showTerminal">
+                            @(_showTerminal ? "Hide Terminal" : "Terminal")
+                        </button>
                     </div>
                 </div>
+
+                @if (_showTerminal)
+                {
+                    <SshTerminalPanel />
+                }
 
                 @if (DropletActions.Count > 0)
                 {
@@ -198,6 +206,7 @@ else
     private string DoSaveMessage { get; set; } = string.Empty;
     private DropletInfoResult? DropletResult { get; set; }
     private List<DropletActionView> DropletActions { get; set; } = new();
+    private bool _showTerminal;
 
     protected override async Task OnInitializedAsync()
     {
