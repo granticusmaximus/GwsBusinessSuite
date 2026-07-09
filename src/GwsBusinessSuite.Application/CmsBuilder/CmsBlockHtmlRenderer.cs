@@ -27,7 +27,9 @@ public static class CmsBlockHtmlRenderer
     {
         if (layout is null || layout.Sections.Count == 0)
         {
-            return string.Empty;
+            return editMode
+                ? """<div class="gws-canvas-empty" data-gws-empty-canvas="1">Drop widgets here to start building this page.</div>"""
+                : string.Empty;
         }
 
         var html = new StringBuilder();
@@ -51,6 +53,20 @@ public static class CmsBlockHtmlRenderer
           .gws-editor-selected { outline: 2px solid #2563eb !important; outline-offset: -2px; }
           [data-gws-section-id]:hover { outline: 1px dashed rgba(148, 163, 184, 0.5); outline-offset: -1px; }
           [data-gws-inline-prop]:focus { outline: 2px solid #16a34a !important; outline-offset: 2px; cursor: text; }
+          .gws-column { position: relative; min-height: 24px; }
+          .gws-column.is-drop-target { outline: 1px dashed rgba(37, 99, 235, 0.45); outline-offset: 6px; border-radius: 14px; }
+          .gws-column-empty {
+            min-height: 72px; border: 1px dashed rgba(148, 163, 184, 0.5); border-radius: 14px;
+            display: flex; align-items: center; justify-content: center; text-align: center;
+            color: #64748b; font-size: 0.9rem; background: rgba(248, 250, 252, 0.9);
+          }
+          .gws-canvas-empty {
+            min-height: 240px; margin: 2rem auto; padding: 1.5rem;
+            border: 2px dashed rgba(148, 163, 184, 0.65); border-radius: 20px;
+            display: flex; align-items: center; justify-content: center; text-align: center;
+            color: #475569; background: linear-gradient(180deg, rgba(248, 250, 252, 0.95), rgba(241, 245, 249, 0.95));
+          }
+          .gws-canvas-empty.is-drop-target { border-color: #2563eb; background: rgba(219, 234, 254, 0.55); }
           .gws-drag-handle {
             position: absolute; top: 4px; left: 4px; z-index: 40;
             width: 22px; height: 22px; border-radius: 6px;
@@ -67,24 +83,118 @@ public static class CmsBlockHtmlRenderer
           var ORIGIN = window.location.origin;
           function send(msg) { window.parent.postMessage(msg, ORIGIN); }
 
-          // Canvas drag-and-drop: tracked entirely within this document rather than handed
-          // off to the parent frame. Once a mousedown lands inside an iframe, the browser
-          // keeps routing subsequent mousemove/mouseup here for the rest of the gesture
-          // regardless of what's stacked on top of the iframe in the parent document - so a
-          // parent-side interception overlay never actually receives the events. Tracking
-          // and hit-testing locally sidesteps that entirely; only the final drop needs to
-          // reach the parent, since that's the only side that can mutate Blazor state.
           var drag = null;
+          var paletteDragTarget = null;
+          var html5Indicator = null;
+
+          function createIndicator() {
+            var indicator = document.createElement('div');
+            indicator.style.cssText = 'position:fixed;left:0;top:0;width:0;height:3px;background:#2563eb;z-index:100000;pointer-events:none;display:none;border-radius:2px;box-shadow:0 0 0 1px rgba(255,255,255,0.8);';
+            document.body.appendChild(indicator);
+            return indicator;
+          }
+
+          function clearIndicator(indicator) {
+            if (indicator) indicator.style.display = 'none';
+          }
+
+          function clearDropHighlights() {
+            document.querySelectorAll('.is-drop-target').forEach(function (el) {
+              el.classList.remove('is-drop-target');
+            });
+          }
+
+          function clearDropVisuals(indicator) {
+            clearIndicator(indicator);
+            clearDropHighlights();
+          }
+
+          function getSectionId(el) {
+            var sectionEl = el && el.closest ? el.closest('[data-gws-section-id]') : null;
+            return sectionEl ? sectionEl.getAttribute('data-gws-section-id') : '';
+          }
+
+          function getColumnId(el) {
+            var columnEl = el && el.closest ? el.closest('[data-gws-column-id]') : null;
+            return columnEl ? columnEl.getAttribute('data-gws-column-id') : '';
+          }
+
+          function hasType(dataTransfer, type) {
+            return !!(dataTransfer && dataTransfer.types && Array.prototype.indexOf.call(dataTransfer.types, type) >= 0);
+          }
+
+          function resolveDropTarget(clientX, clientY, draggedWidgetId) {
+            var el = document.elementFromPoint(clientX, clientY);
+            if (!el || !el.closest) return null;
+
+            var emptyCanvas = el.closest('[data-gws-empty-canvas]');
+            if (emptyCanvas) {
+              return { mode: 'empty', emptyCanvas: emptyCanvas };
+            }
+
+            var widgetEl = el.closest('[data-gws-widget-id]');
+            if (widgetEl) {
+              var widgetId = widgetEl.getAttribute('data-gws-widget-id');
+              if (draggedWidgetId && widgetId === draggedWidgetId) return null;
+              var rect = widgetEl.getBoundingClientRect();
+              return {
+                mode: 'widget',
+                widgetId: widgetId,
+                sectionId: getSectionId(widgetEl),
+                columnId: getColumnId(widgetEl),
+                columnEl: widgetEl.closest('[data-gws-column-id]'),
+                rect: rect,
+                insertAfter: clientY > rect.top + rect.height / 2
+              };
+            }
+
+            var columnEl = el.closest('[data-gws-column-id]');
+            if (columnEl) {
+              return {
+                mode: 'column',
+                sectionId: getSectionId(columnEl),
+                columnId: getColumnId(columnEl),
+                columnEl: columnEl,
+                rect: columnEl.getBoundingClientRect()
+              };
+            }
+
+            return null;
+          }
+
+          function drawDropIndicator(target, indicator) {
+            clearDropVisuals(indicator);
+            if (!target) return;
+
+            if (target.mode === 'empty') {
+              target.emptyCanvas.classList.add('is-drop-target');
+              return;
+            }
+
+            if (target.mode === 'column' && target.columnEl) {
+              target.columnEl.classList.add('is-drop-target');
+            }
+
+            if (!indicator || !target.rect) return;
+
+            indicator.style.display = 'block';
+            indicator.style.left = target.rect.left + 'px';
+            indicator.style.width = target.rect.width + 'px';
+            indicator.style.top = (target.mode === 'widget' && !target.insertAfter ? target.rect.top : target.rect.bottom) + 'px';
+          }
 
           document.addEventListener('mousedown', function (e) {
             var handle = e.target.closest('[data-gws-drag-handle-for]');
             if (!handle) return;
             e.preventDefault();
-            var indicator = document.createElement('div');
-            indicator.style.cssText = 'position:fixed;left:0;top:0;width:0;height:3px;background:#2563eb;z-index:100000;pointer-events:none;display:none;border-radius:2px;box-shadow:0 0 0 1px rgba(255,255,255,0.8);';
-            document.body.appendChild(indicator);
             document.body.style.userSelect = 'none';
-            drag = { widgetId: handle.getAttribute('data-gws-drag-handle-for'), indicator: indicator, target: null, raf: null, pendingEvent: null };
+            drag = {
+              widgetId: handle.getAttribute('data-gws-drag-handle-for'),
+              indicator: createIndicator(),
+              target: null,
+              raf: null,
+              pendingEvent: null
+            };
           });
 
           function processDragMove() {
@@ -92,20 +202,8 @@ public static class CmsBlockHtmlRenderer
             drag.raf = null;
             var e = drag.pendingEvent;
             if (!e) return;
-            var el = document.elementFromPoint(e.clientX, e.clientY);
-            var widgetEl = el && el.closest ? el.closest('[data-gws-widget-id]') : null;
-            if (!widgetEl || widgetEl.getAttribute('data-gws-widget-id') === drag.widgetId) {
-              drag.indicator.style.display = 'none';
-              drag.target = null;
-              return;
-            }
-            var rect = widgetEl.getBoundingClientRect();
-            var insertAfter = e.clientY > rect.top + rect.height / 2;
-            drag.indicator.style.display = 'block';
-            drag.indicator.style.left = rect.left + 'px';
-            drag.indicator.style.top = (insertAfter ? rect.bottom : rect.top) + 'px';
-            drag.indicator.style.width = rect.width + 'px';
-            drag.target = { widgetId: widgetEl.getAttribute('data-gws-widget-id'), insertAfter: insertAfter };
+            drag.target = resolveDropTarget(e.clientX, e.clientY, drag.widgetId);
+            drawDropIndicator(drag.target, drag.indicator);
           }
 
           document.addEventListener('mousemove', function (e) {
@@ -120,13 +218,51 @@ public static class CmsBlockHtmlRenderer
             var draggedId = drag.widgetId;
             var target = drag.target;
             if (drag.raf) cancelAnimationFrame(drag.raf);
+            clearDropVisuals(drag.indicator);
             drag.indicator.remove();
             document.body.style.userSelect = '';
             drag = null;
-            if (target) {
-              send({ type: 'cms:drop', widgetId: draggedId, targetWidgetId: target.widgetId, insertAfter: target.insertAfter });
+
+            if (target && target.mode !== 'empty') {
+              send({
+                type: 'cms:drop',
+                widgetId: draggedId,
+                sectionId: target.sectionId || '',
+                columnId: target.columnId || '',
+                targetWidgetId: target.widgetId || '',
+                insertAfter: !!target.insertAfter
+              });
             }
           });
+
+          document.addEventListener('dragover', function (e) {
+            if (!hasType(e.dataTransfer, 'application/x-gws-widget-type')) return;
+            var target = resolveDropTarget(e.clientX, e.clientY, null);
+            if (!target) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            if (!html5Indicator) html5Indicator = createIndicator();
+            paletteDragTarget = target;
+            drawDropIndicator(target, html5Indicator);
+          }, true);
+
+          document.addEventListener('drop', function (e) {
+            if (!hasType(e.dataTransfer, 'application/x-gws-widget-type')) return;
+            e.preventDefault();
+            var widgetType = e.dataTransfer.getData('application/x-gws-widget-type') || e.dataTransfer.getData('text/plain');
+            var target = resolveDropTarget(e.clientX, e.clientY, null) || paletteDragTarget;
+            clearDropVisuals(html5Indicator);
+            paletteDragTarget = null;
+            if (!widgetType) return;
+            send({
+              type: 'cms:insert-widget',
+              widgetType: widgetType,
+              sectionId: target && target.sectionId ? target.sectionId : '',
+              columnId: target && target.columnId ? target.columnId : '',
+              targetWidgetId: target && target.widgetId ? target.widgetId : '',
+              insertAfter: !!(target && target.insertAfter)
+            });
+          }, true);
 
           function highlight(widgetId) {
             var prev = document.querySelector('.gws-editor-selected');
@@ -192,6 +328,9 @@ public static class CmsBlockHtmlRenderer
               if (el && document.activeElement !== el) {
                 el.innerText = e.data.value;
               }
+            } else if (e.data.type === 'cms:palette-drag-end') {
+              clearDropVisuals(html5Indicator);
+              paletteDragTarget = null;
             }
           });
 
@@ -211,7 +350,14 @@ public static class CmsBlockHtmlRenderer
 
         foreach (var column in section.Columns)
         {
-            sb.Append("""<div class="gws-column">""");
+            var columnAttrs = editMode
+                ? $" class=\"gws-column\" data-gws-column-id=\"{Html(column.Id)}\""
+                : " class=\"gws-column\"";
+            sb.Append($"""<div{columnAttrs}>""");
+            if (editMode && column.Widgets.Count == 0)
+            {
+                sb.Append("""<div class="gws-column-empty">Drop widgets here</div>""");
+            }
             foreach (var widget in column.Widgets)
             {
                 var inner = WrapWithStyle(RenderWidget(widget, siteSlug, pageSlug, editMode), widget.Style);

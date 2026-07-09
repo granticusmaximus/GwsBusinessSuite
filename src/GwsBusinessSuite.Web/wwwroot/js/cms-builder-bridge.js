@@ -66,6 +66,25 @@ window.gwsCmsBuilderBridge = (function () {
         }
     }
 
+    function beginPaletteDrag(event) {
+        const source = event.currentTarget || event.target;
+        const widgetType = source && source.getAttribute
+            ? source.getAttribute('data-gws-palette-widget')
+            : null;
+        if (!widgetType || !event.dataTransfer) {
+            return;
+        }
+
+        event.dataTransfer.effectAllowed = 'copy';
+        event.dataTransfer.dropEffect = 'copy';
+        event.dataTransfer.setData('application/x-gws-widget-type', widgetType);
+        event.dataTransfer.setData('text/plain', widgetType);
+    }
+
+    function endPaletteDrag() {
+        sendToIframe({ type: 'cms:palette-drag-end' });
+    }
+
     function handleMessage(event) {
         if (event.origin !== window.location.origin) return;
         const data = event.data;
@@ -82,8 +101,23 @@ window.gwsCmsBuilderBridge = (function () {
                 _dotNetRef.invokeMethodAsync('OnWidgetPropEditedFromIframe', data.sectionId || '', data.widgetId || '', data.prop || '', data.value || '');
                 break;
             case 'cms:drop':
-                if (data.widgetId && data.targetWidgetId && _dotNetRef) {
-                    _dotNetRef.invokeMethodAsync('OnCanvasDropAsync', data.widgetId, data.targetWidgetId, !!data.insertAfter);
+                if (data.widgetId && _dotNetRef) {
+                    _dotNetRef.invokeMethodAsync('OnCanvasDropAsync',
+                        data.widgetId,
+                        data.sectionId || '',
+                        data.columnId || '',
+                        data.targetWidgetId || '',
+                        !!data.insertAfter);
+                }
+                break;
+            case 'cms:insert-widget':
+                if (data.widgetType && _dotNetRef) {
+                    _dotNetRef.invokeMethodAsync('OnCanvasInsertWidgetAsync',
+                        data.widgetType,
+                        data.sectionId || '',
+                        data.columnId || '',
+                        data.targetWidgetId || '',
+                        !!data.insertAfter);
                 }
                 break;
             case 'cms:ready':
@@ -92,5 +126,5 @@ window.gwsCmsBuilderBridge = (function () {
         }
     }
 
-    return { init, dispose, sendToIframe, reloadIframe };
+    return { init, dispose, sendToIframe, reloadIframe, beginPaletteDrag, endPaletteDrag };
 })();

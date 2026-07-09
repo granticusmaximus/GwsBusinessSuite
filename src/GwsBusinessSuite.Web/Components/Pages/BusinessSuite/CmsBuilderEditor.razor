@@ -110,7 +110,12 @@ else
                 <div class="studio-widget-grid">
                     @foreach (var wt in WidgetCatalog)
                     {
-                        <button class="studio-widget-card" @onclick="() => QuickAddWidget(wt.Type)">
+                        <button class="studio-widget-card"
+                                draggable="true"
+                                data-gws-palette-widget="@wt.Type"
+                                ondragstart="window.gwsCmsBuilderBridge.beginPaletteDrag(event)"
+                                ondragend="window.gwsCmsBuilderBridge.endPaletteDrag()"
+                                @onclick="() => QuickAddWidget(wt.Type)">
                             <span class="studio-widget-icon"><i class="@wt.Icon"></i></span>
                             <span class="studio-widget-copy">
                                 <strong>@wt.Title</strong>
@@ -268,7 +273,7 @@ else
             </div>
         </div>
         <p class="small text-secondary px-2 mb-0">
-            <i class="bi bi-info-circle me-1"></i>Preview updates on save or reload — edits here aren't pushed live until you click Save.
+            <i class="bi bi-info-circle me-1"></i>Drag widgets straight onto the canvas. Canvas drops save immediately; Inspector edits still wait for Save.
         </p>
     </section>
 
@@ -1116,9 +1121,9 @@ else
     // a reload), and unlike Save-button edits, a drag-drop shouldn't require a separate
     // explicit Save to take effect, matching WordPress/Elementor's own behavior.
     [JSInvokable]
-    public async Task OnCanvasDropAsync(string draggedWidgetId, string targetWidgetId, bool insertAfter)
+    public async Task OnCanvasDropAsync(string draggedWidgetId, string targetSectionId, string targetColumnId, string targetWidgetId, bool insertAfter)
     {
-        if (string.IsNullOrEmpty(draggedWidgetId) || string.IsNullOrEmpty(targetWidgetId) || draggedWidgetId == targetWidgetId)
+        if (string.IsNullOrEmpty(draggedWidgetId))
         {
             return;
         }
@@ -1130,26 +1135,31 @@ else
             return;
         }
 
-        var (toSection, toColumn) = FindWidgetLocation(targetWidgetId);
-        if (toColumn is null)
+        PushUndo();
+        fromColumn.Widgets.Remove(draggedWidget);
+
+        var inserted = InsertWidgetIntoLayout(draggedWidget, targetSectionId, targetColumnId, targetWidgetId, insertAfter);
+        if (!inserted)
+        {
+            fromColumn.Widgets.Add(draggedWidget);
+            return;
+        }
+
+        StateHasChanged();
+        await SaveAsync();
+    }
+
+    [JSInvokable]
+    public async Task OnCanvasInsertWidgetAsync(string widgetType, string targetSectionId, string targetColumnId, string targetWidgetId, bool insertAfter)
+    {
+        if (string.IsNullOrWhiteSpace(widgetType))
         {
             return;
         }
 
         PushUndo();
-        fromColumn.Widgets.Remove(draggedWidget);
-
-        var targetIndex = toColumn.Widgets.FindIndex(w => w.Id == targetWidgetId);
-        if (targetIndex < 0)
-        {
-            toColumn.Widgets.Add(draggedWidget);
-        }
-        else
-        {
-            toColumn.Widgets.Insert(insertAfter ? targetIndex + 1 : targetIndex, draggedWidget);
-        }
-
-        SelectWidget(toSection?.Id ?? string.Empty, draggedWidget.Id);
+        var widget = CreateDefaultWidget(widgetType);
+        InsertWidgetIntoLayout(widget, targetSectionId, targetColumnId, targetWidgetId, insertAfter);
         StateHasChanged();
         await SaveAsync();
     }
@@ -1498,6 +1508,58 @@ else
         SelectWidget(targetSection.Id, widget.Id);
     }
 
+    private bool InsertWidgetIntoLayout(LayoutWidget widget, string targetSectionId, string targetColumnId, string targetWidgetId, bool insertAfter)
+    {
+        LayoutSection? targetSection = null;
+        LayoutColumn? targetColumn = null;
+
+        if (!string.IsNullOrEmpty(targetWidgetId))
+        {
+            (targetSection, targetColumn) = FindWidgetLocation(targetWidgetId);
+        }
+
+        targetSection ??= FindSection(targetSectionId);
+        targetColumn ??= FindColumn(targetSection, targetColumnId);
+
+        if (targetSection is null)
+        {
+            targetSection = _layout.Sections.LastOrDefault();
+            if (targetSection is null)
+            {
+                targetSection = CreateDefaultSection();
+                _layout.Sections.Add(targetSection);
+            }
+        }
+
+        targetColumn ??= targetSection.Columns.FirstOrDefault();
+        if (targetColumn is null)
+        {
+            targetSection.Columns = BuildColumnsForLayout(targetSection.ColumnLayout);
+            targetColumn = targetSection.Columns.FirstOrDefault();
+        }
+
+        if (targetColumn is null)
+        {
+            return false;
+        }
+
+        var targetIndex = string.IsNullOrEmpty(targetWidgetId)
+            ? -1
+            : targetColumn.Widgets.FindIndex(w => w.Id == targetWidgetId);
+
+        if (targetIndex < 0)
+        {
+            targetColumn.Widgets.Add(widget);
+        }
+        else
+        {
+            targetColumn.Widgets.Insert(insertAfter ? targetIndex + 1 : targetIndex, widget);
+        }
+
+        SelectWidget(targetSection.Id, widget.Id);
+        return true;
+    }
+
     private void MoveWidgetInColumn(string sectionId, string columnId, int index, int direction)
     {
         var col = FindSection(sectionId)?.Columns.FirstOrDefault(c => c.Id == columnId);
@@ -1762,6 +1824,9 @@ else
     // ── Lookup helpers ────────────────────────────────────────────────────
     private LayoutSection? FindSection(string id) =>
         _layout.Sections.FirstOrDefault(s => s.Id == id);
+
+    private static LayoutColumn? FindColumn(LayoutSection? section, string columnId) =>
+        section?.Columns.FirstOrDefault(c => c.Id == columnId);
 
     private LayoutWidget? FindWidget(string widgetId) =>
         _layout.Sections.SelectMany(s => s.Columns).SelectMany(c => c.Widgets)

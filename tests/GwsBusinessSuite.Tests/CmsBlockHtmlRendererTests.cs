@@ -40,6 +40,15 @@ public sealed class CmsBlockHtmlRendererTests
     }
 
     [Fact]
+    public void Render_ShouldReturnCanvasPlaceholder_ForNoSections_InEditMode()
+    {
+        var html = CmsBlockHtmlRenderer.Render("""{"sections":[]}""", editMode: true);
+
+        Assert.Contains("gws-canvas-empty", html);
+        Assert.Contains("data-gws-empty-canvas", html);
+    }
+
+    [Fact]
     public void Render_ShouldReturnEmptyString_ForInvalidJson()
     {
         var html = CmsBlockHtmlRenderer.Render("not json");
@@ -161,6 +170,29 @@ public sealed class CmsBlockHtmlRendererTests
         Assert.Contains("gws-cols-2", html);
         var columnCount = html.Split("class=\"gws-column\"").Length - 1;
         Assert.Equal(2, columnCount);
+    }
+
+    [Fact]
+    public void Render_ShouldEmitCanvasDropMetadata_InEditMode()
+    {
+        var html = CmsBlockHtmlRenderer.Render(
+            """{"sections":[{"id":"s1","columns":[{"id":"c1","widgets":[{"id":"w1","widgetType":"paragraph","props":{"text":"Hello"}}]}]}]}""",
+            editMode: true);
+
+        Assert.Contains("data-gws-section-id=\"s1\"", html);
+        Assert.Contains("data-gws-column-id=\"c1\"", html);
+        Assert.Contains("data-gws-widget-id=\"w1\"", html);
+    }
+
+    [Fact]
+    public void Render_ShouldShowEmptyColumnDropHint_InEditMode()
+    {
+        var html = CmsBlockHtmlRenderer.Render(
+            """{"sections":[{"id":"s1","columns":[{"id":"c1","widgets":[]}]}]}""",
+            editMode: true);
+
+        Assert.Contains("gws-column-empty", html);
+        Assert.Contains("Drop widgets here", html);
     }
 
     [Fact]
