@@ -26,7 +26,7 @@ public sealed class NewsIntelligenceServiceTests
         db.WatchedTopics.Add(topic);
         await db.SaveChangesAsync();
 
-        var now = new DateTimeOffset(2026, 7, 8, 15, 0, 0, TimeSpan.Zero);
+        var now = DateTimeOffset.UtcNow;
         db.NewsItems.AddRange(
             new NewsItem
             {
@@ -97,7 +97,7 @@ public sealed class NewsIntelligenceServiceTests
         db.WatchedTopics.AddRange(firstTopic, secondTopic);
         await db.SaveChangesAsync();
 
-        var now = new DateTimeOffset(2026, 7, 8, 15, 0, 0, TimeSpan.Zero);
+        var now = DateTimeOffset.UtcNow;
         db.NewsItems.AddRange(
             new NewsItem
             {
