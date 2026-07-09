@@ -1,9 +1,11 @@
 using System.Diagnostics;
 using GwsBusinessSuite.Application.Abstractions;
+using Microsoft.Extensions.Logging;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
-public sealed class DockerDeploymentService : IDockerDeploymentService
+public sealed class DockerDeploymentService(
+    ILogger<DockerDeploymentService> logger, string dockerExecutable = "docker") : IDockerDeploymentService
 {
     // Builds the image locally via the Docker CLI rather than a remote Docker Engine API
     // client — this matches how the project already deploys (docker-compose over SSH on
@@ -25,20 +27,30 @@ public sealed class DockerDeploymentService : IDockerDeploymentService
         var contextDirectory = Path.GetDirectoryName(fullDockerfilePath) ?? Directory.GetCurrentDirectory();
         var imageTag = appName.Trim().ToLowerInvariant();
 
-        var (exitCode, output) = await RunDockerCommandAsync(
-            $"build -t {imageTag} -f \"{fullDockerfilePath}\" \"{contextDirectory}\"",
-            ct);
+        int exitCode;
+        string output;
+        try
+        {
+            (exitCode, output) = await RunDockerCommandAsync(
+                $"build -t {imageTag} -f \"{fullDockerfilePath}\" \"{contextDirectory}\"",
+                ct);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            logger.LogWarning(ex, "Unable to run the Docker CLI while deploying '{ImageTag}'.", imageTag);
+            return $"Docker deployment failed: could not run the Docker CLI ({ex.Message}).";
+        }
 
         return exitCode == 0
             ? $"Docker image '{imageTag}' built successfully.\n{output}"
             : $"Docker build failed for '{imageTag}' (exit code {exitCode}).\n{output}";
     }
 
-    private static async Task<(int ExitCode, string Output)> RunDockerCommandAsync(string arguments, CancellationToken cancellationToken)
+    private async Task<(int ExitCode, string Output)> RunDockerCommandAsync(string arguments, CancellationToken cancellationToken)
     {
         var startInfo = new ProcessStartInfo
         {
-            FileName = "docker",
+            FileName = dockerExecutable,
             Arguments = arguments,
             RedirectStandardOutput = true,
             RedirectStandardError = true,

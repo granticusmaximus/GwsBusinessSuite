@@ -1,5 +1,6 @@
 @page "/admin/ollama-console"
 @rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
 @using GwsBusinessSuite.Application.Abstractions
 @using GwsBusinessSuite.Application.ContentStudio
 @using GwsBusinessSuite.Application.Settings

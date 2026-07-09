@@ -1,5 +1,6 @@
 @page "/admin/government-intelligence"
 @rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
 @using System.Globalization
 @using GwsBusinessSuite.Application.GovernmentIntelligence
 @inject IGovernmentIntelligenceService GovernmentService

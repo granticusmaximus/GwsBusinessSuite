@@ -31,6 +31,8 @@
       Include="..\..\src\GwsBusinessSuite.Application\GwsBusinessSuite.Application.csproj" />
     <ProjectReference
       Include="..\..\src\GwsBusinessSuite.Infrastructure\GwsBusinessSuite.Infrastructure.csproj" />
+    <ProjectReference
+      Include="..\..\src\GwsBusinessSuite.Web\GwsBusinessSuite.Web.csproj" />
   </ItemGroup>
 
 </Project>

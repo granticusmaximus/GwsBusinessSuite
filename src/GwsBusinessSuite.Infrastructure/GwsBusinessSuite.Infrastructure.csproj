@@ -9,6 +9,10 @@
     <PackageReference Include="CodeHollow.FeedReader" Version="1.2.6" />
     <PackageReference Include="Docker.DotNet" Version="3.125.15" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="10.0.8" />
+    <!-- IPasswordHasher<T>/PasswordHasher<T> only - not the full ASP.NET Core Identity
+         stack - needed by UserManagementService without pulling in the web SDK's shared
+         framework into this class library. -->
+    <PackageReference Include="Microsoft.Extensions.Identity.Core" Version="10.0.1" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.8">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>

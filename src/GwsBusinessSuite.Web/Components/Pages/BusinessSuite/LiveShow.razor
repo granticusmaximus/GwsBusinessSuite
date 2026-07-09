@@ -1,5 +1,6 @@
 @page "/admin/live-show"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@attribute [Authorize(Policy = "AdminOnly")]
 @using Microsoft.JSInterop
 @inject IJSRuntime JS
 @inject ILogger<LiveShow> Logger

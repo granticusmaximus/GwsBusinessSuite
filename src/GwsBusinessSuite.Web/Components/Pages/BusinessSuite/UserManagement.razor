@@ -1,13 +1,10 @@
 @page "/admin/users"
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "AdminOnly")]
+@using GwsBusinessSuite.Application.Users
 @using GwsBusinessSuite.Domain.Entities
-@using GwsBusinessSuite.Infrastructure.Data
 @using Microsoft.AspNetCore.Authorization
-@using Microsoft.AspNetCore.Identity
-@using Microsoft.EntityFrameworkCore
-@inject IDbContextFactory<ApplicationDbContext> DbFactory
-@inject IPasswordHasher<AppUser> Hasher
+@inject IUserManagementService UserManagementService
 @inject ILogger<UserManagement> Logger
 
 <PageTitle>User Management</PageTitle>
@@ -172,7 +169,7 @@
 </div>
 
 @code {
-    private List<AppUser> Users { get; set; } = new();
+    private List<UserView> Users { get; set; } = new();
     private bool IsBusy { get; set; }
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
@@ -198,8 +195,7 @@
         IsBusy = true;
         try
         {
-            await using var db = await DbFactory.CreateDbContextAsync();
-            Users = await db.AppUsers.OrderBy(u => u.Username).ToListAsync();
+            Users = (await UserManagementService.ListUsersAsync()).ToList();
         }
         catch (Exception ex)
         {
@@ -223,47 +219,30 @@
     {
         ErrorMessage  = string.Empty;
         StatusMessage = string.Empty;
-
-        if (string.IsNullOrWhiteSpace(NewUsername))
-        { ErrorMessage = "Username is required."; return; }
-
-        if (string.IsNullOrWhiteSpace(NewPassword) || NewPassword.Length < 8)
-        { ErrorMessage = "Password must be at least 8 characters."; return; }
-
-        if (!AppRoles.All.Contains(NewRole))
-        { ErrorMessage = "Invalid role selected."; return; }
-
-        IsBusy = true;
+        IsBusy        = true;
         try
         {
-            await using var db = await DbFactory.CreateDbContextAsync();
-
-            if (await db.AppUsers.AnyAsync(u => u.Username == NewUsername.Trim()))
-            { ErrorMessage = $"Username '{NewUsername.Trim()}' is already taken."; return; }
-
-            var user = new AppUser
+            var result = await UserManagementService.CreateUserAsync(new CreateUserInput
             {
-                Username  = NewUsername.Trim(),
-                Role      = NewRole,
-                CreatedBy = "admin"
-            };
-            user.PasswordHash = Hasher.HashPassword(user, NewPassword);
-            db.AppUsers.Add(user);
-            await db.SaveChangesAsync();
+                Username = NewUsername,
+                Password = NewPassword,
+                Role = NewRole
+            });
 
-            StatusMessage  = $"User '{user.Username}' created successfully.";
+            if (!result.Succeeded)
+            {
+                ErrorMessage = result.FailureReason ?? "Unable to create user.";
+                return;
+            }
+
+            StatusMessage  = $"User '{NewUsername.Trim()}' created successfully.";
             ShowCreateForm = false;
             await LoadUsers();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to create user.");
-            ErrorMessage = $"Unable to create user. {ex.Message}";
         }
         finally { IsBusy = false; }
     }
 
-    private void StartEditRole(AppUser user)
+    private void StartEditRole(UserView user)
     {
         EditingRoleForId   = user.Id;
         EditingRole        = user.Role;
@@ -280,34 +259,21 @@
 
     private async Task SaveRole(Guid id)
     {
-        if (!AppRoles.All.Contains(EditingRole))
-        { ErrorMessage = "Invalid role."; return; }
-
         ErrorMessage  = string.Empty;
         StatusMessage = string.Empty;
         IsBusy        = true;
         try
         {
-            await using var db = await DbFactory.CreateDbContextAsync();
-            var user = await db.AppUsers.FindAsync(id);
-            if (user is null) { ErrorMessage = "User not found."; return; }
+            var result = await UserManagementService.ChangeRoleAsync(id, EditingRole);
+            if (!result.Succeeded)
+            {
+                ErrorMessage = result.FailureReason ?? "Unable to update role.";
+                return;
+            }
 
-            if (user.Role == AppRoles.Admin && EditingRole != AppRoles.Admin && IsLastAdmin(user))
-            { ErrorMessage = "Cannot change the role of the last Admin account."; return; }
-
-            user.Role      = EditingRole;
-            user.UpdatedAt = DateTimeOffset.UtcNow;
-            user.UpdatedBy = "admin";
-            await db.SaveChangesAsync();
-
-            StatusMessage    = $"Role updated for '{user.Username}'.";
+            StatusMessage    = "Role updated.";
             EditingRoleForId = null;
             await LoadUsers();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to update role for user {Id}.", id);
-            ErrorMessage = $"Unable to update role. {ex.Message}";
         }
         finally { IsBusy = false; }
     }
@@ -329,31 +295,21 @@
 
     private async Task SavePassword(Guid id)
     {
-        if (string.IsNullOrWhiteSpace(ResetPasswordValue) || ResetPasswordValue.Length < 8)
-        { ErrorMessage = "Password must be at least 8 characters."; return; }
-
         ErrorMessage  = string.Empty;
         StatusMessage = string.Empty;
         IsBusy        = true;
         try
         {
-            await using var db = await DbFactory.CreateDbContextAsync();
-            var user = await db.AppUsers.FindAsync(id);
-            if (user is null) { ErrorMessage = "User not found."; return; }
+            var result = await UserManagementService.ResetPasswordAsync(id, ResetPasswordValue);
+            if (!result.Succeeded)
+            {
+                ErrorMessage = result.FailureReason ?? "Unable to reset password.";
+                return;
+            }
 
-            user.PasswordHash = Hasher.HashPassword(user, ResetPasswordValue);
-            user.UpdatedAt    = DateTimeOffset.UtcNow;
-            user.UpdatedBy    = "admin";
-            await db.SaveChangesAsync();
-
-            StatusMessage      = $"Password reset for '{user.Username}'.";
+            StatusMessage      = "Password reset.";
             ResetPasswordForId = null;
             await LoadUsers();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to reset password for user {Id}.", id);
-            ErrorMessage = $"Unable to reset password. {ex.Message}";
         }
         finally { IsBusy = false; }
     }
@@ -365,30 +321,23 @@
         IsBusy        = true;
         try
         {
-            await using var db = await DbFactory.CreateDbContextAsync();
-            var user = await db.AppUsers.FindAsync(id);
-            if (user is null) { ErrorMessage = "User not found."; return; }
+            var result = await UserManagementService.ToggleActiveAsync(id);
+            if (!result.Succeeded)
+            {
+                ErrorMessage = result.FailureReason ?? "Unable to update user.";
+                return;
+            }
 
-            if (user.IsActive && IsLastAdmin(user))
-            { ErrorMessage = "Cannot deactivate the last Admin account."; return; }
-
-            user.IsActive  = !user.IsActive;
-            user.UpdatedAt = DateTimeOffset.UtcNow;
-            user.UpdatedBy = "admin";
-            await db.SaveChangesAsync();
-
-            StatusMessage = $"'{user.Username}' is now {(user.IsActive ? "active" : "inactive")}.";
+            StatusMessage = "User updated.";
             await LoadUsers();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to toggle active state for user {Id}.", id);
-            ErrorMessage = $"Unable to update user. {ex.Message}";
         }
         finally { IsBusy = false; }
     }
 
-    private bool IsLastAdmin(AppUser user) =>
+    // UI-only convenience for disabling the Deactivate button ahead of time - the
+    // authoritative lockout guard lives server-side in UserManagementService, which
+    // re-checks against the database rather than this possibly-stale in-memory list.
+    private bool IsLastAdmin(UserView user) =>
         user.Role == AppRoles.Admin &&
         Users.Count(u => u.Role == AppRoles.Admin && u.IsActive) <= 1;
 

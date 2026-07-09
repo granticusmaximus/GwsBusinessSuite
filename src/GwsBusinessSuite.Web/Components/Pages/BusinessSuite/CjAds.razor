@@ -1,5 +1,6 @@
 @page "/admin/cj-ads"
 @rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
 @using GwsBusinessSuite.Application.CjAds
 @inject ICjAdsService CjAdsService
 @inject ILogger<CjAds> Logger

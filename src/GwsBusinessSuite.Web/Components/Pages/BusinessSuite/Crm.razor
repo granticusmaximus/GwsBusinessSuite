@@ -1,5 +1,6 @@
 @page "/admin/crm"
 @rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
 @using GwsBusinessSuite.Application.Crm
 @using GwsBusinessSuite.Domain.Entities
 @inject ICrmService CrmService

@@ -1,5 +1,6 @@
 @page "/admin/news-intelligence"
 @rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
 @using GwsBusinessSuite.Application.NewsIntelligence
 @using GwsBusinessSuite.Infrastructure.Services
 @inject INewsIntelligenceService NewsService

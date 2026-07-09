@@ -1,10 +1,12 @@
 using GwsBusinessSuite.Application.Abstractions;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
-public sealed class OllamaService(HttpClient http) : IOllamaService
+public sealed class OllamaService(HttpClient http, ILogger<OllamaService> logger) : IOllamaService
 {
     public async Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
     {
@@ -16,25 +18,41 @@ public sealed class OllamaService(HttpClient http) : IOllamaService
             prompt = userPrompt
         };
 
-        using var response = await http.PostAsJsonAsync("/api/generate", payload, ct);
-        response.EnsureSuccessStatusCode();
+        try
+        {
+            using var response = await http.PostAsJsonAsync("/api/generate", payload, ct);
+            response.EnsureSuccessStatusCode();
 
-        var result = await response.Content.ReadFromJsonAsync<OllamaGenerateResponse>(cancellationToken: ct);
-        return result?.Response ?? string.Empty;
+            var result = await response.Content.ReadFromJsonAsync<OllamaGenerateResponse>(cancellationToken: ct);
+            return result?.Response ?? string.Empty;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            logger.LogWarning(ex, "Ollama generate request failed for model '{Model}'.", model);
+            throw;
+        }
     }
 
     public async Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default)
     {
-        using var response = await http.GetAsync("/api/tags", ct);
-        response.EnsureSuccessStatusCode();
+        try
+        {
+            using var response = await http.GetAsync("/api/tags", ct);
+            response.EnsureSuccessStatusCode();
 
-        var result = await response.Content.ReadFromJsonAsync<OllamaTagsResponse>(cancellationToken: ct);
-        return result?.Models?
-            .Select(x => x.Name)
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray()
-            ?? Array.Empty<string>();
+            var result = await response.Content.ReadFromJsonAsync<OllamaTagsResponse>(cancellationToken: ct);
+            return result?.Models?
+                .Select(x => x.Name)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray()
+                ?? Array.Empty<string>();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            logger.LogWarning(ex, "Ollama list-models request failed.");
+            throw;
+        }
     }
 
     private sealed record OllamaGenerateResponse(string Response);

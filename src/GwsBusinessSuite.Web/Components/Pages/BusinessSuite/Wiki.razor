@@ -1,5 +1,6 @@
 @page "/admin/wiki"
 @rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
 @implements IAsyncDisposable
 @using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Domain.Entities

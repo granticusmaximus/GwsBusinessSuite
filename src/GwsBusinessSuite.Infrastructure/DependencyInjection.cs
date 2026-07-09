@@ -12,6 +12,7 @@ using GwsBusinessSuite.Application.NewsIntelligence;
 using GwsBusinessSuite.Application.Podcasts;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Application.SshTerminal;
+using GwsBusinessSuite.Application.Users;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
@@ -97,6 +98,7 @@ public static class DependencyInjection
         services.AddScoped<ICmsKnowledgeService, CmsKnowledgeService>();
         services.AddScoped<IContentStudioService, ContentStudioService>();
         services.AddScoped<ICrmService, CrmService>();
+        services.AddScoped<IUserManagementService, UserManagementService>();
         // Same persisted volume as the SQLite DB and DP keys in production
         // (docker-compose.yml mounts gwssuite-data:/app/data); a relative dev-local path
         // otherwise (see appsettings.Development.json).
