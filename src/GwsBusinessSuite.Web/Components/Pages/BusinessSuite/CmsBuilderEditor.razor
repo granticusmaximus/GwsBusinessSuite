@@ -48,7 +48,7 @@
             </button>
         </div>
         <button class="btn btn-outline-secondary" @onclick="BackToList">Back</button>
-        <button class="btn btn-primary" @onclick="SaveAsync" disabled="@(_isBusy || _page is null)">
+        <button class="btn btn-primary" @onclick="() => SaveAsync()" disabled="@(_isBusy || _page is null)">
             <i class="bi bi-cloud-check me-1"></i>@(_isBusy ? "Saving…" : "Save")
         </button>
     </div>
@@ -114,7 +114,7 @@ else
                                 draggable="true"
                                 data-gws-palette-widget="@wt.Type"
                                 ondragstart="window.gwsCmsBuilderBridge.beginPaletteDrag(event)"
-                                ondragend="window.gwsCmsBuilderBridge.endPaletteDrag()"
+                                ondragend="window.gwsCmsBuilderBridge.endExternalDrag()"
                                 @onclick="() => QuickAddWidget(wt.Type)">
                             <span class="studio-widget-icon"><i class="@wt.Icon"></i></span>
                             <span class="studio-widget-copy">
@@ -141,7 +141,13 @@ else
                     <div class="studio-widget-grid">
                         @foreach (var globalBlock in _globalBlocks)
                         {
-                            <button class="studio-widget-card" @onclick="() => InsertGlobalBlock(globalBlock)">
+                            <button class="studio-widget-card"
+                                    draggable="true"
+                                    data-gws-global-block-id="@globalBlock.Id"
+                                    data-gws-global-block-kind="@globalBlock.Kind"
+                                    ondragstart="window.gwsCmsBuilderBridge.beginGlobalBlockDrag(event)"
+                                    ondragend="window.gwsCmsBuilderBridge.endExternalDrag()"
+                                    @onclick="() => InsertGlobalBlock(globalBlock)">
                                 <span class="studio-widget-icon">
                                     <i class="@(globalBlock.Kind == GlobalBlockKinds.Section ? "bi bi-layout-text-window" : GetWidgetIconClass(globalBlock.WidgetType ?? "paragraph"))"></i>
                                 </span>
@@ -273,7 +279,7 @@ else
             </div>
         </div>
         <p class="small text-secondary px-2 mb-0">
-            <i class="bi bi-info-circle me-1"></i>Drag widgets straight onto the canvas. Canvas drops save immediately; Inspector edits still wait for Save.
+            <i class="bi bi-info-circle me-1"></i>All edits autosave. Drag widgets or global blocks onto the canvas; structural changes refresh the preview automatically.
         </p>
     </section>
 
@@ -722,7 +728,7 @@ else
                             <div class="col-6">
                                 <label class="form-label small fw-semibold">Padding</label>
                                 <select class="form-select form-select-sm" value="@selWidget.Style.Padding"
-                                        @onchange='(e) => selWidget.Style.Padding = e.Value?.ToString() ?? "none"'>
+                                        @onchange='(e) => SetStylePadding(selWidget, e.Value?.ToString() ?? "none")'>
                                     <option value="none">None</option>
                                     <option value="sm">Small</option>
                                     <option value="md">Medium</option>
@@ -733,7 +739,7 @@ else
                             <div class="col-6">
                                 <label class="form-label small fw-semibold">Corner Radius</label>
                                 <select class="form-select form-select-sm" value="@selWidget.Style.BorderRadius"
-                                        @onchange='(e) => selWidget.Style.BorderRadius = e.Value?.ToString() ?? "none"'>
+                                        @onchange='(e) => SetStyleBorderRadius(selWidget, e.Value?.ToString() ?? "none")'>
                                     <option value="none">None</option>
                                     <option value="sm">Small</option>
                                     <option value="md">Medium</option>
@@ -744,7 +750,7 @@ else
                             <div class="col-6">
                                 <label class="form-label small fw-semibold">Font Size</label>
                                 <select class="form-select form-select-sm" value="@selWidget.Style.FontSize"
-                                        @onchange='(e) => selWidget.Style.FontSize = e.Value?.ToString() ?? "default"'>
+                                        @onchange='(e) => SetStyleFontSize(selWidget, e.Value?.ToString() ?? "default")'>
                                     <option value="default">Default</option>
                                     <option value="sm">Small</option>
                                     <option value="md">Medium</option>
@@ -809,12 +815,12 @@ else
                         <div>
                             <label class="form-label small fw-semibold">Label</label>
                             <input class="form-control" value="@sel.Label"
-                                   @oninput="(e) => sel.Label = e.Value?.ToString() ?? sel.Label" />
+                                   @oninput="(e) => SetSectionLabel(sel, e.Value?.ToString() ?? sel.Label)" />
                         </div>
                         <div>
                             <label class="form-label small fw-semibold">Column Layout</label>
                             <select class="form-select" value="@sel.ColumnLayout"
-                                    @onchange="(e) => UpdateSectionColumnLayout(sel, e.Value?.ToString() ?? sel.ColumnLayout)">
+                                    @onchange="(e) => SetSectionColumnLayout(sel, e.Value?.ToString() ?? sel.ColumnLayout)">
                                 <option value="full">Full Width</option>
                                 <option value="half-half">Two Equal Columns (50/50)</option>
                                 <option value="one-third-two-thirds">1/3 + 2/3</option>
@@ -824,7 +830,8 @@ else
                         </div>
                         <div>
                             <label class="form-label small fw-semibold">Background</label>
-                            <select class="form-select" @bind="sel.Background">
+                            <select class="form-select" value="@sel.Background"
+                                    @onchange='(e) => SetSectionBackground(sel, e.Value?.ToString() ?? "transparent")'>
                                 <option value="transparent">Transparent</option>
                                 <option value="light">Light</option>
                                 <option value="dark">Dark</option>
@@ -833,7 +840,8 @@ else
                         </div>
                         <div>
                             <label class="form-label small fw-semibold">Vertical Padding</label>
-                            <select class="form-select" @bind="sel.Padding">
+                            <select class="form-select" value="@sel.Padding"
+                                    @onchange='(e) => SetSectionPadding(sel, e.Value?.ToString() ?? "md")'>
                                 <option value="none">None</option>
                                 <option value="sm">Small</option>
                                 <option value="md">Medium</option>
@@ -964,6 +972,10 @@ else
     private bool _isBusy;
     private string _statusMessage = string.Empty;
     private string _errorMessage = string.Empty;
+    private CancellationTokenSource? _autosaveCts;
+    private bool _pendingAutosaveReloadPreview;
+    private const int AutosaveDelayMs = 800;
+    private const int StructuralAutosaveDelayMs = 150;
 
     // ── Selection ─────────────────────────────────────────────────────────
     private string _selectedSectionId = string.Empty;
@@ -1164,8 +1176,36 @@ else
         await SaveAsync();
     }
 
+    [JSInvokable]
+    public async Task OnCanvasInsertGlobalAsync(Guid globalBlockId, string targetSectionId, string targetColumnId, string targetWidgetId, bool insertAfter)
+    {
+        var globalBlock = _globalBlocks.FirstOrDefault(block => block.Id == globalBlockId);
+        if (globalBlock is null)
+        {
+            return;
+        }
+
+        PushUndo();
+        var effectiveInsertAfter = globalBlock.Kind == GlobalBlockKinds.Section && string.IsNullOrEmpty(targetWidgetId)
+            ? true
+            : insertAfter;
+        var inserted = globalBlock.Kind == GlobalBlockKinds.Section
+            ? InsertSectionIntoLayout(GlobalBlockMaterializer.CreateSectionPlacement(globalBlock), targetSectionId, targetWidgetId, effectiveInsertAfter)
+            : InsertWidgetIntoLayout(GlobalBlockMaterializer.CreateWidgetPlacement(globalBlock), targetSectionId, targetColumnId, targetWidgetId, effectiveInsertAfter);
+
+        if (!inserted)
+        {
+            return;
+        }
+
+        StateHasChanged();
+        await SaveAsync();
+    }
+
     public async ValueTask DisposeAsync()
     {
+        _autosaveCts?.Cancel();
+        _autosaveCts?.Dispose();
         if (_bridgeInitialized)
         {
             try
@@ -1211,13 +1251,31 @@ else
     }
 
     // ── Save ──────────────────────────────────────────────────────────────
-    private async Task SaveAsync()
+    private async Task SaveAsync(bool reloadPreview = true, bool isAutosave = false)
     {
         if (_page is null) return;
+        if (!isAutosave)
+        {
+            _autosaveCts?.Cancel();
+            _autosaveCts?.Dispose();
+            _autosaveCts = null;
+            _pendingAutosaveReloadPreview = false;
+        }
+        if (_isBusy)
+        {
+            if (isAutosave)
+            {
+                QueueAutosave(reloadPreview);
+            }
+            return;
+        }
 
         _isBusy = true;
         _errorMessage = string.Empty;
-        _statusMessage = string.Empty;
+        if (!isAutosave)
+        {
+            _statusMessage = string.Empty;
+        }
         try
         {
             var storedLayout = await BuildStoredLayoutAsync(_layout, _page.SiteId);
@@ -1237,8 +1295,11 @@ else
             };
             _page = await CmsBuilderService.SavePageAsync(editor);
             _globalBlocks = (await GlobalBlockService.ListAsync(_page.SiteId)).ToList();
-            _statusMessage = "Saved — live now.";
-            ReloadPreview();
+            _statusMessage = isAutosave ? "Changes saved automatically." : "Saved — live now.";
+            if (reloadPreview)
+            {
+                ReloadPreview();
+            }
         }
         catch (Exception ex)
         {
@@ -1249,6 +1310,49 @@ else
         {
             _isBusy = false;
         }
+    }
+
+    private void QueueAutosave(bool reloadPreview, bool immediate = false)
+    {
+        if (_page is null)
+        {
+            return;
+        }
+
+        _pendingAutosaveReloadPreview |= reloadPreview;
+        _errorMessage = string.Empty;
+        _statusMessage = "Saving changes…";
+
+        _autosaveCts?.Cancel();
+        _autosaveCts?.Dispose();
+
+        var cts = new CancellationTokenSource();
+        _autosaveCts = cts;
+        _ = DebouncedAutosaveAsync(cts.Token, immediate ? StructuralAutosaveDelayMs : AutosaveDelayMs);
+    }
+
+    private async Task DebouncedAutosaveAsync(CancellationToken cancellationToken, int delayMs)
+    {
+        try
+        {
+            await Task.Delay(delayMs, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        await InvokeAsync(async () =>
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            var reloadPreview = _pendingAutosaveReloadPreview;
+            _pendingAutosaveReloadPreview = false;
+            await SaveAsync(reloadPreview: reloadPreview, isAutosave: true);
+        });
     }
 
     private async Task<PageLayout> BuildStoredLayoutAsync(PageLayout layout, Guid siteId)
@@ -1314,6 +1418,7 @@ else
             widget.GlobalBlockId = globalBlock.Id;
             _globalBlocks = (await GlobalBlockService.ListAsync(_page.SiteId)).ToList();
             _statusMessage = $"Saved '{globalBlock.Name}' as a global widget.";
+            QueueAutosave(reloadPreview: false, immediate: true);
         }
         catch (Exception ex)
         {
@@ -1339,6 +1444,7 @@ else
             section.GlobalBlockId = globalBlock.Id;
             _globalBlocks = (await GlobalBlockService.ListAsync(_page.SiteId)).ToList();
             _statusMessage = $"Saved '{globalBlock.Name}' as a global section.";
+            QueueAutosave(reloadPreview: false, immediate: true);
         }
         catch (Exception ex)
         {
@@ -1356,6 +1462,7 @@ else
         PushUndo();
         widget.GlobalBlockId = null;
         _statusMessage = "Detached widget from its global source.";
+        QueueAutosave(reloadPreview: false, immediate: true);
     }
 
     private void DetachSelectedSection()
@@ -1367,6 +1474,7 @@ else
         PushUndo();
         section.GlobalBlockId = null;
         _statusMessage = "Detached section from its global source.";
+        QueueAutosave(reloadPreview: false, immediate: true);
     }
 
     private void InsertGlobalBlock(GlobalBlock globalBlock)
@@ -1375,6 +1483,7 @@ else
         if (globalBlock.Kind == GlobalBlockKinds.Section)
         {
             AddSectionPlacement(GlobalBlockMaterializer.CreateSectionPlacement(globalBlock));
+            QueueAutosave(reloadPreview: true, immediate: true);
         }
         else
         {
@@ -1419,6 +1528,7 @@ else
         _layout.Sections.Add(section);
         _leftTab = "layers";
         SelectSection(section.Id);
+        QueueAutosave(reloadPreview: true, immediate: true);
     }
 
     private void DeleteSection(string sectionId)
@@ -1426,6 +1536,7 @@ else
         PushUndo();
         _layout.Sections.RemoveAll(s => s.Id == sectionId);
         if (_selectedSectionId == sectionId) ClearSelection();
+        QueueAutosave(reloadPreview: true, immediate: true);
     }
 
     private static LayoutSection CreateDefaultSection()
@@ -1456,22 +1567,7 @@ else
 
     private void AddSectionPlacement(LayoutSection section)
     {
-        LayoutSection? anchorSection = null;
-        if (!string.IsNullOrEmpty(_selectedSectionId))
-        {
-            anchorSection = FindSection(_selectedSectionId);
-        }
-        else if (!string.IsNullOrEmpty(_selectedWidgetId))
-        {
-            anchorSection = FindWidgetLocation(_selectedWidgetId).Section;
-        }
-
-        var insertAt = anchorSection is null
-            ? _layout.Sections.Count
-            : _layout.Sections.IndexOf(anchorSection) + 1;
-        _layout.Sections.Insert(insertAt, section);
-        _leftTab = "layers";
-        SelectSection(section.Id);
+        InsertSectionIntoLayout(section, _selectedSectionId, _selectedWidgetId, insertAfter: true);
     }
 
     // ── Widget CRUD ───────────────────────────────────────────────────────
@@ -1506,6 +1602,32 @@ else
 
         targetColumn.Widgets.Add(widget);
         SelectWidget(targetSection.Id, widget.Id);
+        QueueAutosave(reloadPreview: true, immediate: true);
+    }
+
+    private bool InsertSectionIntoLayout(LayoutSection section, string targetSectionId, string targetWidgetId, bool insertAfter)
+    {
+        LayoutSection? anchorSection = null;
+        if (!string.IsNullOrEmpty(targetWidgetId))
+        {
+            anchorSection = FindWidgetLocation(targetWidgetId).Section;
+        }
+
+        anchorSection ??= FindSection(targetSectionId);
+
+        var insertAt = anchorSection is null
+            ? _layout.Sections.Count
+            : _layout.Sections.IndexOf(anchorSection) + (insertAfter ? 1 : 0);
+
+        if (insertAt < 0)
+        {
+            insertAt = _layout.Sections.Count;
+        }
+
+        _layout.Sections.Insert(insertAt, section);
+        _leftTab = "layers";
+        SelectSection(section.Id);
+        return true;
     }
 
     private bool InsertWidgetIntoLayout(LayoutWidget widget, string targetSectionId, string targetColumnId, string targetWidgetId, bool insertAfter)
@@ -1568,6 +1690,7 @@ else
         if (target < 0 || target >= col.Widgets.Count) return;
         PushUndo();
         (col.Widgets[index], col.Widgets[target]) = (col.Widgets[target], col.Widgets[index]);
+        QueueAutosave(reloadPreview: true, immediate: true);
     }
 
     private void MoveSelectedWidgetUp()
@@ -1647,6 +1770,7 @@ else
 
         SelectWidget(targetSectionId, draggedWidget.Id);
         EndDragWidget();
+        QueueAutosave(reloadPreview: true, immediate: true);
     }
 
     // ── Drag-and-drop reordering (Layers panel — sections) ──────────────────
@@ -1694,6 +1818,7 @@ else
 
         SelectSection(dragged.Id);
         EndDragSection();
+        QueueAutosave(reloadPreview: true, immediate: true);
     }
 
     // ── Section CRUD (continued) ─────────────────────────────────────────────
@@ -1736,6 +1861,7 @@ else
         var insertAt = _layout.Sections.IndexOf(original) + 1;
         _layout.Sections.Insert(insertAt, clone);
         SelectSection(clone.Id);
+        QueueAutosave(reloadPreview: true, immediate: true);
     }
 
     private void MoveSection(string sectionId, int direction)
@@ -1747,6 +1873,7 @@ else
         if (target < 0 || target >= _layout.Sections.Count) return;
         PushUndo();
         (_layout.Sections[index], _layout.Sections[target]) = (_layout.Sections[target], _layout.Sections[index]);
+        QueueAutosave(reloadPreview: true, immediate: true);
     }
 
     private bool CanMoveSectionUp(string sectionId) => _layout.Sections.FindIndex(s => s.Id == sectionId) > 0;
@@ -1795,6 +1922,7 @@ else
         };
         col.Widgets.Insert(index + 1, clone);
         SelectWidget(sectionId, clone.Id);
+        QueueAutosave(reloadPreview: true, immediate: true);
     }
 
     private void DuplicateSelectedWidget()
@@ -1811,6 +1939,7 @@ else
         var col = FindSection(sectionId)?.Columns.FirstOrDefault(c => c.Id == columnId);
         col?.Widgets.RemoveAll(w => w.Id == widgetId);
         if (_selectedWidgetId == widgetId) ClearSelection();
+        QueueAutosave(reloadPreview: true, immediate: true);
     }
 
     private void DeleteSelectedWidget()
@@ -1849,27 +1978,45 @@ else
         widget.Props.TryGetValue(key, out var val) ? val : defaultValue;
 
     // Instance method (not static) so it can push live edits out to the canvas iframe as
-    // they happen - every content edit, whether typed in the Inspector or made inline on
-    // the canvas (Phase 3), funnels through this one method. _suppressCanvasSync is set
-    // while applying an edit that originated FROM the iframe, so that push doesn't echo
-    // straight back to the element the user is actively typing in.
+    // they happen. _suppressCanvasSync is set while applying an edit that originated FROM
+    // the iframe, so that push doesn't echo straight back to the element the user is
+    // actively typing in.
     private bool _suppressCanvasSync;
 
-    // forceNewUndoStep: false (the default, used by every @oninput-bound Inspector field)
-    // collapses a burst of rapid keystrokes into the same widget+key into a single undo
-    // step; true (used by discrete actions like Add/Remove Field and canvas inline edits,
-    // which route through this same method) always starts a fresh step regardless of what
-    // was being typed immediately beforehand.
-    private void SetProp(LayoutWidget widget, string key, string value, bool forceNewUndoStep = false)
+    private void ApplyTrackedMutation(string editKey, Action mutation, bool reloadPreview, bool forceNewUndoStep = false, bool immediateAutosave = false)
     {
-        var editKey = $"{widget.Id}:{key}";
         if (forceNewUndoStep || editKey != _lastUndoEditKey)
         {
             PushUndo();
             _lastUndoEditKey = editKey;
         }
-        widget.Props[key] = value;
-        if (!_suppressCanvasSync)
+
+        mutation();
+        QueueAutosave(reloadPreview, immediateAutosave);
+    }
+
+    private static bool CanPatchWidgetPropLive(string widgetType, string key) => (widgetType, key) switch
+    {
+        ("hero", "headline") => true,
+        ("hero", "subline") => true,
+        ("hero", "cta1Label") => true,
+        ("hero", "cta2Label") => true,
+        ("heading", "text") => true,
+        ("paragraph", "text") => true,
+        ("button", "label") => true,
+        _ => false
+    };
+
+    private void SetProp(LayoutWidget widget, string key, string value, bool forceNewUndoStep = false)
+    {
+        var canPatchLive = CanPatchWidgetPropLive(widget.WidgetType, key);
+        ApplyTrackedMutation(
+            editKey: $"{widget.Id}:{key}",
+            mutation: () => widget.Props[key] = value,
+            reloadPreview: !canPatchLive,
+            forceNewUndoStep: forceNewUndoStep);
+
+        if (!_suppressCanvasSync && canPatchLive)
         {
             _ = PushPropToCanvasAsync(widget.Id, key, value);
         }
@@ -1893,12 +2040,129 @@ else
         }
     }
 
-    // ── Style helpers (Phase 6) ─────────────────────────────────────────────
-    private static void SetStyleTextColor(LayoutWidget widget, string value) =>
-        widget.Style.TextColor = value;
+    private void SetSectionLabel(LayoutSection section, string value)
+    {
+        if (section.Label == value) return;
+        ApplyTrackedMutation($"{section.Id}:label", () => section.Label = value, reloadPreview: false);
+    }
 
-    private static void SetStyleBackgroundColor(LayoutWidget widget, string value) =>
-        widget.Style.BackgroundColor = value;
+    private void SetSectionColumnLayout(LayoutSection section, string value)
+    {
+        if (section.ColumnLayout == value) return;
+        ApplyTrackedMutation(
+            $"{section.Id}:column-layout",
+            () => UpdateSectionColumnLayout(section, value),
+            reloadPreview: true,
+            immediateAutosave: true);
+    }
+
+    private void SetSectionBackground(LayoutSection section, string value)
+    {
+        if (section.Background == value) return;
+        ApplyTrackedMutation($"{section.Id}:background", () => section.Background = value, reloadPreview: false);
+        _ = PushSectionAppearanceToCanvasAsync(section);
+    }
+
+    private void SetSectionPadding(LayoutSection section, string value)
+    {
+        if (section.Padding == value) return;
+        ApplyTrackedMutation($"{section.Id}:padding", () => section.Padding = value, reloadPreview: false);
+        _ = PushSectionAppearanceToCanvasAsync(section);
+    }
+
+    private async Task PushSectionAppearanceToCanvasAsync(LayoutSection section)
+    {
+        if (!_bridgeInitialized) return;
+        try
+        {
+            await JS.InvokeVoidAsync("gwsCmsBuilderBridge.sendToIframe",
+                new
+                {
+                    type = "cms:section-changed",
+                    sectionId = section.Id,
+                    cssClass = BuildSectionCssClass(section)
+                });
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to push section appearance to canvas for section {SectionId}.", section.Id);
+        }
+    }
+
+    // ── Style helpers (Phase 6) ─────────────────────────────────────────────
+    private void SetStyleTextColor(LayoutWidget widget, string value) =>
+        SetWidgetStyle(widget, "text-color", style => style.TextColor = value);
+
+    private void SetStyleBackgroundColor(LayoutWidget widget, string value) =>
+        SetWidgetStyle(widget, "background-color", style => style.BackgroundColor = value);
+
+    private void SetStylePadding(LayoutWidget widget, string value) =>
+        SetWidgetStyle(widget, "padding", style => style.Padding = value);
+
+    private void SetStyleBorderRadius(LayoutWidget widget, string value) =>
+        SetWidgetStyle(widget, "border-radius", style => style.BorderRadius = value);
+
+    private void SetStyleFontSize(LayoutWidget widget, string value) =>
+        SetWidgetStyle(widget, "font-size", style => style.FontSize = value);
+
+    private void SetWidgetStyle(LayoutWidget widget, string styleKey, Action<WidgetStyle> mutation)
+    {
+        var before = widget.Style.ToInlineStyle();
+        ApplyTrackedMutation($"{widget.Id}:style:{styleKey}", () => mutation(widget.Style), reloadPreview: false);
+        if (before == widget.Style.ToInlineStyle())
+        {
+            return;
+        }
+        _ = PushStyleToCanvasAsync(widget.Id, widget.Style);
+    }
+
+    private async Task PushStyleToCanvasAsync(string widgetId, WidgetStyle style)
+    {
+        if (!_bridgeInitialized) return;
+        try
+        {
+            await JS.InvokeVoidAsync("gwsCmsBuilderBridge.sendToIframe",
+                new
+                {
+                    type = "cms:style-changed",
+                    widgetId,
+                    inlineStyle = style.ToInlineStyle(),
+                    hasAnyOverride = style.HasAnyOverride
+                });
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to push live style change to canvas for widget {WidgetId}.", widgetId);
+        }
+    }
+
+    private static string BuildSectionCssClass(LayoutSection section)
+    {
+        var backgroundClass = section.Background switch
+        {
+            "light" => "gws-bg-light",
+            "dark" => "gws-bg-dark",
+            "accent" => "gws-bg-accent",
+            _ => string.Empty
+        };
+
+        var paddingClass = section.Padding switch
+        {
+            "none" => "gws-pad-none",
+            "sm" => "gws-pad-sm",
+            "lg" => "gws-pad-lg",
+            "xl" => "gws-pad-xl",
+            _ => "gws-pad-md"
+        };
+
+        return string.Join(' ', new[] { "gws-section", backgroundClass, paddingClass }.Where(x => !string.IsNullOrWhiteSpace(x)));
+    }
 
     // ── Form widget field editor ─────────────────────────────────────────
     private static readonly string[] FormFieldTypes = ["text", "email", "tel", "textarea", "select", "checkbox"];

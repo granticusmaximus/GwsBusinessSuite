@@ -81,7 +81,26 @@ window.gwsCmsBuilderBridge = (function () {
         event.dataTransfer.setData('text/plain', widgetType);
     }
 
-    function endPaletteDrag() {
+    function beginGlobalBlockDrag(event) {
+        const source = event.currentTarget || event.target;
+        const globalBlockId = source && source.getAttribute
+            ? source.getAttribute('data-gws-global-block-id')
+            : null;
+        const globalBlockKind = source && source.getAttribute
+            ? source.getAttribute('data-gws-global-block-kind')
+            : null;
+        if (!globalBlockId || !globalBlockKind || !event.dataTransfer) {
+            return;
+        }
+
+        event.dataTransfer.effectAllowed = 'copy';
+        event.dataTransfer.dropEffect = 'copy';
+        event.dataTransfer.setData('application/x-gws-global-block-id', globalBlockId);
+        event.dataTransfer.setData('application/x-gws-global-block-kind', globalBlockKind);
+        event.dataTransfer.setData('text/plain', globalBlockId);
+    }
+
+    function endExternalDrag() {
         sendToIframe({ type: 'cms:palette-drag-end' });
     }
 
@@ -120,11 +139,21 @@ window.gwsCmsBuilderBridge = (function () {
                         !!data.insertAfter);
                 }
                 break;
+            case 'cms:insert-global':
+                if (data.globalBlockId && _dotNetRef) {
+                    _dotNetRef.invokeMethodAsync('OnCanvasInsertGlobalAsync',
+                        data.globalBlockId,
+                        data.sectionId || '',
+                        data.columnId || '',
+                        data.targetWidgetId || '',
+                        !!data.insertAfter);
+                }
+                break;
             case 'cms:ready':
                 _dotNetRef.invokeMethodAsync('OnIframeReady');
                 break;
         }
     }
 
-    return { init, dispose, sendToIframe, reloadIframe, beginPaletteDrag, endPaletteDrag };
+    return { init, dispose, sendToIframe, reloadIframe, beginPaletteDrag, beginGlobalBlockDrag, endExternalDrag };
 })();

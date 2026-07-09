@@ -123,6 +123,11 @@ public static class CmsBlockHtmlRenderer
             return !!(dataTransfer && dataTransfer.types && Array.prototype.indexOf.call(dataTransfer.types, type) >= 0);
           }
 
+          function hasExternalDragType(dataTransfer) {
+            return hasType(dataTransfer, 'application/x-gws-widget-type')
+              || hasType(dataTransfer, 'application/x-gws-global-block-id');
+          }
+
           function resolveDropTarget(clientX, clientY, draggedWidgetId) {
             var el = document.elementFromPoint(clientX, clientY);
             if (!el || !el.closest) return null;
@@ -236,7 +241,7 @@ public static class CmsBlockHtmlRenderer
           });
 
           document.addEventListener('dragover', function (e) {
-            if (!hasType(e.dataTransfer, 'application/x-gws-widget-type')) return;
+            if (!hasExternalDragType(e.dataTransfer)) return;
             var target = resolveDropTarget(e.clientX, e.clientY, null);
             if (!target) return;
             e.preventDefault();
@@ -247,12 +252,24 @@ public static class CmsBlockHtmlRenderer
           }, true);
 
           document.addEventListener('drop', function (e) {
-            if (!hasType(e.dataTransfer, 'application/x-gws-widget-type')) return;
+            if (!hasExternalDragType(e.dataTransfer)) return;
             e.preventDefault();
             var widgetType = e.dataTransfer.getData('application/x-gws-widget-type') || e.dataTransfer.getData('text/plain');
+            var globalBlockId = e.dataTransfer.getData('application/x-gws-global-block-id');
             var target = resolveDropTarget(e.clientX, e.clientY, null) || paletteDragTarget;
             clearDropVisuals(html5Indicator);
             paletteDragTarget = null;
+            if (globalBlockId) {
+              send({
+                type: 'cms:insert-global',
+                globalBlockId: globalBlockId,
+                sectionId: target && target.sectionId ? target.sectionId : '',
+                columnId: target && target.columnId ? target.columnId : '',
+                targetWidgetId: target && target.widgetId ? target.widgetId : '',
+                insertAfter: !!(target && target.insertAfter)
+              });
+              return;
+            }
             if (!widgetType) return;
             send({
               type: 'cms:insert-widget',
@@ -263,6 +280,46 @@ public static class CmsBlockHtmlRenderer
               insertAfter: !!(target && target.insertAfter)
             });
           }, true);
+
+          function findDirectStyleWrapper(container) {
+            return Array.prototype.find.call(container.children, function (child) {
+              return child.classList && child.classList.contains('gws-widget-style');
+            }) || null;
+          }
+
+          function applyWidgetStyle(widgetId, inlineStyle, hasAnyOverride) {
+            var container = document.querySelector('[data-gws-widget-id="' + widgetId + '"]');
+            if (!container) return;
+
+            var wrapper = findDirectStyleWrapper(container);
+            if (hasAnyOverride) {
+              if (!wrapper) {
+                wrapper = document.createElement('div');
+                wrapper.className = 'gws-widget-style';
+                Array.prototype.slice.call(container.childNodes).forEach(function (node) {
+                  if (node.nodeType === 1 && node.hasAttribute && node.hasAttribute('data-gws-drag-handle-for')) return;
+                  wrapper.appendChild(node);
+                });
+                container.appendChild(wrapper);
+              }
+              wrapper.setAttribute('style', inlineStyle || '');
+              return;
+            }
+
+            if (wrapper) {
+              while (wrapper.firstChild) {
+                container.insertBefore(wrapper.firstChild, wrapper);
+              }
+              wrapper.remove();
+            }
+          }
+
+          function applySectionClass(sectionId, cssClass) {
+            var section = document.querySelector('[data-gws-section-id="' + sectionId + '"]');
+            if (section) {
+              section.className = cssClass || 'gws-section';
+            }
+          }
 
           function highlight(widgetId) {
             var prev = document.querySelector('.gws-editor-selected');
@@ -328,6 +385,10 @@ public static class CmsBlockHtmlRenderer
               if (el && document.activeElement !== el) {
                 el.innerText = e.data.value;
               }
+            } else if (e.data.type === 'cms:style-changed') {
+              applyWidgetStyle(e.data.widgetId, e.data.inlineStyle || '', !!e.data.hasAnyOverride);
+            } else if (e.data.type === 'cms:section-changed') {
+              applySectionClass(e.data.sectionId, e.data.cssClass || '');
             } else if (e.data.type === 'cms:palette-drag-end') {
               clearDropVisuals(html5Indicator);
               paletteDragTarget = null;
