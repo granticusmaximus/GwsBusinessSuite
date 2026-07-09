@@ -130,6 +130,7 @@
     private ISshTerminalSession? _session;
     private readonly string _terminalElementId = $"ssh-terminal-{Guid.NewGuid():N}";
     private DotNetObjectReference<SshTerminalPanel>? _dotNetRef;
+    private bool _terminalInitialized;
 
     protected override async Task OnInitializedAsync()
     {
@@ -207,18 +208,32 @@
             _session = result.Session;
             _session.OutputReceived += OnOutputReceived;
             _session.Closed += OnSessionClosed;
-
-            _dotNetRef = DotNetObjectReference.Create(this);
-            await JS.InvokeVoidAsync("gwsSshTerminal.init", _terminalElementId, _dotNetRef, 80, 24);
-
-            // The remote shell's first prompt can arrive before the UI subscribes to
-            // OutputReceived during connect. Send a newline to force a fresh prompt.
-            await _session.WriteAsync(new byte[] { (byte)'\n' });
+            Logger.LogDebug("SSH session opened for {ElementId}; awaiting render to init terminal.", _terminalElementId);
         }
         finally
         {
             _isConnecting = false;
         }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // gwsSshTerminal.init needs the "@_terminalElementId" div in the DOM. Blazor only
+        // guarantees that once a render has completed, which does not happen synchronously
+        // right after "_session" is assigned in ConnectAsync - it happens here instead.
+        if (_session is null || _terminalInitialized)
+        {
+            return;
+        }
+
+        _terminalInitialized = true;
+        _dotNetRef = DotNetObjectReference.Create(this);
+        Logger.LogDebug("Invoking gwsSshTerminal.init for {ElementId}.", _terminalElementId);
+        await JS.InvokeVoidAsync("gwsSshTerminal.init", _terminalElementId, _dotNetRef, 80, 24);
+
+        // The remote shell's first prompt can arrive before the JS terminal instance exists
+        // to render it. Send a newline now that the terminal is ready to force a fresh prompt.
+        await _session.WriteAsync(new byte[] { (byte)'\n' });
     }
 
     private async Task TrustNewHostKeyAsync()
@@ -236,6 +251,7 @@
 
     private void OnOutputReceived(byte[] data)
     {
+        Logger.LogDebug("SSH output received: {ByteCount} bytes for {ElementId}.", data.Length, _terminalElementId);
         _ = InvokeAsync(async () =>
         {
             try
@@ -303,6 +319,7 @@
 
         _dotNetRef?.Dispose();
         _dotNetRef = null;
+        _terminalInitialized = false;
 
         await _session.DisposeAsync();
         _session = null;

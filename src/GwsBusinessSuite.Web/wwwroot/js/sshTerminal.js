@@ -12,6 +12,7 @@ window.gwsSshTerminal = (function () {
 
         const el = document.getElementById(elementId);
         if (!el) {
+            console.debug(`gwsSshTerminal.init: element #${elementId} not found in DOM yet; aborting init.`);
             return;
         }
 
@@ -35,12 +36,15 @@ window.gwsSshTerminal = (function () {
         resizeObserver.observe(el);
 
         instances[elementId] = { term, fitAddon, resizeObserver };
+        console.debug(`gwsSshTerminal.init: terminal attached to #${elementId}.`);
     }
 
     function write(elementId, byteArray) {
         const inst = instances[elementId];
         if (inst) {
             inst.term.write(byteArray);
+        } else {
+            console.debug(`gwsSshTerminal.write: no terminal instance for #${elementId}; ${byteArray.length} bytes dropped.`);
         }
     }
 
