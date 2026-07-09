@@ -210,6 +210,10 @@
 
             _dotNetRef = DotNetObjectReference.Create(this);
             await JS.InvokeVoidAsync("gwsSshTerminal.init", _terminalElementId, _dotNetRef, 80, 24);
+
+            // The remote shell's first prompt can arrive before the UI subscribes to
+            // OutputReceived during connect. Send a newline to force a fresh prompt.
+            await _session.WriteAsync(new byte[] { (byte)'\n' });
         }
         finally
         {
