@@ -47,6 +47,17 @@
         <InputTextArea class="form-control font-monospace customize-css-editor" @bind-Value="CustomCssInput"
                        placeholder="Applies to every page on this site. Page-level CSS can override it." spellcheck="false" />
 
+        <div class="row g-2 mt-1">
+            <div class="col-12">
+                <label class="form-label fw-semibold small">Logo URL</label>
+                <InputText class="form-control" @bind-Value="LogoUrlInput" placeholder="https://... or /media/{id}" />
+            </div>
+            <div class="col-12">
+                <label class="form-label fw-semibold small">Favicon URL</label>
+                <InputText class="form-control" @bind-Value="FaviconUrlInput" placeholder="https://... or /media/{id}" />
+            </div>
+        </div>
+
         <div class="d-flex flex-wrap gap-2 mt-3">
             <button class="btn btn-primary btn-sm" @onclick="SaveAsync" disabled="@IsBusy">Save changes</button>
             @if (ExportUrl is { } exportUrl)
@@ -64,6 +75,8 @@
     private string CustomCssInput { get; set; } = string.Empty;
     private string AccentColorInput { get; set; } = "#f59e0b";
     private string FontPairingInput { get; set; } = CmsFontPairings.Elegant;
+    private string LogoUrlInput { get; set; } = string.Empty;
+    private string FaviconUrlInput { get; set; } = string.Empty;
     private bool IsBusy { get; set; }
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
@@ -86,6 +99,8 @@
         CustomCssInput = site.CustomCss;
         AccentColorInput = site.AccentColorHex;
         FontPairingInput = site.FontPairingKey;
+        LogoUrlInput = site.LogoUrl;
+        FaviconUrlInput = site.FaviconUrl;
     }
 
     // Partial save: re-fetch the freshest site so a concurrent edit on
@@ -113,7 +128,9 @@
                 NavMenuJson = freshSite.NavMenuJson,
                 FooterNavMenuJson = freshSite.FooterNavMenuJson,
                 AccentColorHex = AccentColorInput,
-                FontPairingKey = FontPairingInput
+                FontPairingKey = FontPairingInput,
+                LogoUrl = LogoUrlInput,
+                FaviconUrl = FaviconUrlInput
             });
 
             CurrentSite = saved;

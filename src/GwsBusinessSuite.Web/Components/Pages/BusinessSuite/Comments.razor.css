@@ -2,4 +2,10 @@
     max-width: 420px;
     overflow-wrap: break-word;
     color: var(--gws-text-strong, #1e2430);
+    padding-left: calc(var(--comment-depth, 0) * 1.25rem);
+}
+
+.comment-thread-meta {
+    padding-left: calc(var(--comment-depth, 0) * 1.25rem);
+    margin-bottom: 0.35rem;
 }

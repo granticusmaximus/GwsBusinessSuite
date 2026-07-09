@@ -30,7 +30,7 @@
                 <span class="badge text-bg-light">@FormatSource(CurrentArticle.Source)</span>
                 @if (CurrentArticle.PublishedAt.HasValue)
                 {
-                    <span class="small text-secondary">Published @FormatDate(CurrentArticle.PublishedAt.Value)</span>
+                    <span class="small text-secondary">@(IsScheduledArticle(CurrentArticle) ? "Scheduled" : "Published") @FormatDate(CurrentArticle.PublishedAt.Value)</span>
                 }
                 @if (CurrentArticle.SourceDraftId.HasValue)
                 {
@@ -168,6 +168,11 @@ else
                 <div class="col-md-4">
                     <label class="form-label fw-semibold small">Estimated Reading Time</label>
                     <input class="form-control" @bind="EstimatedReadingTime" placeholder="e.g. 6 min read" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold small">Publish At</label>
+                    <input class="form-control" type="datetime-local" value="@PublishedAtInput" @onchange="OnPublishedAtChanged" />
+                    <div class="form-text">Future dates keep the article scheduled until that time.</div>
                 </div>
                 <div class="col-12">
                     <label class="form-label fw-semibold small">Hero Image</label>
@@ -398,6 +403,7 @@ else
     private List<ArticleCategory> Categories { get; set; } = new();
     private string MetaDescription { get; set; } = string.Empty;
     private string EstimatedReadingTime { get; set; } = string.Empty;
+    private DateTimeOffset? PublishedAtValue { get; set; }
     private string? HeroImageUrl { get; set; }
     private string? HeroImageDataUri { get; set; }
     private string HeroImageAltText { get; set; } = string.Empty;
@@ -545,6 +551,7 @@ else
         Tags                 = a.Tags;
         MetaDescription      = a.MetaDescription;
         EstimatedReadingTime = a.EstimatedReadingTime;
+        PublishedAtValue     = a.PublishedAt;
         HeroImageUrl         = a.HeroImageUrl;
         HeroImageDataUri     = a.HeroImageDataUri;
         HeroImageAltText     = a.HeroImageAltText;
@@ -674,6 +681,10 @@ else
             article.Tags              = Tags.Trim();
             article.MetaDescription   = MetaDescription.Trim();
             article.EstimatedReadingTime = EstimatedReadingTime.Trim();
+            if (PublishedAtValue.HasValue)
+            {
+                article.PublishedAt = PublishedAtValue.Value;
+            }
             article.HeroImageUrl      = string.IsNullOrWhiteSpace(HeroImageUrl) ? null : HeroImageUrl.Trim();
             article.HeroImageDataUri  = HeroImageDataUri ?? string.Empty;
             article.HeroImageAltText  = HeroImageAltText.Trim();
@@ -685,7 +696,10 @@ else
             if (publish)
             {
                 article.Status      = ArticleStatuses.Published;
-                article.PublishedAt ??= DateTimeOffset.UtcNow;
+                if (article.PublishedAt is null || article.PublishedAt > DateTimeOffset.UtcNow)
+                {
+                    article.PublishedAt = DateTimeOffset.UtcNow;
+                }
             }
 
             await db.SaveChangesAsync();
@@ -709,6 +723,35 @@ else
     {
         Navigation.NavigateTo("/admin/article-editor");
     }
+
+    private string PublishedAtInput
+    {
+        get => PublishedAtValue?.ToLocalTime().ToString("yyyy-MM-ddTHH:mm") ?? string.Empty;
+    }
+
+    private void OnPublishedAtChanged(ChangeEventArgs args) =>
+        PublishedAtValue = ParseDateTimeLocal(args.Value?.ToString());
+
+    private static DateTimeOffset? ParseDateTimeLocal(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (!DateTime.TryParse(value, out var parsed))
+        {
+            return null;
+        }
+
+        var local = DateTime.SpecifyKind(parsed, DateTimeKind.Local);
+        return new DateTimeOffset(local);
+    }
+
+    private static bool IsScheduledArticle(Article article) =>
+        article.Status == ArticleStatuses.Published
+        && article.PublishedAt is { } publishAt
+        && publishAt > DateTimeOffset.UtcNow;
 
     private void ToggleReviseWithAiPanel()
     {

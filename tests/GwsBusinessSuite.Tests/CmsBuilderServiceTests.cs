@@ -542,6 +542,98 @@ public sealed class CmsBuilderServiceTests
             .WithMessage("*not found*");
     }
 
+    [Fact]
+    public async Task SaveSiteAsync_ShouldPersistLogoAndFaviconUrls()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel
+        {
+            Name = "Branded Site",
+            LogoUrl = "https://cdn.example.com/logo.svg",
+            FaviconUrl = "https://cdn.example.com/favicon.png"
+        });
+
+        var reloaded = await service.GetSiteAsync(site.Id);
+
+        reloaded!.LogoUrl.Should().Be("https://cdn.example.com/logo.svg");
+        reloaded.FaviconUrl.Should().Be("https://cdn.example.com/favicon.png");
+    }
+
+    [Fact]
+    public async Task SavePageAsync_ShouldPersistCanonicalTagsAndSiteScopedCategories()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var firstSite = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site One" });
+        var secondSite = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site Two" });
+
+        var firstPage = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = firstSite.Id,
+            Title = "Landing",
+            Slug = "landing",
+            BlocksJson = "[]",
+            CanonicalUrl = "https://example.com/landing",
+            CategoryName = "Marketing",
+            Tags = "seo, landing"
+        });
+
+        var secondPageSameSite = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = firstSite.Id,
+            Title = "Pricing",
+            Slug = "pricing",
+            BlocksJson = "[]",
+            CategoryName = "Marketing"
+        });
+
+        var thirdPageOtherSite = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = secondSite.Id,
+            Title = "Pricing",
+            Slug = "pricing",
+            BlocksJson = "[]",
+            CategoryName = "Marketing"
+        });
+
+        firstPage.CanonicalUrl.Should().Be("https://example.com/landing");
+        firstPage.Tags.Should().Be("seo, landing");
+        firstPage.CategoryId.Should().NotBeNull();
+        secondPageSameSite.CategoryId.Should().Be(firstPage.CategoryId!.Value);
+        thirdPageOtherSite.CategoryId.Should().NotBe(firstPage.CategoryId!.Value);
+
+        var categories = await service.ListPageCategoriesAsync(firstSite.Id);
+        categories.Should().ContainSingle(category => category.Name == "Marketing");
+    }
+
+    [Fact]
+    public async Task GetPageByFullPathAsync_ShouldHideFutureScheduledPages_UntilTheirPublishTime()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        var scheduledAt = DateTimeOffset.UtcNow.AddHours(3);
+
+        await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id,
+            Title = "Launch Page",
+            Slug = "launch-page",
+            BlocksJson = "[]",
+            Status = CmsPageStatuses.Published,
+            PublishedAt = scheduledAt
+        });
+
+        (await service.GetPageByFullPathAsync(site.Id, "launch-page")).Should().BeNull();
+        var preview = await service.GetPageByFullPathAsync(site.Id, "launch-page", includeUnpublished: true);
+        preview.Should().NotBeNull();
+        preview!.PublishedAt.Should().Be(scheduledAt);
+    }
+
     private static async Task<ApplicationDbContext> CreateDbAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

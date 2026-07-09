@@ -106,7 +106,11 @@
                                 disabled="@IsCmsBusy">
                             <div class="fw-semibold d-flex align-items-center gap-2">
                                 @(GetPageDepth(cmsPage) > 0 ? "— " : "")@cmsPage.Title
-                                @if (cmsPage.Status != CmsPageStatuses.Published)
+                                @if (IsScheduled(cmsPage))
+                                {
+                                    <span class="badge text-bg-info">Scheduled for @cmsPage.PublishedAt?.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</span>
+                                }
+                                else if (cmsPage.Status != CmsPageStatuses.Published)
                                 {
                                     <span class="badge text-bg-secondary">Draft</span>
                                 }
@@ -212,6 +216,11 @@
     }
 
     private string BuildFullPath(CmsPage page) => CmsBuilderService.BuildFullPath(page, CmsPages);
+
+    private static bool IsScheduled(CmsPage page) =>
+        page.Status == CmsPageStatuses.Published
+        && page.PublishedAt is { } publishAt
+        && publishAt > DateTimeOffset.UtcNow;
 
     private void CreateNewPage() => Navigation.NavigateTo("/admin/pages/edit");
 

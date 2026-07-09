@@ -7,6 +7,7 @@ public interface ICommentService
         string authorName,
         string authorEmail,
         string body,
+        Guid? parentCommentId = null,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<CommentView>> ListApprovedForArticleAsync(Guid articleId, CancellationToken cancellationToken = default);

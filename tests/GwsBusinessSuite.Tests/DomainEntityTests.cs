@@ -18,4 +18,26 @@ public sealed class DomainEntityTests
         draft.ArticleMarkdown.Should().BeEmpty();
         draft.Id.Should().NotBeEmpty();
     }
+
+    [Fact]
+    public void PublicationWindows_ShouldOnlyTreatPastOrCurrentPublishedDatesAsVisible()
+    {
+        PublicationWindows.IsVisible(
+            CmsPageStatuses.Published,
+            CmsPageStatuses.Published,
+            DateTimeOffset.UtcNow.AddMinutes(-5),
+            DateTimeOffset.UtcNow).Should().BeTrue();
+
+        PublicationWindows.IsVisible(
+            CmsPageStatuses.Published,
+            CmsPageStatuses.Published,
+            DateTimeOffset.UtcNow.AddMinutes(5),
+            DateTimeOffset.UtcNow).Should().BeFalse();
+
+        PublicationWindows.IsVisible(
+            CmsPageStatuses.Draft,
+            CmsPageStatuses.Published,
+            DateTimeOffset.UtcNow.AddMinutes(-5),
+            DateTimeOffset.UtcNow).Should().BeFalse();
+    }
 }

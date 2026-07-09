@@ -42,8 +42,8 @@
             <div class="small text-secondary">Title, path, SEO, and publish status.</div>
         </div>
         <div class="d-flex align-items-center gap-2">
-            <span class="badge @(PageEditorModel.Status == CmsPageStatuses.Published ? "text-bg-success" : "text-bg-secondary")">
-                @(PageEditorModel.Status == CmsPageStatuses.Published ? "Published" : "Draft")
+            <span class="badge @GetStatusBadgeClass()">
+                @GetStatusBadgeLabel()
             </span>
             <span class="badge @(PageId.HasValue ? "text-bg-primary" : "text-bg-secondary")">
                 @(PageId.HasValue ? "Editing Existing Page" : "New Page")
@@ -79,7 +79,7 @@
             </div>
             @if (!string.IsNullOrWhiteSpace(PageEditorModel.Slug))
             {
-                <p class="small text-secondary mb-3">Live path: <span class="font-monospace">/@PreviewFullPath()</span></p>
+                <p class="small text-secondary mb-3">Live path: <span class="font-monospace">@PreviewRoutePath()</span></p>
             }
 
             <div class="row g-3 mb-3">
@@ -94,6 +94,29 @@
                 <div class="col-12">
                     <label class="form-label fw-semibold small">SEO Meta Description</label>
                     <InputText class="form-control" @bind-Value="PageEditorModel.MetaDescription" placeholder="Shown in search results and link previews" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold small">Canonical URL Override</label>
+                    <InputText class="form-control" @bind-Value="PageEditorModel.CanonicalUrl" placeholder="Falls back to the live page URL when blank" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold small">Publish At</label>
+                    <input class="form-control" type="datetime-local" value="@PublishedAtInput" @onchange="OnPublishedAtChanged" />
+                    <div class="form-text">Future dates keep the page scheduled until that time.</div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold small">Category</label>
+                    <input class="form-control" list="cms-page-categories" @bind="PageEditorModel.CategoryName" placeholder="Type to reuse or create a page category" />
+                    <datalist id="cms-page-categories">
+                        @foreach (var category in PageCategories)
+                        {
+                            <option value="@category.Name"></option>
+                        }
+                    </datalist>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold small">Tags</label>
+                    <InputText class="form-control" @bind-Value="PageEditorModel.Tags" placeholder="comma-separated, e.g. landing, seo, campaign" />
                 </div>
                 <div class="col-12">
                     <label class="form-label fw-semibold small">Page Custom CSS</label>
@@ -150,7 +173,7 @@
                 else
                 {
                     <button class="btn btn-success" @onclick="() => SetStatusAndSaveAsync(CmsPageStatuses.Published)" disabled="@IsCmsBusy">
-                        <i class="bi bi-cloud-upload me-1"></i>Publish
+                        <i class="bi bi-cloud-upload me-1"></i>@(IsScheduledPage() ? "Schedule" : "Publish")
                     </button>
                 }
                 <button class="btn btn-outline-secondary" @onclick='() => Navigation.NavigateTo("/admin/pages/edit")' disabled="@IsCmsBusy">Reset</button>
@@ -332,6 +355,7 @@
 
     private CmsSite? CurrentSite { get; set; }
     private List<CmsPage> CmsPages { get; set; } = new();
+    private List<CmsPageCategory> PageCategories { get; set; } = new();
     private List<CmsWorkflowBlueprintSummary> CmsBlueprints { get; set; } = new();
     private CmsPageEditorModel PageEditorModel { get; set; } = new() { BlocksJson = "{\"sections\":[]}" };
     private Guid? SelectedSiteId { get; set; }
@@ -388,6 +412,7 @@
             SelectedSiteId = site.Id;
             NavMenuItems = ParseNavMenuJson(site.NavMenuJson);
             CmsPages = (await CmsBuilderService.ListPagesAsync(site.Id)).ToList();
+            PageCategories = (await CmsBuilderService.ListPageCategoriesAsync(site.Id)).ToList();
 
             if (PageId.HasValue)
             {
@@ -410,8 +435,14 @@
                     MetaTitle = page.MetaTitle,
                     MetaDescription = page.MetaDescription,
                     OgImageUrl = page.OgImageUrl,
+                    CanonicalUrl = page.CanonicalUrl,
+                    CategoryName = page.CategoryId is { } categoryId
+                        ? PageCategories.FirstOrDefault(category => category.Id == categoryId)?.Name ?? string.Empty
+                        : string.Empty,
+                    Tags = page.Tags,
                     CustomCss = page.CustomCss,
-                    Status = page.Status
+                    Status = page.Status,
+                    PublishedAt = page.PublishedAt
                 };
 
                 await LoadFormSubmissionsAsync();
@@ -466,7 +497,7 @@
 
     private bool IsCurrentPageInNav()
     {
-        var path = "/" + PreviewFullPath();
+        var path = PreviewRoutePath();
         return NavMenuItems.Any(n => string.Equals(n.Href, path, StringComparison.OrdinalIgnoreCase));
     }
 
@@ -482,7 +513,7 @@
         {
             var freshSite = await CmsBuilderService.GetSiteBySlugAsync(CurrentSite.Slug) ?? CurrentSite;
             var navItems = ParseNavMenuJson(freshSite.NavMenuJson);
-            navItems.Add(new NavMenuItem(Guid.NewGuid().ToString("N")[..8], PageEditorModel.Title, "/" + PreviewFullPath(), false));
+            navItems.Add(new NavMenuItem(Guid.NewGuid().ToString("N")[..8], PageEditorModel.Title, PreviewRoutePath(), false));
 
             var saved = await CmsBuilderService.SaveSiteAsync(new CmsSiteEditorModel
             {
@@ -494,7 +525,9 @@
                 NavMenuJson = JsonSerializer.Serialize(navItems, NavJsonOptions),
                 FooterNavMenuJson = freshSite.FooterNavMenuJson,
                 AccentColorHex = freshSite.AccentColorHex,
-                FontPairingKey = freshSite.FontPairingKey
+                FontPairingKey = freshSite.FontPairingKey,
+                LogoUrl = freshSite.LogoUrl,
+                FaviconUrl = freshSite.FaviconUrl
             });
 
             CurrentSite = saved;
@@ -712,6 +745,7 @@
             }
 
             CmsPages = (await CmsBuilderService.ListPagesAsync(SelectedSiteId.Value)).ToList();
+            PageCategories = (await CmsBuilderService.ListPageCategoriesAsync(SelectedSiteId.Value)).ToList();
             await LoadAsync();
         }
         catch (Exception ex)
@@ -791,8 +825,76 @@
     // the bare /cms/ SSR fallback.
     private string? LivePageUrl =>
         !string.IsNullOrWhiteSpace(PageEditorModel.Slug)
-            ? $"{(Configuration["Canvas:PublicBaseUrl"] ?? string.Empty).TrimEnd('/')}/{PreviewFullPath()}"
+            ? CombinePublicUrl((Configuration["Canvas:PublicBaseUrl"] ?? string.Empty).TrimEnd('/'), PreviewRoutePath())
             : null;
+
+    private string PublishedAtInput
+    {
+        get => PageEditorModel.PublishedAt?.ToLocalTime().ToString("yyyy-MM-ddTHH:mm") ?? string.Empty;
+    }
+
+    private void OnPublishedAtChanged(ChangeEventArgs args) =>
+        PageEditorModel.PublishedAt = ParseDateTimeLocal(args.Value?.ToString());
+
+    private string PreviewRoutePath()
+    {
+        if (PageEditorModel.ParentPageId is null
+            && (string.Equals(PageEditorModel.Slug, "home", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(PageEditorModel.Slug, "index", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "/";
+        }
+
+        return "/" + PreviewFullPath();
+    }
+
+    private bool IsScheduledPage() =>
+        PageEditorModel.Status == CmsPageStatuses.Published
+        && PageEditorModel.PublishedAt is { } publishAt
+        && publishAt > DateTimeOffset.UtcNow;
+
+    private string GetStatusBadgeLabel()
+    {
+        if (IsScheduledPage())
+        {
+            return $"Scheduled for {PageEditorModel.PublishedAt?.ToLocalTime():MMM d, yyyy h:mm tt}";
+        }
+
+        return PageEditorModel.Status == CmsPageStatuses.Published ? "Published" : "Draft";
+    }
+
+    private string GetStatusBadgeClass() =>
+        IsScheduledPage()
+            ? "text-bg-info"
+            : PageEditorModel.Status == CmsPageStatuses.Published ? "text-bg-success" : "text-bg-secondary";
+
+    private static DateTimeOffset? ParseDateTimeLocal(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (!DateTime.TryParse(value, out var parsed))
+        {
+            return null;
+        }
+
+        var local = DateTime.SpecifyKind(parsed, DateTimeKind.Local);
+        return new DateTimeOffset(local);
+    }
+
+    private static string CombinePublicUrl(string baseUrl, string routePath)
+    {
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            return routePath;
+        }
+
+        return routePath == "/"
+            ? baseUrl
+            : $"{baseUrl.TrimEnd('/')}/{routePath.TrimStart('/')}";
+    }
 
     private void OpenStudio(Guid pageId) => Navigation.NavigateTo($"/admin/canvas/editor/{pageId}");
 }

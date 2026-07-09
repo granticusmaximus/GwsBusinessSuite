@@ -157,6 +157,48 @@ public sealed class CommentServiceTests
     }
 
     [Fact]
+    public async Task SubmitAsync_AndListApprovedForArticleAsync_ShouldReturnNestedReplies()
+    {
+        await using var db = await CreateDbAsync();
+        var article = await CreateArticleAsync(db);
+        var service = new CommentService(db);
+
+        var parent = await service.SubmitAsync(article.Id, "Ada", "ada@example.com", "Parent");
+        await service.ApproveAsync(parent.Id);
+
+        var reply = await service.SubmitAsync(article.Id, "Bob", "bob@example.com", "Reply", parent.Id);
+        await service.ApproveAsync(reply.Id);
+
+        var approved = await service.ListApprovedForArticleAsync(article.Id);
+
+        approved.Should().ContainSingle();
+        approved[0].AuthorName.Should().Be("Ada");
+        approved[0].Replies.Should().ContainSingle();
+        approved[0].Replies[0].AuthorName.Should().Be("Bob");
+        approved[0].Replies[0].Depth.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_ShouldReparentReplies_WhenDeletingAParentComment()
+    {
+        await using var db = await CreateDbAsync();
+        var article = await CreateArticleAsync(db);
+        var service = new CommentService(db);
+
+        var parent = await service.SubmitAsync(article.Id, "Ada", "ada@example.com", "Parent");
+        await service.ApproveAsync(parent.Id);
+        var reply = await service.SubmitAsync(article.Id, "Bob", "bob@example.com", "Reply", parent.Id);
+        await service.ApproveAsync(reply.Id);
+
+        await service.DeleteAsync(parent.Id);
+
+        var approved = await service.ListApprovedForArticleAsync(article.Id);
+        approved.Should().ContainSingle();
+        approved[0].AuthorName.Should().Be("Bob");
+        approved[0].ParentCommentId.Should().BeNull();
+    }
+
+    [Fact]
     public async Task CountPendingAsync_ShouldOnlyCountPendingComments()
     {
         await using var db = await CreateDbAsync();

@@ -69,6 +69,14 @@ a { color: inherit; }
   flex-shrink: 0;
 }
 
+.site-logo-custom {
+  width: auto;
+  height: auto;
+  max-height: 2.75rem;
+  max-width: min(240px, 55vw);
+  object-fit: contain;
+}
+
 .site-logo-wordmark {
   display: inline-flex;
   align-items: baseline;
@@ -675,6 +683,38 @@ a { color: inherit; }
   font-size: 0.92rem;
   line-height: 1.65;
   white-space: pre-wrap;
+}
+
+.comment-reply-link {
+  display: inline-flex;
+  margin-top: 0.25rem;
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.comment-reply-link:hover { color: var(--accent-hover); }
+
+.comment-item-replies {
+  margin-top: 1rem;
+  margin-left: 1.25rem;
+  padding-left: 1rem;
+  border-left: 1px solid var(--border);
+}
+
+.comment-replying-banner {
+  margin-bottom: 1rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: var(--radius);
+  background: var(--accent-low);
+  color: var(--text-2);
+  font-size: 0.86rem;
+}
+
+.comment-replying-banner a {
+  color: var(--accent);
+  text-decoration: none;
+  margin-left: 0.35rem;
 }
 
 .comment-form {

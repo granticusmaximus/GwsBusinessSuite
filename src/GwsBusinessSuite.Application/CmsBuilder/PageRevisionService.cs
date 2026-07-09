@@ -27,6 +27,9 @@ public sealed class PageRevisionService(IAppDbContext dbContext) : IPageRevision
             MetaTitle = currentPage.MetaTitle,
             MetaDescription = currentPage.MetaDescription,
             OgImageUrl = currentPage.OgImageUrl,
+            CanonicalUrl = currentPage.CanonicalUrl,
+            CategoryId = currentPage.CategoryId,
+            Tags = currentPage.Tags,
             CustomCss = currentPage.CustomCss,
             Label = label?.Trim() ?? string.Empty,
             CreatedBy = "cms-page-revision"
@@ -77,6 +80,9 @@ public sealed class PageRevisionService(IAppDbContext dbContext) : IPageRevision
         page.MetaTitle = revision.MetaTitle;
         page.MetaDescription = revision.MetaDescription;
         page.OgImageUrl = revision.OgImageUrl;
+        page.CanonicalUrl = revision.CanonicalUrl;
+        page.CategoryId = revision.CategoryId;
+        page.Tags = revision.Tags;
         page.CustomCss = revision.CustomCss;
         page.UpdatedAt = DateTimeOffset.UtcNow;
         page.UpdatedBy = "cms-revision-restore";

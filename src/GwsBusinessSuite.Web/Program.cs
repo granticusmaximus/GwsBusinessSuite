@@ -481,10 +481,11 @@ app.MapGet("/{**pageSlug}", (
         ICmsBuilderService cmsBuilderService,
         GlobalBlockResolver globalBlockResolver,
         IConfiguration configuration) =>
-        RenderPublicCanvasPageAsync(pageSlug, request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration))
+        RenderPublicCanvasPageAsync(pageSlug, request, request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration))
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
 
 app.MapGet("/blog", async (
+        HttpRequest request,
         IDbContextFactory<ApplicationDbContext> dbFactory,
         ICmsBuilderService cmsBuilderService,
         ISiteSettingsService siteSettingsService,
@@ -506,8 +507,9 @@ app.MapGet("/blog", async (
         // after materializing (same pattern as the existing /api/blog handler above).
         var articles = (await db.Articles
             .AsNoTracking()
-            .Where(a => a.Status == ArticleStatuses.Published && a.TrashedAt == null)
+            .Where(a => a.TrashedAt == null)
             .ToListAsync())
+            .Where(a => IsArticlePubliclyVisible(a, DateTimeOffset.UtcNow))
             .OrderByDescending(a => a.PublishedAt)
             .ToList();
 
@@ -557,7 +559,19 @@ app.MapGet("/blog", async (
 
         var navMenus = await GetPublicNavMenusAsync(cmsBuilderService, configuration);
         var bodyHtml = PublicSiteHtmlRenderer.BlogListBody(pageItems, keywords, keyword, categories, category, tag, page, effectivePageSize, filtered.Count, totalPages);
-        var html = PublicSiteHtmlRenderer.Layout("Blog — Grant Watson", "Thoughts on software, building products, and the web.", null, bodyHtml, navMenus.Primary, navMenus.Footer, navMenus.AccentColorHex, navMenus.FontPairingKey);
+        var html = PublicSiteHtmlRenderer.Layout(
+            "Blog — Grant Watson",
+            "Thoughts on software, building products, and the web.",
+            null,
+            bodyHtml,
+            navMenus.Primary,
+            navMenus.Footer,
+            navMenus.AccentColorHex,
+            navMenus.FontPairingKey,
+            canonicalUrl: CombineAbsoluteUrl(GetPublicBaseUrl(configuration, request), $"{request.Path}{request.QueryString}"),
+            siteName: navMenus.SiteName,
+            logoUrl: navMenus.LogoUrl,
+            faviconUrl: navMenus.FaviconUrl);
         return Results.Content(html, "text/html");
     })
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
@@ -573,15 +587,26 @@ app.MapGet("/blog/{slug}", async (
         await using var db = await dbFactory.CreateDbContextAsync();
         var a = await db.Articles
             .Include(x => x.AffiliatePlacements)
-            .Where(x => x.Slug == slug && x.Status == ArticleStatuses.Published && x.TrashedAt == null)
+            .Where(x => x.Slug == slug && x.TrashedAt == null)
             .FirstOrDefaultAsync();
 
         var navMenus = await GetPublicNavMenusAsync(cmsBuilderService, configuration);
 
-        if (a is null)
+        if (a is null || !IsArticlePubliclyVisible(a, DateTimeOffset.UtcNow))
         {
             return Results.Content(
-                PublicSiteHtmlRenderer.Layout("404 — Not Found", string.Empty, null, PublicSiteHtmlRenderer.NotFoundBody("Article not found.", "/blog", "Back to Blog"), navMenus.Primary, navMenus.Footer, navMenus.AccentColorHex, navMenus.FontPairingKey),
+                PublicSiteHtmlRenderer.Layout(
+                    "404 — Not Found",
+                    string.Empty,
+                    null,
+                    PublicSiteHtmlRenderer.NotFoundBody("Article not found.", "/blog", "Back to Blog"),
+                    navMenus.Primary,
+                    navMenus.Footer,
+                    navMenus.AccentColorHex,
+                    navMenus.FontPairingKey,
+                    siteName: navMenus.SiteName,
+                    logoUrl: navMenus.LogoUrl,
+                    faviconUrl: navMenus.FaviconUrl),
                 "text/html", statusCode: StatusCodes.Status404NotFound);
         }
 
@@ -591,18 +616,34 @@ app.MapGet("/blog/{slug}", async (
             ? await db.ArticleCategories.AsNoTracking().FirstOrDefaultAsync(c => c.Id == a.CategoryId.Value)
             : null;
         var approvedComments = await commentService.ListApprovedForArticleAsync(a.Id);
+        var replyToCommentId = Guid.TryParse(request.Query["replyTo"], out var parsedReplyToId) ? parsedReplyToId : (Guid?)null;
+        var replyComment = replyToCommentId.HasValue ? FindCommentById(approvedComments, replyToCommentId.Value) : null;
 
         var bodyHtml = PublicSiteHtmlRenderer.BlogPostBody(
             a.Title, a.MetaDescription, a.Author, a.PublishedAt, a.EstimatedReadingTime, a.PrimaryKeyword,
             heroImageUrl, a.HeroImageAltText, a.HeroImageCaption, renderedMarkdown,
-            articleCategory?.Name, articleCategory?.Slug, ParseTags(a.Tags), a.Slug, approvedComments);
+            articleCategory?.Name, articleCategory?.Slug, ParseTags(a.Tags), a.Slug, approvedComments,
+            replyToCommentId: replyComment?.Id,
+            replyToAuthorName: replyComment?.AuthorName);
 
         if (request.Query["comment"] == "1")
         {
             bodyHtml = PublicSiteHtmlRenderer.CommentPendingBanner() + bodyHtml;
         }
 
-        var html = PublicSiteHtmlRenderer.Layout(a.Title, a.MetaDescription, heroImageUrl, bodyHtml, navMenus.Primary, navMenus.Footer, navMenus.AccentColorHex, navMenus.FontPairingKey);
+        var html = PublicSiteHtmlRenderer.Layout(
+            a.Title,
+            a.MetaDescription,
+            heroImageUrl,
+            bodyHtml,
+            navMenus.Primary,
+            navMenus.Footer,
+            navMenus.AccentColorHex,
+            navMenus.FontPairingKey,
+            canonicalUrl: CombineAbsoluteUrl(GetPublicBaseUrl(configuration, request), $"/blog/{a.Slug}"),
+            siteName: navMenus.SiteName,
+            logoUrl: navMenus.LogoUrl,
+            faviconUrl: navMenus.FaviconUrl);
         return Results.Content(html, "text/html");
     })
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
@@ -619,9 +660,9 @@ app.MapPost("/blog/{slug}/comments", async (
 {
     await using var db = await dbFactory.CreateDbContextAsync();
     var article = await db.Articles
-        .Where(x => x.Slug == slug && x.Status == ArticleStatuses.Published && x.TrashedAt == null)
+        .Where(x => x.Slug == slug && x.TrashedAt == null)
         .FirstOrDefaultAsync();
-    if (article is null) return Results.NotFound();
+    if (article is null || !IsArticlePubliclyVisible(article, DateTimeOffset.UtcNow)) return Results.NotFound();
 
     var form = await request.ReadFormAsync();
     var thanksUrl = $"/blog/{slug}?comment=1";
@@ -639,15 +680,113 @@ app.MapPost("/blog/{slug}/comments", async (
             article.Id,
             form["authorName"].ToString(),
             form["authorEmail"].ToString(),
-            form["body"].ToString());
+            form["body"].ToString(),
+            Guid.TryParse(form["parentCommentId"], out var parentCommentId) ? parentCommentId : null);
     }
     catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+    catch (InvalidOperationException ex)
     {
         return Results.BadRequest(new { error = ex.Message });
     }
 
     return Results.Redirect(thanksUrl);
 }).RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-write");
+
+app.MapGet("/sitemap.xml", async (
+    HttpRequest request,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    ICmsBuilderService cmsBuilderService,
+    IConfiguration configuration) =>
+{
+    var site = await GetConfiguredCanvasSiteAsync(cmsBuilderService, configuration);
+    if (site is null)
+    {
+        return Results.NotFound();
+    }
+
+    var baseUrl = GetPublicBaseUrl(configuration, request);
+    var allPages = (await cmsBuilderService.ListPagesAsync(site.Id)).ToList();
+    var visiblePages = allPages
+        .Where(page => IsCmsPagePubliclyVisible(page, DateTimeOffset.UtcNow))
+        .Select(page =>
+        {
+            var fullPath = cmsBuilderService.BuildFullPath(page, allPages);
+            var routePath = GetPublicCanvasRoutePath(page, fullPath);
+            return new PublicSiteHtmlRenderer.SitemapEntry(
+                ResolvePublicUrl(baseUrl, page.CanonicalUrl, routePath),
+                page.UpdatedAt ?? page.PublishedAt ?? page.CreatedAt);
+        });
+
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var visibleArticles = (await db.Articles
+            .AsNoTracking()
+            .Where(article => article.TrashedAt == null)
+            .ToListAsync())
+        .Where(article => IsArticlePubliclyVisible(article, DateTimeOffset.UtcNow))
+        .Select(article => new PublicSiteHtmlRenderer.SitemapEntry(
+            ResolvePublicUrl(baseUrl, null, $"/blog/{article.Slug}"),
+            article.UpdatedAt ?? article.PublishedAt ?? article.CreatedAt));
+
+    var xml = PublicSiteHtmlRenderer.SitemapXml(
+        visiblePages.Concat(visibleArticles)
+            .OrderByDescending(entry => entry.LastModified)
+            .ToList());
+
+    return Results.Text(xml, "application/xml", Encoding.UTF8);
+}).RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
+
+app.MapGet("/robots.txt", (
+    HttpRequest request,
+    IConfiguration configuration) =>
+{
+    var sitemapUrl = CombineAbsoluteUrl(GetPublicBaseUrl(configuration, request), "/sitemap.xml");
+    return Results.Text(PublicSiteHtmlRenderer.RobotsTxt(sitemapUrl), "text/plain", Encoding.UTF8);
+}).RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
+
+app.MapGet("/rss.xml", async (
+    HttpRequest request,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    ICmsBuilderService cmsBuilderService,
+    IConfiguration configuration) =>
+{
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var baseUrl = GetPublicBaseUrl(configuration, request);
+    var site = await GetConfiguredCanvasSiteAsync(cmsBuilderService, configuration);
+    var siteName = site?.Name ?? configuration["Canvas:SiteName"] ?? "Site";
+
+    var items = (await db.Articles
+            .AsNoTracking()
+            .Where(article => article.TrashedAt == null)
+            .ToListAsync())
+        .Where(article => IsArticlePubliclyVisible(article, DateTimeOffset.UtcNow))
+        .OrderByDescending(article => article.PublishedAt)
+        .Take(20)
+        .Select(article => new PublicSiteHtmlRenderer.RssItem(
+            article.Title,
+            CombineAbsoluteUrl(baseUrl, $"/blog/{article.Slug}"),
+            article.MetaDescription,
+            article.PublishedAt,
+            CombineAbsoluteUrl(baseUrl, $"/blog/{article.Slug}")))
+        .ToList();
+
+    var xml = PublicSiteHtmlRenderer.RssXml(
+        $"{siteName} Blog",
+        "Thoughts on software, building products, and the web.",
+        CombineAbsoluteUrl(baseUrl, "/blog"),
+        items);
+
+    return Results.Text(xml, "application/rss+xml", Encoding.UTF8);
+}).RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
+app.MapGet("/feed", (
+    HttpRequest request,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    ICmsBuilderService cmsBuilderService,
+    IConfiguration configuration) =>
+    Results.Redirect("/rss.xml"))
+    .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
 
 // One re-execute target for every 404 in the app, branching internally on IsPublicHost —
 // not two UseWhen-branched re-execute targets (see the note above
@@ -660,8 +799,18 @@ app.MapGet("/__not-found", async (HttpContext httpContext, ICmsBuilderService cm
         if (IsPublicHost(httpContext))
         {
             var navMenus = await GetPublicNavMenusAsync(cmsBuilderService, configuration);
-            var html = PublicSiteHtmlRenderer.Layout("404 — Not Found", string.Empty, null,
-                PublicSiteHtmlRenderer.NotFoundBody("Sorry, the content you are looking for does not exist.", "/", "Back to Home"), navMenus.Primary, navMenus.Footer, navMenus.AccentColorHex, navMenus.FontPairingKey);
+            var html = PublicSiteHtmlRenderer.Layout(
+                "404 — Not Found",
+                string.Empty,
+                null,
+                PublicSiteHtmlRenderer.NotFoundBody("Sorry, the content you are looking for does not exist.", "/", "Back to Home"),
+                navMenus.Primary,
+                navMenus.Footer,
+                navMenus.AccentColorHex,
+                navMenus.FontPairingKey,
+                siteName: navMenus.SiteName,
+                logoUrl: navMenus.LogoUrl,
+                faviconUrl: navMenus.FaviconUrl);
             return Results.Content(html, "text/html");
         }
 
@@ -810,7 +959,9 @@ app.MapGet("/api/cms/{siteSlug}/pages", async (
     var site = await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
     if (site is null) return Results.NotFound();
 
-    var pages = await cmsBuilderService.ListPagesAsync(site.Id);
+    var pages = (await cmsBuilderService.ListPagesAsync(site.Id))
+        .Where(page => IsCmsPagePubliclyVisible(page, DateTimeOffset.UtcNow))
+        .ToList();
 
     return Results.Ok(pages.Select(page => new
     {
@@ -833,7 +984,7 @@ app.MapGet("/api/cms/{siteSlug}/pages/{pageSlug}", async (
     var page = await cmsBuilderService.GetPageBySlugAsync(site.Id, pageSlug);
     // Likely unused now that the React frontend is retired (AllowAnonymous JSON API), but
     // still shouldn't leak draft content if anything still calls it.
-    if (page is null || page.Status != CmsPageStatuses.Published) return Results.NotFound();
+    if (page is null || !IsCmsPagePubliclyVisible(page, DateTimeOffset.UtcNow)) return Results.NotFound();
 
     // Parse blocks from JSON so the React app gets a proper array, not a raw
     // JSON string — it can iterate blocks directly without a second parse.
@@ -859,10 +1010,11 @@ app.MapGet("/api/blog", async (IDbContextFactory<ApplicationDbContext> dbFactory
     await using var db = await dbFactory.CreateDbContextAsync();
     var articles = await db.Articles
         .AsNoTracking()
-        .Where(a => a.Status == ArticleStatuses.Published)
+        .Where(a => a.TrashedAt == null)
         .ToListAsync();
 
     var result = articles
+        .Where(a => IsArticlePubliclyVisible(a, DateTimeOffset.UtcNow))
         .OrderByDescending(a => a.PublishedAt)
         .Select(a => new
         {
@@ -889,10 +1041,10 @@ app.MapGet("/api/blog/{slug}", async (
     await using var db = await dbFactory.CreateDbContextAsync();
     var a = await db.Articles
         .Include(x => x.AffiliatePlacements)
-        .Where(x => x.Slug == slug && x.Status == ArticleStatuses.Published)
+        .Where(x => x.Slug == slug && x.TrashedAt == null)
         .FirstOrDefaultAsync();
 
-    if (a is null) return Results.NotFound();
+    if (a is null || !IsArticlePubliclyVisible(a, DateTimeOffset.UtcNow)) return Results.NotFound();
 
     var heroImageUrl = a.HeroImageUrl
         ?? (a.HeroImageDataUri != "" ? $"/og-image/{a.Slug}" : null);
@@ -1120,7 +1272,7 @@ app.MapGet("/", (
     GlobalBlockResolver globalBlockResolver,
     IConfiguration configuration) =>
     IsPublicHost(httpContext)
-        ? RenderPublicCanvasPageAsync("home", request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration)
+        ? RenderPublicCanvasPageAsync("home", request, request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration)
         : Task.FromResult(Results.Redirect("/admin")))
     .AllowAnonymous().RequireRateLimiting("public-read");
 
@@ -1132,13 +1284,15 @@ app.Run();
 // them funnel through PublicSiteHtmlRenderer.Layout.
 static async Task<PublicNavMenus> GetPublicNavMenusAsync(ICmsBuilderService cmsBuilderService, IConfiguration configuration)
 {
-    var siteSlug = configuration["Canvas:SiteSlug"] ?? string.Empty;
-    var site = string.IsNullOrWhiteSpace(siteSlug) ? null : await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
+    var site = await GetConfiguredCanvasSiteAsync(cmsBuilderService, configuration);
     return new PublicNavMenus(
         PublicSiteHtmlRenderer.ParseNavItems(site?.NavMenuJson),
         PublicSiteHtmlRenderer.ParseFooterNavItems(site?.FooterNavMenuJson),
         site?.AccentColorHex,
-        site?.FontPairingKey);
+        site?.FontPairingKey,
+        site?.Name,
+        site?.LogoUrl,
+        site?.FaviconUrl);
 }
 
 // Renders a Canvas page (by full path, under the Canvas:SiteSlug-configured site) as a full
@@ -1146,13 +1300,14 @@ static async Task<PublicNavMenus> GetPublicNavMenusAsync(ICmsBuilderService cmsB
 // fullPath supports nested pages ("services/web-dev") via GetPageByFullPathAsync.
 static async Task<IResult> RenderPublicCanvasPageAsync(
     string fullPath,
+    HttpRequest request,
     bool showSubmittedBanner,
     ICmsBuilderService cmsBuilderService,
     GlobalBlockResolver globalBlockResolver,
     IConfiguration configuration)
 {
     var siteSlug = configuration["Canvas:SiteSlug"] ?? string.Empty;
-    var site = string.IsNullOrWhiteSpace(siteSlug) ? null : await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
+    var site = await GetConfiguredCanvasSiteAsync(cmsBuilderService, configuration);
     if (site is null)
     {
         return Results.Content(
@@ -1168,7 +1323,18 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     if (page is null)
     {
         return Results.Content(
-            PublicSiteHtmlRenderer.Layout("404 — Not Found", string.Empty, null, PublicSiteHtmlRenderer.NotFoundBody("Page not found.", "/", "Back to Home"), navItems, footerNavItems, site.AccentColorHex, site.FontPairingKey),
+            PublicSiteHtmlRenderer.Layout(
+                "404 — Not Found",
+                string.Empty,
+                null,
+                PublicSiteHtmlRenderer.NotFoundBody("Page not found.", "/", "Back to Home"),
+                navItems,
+                footerNavItems,
+                site.AccentColorHex,
+                site.FontPairingKey,
+                siteName: site.Name,
+                logoUrl: site.LogoUrl,
+                faviconUrl: site.FaviconUrl),
             "text/html", statusCode: StatusCodes.Status404NotFound);
     }
 
@@ -1189,8 +1355,116 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
         : $"<style>{SanitizeInlineCss(customCss)}</style>{bodyHtml}";
 
     var pageTitle = string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle;
-    var html = PublicSiteHtmlRenderer.Layout(pageTitle, page.MetaDescription, page.OgImageUrl, wrappedBody, navItems, footerNavItems, site.AccentColorHex, site.FontPairingKey);
+    var canonicalUrl = ResolvePublicUrl(
+        GetPublicBaseUrl(configuration, request),
+        page.CanonicalUrl,
+        GetPublicCanvasRoutePath(page, fullPath));
+    var html = PublicSiteHtmlRenderer.Layout(
+        pageTitle,
+        page.MetaDescription,
+        page.OgImageUrl,
+        wrappedBody,
+        navItems,
+        footerNavItems,
+        site.AccentColorHex,
+        site.FontPairingKey,
+        canonicalUrl: canonicalUrl,
+        siteName: site.Name,
+        logoUrl: site.LogoUrl,
+        faviconUrl: site.FaviconUrl);
     return Results.Content(html, "text/html");
+}
+
+static async Task<CmsSite?> GetConfiguredCanvasSiteAsync(ICmsBuilderService cmsBuilderService, IConfiguration configuration)
+{
+    var siteSlug = configuration["Canvas:SiteSlug"] ?? string.Empty;
+    return string.IsNullOrWhiteSpace(siteSlug)
+        ? null
+        : await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
+}
+
+static string GetPublicBaseUrl(IConfiguration configuration, HttpRequest? request = null)
+{
+    var configured = configuration["Canvas:PublicBaseUrl"]?.Trim();
+    if (!string.IsNullOrWhiteSpace(configured))
+    {
+        return configured.TrimEnd('/');
+    }
+
+    if (request is not null && request.Host.HasValue)
+    {
+        return $"{request.Scheme}://{request.Host.Value}".TrimEnd('/');
+    }
+
+    return string.Empty;
+}
+
+static string ResolvePublicUrl(string baseUrl, string? overrideUrl, string fallbackPath)
+{
+    if (!string.IsNullOrWhiteSpace(overrideUrl))
+    {
+        if (Uri.TryCreate(overrideUrl, UriKind.Absolute, out var absolute))
+        {
+            return absolute.AbsoluteUri;
+        }
+
+        return CombineAbsoluteUrl(baseUrl, overrideUrl);
+    }
+
+    return CombineAbsoluteUrl(baseUrl, fallbackPath);
+}
+
+static string CombineAbsoluteUrl(string baseUrl, string path)
+{
+    if (string.IsNullOrWhiteSpace(path) || path == "/")
+    {
+        return string.IsNullOrWhiteSpace(baseUrl) ? "/" : baseUrl;
+    }
+
+    if (string.IsNullOrWhiteSpace(baseUrl))
+    {
+        return path.StartsWith('/') ? path : $"/{path}";
+    }
+
+    return $"{baseUrl.TrimEnd('/')}/{path.TrimStart('/')}";
+}
+
+static string GetPublicCanvasRoutePath(CmsPage page, string fullPath)
+{
+    var normalized = fullPath.Trim('/');
+    if (page.ParentPageId is null
+        && (string.Equals(page.Slug, "home", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(page.Slug, "index", StringComparison.OrdinalIgnoreCase)))
+    {
+        return "/";
+    }
+
+    return $"/{normalized}";
+}
+
+static bool IsCmsPagePubliclyVisible(CmsPage page, DateTimeOffset now) =>
+    page.TrashedAt is null && PublicationWindows.IsVisible(page.Status, CmsPageStatuses.Published, page.PublishedAt, now);
+
+static bool IsArticlePubliclyVisible(Article article, DateTimeOffset now) =>
+    article.TrashedAt is null && PublicationWindows.IsVisible(article.Status, ArticleStatuses.Published, article.PublishedAt, now);
+
+static CommentView? FindCommentById(IEnumerable<CommentView> comments, Guid commentId)
+{
+    foreach (var comment in comments)
+    {
+        if (comment.Id == commentId)
+        {
+            return comment;
+        }
+
+        var reply = FindCommentById(comment.Replies, commentId);
+        if (reply is not null)
+        {
+            return reply;
+        }
+    }
+
+    return null;
 }
 
 // CSS isn't HTML-encoded before going into a <style> tag (encoding it would break the
@@ -1301,4 +1575,11 @@ record ArticleUpsertRequest(
 
 // Bundles both named theme locations (Primary/header, Footer) so callers that render a full
 // page shell only need one site lookup instead of two.
-sealed record PublicNavMenus(IReadOnlyList<NavMenuItem> Primary, IReadOnlyList<NavMenuItem> Footer, string? AccentColorHex, string? FontPairingKey);
+sealed record PublicNavMenus(
+    IReadOnlyList<NavMenuItem> Primary,
+    IReadOnlyList<NavMenuItem> Footer,
+    string? AccentColorHex,
+    string? FontPairingKey,
+    string? SiteName,
+    string? LogoUrl,
+    string? FaviconUrl);

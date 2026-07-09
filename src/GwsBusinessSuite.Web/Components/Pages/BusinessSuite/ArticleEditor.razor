@@ -182,7 +182,7 @@
                                             <a href="/admin/article-editor/@article.Id">Edit</a>
                                             <span class="text-secondary"> | </span>
                                             <button type="button" class="text-danger" @onclick="() => TrashArticleAsync(article.Id)">Trash</button>
-                                            @if (article.Status == ArticleStatuses.Published)
+                                            @if (article.Status == ArticleStatuses.Published && !IsScheduledArticle(article))
                                             {
                                                 <span class="text-secondary"> | </span>
                                                 <a href="/blog/@article.Slug" target="_blank">View</a>
@@ -190,7 +190,9 @@
                                         </div>
                                     </td>
                                     <td>
-                                        <span class="badge @GetStatusBadgeClass(article.Status)">@article.Status</span>
+                                        <span class="badge @(IsScheduledArticle(article) ? "text-bg-info" : GetStatusBadgeClass(article.Status))">
+                                            @(IsScheduledArticle(article) ? "Scheduled" : article.Status)
+                                        </span>
                                         @if (article.Status == ArticleStatuses.Draft)
                                         {
                                             <button class="btn btn-xs btn-link p-0 ms-1" @onclick="() => PublishArticle(article.Id)" disabled="@IsBusy">Publish</button>
@@ -662,6 +664,11 @@
         ArticleSource.OllamaGenerated => "Ollama",
         _                             => source
     };
+
+    private static bool IsScheduledArticle(Article article) =>
+        article.Status == ArticleStatuses.Published
+        && article.PublishedAt is { } publishAt
+        && publishAt > DateTimeOffset.UtcNow;
 
     private static string FormatDate(DateTimeOffset value) =>
         value.ToLocalTime().ToString("yyyy-MM-dd HH:mm");

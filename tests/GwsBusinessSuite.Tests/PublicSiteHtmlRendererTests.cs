@@ -100,6 +100,38 @@ public sealed class PublicSiteHtmlRendererTests
     }
 
     [Fact]
+    public void Layout_ShouldRenderCanonicalAndCustomFavicon_WhenProvided()
+    {
+        var html = PublicSiteHtmlRenderer.Layout(
+            "Title",
+            "Description",
+            null,
+            "<p>body</p>",
+            canonicalUrl: "https://example.com/page",
+            faviconUrl: "https://cdn.example.com/favicon.png");
+
+        Assert.Contains("rel=\"canonical\"", html);
+        Assert.Contains("https://example.com/page", html);
+        Assert.Contains("https://cdn.example.com/favicon.png", html);
+    }
+
+    [Fact]
+    public void Layout_ShouldRenderCustomLogo_WhenProvided()
+    {
+        var html = PublicSiteHtmlRenderer.Layout(
+            "Title",
+            "Description",
+            null,
+            "<p>body</p>",
+            siteName: "Example Site",
+            logoUrl: "https://cdn.example.com/logo.svg");
+
+        Assert.Contains("site-logo-custom", html);
+        Assert.Contains("https://cdn.example.com/logo.svg", html);
+        Assert.Contains("alt=\"Example Site\"", html);
+    }
+
+    [Fact]
     public void Layout_ShouldRenderModernFontPairing()
     {
         var html = PublicSiteHtmlRenderer.Layout("Title", "Description", null, "<p>body</p>", fontPairingKey: CmsFontPairings.Modern);
@@ -310,5 +342,97 @@ public sealed class PublicSiteHtmlRendererTests
 
         Assert.DoesNotContain("/blog?category=", html);
         Assert.DoesNotContain("/blog?tag=", html);
+    }
+
+    [Fact]
+    public void BlogPostBody_ShouldRenderNestedRepliesAndReplyFormContext()
+    {
+        var comments = new[]
+        {
+            new GwsBusinessSuite.Application.Comments.CommentView
+            {
+                Id = Guid.NewGuid(),
+                AuthorName = "Ada",
+                Body = "Parent",
+                CreatedAt = DateTimeOffset.UtcNow,
+                Replies =
+                [
+                    new GwsBusinessSuite.Application.Comments.CommentView
+                    {
+                        Id = Guid.NewGuid(),
+                        ParentCommentId = Guid.NewGuid(),
+                        AuthorName = "Bob",
+                        Body = "Reply",
+                        CreatedAt = DateTimeOffset.UtcNow,
+                        Depth = 1
+                    }
+                ]
+            }
+        };
+
+        var html = PublicSiteHtmlRenderer.BlogPostBody(
+            "Title",
+            "Description",
+            "Grant Watson",
+            DateTimeOffset.UtcNow,
+            "5 min",
+            "",
+            null,
+            "",
+            "",
+            "Body text",
+            slug: "post",
+            approvedComments: comments,
+            replyToCommentId: comments[0].Id,
+            replyToAuthorName: comments[0].AuthorName);
+
+        Assert.Contains("comment-item-replies", html);
+        Assert.Contains("Replying to <strong>Ada</strong>", html);
+        Assert.Contains("name=\"parentCommentId\"", html);
+        Assert.Contains("?replyTo=", html);
+    }
+
+    [Fact]
+    public void SitemapXml_ShouldRenderEntriesWithLastModified()
+    {
+        var xml = PublicSiteHtmlRenderer.SitemapXml(
+        [
+            new PublicSiteHtmlRenderer.SitemapEntry("https://example.com/", new DateTimeOffset(2026, 7, 9, 0, 0, 0, TimeSpan.Zero))
+        ]);
+
+        Assert.Contains("<urlset", xml);
+        Assert.Contains("https://example.com/", xml);
+        Assert.Contains("<lastmod>2026-07-09</lastmod>", xml);
+    }
+
+    [Fact]
+    public void RobotsTxt_ShouldIncludeAdminDisallowAndSitemap()
+    {
+        var robots = PublicSiteHtmlRenderer.RobotsTxt("https://example.com/sitemap.xml");
+
+        Assert.Contains("Disallow: /admin", robots);
+        Assert.Contains("Sitemap: https://example.com/sitemap.xml", robots);
+    }
+
+    [Fact]
+    public void RssXml_ShouldRenderChannelAndItemMetadata()
+    {
+        var xml = PublicSiteHtmlRenderer.RssXml(
+            "Example Blog",
+            "Description",
+            "https://example.com/blog",
+            [
+                new PublicSiteHtmlRenderer.RssItem(
+                    "Launch Post",
+                    "https://example.com/blog/launch-post",
+                    "Post description",
+                    new DateTimeOffset(2026, 7, 9, 14, 30, 0, TimeSpan.Zero),
+                    "https://example.com/blog/launch-post")
+            ]);
+
+        Assert.Contains("<rss version=\"2.0\">", xml);
+        Assert.Contains("<title>Launch Post</title>", xml);
+        Assert.Contains("<link>https://example.com/blog/launch-post</link>", xml);
+        Assert.Contains("<description>Post description</description>", xml);
     }
 }

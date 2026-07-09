@@ -194,6 +194,8 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         site.FooterNavMenuJson = string.IsNullOrWhiteSpace(editor.FooterNavMenuJson) ? "[]" : editor.FooterNavMenuJson.Trim();
         site.AccentColorHex = string.IsNullOrWhiteSpace(editor.AccentColorHex) ? "#f59e0b" : editor.AccentColorHex.Trim();
         site.FontPairingKey = string.IsNullOrWhiteSpace(editor.FontPairingKey) ? CmsFontPairings.Elegant : editor.FontPairingKey.Trim();
+        site.LogoUrl = editor.LogoUrl?.Trim() ?? string.Empty;
+        site.FaviconUrl = editor.FaviconUrl?.Trim() ?? string.Empty;
         site.UpdatedAt = now;
         site.UpdatedBy = "cms-ui";
 
@@ -220,6 +222,10 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
 
         var globalBlocks = await dbContext.GlobalBlocks
             .Where(block => block.SiteId == siteId)
+            .ToListAsync(cancellationToken);
+
+        var categories = await dbContext.CmsPageCategories
+            .Where(category => category.SiteId == siteId)
             .ToListAsync(cancellationToken);
 
         if (pages.Count > 0)
@@ -249,6 +255,11 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         if (globalBlocks.Count > 0)
         {
             dbContext.GlobalBlocks.RemoveRange(globalBlocks);
+        }
+
+        if (categories.Count > 0)
+        {
+            dbContext.CmsPageCategories.RemoveRange(categories);
         }
 
         dbContext.CmsSites.Remove(site);
@@ -285,6 +296,18 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
 
         return pages
             .OrderByDescending(page => page.TrashedAt)
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<CmsPageCategory>> ListPageCategoriesAsync(Guid siteId, CancellationToken cancellationToken = default)
+    {
+        var categories = await dbContext.CmsPageCategories
+            .AsNoTracking()
+            .Where(category => category.SiteId == siteId)
+            .ToListAsync(cancellationToken);
+
+        return categories
+            .OrderBy(category => category.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
@@ -355,7 +378,9 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
             return null;
         }
 
-        if (current is not null && !includeUnpublished && current.Status != CmsPageStatuses.Published)
+        if (current is not null
+            && !includeUnpublished
+            && !PublicationWindows.IsVisible(current.Status, CmsPageStatuses.Published, current.PublishedAt, DateTimeOffset.UtcNow))
         {
             return null;
         }
@@ -447,12 +472,21 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         page.MetaTitle = editor.MetaTitle?.Trim() ?? string.Empty;
         page.MetaDescription = editor.MetaDescription?.Trim() ?? string.Empty;
         page.OgImageUrl = editor.OgImageUrl?.Trim() ?? string.Empty;
+        page.CanonicalUrl = editor.CanonicalUrl?.Trim() ?? string.Empty;
+        page.CategoryId = await ResolvePageCategoryIdAsync(siteId, editor.CategoryName, cancellationToken);
+        page.Tags = editor.Tags?.Trim() ?? string.Empty;
         page.CustomCss = editor.CustomCss?.Trim() ?? string.Empty;
-        // Stamped once, the first time a page goes live, and left alone after — re-saving an
-        // already-published page (or unpublishing and republishing) doesn't reset it.
-        if (requestedStatus == CmsPageStatuses.Published && page.PublishedAt is null)
+        var requestedPublishedAt = editor.PublishedAt;
+        if (requestedPublishedAt.HasValue)
         {
-            page.PublishedAt = now;
+            page.PublishedAt = requestedPublishedAt.Value;
+        }
+        else if (requestedStatus == CmsPageStatuses.Published)
+        {
+            if (page.PublishedAt is null || page.PublishedAt > now)
+            {
+                page.PublishedAt = now;
+            }
         }
         page.Status = requestedStatus;
         page.UpdatedAt = now;
@@ -630,6 +664,67 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         var slugs = await dbContext.CmsSites
             .Where(site => site.Id != currentSiteId)
             .Select(site => site.Slug)
+            .ToListAsync(cancellationToken);
+
+        if (!slugs.Contains(baseSlug, StringComparer.OrdinalIgnoreCase))
+        {
+            return baseSlug;
+        }
+
+        for (var counter = 2; ; counter++)
+        {
+            var candidate = $"{baseSlug}-{counter}";
+            if (!slugs.Contains(candidate, StringComparer.OrdinalIgnoreCase))
+            {
+                return candidate;
+            }
+        }
+    }
+
+    private async Task<Guid?> ResolvePageCategoryIdAsync(Guid siteId, string? categoryName, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(categoryName))
+        {
+            return null;
+        }
+
+        var trimmedName = categoryName.Trim();
+        var requestedSlug = CreateSlug(trimmedName);
+        var existing = await dbContext.CmsPageCategories
+            .FirstOrDefaultAsync(
+                category => category.SiteId == siteId && category.Slug == requestedSlug,
+                cancellationToken);
+
+        if (existing is not null)
+        {
+            if (!string.Equals(existing.Name, trimmedName, StringComparison.Ordinal))
+            {
+                existing.Name = trimmedName;
+                existing.UpdatedAt = DateTimeOffset.UtcNow;
+                existing.UpdatedBy = "cms-ui";
+            }
+
+            return existing.Id;
+        }
+
+        var category = new CmsPageCategory
+        {
+            SiteId = siteId,
+            Name = trimmedName,
+            Slug = await GetUniquePageCategorySlugAsync(siteId, requestedSlug, cancellationToken),
+            CreatedBy = "cms-ui"
+        };
+
+        await dbContext.CmsPageCategories.AddAsync(category, cancellationToken);
+        return category.Id;
+    }
+
+    private async Task<string> GetUniquePageCategorySlugAsync(Guid siteId, string requestedSlug, CancellationToken cancellationToken)
+    {
+        var baseSlug = string.IsNullOrWhiteSpace(requestedSlug) ? "page-category" : requestedSlug;
+        var slugs = await dbContext.CmsPageCategories
+            .Where(category => category.SiteId == siteId)
+            .Select(category => category.Slug)
             .ToListAsync(cancellationToken);
 
         if (!slugs.Contains(baseSlug, StringComparer.OrdinalIgnoreCase))

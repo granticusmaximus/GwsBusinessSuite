@@ -85,7 +85,13 @@
                                 <div class="small text-secondary">@comment.AuthorEmail</div>
                             </td>
                             <td>
-                                <div class="comment-excerpt">@Excerpt(comment.Body)</div>
+                                <div class="comment-thread-meta" style="--comment-depth:@comment.Depth">
+                                    @if (comment.ParentCommentId.HasValue)
+                                    {
+                                        <span class="badge text-bg-light">Reply to @comment.ParentAuthorName</span>
+                                    }
+                                </div>
+                                <div class="comment-excerpt" style="--comment-depth:@comment.Depth">@Excerpt(comment.Body)</div>
                                 <div class="wp-row-actions">
                                     @if (comment.Status != CommentStatuses.Approved)
                                     {

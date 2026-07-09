@@ -10,6 +10,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<WikiPage> WikiPages => Set<WikiPage>();
     public DbSet<CmsSite> CmsSites => Set<CmsSite>();
     public DbSet<CmsPage> CmsPages => Set<CmsPage>();
+    public DbSet<CmsPageCategory> CmsPageCategories => Set<CmsPageCategory>();
     public DbSet<GlobalBlock> GlobalBlocks => Set<GlobalBlock>();
     public DbSet<MediaAsset> MediaAssets => Set<MediaAsset>();
     public DbSet<FormSubmission> FormSubmissions => Set<FormSubmission>();
@@ -41,9 +42,21 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         // Slugs are unique per parent, not per site — /services/pricing and
         // /products/pricing can coexist since their full paths differ.
         modelBuilder.Entity<CmsPage>().HasIndex(x => new { x.SiteId, x.ParentPageId, x.Slug }).IsUnique();
+        modelBuilder.Entity<CmsPage>().HasIndex(x => x.CategoryId);
+        modelBuilder.Entity<CmsPage>()
+            .HasOne<CmsPageCategory>()
+            .WithMany()
+            .HasForeignKey(x => x.CategoryId)
+            .OnDelete(DeleteBehavior.SetNull);
+        modelBuilder.Entity<CmsPageCategory>().HasIndex(x => new { x.SiteId, x.Slug }).IsUnique();
         modelBuilder.Entity<GlobalBlock>().HasIndex(x => new { x.SiteId, x.Kind, x.Name });
         modelBuilder.Entity<FormSubmission>().HasIndex(x => new { x.PageId, x.CreatedAt });
         modelBuilder.Entity<Comment>().HasIndex(x => new { x.ArticleId, x.Status });
+        modelBuilder.Entity<Comment>()
+            .HasOne<Comment>()
+            .WithMany()
+            .HasForeignKey(x => x.ParentCommentId)
+            .OnDelete(DeleteBehavior.SetNull);
         modelBuilder.Entity<DockerHealthAlert>().HasIndex(x => new { x.ContainerName, x.IsRead });
         modelBuilder.Entity<DockerActionLog>().HasIndex(x => new { x.ContainerName, x.CreatedAt });
         modelBuilder.Entity<CmsPageRevision>().HasIndex(x => new { x.PageId, x.RevisionNumber }).IsUnique();

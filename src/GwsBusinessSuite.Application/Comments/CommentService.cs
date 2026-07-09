@@ -15,6 +15,7 @@ public sealed class CommentService(IAppDbContext dbContext) : ICommentService
         string authorName,
         string authorEmail,
         string body,
+        Guid? parentCommentId = null,
         CancellationToken cancellationToken = default)
     {
         var trimmedName = (authorName ?? string.Empty).Trim();
@@ -42,9 +43,27 @@ public sealed class CommentService(IAppDbContext dbContext) : ICommentService
             throw new InvalidOperationException("The article this comment belongs to no longer exists.");
         }
 
+        if (parentCommentId is { } requestedParentId)
+        {
+            var parent = await dbContext.Comments
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.Id == requestedParentId && c.ArticleId == articleId, cancellationToken);
+
+            if (parent is null)
+            {
+                throw new InvalidOperationException("The comment you're replying to no longer exists.");
+            }
+
+            if (parent.Status != CommentStatuses.Approved)
+            {
+                throw new InvalidOperationException("Replies can only target approved comments.");
+            }
+        }
+
         var comment = new Comment
         {
             ArticleId = articleId,
+            ParentCommentId = parentCommentId,
             AuthorName = Truncate(trimmedName, MaxAuthorNameLength),
             AuthorEmail = Truncate(trimmedEmail, MaxAuthorEmailLength),
             Body = Truncate(trimmedBody, MaxBodyLength),
@@ -65,12 +84,10 @@ public sealed class CommentService(IAppDbContext dbContext) : ICommentService
             .Where(c => c.ArticleId == articleId && c.Status == CommentStatuses.Approved)
             .ToListAsync(cancellationToken);
 
-        // SQLite can't translate ORDER BY on a DateTimeOffset column, so order
-        // client-side after materializing (same pattern used elsewhere in this codebase).
-        return comments
-            .OrderBy(c => c.CreatedAt)
-            .Select(c => ToView(c, articleTitle: string.Empty, articleSlug: string.Empty))
-            .ToList();
+        return BuildCommentTree(
+            comments,
+            _ => (string.Empty, string.Empty),
+            rootOrderDescending: false);
     }
 
     public async Task<IReadOnlyList<CommentView>> ListForModerationAsync(string? statusFilter, CancellationToken cancellationToken = default)
@@ -88,13 +105,15 @@ public sealed class CommentService(IAppDbContext dbContext) : ICommentService
             .Select(a => new { a.Id, a.Title, a.Slug })
             .ToDictionaryAsync(a => a.Id, cancellationToken);
 
-        return comments
-            .OrderByDescending(c => c.CreatedAt)
-            .Select(c =>
-            {
-                var article = articlesById.GetValueOrDefault(c.ArticleId);
-                return ToView(c, article?.Title ?? "(deleted article)", article?.Slug ?? string.Empty);
-            })
+        return FlattenComments(
+            BuildCommentTree(
+                comments,
+                comment =>
+                {
+                    var article = articlesById.GetValueOrDefault(comment.ArticleId);
+                    return (article?.Title ?? "(deleted article)", article?.Slug ?? string.Empty);
+                },
+                rootOrderDescending: true))
             .ToList();
     }
 
@@ -114,6 +133,21 @@ public sealed class CommentService(IAppDbContext dbContext) : ICommentService
         if (comment is null)
         {
             return;
+        }
+
+        var replies = await dbContext.Comments
+            .Where(child => child.ParentCommentId == commentId)
+            .ToListAsync(cancellationToken);
+
+        if (replies.Count > 0)
+        {
+            var now = DateTimeOffset.UtcNow;
+            foreach (var reply in replies)
+            {
+                reply.ParentCommentId = comment.ParentCommentId;
+                reply.UpdatedAt = now;
+                reply.UpdatedBy = "admin";
+            }
         }
 
         dbContext.Comments.Remove(comment);
@@ -142,16 +176,81 @@ public sealed class CommentService(IAppDbContext dbContext) : ICommentService
     private static string Truncate(string value, int maxLength) =>
         value.Length > maxLength ? value[..maxLength] : value;
 
+    private static IReadOnlyList<CommentView> BuildCommentTree(
+        IReadOnlyList<Comment> comments,
+        Func<Comment, (string ArticleTitle, string ArticleSlug)> articleLookup,
+        bool rootOrderDescending)
+    {
+        var commentsById = comments.ToDictionary(comment => comment.Id);
+        var effectiveParents = comments.ToDictionary(
+            comment => comment.Id,
+            comment => comment.ParentCommentId is { } parentId && commentsById.ContainsKey(parentId) ? comment.ParentCommentId : null);
+        var childrenByParent = comments.ToLookup(comment => effectiveParents[comment.Id]);
+
+        CommentView BuildView(Comment comment, int depth)
+        {
+            var (articleTitle, articleSlug) = articleLookup(comment);
+            var parentAuthor = comment.ParentCommentId is { } parentId && commentsById.TryGetValue(parentId, out var parent)
+                ? parent.AuthorName
+                : string.Empty;
+
+            return new CommentView
+            {
+                Id = comment.Id,
+                ArticleId = comment.ArticleId,
+                ParentCommentId = effectiveParents[comment.Id],
+                ArticleTitle = articleTitle,
+                ArticleSlug = articleSlug,
+                ParentAuthorName = parentAuthor,
+                AuthorName = comment.AuthorName,
+                AuthorEmail = comment.AuthorEmail,
+                Body = comment.Body,
+                Status = comment.Status,
+                CreatedAt = comment.CreatedAt,
+                Depth = depth,
+                Replies = childrenByParent[comment.Id]
+                    .OrderBy(child => child.CreatedAt)
+                    .Select(child => BuildView(child, depth + 1))
+                    .ToList()
+            };
+        }
+
+        var roots = childrenByParent[null].AsEnumerable();
+        roots = rootOrderDescending
+            ? roots.OrderByDescending(comment => comment.CreatedAt)
+            : roots.OrderBy(comment => comment.CreatedAt);
+
+        return roots
+            .Select(comment => BuildView(comment, depth: 0))
+            .ToList();
+    }
+
+    private static IEnumerable<CommentView> FlattenComments(IEnumerable<CommentView> comments)
+    {
+        foreach (var comment in comments)
+        {
+            yield return comment;
+
+            foreach (var reply in FlattenComments(comment.Replies))
+            {
+                yield return reply;
+            }
+        }
+    }
+
     private static CommentView ToView(Comment comment, string articleTitle, string articleSlug) => new()
     {
         Id = comment.Id,
         ArticleId = comment.ArticleId,
+        ParentCommentId = comment.ParentCommentId,
         ArticleTitle = articleTitle,
         ArticleSlug = articleSlug,
+        ParentAuthorName = string.Empty,
         AuthorName = comment.AuthorName,
         AuthorEmail = comment.AuthorEmail,
         Body = comment.Body,
         Status = comment.Status,
-        CreatedAt = comment.CreatedAt
+        CreatedAt = comment.CreatedAt,
+        Depth = 0
     };
 }

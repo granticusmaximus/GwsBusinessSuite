@@ -126,6 +126,45 @@ public sealed class PageRevisionServiceTests
         (await revisions.ListAsync(page.Id)).Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task CreateRevisionAsync_AndRestoreAsync_ShouldCarryCanonicalCategoryAndTags()
+    {
+        await using var db = await CreateDbAsync();
+        var cms = new CmsBuilderService(db);
+        var revisions = new PageRevisionService(db);
+        var site = await cms.SaveSiteAsync(new CmsSiteEditorModel { Name = "Test" });
+        var page = await cms.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id,
+            Title = "Home",
+            Slug = "home",
+            BlocksJson = "[]",
+            CanonicalUrl = "https://example.com/home",
+            CategoryName = "Marketing",
+            Tags = "seo, launch"
+        });
+
+        var revision = await revisions.CreateRevisionAsync(page);
+
+        await cms.SavePageAsync(new CmsPageEditorModel
+        {
+            PageId = page.Id,
+            SiteId = site.Id,
+            Title = "Home",
+            Slug = "home",
+            BlocksJson = "[]",
+            CanonicalUrl = "https://example.com/home-v2",
+            CategoryName = "Product",
+            Tags = "product"
+        });
+
+        var restored = await revisions.RestoreAsync(page.Id, revision.Id);
+
+        restored.CanonicalUrl.Should().Be("https://example.com/home");
+        restored.Tags.Should().Be("seo, launch");
+        restored.CategoryId.Should().Be(page.CategoryId);
+    }
+
     private static async Task<GwsBusinessSuite.Domain.Entities.CmsPage> CreatePageAsync(CmsBuilderService cms, string blocksJson)
     {
         var site = await cms.SaveSiteAsync(new CmsSiteEditorModel { Name = "Test" });

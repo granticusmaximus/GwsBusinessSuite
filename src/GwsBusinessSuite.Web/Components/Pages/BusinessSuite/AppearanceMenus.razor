@@ -184,7 +184,9 @@
                 NavMenuJson = JsonSerializer.Serialize(NavMenuItems, NavJsonOptions),
                 FooterNavMenuJson = JsonSerializer.Serialize(FooterNavMenuItems, NavJsonOptions),
                 AccentColorHex = freshSite.AccentColorHex,
-                FontPairingKey = freshSite.FontPairingKey
+                FontPairingKey = freshSite.FontPairingKey,
+                LogoUrl = freshSite.LogoUrl,
+                FaviconUrl = freshSite.FaviconUrl
             });
 
             CurrentSite = saved;

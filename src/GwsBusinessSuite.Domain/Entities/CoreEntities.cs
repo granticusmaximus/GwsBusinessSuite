@@ -79,6 +79,14 @@ public static class CmsFontPairings
     public const string Classic = "classic";
 }
 
+public static class PublicationWindows
+{
+    public static bool IsVisible(string status, string publishedStatus, DateTimeOffset? publishedAt, DateTimeOffset now) =>
+        string.Equals(status, publishedStatus, StringComparison.Ordinal)
+        && publishedAt is { } publishAt
+        && publishAt <= now;
+}
+
 public sealed class CmsSite : AuditableEntity
 {
     public required string Name { get; set; }
@@ -99,6 +107,8 @@ public sealed class CmsSite : AuditableEntity
     // already shipped with, so existing sites render identically until an admin changes them.
     public string AccentColorHex { get; set; } = "#f59e0b";
     public string FontPairingKey { get; set; } = CmsFontPairings.Elegant;
+    public string LogoUrl { get; set; } = string.Empty;
+    public string FaviconUrl { get; set; } = string.Empty;
 }
 
 public static class CmsPageStatuses
@@ -111,16 +121,26 @@ public sealed class CmsPage : AuditableEntity
 {
     public Guid SiteId { get; set; }
     public Guid? ParentPageId { get; set; }
+    public Guid? CategoryId { get; set; }
     public required string Title { get; set; }
     public required string Slug { get; set; }
     public string BlocksJson { get; set; } = "[]";
     public string MetaTitle { get; set; } = string.Empty;
     public string MetaDescription { get; set; } = string.Empty;
     public string OgImageUrl { get; set; } = string.Empty;
+    public string CanonicalUrl { get; set; } = string.Empty;
+    public string Tags { get; set; } = string.Empty;
     public string CustomCss { get; set; } = string.Empty;
     public string Status { get; set; } = CmsPageStatuses.Draft;
     public DateTimeOffset? PublishedAt { get; set; }
     public DateTimeOffset? TrashedAt { get; set; }
+}
+
+public sealed class CmsPageCategory : AuditableEntity
+{
+    public Guid SiteId { get; set; }
+    public required string Name { get; set; }
+    public required string Slug { get; set; }
 }
 
 public sealed class CmsPageRevision : AuditableEntity
@@ -133,6 +153,9 @@ public sealed class CmsPageRevision : AuditableEntity
     public string MetaTitle { get; set; } = string.Empty;
     public string MetaDescription { get; set; } = string.Empty;
     public string OgImageUrl { get; set; } = string.Empty;
+    public string CanonicalUrl { get; set; } = string.Empty;
+    public Guid? CategoryId { get; set; }
+    public string Tags { get; set; } = string.Empty;
     public string CustomCss { get; set; } = string.Empty;
     public string Label { get; set; } = string.Empty;
 }
@@ -184,6 +207,7 @@ public static class CommentStatuses
 public sealed class Comment : AuditableEntity
 {
     public Guid ArticleId { get; set; }
+    public Guid? ParentCommentId { get; set; }
     public string AuthorName { get; set; } = string.Empty;
 
     // Collected for the admin's own reference (spam-pattern review, potential future

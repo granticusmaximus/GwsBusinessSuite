@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Xml.Linq;
 using GwsBusinessSuite.Application.Comments;
 using GwsBusinessSuite.Domain.Entities;
 using Markdig;
@@ -77,6 +78,10 @@ public static class PublicSiteHtmlRenderer
 
     public sealed record CategorySummary(string Name, string Slug);
 
+    public sealed record SitemapEntry(string Url, DateTimeOffset? LastModified);
+
+    public sealed record RssItem(string Title, string Url, string Description, DateTimeOffset? PublishedAt, string Guid);
+
     // ── Global design tokens (Elementor-style "Global Colors/Fonts") ─────────
     // Font pairings are a small curated set rather than an open-ended picker — matches
     // this codebase's "don't over-engineer" convention and avoids needing a font-loading
@@ -106,11 +111,16 @@ public static class PublicSiteHtmlRenderer
     public static string Layout(
         string pageTitle, string metaDescription, string? ogImageUrl, string bodyHtml,
         IReadOnlyList<NavMenuItem>? navItems = null, IReadOnlyList<NavMenuItem>? footerNavItems = null,
-        string? accentColorHex = null, string? fontPairingKey = null)
+        string? accentColorHex = null, string? fontPairingKey = null,
+        string? canonicalUrl = null, string? siteName = null, string? logoUrl = null, string? faviconUrl = null)
     {
         var ogImageTag = string.IsNullOrWhiteSpace(ogImageUrl)
             ? string.Empty
             : $"""<meta property="og:image" content="{Html(ogImageUrl)}" />""";
+        var canonicalTag = string.IsNullOrWhiteSpace(canonicalUrl)
+            ? string.Empty
+            : $"""<link rel="canonical" href="{Html(canonicalUrl)}" />""";
+        var iconHref = string.IsNullOrWhiteSpace(faviconUrl) ? "/favicon.svg" : faviconUrl;
 
         var accent = string.IsNullOrWhiteSpace(accentColorHex) ? DefaultAccentColorHex : accentColorHex;
         var pairing = fontPairingKey is not null && FontPairingsByKey.TryGetValue(fontPairingKey, out var p)
@@ -137,11 +147,12 @@ public static class PublicSiteHtmlRenderer
             <html lang="en">
             <head>
               <meta charset="UTF-8" />
-              <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+              <link rel="icon" href="{Html(iconHref)}" />
               <meta name="viewport" content="width=device-width, initial-scale=1.0" />
               <title>{Html(pageTitle)}</title>
               <meta name="description" content="{Html(metaDescription)}" />
               {ogImageTag}
+              {canonicalTag}
               <link rel="preconnect" href="https://fonts.googleapis.com" />
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
               <link href="{pairing.GoogleFontsHref}" rel="stylesheet" />
@@ -150,7 +161,7 @@ public static class PublicSiteHtmlRenderer
               {designTokensStyle}
             </head>
             <body>
-              {Nav(navItems ?? DefaultNavItems)}
+              {Nav(navItems ?? DefaultNavItems, siteName, logoUrl)}
               {bodyHtml}
               {Footer(footerNavItems ?? [])}
             </body>
@@ -221,17 +232,25 @@ public static class PublicSiteHtmlRenderer
         return $"""<a href="{Html(item.Href)}"{targetAttrs}>{Html(item.Label)}</a>""";
     }
 
-    private static string Nav(IReadOnlyList<NavMenuItem> navItems)
+    private static string Nav(IReadOnlyList<NavMenuItem> navItems, string? siteName, string? logoUrl)
     {
-        var sb = new StringBuilder();
-        sb.Append("""
-            <nav class="site-nav">
-              <a href="/" class="site-logo">
+        var brandHtml = string.IsNullOrWhiteSpace(logoUrl)
+            ? """
                 <img src="/logo-mark.svg" alt="" />
                 <span class="site-logo-wordmark">
                   <span>grantwatson</span>
                   <span class="site-logo-domain">.dev</span>
                 </span>
+                """
+            : $"""<img src="{Html(logoUrl)}" alt="{Html(string.IsNullOrWhiteSpace(siteName) ? "Site logo" : siteName)}" class="site-logo-custom" />""";
+
+        var sb = new StringBuilder();
+        sb.Append("""
+            <nav class="site-nav">
+              <a href="/" class="site-logo">
+            """);
+        sb.Append(brandHtml);
+        sb.Append("""
               </a>
               <div class="nav-links">
             """);
@@ -468,7 +487,9 @@ public static class PublicSiteHtmlRenderer
         string? categorySlug = null,
         IReadOnlyList<string>? tags = null,
         string slug = "",
-        IReadOnlyList<CommentView>? approvedComments = null)
+        IReadOnlyList<CommentView>? approvedComments = null,
+        Guid? replyToCommentId = null,
+        string? replyToAuthorName = null)
     {
         var dateLabel = publishedAt?.ToString("MMMM d, yyyy") ?? "";
         var heroHtml = string.IsNullOrWhiteSpace(heroImageUrl)
@@ -494,27 +515,30 @@ public static class PublicSiteHtmlRenderer
             : string.Concat(tags.Select(t => $"""<a class="article-tag" href="/blog?tag={Uri.EscapeDataString(t)}">{Html(t)}</a>"""));
 
         var comments = approvedComments ?? Array.Empty<CommentView>();
+        var visibleCommentCount = CountComments(comments);
         var commentListHtml = comments.Count == 0
             ? """<p class="comments-empty">No comments yet — be the first to share your thoughts.</p>"""
-            : string.Concat(comments.Select(c => $"""
-                <div class="comment-item">
-                  <div class="comment-item-meta">
-                    <span class="comment-item-author">{Html(c.AuthorName)}</span>
-                    <span class="comment-item-date">{Html(c.CreatedAt.ToString("MMMM d, yyyy"))}</span>
-                  </div>
-                  <p class="comment-item-body">{Html(c.Body)}</p>
+            : string.Concat(comments.Select(c => RenderCommentThread(c, slug)));
+        var replyContextHtml = replyToCommentId.HasValue
+            ? $"""
+                <div class="comment-replying-banner">
+                  Replying to <strong>{Html(replyToAuthorName)}</strong>.
+                  <a href="/blog/{Html(slug)}#comment-form">Cancel</a>
                 </div>
-                """));
+                <input type="hidden" name="parentCommentId" value="{Html(replyToCommentId.Value.ToString())}" />
+                """
+            : string.Empty;
 
         var commentsHtml = $"""
             <section class="comments-section" aria-labelledby="comments-heading">
-              <h2 id="comments-heading" class="comments-heading">Comments ({comments.Count})</h2>
+              <h2 id="comments-heading" class="comments-heading">Comments ({visibleCommentCount})</h2>
               {commentListHtml}
-              <form class="comment-form" method="post" action="/blog/{Html(slug)}/comments">
+              <form id="comment-form" class="comment-form" method="post" action="/blog/{Html(slug)}/comments">
                 <div class="comment-form-honeypot" aria-hidden="true">
                   <label for="website">Website</label>
                   <input type="text" id="website" name="website" tabindex="-1" autocomplete="off" />
                 </div>
+                {replyContextHtml}
                 <div class="comment-form-row">
                   <div class="comment-form-field">
                     <label for="authorName">Name</label>
@@ -558,6 +582,98 @@ public static class PublicSiteHtmlRenderer
               </div>
             </article>
             """;
+    }
+
+    public static string SitemapXml(IReadOnlyList<SitemapEntry> entries)
+    {
+        var document = new XDocument(
+            new XDeclaration("1.0", "utf-8", "yes"),
+            new XElement(
+                XName.Get("urlset", "http://www.sitemaps.org/schemas/sitemap/0.9"),
+                entries.Select(entry =>
+                {
+                    var url = new XElement(XName.Get("url", "http://www.sitemaps.org/schemas/sitemap/0.9"),
+                        new XElement(XName.Get("loc", "http://www.sitemaps.org/schemas/sitemap/0.9"), entry.Url));
+
+                    if (entry.LastModified is { } lastModified)
+                    {
+                        url.Add(new XElement(
+                            XName.Get("lastmod", "http://www.sitemaps.org/schemas/sitemap/0.9"),
+                            lastModified.UtcDateTime.ToString("yyyy-MM-dd")));
+                    }
+
+                    return url;
+                })));
+
+        return SerializeXml(document);
+    }
+
+    public static string RobotsTxt(string sitemapUrl) => string.Join('\n',
+        [
+            "User-agent: *",
+            "Allow: /",
+            "Disallow: /admin",
+            $"Sitemap: {sitemapUrl}"
+        ]) + '\n';
+
+    public static string RssXml(string title, string description, string siteUrl, IReadOnlyList<RssItem> items)
+    {
+        var document = new XDocument(
+            new XDeclaration("1.0", "utf-8", "yes"),
+            new XElement("rss",
+                new XAttribute("version", "2.0"),
+                new XElement("channel",
+                    new XElement("title", title),
+                    new XElement("link", siteUrl),
+                    new XElement("description", description),
+                    items.Select(item =>
+                    {
+                        var element = new XElement("item",
+                            new XElement("title", item.Title),
+                            new XElement("link", item.Url),
+                            new XElement("description", item.Description),
+                            new XElement("guid",
+                                new XAttribute("isPermaLink", "true"),
+                                item.Guid));
+
+                        if (item.PublishedAt is { } publishedAt)
+                        {
+                            element.Add(new XElement("pubDate", publishedAt.UtcDateTime.ToString("r")));
+                        }
+
+                        return element;
+                    }))));
+
+        return SerializeXml(document);
+    }
+
+    private static string RenderCommentThread(CommentView comment, string slug)
+    {
+        var repliesHtml = comment.Replies.Count == 0
+            ? string.Empty
+            : $"""<div class="comment-item-replies">{string.Concat(comment.Replies.Select(reply => RenderCommentThread(reply, slug)))}</div>""";
+
+        return $"""
+            <div class="comment-item">
+              <div class="comment-item-meta">
+                <span class="comment-item-author">{Html(comment.AuthorName)}</span>
+                <span class="comment-item-date">{Html(comment.CreatedAt.ToString("MMMM d, yyyy"))}</span>
+              </div>
+              <p class="comment-item-body">{Html(comment.Body)}</p>
+              <a class="comment-reply-link" href="/blog/{Html(slug)}?replyTo={Html(comment.Id.ToString())}#comment-form">Reply</a>
+              {repliesHtml}
+            </div>
+            """;
+    }
+
+    private static int CountComments(IEnumerable<CommentView> comments) =>
+        comments.Sum(comment => 1 + CountComments(comment.Replies));
+
+    private static string SerializeXml(XDocument document)
+    {
+        using var writer = new StringWriter();
+        document.Save(writer);
+        return writer.ToString();
     }
 
     private static string Html(string? value) => WebUtility.HtmlEncode(value ?? string.Empty);

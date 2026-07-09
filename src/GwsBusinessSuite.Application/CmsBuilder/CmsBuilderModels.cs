@@ -23,6 +23,10 @@ public sealed class CmsSiteEditorModel
     public string AccentColorHex { get; set; } = "#f59e0b";
 
     public string FontPairingKey { get; set; } = CmsFontPairings.Elegant;
+
+    public string LogoUrl { get; set; } = string.Empty;
+
+    public string FaviconUrl { get; set; } = string.Empty;
 }
 
 public sealed class CmsPageEditorModel
@@ -48,9 +52,17 @@ public sealed class CmsPageEditorModel
 
     public string OgImageUrl { get; set; } = string.Empty;
 
+    public string CanonicalUrl { get; set; } = string.Empty;
+
+    public string CategoryName { get; set; } = string.Empty;
+
+    public string Tags { get; set; } = string.Empty;
+
     public string CustomCss { get; set; } = string.Empty;
 
     public string Status { get; set; } = CmsPageStatuses.Draft;
+
+    public DateTimeOffset? PublishedAt { get; set; }
 }
 
 public sealed record NavMenuItem(string Id, string Label, string Href, bool OpenInNewTab);
