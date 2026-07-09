@@ -1,0 +1,8 @@
+@page "/admin/ssh-terminal-window"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+
+<PageTitle>SSH Terminal</PageTitle>
+
+<SshTerminalPanel AutoConnect="true" FullScreen="true" />

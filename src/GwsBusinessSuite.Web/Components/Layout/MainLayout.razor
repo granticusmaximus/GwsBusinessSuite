@@ -3,8 +3,8 @@
 
 <AuthorizeView>
     <Authorized Context="authState">
-        <div class="gws-layout @(IsBuilderRoute ? "gws-builder-mode" : "")">
-            @if (!IsBuilderRoute)
+        <div class="gws-layout @(IsChromelessRoute ? "gws-builder-mode" : "")">
+            @if (!IsChromelessRoute)
             {
                 <header class="gws-admin-bar">
                     <div class="gws-admin-bar-start">
@@ -28,7 +28,7 @@
             }
 
             <div class="gws-layout-body">
-                @if (!IsBuilderRoute)
+                @if (!IsChromelessRoute)
                 {
                     <aside class="gws-sidebar">
                         <NavMenu />
@@ -36,7 +36,7 @@
                 }
 
                 <div class="gws-body">
-                    <main class="gws-content @(IsBuilderRoute ? "gws-content-builder" : "")">
+                    <main class="gws-content @(IsChromelessRoute ? "gws-content-builder" : "")">
                         @Body
                     </main>
                 </div>
@@ -58,6 +58,13 @@
 </div>
 
 @code {
-    private bool IsBuilderRoute =>
-        Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("admin/canvas", StringComparison.OrdinalIgnoreCase);
+    private bool IsChromelessRoute
+    {
+        get
+        {
+            var path = Navigation.ToBaseRelativePath(Navigation.Uri);
+            return path.StartsWith("admin/canvas", StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith("admin/ssh-terminal-window", StringComparison.OrdinalIgnoreCase);
+        }
+    }
 }

@@ -22,11 +22,18 @@ window.gwsSshTerminal = (function () {
         term.open(el);
         fitAddon.fit();
 
+        // xterm's cursor blinks whether or not it's focused, so without this a connected
+        // terminal looks alive but silently drops every keystroke until the user finds and
+        // clicks its (off-screen, opacity:0) helper textarea. Focus it immediately instead,
+        // matching a native terminal window that's ready to type in as soon as it opens.
+        term.focus();
+
         // Blazor auto-marshals a C# byte[] parameter to/from a JS Uint8Array over the
         // circuit - pass Uint8Array directly both ways rather than converting to a plain
         // number array, which would silently switch to a slower/incorrect marshalling path.
         term.onData((data) => {
-            dotNetHelper.invokeMethodAsync("OnTerminalInput", new TextEncoder().encode(data));
+            dotNetHelper.invokeMethodAsync("OnTerminalInput", new TextEncoder().encode(data))
+                .catch((err) => console.error("gwsSshTerminal: OnTerminalInput failed.", err));
         });
 
         const resizeObserver = new ResizeObserver(() => {
@@ -59,5 +66,21 @@ window.gwsSshTerminal = (function () {
         delete instances[elementId];
     }
 
-    return { init, write, destroy };
+    // Mirrors DigitalOcean's droplet console: a separate, resizable popup window rather
+    // than an inline panel. Sizing/positioning here is just the initial size - the window
+    // chrome (resizable=yes) lets the user resize it afterward, and the terminal inside
+    // re-fits itself via the ResizeObserver wired up in init().
+    function openWindow() {
+        const width = Math.min(1000, window.screen.availWidth - 100);
+        const height = Math.min(700, window.screen.availHeight - 100);
+        const left = Math.max(0, (window.screen.availWidth - width) / 2);
+        const top = Math.max(0, (window.screen.availHeight - height) / 2);
+        window.open(
+            '/admin/ssh-terminal-window',
+            'gws-ssh-terminal',
+            `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
+        );
+    }
+
+    return { init, write, destroy, openWindow };
 })();
