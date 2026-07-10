@@ -31,6 +31,32 @@
     --gws-shadow-lg: var(--gws-shadow-md);
 }
 
+/* Bootstrap 5.3's own CSS custom properties (loaded before app.css - see App.razor) -
+   overriding these here re-themes every .text-primary/.bg-primary/.border-primary/link
+   utility class across all ~30 admin pages without having to hunt down each usage. */
+:root {
+    --bs-primary: #f59e0b;
+    --bs-primary-rgb: 245, 158, 11;
+    --bs-primary-text-emphasis: #fbbf7a;
+    --bs-primary-bg-subtle: #3a2a12;
+    --bs-primary-border-subtle: #5c4321;
+    --bs-body-color: #fafaf9;
+    --bs-body-color-rgb: 250, 250, 249;
+    --bs-body-bg: #141210;
+    --bs-body-bg-rgb: 20, 18, 16;
+    --bs-emphasis-color: #fafaf9;
+    --bs-secondary-color: #a8a29e;
+    --bs-secondary-bg: #231f1d;
+    --bs-tertiary-bg: #1c1917;
+    --bs-border-color: #292524;
+    --bs-border-color-translucent: rgba(250, 250, 249, 0.12);
+    --bs-link-color: #f59e0b;
+    --bs-link-color-rgb: 245, 158, 11;
+    --bs-link-hover-color: #d97706;
+    --bs-link-hover-color-rgb: 217, 119, 6;
+    --bs-heading-color: #fafaf9;
+}
+
 /* ── Base ────────────────────────────────────────────────── */
 html, body {
     height: 100%;
