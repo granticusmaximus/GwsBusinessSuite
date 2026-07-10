@@ -5,6 +5,7 @@ using GwsBusinessSuite.Application.Comments;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure;
 using GwsBusinessSuite.Application.ContentStudio;
+using GwsBusinessSuite.Application.Resume;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Web.Services;
@@ -699,6 +700,34 @@ app.MapPost("/blog/{slug}/comments", async (
 
     return Results.Redirect(thanksUrl);
 }).RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-write");
+
+app.MapGet("/resume", async (
+        HttpRequest request,
+        ICmsBuilderService cmsBuilderService,
+        IConfiguration configuration) =>
+    {
+        var navMenus = await GetPublicNavMenusAsync(cmsBuilderService, configuration);
+        var bodyHtml = ResumeHtmlRenderer.Body();
+        var html = PublicSiteHtmlRenderer.Layout(
+            "Resume — Grant Watson",
+            "Grant Watson's resume: software engineer and business analyst experience since 2017.",
+            null,
+            bodyHtml,
+            navMenus.Primary,
+            navMenus.Footer,
+            navMenus.AccentColorHex,
+            navMenus.FontPairingKey,
+            canonicalUrl: CombineAbsoluteUrl(GetPublicBaseUrl(configuration, request), "/resume"),
+            siteName: navMenus.SiteName,
+            logoUrl: navMenus.LogoUrl,
+            faviconUrl: navMenus.FaviconUrl);
+        return Results.Content(html, "text/html");
+    })
+    .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
+
+app.MapGet("/resume.pdf", (IResumePdfService resumePdfService) =>
+        Results.File(resumePdfService.GenerateResumePdf(), "application/pdf", "Grant-Watson-Resume.pdf"))
+    .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
 
 app.MapGet("/sitemap.xml", async (
     HttpRequest request,

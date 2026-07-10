@@ -148,13 +148,13 @@ public static class GrantWatsonHomepageTemplate
                     columnLayout: "full",
                     Column(
                         HeroWidget(
-                            headline: "C#-heavy software development for the apps your business actually needs.",
-                            subline: "I build ASP.NET, WPF, VB.NET, and JavaScript applications for internal teams, customer experiences, inventory workflows, and line-of-business operations. My recent business analyst experience at Unum also helps me translate requirements into software that works in the real world.",
+                            headline: "Grant Watson — Software Engineer and Business Analyst",
+                            subline: "I've worked as a software developer since 2017, building ASP.NET, WPF, VB.NET, and JavaScript applications across federal, tribal, and private-sector teams. My current role as a Business Developer at Unum adds hands-on business-analysis experience — turning regulatory requirements and ambiguous asks into software that actually works.",
                             cta1Label: "Start a Project",
                             cta1Href: "/contact",
                             cta2Label: "Read the Blog",
                             cta2Href: "/blog"),
-                        ButtonWidget("View Resume", "/resume", "outline-secondary"))),
+                        ButtonWidget("See my Resumè", "/resume", "outline-secondary"))),
 
                 Section(
                     label: "Intro",

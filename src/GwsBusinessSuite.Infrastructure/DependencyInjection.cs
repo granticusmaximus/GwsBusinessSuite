@@ -10,6 +10,7 @@ using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.GovernmentIntelligence;
 using GwsBusinessSuite.Application.NewsIntelligence;
 using GwsBusinessSuite.Application.Podcasts;
+using GwsBusinessSuite.Application.Resume;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Application.SshTerminal;
 using GwsBusinessSuite.Application.Users;
@@ -99,6 +100,7 @@ public static class DependencyInjection
         services.AddScoped<IContentStudioService, ContentStudioService>();
         services.AddScoped<ICrmService, CrmService>();
         services.AddScoped<IUserManagementService, UserManagementService>();
+        services.AddScoped<IResumePdfService, ResumePdfService>();
         // Same persisted volume as the SQLite DB and DP keys in production
         // (docker-compose.yml mounts gwssuite-data:/app/data); a relative dev-local path
         // otherwise (see appsettings.Development.json).
