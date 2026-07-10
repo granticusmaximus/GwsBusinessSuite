@@ -375,22 +375,6 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
             : null;
     }
 
-    public async Task<CmsPage?> GetHomepageAsync(Guid siteId, bool includeUnpublished = false, CancellationToken cancellationToken = default)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var pages = await dbContext.CmsPages
-            .AsNoTracking()
-            .Where(page => page.SiteId == siteId && page.ParentPageId == null)
-            .ToListAsync(cancellationToken);
-
-        return pages
-            .Where(page => IsPageResolvable(page, includeUnpublished, now))
-            .OrderBy(GetHomepagePriority)
-            .ThenBy(page => page.CreatedAt)
-            .ThenBy(page => page.Title, StringComparer.OrdinalIgnoreCase)
-            .FirstOrDefault();
-    }
-
     // Shared by the Studio's page list (display) and Program.cs (nav hrefs, "View Live Page")
     // — walks ParentPageId back to the root. allPagesInSite must include every page for the
     // site the given page belongs to, or ancestors won't resolve.
@@ -508,21 +492,6 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         page is not null
         && page.TrashedAt is null
         && (includeUnpublished || PublicationWindows.IsVisible(page.Status, CmsPageStatuses.Published, page.PublishedAt, now));
-
-    private static int GetHomepagePriority(CmsPage page)
-    {
-        if (string.Equals(page.Slug, "home", StringComparison.OrdinalIgnoreCase))
-        {
-            return 0;
-        }
-
-        if (string.Equals(page.Slug, "index", StringComparison.OrdinalIgnoreCase))
-        {
-            return 1;
-        }
-
-        return 2;
-    }
 
     // Permanent, unrecoverable delete — only allowed on a page that's already in the Trash
     // (see TrashPageAsync), so a stray click on the normal page editor can never permanently

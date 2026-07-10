@@ -178,6 +178,8 @@ using (var scope = app.Services.CreateScope())
     await using var dbContext = await dbFactory.CreateDbContextAsync();
     await dbContext.Database.MigrateAsync();
 
+    await EnsureGrantWatsonHomepageAsync(dbContext, app.Configuration, app.Logger);
+
     if (!await dbContext.AppUsers.AnyAsync())
     {
         var hasher        = scope.ServiceProvider.GetRequiredService<IPasswordHasher<AppUser>>();
@@ -1273,7 +1275,7 @@ app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
-// "/" on the public host resolves the Canvas homepage; anywhere else (admin.gwsapp.net,
+// "/" on the public host renders the Canvas "home" page; anywhere else (admin.gwsapp.net,
 // localhost, direct IP) redirects to /admin as before. One endpoint, not two — see the note
 // above the /{**pageSlug} route for why a second RequireHost-gated "/" registration breaks.
 app.MapGet("/", (
@@ -1283,7 +1285,7 @@ app.MapGet("/", (
     GlobalBlockResolver globalBlockResolver,
     IConfiguration configuration) =>
     IsPublicHost(httpContext)
-        ? RenderPublicCanvasPageAsync(string.Empty, request, request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration)
+        ? RenderPublicCanvasPageAsync("home", request, request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration)
         : Task.FromResult(Results.Redirect("/admin")))
     .AllowAnonymous().RequireRateLimiting("public-read");
 
@@ -1307,8 +1309,7 @@ static async Task<PublicNavMenus> GetPublicNavMenusAsync(ICmsBuilderService cmsB
 }
 
 // Renders a Canvas page (by full path, under the Canvas:SiteSlug-configured site) as a full
-// grantwatson.dev document — shared by GET "/" (blank path => homepage resolution) and
-// GET "/{**pageSlug}".
+// grantwatson.dev document — shared by GET "/" (path "home") and GET "/{**pageSlug}".
 // fullPath supports nested pages ("services/web-dev") via GetPageByFullPathAsync.
 static async Task<IResult> RenderPublicCanvasPageAsync(
     string fullPath,
@@ -1332,9 +1333,7 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     var normalizedPath = fullPath.Trim('/');
     // includeUnpublished stays false here — real visitors on grantwatson.dev never see
     // drafts, only the auth-aware /cms/{siteSlug}/{**pageSlug} preview route does.
-    var page = string.IsNullOrWhiteSpace(normalizedPath)
-        ? await cmsBuilderService.GetHomepageAsync(site.Id, includeUnpublished: false)
-        : await cmsBuilderService.GetPageByFullPathAsync(site.Id, normalizedPath, includeUnpublished: false);
+    var page = await cmsBuilderService.GetPageByFullPathAsync(site.Id, normalizedPath, includeUnpublished: false);
     if (page is null)
     {
         return Results.Content(
@@ -1524,6 +1523,76 @@ static bool IsWeakSeedPassword(string password, string username, out string reas
 
     reason = string.Empty;
     return false;
+}
+
+static async Task EnsureGrantWatsonHomepageAsync(ApplicationDbContext dbContext, IConfiguration configuration, ILogger logger)
+{
+    var siteName = configuration["Canvas:SiteName"] ?? "grantwatson.dev";
+    var site = await dbContext.CmsSites.FirstOrDefaultAsync(s => s.Slug == GrantWatsonHomepageTemplate.SiteSlug);
+    if (site is null)
+    {
+        site = new CmsSite
+        {
+            Name = siteName,
+            Slug = GrantWatsonHomepageTemplate.SiteSlug,
+            Theme = "Default",
+            AccentColorHex = "#f59e0b",
+            FontPairingKey = CmsFontPairings.Elegant,
+            CreatedBy = "system"
+        };
+        dbContext.CmsSites.Add(site);
+        await dbContext.SaveChangesAsync();
+        logger.LogInformation("Created the default public CMS site for {SiteSlug}.", GrantWatsonHomepageTemplate.SiteSlug);
+    }
+
+    var homePage = await dbContext.CmsPages
+        .FirstOrDefaultAsync(page => page.SiteId == site.Id && page.ParentPageId == null && page.Slug == "home");
+
+    if (!GrantWatsonHomepageTemplate.ShouldApplyTemplate(homePage))
+    {
+        return;
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var blocksJson = GrantWatsonHomepageTemplate.CreateBlocksJson();
+
+    if (homePage is null)
+    {
+        homePage = new CmsPage
+        {
+            SiteId = site.Id,
+            Title = "Home",
+            Slug = "home",
+            BlocksJson = blocksJson,
+            MetaTitle = GrantWatsonHomepageTemplate.MetaTitle,
+            MetaDescription = GrantWatsonHomepageTemplate.MetaDescription,
+            Status = CmsPageStatuses.Published,
+            PublishedAt = now,
+            CreatedAt = now,
+            CreatedBy = "system",
+            UpdatedAt = now,
+            UpdatedBy = "system"
+        };
+        dbContext.CmsPages.Add(homePage);
+        logger.LogInformation("Created the public home page for {SiteSlug}.", GrantWatsonHomepageTemplate.SiteSlug);
+    }
+    else
+    {
+        homePage.Title = "Home";
+        homePage.Slug = "home";
+        homePage.ParentPageId = null;
+        homePage.BlocksJson = blocksJson;
+        homePage.MetaTitle = GrantWatsonHomepageTemplate.MetaTitle;
+        homePage.MetaDescription = GrantWatsonHomepageTemplate.MetaDescription;
+        homePage.Status = CmsPageStatuses.Published;
+        homePage.PublishedAt ??= now;
+        homePage.TrashedAt = null;
+        homePage.UpdatedAt = now;
+        homePage.UpdatedBy = "system";
+        logger.LogInformation("Updated the legacy public home page for {SiteSlug}.", GrantWatsonHomepageTemplate.SiteSlug);
+    }
+
+    await dbContext.SaveChangesAsync();
 }
 
 // These mutation endpoints are authenticated, but cookie auth alone gives no CSRF
