@@ -1273,7 +1273,7 @@ app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
-// "/" on the public host renders the Canvas home page; anywhere else (admin.gwsapp.net,
+// "/" on the public host resolves the Canvas homepage; anywhere else (admin.gwsapp.net,
 // localhost, direct IP) redirects to /admin as before. One endpoint, not two — see the note
 // above the /{**pageSlug} route for why a second RequireHost-gated "/" registration breaks.
 app.MapGet("/", (
@@ -1283,7 +1283,7 @@ app.MapGet("/", (
     GlobalBlockResolver globalBlockResolver,
     IConfiguration configuration) =>
     IsPublicHost(httpContext)
-        ? RenderPublicCanvasPageAsync("home", request, request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration)
+        ? RenderPublicCanvasPageAsync(string.Empty, request, request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration)
         : Task.FromResult(Results.Redirect("/admin")))
     .AllowAnonymous().RequireRateLimiting("public-read");
 
@@ -1307,7 +1307,8 @@ static async Task<PublicNavMenus> GetPublicNavMenusAsync(ICmsBuilderService cmsB
 }
 
 // Renders a Canvas page (by full path, under the Canvas:SiteSlug-configured site) as a full
-// grantwatson.dev document — shared by GET "/" (path "home") and GET "/{**pageSlug}".
+// grantwatson.dev document — shared by GET "/" (blank path => homepage resolution) and
+// GET "/{**pageSlug}".
 // fullPath supports nested pages ("services/web-dev") via GetPageByFullPathAsync.
 static async Task<IResult> RenderPublicCanvasPageAsync(
     string fullPath,
@@ -1328,9 +1329,12 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
 
     var navItems = PublicSiteHtmlRenderer.ParseNavItems(site.NavMenuJson);
     var footerNavItems = PublicSiteHtmlRenderer.ParseFooterNavItems(site.FooterNavMenuJson);
+    var normalizedPath = fullPath.Trim('/');
     // includeUnpublished stays false here — real visitors on grantwatson.dev never see
     // drafts, only the auth-aware /cms/{siteSlug}/{**pageSlug} preview route does.
-    var page = await cmsBuilderService.GetPageByFullPathAsync(site.Id, fullPath, includeUnpublished: false);
+    var page = string.IsNullOrWhiteSpace(normalizedPath)
+        ? await cmsBuilderService.GetHomepageAsync(site.Id, includeUnpublished: false)
+        : await cmsBuilderService.GetPageByFullPathAsync(site.Id, normalizedPath, includeUnpublished: false);
     if (page is null)
     {
         return Results.Content(
@@ -1369,7 +1373,7 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     var canonicalUrl = ResolvePublicUrl(
         GetPublicBaseUrl(configuration, request),
         page.CanonicalUrl,
-        GetPublicCanvasRoutePath(page, fullPath));
+        GetPublicCanvasRoutePath(page, normalizedPath));
     var html = PublicSiteHtmlRenderer.Layout(
         pageTitle,
         page.MetaDescription,

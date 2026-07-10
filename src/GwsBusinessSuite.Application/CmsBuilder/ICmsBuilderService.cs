@@ -16,6 +16,7 @@ public interface ICmsBuilderService
     Task<CmsPage?> GetPageAsync(Guid pageId, CancellationToken cancellationToken = default);
     Task<CmsPage?> GetPageBySlugAsync(Guid siteId, string pageSlug, CancellationToken cancellationToken = default);
     Task<CmsPage?> GetPageByFullPathAsync(Guid siteId, string fullPath, bool includeUnpublished = false, CancellationToken cancellationToken = default);
+    Task<CmsPage?> GetHomepageAsync(Guid siteId, bool includeUnpublished = false, CancellationToken cancellationToken = default);
     Task<CmsPage> SavePageAsync(CmsPageEditorModel editor, CancellationToken cancellationToken = default);
     string BuildFullPath(CmsPage page, IReadOnlyList<CmsPage> allPagesInSite);
     Task TrashPageAsync(Guid pageId, CancellationToken cancellationToken = default);

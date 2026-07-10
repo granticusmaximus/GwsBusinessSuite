@@ -370,22 +370,25 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
             parentId = current.Id;
         }
 
-        // Trashed is unconditional — unlike Draft, an authenticated admin previewing via
-        // the Studio doesn't get to see a trashed page either. Trash means "not visible
-        // anywhere until restored."
-        if (current is not null && current.TrashedAt is not null)
-        {
-            return null;
-        }
+        return IsPageResolvable(current, includeUnpublished, DateTimeOffset.UtcNow)
+            ? current
+            : null;
+    }
 
-        if (current is not null
-            && !includeUnpublished
-            && !PublicationWindows.IsVisible(current.Status, CmsPageStatuses.Published, current.PublishedAt, DateTimeOffset.UtcNow))
-        {
-            return null;
-        }
+    public async Task<CmsPage?> GetHomepageAsync(Guid siteId, bool includeUnpublished = false, CancellationToken cancellationToken = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var pages = await dbContext.CmsPages
+            .AsNoTracking()
+            .Where(page => page.SiteId == siteId && page.ParentPageId == null)
+            .ToListAsync(cancellationToken);
 
-        return current;
+        return pages
+            .Where(page => IsPageResolvable(page, includeUnpublished, now))
+            .OrderBy(GetHomepagePriority)
+            .ThenBy(page => page.CreatedAt)
+            .ThenBy(page => page.Title, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
     }
 
     // Shared by the Studio's page list (display) and Program.cs (nav hrefs, "View Live Page")
@@ -499,6 +502,26 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return page;
+    }
+
+    private static bool IsPageResolvable(CmsPage? page, bool includeUnpublished, DateTimeOffset now) =>
+        page is not null
+        && page.TrashedAt is null
+        && (includeUnpublished || PublicationWindows.IsVisible(page.Status, CmsPageStatuses.Published, page.PublishedAt, now));
+
+    private static int GetHomepagePriority(CmsPage page)
+    {
+        if (string.Equals(page.Slug, "home", StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+
+        if (string.Equals(page.Slug, "index", StringComparison.OrdinalIgnoreCase))
+        {
+            return 1;
+        }
+
+        return 2;
     }
 
     // Permanent, unrecoverable delete — only allowed on a page that's already in the Trash
