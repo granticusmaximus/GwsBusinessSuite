@@ -120,6 +120,25 @@ public sealed class DockerHealthService(IAppDbContext dbContext) : IDockerHealth
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task MarkAllAlertsReadAsync(CancellationToken cancellationToken = default)
+    {
+        var unread = await dbContext.DockerHealthAlerts.Where(a => !a.IsRead).ToListAsync(cancellationToken);
+        if (unread.Count == 0)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var alert in unread)
+        {
+            alert.IsRead = true;
+            alert.UpdatedAt = now;
+            alert.UpdatedBy = "system";
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<int> CountUnreadAlertsAsync(CancellationToken cancellationToken = default)
     {
         return await dbContext.DockerHealthAlerts.CountAsync(a => !a.IsRead, cancellationToken);

@@ -10,6 +10,8 @@ public interface IDockerHealthService
 
     Task MarkAlertReadAsync(Guid alertId, CancellationToken cancellationToken = default);
 
+    Task MarkAllAlertsReadAsync(CancellationToken cancellationToken = default);
+
     Task<int> CountUnreadAlertsAsync(CancellationToken cancellationToken = default);
 
     Task<DockerActionResult> StartContainerAsync(string containerName, string performedBy, CancellationToken cancellationToken = default);

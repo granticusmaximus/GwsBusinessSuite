@@ -1,27 +1,32 @@
 /* ── Design tokens ───────────────────────────────────────────
-   Flat, dense wp-admin-inspired chrome: a dark sidebar + a slim full-width
-   admin bar above it, light-gray content area, small-radius flat panels.
-   Values are deliberately our own (not copies of WordPress's exact admin
-   scheme) — see the icon set (Bootstrap Icons, not Dashicons) and color
-   values below, which lean on this app's existing blue brand accent
-   rather than WordPress's blue/gray. */
+   Dense admin chrome (dark sidebar + slim admin bar + panel content area),
+   now sharing the exact palette/type pairing as the public grantwatson.dev
+   site (see wwwroot/public-site.css :root) instead of its own separate
+   wp-admin-blue scheme, so the two apps read as one product. Variable
+   *names* are kept as the original --gws-* tokens so every component and
+   scoped .razor.css file that already reads them picks up the new values
+   automatically - only the values changed. */
 :root {
     --gws-sidebar-width: 224px;
     --gws-sidebar-collapsed-width: 60px;
-    --gws-sidebar-accent: #2563eb;
+    --gws-sidebar-accent: #f59e0b;
+    --gws-sidebar-accent-hover: #d97706;
     --gws-admin-bar-height: 36px;
-    --gws-sidebar-bg: #161b26;
-    --gws-sidebar-hover-bg: #232a38;
-    --gws-sidebar-text: #c7ccd6;
-    --gws-sidebar-text-soft: #8891a1;
-    --gws-admin-bar-bg: #10141d;
-    --gws-body-bg: #eef1f5;
-    --gws-panel-bg: #ffffff;
-    --gws-panel-border: #dcdfe4;
-    --gws-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
-    --gws-shadow-md: 0 2px 8px rgba(15, 23, 42, 0.08);
-    --gws-text-strong: #1e2430;
-    --gws-text-soft: #646b78;
+    --gws-sidebar-bg: #1c1917;
+    --gws-sidebar-hover-bg: #2a2522;
+    --gws-sidebar-text: #d6d3d1;
+    --gws-sidebar-text-soft: #78716c;
+    --gws-admin-bar-bg: #141210;
+    --gws-body-bg: #141210;
+    --gws-panel-bg: #1c1917;
+    --gws-panel-bg-2: #231f1d;
+    --gws-panel-border: #292524;
+    --gws-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --gws-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+    --gws-text-strong: #fafaf9;
+    --gws-text-soft: #a8a29e;
+    --gws-font-serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
+    --gws-font-sans: 'Inter', system-ui, -apple-system, sans-serif;
     /* Kept for any component still referencing the old glass tokens by name. */
     --gws-shadow-lg: var(--gws-shadow-md);
 }
@@ -29,7 +34,7 @@
 /* ── Base ────────────────────────────────────────────────── */
 html, body {
     height: 100%;
-    font-family: "SF Pro Display", "SF Pro Text", "Segoe UI Variable", "Inter Tight", "Aptos", system-ui, sans-serif;
+    font-family: var(--gws-font-sans);
     background: var(--gws-body-bg);
     color: var(--gws-text-strong);
 }
@@ -321,8 +326,9 @@ h1:focus { outline: none; }
 }
 
 .page-header h1 {
-    font-size: 1.4rem;
-    font-weight: 600;
+    font-family: var(--gws-font-serif);
+    font-size: 1.55rem;
+    font-weight: 800;
     color: var(--gws-text-strong);
     margin-bottom: .3rem;
     letter-spacing: -.01em;
@@ -336,6 +342,15 @@ h1:focus { outline: none; }
 
 .card {
     border-radius: 4px !important;
+    background: var(--gws-panel-bg);
+    border-color: var(--gws-panel-border);
+    color: var(--gws-text-strong);
+}
+
+.card-header,
+.card-footer {
+    background: var(--gws-panel-bg-2);
+    border-color: var(--gws-panel-border);
 }
 
 .card.border-0.shadow-sm,
@@ -353,19 +368,29 @@ h1:focus { outline: none; }
 .btn-primary {
     background: var(--gws-sidebar-accent);
     border: none;
+    color: #1c1917;
     box-shadow: none;
 }
 
 .btn-primary:hover {
-    background: #1d4ed8;
+    background: var(--gws-sidebar-accent-hover);
+    color: #1c1917;
 }
 
 .btn-outline-secondary,
 .btn-outline-success,
 .btn-outline-primary,
 .btn-outline-danger {
-    background: #fff;
+    background: transparent;
     border-color: var(--gws-panel-border);
+    color: var(--gws-text-strong);
+}
+
+.btn-outline-primary:hover,
+.btn-outline-secondary:hover {
+    background: var(--gws-panel-bg-2);
+    border-color: var(--gws-sidebar-accent);
+    color: var(--gws-text-strong);
 }
 
 .form-control,
@@ -374,7 +399,118 @@ h1:focus { outline: none; }
 .form-control:focus,
 .form-select:focus {
     border-radius: 3px;
+    background-color: var(--gws-panel-bg-2);
+    border-color: var(--gws-panel-border);
+    color: var(--gws-text-strong);
 }
+
+.form-control::placeholder { color: var(--gws-text-soft); }
+
+.form-control:focus,
+.form-select:focus {
+    background-color: var(--gws-panel-bg-2);
+    color: var(--gws-text-strong);
+    border-color: var(--gws-sidebar-accent);
+    box-shadow: 0 0 0 0.2rem rgba(245, 158, 11, 0.18);
+}
+
+.form-label { color: var(--gws-text-soft); }
+
+/* ── Bootstrap component dark-mode overrides ───────────────
+   Bootstrap 5's own component CSS (tables, modals, dropdowns, alerts,
+   badges, pagination, list-group) ships light-mode-only defaults that
+   aren't driven by our --gws-* tokens, so they need explicit overrides
+   here rather than picking the new palette up for free. */
+.table {
+    color: var(--gws-text-strong);
+    border-color: var(--gws-panel-border);
+    --bs-table-bg: transparent;
+    --bs-table-striped-bg: var(--gws-panel-bg-2);
+    --bs-table-hover-bg: var(--gws-panel-bg-2);
+    --bs-table-hover-color: var(--gws-text-strong);
+    --bs-table-color: var(--gws-text-strong);
+    --bs-table-border-color: var(--gws-panel-border);
+}
+
+.table > :not(caption) > * > * { background-color: transparent; }
+
+.modal-content {
+    background: var(--gws-panel-bg);
+    color: var(--gws-text-strong);
+    border: 1px solid var(--gws-panel-border);
+}
+
+.modal-header,
+.modal-footer { border-color: var(--gws-panel-border); }
+
+.modal-backdrop.show { opacity: .65; }
+
+.btn-close { filter: invert(1) grayscale(100%) brightness(1.6); }
+
+.dropdown-menu {
+    background: var(--gws-panel-bg-2);
+    border: 1px solid var(--gws-panel-border);
+    box-shadow: var(--gws-shadow-md);
+}
+
+.dropdown-item { color: var(--gws-text-strong); }
+
+.dropdown-item:hover,
+.dropdown-item:focus {
+    background: var(--gws-sidebar-hover-bg);
+    color: var(--gws-text-strong);
+}
+
+.dropdown-divider { border-color: var(--gws-panel-border); }
+
+.alert-primary,
+.alert-info { background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.35); color: #fbbf7a; }
+.alert-success { background: rgba(34, 197, 94, 0.12); border-color: rgba(34, 197, 94, 0.35); color: #86efac; }
+.alert-danger { background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.35); color: #fca5a5; }
+.alert-warning { background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.35); color: #fcd34d; }
+
+.badge.bg-primary { background-color: var(--gws-sidebar-accent) !important; color: #1c1917 !important; }
+.badge.bg-secondary { background-color: var(--gws-panel-bg-2) !important; color: var(--gws-text-soft) !important; }
+.badge.bg-light { background-color: var(--gws-panel-bg-2) !important; color: var(--gws-text-strong) !important; }
+
+.page-link {
+    background: var(--gws-panel-bg);
+    border-color: var(--gws-panel-border);
+    color: var(--gws-text-strong);
+}
+.page-link:hover { background: var(--gws-panel-bg-2); color: var(--gws-text-strong); }
+.page-item.active .page-link {
+    background: var(--gws-sidebar-accent);
+    border-color: var(--gws-sidebar-accent);
+    color: #1c1917;
+}
+.page-item.disabled .page-link { background: var(--gws-panel-bg); color: var(--gws-text-soft); }
+
+.list-group-item {
+    background: var(--gws-panel-bg);
+    border-color: var(--gws-panel-border);
+    color: var(--gws-text-strong);
+}
+.list-group-item.active {
+    background: var(--gws-sidebar-accent);
+    border-color: var(--gws-sidebar-accent);
+    color: #1c1917;
+}
+
+.nav-tabs { border-color: var(--gws-panel-border); }
+.nav-tabs .nav-link { color: var(--gws-text-soft); border-color: transparent; }
+.nav-tabs .nav-link:hover { border-color: var(--gws-panel-border); }
+.nav-tabs .nav-link.active {
+    background: var(--gws-panel-bg);
+    color: var(--gws-text-strong);
+    border-color: var(--gws-panel-border) var(--gws-panel-border) var(--gws-panel-bg);
+}
+
+.breadcrumb-item + .breadcrumb-item::before { color: var(--gws-text-soft); }
+
+.text-muted { color: var(--gws-text-soft) !important; }
+
+hr { border-color: var(--gws-panel-border); opacity: 1; }
 
 /* ── WordPress-style list tables (Posts, Pages) ────────────
    Row actions ("Edit | Trash | View") stay in the DOM for accessibility
@@ -499,19 +635,35 @@ h1:focus { outline: none; }
 
 .EasyMDEContainer .editor-toolbar {
     border-radius: 10px 10px 0 0;
-    border-color: #dbe6f3;
+    border-color: var(--gws-panel-border);
+    background: var(--gws-panel-bg-2);
 }
 
 .EasyMDEContainer .CodeMirror,
 .EasyMDEContainer .editor-toolbar {
-    border-color: #dbe6f3;
+    border-color: var(--gws-panel-border);
 }
 
+.EasyMDEContainer .CodeMirror {
+    background: var(--gws-panel-bg);
+    color: var(--gws-text-strong);
+}
+
+.EasyMDEContainer .editor-toolbar button { color: var(--gws-text-soft) !important; }
+.EasyMDEContainer .editor-toolbar button:hover,
+.EasyMDEContainer .editor-toolbar button.active {
+    background: var(--gws-sidebar-hover-bg);
+    border-color: var(--gws-panel-border);
+}
+.EasyMDEContainer .editor-toolbar i.separator { border-left-color: var(--gws-panel-border); }
+.EasyMDEContainer .CodeMirror-cursor { border-left-color: var(--gws-text-strong); }
+.EasyMDEContainer .editor-statusbar { color: var(--gws-text-soft); }
+
 .surface-panel {
-    background: #fff;
-    border: 1px solid #e2e8f0;
+    background: var(--gws-panel-bg);
+    border: 1px solid var(--gws-panel-border);
     border-radius: 16px;
-    box-shadow: 0 10px 24px rgba(15, 23, 42, .05);
+    box-shadow: var(--gws-shadow-md);
 }
 
 .article-preview {
@@ -524,7 +676,8 @@ h1:focus { outline: none; }
 .article-preview h2,
 .article-preview h3,
 .article-preview h4 {
-    color: #0f172a;
+    font-family: var(--gws-font-serif);
+    color: var(--gws-text-strong);
     font-weight: 700;
     line-height: 1.2;
 }
@@ -542,14 +695,14 @@ h1:focus { outline: none; }
 
 .article-preview p,
 .article-preview li {
-    color: #334155;
+    color: var(--gws-text-soft);
     line-height: 1.85;
     font-size: .98rem;
 }
 
 .article-preview pre {
-    background: #0f172a;
-    color: #e2e8f0;
+    background: var(--gws-panel-bg-2);
+    color: var(--gws-text-strong);
     padding: 1rem;
     border-radius: 12px;
     overflow-x: auto;
@@ -561,15 +714,15 @@ h1:focus { outline: none; }
 }
 
 .article-preview blockquote {
-    border-left: 4px solid #38bdf8;
+    border-left: 4px solid var(--gws-sidebar-accent);
     padding-left: 1rem;
-    color: #475569;
+    color: var(--gws-text-soft);
     margin: 1.25rem 0;
 }
 
 .hero-preview-panel {
-    background: linear-gradient(180deg, rgba(15, 23, 42, .02), rgba(15, 23, 42, .06));
-    border: 1px solid #dbeafe;
+    background: linear-gradient(180deg, rgba(255, 255, 255, .02), rgba(255, 255, 255, .05));
+    border: 1px solid var(--gws-panel-border);
     border-radius: 18px;
     padding: 1.25rem;
 }
@@ -578,9 +731,9 @@ h1:focus { outline: none; }
     width: 100%;
     display: block;
     border-radius: 18px;
-    border: 1px solid rgba(15, 23, 42, .08);
-    box-shadow: 0 18px 32px rgba(15, 23, 42, .12);
-    background: #0f172a;
+    border: 1px solid var(--gws-panel-border);
+    box-shadow: var(--gws-shadow-md);
+    background: var(--gws-panel-bg-2);
 }
 
 .hero-status-panel {
@@ -590,9 +743,9 @@ h1:focus { outline: none; }
     gap: 1rem;
     padding: 1.5rem;
     border-radius: 18px;
-    border: 1px dashed #93c5fd;
-    background: linear-gradient(180deg, #eff6ff, #f8fafc);
-    color: #0f172a;
+    border: 1px dashed var(--gws-panel-border);
+    background: var(--gws-panel-bg-2);
+    color: var(--gws-text-strong);
 }
 
 .hero-status-icon {
@@ -602,8 +755,8 @@ h1:focus { outline: none; }
     align-items: center;
     justify-content: center;
     border-radius: 16px;
-    background: #dbeafe;
-    color: #1d4ed8;
+    background: rgba(245, 158, 11, 0.14);
+    color: var(--gws-sidebar-accent);
     font-size: 1.5rem;
     flex-shrink: 0;
 }
@@ -613,8 +766,8 @@ h1:focus { outline: none; }
     align-items: center;
     border-radius: 999px;
     padding: .35rem .8rem;
-    background: #dbeafe;
-    color: #1d4ed8;
+    background: rgba(245, 158, 11, 0.14);
+    color: var(--gws-sidebar-accent);
     font-size: .75rem;
     font-weight: 700;
     letter-spacing: .03em;
@@ -622,22 +775,22 @@ h1:focus { outline: none; }
 }
 
 .hero-chip-secondary {
-    background: #fef3c7;
-    color: #92400e;
+    background: var(--gws-panel-bg-2);
+    color: var(--gws-text-soft);
 }
 
 /* ── Validation ──────────────────────────────────────────── */
 .valid.modified:not([type=checkbox]) { outline: 1px solid #22c55e; }
 .invalid { outline: 1px solid #ef4444; }
-.validation-message { color: #ef4444; font-size: .85rem; }
+.validation-message { color: #fca5a5; font-size: .85rem; }
 
 /* ── Blazor error boundary ───────────────────────────────── */
 .blazor-error-boundary {
-    background: #fee2e2;
-    border: 1px solid #fecaca;
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.35);
     border-radius: 6px;
     padding: 1rem 1.25rem;
-    color: #991b1b;
+    color: #fca5a5;
 }
 
 .blazor-error-boundary::after {
@@ -646,8 +799,8 @@ h1:focus { outline: none; }
 
 /* ── Blazor error toast ──────────────────────────────────── */
 #blazor-error-ui {
-    background: #fffbeb;
-    border-top: 1px solid #f59e0b;
+    background: var(--gws-panel-bg-2);
+    border-top: 1px solid var(--gws-sidebar-accent);
     bottom: 0;
     left: 0;
     padding: .65rem 1.25rem;
@@ -656,7 +809,7 @@ h1:focus { outline: none; }
     z-index: 1050;
     display: none;
     font-size: .875rem;
-    color: #92400e;
+    color: var(--gws-text-strong);
 }
 
 #blazor-error-ui .dismiss {
@@ -674,9 +827,9 @@ h1:focus { outline: none; }
     min-height: 100vh;
     padding: 2rem;
     background:
-        radial-gradient(circle at top left, rgba(96, 165, 250, 0.18), transparent 28%),
-        radial-gradient(circle at bottom right, rgba(251, 191, 36, 0.14), transparent 26%),
-        linear-gradient(180deg, #fbfdff 0%, #f4f7fb 56%, #edf3f9 100%);
+        radial-gradient(circle at top left, rgba(245, 158, 11, 0.12), transparent 28%),
+        radial-gradient(circle at bottom right, rgba(245, 158, 11, 0.08), transparent 26%),
+        linear-gradient(180deg, #141210 0%, #1c1917 56%, #141210 100%);
 }
 /* ── Responsive ──────────────────────────────────────────── */
 @media (max-width: 767.98px) {

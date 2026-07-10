@@ -16,7 +16,13 @@
     @if (IsOpen)
     {
         <div class="notif-bell-panel">
-            <div class="notif-bell-panel-header">Notifications</div>
+            <div class="notif-bell-panel-header">
+                <span>Notifications</span>
+                @if (UnreadCount > 0)
+                {
+                    <button type="button" class="notif-bell-mark-all" @onclick="MarkAllReadAsync">Mark all as read</button>
+                }
+            </div>
             @if (RecentAlerts.Count == 0)
             {
                 <div class="notif-bell-empty">No alerts. All containers healthy.</div>
@@ -25,12 +31,21 @@
             {
                 @foreach (var alert in RecentAlerts)
                 {
-                    <a href="javascript:void(0)" class="notif-bell-item @(alert.IsRead ? "" : "notif-bell-item-unread")"
-                       @onclick="() => OpenAlertAsync(alert)" @onclick:preventDefault>
-                        <div class="notif-bell-item-title">@alert.ContainerName</div>
-                        <div class="notif-bell-item-message">@alert.Message</div>
-                        <div class="notif-bell-item-time">@alert.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</div>
-                    </a>
+                    <div class="notif-bell-item @(alert.IsRead ? "" : "notif-bell-item-unread")">
+                        <a href="javascript:void(0)" class="notif-bell-item-link"
+                           @onclick="() => OpenAlertAsync(alert)" @onclick:preventDefault>
+                            <div class="notif-bell-item-title">@alert.ContainerName</div>
+                            <div class="notif-bell-item-message">@alert.Message</div>
+                            <div class="notif-bell-item-time">@alert.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</div>
+                        </a>
+                        @if (!alert.IsRead)
+                        {
+                            <button type="button" class="notif-bell-mark-read" title="Mark as read"
+                                    @onclick="() => MarkReadAsync(alert)" @onclick:stopPropagation>
+                                <i class="bi bi-check2"></i>
+                            </button>
+                        }
+                    </div>
                 }
             }
         </div>
@@ -65,12 +80,47 @@
         IsOpen = !IsOpen;
     }
 
+    // DockerHealthAlertView's members are init-only, so an already-read alert is
+    // represented by swapping in a new instance rather than mutating the existing one.
+    private static DockerHealthAlertView AsRead(DockerHealthAlertView alert) => new()
+    {
+        Id = alert.Id,
+        ContainerName = alert.ContainerName,
+        Severity = alert.Severity,
+        Message = alert.Message,
+        IsRead = true,
+        CreatedAt = alert.CreatedAt,
+    };
+
+    private async Task MarkReadAsync(DockerHealthAlertView alert)
+    {
+        if (alert.IsRead)
+        {
+            return;
+        }
+
+        await DockerHealthService.MarkAlertReadAsync(alert.Id);
+        var index = RecentAlerts.FindIndex(a => a.Id == alert.Id);
+        if (index >= 0)
+        {
+            RecentAlerts[index] = AsRead(alert);
+        }
+
+        UnreadCount = Math.Max(0, UnreadCount - 1);
+    }
+
+    private async Task MarkAllReadAsync()
+    {
+        await DockerHealthService.MarkAllAlertsReadAsync();
+        RecentAlerts = RecentAlerts.Select(a => a.IsRead ? a : AsRead(a)).ToList();
+        UnreadCount = 0;
+    }
+
     private async Task OpenAlertAsync(DockerHealthAlertView alert)
     {
         if (!alert.IsRead)
         {
-            await DockerHealthService.MarkAlertReadAsync(alert.Id);
-            UnreadCount = Math.Max(0, UnreadCount - 1);
+            await MarkReadAsync(alert);
         }
 
         IsOpen = false;
