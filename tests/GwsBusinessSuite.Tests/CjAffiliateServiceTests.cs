@@ -8,6 +8,19 @@ namespace GwsBusinessSuite.Tests;
 
 public sealed class CjAffiliateServiceTests
 {
+    // Publisher-scoped joined-advertiser lookup is tried first (see FetchPartnersAsync) and
+    // only falls through to the commissions GraphQL query below when it comes back empty -
+    // every commissions-focused test in this file needs to return an empty advertiser-lookup
+    // result so the GraphQL path it's actually exercising still gets reached.
+    private static HttpResponseMessage EmptyAdvertiserLookupResponse() => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent("{\"results\":[]}", Encoding.UTF8, "application/json")
+    };
+
+    private static bool IsAdvertiserLookupRequest(HttpRequestMessage request) =>
+        request.RequestUri is not null &&
+        request.RequestUri.Host.Equals("advertiser-lookup.api.cj.com", StringComparison.OrdinalIgnoreCase);
+
     [Fact]
     public async Task FetchPartnersAsync_ShouldUseGraphQlPost_ForCommissionsEndpoint()
     {
@@ -16,10 +29,12 @@ public sealed class CjAffiliateServiceTests
         using var handler = new RecordingHandler(
             observedUris,
             observedMethods: observedMethods,
-            responseFactory: _ => new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("{\"data\":{\"publisherCommissions\":{\"records\":[{\"advertiserId\":\"1001\",\"advertiserName\":\"Acme Corp\"}]}}}", Encoding.UTF8, "application/json")
-            });
+            responseFactory: request => IsAdvertiserLookupRequest(request)
+                ? EmptyAdvertiserLookupResponse()
+                : new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"data\":{\"publisherCommissions\":{\"records\":[{\"advertiserId\":\"1001\",\"advertiserName\":\"Acme Corp\"}]}}}", Encoding.UTF8, "application/json")
+                });
         using var client = new HttpClient(handler);
         var service = new CjAffiliateService(client);
 
@@ -31,8 +46,10 @@ public sealed class CjAffiliateServiceTests
 
         Assert.Single(result.Partners);
         Assert.NotEmpty(observedUris);
-        Assert.All(observedUris, uri => Assert.Equal("commissions.api.cj.com", uri.Host, ignoreCase: true));
-        Assert.All(observedMethods, method => Assert.Equal(HttpMethod.Post, method));
+        Assert.Contains(observedUris, uri => uri.Host.Equals("commissions.api.cj.com", StringComparison.OrdinalIgnoreCase));
+        Assert.All(observedUris.Where(uri => uri.Host.Equals("commissions.api.cj.com", StringComparison.OrdinalIgnoreCase)),
+            uri => Assert.Equal("commissions.api.cj.com", uri.Host, ignoreCase: true));
+        Assert.Contains(observedMethods, method => method == HttpMethod.Post);
     }
 
     [Fact]
@@ -41,10 +58,12 @@ public sealed class CjAffiliateServiceTests
         var observedUris = new List<Uri>();
         using var handler = new RecordingHandler(
             observedUris,
-            responseFactory: _ => new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("{\"data\":{\"publisherCommissions\":{\"records\":[{\"advertiserId\":\"1001\",\"advertiserName\":\"Acme Corp\"}]}}}", Encoding.UTF8, "application/json")
-            });
+            responseFactory: request => IsAdvertiserLookupRequest(request)
+                ? EmptyAdvertiserLookupResponse()
+                : new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"data\":{\"publisherCommissions\":{\"records\":[{\"advertiserId\":\"1001\",\"advertiserName\":\"Acme Corp\"}]}}}", Encoding.UTF8, "application/json")
+                });
         using var client = new HttpClient(handler);
         var service = new CjAffiliateService(client);
 
@@ -54,8 +73,9 @@ public sealed class CjAffiliateServiceTests
             EndpointUrl: "https://commissions.api.cj.com",
             MaxResults: 5));
 
-        Assert.NotEmpty(observedUris);
-        Assert.All(observedUris, uri =>
+        var commissionsUris = observedUris.Where(uri => uri.Host.Equals("commissions.api.cj.com", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.NotEmpty(commissionsUris);
+        Assert.All(commissionsUris, uri =>
         {
             Assert.Equal("commissions.api.cj.com", uri.Host, ignoreCase: true);
             Assert.Equal("/query", uri.AbsolutePath);
@@ -136,10 +156,12 @@ public sealed class CjAffiliateServiceTests
         var observedUris = new List<Uri>();
         using var handler = new RecordingHandler(
             observedUris,
-            responseFactory: _ => new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("{\"data\":{\"publisherCommissions\":{\"records\":[{\"advertiserId\":\"1001\",\"advertiserName\":\"Acme\",\"country\":\"US\",\"actionStatus\":\"new\"},{\"advertiserId\":\"1001\",\"advertiserName\":\"Acme\",\"country\":\"US\",\"actionStatus\":\"new\"}]}}}", Encoding.UTF8, "application/json")
-            });
+            responseFactory: request => IsAdvertiserLookupRequest(request)
+                ? EmptyAdvertiserLookupResponse()
+                : new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"data\":{\"publisherCommissions\":{\"records\":[{\"advertiserId\":\"1001\",\"advertiserName\":\"Acme\",\"country\":\"US\",\"actionStatus\":\"new\"},{\"advertiserId\":\"1001\",\"advertiserName\":\"Acme\",\"country\":\"US\",\"actionStatus\":\"new\"}]}}}", Encoding.UTF8, "application/json")
+                });
         using var client = new HttpClient(handler);
         var service = new CjAffiliateService(client);
 
@@ -156,8 +178,13 @@ public sealed class CjAffiliateServiceTests
         Assert.Equal("new", partner.RelationshipStatus);
     }
 
+    // "My Advertisers" is relationship data (joined/active), not transaction history - a
+    // publisher can be joined with an advertiser for months before ever generating a
+    // commission from them. So the joined-only advertiser-lookup result is authoritative
+    // on its own and used as-is; it does NOT get merged with (or need corroboration from)
+    // the commissions GraphQL endpoint, which is only consulted when lookup finds nothing.
     [Fact]
-    public async Task FetchPartnersAsync_ShouldMergeActiveAdvertiserLookup_WhenCommissionsOnlyReturnSubset()
+    public async Task FetchPartnersAsync_ShouldUseAdvertiserLookupAlone_WithoutCallingCommissionsEndpoint()
     {
         var observedUris = new List<Uri>();
         using var handler = new RecordingHandler(
@@ -188,11 +215,11 @@ public sealed class CjAffiliateServiceTests
             EndpointUrl: "https://commissions.api.cj.com/query",
             MaxResults: 100));
 
-        Assert.Equal(3, result.Partners.Count);
-        Assert.Contains(result.Partners, partner => partner.AdvertiserId == "1001");
+        Assert.Equal(2, result.Partners.Count);
         Assert.Contains(result.Partners, partner => partner.AdvertiserId == "2001");
         Assert.Contains(result.Partners, partner => partner.AdvertiserId == "2002");
         Assert.Contains(observedUris, uri => uri.Host.Equals("advertiser-lookup.api.cj.com", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(observedUris, uri => uri.Host.Equals("commissions.api.cj.com", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -205,6 +232,11 @@ public sealed class CjAffiliateServiceTests
             observedUris,
             responseFactory: request =>
             {
+                if (IsAdvertiserLookupRequest(request))
+                {
+                    return EmptyAdvertiserLookupResponse();
+                }
+
                 var payload = request.Content is null
                     ? string.Empty
                     : request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
@@ -336,6 +368,11 @@ public sealed class CjAffiliateServiceTests
             observedUris,
             responseFactory: request =>
             {
+                if (IsAdvertiserLookupRequest(request))
+                {
+                    return EmptyAdvertiserLookupResponse();
+                }
+
                 var body = request.Content is null
                     ? string.Empty
                     : request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
