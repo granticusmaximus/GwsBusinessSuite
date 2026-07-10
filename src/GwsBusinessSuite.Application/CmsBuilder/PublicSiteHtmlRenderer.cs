@@ -106,6 +106,11 @@ public static class PublicSiteHtmlRenderer
 
     private const string DefaultAccentColorHex = "#f59e0b";
 
+    // Plain (non-raw, non-interpolated) string so its JS braces don't need escaping when
+    // dropped into Layout's raw interpolated string below via a single {ReducedMotionRevealScript} hole.
+    private const string ReducedMotionRevealScript =
+        "<script>if(!window.matchMedia('(prefers-reduced-motion: reduce)').matches){document.documentElement.classList.add('js-reveal')}</script>";
+
     // ── Page shell ───────────────────────────────────────────────────────────
 
     public static string Layout(
@@ -159,11 +164,13 @@ public static class PublicSiteHtmlRenderer
               <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
               <link rel="stylesheet" href="/public-site.css" />
               {designTokensStyle}
+              {ReducedMotionRevealScript}
             </head>
             <body>
               {Nav(navItems ?? DefaultNavItems, siteName, logoUrl)}
               {bodyHtml}
               {Footer(footerNavItems ?? [])}
+              <script src="/public-site.js" defer></script>
             </body>
             </html>
             """;

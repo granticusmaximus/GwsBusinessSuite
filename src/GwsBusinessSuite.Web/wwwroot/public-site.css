@@ -1143,3 +1143,90 @@ a { color: inherit; }
   .resume-card-header, .resume-card-body { padding: 1.5rem; }
   .resume-entry-header { flex-direction: column; align-items: flex-start; }
 }
+
+/* ─── Scroll reveal ───────────────────────────────────────
+   Progressive enhancement only: the hidden-until-revealed state is scoped under
+   .js-reveal, which the inline head script in PublicSiteHtmlRenderer.Layout adds to
+   <html> only when prefers-reduced-motion is off. No-JS and reduced-motion visitors
+   always see full content immediately - see public-site.js for the observer logic. */
+.js-reveal .gws-section,
+.js-reveal .resume-card,
+.js-reveal .blog-page-header,
+.js-reveal .page-not-found {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.js-reveal .is-revealed { opacity: 1; transform: none; }
+
+/* ─── Cursor glow ─────────────────────────────────────────
+   A soft trailing glow (not a native-cursor replacement, so normal cursor behavior and
+   accessibility are unaffected) added by public-site.js on fine-pointer devices only. */
+.cursor-glow {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent-low) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0;
+  transition: opacity 0.3s ease, width 0.25s ease, height 0.25s ease, margin 0.25s ease, background 0.25s ease;
+}
+.cursor-glow.is-visible { opacity: 1; }
+.cursor-glow.is-active {
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  background: radial-gradient(circle, var(--accent-low) 0%, transparent 75%);
+}
+
+/* ─── Glass-morphism cards ─────────────────────────────────
+   Applies to the .gws-card widget (used in Capability/Services sections across Canvas
+   pages) - frosted, translucent surface plus a hover lift instead of the previous flat
+   solid card. */
+.gws-card {
+  background: color-mix(in srgb, var(--bg-surface) 65%, transparent);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border-color: color-mix(in srgb, var(--text-1) 10%, transparent);
+  transition: transform 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.gws-card:hover {
+  transform: translateY(-4px);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+}
+
+/* ─── Footer glow ─────────────────────────────────────────── */
+.site-footer { position: relative; }
+.site-footer::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(420px, 70%);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0.5;
+}
+
+/* ─── 404 glow ────────────────────────────────────────────── */
+.page-not-found h1 {
+  color: transparent;
+  background: linear-gradient(180deg, var(--text-1), var(--border));
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: gws-404-pulse 3.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-not-found h1 { animation: none; }
+}
+@keyframes gws-404-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
