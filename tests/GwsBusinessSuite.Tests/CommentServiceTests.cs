@@ -1,4 +1,5 @@
 using FluentAssertions;
+using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Comments;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
@@ -122,12 +123,13 @@ public sealed class CommentServiceTests
     {
         await using var db = await CreateDbAsync();
         var article = await CreateArticleAsync(db);
-        var service = new CommentService(db);
+        var service = new CommentService(db, new FixedCurrentUserAccessor("moderator"));
         var comment = await service.SubmitAsync(article.Id, "Ada", "ada@example.com", "Great article!");
 
         await service.ApproveAsync(comment.Id);
 
         (await service.ListForModerationAsync(null)).Single().Status.Should().Be(CommentStatuses.Approved);
+        (await db.Comments.SingleAsync(c => c.Id == comment.Id)).UpdatedBy.Should().Be("moderator");
     }
 
     [Fact]
@@ -135,7 +137,7 @@ public sealed class CommentServiceTests
     {
         await using var db = await CreateDbAsync();
         var article = await CreateArticleAsync(db);
-        var service = new CommentService(db);
+        var service = new CommentService(db, new FixedCurrentUserAccessor("moderator"));
         var comment = await service.SubmitAsync(article.Id, "Bot", "bot@example.com", "spam link");
 
         await service.MarkSpamAsync(comment.Id);
@@ -148,7 +150,7 @@ public sealed class CommentServiceTests
     {
         await using var db = await CreateDbAsync();
         var article = await CreateArticleAsync(db);
-        var service = new CommentService(db);
+        var service = new CommentService(db, new FixedCurrentUserAccessor("moderator"));
         var comment = await service.SubmitAsync(article.Id, "Ada", "ada@example.com", "Great article!");
 
         await service.DeleteAsync(comment.Id);
@@ -183,7 +185,7 @@ public sealed class CommentServiceTests
     {
         await using var db = await CreateDbAsync();
         var article = await CreateArticleAsync(db);
-        var service = new CommentService(db);
+        var service = new CommentService(db, new FixedCurrentUserAccessor("moderator"));
 
         var parent = await service.SubmitAsync(article.Id, "Ada", "ada@example.com", "Parent");
         await service.ApproveAsync(parent.Id);
@@ -196,6 +198,7 @@ public sealed class CommentServiceTests
         approved.Should().ContainSingle();
         approved[0].AuthorName.Should().Be("Bob");
         approved[0].ParentCommentId.Should().BeNull();
+        (await db.Comments.SingleAsync(c => c.Id == reply.Id)).UpdatedBy.Should().Be("moderator");
     }
 
     [Fact]

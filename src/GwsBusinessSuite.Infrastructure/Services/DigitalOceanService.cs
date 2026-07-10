@@ -13,13 +13,15 @@ public sealed class DigitalOceanService(
     HttpClient httpClient,
     IAppDbContext dbContext,
     ISecretProtector secretProtector,
-    ILogger<DigitalOceanService> logger) : IDigitalOceanService
+    ILogger<DigitalOceanService> logger,
+    ICurrentUserAccessor? currentUserAccessor = null) : IDigitalOceanService
 {
     // DigitalOcean's local droplet metadata service - only reachable from inside the
     // droplet itself. Used to auto-detect the droplet's own ID so the user doesn't have
     // to look it up manually in production; unreachable in local dev, where a manual
     // DropletId override is required instead.
     private const string MetadataDropletIdUrl = "http://169.254.169.254/metadata/v1/id";
+    private readonly ICurrentUserAccessor _currentUserAccessor = currentUserAccessor ?? FixedCurrentUserAccessor.Unknown;
 
     public async Task<DigitalOceanSettingsView?> GetSettingsAsync(CancellationToken cancellationToken = default)
     {
@@ -72,7 +74,7 @@ public sealed class DigitalOceanService(
         row.ApiToken = ProtectApiToken(settings.ApiToken);
         row.DropletId = settings.DropletId.Trim();
         row.UpdatedAt = DateTimeOffset.UtcNow;
-        row.UpdatedBy = "user";
+        row.UpdatedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
     }
@@ -108,7 +110,7 @@ public sealed class DigitalOceanService(
         // else: NewPrivateKey left blank - leave the existing stored key untouched.
 
         row.UpdatedAt = DateTimeOffset.UtcNow;
-        row.UpdatedBy = "user";
+        row.UpdatedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
     }

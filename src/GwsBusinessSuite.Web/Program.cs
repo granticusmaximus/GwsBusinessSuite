@@ -7,6 +7,7 @@ using GwsBusinessSuite.Infrastructure;
 using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Infrastructure.Data;
+using GwsBusinessSuite.Web.Services;
 using GwsBusinessSuite.Web.Components;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
@@ -29,6 +30,8 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddCascadingAuthenticationState();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUserAccessor, CurrentUserAccessor>();
 
 // Content Studio article generation can take several minutes against Ollama
 // (first-time model load especially). Extend the circuit's disconnect grace
@@ -1136,10 +1139,12 @@ app.MapPost("/admin/api/articles", async (
     ArticleUpsertRequest req,
     HttpContext httpContext,
     IAntiforgery antiforgery,
-    IDbContextFactory<ApplicationDbContext> dbFactory) =>
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    ICurrentUserAccessor currentUserAccessor) =>
 {
     if (await ValidateAntiforgeryAsync(httpContext, antiforgery) is { } rejection) return rejection;
 
+    var performedBy = await currentUserAccessor.GetCurrentUsernameAsync();
     await using var db = await dbFactory.CreateDbContextAsync();
     var article = new Article
     {
@@ -1157,7 +1162,7 @@ app.MapPost("/admin/api/articles", async (
         BodyMarkdown      = req.BodyMarkdown,
         Status            = ArticleStatuses.Draft,
         Source            = ArticleSource.Manual,
-        CreatedBy         = GetCurrentUsername(httpContext)
+        CreatedBy         = performedBy
     };
     db.Articles.Add(article);
     await db.SaveChangesAsync();
@@ -1170,10 +1175,12 @@ app.MapPut("/admin/api/articles/{id:guid}", async (
     ArticleUpsertRequest req,
     HttpContext httpContext,
     IAntiforgery antiforgery,
-    IDbContextFactory<ApplicationDbContext> dbFactory) =>
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    ICurrentUserAccessor currentUserAccessor) =>
 {
     if (await ValidateAntiforgeryAsync(httpContext, antiforgery) is { } rejection) return rejection;
 
+    var performedBy = await currentUserAccessor.GetCurrentUsernameAsync();
     await using var db = await dbFactory.CreateDbContextAsync();
     var article = await db.Articles.FindAsync(id);
     if (article is null) return Results.NotFound();
@@ -1190,7 +1197,7 @@ app.MapPut("/admin/api/articles/{id:guid}", async (
     article.HeroImageAltText  = req.HeroImageAltText;
     article.HeroImageCaption  = req.HeroImageCaption;
     article.BodyMarkdown      = req.BodyMarkdown;
-    article.UpdatedBy         = GetCurrentUsername(httpContext);
+    article.UpdatedBy         = performedBy;
     article.UpdatedAt         = DateTimeOffset.UtcNow;
 
     await db.SaveChangesAsync();
@@ -1202,10 +1209,12 @@ app.MapPost("/admin/api/articles/{id:guid}/publish", async (
     Guid id,
     HttpContext httpContext,
     IAntiforgery antiforgery,
-    IDbContextFactory<ApplicationDbContext> dbFactory) =>
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    ICurrentUserAccessor currentUserAccessor) =>
 {
     if (await ValidateAntiforgeryAsync(httpContext, antiforgery) is { } rejection) return rejection;
 
+    var performedBy = await currentUserAccessor.GetCurrentUsernameAsync();
     await using var db = await dbFactory.CreateDbContextAsync();
     var article = await db.Articles.FindAsync(id);
     if (article is null) return Results.NotFound();
@@ -1213,7 +1222,7 @@ app.MapPost("/admin/api/articles/{id:guid}/publish", async (
     article.Status      = ArticleStatuses.Published;
     article.PublishedAt ??= DateTimeOffset.UtcNow;
     article.UpdatedAt   = DateTimeOffset.UtcNow;
-    article.UpdatedBy   = GetCurrentUsername(httpContext);
+    article.UpdatedBy   = performedBy;
     await db.SaveChangesAsync();
     return Results.Ok(new { article.Id, article.Slug, article.Status, article.PublishedAt });
 }).RequireAuthorization().RequireRateLimiting("admin-mutation");
@@ -1223,17 +1232,19 @@ app.MapPost("/admin/api/articles/{id:guid}/unpublish", async (
     Guid id,
     HttpContext httpContext,
     IAntiforgery antiforgery,
-    IDbContextFactory<ApplicationDbContext> dbFactory) =>
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    ICurrentUserAccessor currentUserAccessor) =>
 {
     if (await ValidateAntiforgeryAsync(httpContext, antiforgery) is { } rejection) return rejection;
 
+    var performedBy = await currentUserAccessor.GetCurrentUsernameAsync();
     await using var db = await dbFactory.CreateDbContextAsync();
     var article = await db.Articles.FindAsync(id);
     if (article is null) return Results.NotFound();
 
     article.Status    = ArticleStatuses.Draft;
     article.UpdatedAt = DateTimeOffset.UtcNow;
-    article.UpdatedBy = GetCurrentUsername(httpContext);
+    article.UpdatedBy = performedBy;
     await db.SaveChangesAsync();
     return Results.Ok(new { article.Id, article.Slug, article.Status });
 }).RequireAuthorization().RequireRateLimiting("admin-mutation");
@@ -1509,12 +1520,6 @@ static bool IsWeakSeedPassword(string password, string username, out string reas
 
     reason = string.Empty;
     return false;
-}
-
-static string GetCurrentUsername(HttpContext httpContext)
-{
-    var username = httpContext.User.Identity?.Name;
-    return string.IsNullOrWhiteSpace(username) ? "unknown" : username;
 }
 
 // These mutation endpoints are authenticated, but cookie auth alone gives no CSRF

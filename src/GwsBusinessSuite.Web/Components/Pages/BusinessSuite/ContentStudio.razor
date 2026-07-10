@@ -6,6 +6,7 @@
 @using GwsBusinessSuite.Application.ContentStudio
 @inject IContentStudioService ContentStudioService
 @inject ITrendResearchService TrendResearchService
+@inject ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 @inject ILogger<ContentStudio> Logger
@@ -304,6 +305,8 @@
         await RefreshDrafts();
     }
 
+    private Task<string> CurrentUserNameAsync() => CurrentUserAccessor.GetCurrentUsernameAsync();
+
     private static string FormatDate(DateTimeOffset value)
     {
         return value.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
@@ -397,11 +400,12 @@
 
         try
         {
+            var user = await CurrentUserNameAsync();
             var updated = await ContentStudioService.RejectDraftAsync(new DraftDecisionRequest
             {
                 DraftId = draftId,
                 Notes = "Marked as no longer interested from draft list.",
-                PerformedBy = "content-studio-ui"
+                PerformedBy = user
             });
 
             if (updated is null)

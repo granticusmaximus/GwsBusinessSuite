@@ -4,8 +4,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GwsBusinessSuite.Application.Settings;
 
-public sealed class SiteSettingsService(IAppDbContext db) : ISiteSettingsService
+public sealed class SiteSettingsService(
+    IAppDbContext db,
+    ICurrentUserAccessor? currentUserAccessor = null) : ISiteSettingsService
 {
+    private readonly ICurrentUserAccessor _currentUserAccessor = currentUserAccessor ?? FixedCurrentUserAccessor.Unknown;
+
     // No row yet just means "nothing has been customized" - return the same defaults the
     // SiteSettings entity itself declares, without writing a row on what's otherwise a
     // read-only hot path (this is queried on every /blog request, media upload, etc.).
@@ -39,7 +43,7 @@ public sealed class SiteSettingsService(IAppDbContext db) : ISiteSettingsService
         row.OllamaTimeoutMinutesOverride = settings.OllamaTimeoutMinutesOverride is > 0 ? settings.OllamaTimeoutMinutesOverride : null;
         row.MaxMediaUploadSizeMb = settings.MaxMediaUploadSizeMb > 0 ? settings.MaxMediaUploadSizeMb : 8;
         row.UpdatedAt = DateTimeOffset.UtcNow;
-        row.UpdatedBy = "admin";
+        row.UpdatedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
 
         await db.SaveChangesAsync(cancellationToken);
     }

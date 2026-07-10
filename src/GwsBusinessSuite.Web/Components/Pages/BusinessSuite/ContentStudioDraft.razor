@@ -11,6 +11,7 @@
 @inject IContentStudioService ContentStudioService
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject ISiteSettingsService SiteSettingsService
+@inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
 @inject ILogger<ContentStudioDraft> Logger
@@ -282,6 +283,8 @@ else
         await LoadDraft();
     }
 
+    private Task<string> CurrentUserNameAsync() => CurrentUserAccessor.GetCurrentUsernameAsync();
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         await JS.InvokeVoidAsync("gwsTooltips.init", "[data-bs-toggle='tooltip']");
@@ -367,6 +370,7 @@ else
             await stream.CopyToAsync(ms);
             var dataUri = $"data:{e.File.ContentType};base64,{Convert.ToBase64String(ms.ToArray())}";
 
+            var user = await CurrentUserNameAsync();
             await using var db = await DbFactory.CreateDbContextAsync();
             var draft = await db.SeoArticleDrafts.FindAsync(CurrentDraft.DraftId);
             if (draft is not null)
@@ -374,7 +378,7 @@ else
                 draft.HeroImageDataUri = dataUri;
                 draft.HeroImageAltText = CurrentDraft.Title;
                 draft.UpdatedAt = DateTimeOffset.UtcNow;
-                draft.UpdatedBy = "content-studio-ui";
+                draft.UpdatedBy = user;
                 await db.SaveChangesAsync();
             }
 
@@ -401,12 +405,13 @@ else
             return;
         }
 
+        var user = await CurrentUserNameAsync();
         await RunWorkflowAction(
             async () => await ContentStudioService.ApproveDraftAsync(new DraftDecisionRequest
             {
                 DraftId = CurrentDraft.DraftId,
                 Notes = RevisionNotes,
-                PerformedBy = "content-studio-ui"
+                PerformedBy = user
             }),
             "Saving approval decision and updating workflow history.",
             _ => "Draft approved. Publish live when ready.");
@@ -419,12 +424,13 @@ else
             return;
         }
 
+        var user = await CurrentUserNameAsync();
         await RunWorkflowAction(
             async () => await ContentStudioService.PublishDraftToSiteAsync(new DraftPublishRequest
             {
                 DraftId = CurrentDraft.DraftId,
                 Notes = RevisionNotes,
-                PerformedBy = "content-studio-ui"
+                PerformedBy = user
             }),
             "Publishing the approved article live to the site blog.",
             updated => $"Draft published live and can be shared at /blog/{updated.Slug}.");
@@ -455,12 +461,13 @@ else
             return;
         }
 
+        var user = await CurrentUserNameAsync();
         await RunWorkflowAction(
             async () => await ContentStudioService.RequestRevisionAsync(new DraftRevisionRequest
             {
                 DraftId = CurrentDraft.DraftId,
                 RequestedModifications = RevisionNotes,
-                PerformedBy = "content-studio-ui"
+                PerformedBy = user
             }),
             "Requesting a revised article draft from Ollama with your revision notes.",
             _ => "Revision requested and persisted.");
@@ -473,12 +480,13 @@ else
             return;
         }
 
+        var user = await CurrentUserNameAsync();
         await RunWorkflowAction(
             async () => await ContentStudioService.UpdateDraftMarkdownAsync(new DraftMarkdownUpdateRequest
             {
                 DraftId = CurrentDraft.DraftId,
                 Markdown = EditableMarkdown,
-                PerformedBy = "content-studio-ui"
+                PerformedBy = user
             }),
             "Saving your markdown edits.",
             _ => "Markdown edits saved.");
@@ -491,12 +499,13 @@ else
             return;
         }
 
+        var user = await CurrentUserNameAsync();
         await RunWorkflowAction(
             async () => await ContentStudioService.RejectDraftAsync(new DraftDecisionRequest
             {
                 DraftId = CurrentDraft.DraftId,
                 Notes = RevisionNotes,
-                PerformedBy = "content-studio-ui"
+                PerformedBy = user
             }),
             "Saving rejection decision and updating workflow history.",
             _ => "Draft rejected and persisted.");
@@ -635,12 +644,13 @@ else
 
         try
         {
+            var user = await CurrentUserNameAsync();
             await ContentStudioService.RecordAffiliatePlacementInteractionAsync(new AffiliatePlacementInteractionRequest
             {
                 DraftId = CurrentDraft.DraftId,
                 SlotToken = placement.SlotToken,
                 EventType = "Click",
-                PerformedBy = "content-studio-ui"
+                PerformedBy = user
             });
         }
         catch (Exception ex)

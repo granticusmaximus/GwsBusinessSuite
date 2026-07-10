@@ -1,4 +1,5 @@
 using FluentAssertions;
+using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Users;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
@@ -28,6 +29,8 @@ public sealed class UserManagementServiceTests
         result.Succeeded.Should().BeTrue();
         var users = await service.ListUsersAsync();
         users.Should().ContainSingle(u => u.Username == "jsmith" && u.Role == AppRoles.Author);
+        await using var db = CreateReadDbContext(connection);
+        (await db.AppUsers.SingleAsync(u => u.Username == "jsmith")).CreatedBy.Should().Be("grantwatson");
     }
 
     [Fact]
@@ -91,6 +94,8 @@ public sealed class UserManagementServiceTests
 
         result.Succeeded.Should().BeTrue();
         (await service.ListUsersAsync()).Single().Role.Should().Be(AppRoles.Contributor);
+        await using var db = CreateReadDbContext(connection);
+        (await db.AppUsers.SingleAsync(u => u.Id == userId)).UpdatedBy.Should().Be("grantwatson");
     }
 
     [Fact]
@@ -118,6 +123,8 @@ public sealed class UserManagementServiceTests
         var result = await service.ResetPasswordAsync(userId, "new-correct-horse");
 
         result.Succeeded.Should().BeTrue();
+        await using var db = CreateReadDbContext(connection);
+        (await db.AppUsers.SingleAsync(u => u.Id == userId)).UpdatedBy.Should().Be("grantwatson");
     }
 
     [Fact]
@@ -145,6 +152,8 @@ public sealed class UserManagementServiceTests
         var deactivateResult = await service.ToggleActiveAsync(userId);
         deactivateResult.Succeeded.Should().BeTrue();
         (await service.ListUsersAsync()).Single().IsActive.Should().BeFalse();
+        await using var db = CreateReadDbContext(connection);
+        (await db.AppUsers.SingleAsync(u => u.Id == userId)).UpdatedBy.Should().Be("grantwatson");
 
         var reactivateResult = await service.ToggleActiveAsync(userId);
         reactivateResult.Succeeded.Should().BeTrue();
@@ -196,7 +205,14 @@ public sealed class UserManagementServiceTests
     }
 
     private static UserManagementService CreateService(SqliteConnection connection) =>
-        new(new TestDbContextFactory(connection), new PasswordHasher<AppUser>(), NullLogger<UserManagementService>.Instance);
+        new(
+            new TestDbContextFactory(connection),
+            new PasswordHasher<AppUser>(),
+            NullLogger<UserManagementService>.Instance,
+            new FixedCurrentUserAccessor("grantwatson"));
+
+    private static ApplicationDbContext CreateReadDbContext(SqliteConnection connection) =>
+        new(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options);
 
     private static async Task<SqliteConnection> OpenConnectionAsync()
     {

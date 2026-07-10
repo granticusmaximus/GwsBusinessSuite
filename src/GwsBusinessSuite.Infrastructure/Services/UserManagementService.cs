@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Users;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
@@ -11,8 +12,11 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 public sealed class UserManagementService(
     IDbContextFactory<ApplicationDbContext> dbContextFactory,
     IPasswordHasher<AppUser> passwordHasher,
-    ILogger<UserManagementService> logger) : IUserManagementService
+    ILogger<UserManagementService> logger,
+    ICurrentUserAccessor? currentUserAccessor = null) : IUserManagementService
 {
+    private readonly ICurrentUserAccessor _currentUserAccessor = currentUserAccessor ?? FixedCurrentUserAccessor.Unknown;
+
     // A fresh, short-lived DbContext per operation rather than one shared IAppDbContext -
     // this is a long-lived admin-session page where reusing a single tracked context across
     // many operations would accumulate stale/tracked entities over the session's lifetime.
@@ -41,6 +45,7 @@ public sealed class UserManagementService(
         try
         {
             await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var performedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
 
             var username = input.Username.Trim();
             if (await db.AppUsers.AnyAsync(u => u.Username == username, cancellationToken))
@@ -52,7 +57,7 @@ public sealed class UserManagementService(
             {
                 Username = username,
                 Role = input.Role,
-                CreatedBy = "admin"
+                CreatedBy = performedBy
             };
             user.PasswordHash = passwordHasher.HashPassword(user, input.Password);
             db.AppUsers.Add(user);
@@ -77,6 +82,7 @@ public sealed class UserManagementService(
         try
         {
             await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var performedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
             var user = await db.AppUsers.FindAsync([userId], cancellationToken);
             if (user is null)
             {
@@ -91,7 +97,7 @@ public sealed class UserManagementService(
 
             user.Role = newRole;
             user.UpdatedAt = DateTimeOffset.UtcNow;
-            user.UpdatedBy = "admin";
+            user.UpdatedBy = performedBy;
             await db.SaveChangesAsync(cancellationToken);
 
             return UserManagementResult.Success();
@@ -113,6 +119,7 @@ public sealed class UserManagementService(
         try
         {
             await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var performedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
             var user = await db.AppUsers.FindAsync([userId], cancellationToken);
             if (user is null)
             {
@@ -121,7 +128,7 @@ public sealed class UserManagementService(
 
             user.PasswordHash = passwordHasher.HashPassword(user, newPassword);
             user.UpdatedAt = DateTimeOffset.UtcNow;
-            user.UpdatedBy = "admin";
+            user.UpdatedBy = performedBy;
             await db.SaveChangesAsync(cancellationToken);
 
             return UserManagementResult.Success();
@@ -138,6 +145,7 @@ public sealed class UserManagementService(
         try
         {
             await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var performedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
             var user = await db.AppUsers.FindAsync([userId], cancellationToken);
             if (user is null)
             {
@@ -151,7 +159,7 @@ public sealed class UserManagementService(
 
             user.IsActive = !user.IsActive;
             user.UpdatedAt = DateTimeOffset.UtcNow;
-            user.UpdatedBy = "admin";
+            user.UpdatedBy = performedBy;
             await db.SaveChangesAsync(cancellationToken);
 
             return UserManagementResult.Success();

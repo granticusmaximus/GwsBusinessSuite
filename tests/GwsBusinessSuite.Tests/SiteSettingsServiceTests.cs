@@ -1,3 +1,4 @@
+using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.Data.Sqlite;
@@ -11,7 +12,7 @@ public sealed class SiteSettingsServiceTests
     public async Task GetSettingsAsync_ShouldReturnEntityDefaults_WhenNoRowExists()
     {
         await using var db = await CreateDbAsync();
-        var service = new SiteSettingsService(db);
+        var service = new SiteSettingsService(db, new FixedCurrentUserAccessor("grantwatson"));
 
         var settings = await service.GetSettingsAsync();
 
@@ -31,7 +32,7 @@ public sealed class SiteSettingsServiceTests
     public async Task SaveSettingsAsync_ShouldPersistAndReload_OnFirstSave()
     {
         await using var db = await CreateDbAsync();
-        var service = new SiteSettingsService(db);
+        var service = new SiteSettingsService(db, new FixedCurrentUserAccessor("grantwatson"));
 
         var categoryId = Guid.NewGuid();
         await service.SaveSettingsAsync(new SiteSettingsView(
@@ -51,13 +52,14 @@ public sealed class SiteSettingsServiceTests
         Assert.Equal(45, reloaded.OllamaTimeoutMinutesOverride);
         Assert.Equal(16, reloaded.MaxMediaUploadSizeMb);
         Assert.Equal(1, await db.SiteSettings.CountAsync());
+        Assert.Equal("grantwatson", (await db.SiteSettings.SingleAsync()).UpdatedBy);
     }
 
     [Fact]
     public async Task SaveSettingsAsync_ShouldClearOverrides_WhenBlankOrNullPassed()
     {
         await using var db = await CreateDbAsync();
-        var service = new SiteSettingsService(db);
+        var service = new SiteSettingsService(db, new FixedCurrentUserAccessor("grantwatson"));
 
         await service.SaveSettingsAsync(new SiteSettingsView(25, Guid.NewGuid(), "Someone", "llama3.2", 45, 16));
 
@@ -77,7 +79,7 @@ public sealed class SiteSettingsServiceTests
     public async Task SaveSettingsAsync_ShouldClampPostsPerPage_ToAllowedValues()
     {
         await using var db = await CreateDbAsync();
-        var service = new SiteSettingsService(db);
+        var service = new SiteSettingsService(db, new FixedCurrentUserAccessor("grantwatson"));
 
         await service.SaveSettingsAsync(new SiteSettingsView(99, null, null, null, null, 8));
 

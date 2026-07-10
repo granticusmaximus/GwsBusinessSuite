@@ -50,7 +50,7 @@ public sealed class WikiService(IAppDbContext dbContext, string repoPath) : IWik
             Title = string.Empty,
             Slug = string.Empty,
             CreatedAt = now,
-            CreatedBy = "wiki-ui"
+            CreatedBy = performedBy
         };
 
         var previousSlug = page.Slug;
@@ -64,7 +64,7 @@ public sealed class WikiService(IAppDbContext dbContext, string repoPath) : IWik
         page.Slug = uniqueSlug;
         page.Markdown = editor.Markdown.Trim();
         page.UpdatedAt = now;
-        page.UpdatedBy = "wiki-ui";
+        page.UpdatedBy = performedBy;
 
         if (isNew)
         {

@@ -5,8 +5,8 @@
 @using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Domain.Entities
 @using Markdig
-@using Microsoft.AspNetCore.Components.Authorization
 @inject IWikiService WikiService
+@inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
 @inject ILogger<Wiki> Logger
 
@@ -219,9 +219,6 @@
 </div>
 
 @code {
-    [CascadingParameter]
-    private Task<AuthenticationState>? AuthState { get; set; }
-
     private List<WikiPage> WikiPages { get; set; } = new();
     private WikiPageEditorModel Editor { get; set; } = new();
     private Guid? SelectedPageId { get; set; }
@@ -277,12 +274,7 @@
         await InvokeAsync(StateHasChanged);
     }
 
-    private async Task<string> CurrentUserNameAsync()
-    {
-        if (AuthState is null) return "admin";
-        var state = await AuthState;
-        return state.User.Identity?.Name ?? "admin";
-    }
+    private Task<string> CurrentUserNameAsync() => CurrentUserAccessor.GetCurrentUsernameAsync();
 
     private async Task LoadPagesAsync(bool selectFirstPage)
     {

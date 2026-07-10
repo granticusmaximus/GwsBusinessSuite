@@ -28,7 +28,7 @@ public sealed class WikiServiceTests : IDisposable
 
         created.Slug.Should().Be("internal-runbook");
         created.Markdown.Should().Contain("Steps go here.");
-        created.CreatedBy.Should().Be("wiki-ui");
+        created.CreatedBy.Should().Be("grantwatson");
 
         var listed = await service.ListPagesAsync();
         listed.Should().HaveCount(1);
@@ -47,6 +47,7 @@ public sealed class WikiServiceTests : IDisposable
         updated.Id.Should().Be(created.Id);
         updated.Markdown.Should().Contain("Updated steps.");
         updated.UpdatedAt.Should().NotBeNull();
+        updated.UpdatedBy.Should().Be("grantwatson");
 
         await service.DeletePageAsync(created.Id, "grantwatson");
 

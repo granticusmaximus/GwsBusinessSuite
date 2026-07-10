@@ -2,11 +2,11 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "AdminOnly")]
 @using Microsoft.AspNetCore.Authorization
-@using System.Security.Claims
 @using GwsBusinessSuite.Application.DockerHealth
 @using GwsBusinessSuite.Application.DigitalOcean
 @inject IDockerHealthService DockerHealthService
 @inject IDigitalOceanService DigitalOceanService
+@inject ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 @inject ILogger<DockerHealth> Logger
@@ -180,9 +180,6 @@ else
 }
 
 @code {
-    [CascadingParameter]
-    private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? AuthState { get; set; }
-
     private List<ContainerHealthView> Containers { get; set; } = new();
     private bool _loaded;
     private bool _available;
@@ -212,12 +209,7 @@ else
         _doLoaded = true;
     }
 
-    private async Task<string> CurrentUserNameAsync()
-    {
-        if (AuthState is null) return "admin";
-        var state = await AuthState;
-        return state.User.Identity?.Name ?? "admin";
-    }
+    private Task<string> CurrentUserNameAsync() => CurrentUserAccessor.GetCurrentUsernameAsync();
 
     private async Task LoadContainersAsync()
     {

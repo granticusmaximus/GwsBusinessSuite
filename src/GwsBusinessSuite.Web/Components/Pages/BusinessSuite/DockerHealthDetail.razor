@@ -4,6 +4,7 @@
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.DockerHealth
 @inject IDockerHealthService DockerHealthService
+@inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
 @inject ILogger<DockerHealthDetail> Logger
 
@@ -189,9 +190,6 @@ else
     [Parameter]
     public string ContainerName { get; set; } = string.Empty;
 
-    [CascadingParameter]
-    private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? AuthState { get; set; }
-
     private ContainerDetailView? Detail { get; set; }
     private List<DockerActionLogView> ActionLogs { get; set; } = new();
     private bool _loaded;
@@ -227,12 +225,7 @@ else
         }
     }
 
-    private async Task<string> CurrentUserNameAsync()
-    {
-        if (AuthState is null) return "admin";
-        var state = await AuthState;
-        return state.User.Identity?.Name ?? "admin";
-    }
+    private Task<string> CurrentUserNameAsync() => CurrentUserAccessor.GetCurrentUsernameAsync();
 
     private async Task RunActionAsync(Func<string, string, CancellationToken, Task<DockerActionResult>> action)
     {

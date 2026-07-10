@@ -4,11 +4,14 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GwsBusinessSuite.Application.Comments;
 
-public sealed class CommentService(IAppDbContext dbContext) : ICommentService
+public sealed class CommentService(
+    IAppDbContext dbContext,
+    ICurrentUserAccessor? currentUserAccessor = null) : ICommentService
 {
     private const int MaxAuthorNameLength = 100;
     private const int MaxAuthorEmailLength = 200;
     private const int MaxBodyLength = 5000;
+    private readonly ICurrentUserAccessor _currentUserAccessor = currentUserAccessor ?? FixedCurrentUserAccessor.Unknown;
 
     public async Task<CommentView> SubmitAsync(
         Guid articleId,
@@ -142,11 +145,12 @@ public sealed class CommentService(IAppDbContext dbContext) : ICommentService
         if (replies.Count > 0)
         {
             var now = DateTimeOffset.UtcNow;
+            var performedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
             foreach (var reply in replies)
             {
                 reply.ParentCommentId = comment.ParentCommentId;
                 reply.UpdatedAt = now;
-                reply.UpdatedBy = "admin";
+                reply.UpdatedBy = performedBy;
             }
         }
 
@@ -169,7 +173,7 @@ public sealed class CommentService(IAppDbContext dbContext) : ICommentService
 
         comment.Status = status;
         comment.UpdatedAt = DateTimeOffset.UtcNow;
-        comment.UpdatedBy = "admin";
+        comment.UpdatedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 

@@ -1,9 +1,9 @@
 @implements IAsyncDisposable
 @using GwsBusinessSuite.Application.DigitalOcean
 @using GwsBusinessSuite.Application.SshTerminal
-@using Microsoft.AspNetCore.Components.Authorization
 @inject IDigitalOceanService DigitalOceanService
 @inject ISshTerminalService SshTerminalService
+@inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
 @inject ILogger<SshTerminalPanel> Logger
 
@@ -170,9 +170,6 @@ else
     [Parameter]
     public bool FullScreen { get; set; }
 
-    [CascadingParameter]
-    private Task<AuthenticationState>? AuthState { get; set; }
-
     private bool _settingsLoaded;
     private string _username = "root";
     private int _port = 22;
@@ -206,12 +203,7 @@ else
         }
     }
 
-    private async Task<string> CurrentUserNameAsync()
-    {
-        if (AuthState is null) return "admin";
-        var state = await AuthState;
-        return state.User.Identity?.Name ?? "admin";
-    }
+    private Task<string> CurrentUserNameAsync() => CurrentUserAccessor.GetCurrentUsernameAsync();
 
     private async Task LoadSettingsAsync()
     {

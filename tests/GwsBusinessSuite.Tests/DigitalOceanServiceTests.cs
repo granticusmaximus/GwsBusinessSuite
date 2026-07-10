@@ -40,6 +40,7 @@ public sealed class DigitalOceanServiceTests
         settings!.ApiToken.Should().Be("dop_v1_secret");
         settings.DropletId.Should().Be("12345");
         settings.ApiTokenUnreadable.Should().BeFalse();
+        db.DigitalOceanSettings.Single().UpdatedBy.Should().Be("grantwatson");
     }
 
     [Fact]
@@ -150,7 +151,12 @@ public sealed class DigitalOceanServiceTests
     private static DigitalOceanService CreateService(ApplicationDbContext db, HttpMessageHandler handler)
     {
         var client = new HttpClient(handler) { BaseAddress = new Uri("https://api.digitalocean.com/v2/") };
-        return new DigitalOceanService(client, db, new FakeSecretProtector(), NullLogger<DigitalOceanService>.Instance);
+        return new DigitalOceanService(
+            client,
+            db,
+            new FakeSecretProtector(),
+            NullLogger<DigitalOceanService>.Instance,
+            new FixedCurrentUserAccessor("grantwatson"));
     }
 
     private static async Task<ApplicationDbContext> CreateDbAsync()
