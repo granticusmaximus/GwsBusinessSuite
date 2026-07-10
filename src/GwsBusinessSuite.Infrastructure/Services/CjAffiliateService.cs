@@ -52,6 +52,36 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
 
         if (IsCommissionsApiEndpoint(endpoint))
         {
+            // "My Advertisers" means CJ's advertiser-relationship data (joined/active) -
+            // a publisher can be joined with an advertiser for months before ever
+            // generating a commission from them, so the commissions GraphQL query below
+            // (which only knows about advertisers with actual transaction history) badly
+            // undercounts the real roster. Try the joined-only Advertiser Lookup API
+            // first; only fall back to mining a roster out of commissions data if
+            // advertiser-lookup returns nothing for this token (e.g. a bad param
+            // combination CJ rejects with 400 - a real 401/403 auth failure still
+            // propagates, since silently masking that would just trade one confusing
+            // undercounted result for another).
+            try
+            {
+                var joinedLookup = await FetchPartnersViaAdvertiserLookupAsync(
+                    requestDeveloperKey: request.DeveloperKey.Trim(),
+                    publisherId: publisherId,
+                    maxResults: maxResults,
+                    ct: ct);
+
+                if (joinedLookup.Partners.Count > 0)
+                {
+                    return joinedLookup;
+                }
+            }
+            catch (HttpRequestException ex) when (
+                ex.StatusCode == HttpStatusCode.BadRequest &&
+                ex.Message.Contains("CJ advertiser lookup failed", StringComparison.OrdinalIgnoreCase))
+            {
+                // Fall through to commissions-based discovery below.
+            }
+
             return await FetchPartnersViaGraphQlAsync(endpoint, request.DeveloperKey.Trim(), publisherId, websiteId, maxResults, ct);
         }
 
@@ -418,7 +448,12 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
             ? string.Empty
             : $"&keywords={Uri.EscapeDataString(keywords)}";
 
-        return $"https://advertiser-lookup.api.cj.com/v3/advertiser-lookup?requestor-cid={cid}&records-per-page={AdvertiserLookupPageSize}&page-number={pageNumber}{keywordSegment}";
+        // advertiser-ids=joined scopes results to advertisers this publisher actually has
+        // a relationship with (CJ's "My Advertisers"). Without it, CJ's own behavior is
+        // inconsistent across accounts - sometimes an empty/sparse result, sometimes the
+        // full public CJ network catalog - which is what the keyword-crawl fallback below
+        // was originally working around.
+        return $"https://advertiser-lookup.api.cj.com/v3/advertiser-lookup?advertiser-ids=joined&requestor-cid={cid}&records-per-page={AdvertiserLookupPageSize}&page-number={pageNumber}{keywordSegment}";
     }
 
     private static object BuildGraphQlPayload(string graphQlQuery, string publisherId, string? websiteId)
