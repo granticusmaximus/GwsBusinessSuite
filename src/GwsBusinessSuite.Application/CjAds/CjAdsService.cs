@@ -315,6 +315,134 @@ public sealed class CjAdsService(
         };
     }
 
+    // Replaces the old "export a CSV from CJ's Get Links tool and paste it in" workflow with
+    // a live call to CJ's Link Search API for a single advertiser. Always a full
+    // replace-and-reinsert of that advertiser's catalog offers (not a merge) so stale/expired
+    // links CJ no longer returns don't linger - the roster placeholder row (LinkName ==
+    // AdvertiserId, written by SyncPartnersAsync) is untouched since IsCatalogOffer excludes it.
+    public async Task<CjLinkSyncResult> SyncLinksForAdvertiserAsync(
+        string advertiserId,
+        string advertiserName,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(advertiserId);
+
+        var settings = await GetConnectorSettingsAsync(cancellationToken);
+        if (settings is null || string.IsNullOrWhiteSpace(settings.DeveloperKey))
+        {
+            throw new InvalidOperationException("Connect your CJ account before syncing links (Developer Key is missing).");
+        }
+
+        if (string.IsNullOrWhiteSpace(settings.WebsiteId))
+        {
+            throw new InvalidOperationException(
+                "Website ID is required to sync links (CJ generates tracking links per-site). Set it in the CJ connector settings.");
+        }
+
+        var fetched = await cjAffiliateService.FetchLinksAsync(new CjLinkFetchRequest(
+            DeveloperKey: settings.DeveloperKey.Trim(),
+            PublisherId: settings.PublisherId.Trim(),
+            WebsiteId: settings.WebsiteId.Trim(),
+            AdvertiserId: advertiserId.Trim(),
+            MaxResults: settings.MaxResults), cancellationToken);
+
+        var normalizedAdvertiserId = NormalizeAdvertiserId(advertiserId, advertiserName);
+        var existingCatalogOffers = await db.AffiliateOffers
+            .Where(x => x.Network == NetworkName && x.AdvertiserId == normalizedAdvertiserId && x.LinkName != x.AdvertiserId)
+            .ToListAsync(cancellationToken);
+
+        if (existingCatalogOffers.Count > 0)
+        {
+            db.AffiliateOffers.RemoveRange(existingCatalogOffers);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var imported = 0;
+
+        foreach (var link in fetched.Links)
+        {
+            var trackingUrl = string.IsNullOrWhiteSpace(link.ClickUrl) ? link.DestinationUrl : link.ClickUrl;
+            if (string.IsNullOrWhiteSpace(trackingUrl))
+            {
+                continue;
+            }
+
+            await db.AffiliateOffers.AddAsync(new AffiliateOffer
+            {
+                Network = NetworkName,
+                AdvertiserId = normalizedAdvertiserId,
+                AdvertiserName = advertiserName,
+                LinkName = string.IsNullOrWhiteSpace(link.LinkName) ? "CJ Link" : link.LinkName,
+                Category = link.PromotionType,
+                TrackingUrl = trackingUrl,
+                PromotionEndsAt = link.PromotionEndDate,
+                CreatedAt = now,
+                CreatedBy = "cj-link-sync"
+            }, cancellationToken);
+            imported += 1;
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+
+        return new CjLinkSyncResult
+        {
+            IsSuccess = true,
+            Message = imported > 0
+                ? $"Synced {imported} links for {advertiserName}."
+                : fetched.Message,
+            Imported = imported,
+            Updated = 0,
+            Offers = await GetOffersForAdvertiserAsync(normalizedAdvertiserId, advertiserName, cancellationToken)
+        };
+    }
+
+    // Loops every advertiser currently in "My Advertisers" (see SyncPartnersAsync) and syncs
+    // real links for each. This is a lot of sequential CJ API calls for a large roster (dozens
+    // to low hundreds), so it's deliberately resilient per-advertiser - one advertiser
+    // returning an error (e.g. link search unsupported for that program) doesn't abort the
+    // whole run, it's just recorded and skipped. A small delay between calls is a courtesy to
+    // CJ's API rather than a documented rate limit requirement.
+    public async Task<CjBulkLinkSyncResult> SyncAllLinksAsync(CancellationToken cancellationToken = default)
+    {
+        var partners = await ListPartnersAsync(cancellationToken: cancellationToken);
+
+        var processed = 0;
+        var failed = 0;
+        var totalImported = 0;
+        var failures = new List<string>();
+
+        foreach (var partner in partners)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                var result = await SyncLinksForAdvertiserAsync(partner.AdvertiserId, partner.AdvertiserName, cancellationToken);
+                processed += 1;
+                totalImported += result.Imported;
+            }
+            catch (Exception ex)
+            {
+                failed += 1;
+                failures.Add($"{partner.AdvertiserName}: {ex.Message}");
+                logger.LogWarning(ex, "CJ link sync failed for advertiser {AdvertiserId} ({AdvertiserName}).", partner.AdvertiserId, partner.AdvertiserName);
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(300), cancellationToken);
+        }
+
+        return new CjBulkLinkSyncResult
+        {
+            IsSuccess = failed == 0,
+            Message = $"Synced links for {processed} of {partners.Count} advertisers ({totalImported} total links imported)." +
+                       (failed > 0 ? $" {failed} advertiser(s) failed - see details." : string.Empty),
+            AdvertisersProcessed = processed,
+            AdvertisersFailed = failed,
+            TotalLinksImported = totalImported,
+            FailureMessages = failures
+        };
+    }
+
     private static void Validate(CjPartnerSyncRequest request)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(request.DeveloperKey);

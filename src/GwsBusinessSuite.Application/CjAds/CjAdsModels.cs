@@ -67,6 +67,25 @@ public sealed class CjConnectionTestResult
     public int PartnerCountPreview { get; init; }
 }
 
+public sealed class CjLinkSyncResult
+{
+    public bool IsSuccess { get; init; }
+    public string Message { get; init; } = string.Empty;
+    public int Imported { get; init; }
+    public int Updated { get; init; }
+    public IReadOnlyList<CjAffiliateOfferView> Offers { get; init; } = Array.Empty<CjAffiliateOfferView>();
+}
+
+public sealed class CjBulkLinkSyncResult
+{
+    public bool IsSuccess { get; init; }
+    public string Message { get; init; } = string.Empty;
+    public int AdvertisersProcessed { get; init; }
+    public int AdvertisersFailed { get; init; }
+    public int TotalLinksImported { get; init; }
+    public IReadOnlyList<string> FailureMessages { get; init; } = Array.Empty<string>();
+}
+
 public sealed class CjConnectorSettingsView
 {
     public string DeveloperKey { get; init; } = string.Empty;

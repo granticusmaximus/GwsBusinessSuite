@@ -146,6 +146,288 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
             Message: $"Connected to CJ API but no partner records were returned by any partner query strategy. Last CJ response preview: {CreateBodyPreview(lastBody)}");
     }
 
+    // CJ's Link Search API (a separate host/API from both the commissions GraphQL endpoint
+    // and the advertiser-lookup REST API above) returns the actual clickable tracking links -
+    // the same thing you'd otherwise copy by hand from CJ's "Get Links" tool per advertiser.
+    // website-id is required here (unlike advertiser-lookup) because a click/tracking URL is
+    // meaningless without knowing which of your affiliated sites it's being generated for.
+    public async Task<CjLinkFetchResult> FetchLinksAsync(CjLinkFetchRequest request, CancellationToken ct = default)
+    {
+        var developerKey = request.DeveloperKey.Trim();
+        var websiteId = request.WebsiteId.Trim();
+        var advertiserId = request.AdvertiserId.Trim();
+        var maxResults = request.MaxResults <= 0 ? 100 : request.MaxResults;
+
+        if (string.IsNullOrWhiteSpace(websiteId))
+        {
+            throw new InvalidOperationException(
+                "CJ link search requires a Website ID (the CJ PID for the site you want tracking links generated for). Set it in the CJ connector settings.");
+        }
+
+        var unique = new Dictionary<string, CjLinkRecord>(StringComparer.OrdinalIgnoreCase);
+        HttpStatusCode? lastStatusCode = null;
+        string? lastReason = null;
+        string? lastBody = null;
+
+        for (var page = 1; ; page += 1)
+        {
+            var attempt = await ExecuteLinkFetchAttemptAsync(
+                BuildLinkSearchUrl(websiteId, advertiserId, page, AdvertiserLookupPageSize),
+                developerKey,
+                ct);
+
+            lastStatusCode = attempt.StatusCode;
+            lastReason = attempt.ReasonPhrase;
+            lastBody = attempt.Body;
+
+            if (attempt.IsAuthorizationError)
+            {
+                throw new HttpRequestException(
+                    $"CJ link search authorization failed with HTTP {(int)attempt.StatusCode} ({attempt.ReasonPhrase}). Verify your CJ Personal Access Token has Link Search API access.",
+                    null,
+                    attempt.StatusCode);
+            }
+
+            if ((int)attempt.StatusCode >= 400 || attempt.Links.Count == 0)
+            {
+                break;
+            }
+
+            foreach (var link in attempt.Links)
+            {
+                if (string.IsNullOrWhiteSpace(link.LinkId) && string.IsNullOrWhiteSpace(link.LinkName))
+                {
+                    continue;
+                }
+
+                var key = string.IsNullOrWhiteSpace(link.LinkId) ? link.LinkName : link.LinkId;
+                unique.TryAdd(key, link);
+            }
+
+            if (attempt.Links.Count < AdvertiserLookupPageSize || unique.Count >= maxResults)
+            {
+                break;
+            }
+        }
+
+        var final = unique.Values.Take(maxResults).ToArray();
+
+        if (final.Length > 0)
+        {
+            return new CjLinkFetchResult(final, $"Fetched {final.Length} links.");
+        }
+
+        if (lastStatusCode is not null && (int)lastStatusCode.Value >= 400)
+        {
+            throw new HttpRequestException(
+                $"CJ link search failed with HTTP {(int)lastStatusCode.Value} ({lastReason}). Body: {lastBody}",
+                null,
+                lastStatusCode.Value);
+        }
+
+        return new CjLinkFetchResult(
+            Array.Empty<CjLinkRecord>(),
+            "Connected to CJ Link Search API, but no links were returned for this advertiser/website combination. The advertiser may not have any active links, or may require deep-link generation instead of pre-built links.");
+    }
+
+    private static string BuildLinkSearchUrl(string websiteId, string advertiserId, int pageNumber, int recordsPerPage)
+    {
+        var wid = Uri.EscapeDataString(websiteId);
+        var aid = Uri.EscapeDataString(advertiserId);
+        return $"https://link-search.api.cj.com/v2/link-search?website-id={wid}&advertiser-ids={aid}&records-per-page={recordsPerPage}&page-number={pageNumber}";
+    }
+
+    private async Task<CjLinkFetchAttemptResult> ExecuteLinkFetchAttemptAsync(string url, string developerKey, CancellationToken ct)
+    {
+        var rawAttempt = await SendLinkFetchAttemptAsync(url, developerKey, useBearerScheme: false, ct);
+        if (rawAttempt.Links.Count > 0)
+        {
+            return rawAttempt;
+        }
+
+        var bearerAttempt = await SendLinkFetchAttemptAsync(url, developerKey, useBearerScheme: true, ct);
+        if (bearerAttempt.Links.Count > 0)
+        {
+            return bearerAttempt;
+        }
+
+        if (rawAttempt.IsAuthorizationError && !bearerAttempt.IsAuthorizationError)
+        {
+            return bearerAttempt;
+        }
+
+        if (!rawAttempt.IsAuthorizationError && bearerAttempt.IsAuthorizationError)
+        {
+            return rawAttempt;
+        }
+
+        return bearerAttempt;
+    }
+
+    private async Task<CjLinkFetchAttemptResult> SendLinkFetchAttemptAsync(string url, string developerKey, bool useBearerScheme, CancellationToken ct)
+    {
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
+        if (useBearerScheme)
+        {
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", developerKey);
+        }
+        else
+        {
+            httpRequest.Headers.TryAddWithoutValidation("Authorization", developerKey);
+        }
+
+        httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/xml"));
+
+        using var response = await http.SendAsync(httpRequest, ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+
+        IReadOnlyCollection<CjLinkRecord> links = Array.Empty<CjLinkRecord>();
+        if (response.IsSuccessStatusCode)
+        {
+            links = TryParseLinksJson(body);
+            if (links.Count == 0)
+            {
+                links = TryParseLinksXml(body);
+            }
+        }
+
+        return new CjLinkFetchAttemptResult(
+            StatusCode: response.StatusCode,
+            ReasonPhrase: response.ReasonPhrase,
+            Body: body,
+            Links: links);
+    }
+
+    private sealed record CjLinkFetchAttemptResult(
+        HttpStatusCode StatusCode,
+        string? ReasonPhrase,
+        string Body,
+        IReadOnlyCollection<CjLinkRecord> Links)
+    {
+        public bool IsAuthorizationError => StatusCode == HttpStatusCode.Unauthorized || StatusCode == HttpStatusCode.Forbidden;
+    }
+
+    private static IReadOnlyCollection<CjLinkRecord> TryParseLinksJson(string payload)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+
+            var links = new List<JsonElement>();
+            CollectArrayValues(document.RootElement, "link", links);
+            CollectArrayValues(document.RootElement, "links", links);
+            CollectArrayValues(document.RootElement, "records", links);
+            CollectArrayValues(document.RootElement, "results", links);
+
+            if (links.Count == 0 && document.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                links.AddRange(document.RootElement.EnumerateArray());
+            }
+
+            return links
+                .Select(MapJsonLink)
+                .Where(x => x is not null)
+                .Cast<CjLinkRecord>()
+                .ToArray();
+        }
+        catch
+        {
+            return Array.Empty<CjLinkRecord>();
+        }
+    }
+
+    private static CjLinkRecord? MapJsonLink(JsonElement element)
+    {
+        static string Read(JsonElement parent, params string[] names)
+        {
+            foreach (var name in names)
+            {
+                if (parent.ValueKind == JsonValueKind.Object &&
+                    parent.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null)
+                {
+                    return value.ToString() ?? string.Empty;
+                }
+            }
+            return string.Empty;
+        }
+
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var linkName = Read(element, "linkName", "link-name", "link_name", "promotionalName", "promotional-name", "name");
+        var clickUrl = Read(element, "clickUrl", "click-url", "click_url", "linkCode", "link-code");
+        var destination = Read(element, "destination", "destinationUrl", "destination-url", "landingPageUrl", "landing-page-url");
+
+        if (string.IsNullOrWhiteSpace(linkName) && string.IsNullOrWhiteSpace(clickUrl) && string.IsNullOrWhiteSpace(destination))
+        {
+            return null;
+        }
+
+        var endDateRaw = Read(element, "promotion-end-date", "promotionEndDate", "endDate", "end-date");
+        DateTimeOffset? endDate = DateTimeOffset.TryParse(endDateRaw, out var parsedEnd) ? parsedEnd : null;
+
+        return new CjLinkRecord(
+            LinkId: Read(element, "linkId", "link-id", "link_id", "id"),
+            AdvertiserId: Read(element, "advertiserId", "advertiser-id", "advertiser_id"),
+            AdvertiserName: Read(element, "advertiserName", "advertiser-name", "advertiser_name"),
+            LinkName: string.IsNullOrWhiteSpace(linkName) ? "CJ Link" : linkName,
+            LinkType: Read(element, "linkType", "link-type", "link_type"),
+            Description: Read(element, "description"),
+            ClickUrl: clickUrl,
+            DestinationUrl: destination,
+            PromotionType: Read(element, "promotionType", "promotion-type", "promotion_type"),
+            PromotionEndDate: endDate);
+    }
+
+    private static IReadOnlyCollection<CjLinkRecord> TryParseLinksXml(string payload)
+    {
+        try
+        {
+            var document = XDocument.Parse(payload);
+            var linkElements = document
+                .Descendants()
+                .Where(x => x.Name.LocalName.Equals("link", StringComparison.OrdinalIgnoreCase));
+
+            return linkElements
+                .Select(element =>
+                {
+                    var linkName = ReadValue(element, "link-name", "linkName", "promotional-name", "name");
+                    var clickUrl = ReadValue(element, "click-url", "clickUrl", "link-code", "linkCode");
+                    var destination = ReadValue(element, "destination", "destination-url", "destinationUrl", "landing-page-url");
+
+                    if (string.IsNullOrWhiteSpace(linkName) && string.IsNullOrWhiteSpace(clickUrl) && string.IsNullOrWhiteSpace(destination))
+                    {
+                        return null;
+                    }
+
+                    var endDateRaw = ReadValue(element, "promotion-end-date", "promotionEndDate", "end-date");
+                    DateTimeOffset? endDate = DateTimeOffset.TryParse(endDateRaw, out var parsedEnd) ? parsedEnd : null;
+
+                    return new CjLinkRecord(
+                        LinkId: ReadValue(element, "link-id", "linkId", "id"),
+                        AdvertiserId: ReadValue(element, "advertiser-id", "advertiserId"),
+                        AdvertiserName: ReadValue(element, "advertiser-name", "advertiserName"),
+                        LinkName: string.IsNullOrWhiteSpace(linkName) ? "CJ Link" : linkName,
+                        LinkType: ReadValue(element, "link-type", "linkType"),
+                        Description: ReadValue(element, "description"),
+                        ClickUrl: clickUrl,
+                        DestinationUrl: destination,
+                        PromotionType: ReadValue(element, "promotion-type", "promotionType"),
+                        PromotionEndDate: endDate);
+                })
+                .Where(x => x is not null)
+                .Cast<CjLinkRecord>()
+                .ToArray();
+        }
+        catch
+        {
+            return Array.Empty<CjLinkRecord>();
+        }
+    }
+
     private async Task<CjPartnerFetchResult> FetchPartnersViaGraphQlAsync(
         string endpoint,
         string developerKey,

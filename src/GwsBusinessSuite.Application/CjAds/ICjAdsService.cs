@@ -7,6 +7,8 @@ public interface ICjAdsService
     Task<IReadOnlyList<CjPartnerView>> ListPartnersAsync(string relationshipStatus = "All", string search = "", CancellationToken cancellationToken = default);
     Task<IReadOnlyList<CjAffiliateOfferView>> GetOffersForAdvertiserAsync(string advertiserId, string advertiserName, CancellationToken cancellationToken = default);
     Task<CjOfferImportResult> ImportOffersAsync(CjOfferImportRequest request, CancellationToken cancellationToken = default);
+    Task<CjLinkSyncResult> SyncLinksForAdvertiserAsync(string advertiserId, string advertiserName, CancellationToken cancellationToken = default);
+    Task<CjBulkLinkSyncResult> SyncAllLinksAsync(CancellationToken cancellationToken = default);
     Task<CjConnectorSettingsView?> GetConnectorSettingsAsync(CancellationToken cancellationToken = default);
     Task SaveConnectorSettingsAsync(CjConnectorSettingsView settings, CancellationToken cancellationToken = default);
 }

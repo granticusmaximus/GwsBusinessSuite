@@ -4,6 +4,7 @@ public interface ICjAffiliateService
 {
     Task<CjConnectionValidationResult> ValidateConnectionAsync(CjConnectionRequest request, CancellationToken ct = default);
     Task<CjPartnerFetchResult> FetchPartnersAsync(CjConnectionRequest request, CancellationToken ct = default);
+    Task<CjLinkFetchResult> FetchLinksAsync(CjLinkFetchRequest request, CancellationToken ct = default);
 }
 public interface IOllamaService
 {
@@ -36,3 +37,26 @@ public sealed record CjPartnerRecord(
     string Country,
     string PrimaryCategory,
     string DetailsUrl);
+
+public sealed record CjLinkFetchRequest(
+    string DeveloperKey,
+    string PublisherId,
+    string WebsiteId,
+    string AdvertiserId,
+    int MaxResults = 100);
+
+public sealed record CjLinkFetchResult(
+    IReadOnlyCollection<CjLinkRecord> Links,
+    string Message);
+
+public sealed record CjLinkRecord(
+    string LinkId,
+    string AdvertiserId,
+    string AdvertiserName,
+    string LinkName,
+    string LinkType,
+    string Description,
+    string ClickUrl,
+    string DestinationUrl,
+    string PromotionType,
+    DateTimeOffset? PromotionEndDate);

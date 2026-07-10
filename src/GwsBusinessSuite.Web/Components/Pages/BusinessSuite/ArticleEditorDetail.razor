@@ -3,6 +3,7 @@
 @attribute [Authorize(Policy = "ContentAccess")]
 @implements IAsyncDisposable
 @using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.AffiliateSuggestions
 @using GwsBusinessSuite.Application.Articles
 @using GwsBusinessSuite.Application.ContentStudio
 @using GwsBusinessSuite.Application.Settings
@@ -14,6 +15,7 @@
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject ISiteSettingsService SiteSettingsService
 @inject IContentStudioService ContentStudioService
+@inject IAffiliateSuggestionService AffiliateSuggestionService
 @inject NavigationManager Navigation
 @inject ILogger<ArticleEditorDetail> Logger
 @inject IJSRuntime JS
@@ -707,6 +709,20 @@ else
             StatusMessage = publish
                 ? $"Article published and live at /blog/{article.Slug}."
                 : "Draft saved.";
+
+            if (publish)
+            {
+                // Best-effort: a failed AI match shouldn't undo a successful publish. Review
+                // and apply happens on the Affiliate Suggestions page, not here.
+                try
+                {
+                    await AffiliateSuggestionService.GenerateForArticleAsync(article.Id);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Affiliate suggestion generation failed for newly published article {Id}.", article.Id);
+                }
+            }
         }
         catch (Exception ex)
         {

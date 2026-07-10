@@ -27,6 +27,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<SiteSettings> SiteSettings { get; }
     DbSet<Article> Articles { get; }
     DbSet<ArticleAffiliatePlacement> ArticleAffiliatePlacements { get; }
+    DbSet<ArticleAffiliateSuggestion> ArticleAffiliateSuggestions { get; }
     DbSet<AppUser> AppUsers { get; }
     DbSet<WatchedTopic> WatchedTopics { get; }
     DbSet<NewsItem> NewsItems { get; }

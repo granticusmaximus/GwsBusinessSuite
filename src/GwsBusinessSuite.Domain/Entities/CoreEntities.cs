@@ -433,6 +433,33 @@ public sealed class ArticleAffiliatePlacement : AuditableEntity
     public Article? Article { get; set; }
 }
 
+public static class ArticleAffiliateSuggestionStatuses
+{
+    public const string Pending = "Pending";
+    public const string Applied = "Applied";
+    public const string Dismissed = "Dismissed";
+}
+
+// An AI-proposed (Ollama) pairing of an article with an AffiliateOffer, awaiting a one-click
+// human Apply/Dismiss before it ever becomes a live ArticleAffiliatePlacement - see
+// IAffiliateSuggestionService. Offer fields are snapshotted at generation time (not just an
+// AffiliateOfferId FK) so a suggestion still displays sensibly even if the source offer is
+// later resynced/removed from CJ.
+public sealed class ArticleAffiliateSuggestion : AuditableEntity
+{
+    public Guid ArticleId { get; set; }
+    public Guid AffiliateOfferId { get; set; }
+    public string AdvertiserId { get; set; } = string.Empty;
+    public string AdvertiserName { get; set; } = string.Empty;
+    public string LinkName { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public string TrackingUrl { get; set; } = string.Empty;
+    public string Reasoning { get; set; } = string.Empty;
+    public int Rank { get; set; }
+    public string Status { get; set; } = ArticleAffiliateSuggestionStatuses.Pending;
+    public Article? Article { get; set; }
+}
+
 public sealed class WatchedTopic : AuditableEntity
 {
     public required string Name { get; set; }

@@ -1,4 +1,5 @@
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.AffiliateSuggestions;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.CmsKnowledge;
 using GwsBusinessSuite.Application.Comments;
@@ -101,6 +102,7 @@ public static class DependencyInjection
         services.AddScoped<ICrmService, CrmService>();
         services.AddScoped<IUserManagementService, UserManagementService>();
         services.AddScoped<IResumePdfService, ResumePdfService>();
+        services.AddScoped<IAffiliateSuggestionService, AffiliateSuggestionService>();
         // Same persisted volume as the SQLite DB and DP keys in production
         // (docker-compose.yml mounts gwssuite-data:/app/data); a relative dev-local path
         // otherwise (see appsettings.Development.json).

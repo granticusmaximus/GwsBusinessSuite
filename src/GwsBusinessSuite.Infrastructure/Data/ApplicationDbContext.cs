@@ -29,6 +29,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<Article> Articles => Set<Article>();
     public DbSet<ArticleCategory> ArticleCategories => Set<ArticleCategory>();
     public DbSet<ArticleAffiliatePlacement> ArticleAffiliatePlacements => Set<ArticleAffiliatePlacement>();
+    public DbSet<ArticleAffiliateSuggestion> ArticleAffiliateSuggestions => Set<ArticleAffiliateSuggestion>();
     public DbSet<AppUser> AppUsers => Set<AppUser>();
     public DbSet<WatchedTopic> WatchedTopics => Set<WatchedTopic>();
     public DbSet<NewsItem> NewsItems => Set<NewsItem>();
@@ -92,6 +93,13 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .HasForeignKey(x => x.ArticleId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<ArticleAffiliatePlacement>().HasIndex(x => new { x.ArticleId, x.SortOrder });
+
+        modelBuilder.Entity<ArticleAffiliateSuggestion>()
+            .HasOne(x => x.Article)
+            .WithMany()
+            .HasForeignKey(x => x.ArticleId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<ArticleAffiliateSuggestion>().HasIndex(x => new { x.ArticleId, x.Status });
 
         modelBuilder.Entity<AppUser>().HasIndex(x => x.Username).IsUnique();
         modelBuilder.Entity<AppUser>().HasIndex(x => x.Role);

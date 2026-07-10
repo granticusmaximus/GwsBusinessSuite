@@ -1,3 +1,4 @@
+using GwsBusinessSuite.Application.AffiliateSuggestions;
 using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Settings;
@@ -379,6 +380,7 @@ public sealed class ContentStudioServiceTests
             factory,
             ollama,
             new FakeAffiliateOfferScoringService(),
+            new AffiliateSuggestionService(db, ollama, options, NullLogger<AffiliateSuggestionService>.Instance),
             new SiteSettingsService(db),
             options,
             NullLogger<ContentStudioService>.Instance);

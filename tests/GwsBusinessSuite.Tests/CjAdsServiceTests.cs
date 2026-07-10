@@ -460,5 +460,10 @@ public sealed class CjAdsServiceTests
         {
             return Task.FromResult(new CjPartnerFetchResult(partners, "ok", isCompleteRoster));
         }
+
+        public Task<CjLinkFetchResult> FetchLinksAsync(CjLinkFetchRequest request, CancellationToken ct = default)
+        {
+            return Task.FromResult(new CjLinkFetchResult(Array.Empty<CjLinkRecord>(), "ok"));
+        }
     }
 }

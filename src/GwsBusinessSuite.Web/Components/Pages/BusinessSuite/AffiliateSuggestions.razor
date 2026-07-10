@@ -1,0 +1,237 @@
+@page "/admin/affiliate-suggestions"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.AffiliateSuggestions
+@inject IAffiliateSuggestionService SuggestionService
+@inject ILogger<AffiliateSuggestions> Logger
+
+<PageTitle>Affiliate Suggestions</PageTitle>
+
+<div class="page-header">
+  <h1><i class="bi bi-magic me-2 text-primary"></i>Affiliate Suggestions</h1>
+  <p>
+    AI-matched (Ollama) affiliate offers for your articles, pulled from your synced CJ links.
+    Nothing goes live until you click Apply - review each pick, then apply the ones that fit.
+  </p>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+  <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+}
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+  <div class="alert alert-info" role="alert">@StatusMessage</div>
+}
+@if (BulkFailures.Count > 0)
+{
+  <div class="alert alert-warning small">
+    <div class="fw-semibold mb-1">Some articles failed to generate suggestions:</div>
+    <ul class="mb-0 ps-3">
+      @foreach (var failure in BulkFailures)
+      {
+        <li>@failure</li>
+      }
+    </ul>
+  </div>
+}
+
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-body d-flex flex-wrap align-items-center justify-content-between gap-3">
+    <div>
+      <div class="fw-semibold">Generate suggestions for every article</div>
+      <div class="text-secondary small">Runs Ollama matching across all non-trashed articles. Can take a while for a large blog.</div>
+    </div>
+    <button type="button" class="btn btn-primary d-inline-flex align-items-center gap-2" @onclick="GenerateForAll" disabled="@IsBusy">
+      <i class="bi bi-stars"></i>
+      <span>@(IsBusy ? "Generating..." : "Generate for All Articles")</span>
+    </button>
+  </div>
+</div>
+
+@if (!_loaded)
+{
+  <p class="text-secondary">Loading suggestions...</p>
+}
+else if (Groups.Count == 0)
+{
+  <div class="card border-0 shadow-sm">
+    <div class="card-body text-secondary">
+      No pending suggestions. Click "Generate for All Articles" above, or sync CJ links first if you haven't yet.
+    </div>
+  </div>
+}
+else
+{
+  @foreach (var group in Groups)
+  {
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-header border-bottom py-3 d-flex flex-wrap align-items-center justify-content-between gap-2">
+        <div>
+          <span class="fw-semibold">@group.ArticleTitle</span>
+          <span class="badge text-bg-secondary ms-2">@group.ArticleStatus</span>
+        </div>
+        <div class="d-flex gap-2">
+          <a class="btn btn-sm btn-outline-secondary" href="@($"/admin/article-editor/{group.ArticleId}")" target="_blank">
+            <i class="bi bi-pencil-square"></i> Open Article
+          </a>
+          <button type="button" class="btn btn-sm btn-success" @onclick="() => ApplyAll(group.ArticleId)" disabled="@IsBusy">
+            <i class="bi bi-check2-all"></i> Apply All
+          </button>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Offer</th>
+              <th>Category</th>
+              <th>Why it fits</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            @foreach (var suggestion in group.Suggestions)
+            {
+              <tr>
+                <td>
+                  <div class="fw-semibold">@suggestion.AdvertiserName</div>
+                  <div class="small text-secondary">@suggestion.LinkName</div>
+                </td>
+                <td>@(string.IsNullOrWhiteSpace(suggestion.Category) ? "-" : suggestion.Category)</td>
+                <td class="small text-secondary">@suggestion.Reasoning</td>
+                <td class="text-end">
+                  <div class="d-flex justify-content-end gap-2">
+                    <button type="button" class="btn btn-sm btn-outline-success" @onclick="() => Apply(suggestion.Id)" disabled="@IsBusy">
+                      <i class="bi bi-check2"></i> Apply
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => Dismiss(suggestion.Id)" disabled="@IsBusy">
+                      <i class="bi bi-x"></i> Dismiss
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  }
+}
+
+@code {
+  private List<ArticleSuggestionGroupView> Groups { get; set; } = new();
+  private List<string> BulkFailures { get; set; } = new();
+  private bool _loaded;
+  private bool IsBusy { get; set; }
+  private string ErrorMessage { get; set; } = string.Empty;
+  private string StatusMessage { get; set; } = string.Empty;
+
+  protected override async Task OnInitializedAsync()
+  {
+    await LoadGroups();
+  }
+
+  private async Task LoadGroups()
+  {
+    try
+    {
+      Groups = (await SuggestionService.ListPendingSuggestionsAsync()).ToList();
+      _loaded = true;
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Unable to load affiliate suggestions.");
+      ErrorMessage = $"Unable to load suggestions. {ex.Message}";
+      _loaded = true;
+    }
+  }
+
+  private async Task GenerateForAll()
+  {
+    IsBusy = true;
+    ErrorMessage = string.Empty;
+    StatusMessage = "Generating suggestions - this can take a while...";
+    BulkFailures = new List<string>();
+    try
+    {
+      var result = await SuggestionService.GenerateForAllArticlesAsync();
+      StatusMessage = result.Message;
+      BulkFailures = result.FailureMessages.ToList();
+      await LoadGroups();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Bulk affiliate suggestion generation failed.");
+      ErrorMessage = $"Generation failed. {ex.Message}";
+      StatusMessage = string.Empty;
+    }
+    finally
+    {
+      IsBusy = false;
+    }
+  }
+
+  private async Task Apply(Guid suggestionId)
+  {
+    IsBusy = true;
+    ErrorMessage = string.Empty;
+    try
+    {
+      await SuggestionService.ApplySuggestionAsync(suggestionId);
+      StatusMessage = "Applied. The offer's ad card is now embedded in the article.";
+      await LoadGroups();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Unable to apply affiliate suggestion {Id}.", suggestionId);
+      ErrorMessage = $"Unable to apply suggestion. {ex.Message}";
+    }
+    finally
+    {
+      IsBusy = false;
+    }
+  }
+
+  private async Task ApplyAll(Guid articleId)
+  {
+    IsBusy = true;
+    ErrorMessage = string.Empty;
+    try
+    {
+      await SuggestionService.ApplyAllForArticleAsync(articleId);
+      StatusMessage = "Applied all suggested offers for this article.";
+      await LoadGroups();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Unable to apply all affiliate suggestions for article {ArticleId}.", articleId);
+      ErrorMessage = $"Unable to apply suggestions. {ex.Message}";
+    }
+    finally
+    {
+      IsBusy = false;
+    }
+  }
+
+  private async Task Dismiss(Guid suggestionId)
+  {
+    IsBusy = true;
+    ErrorMessage = string.Empty;
+    try
+    {
+      await SuggestionService.DismissSuggestionAsync(suggestionId);
+      await LoadGroups();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Unable to dismiss affiliate suggestion {Id}.", suggestionId);
+      ErrorMessage = $"Unable to dismiss suggestion. {ex.Message}";
+    }
+    finally
+    {
+      IsBusy = false;
+    }
+  }
+}

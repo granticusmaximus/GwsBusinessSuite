@@ -1,4 +1,5 @@
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.AffiliateSuggestions;
 using GwsBusinessSuite.Application.Articles;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Domain.Entities;
@@ -13,6 +14,7 @@ public sealed class ContentStudioService(
     IAppDbContextFactory dbContextFactory,
     IOllamaService ollama,
     IAffiliateOfferScoringService offerScoringService,
+    IAffiliateSuggestionService affiliateSuggestionService,
     ISiteSettingsService siteSettingsService,
     IOptions<ContentStudioOptions> options,
     ILogger<ContentStudioService> logger) : IContentStudioService
@@ -488,6 +490,21 @@ public sealed class ContentStudioService(
             "Published Content Studio draft {DraftId} live to the site blog at slug {Slug}.",
             draft.Id,
             draft.Slug);
+
+        // Best-effort: only worth suggesting on the article's first publish (isNewArticle) -
+        // a republish of an already-live article shouldn't churn its existing suggestions/ad
+        // placements. A failed AI match here shouldn't undo a successful publish.
+        if (isNewArticle)
+        {
+            try
+            {
+                await affiliateSuggestionService.GenerateForArticleAsync(article.Id, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Affiliate suggestion generation failed for newly published article {Id}.", article.Id);
+            }
+        }
 
         return await GetDraftAsync(draft.Id, cancellationToken);
     }
