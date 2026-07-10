@@ -55,6 +55,30 @@
     --bs-link-hover-color: #d97706;
     --bs-link-hover-color-rgb: 217, 119, 6;
     --bs-heading-color: #fafaf9;
+    /* .bg-white/.bg-light (e.g. every "card-header bg-white" in the admin pages, and
+       .text-bg-light badges) are driven by these two vars, not the ones above - left
+       at Bootstrap's light-mode defaults, these render literal white/near-white
+       backgrounds with our new white body text sitting on top of them, i.e. invisible
+       text. --bs-dark is deliberately NOT touched here: .bg-dark (the SSH terminal
+       panel) still needs a literal near-black, so .text-dark gets its own targeted
+       fix below instead of flipping the shared variable. */
+    --bs-white: #231f1d;
+    --bs-white-rgb: 35, 31, 29;
+    --bs-light: #2a2522;
+    --bs-light-rgb: 42, 37, 34;
+}
+
+/* Bootstrap hardcodes the paired text color for text-bg-light/.text-dark (color:#000
+   !important) rather than deriving it from a variable, so redirecting --bs-light above
+   isn't enough on its own - these need their own !important overrides to win the
+   cascade against Bootstrap's original declarations. */
+.text-bg-light {
+    color: var(--gws-text-strong) !important;
+    background-color: var(--gws-panel-bg-2) !important;
+}
+
+.text-dark {
+    color: var(--gws-text-strong) !important;
 }
 
 /* ── Base ────────────────────────────────────────────────── */
