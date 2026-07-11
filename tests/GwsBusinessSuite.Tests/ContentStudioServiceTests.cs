@@ -349,6 +349,70 @@ public sealed class ContentStudioServiceTests
         await Assert.ThrowsAsync<InvalidOperationException>(action);
     }
 
+    [Fact]
+    public async Task GenerateHeroImageAsync_ShouldPersistImageAndLogWorkflowEvent_FallingBackToTitleWhenPromptBlank()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var ollama = new FakeOllamaService { GenerateTextResult = "# Title\n\nBody" };
+        var service = CreateService(db, factory, ollama);
+
+        var draft = await service.GenerateArticleAsync(new ArticleGenerationRequest
+        {
+            Topic = "Clean Architecture in Blazor",
+            TargetAudience = "Mid-level C# developers",
+            PrimaryKeyword = "Blazor clean architecture",
+            SecondaryKeywords = "ASP.NET Core, C#"
+        });
+
+        await new SiteSettingsService(db).SaveSettingsAsync(
+            new SiteSettingsView(10, null, null, null, null, "x/z-image-turbo", 8));
+
+        ollama.GenerateImageResult = Convert.ToBase64String("fake-png-bytes"u8.ToArray());
+
+        var updated = await service.GenerateHeroImageAsync(new DraftHeroImageGenerationRequest
+        {
+            DraftId = draft.DraftId,
+            Prompt = string.Empty,
+            PerformedBy = "grantwatson"
+        });
+
+        Assert.NotNull(updated);
+        Assert.Equal($"data:image/png;base64,{ollama.GenerateImageResult}", updated!.HeroImage.DataUri);
+        Assert.True(updated.HeroImage.IsGeneratedByOllama);
+        Assert.Equal("x/z-image-turbo", updated.HeroImage.ConfiguredModel);
+        // A blank prompt should fall back to the draft title.
+        Assert.Equal(draft.Title, updated.HeroImage.Prompt);
+        Assert.Equal("x/z-image-turbo", ollama.LastRequestedModel);
+        Assert.Equal(draft.Title, ollama.LastImagePrompt);
+
+        var events = await db.SeoArticleWorkflowEvents.Where(x => x.SeoArticleDraftId == draft.DraftId).ToListAsync();
+        Assert.Contains(events, e => e.EventType == "HeroImageRegenerated");
+    }
+
+    [Fact]
+    public async Task GenerateHeroImageAsync_ShouldThrow_WhenNoModelConfigured()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var ollama = new FakeOllamaService { GenerateTextResult = "# Title\n\nBody" };
+        var service = CreateService(db, factory, ollama);
+
+        var draft = await service.GenerateArticleAsync(new ArticleGenerationRequest
+        {
+            Topic = "Clean Architecture in Blazor",
+            TargetAudience = "Mid-level C# developers",
+            PrimaryKeyword = "Blazor clean architecture",
+            SecondaryKeywords = "ASP.NET Core, C#"
+        });
+
+        var action = () => service.GenerateHeroImageAsync(new DraftHeroImageGenerationRequest
+        {
+            DraftId = draft.DraftId,
+            Prompt = "a robot writing code"
+        });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(action);
+    }
+
     private static async Task<(ApplicationDbContext Db, IAppDbContextFactory Factory)> CreateDbAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
