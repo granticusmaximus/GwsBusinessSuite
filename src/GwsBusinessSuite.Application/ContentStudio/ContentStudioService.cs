@@ -37,11 +37,17 @@ public sealed class ContentStudioService(
             })
             .ToListAsync(cancellationToken);
 
+        // Pending-review drafts sort first regardless of age, so one never silently falls
+        // off the end of this capped list behind a run of newer approved/rejected drafts.
         return drafts
-            .OrderByDescending(x => x.CreatedAt)
+            .OrderBy(x => x.Status == SeoArticleDraftStatuses.PendingReview ? 0 : 1)
+            .ThenByDescending(x => x.CreatedAt)
             .Take(20)
             .ToList();
     }
+
+    public Task<int> CountPendingReviewAsync(CancellationToken cancellationToken = default) =>
+        db.SeoArticleDrafts.CountAsync(x => x.Status == SeoArticleDraftStatuses.PendingReview, cancellationToken);
 
     public Task<ArticleGenerationResult?> GetDraftAsync(Guid draftId, CancellationToken cancellationToken = default)
         => GetDraftCoreAsync(db, draftId, cancellationToken);

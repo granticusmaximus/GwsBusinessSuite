@@ -46,6 +46,14 @@
 - Progressively copy over WordPress/Elementor features without proprietary code
 
 ## Other Areas to Address
-- Article approval/revision queue — workflow events exist, audit completeness of the queue UI
+- Article approval/revision queue ✅ (audited) — the approve/reject/revision UI and the
+  full workflow-event-history timeline were already complete. Two real gaps found and
+  fixed: the drafts list silently capped at 20 most-recent-by-`CreatedAt`, so an old
+  pending-review draft could fall off behind newer approved/rejected ones (now sorts
+  pending-review first); and there was no pending-count badge in the nav despite the
+  identical pattern already existing for Comments/Docker (now added). Remaining, smaller
+  items not addressed: `HeroImageRegenerated` workflow event type is defined but never
+  emitted (hero uploads bypass the workflow log entirely), and "revision" has no
+  diff/rollback — it's an AI regenerate-and-overwrite with no version history.
 - Live Show page — exists in admin, needs review and possible expansion
 - Wiki — has markdown pages; consider history tracking and richer editing

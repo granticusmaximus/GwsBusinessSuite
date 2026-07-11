@@ -3,6 +3,7 @@ namespace GwsBusinessSuite.Application.ContentStudio;
 public interface IContentStudioService
 {
     Task<IReadOnlyList<ContentStudioDraftSummary>> ListDraftsAsync(CancellationToken cancellationToken = default);
+    Task<int> CountPendingReviewAsync(CancellationToken cancellationToken = default);
     Task<ArticleGenerationResult?> GetDraftAsync(Guid draftId, CancellationToken cancellationToken = default);
     Task<ArticleGenerationResult> GenerateArticleAsync(
         ArticleGenerationRequest request,

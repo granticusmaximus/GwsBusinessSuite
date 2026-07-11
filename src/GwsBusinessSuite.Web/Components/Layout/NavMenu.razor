@@ -1,10 +1,12 @@
 @using GwsBusinessSuite.Application.Comments
+@using GwsBusinessSuite.Application.ContentStudio
 @using GwsBusinessSuite.Application.DockerHealth
 @using GwsBusinessSuite.Domain.Entities
 @using Microsoft.AspNetCore.Components.Authorization
 @using System.Security.Claims
 @inject AuthenticationStateProvider AuthProvider
 @inject ICommentService CommentService
+@inject IContentStudioService ContentStudioService
 @inject IDockerHealthService DockerHealthService
 
 <nav class="gws-nav">
@@ -32,7 +34,7 @@
     <NavLink class="gws-nav-link" href="admin/content-studio" title="Generate with AI">
         <i class="bi bi-magic"></i>
         <span class="gws-nav-link-copy">
-            <span>Generate with AI</span>
+            <span>Generate with AI@(_pendingDraftCount > 0 ? $" ({_pendingDraftCount})" : "")</span>
             <small>Ollama-assisted drafts</small>
         </span>
     </NavLink>
@@ -198,6 +200,7 @@
     private string _role = string.Empty;
     private int _pendingCommentCount;
     private int _unreadDockerAlertCount;
+    private int _pendingDraftCount;
 
     protected override async Task OnInitializedAsync()
     {
@@ -208,6 +211,7 @@
         {
             _pendingCommentCount = await CommentService.CountPendingAsync();
             _unreadDockerAlertCount = await DockerHealthService.CountUnreadAlertsAsync();
+            _pendingDraftCount = await ContentStudioService.CountPendingReviewAsync();
         }
     }
 
