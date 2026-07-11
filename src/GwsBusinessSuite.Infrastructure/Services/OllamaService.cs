@@ -55,6 +55,49 @@ public sealed class OllamaService(HttpClient http, ILogger<OllamaService> logger
         }
     }
 
+    public async Task PullModelAsync(string model, CancellationToken ct = default)
+    {
+        var payload = new { model, stream = false };
+
+        try
+        {
+            using var response = await http.PostAsJsonAsync("/api/pull", payload, ct);
+            response.EnsureSuccessStatusCode();
+
+            var result = await response.Content.ReadFromJsonAsync<OllamaStatusResponse>(cancellationToken: ct);
+            if (!string.Equals(result?.Status, "success", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"Ollama did not report success pulling '{model}' (status: {result?.Status ?? "unknown"}).");
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            logger.LogWarning(ex, "Ollama pull request failed for model '{Model}'.", model);
+            throw;
+        }
+    }
+
+    public async Task DeleteModelAsync(string model, CancellationToken ct = default)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Delete, "/api/delete")
+            {
+                Content = JsonContent.Create(new { model })
+            };
+            using var response = await http.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            logger.LogWarning(ex, "Ollama delete request failed for model '{Model}'.", model);
+            throw;
+        }
+    }
+
+    private sealed record OllamaStatusResponse(string? Status);
+
     private sealed record OllamaGenerateResponse(string Response);
 
     private sealed record OllamaTagsResponse([property: JsonPropertyName("models")] OllamaTagModel[]? Models);

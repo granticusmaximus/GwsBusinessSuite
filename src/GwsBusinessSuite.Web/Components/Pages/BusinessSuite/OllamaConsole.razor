@@ -8,6 +8,7 @@
 @inject IOllamaService Ollama
 @inject IOptions<ContentStudioOptions> StudioOptions
 @inject ISiteSettingsService SiteSettingsService
+@inject IJSRuntime JS
 @inject ILogger<OllamaConsole> Logger
 
 <PageTitle>Ollama Console</PageTitle>
@@ -84,6 +85,24 @@
             <div class="card-header bg-white border-bottom py-3">
                 <span class="fw-semibold">Installed models (@_models.Count)</span>
             </div>
+            <div class="card-body">
+                <div class="d-flex gap-2 mb-3">
+                    <input class="form-control form-control-sm font-monospace" @bind="_pullModelName" @bind:event="oninput"
+                           placeholder="e.g. llama3.2" disabled="@IsModelBusy(_pullModelName)" />
+                    <button class="btn btn-sm btn-outline-primary text-nowrap" @onclick="PullModelAsync"
+                            disabled="@(string.IsNullOrWhiteSpace(_pullModelName) || IsModelBusy(_pullModelName))">
+                        @if (IsModelBusy(_pullModelName))
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        <span>Pull</span>
+                    </button>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_modelActionError))
+                {
+                    <div class="alert alert-danger small py-2" role="alert">@_modelActionError</div>
+                }
+            </div>
             <div class="card-body p-0">
                 @if (_models.Count == 0)
                 {
@@ -98,10 +117,23 @@
                         {
                             <li class="list-group-item d-flex justify-content-between align-items-center">
                                 <span class="font-monospace small">@model</span>
-                                @if (IsConfiguredModel(model))
-                                {
-                                    <span class="badge text-bg-primary">active</span>
-                                }
+                                <div class="d-flex align-items-center gap-2">
+                                    @if (IsConfiguredModel(model))
+                                    {
+                                        <span class="badge text-bg-primary">active</span>
+                                    }
+                                    <button class="btn btn-sm btn-outline-danger" disabled="@IsModelBusy(model)"
+                                            @onclick="() => DeleteModelAsync(model)">
+                                        @if (IsModelBusy(model))
+                                        {
+                                            <span class="spinner-border spinner-border-sm"></span>
+                                        }
+                                        else
+                                        {
+                                            <i class="bi bi-trash"></i>
+                                        }
+                                    </button>
+                                </div>
                             </li>
                         }
                     </ul>
@@ -185,6 +217,9 @@
     private long _latencyMs;
     private List<string> _models = [];
     private bool _configuredModelInstalled;
+    private string _pullModelName = string.Empty;
+    private string _modelActionError = string.Empty;
+    private readonly HashSet<string> _busyModels = new(StringComparer.OrdinalIgnoreCase);
 
     private string _promptModel = string.Empty;
     private string _systemPrompt = string.Empty;
@@ -238,6 +273,57 @@
         finally
         {
             _checking = false;
+        }
+    }
+
+    private bool IsModelBusy(string model) => !string.IsNullOrWhiteSpace(model) && _busyModels.Contains(model);
+
+    private async Task PullModelAsync()
+    {
+        var model = _pullModelName.Trim();
+        if (string.IsNullOrWhiteSpace(model)) return;
+
+        _modelActionError = string.Empty;
+        _busyModels.Add(model);
+        StateHasChanged();
+        try
+        {
+            await Ollama.PullModelAsync(model);
+            _pullModelName = string.Empty;
+            await CheckConnectionAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Ollama model pull failed for '{Model}'.", model);
+            _modelActionError = $"Failed to pull '{model}': {ex.Message}";
+        }
+        finally
+        {
+            _busyModels.Remove(model);
+        }
+    }
+
+    private async Task DeleteModelAsync(string model)
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Delete model '{model}' from this Ollama server?");
+        if (!confirmed) return;
+
+        _modelActionError = string.Empty;
+        _busyModels.Add(model);
+        StateHasChanged();
+        try
+        {
+            await Ollama.DeleteModelAsync(model);
+            await CheckConnectionAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Ollama model delete failed for '{Model}'.", model);
+            _modelActionError = $"Failed to delete '{model}': {ex.Message}";
+        }
+        finally
+        {
+            _busyModels.Remove(model);
         }
     }
 

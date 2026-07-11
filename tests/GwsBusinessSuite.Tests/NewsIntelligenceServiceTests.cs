@@ -178,5 +178,9 @@ public sealed class NewsIntelligenceServiceTests
 
         public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default)
             => Task.FromResult<IReadOnlyCollection<string>>(Array.Empty<string>());
+
+        public Task PullModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task DeleteModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
     }
 }

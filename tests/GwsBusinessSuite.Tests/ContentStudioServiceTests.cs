@@ -419,5 +419,9 @@ public sealed class ContentStudioServiceTests
         {
             return Task.FromResult(Models);
         }
+
+        public Task PullModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task DeleteModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
     }
 }

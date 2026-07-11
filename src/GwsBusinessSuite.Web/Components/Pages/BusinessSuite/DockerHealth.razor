@@ -4,8 +4,11 @@
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.DockerHealth
 @using GwsBusinessSuite.Application.DigitalOcean
+@using GwsBusinessSuite.Application.Abstractions
 @inject IDockerHealthService DockerHealthService
 @inject IDigitalOceanService DigitalOceanService
+@inject IDockerDeploymentService DockerDeploymentService
+@inject IWebHostEnvironment Env
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
@@ -117,6 +120,34 @@
     </div>
 </div>
 
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white border-bottom py-3">
+        <span class="fw-semibold"><i class="bi bi-hammer me-1 text-primary"></i>Build App Image</span>
+    </div>
+    <div class="card-body">
+        <p class="small text-secondary mb-2">
+            Rebuilds this app's Docker image from the local <code>Dockerfile</code> using the Docker CLI.
+            This only works when running locally with Docker installed — production deploys happen via
+            <code>docker compose up -d --build</code> over SSH, not from this button.
+        </p>
+        <button class="btn btn-sm btn-outline-primary" @onclick="BuildImageAsync" disabled="@IsBuildingImage">
+            @if (IsBuildingImage)
+            {
+                <span class="spinner-border spinner-border-sm me-1"></span>
+                <span>Building...</span>
+            }
+            else
+            {
+                <span>Build Image</span>
+            }
+        </button>
+        @if (!string.IsNullOrWhiteSpace(BuildImageMessage))
+        {
+            <pre class="small mt-2 mb-0 @(BuildImageSucceeded ? "text-success" : "text-danger")" style="white-space: pre-wrap;">@BuildImageMessage</pre>
+        }
+    </div>
+</div>
+
 @if (!_loaded)
 {
     <div class="d-flex align-items-center gap-2 text-secondary">
@@ -188,6 +219,10 @@ else
     private string ErrorMessage { get; set; } = string.Empty;
     private readonly HashSet<string> _busyContainers = new();
     private Dictionary<string, DockerActionResult> ActionMessages { get; } = new();
+
+    private bool IsBuildingImage { get; set; }
+    private string BuildImageMessage { get; set; } = string.Empty;
+    private bool BuildImageSucceeded { get; set; }
 
     private bool _doLoaded;
     private string DoApiToken { get; set; } = string.Empty;
@@ -342,6 +377,24 @@ else
         finally
         {
             IsDoActionBusy = false;
+        }
+    }
+
+    private async Task BuildImageAsync()
+    {
+        IsBuildingImage = true;
+        BuildImageMessage = string.Empty;
+        try
+        {
+            // Dockerfile lives at the repo root, two levels above this project's content root.
+            var dockerfilePath = Path.GetFullPath(Path.Combine(Env.ContentRootPath, "..", "..", "Dockerfile"));
+            var result = await DockerDeploymentService.DeployAsync("gws-business-suite", dockerfilePath);
+            BuildImageMessage = result;
+            BuildImageSucceeded = result.StartsWith("Docker image", StringComparison.Ordinal);
+        }
+        finally
+        {
+            IsBuildingImage = false;
         }
     }
 

@@ -10,6 +10,8 @@ public interface IOllamaService
 {
     Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default);
     Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default);
+    Task PullModelAsync(string model, CancellationToken ct = default);
+    Task DeleteModelAsync(string model, CancellationToken ct = default);
 }
 public interface IDockerDeploymentService { Task<string> DeployAsync(string appName, string dockerfilePath, CancellationToken ct = default); }
 
