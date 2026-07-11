@@ -1628,14 +1628,21 @@ static async Task EnsureAboutPageResumeSectionAsync(ApplicationDbContext dbConte
         .FirstOrDefault(widget =>
             widget.WidgetType == "button"
             && widget.Props.TryGetValue("href", out var href)
-            && href == "/resume");
+            && (href == "/resume" || href == "/about#resume"));
     if (resumeButton is not null && homePage is not null)
     {
-        resumeButton.Props["href"] = "/about#resume";
-        homePage.BlocksJson = CmsBuilderJson.Serialize(homeLayout!);
-        homePage.UpdatedAt = now;
-        homePage.UpdatedBy = "system";
-        logger.LogInformation("Repointed the homepage's resume button at /about#resume.");
+        var hrefNeedsFix = resumeButton.Props["href"] != "/about#resume";
+        var opensInNewTab = resumeButton.Props.TryGetValue("openInNewTab", out var openInNewTab) && openInNewTab == "true";
+        if (hrefNeedsFix || opensInNewTab)
+        {
+            resumeButton.Props["href"] = "/about#resume";
+            // It's now an in-page anchor, not a separate page, so it shouldn't pop a new tab.
+            resumeButton.Props["openInNewTab"] = "false";
+            homePage.BlocksJson = CmsBuilderJson.Serialize(homeLayout!);
+            homePage.UpdatedAt = now;
+            homePage.UpdatedBy = "system";
+            logger.LogInformation("Repointed the homepage's resume button at /about#resume (same tab).");
+        }
     }
 
     var aboutPage = await dbContext.CmsPages
