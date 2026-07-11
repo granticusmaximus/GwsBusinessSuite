@@ -328,6 +328,71 @@ public sealed class ContentStudioService(
         return await GetDraftCoreAsync(freshContext, freshDraft.Id, cancellationToken);
     }
 
+    public async Task<ArticleGenerationResult?> GenerateHeroImageAsync(
+        DraftHeroImageGenerationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var draft = await db.SeoArticleDrafts.FirstOrDefaultAsync(x => x.Id == request.DraftId, cancellationToken);
+        if (draft is null)
+        {
+            return null;
+        }
+
+        var prompt = string.IsNullOrWhiteSpace(request.Prompt) ? draft.Title : request.Prompt.Trim();
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            throw new ArgumentException("A prompt (or a draft title to fall back to) is required to generate a hero image.", nameof(request));
+        }
+
+        var configuredModel = await GetEffectiveImageModelAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(configuredModel))
+        {
+            throw new InvalidOperationException("No hero image model is configured. Set one in Settings > AI (Ollama).");
+        }
+
+        var timeout = await GetEffectiveTimeoutAsync(cancellationToken);
+
+        // Same reasoning as RequestRevisionAsync above: generation can take a while, so
+        // reload on a freshly created context rather than reusing the one the Blazor
+        // Server circuit may have disconnected during the wait.
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(timeout);
+        var imageBase64 = await ollama.GenerateImageAsync(configuredModel, prompt, timeoutCts.Token);
+        if (string.IsNullOrWhiteSpace(imageBase64))
+        {
+            throw new InvalidOperationException("Ollama returned no image data.");
+        }
+
+        await using var freshContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var freshDraft = await freshContext.SeoArticleDrafts.FirstOrDefaultAsync(x => x.Id == draft.Id, cancellationToken);
+        if (freshDraft is null)
+        {
+            return null;
+        }
+
+        freshDraft.HeroImageDataUri = $"data:image/png;base64,{imageBase64}";
+        freshDraft.HeroImagePrompt = prompt;
+        freshDraft.HeroImageAltText = freshDraft.Title;
+        freshDraft.HeroImageProvider = "Ollama";
+        freshDraft.HeroImageConfiguredModel = configuredModel;
+        freshDraft.IsHeroImageGeneratedByOllama = true;
+        freshDraft.UpdatedAt = DateTimeOffset.UtcNow;
+        freshDraft.UpdatedBy = request.PerformedBy;
+
+        freshContext.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent
+        {
+            SeoArticleDraftId = freshDraft.Id,
+            EventType = SeoArticleWorkflowEventTypes.HeroImageRegenerated,
+            Notes = $"Generated via Ollama ({configuredModel}). Prompt: {prompt}",
+            CreatedBy = request.PerformedBy
+        });
+
+        await freshContext.SaveChangesAsync(cancellationToken);
+
+        return await GetDraftCoreAsync(freshContext, freshDraft.Id, cancellationToken);
+    }
+
     public async Task<ArticleGenerationResult?> UpdateDraftMarkdownAsync(
         DraftMarkdownUpdateRequest request,
         CancellationToken cancellationToken = default)
@@ -857,6 +922,9 @@ public sealed class ContentStudioService(
                 AltText = draft.HeroImageAltText,
                 DataUri = draft.HeroImageDataUri,
                 Caption = draft.HeroImageCaption,
+                Prompt = draft.HeroImagePrompt,
+                IsGeneratedByOllama = draft.IsHeroImageGeneratedByOllama,
+                ConfiguredModel = draft.HeroImageConfiguredModel,
             },
             WorkflowHistory = events
                 .OrderByDescending(x => x.CreatedAt)
@@ -945,6 +1013,15 @@ public sealed class ContentStudioService(
         return string.IsNullOrWhiteSpace(options.Value.Model)
             ? ContentStudioOptions.DefaultModel
             : options.Value.Model;
+    }
+
+    // Unlike GetEffectiveModelAsync, there's no safe app-wide default image-generation
+    // model to fall back to (an arbitrary text model can't generate images), so an unset
+    // override means "not configured" rather than "use the default."
+    private async Task<string?> GetEffectiveImageModelAsync(CancellationToken cancellationToken)
+    {
+        var settings = await siteSettingsService.GetSettingsAsync(cancellationToken);
+        return string.IsNullOrWhiteSpace(settings.HeroImageModelOverride) ? null : settings.HeroImageModelOverride;
     }
 
     private async Task<TimeSpan> GetEffectiveTimeoutAsync(CancellationToken cancellationToken)

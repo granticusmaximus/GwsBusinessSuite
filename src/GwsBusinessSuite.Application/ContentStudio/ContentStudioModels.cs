@@ -31,6 +31,13 @@ public sealed class DraftDecisionRequest
     public string PerformedBy { get; init; } = "content-studio";
 }
 
+public sealed class DraftHeroImageGenerationRequest
+{
+    public Guid DraftId { get; init; }
+    public string Prompt { get; init; } = string.Empty;
+    public string PerformedBy { get; init; } = "content-studio";
+}
+
 public sealed class DraftPublishRequest
 {
     public Guid DraftId { get; init; }
@@ -127,4 +134,7 @@ public sealed class ArticleHeroImagePreview
     public string AltText  { get; init; } = string.Empty;
     public string DataUri  { get; init; } = string.Empty;
     public string Caption  { get; init; } = string.Empty;
+    public string Prompt { get; init; } = string.Empty;
+    public bool IsGeneratedByOllama { get; init; }
+    public string ConfiguredModel { get; init; } = string.Empty;
 }

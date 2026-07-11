@@ -11,6 +11,9 @@ public interface IContentStudioService
     Task<ArticleGenerationResult?> RequestRevisionAsync(
         DraftRevisionRequest request,
         CancellationToken cancellationToken = default);
+    Task<ArticleGenerationResult?> GenerateHeroImageAsync(
+        DraftHeroImageGenerationRequest request,
+        CancellationToken cancellationToken = default);
     Task<ArticleGenerationResult?> UpdateDraftMarkdownAsync(
         DraftMarkdownUpdateRequest request,
         CancellationToken cancellationToken = default);
