@@ -70,6 +70,7 @@ public sealed class WikiPage : AuditableEntity
     public required string Title { get; set; }
     public required string Slug { get; set; }
     public string Markdown { get; set; } = string.Empty;
+    public Guid? ParentWikiPageId { get; set; }
 }
 
 public static class CmsFontPairings

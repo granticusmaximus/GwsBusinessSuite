@@ -187,6 +187,71 @@ public sealed class WikiServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SavePageAsync_ShouldPersistAndClearParentWikiPageId()
+    {
+        await using var db = await CreateDbAsync();
+        var service = CreateService(db);
+
+        var parent = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Parent Page",
+            Markdown = "Parent content."
+        }, "grantwatson");
+
+        var child = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Child Page",
+            Markdown = "Child content.",
+            ParentWikiPageId = parent.Id
+        }, "grantwatson");
+
+        child.ParentWikiPageId.Should().Be(parent.Id);
+
+        var madeTopLevel = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            WikiPageId = child.Id,
+            Title = "Child Page",
+            Markdown = "Child content.",
+            ParentWikiPageId = null
+        }, "grantwatson");
+
+        madeTopLevel.ParentWikiPageId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RevertToRevisionAsync_ShouldPreserveParentWikiPageId()
+    {
+        await using var db = await CreateDbAsync();
+        var service = CreateService(db);
+
+        var parent = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Parent Page",
+            Markdown = "Parent content."
+        }, "grantwatson");
+
+        var child = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Child Page",
+            Markdown = "Version one.",
+            ParentWikiPageId = parent.Id
+        }, "grantwatson");
+        var firstSha = (await service.GetHistoryAsync(child.Id))[0].Sha;
+
+        await service.SavePageAsync(new WikiPageEditorModel
+        {
+            WikiPageId = child.Id,
+            Title = "Child Page",
+            Markdown = "Version two.",
+            ParentWikiPageId = parent.Id
+        }, "grantwatson");
+
+        var reverted = await service.RevertToRevisionAsync(child.Id, firstSha, "grantwatson");
+
+        reverted.ParentWikiPageId.Should().Be(parent.Id, "reverting content should not silently detach the page from its parent");
+    }
+
+    [Fact]
     public async Task DeletePageAsync_ShouldRemoveTheFileFromTheRepo()
     {
         await using var db = await CreateDbAsync();

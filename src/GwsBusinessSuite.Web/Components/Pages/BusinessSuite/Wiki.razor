@@ -44,6 +44,10 @@
                     <i class="bi bi-plus-lg me-1"></i>New Page
                 </button>
             </div>
+            <div class="card-body border-bottom py-2">
+                <input class="form-control form-control-sm" @bind="SearchQuery" @bind:event="oninput"
+                       placeholder="Search pages by title or slug..." />
+            </div>
             <div class="card-body p-0">
                 @if (WikiPages.Count == 0)
                 {
@@ -51,16 +55,23 @@
                         <p class="mb-0">No wiki pages yet. Create the first page to capture procedures or notes.</p>
                     </div>
                 }
+                else if (FilteredAndOrderedPages().Count == 0)
+                {
+                    <div class="p-4 text-secondary">
+                        <p class="mb-0">No pages match "@SearchQuery".</p>
+                    </div>
+                }
                 else
                 {
                     <div class="list-group list-group-flush">
-                        @foreach (var wikiPage in WikiPages)
+                        @foreach (var wikiPage in FilteredAndOrderedPages())
                         {
                             <button type="button"
                                     class="list-group-item list-group-item-action d-flex justify-content-between align-items-start gap-2 @(SelectedPageId == wikiPage.Id ? "active" : string.Empty)"
+                                    style="padding-left:@(0.75 + GetWikiPageDepth(wikiPage) * 1.25)rem;"
                                     @onclick="() => OpenPageAsync(wikiPage.Id)" disabled="@IsBusy">
                                 <div>
-                                    <div class="fw-semibold">@wikiPage.Title</div>
+                                    <div class="fw-semibold">@(GetWikiPageDepth(wikiPage) > 0 ? "— " : "")@wikiPage.Title</div>
                                     <div class="small @(SelectedPageId == wikiPage.Id ? "text-white-50" : "text-secondary")">
                                         @wikiPage.Slug
                                     </div>
@@ -98,6 +109,16 @@
                         <div class="col-md-4">
                             <label class="form-label fw-semibold small">Slug</label>
                             <InputText class="form-control" @bind-Value="Editor.Slug" placeholder="optional-slug" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold small">Parent Page</label>
+                            <select class="form-select" @bind="ParentWikiPageIdSelection">
+                                <option value="">— Top level —</option>
+                                @foreach (var candidate in WikiParentPageOptions())
+                                {
+                                    <option value="@candidate.Id">@candidate.Title</option>
+                                }
+                            </select>
                         </div>
                         <div class="col-12">
                             <label class="form-label fw-semibold small">Markdown</label>
@@ -223,6 +244,7 @@
     private WikiPageEditorModel Editor { get; set; } = new();
     private Guid? SelectedPageId { get; set; }
     private bool IsBusy { get; set; }
+    private string SearchQuery { get; set; } = string.Empty;
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
 
@@ -320,7 +342,8 @@
                 WikiPageId = page.Id,
                 Title = page.Title,
                 Slug = page.Slug,
-                Markdown = page.Markdown
+                Markdown = page.Markdown,
+                ParentWikiPageId = page.ParentWikiPageId
             };
             DiffShaKey = null;
             StatusMessage = $"Opened wiki page '{page.Title}'.";
@@ -364,7 +387,8 @@
                 WikiPageId = saved.Id,
                 Title = saved.Title,
                 Slug = saved.Slug,
-                Markdown = saved.Markdown
+                Markdown = saved.Markdown,
+                ParentWikiPageId = saved.ParentWikiPageId
             };
             StatusMessage = $"Saved wiki page '{saved.Title}'.";
             await LoadPagesAsync(selectFirstPage: false);
@@ -457,7 +481,8 @@
                 WikiPageId = reverted.Id,
                 Title = reverted.Title,
                 Slug = reverted.Slug,
-                Markdown = reverted.Markdown
+                Markdown = reverted.Markdown,
+                ParentWikiPageId = reverted.ParentWikiPageId
             };
             DiffShaKey = null;
             StatusMessage = $"Reverted '{reverted.Title}' to an earlier version.";
@@ -473,6 +498,91 @@
         {
             IsHistoryBusy = false;
         }
+    }
+
+    // Mirrors Pages.razor's OrderedPagesByHierarchy()/GetPageDepth() for CMS pages - a
+    // recursive depth-first flatten via ToLookup(ParentWikiPageId), rendered as an
+    // indented flat list rather than a nested component.
+    private List<WikiPage> OrderedPagesByHierarchy()
+    {
+        var byParent = WikiPages.ToLookup(p => p.ParentWikiPageId);
+        var result = new List<WikiPage>();
+
+        void Visit(Guid? parentId)
+        {
+            foreach (var page in byParent[parentId])
+            {
+                result.Add(page);
+                Visit(page.Id);
+            }
+        }
+
+        Visit(null);
+        return result;
+    }
+
+    private int GetWikiPageDepth(WikiPage page)
+    {
+        var byId = WikiPages.ToDictionary(p => p.Id);
+        var depth = 0;
+        var current = page;
+        var guard = 0;
+        while (current?.ParentWikiPageId is { } parentId && byId.TryGetValue(parentId, out var parent) && guard++ < 64)
+        {
+            depth++;
+            current = parent;
+        }
+
+        return depth;
+    }
+
+    // With no search query, the full tree is shown in hierarchy order. Once searching,
+    // a matched child's ancestors may not themselves match, so tree order stops making
+    // sense - fall back to a flat alphabetical list of matches (still indented per each
+    // page's real depth, just not grouped under its ancestors).
+    private List<WikiPage> FilteredAndOrderedPages()
+    {
+        if (string.IsNullOrWhiteSpace(SearchQuery))
+        {
+            return OrderedPagesByHierarchy();
+        }
+
+        return WikiPages
+            .Where(p => p.Title.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase)
+                || p.Slug.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    // Mirrors EditPage.razor's ParentPageOptions() for CMS pages - a BFS from the open
+    // page excluding itself and every descendant, so the <select> can never offer a
+    // choice that would create a cycle.
+    private List<WikiPage> WikiParentPageOptions()
+    {
+        if (!SelectedPageId.HasValue)
+        {
+            return WikiPages;
+        }
+
+        var byParent = WikiPages.ToLookup(p => p.ParentWikiPageId);
+        var excluded = new HashSet<Guid> { SelectedPageId.Value };
+        var frontier = new Queue<Guid>();
+        frontier.Enqueue(SelectedPageId.Value);
+        while (frontier.Count > 0)
+        {
+            foreach (var child in byParent[frontier.Dequeue()])
+            {
+                if (excluded.Add(child.Id)) frontier.Enqueue(child.Id);
+            }
+        }
+
+        return WikiPages.Where(p => !excluded.Contains(p.Id)).ToList();
+    }
+
+    private string ParentWikiPageIdSelection
+    {
+        get => Editor.ParentWikiPageId?.ToString() ?? string.Empty;
+        set => Editor.ParentWikiPageId = Guid.TryParse(value, out var id) ? id : null;
     }
 
     private static string DiffLineClass(string line) =>

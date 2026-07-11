@@ -55,5 +55,13 @@
   items not addressed: `HeroImageRegenerated` workflow event type is defined but never
   emitted (hero uploads bypass the workflow log entirely), and "revision" has no
   diff/rollback — it's an AI regenerate-and-overwrite with no version history.
-- Live Show page — exists in admin, needs review and possible expansion
-- Wiki — has markdown pages; consider history tracking and richer editing
+- Live Show page — reviewed. It's a real, working feature but a narrow one: a local
+  browser camera/mic self-monitor only (getUserMedia preview), with no backend service,
+  no persistence, and no actual streaming/broadcast output. "Expansion" needs a product
+  decision first (streaming destination? persisted "shows"? viewer-facing UI?) before
+  any code should be written — same category as the AI app generation queue.
+- Wiki history tracking ✅ — already fully shipped (commit `d514a56`): every save is a
+  real git commit via LibGit2Sharp (`WikiService.cs`), with a full History/Diff/Revert UI
+  already in `Wiki.razor`. The roadmap simply hadn't been updated. Remaining real gap is
+  "richer editing": no page hierarchy (no parent/order), no search box, and the editor is
+  a plain textarea with no wiki-links/image embedding/TOC.

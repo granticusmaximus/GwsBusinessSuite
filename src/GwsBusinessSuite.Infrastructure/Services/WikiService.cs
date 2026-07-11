@@ -63,6 +63,7 @@ public sealed class WikiService(IAppDbContext dbContext, string repoPath) : IWik
         page.Title = editor.Title.Trim();
         page.Slug = uniqueSlug;
         page.Markdown = editor.Markdown.Trim();
+        page.ParentWikiPageId = editor.ParentWikiPageId;
         page.UpdatedAt = now;
         page.UpdatedBy = performedBy;
 
@@ -175,7 +176,8 @@ public sealed class WikiService(IAppDbContext dbContext, string repoPath) : IWik
             WikiPageId = page.Id,
             Title = page.Title,
             Slug = page.Slug,
-            Markdown = oldContent
+            Markdown = oldContent,
+            ParentWikiPageId = page.ParentWikiPageId
         }, performedBy, cancellationToken);
     }
 

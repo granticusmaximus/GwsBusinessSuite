@@ -12,6 +12,8 @@ public sealed class WikiPageEditorModel
     public string Slug { get; set; } = string.Empty;
 
     public string Markdown { get; set; } = string.Empty;
+
+    public Guid? ParentWikiPageId { get; set; }
 }
 
 // One entry per git commit touching a page's file - the source of truth for "history" is
