@@ -856,73 +856,131 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
     string siteSlug,
     ICmsBuilderService cmsBuilderService,
     IWebHostEnvironment env,
-    GlobalBlockResolver globalBlockResolver) =>
+    GlobalBlockResolver globalBlockResolver,
+    IMediaLibraryService mediaLibraryService) =>
 {
     var site = await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
     if (site is null) return Results.NotFound();
 
-    var pages = await cmsBuilderService.ListPagesAsync(site.Id);
+    // allPages (unfiltered beyond trashed) is needed so BuildFullPath can resolve
+    // ancestor slugs even for a page whose parent itself isn't publicly visible.
+    var allPages = await cmsBuilderService.ListPagesAsync(site.Id);
+    var pages = allPages.Where(p => IsCmsPagePubliclyVisible(p, DateTimeOffset.UtcNow)).ToList();
 
     // Read the base stylesheet once — it gets embedded in every page.
     var cssFilePath = Path.Combine(env.WebRootPath, "cms-public.css");
     var baseStylesheet = File.Exists(cssFilePath) ? await File.ReadAllTextAsync(cssFilePath) : string.Empty;
 
+    var mediaReferencePattern = new Regex(
+        "/media/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})",
+        RegexOptions.Compiled);
+    var referencedMediaIds = new HashSet<Guid>();
+    var renderedPages = new List<(string EntryPath, string Html)>();
+
+    foreach (var page in pages)
+    {
+        var layout = CmsBuilderJson.ParseLayout(page.BlocksJson);
+        if (layout is not null)
+        {
+            await globalBlockResolver.ResolveAsync(site.Id, layout);
+        }
+        // The full nested path (not just the leaf slug) so a form widget's hidden "_path"
+        // field matches what the live /cms/{siteSlug}/{**pageSlug} route would have passed.
+        var fullPath = cmsBuilderService.BuildFullPath(page, allPages);
+        var bodySections = CmsBlockHtmlRenderer.Render(layout, site.Slug, fullPath);
+        var pageTitle = System.Net.WebUtility.HtmlEncode(
+            string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle);
+        var metaDescription = System.Net.WebUtility.HtmlEncode(page.MetaDescription);
+        var ogImageTag = string.IsNullOrWhiteSpace(page.OgImageUrl)
+            ? string.Empty
+            : $"""<meta property="og:image" content="{System.Net.WebUtility.HtmlEncode(page.OgImageUrl)}" />""";
+
+        // Combine base + site + page CSS inline so the HTML file is self-contained.
+        var combinedCss = string.Join('\n', new[] { baseStylesheet, site.CustomCss, page.CustomCss }
+            .Where(css => !string.IsNullOrWhiteSpace(css)));
+
+        var pageHtml = $"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+              <meta charset="utf-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1" />
+              <title>{pageTitle}</title>
+              <meta name="description" content="{metaDescription}" />
+              {ogImageTag}
+              <style>{SanitizeInlineCss(combinedCss)}</style>
+            </head>
+            <body>
+              {bodySections}
+            </body>
+            </html>
+            """;
+
+        foreach (Match match in mediaReferencePattern.Matches(pageHtml))
+        {
+            referencedMediaIds.Add(Guid.Parse(match.Groups[1].Value));
+        }
+
+        // Each page lives at {fullPath}/index.html so nested pages (e.g. "services/web-dev")
+        // resolve correctly on any static host, and the site root gets an index.html that
+        // lists all pages.
+        var entryPath = string.Equals(fullPath, "index", StringComparison.OrdinalIgnoreCase)
+            ? "index.html"
+            : $"{fullPath}/index.html";
+
+        renderedPages.Add((entryPath, pageHtml));
+    }
+
     await using var memoryStream = new MemoryStream();
     using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
     {
-        foreach (var page in pages)
+        // Bundle every referenced media asset into the zip so the export is actually
+        // self-contained instead of pointing back at this app's /media/{id} route.
+        var mediaExportPaths = new Dictionary<Guid, string>();
+        foreach (var mediaId in referencedMediaIds)
         {
-            var layout = CmsBuilderJson.ParseLayout(page.BlocksJson);
-            if (layout is not null)
+            var content = await mediaLibraryService.GetContentAsync(mediaId);
+            if (content is null)
             {
-                await globalBlockResolver.ResolveAsync(site.Id, layout);
+                continue;
             }
-            var bodySections = CmsBlockHtmlRenderer.Render(layout, site.Slug, page.Slug);
-            var pageTitle = System.Net.WebUtility.HtmlEncode(
-                string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle);
-            var metaDescription = System.Net.WebUtility.HtmlEncode(page.MetaDescription);
-            var ogImageTag = string.IsNullOrWhiteSpace(page.OgImageUrl)
-                ? string.Empty
-                : $"""<meta property="og:image" content="{System.Net.WebUtility.HtmlEncode(page.OgImageUrl)}" />""";
 
-            // Combine base + site + page CSS inline so the HTML file is self-contained.
-            var combinedCss = string.Join('\n', new[] { baseStylesheet, site.CustomCss, page.CustomCss }
-                .Where(css => !string.IsNullOrWhiteSpace(css)));
+            var extension = content.Value.ContentType switch
+            {
+                "image/png" => ".png",
+                "image/jpeg" => ".jpg",
+                "image/gif" => ".gif",
+                _ => string.Empty
+            };
+            var mediaEntryPath = $"media/{mediaId}{extension}";
+            var mediaEntry = archive.CreateEntry(mediaEntryPath, CompressionLevel.Optimal);
+            await using (var mediaEntryStream = mediaEntry.Open())
+            {
+                await mediaEntryStream.WriteAsync(content.Value.Content);
+            }
+            mediaExportPaths[mediaId] = $"/{mediaEntryPath}";
+        }
 
-            var pageHtml = $"""
-                <!DOCTYPE html>
-                <html lang="en">
-                <head>
-                  <meta charset="utf-8" />
-                  <meta name="viewport" content="width=device-width, initial-scale=1" />
-                  <title>{pageTitle}</title>
-                  <meta name="description" content="{metaDescription}" />
-                  {ogImageTag}
-                  <style>{SanitizeInlineCss(combinedCss)}</style>
-                </head>
-                <body>
-                  {bodySections}
-                </body>
-                </html>
-                """;
-
-            // Each page lives at {slug}/index.html so /about/ resolves correctly on any
-            // static host, and the site root gets an index.html that lists all pages.
-            var entryPath = string.Equals(page.Slug, "index", StringComparison.OrdinalIgnoreCase)
-                ? "index.html"
-                : $"{page.Slug}/index.html";
+        foreach (var (entryPath, html) in renderedPages)
+        {
+            var rewrittenHtml = mediaExportPaths.Count == 0
+                ? html
+                : mediaReferencePattern.Replace(html, match =>
+                    mediaExportPaths.TryGetValue(Guid.Parse(match.Groups[1].Value), out var exportedPath)
+                        ? exportedPath
+                        : match.Value);
 
             var entry = archive.CreateEntry(entryPath, CompressionLevel.SmallestSize);
             await using var entryStream = entry.Open();
             await using var writer = new StreamWriter(entryStream);
-            await writer.WriteAsync(pageHtml);
+            await writer.WriteAsync(rewrittenHtml);
         }
 
         // Top-level index.html if no page has a slug of "index"
         if (!pages.Any(p => string.Equals(p.Slug, "index", StringComparison.OrdinalIgnoreCase)))
         {
             var pageLinks = string.Concat(pages.Select(p =>
-                $"""<li><a href="./{System.Net.WebUtility.HtmlEncode(p.Slug)}/">{System.Net.WebUtility.HtmlEncode(p.Title)}</a></li>"""));
+                $"""<li><a href="./{System.Net.WebUtility.HtmlEncode(cmsBuilderService.BuildFullPath(p, allPages))}/">{System.Net.WebUtility.HtmlEncode(p.Title)}</a></li>"""));
 
             var indexHtml = $"""
                 <!DOCTYPE html>

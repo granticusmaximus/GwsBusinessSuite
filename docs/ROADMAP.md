@@ -12,7 +12,7 @@
 - Article approval, rejection, and revision queue
 - CJ affiliate ingestion and integration
 
-## Phase 3 ✅ (mostly complete)
+## Phase 3 ✅
 - CMS builder
 - Block editor
 - Site preview
@@ -20,9 +20,8 @@
 - Contact form with submission handling
 - Revision history for CMS pages
 - CMS builder is a combination of WordPress features and Elementor Pro features
-
-## Phase 3 — Remaining
-- Static export: download a CmsSite as a ZIP of static HTML/CSS files
+- Static export: download a CmsSite as a ZIP of static HTML/CSS files, including
+  nested page paths, publicly-visible pages only, and bundled media assets
 
 ## Phase 4
 - Ollama local bridge (OllamaConsole exists — audit and fill gaps)
