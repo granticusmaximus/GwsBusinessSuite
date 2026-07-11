@@ -86,7 +86,7 @@ public sealed class ContentStudioServiceTests
         var service = CreateService(db, factory, ollama);
 
         await new SiteSettingsService(db).SaveSettingsAsync(
-            new SiteSettingsView(10, null, null, "mistral", null, 8));
+            new SiteSettingsView(10, null, null, "mistral", null, null, 8));
 
         await service.GenerateArticleAsync(new ArticleGenerationRequest
         {
@@ -408,6 +408,8 @@ public sealed class ContentStudioServiceTests
         public string GenerateTextResult { get; set; } = string.Empty;
         public IReadOnlyCollection<string> Models { get; set; } = Array.Empty<string>();
         public string? LastRequestedModel { get; private set; }
+        public string GenerateImageResult { get; set; } = string.Empty;
+        public string? LastImagePrompt { get; private set; }
 
         public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
         {
@@ -423,5 +425,12 @@ public sealed class ContentStudioServiceTests
         public Task PullModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
 
         public Task DeleteModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default)
+        {
+            LastRequestedModel = model;
+            LastImagePrompt = prompt;
+            return Task.FromResult(GenerateImageResult);
+        }
     }
 }

@@ -182,5 +182,8 @@ public sealed class NewsIntelligenceServiceTests
         public Task PullModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
 
         public Task DeleteModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default)
+            => Task.FromResult(string.Empty);
     }
 }

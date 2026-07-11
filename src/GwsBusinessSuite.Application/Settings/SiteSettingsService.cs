@@ -24,6 +24,7 @@ public sealed class SiteSettingsService(
             row?.DefaultAuthorByline,
             row?.OllamaModelOverride,
             row?.OllamaTimeoutMinutesOverride,
+            row?.HeroImageModelOverride,
             row?.MaxMediaUploadSizeMb ?? defaults.MaxMediaUploadSizeMb);
     }
 
@@ -41,6 +42,7 @@ public sealed class SiteSettingsService(
         row.DefaultAuthorByline = string.IsNullOrWhiteSpace(settings.DefaultAuthorByline) ? null : settings.DefaultAuthorByline.Trim();
         row.OllamaModelOverride = string.IsNullOrWhiteSpace(settings.OllamaModelOverride) ? null : settings.OllamaModelOverride.Trim();
         row.OllamaTimeoutMinutesOverride = settings.OllamaTimeoutMinutesOverride is > 0 ? settings.OllamaTimeoutMinutesOverride : null;
+        row.HeroImageModelOverride = string.IsNullOrWhiteSpace(settings.HeroImageModelOverride) ? null : settings.HeroImageModelOverride.Trim();
         row.MaxMediaUploadSizeMb = settings.MaxMediaUploadSizeMb > 0 ? settings.MaxMediaUploadSizeMb : 8;
         row.UpdatedAt = DateTimeOffset.UtcNow;
         row.UpdatedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);

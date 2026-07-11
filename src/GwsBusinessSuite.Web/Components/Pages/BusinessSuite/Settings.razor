@@ -137,6 +137,16 @@ else
                     <div class="form-text">Leave blank to use the server default (@StudioOptions.Value.GenerationTimeoutMinutes minutes).</div>
                 </div>
                 <div class="form-text mb-3">The Ollama endpoint (@StudioOptions.Value.BaseUrl) is a deployment setting and isn't editable here.</div>
+                <div class="mb-3">
+                    <label class="form-label small text-secondary">Hero image model</label>
+                    <input class="form-control" @bind="HeroImageModelOverrideInput" placeholder="e.g. x/z-image-turbo" />
+                    <div class="form-text">
+                        Model used by Content Studio's "Generate with Ollama" hero image button. Must be an
+                        installed model with image-generation capability. Ollama's image generation is
+                        <strong>experimental and currently macOS-only</strong> per Ollama's own docs, so this may
+                        not work against a Linux-hosted Ollama instance. Leave blank to disable the button.
+                    </div>
+                </div>
                 <button class="btn btn-primary" @onclick="SaveAiAsync" disabled="@IsBusy">Save changes</button>
             </div>
         </div>
@@ -162,6 +172,7 @@ else
     private int MaxUploadSizeMbInput { get; set; } = 8;
     private string OllamaModelOverrideInput { get; set; } = string.Empty;
     private int? OllamaTimeoutOverrideInput { get; set; }
+    private string HeroImageModelOverrideInput { get; set; } = string.Empty;
 
     private List<ArticleCategory> Categories { get; set; } = new();
 
@@ -185,6 +196,7 @@ else
         MaxUploadSizeMbInput = settings.MaxMediaUploadSizeMb;
         OllamaModelOverrideInput = settings.OllamaModelOverride ?? string.Empty;
         OllamaTimeoutOverrideInput = settings.OllamaTimeoutMinutesOverride;
+        HeroImageModelOverrideInput = settings.HeroImageModelOverride ?? string.Empty;
 
         _loaded = true;
     }
@@ -255,7 +267,8 @@ else
             await SiteSettingsService.SaveSettingsAsync(current with
             {
                 OllamaModelOverride = OllamaModelOverrideInput,
-                OllamaTimeoutMinutesOverride = OllamaTimeoutOverrideInput
+                OllamaTimeoutMinutesOverride = OllamaTimeoutOverrideInput,
+                HeroImageModelOverride = HeroImageModelOverrideInput
             });
         });
     }

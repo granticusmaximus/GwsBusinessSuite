@@ -306,6 +306,7 @@ public sealed class SiteSettings : AuditableEntity
     public string? DefaultAuthorByline { get; set; }
     public string? OllamaModelOverride { get; set; }
     public int? OllamaTimeoutMinutesOverride { get; set; }
+    public string? HeroImageModelOverride { get; set; }
     public int MaxMediaUploadSizeMb { get; set; } = 8;
 }
 

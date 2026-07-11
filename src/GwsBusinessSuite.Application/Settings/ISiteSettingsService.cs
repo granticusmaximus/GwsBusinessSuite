@@ -6,6 +6,7 @@ public sealed record SiteSettingsView(
     string? DefaultAuthorByline,
     string? OllamaModelOverride,
     int? OllamaTimeoutMinutesOverride,
+    string? HeroImageModelOverride,
     int MaxMediaUploadSizeMb);
 
 public interface ISiteSettingsService

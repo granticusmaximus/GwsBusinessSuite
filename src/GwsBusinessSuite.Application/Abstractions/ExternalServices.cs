@@ -12,6 +12,10 @@ public interface IOllamaService
     Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default);
     Task PullModelAsync(string model, CancellationToken ct = default);
     Task DeleteModelAsync(string model, CancellationToken ct = default);
+
+    // Requires a model with image-generation capability (e.g. an installed Z-Image
+    // Turbo / FLUX build) - returns raw base64 PNG bytes, no data: URI prefix.
+    Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default);
 }
 public interface IDockerDeploymentService { Task<string> DeployAsync(string appName, string dockerfilePath, CancellationToken ct = default); }
 

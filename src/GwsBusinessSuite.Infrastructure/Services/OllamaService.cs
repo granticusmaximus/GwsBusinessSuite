@@ -55,6 +55,36 @@ public sealed class OllamaService(HttpClient http, ILogger<OllamaService> logger
         }
     }
 
+    // Ollama's /api/generate auto-detects an image-generation-capable model and returns
+    // a base64 PNG in the response's "image" field instead of (or alongside) the usual
+    // text "response" field - see Ollama's "Image Generation (Experimental)" docs. Kept
+    // as its own response DTO rather than reusing OllamaGenerateResponse so text and
+    // image responses aren't conflated.
+    public async Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default)
+    {
+        var payload = new { model, stream = false, prompt };
+
+        try
+        {
+            using var response = await http.PostAsJsonAsync("/api/generate", payload, ct);
+            response.EnsureSuccessStatusCode();
+
+            var result = await response.Content.ReadFromJsonAsync<OllamaImageGenerateResponse>(cancellationToken: ct);
+            if (string.IsNullOrWhiteSpace(result?.Image))
+            {
+                throw new InvalidOperationException(
+                    $"Ollama returned no image data for model '{model}'. Confirm it's an installed model with image-generation capability.");
+            }
+
+            return result.Image;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            logger.LogWarning(ex, "Ollama image generation request failed for model '{Model}'.", model);
+            throw;
+        }
+    }
+
     public async Task PullModelAsync(string model, CancellationToken ct = default)
     {
         var payload = new { model, stream = false };
@@ -97,6 +127,8 @@ public sealed class OllamaService(HttpClient http, ILogger<OllamaService> logger
     }
 
     private sealed record OllamaStatusResponse(string? Status);
+
+    private sealed record OllamaImageGenerateResponse([property: JsonPropertyName("image")] string? Image);
 
     private sealed record OllamaGenerateResponse(string Response);
 

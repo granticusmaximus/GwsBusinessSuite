@@ -21,6 +21,7 @@ public sealed class SiteSettingsServiceTests
         Assert.Null(settings.DefaultAuthorByline);
         Assert.Null(settings.OllamaModelOverride);
         Assert.Null(settings.OllamaTimeoutMinutesOverride);
+        Assert.Null(settings.HeroImageModelOverride);
         Assert.Equal(8, settings.MaxMediaUploadSizeMb);
 
         // Reading defaults must not create a row on what's a hot read path (queried on
@@ -41,6 +42,7 @@ public sealed class SiteSettingsServiceTests
             DefaultAuthorByline: "  Grant Watson  ",
             OllamaModelOverride: "  llama3.2  ",
             OllamaTimeoutMinutesOverride: 45,
+            HeroImageModelOverride: "  x/z-image-turbo  ",
             MaxMediaUploadSizeMb: 16));
 
         var reloaded = await service.GetSettingsAsync();
@@ -50,6 +52,7 @@ public sealed class SiteSettingsServiceTests
         Assert.Equal("Grant Watson", reloaded.DefaultAuthorByline);
         Assert.Equal("llama3.2", reloaded.OllamaModelOverride);
         Assert.Equal(45, reloaded.OllamaTimeoutMinutesOverride);
+        Assert.Equal("x/z-image-turbo", reloaded.HeroImageModelOverride);
         Assert.Equal(16, reloaded.MaxMediaUploadSizeMb);
         Assert.Equal(1, await db.SiteSettings.CountAsync());
         Assert.Equal("grantwatson", (await db.SiteSettings.SingleAsync()).UpdatedBy);
@@ -61,11 +64,11 @@ public sealed class SiteSettingsServiceTests
         await using var db = await CreateDbAsync();
         var service = new SiteSettingsService(db, new FixedCurrentUserAccessor("grantwatson"));
 
-        await service.SaveSettingsAsync(new SiteSettingsView(25, Guid.NewGuid(), "Someone", "llama3.2", 45, 16));
+        await service.SaveSettingsAsync(new SiteSettingsView(25, Guid.NewGuid(), "Someone", "llama3.2", 45, "x/z-image-turbo", 16));
 
         // A second save with blanks/nulls clears the overrides back to "use appsettings
         // default" rather than leaving the previous override in place.
-        await service.SaveSettingsAsync(new SiteSettingsView(25, null, "   ", "   ", null, 16));
+        await service.SaveSettingsAsync(new SiteSettingsView(25, null, "   ", "   ", null, "   ", 16));
 
         var reloaded = await service.GetSettingsAsync();
 
@@ -73,6 +76,7 @@ public sealed class SiteSettingsServiceTests
         Assert.Null(reloaded.DefaultAuthorByline);
         Assert.Null(reloaded.OllamaModelOverride);
         Assert.Null(reloaded.OllamaTimeoutMinutesOverride);
+        Assert.Null(reloaded.HeroImageModelOverride);
     }
 
     [Fact]
@@ -81,7 +85,7 @@ public sealed class SiteSettingsServiceTests
         await using var db = await CreateDbAsync();
         var service = new SiteSettingsService(db, new FixedCurrentUserAccessor("grantwatson"));
 
-        await service.SaveSettingsAsync(new SiteSettingsView(99, null, null, null, null, 8));
+        await service.SaveSettingsAsync(new SiteSettingsView(99, null, null, null, null, null, 8));
 
         var reloaded = await service.GetSettingsAsync();
 
