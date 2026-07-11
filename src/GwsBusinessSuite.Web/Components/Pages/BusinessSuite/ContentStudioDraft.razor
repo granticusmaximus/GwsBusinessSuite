@@ -132,7 +132,7 @@ else
                     <textarea class="form-control form-control-sm mb-2" rows="2" @bind="HeroImagePromptInput"
                               placeholder="@($"Prompt (leave blank to use the title: \"{CurrentDraft.Title}\")")"></textarea>
                     <button class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-2"
-                            @onclick="GenerateHeroImage" disabled="@IsBusy">
+                            @onclick="GenerateHeroImage" disabled="@(IsBusy || !HeroImageGenerationConfigured)">
                         <i class="bi bi-stars"></i>
                         <span>Generate with Ollama</span>
                     </button>
@@ -140,6 +140,10 @@ else
                         Experimental (per Ollama) and currently macOS-only - requires an installed model with
                         image-generation capability, configured in Settings &gt; AI (Ollama).
                     </div>
+                    @if (!HeroImageGenerationConfigured)
+                    {
+                        <div class="form-text text-warning">Configure a hero image model in Settings &gt; AI (Ollama) to enable generation.</div>
+                    }
                 </div>
             </div>
 
@@ -282,6 +286,7 @@ else
     private string HeroUploadError { get; set; } = string.Empty;
     private string HeroImagePromptInput { get; set; } = string.Empty;
     private string EditableMarkdown { get; set; } = string.Empty;
+    private bool HeroImageGenerationConfigured { get; set; }
 
     private bool IsMarkdownDirty =>
         CurrentDraft is not null &&
@@ -302,6 +307,7 @@ else
     {
         var settings = await SiteSettingsService.GetSettingsAsync();
         MaxUploadSizeMb = settings.MaxMediaUploadSizeMb;
+        HeroImageGenerationConfigured = !string.IsNullOrWhiteSpace(settings.HeroImageModelOverride);
         await LoadDraft();
     }
 
@@ -392,19 +398,12 @@ else
             await stream.CopyToAsync(ms);
             var dataUri = $"data:{e.File.ContentType};base64,{Convert.ToBase64String(ms.ToArray())}";
 
-            var user = await CurrentUserNameAsync();
-            await using var db = await DbFactory.CreateDbContextAsync();
-            var draft = await db.SeoArticleDrafts.FindAsync(CurrentDraft.DraftId);
-            if (draft is not null)
+            var refreshed = await ContentStudioService.UploadHeroImageAsync(new DraftHeroImageUploadRequest
             {
-                draft.HeroImageDataUri = dataUri;
-                draft.HeroImageAltText = CurrentDraft.Title;
-                draft.UpdatedAt = DateTimeOffset.UtcNow;
-                draft.UpdatedBy = user;
-                await db.SaveChangesAsync();
-            }
-
-            var refreshed = await ContentStudioService.GetDraftAsync(CurrentDraft.DraftId);
+                DraftId = CurrentDraft.DraftId,
+                DataUri = dataUri,
+                PerformedBy = await CurrentUserNameAsync()
+            });
             if (refreshed is not null) CurrentDraft = refreshed;
             StatusMessage = "Hero image uploaded.";
         }

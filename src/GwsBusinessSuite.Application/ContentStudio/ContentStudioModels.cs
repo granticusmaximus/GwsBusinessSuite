@@ -38,6 +38,13 @@ public sealed class DraftHeroImageGenerationRequest
     public string PerformedBy { get; init; } = "content-studio";
 }
 
+public sealed class DraftHeroImageUploadRequest
+{
+    public Guid DraftId { get; init; }
+    public string DataUri { get; init; } = string.Empty;
+    public string PerformedBy { get; init; } = "content-studio";
+}
+
 public sealed class DraftPublishRequest
 {
     public Guid DraftId { get; init; }

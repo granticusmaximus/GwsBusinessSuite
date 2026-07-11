@@ -393,6 +393,46 @@ public sealed class ContentStudioService(
         return await GetDraftCoreAsync(freshContext, freshDraft.Id, cancellationToken);
     }
 
+    public async Task<ArticleGenerationResult?> UploadHeroImageAsync(
+        DraftHeroImageUploadRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.DataUri) ||
+            !request.DataUri.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("A valid image data URI is required.", nameof(request));
+        }
+
+        await using var freshContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var draft = await freshContext.SeoArticleDrafts.FirstOrDefaultAsync(x => x.Id == request.DraftId, cancellationToken);
+        if (draft is null)
+        {
+            return null;
+        }
+
+        draft.HeroImageDataUri = request.DataUri;
+        draft.HeroImageAltText = draft.Title;
+        draft.HeroImagePrompt = string.Empty;
+        draft.HeroImageProvider = "ManualUpload";
+        draft.HeroImageConfiguredModel = string.Empty;
+        draft.HeroImageAvailableModelsSummary = string.Empty;
+        draft.HeroImageStatusMessage = string.Empty;
+        draft.IsHeroImageGeneratedByOllama = false;
+        draft.UpdatedAt = DateTimeOffset.UtcNow;
+        draft.UpdatedBy = request.PerformedBy;
+
+        freshContext.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent
+        {
+            SeoArticleDraftId = draft.Id,
+            EventType = SeoArticleWorkflowEventTypes.HeroImageRegenerated,
+            Notes = "Hero image uploaded manually.",
+            CreatedBy = request.PerformedBy
+        });
+
+        await freshContext.SaveChangesAsync(cancellationToken);
+        return await GetDraftCoreAsync(freshContext, draft.Id, cancellationToken);
+    }
+
     public async Task<ArticleGenerationResult?> UpdateDraftMarkdownAsync(
         DraftMarkdownUpdateRequest request,
         CancellationToken cancellationToken = default)

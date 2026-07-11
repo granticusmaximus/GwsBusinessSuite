@@ -413,6 +413,77 @@ public sealed class ContentStudioServiceTests
         await Assert.ThrowsAsync<InvalidOperationException>(action);
     }
 
+    [Fact]
+    public async Task UploadHeroImageAsync_ShouldClearGeneratedProvenanceAndLogWorkflowEvent()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var ollama = new FakeOllamaService
+        {
+            GenerateTextResult = "# Title\n\nBody",
+            GenerateImageResult = Convert.ToBase64String("generated-image"u8.ToArray())
+        };
+        var service = CreateService(db, factory, ollama);
+
+        var draft = await service.GenerateArticleAsync(new ArticleGenerationRequest
+        {
+            Topic = "Clean Architecture in Blazor",
+            TargetAudience = "Mid-level C# developers",
+            PrimaryKeyword = "Blazor clean architecture",
+            SecondaryKeywords = "ASP.NET Core, C#"
+        });
+
+        await new SiteSettingsService(db).SaveSettingsAsync(
+            new SiteSettingsView(10, null, null, null, null, "x/z-image-turbo", 8));
+
+        await service.GenerateHeroImageAsync(new DraftHeroImageGenerationRequest
+        {
+            DraftId = draft.DraftId,
+            Prompt = "A generated architecture diagram",
+            PerformedBy = "generator"
+        });
+
+        const string uploadedDataUri = "data:image/webp;base64,dXBsb2FkZWQ=";
+        var updated = await service.UploadHeroImageAsync(new DraftHeroImageUploadRequest
+        {
+            DraftId = draft.DraftId,
+            DataUri = uploadedDataUri,
+            PerformedBy = "uploader"
+        });
+
+        Assert.NotNull(updated);
+        Assert.Equal(uploadedDataUri, updated!.HeroImage.DataUri);
+        Assert.False(updated.HeroImage.IsGeneratedByOllama);
+        Assert.Empty(updated.HeroImage.ConfiguredModel);
+        Assert.Empty(updated.HeroImage.Prompt);
+
+        var savedDraft = await db.SeoArticleDrafts.SingleAsync(x => x.Id == draft.DraftId);
+        await db.Entry(savedDraft).ReloadAsync();
+        Assert.Equal("ManualUpload", savedDraft.HeroImageProvider);
+        Assert.False(savedDraft.IsHeroImageGeneratedByOllama);
+        Assert.Equal("uploader", savedDraft.UpdatedBy);
+
+        var uploadEvent = await db.SeoArticleWorkflowEvents
+            .SingleAsync(x => x.SeoArticleDraftId == draft.DraftId &&
+                              x.EventType == SeoArticleWorkflowEventTypes.HeroImageRegenerated &&
+                              x.CreatedBy == "uploader");
+        Assert.Equal("Hero image uploaded manually.", uploadEvent.Notes);
+    }
+
+    [Fact]
+    public async Task UploadHeroImageAsync_ShouldRejectNonImageDataUri()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var service = CreateService(db, factory, new FakeOllamaService());
+
+        var action = () => service.UploadHeroImageAsync(new DraftHeroImageUploadRequest
+        {
+            DraftId = Guid.NewGuid(),
+            DataUri = "data:text/plain;base64,bm90IGFuIGltYWdl"
+        });
+
+        await Assert.ThrowsAsync<ArgumentException>(action);
+    }
+
     private static async Task<(ApplicationDbContext Db, IAppDbContextFactory Factory)> CreateDbAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
