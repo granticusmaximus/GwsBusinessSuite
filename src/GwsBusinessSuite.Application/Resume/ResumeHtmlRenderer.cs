@@ -3,22 +3,21 @@ using System.Text;
 
 namespace GwsBusinessSuite.Application.Resume;
 
-// Renders the public /resume page body - a hand-authored page (not a Canvas/CMS page)
-// since it needs the "Download CV" link to /resume.pdf alongside the same content
-// ResumePdfService renders into the PDF. Deliberately mirrors ResumePdfService's layout
-// and colors (dark header band + white body, same section order) so the on-screen page
-// and the downloaded PDF read as the same document - see resume-card styles in
-// public-site.css, which hardcode the same hex values as ResumePdfService rather than
-// the site's normal --accent/--text tokens, so a site-wide theme change can't make the
-// two diverge. Wrapped in PublicSiteHtmlRenderer.Layout by the /resume route in
-// Program.cs, same as the blog list/post pages.
+// Renders the resume/CV content embedded as an "html" widget in the "about" Canvas page
+// (see GrantWatsonAboutPageResumeSection) at the #resume anchor, and shared verbatim by
+// ResumePdfService's layout and colors (dark header band + white body, same section
+// order) so the on-screen section and the downloaded PDF read as the same document - see
+// resume-card styles in public-site.css, which hardcode the same hex values as
+// ResumePdfService rather than the site's normal --accent/--text tokens, so a site-wide
+// theme change can't make the two diverge. /resume redirects to /about#resume; the PDF
+// stays at /resume.pdf.
 public static class ResumeHtmlRenderer
 {
     public static string Body()
     {
         var sb = new StringBuilder();
         sb.Append($$"""
-            <main class="resume-page">
+            <section id="resume" class="resume-page">
               <div class="resume-card">
                 <header class="resume-card-header">
                   <div class="resume-card-header-top">
@@ -87,7 +86,7 @@ public static class ResumeHtmlRenderer
                   </section>
                 </div>
               </div>
-            </main>
+            </section>
             """);
 
         return sb.ToString();

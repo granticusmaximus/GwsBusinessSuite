@@ -154,7 +154,7 @@ public static class GrantWatsonHomepageTemplate
                             cta1Href: "/contact",
                             cta2Label: "Read the Blog",
                             cta2Href: "/blog"),
-                        ButtonWidget("See my Resumè", "/resume", "outline-secondary"))),
+                        ButtonWidget("See my Resumè", "/about#resume", "outline-secondary"))),
 
                 Section(
                     label: "Intro",

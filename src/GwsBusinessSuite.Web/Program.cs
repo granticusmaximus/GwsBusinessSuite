@@ -180,6 +180,7 @@ using (var scope = app.Services.CreateScope())
     await dbContext.Database.MigrateAsync();
 
     await EnsureGrantWatsonHomepageAsync(dbContext, app.Configuration, app.Logger);
+    await EnsureAboutPageResumeSectionAsync(dbContext, app.Logger);
 
     if (!await dbContext.AppUsers.AnyAsync())
     {
@@ -701,28 +702,7 @@ app.MapPost("/blog/{slug}/comments", async (
     return Results.Redirect(thanksUrl);
 }).RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-write");
 
-app.MapGet("/resume", async (
-        HttpRequest request,
-        ICmsBuilderService cmsBuilderService,
-        IConfiguration configuration) =>
-    {
-        var navMenus = await GetPublicNavMenusAsync(cmsBuilderService, configuration);
-        var bodyHtml = ResumeHtmlRenderer.Body();
-        var html = PublicSiteHtmlRenderer.Layout(
-            "Resume — Grant Watson",
-            "Grant Watson's resume: software engineer and business analyst experience since 2017.",
-            null,
-            bodyHtml,
-            navMenus.Primary,
-            navMenus.Footer,
-            navMenus.AccentColorHex,
-            navMenus.FontPairingKey,
-            canonicalUrl: CombineAbsoluteUrl(GetPublicBaseUrl(configuration, request), "/resume"),
-            siteName: navMenus.SiteName,
-            logoUrl: navMenus.LogoUrl,
-            faviconUrl: navMenus.FaviconUrl);
-        return Results.Content(html, "text/html");
-    })
+app.MapGet("/resume", () => Results.Redirect("/about#resume", permanent: true))
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
 
 app.MapGet("/resume.pdf", (IResumePdfService resumePdfService) =>
@@ -1619,6 +1599,59 @@ static async Task EnsureGrantWatsonHomepageAsync(ApplicationDbContext dbContext,
         homePage.UpdatedAt = now;
         homePage.UpdatedBy = "system";
         logger.LogInformation("Updated the legacy public home page for {SiteSlug}.", GrantWatsonHomepageTemplate.SiteSlug);
+    }
+
+    await dbContext.SaveChangesAsync();
+}
+
+// One-time content migration: folds the resume/CV content into the "about" Canvas page
+// (see GrantWatsonAboutPageResumeSection) instead of it living on its own /resume page,
+// and repoints the homepage's "See my Resumè" button at the new #resume anchor. Only
+// touches what it's explicitly checking for — never re-applies the whole about-page
+// layout — so any other edits made through the admin CMS builder UI are left alone.
+static async Task EnsureAboutPageResumeSectionAsync(ApplicationDbContext dbContext, ILogger logger)
+{
+    var site = await dbContext.CmsSites.FirstOrDefaultAsync(s => s.Slug == GrantWatsonHomepageTemplate.SiteSlug);
+    if (site is null)
+    {
+        return;
+    }
+
+    var now = DateTimeOffset.UtcNow;
+
+    var homePage = await dbContext.CmsPages
+        .FirstOrDefaultAsync(page => page.SiteId == site.Id && page.ParentPageId == null && page.Slug == "home");
+    var homeLayout = homePage is null ? null : CmsBuilderJson.ParseLayout(homePage.BlocksJson);
+    var resumeButton = homeLayout?.Sections
+        .SelectMany(section => section.Columns)
+        .SelectMany(column => column.Widgets)
+        .FirstOrDefault(widget =>
+            widget.WidgetType == "button"
+            && widget.Props.TryGetValue("href", out var href)
+            && href == "/resume");
+    if (resumeButton is not null && homePage is not null)
+    {
+        resumeButton.Props["href"] = "/about#resume";
+        homePage.BlocksJson = CmsBuilderJson.Serialize(homeLayout!);
+        homePage.UpdatedAt = now;
+        homePage.UpdatedBy = "system";
+        logger.LogInformation("Repointed the homepage's resume button at /about#resume.");
+    }
+
+    var aboutPage = await dbContext.CmsPages
+        .FirstOrDefaultAsync(page => page.SiteId == site.Id && page.Slug == "about");
+    if (aboutPage is not null)
+    {
+        var aboutLayout = CmsBuilderJson.ParseLayout(aboutPage.BlocksJson);
+        if (!GrantWatsonAboutPageResumeSection.HasResumeSection(aboutLayout))
+        {
+            aboutLayout ??= new PageLayout();
+            aboutLayout.Sections.Add(GrantWatsonAboutPageResumeSection.Build());
+            aboutPage.BlocksJson = CmsBuilderJson.Serialize(aboutLayout);
+            aboutPage.UpdatedAt = now;
+            aboutPage.UpdatedBy = "system";
+            logger.LogInformation("Added the resume section to the public about page.");
+        }
     }
 
     await dbContext.SaveChangesAsync();
