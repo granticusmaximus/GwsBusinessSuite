@@ -242,55 +242,12 @@ else
                         </div>
                     }
 
-                    <div class="d-flex align-items-center justify-content-between mb-3">
-                        <h5 class="mb-0">Revision History</h5>
-                        <span class="badge text-bg-light">@RevisionHistory.Count version(s)</span>
-                    </div>
-                    @if (RevisionHistory.Count == 0)
-                    {
-                        <p class="text-secondary mb-4">Revision snapshots will appear after the next generated revision or manual edit.</p>
-                    }
-                    else
-                    {
-                        <div class="list-group mb-4">
-                            @foreach (var revision in RevisionHistory)
-                            {
-                                <div class="list-group-item">
-                                    <div class="d-flex flex-wrap align-items-start justify-content-between gap-3">
-                                        <div>
-                                            <div class="fw-semibold">Version @revision.VersionNumber · @FormatWorkflowEventLabel(revision.ChangeType)</div>
-                                            <div class="small text-secondary">@FormatDate(revision.CreatedAt) by @revision.PerformedBy</div>
-                                            @if (!string.IsNullOrWhiteSpace(revision.Notes))
-                                            {
-                                                <div class="small mt-1">@revision.Notes</div>
-                                            }
-                                        </div>
-                                        <div class="d-flex gap-2">
-                                            <button class="btn btn-sm btn-outline-secondary" disabled="@IsBusy"
-                                                    @onclick="() => ToggleRevisionDiff(revision)">
-                                                @(DiffRevisionId == revision.RevisionId ? "Hide changes" : "View changes")
-                                            </button>
-                                            <button class="btn btn-sm btn-outline-primary" disabled="@(IsBusy || revision.RevisionId == RevisionHistory.First().RevisionId)"
-                                                    @onclick="() => RestoreRevision(revision)">
-                                                Restore
-                                            </button>
-                                        </div>
-                                    </div>
-                                    @if (DiffRevisionId == revision.RevisionId && RevisionDiff is not null)
-                                    {
-                                        <div class="border rounded mt-3 overflow-auto" style="max-height: 28rem;">
-                                            <div class="small text-secondary border-bottom px-3 py-2">
-                                                Comparing version @(RevisionDiff.PreviousVersionNumber?.ToString() ?? "empty") to @RevisionDiff.VersionNumber
-                                            </div>
-                                            <pre class="mb-0 p-3 small"><code>@foreach (var line in RevisionDiff.Lines)
-                                                {<span class="@GetDiffLineClass(line.Kind)">@GetDiffPrefix(line.Kind)@line.Text</span>
-}</code></pre>
-                                        </div>
-                                    }
-                                </div>
-                            }
-                        </div>
-                    }
+                    <ContentStudioRevisionHistory Revisions="RevisionHistory"
+                                                  Diff="RevisionDiff"
+                                                  SelectedRevisionId="DiffRevisionId"
+                                                  IsBusy="IsBusy"
+                                                  OnViewChanges="ToggleRevisionDiff"
+                                                  OnRestore="RestoreRevision" />
 
                     <h5 class="mb-3">Workflow History</h5>
                     @if (CurrentDraft.WorkflowHistory.Count == 0)
@@ -786,20 +743,6 @@ else
             _ => eventType
         };
     }
-
-    private static string GetDiffLineClass(string kind) => kind switch
-    {
-        "added" => "d-block bg-success-subtle text-success-emphasis",
-        "removed" => "d-block bg-danger-subtle text-danger-emphasis",
-        _ => "d-block"
-    };
-
-    private static string GetDiffPrefix(string kind) => kind switch
-    {
-        "added" => "+ ",
-        "removed" => "- ",
-        _ => "  "
-    };
 
     private async Task TrackAffiliateClick(ArticleAffiliatePlacementView placement)
     {

@@ -1,0 +1,97 @@
+@using GwsBusinessSuite.Application.ContentStudio
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h5 class="mb-0">Revision History</h5>
+    <span class="badge text-bg-light">@Revisions.Count version(s)</span>
+</div>
+
+@if (Revisions.Count == 0)
+{
+    <p class="text-secondary mb-4">Revision snapshots will appear after the next generated revision or manual edit.</p>
+}
+else
+{
+    <div class="list-group mb-3">
+        @foreach (var revision in Revisions)
+        {
+            <div class="list-group-item d-flex flex-wrap align-items-start justify-content-between gap-3">
+                <div>
+                    <div class="fw-semibold">Version @revision.VersionNumber · @FormatChangeType(revision.ChangeType)</div>
+                    <div class="small text-secondary">@revision.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm") by @revision.PerformedBy</div>
+                    @if (!string.IsNullOrWhiteSpace(revision.Notes))
+                    {
+                        <div class="small mt-1">@revision.Notes</div>
+                    }
+                </div>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-secondary" disabled="@IsBusy"
+                            @onclick="() => OnViewChanges.InvokeAsync(revision)">
+                        @(SelectedRevisionId == revision.RevisionId ? "Hide changes" : "View changes")
+                    </button>
+                    <button class="btn btn-sm btn-outline-primary" disabled="@(IsBusy || revision.RevisionId == LatestRevisionId)"
+                            @onclick="() => OnRestore.InvokeAsync(revision)">
+                        Restore
+                    </button>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@if (Diff is not null)
+{
+    <div class="border rounded mb-4 overflow-auto" style="max-height: 28rem;">
+        <div class="small text-secondary border-bottom px-3 py-2">
+            Comparing version @(Diff.PreviousVersionNumber?.ToString() ?? "empty") to @Diff.VersionNumber
+        </div>
+        <div class="p-3 small font-monospace text-nowrap">
+            @foreach (var line in Diff.Lines)
+            {
+                <div class="@GetDiffLineClass(line.Kind)">@(GetDiffPrefix(line.Kind) + line.Text)</div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<ContentStudioRevisionView> Revisions { get; set; } = Array.Empty<ContentStudioRevisionView>();
+
+    [Parameter]
+    public ContentStudioRevisionDiff? Diff { get; set; }
+
+    [Parameter]
+    public Guid? SelectedRevisionId { get; set; }
+
+    [Parameter]
+    public bool IsBusy { get; set; }
+
+    [Parameter]
+    public EventCallback<ContentStudioRevisionView> OnViewChanges { get; set; }
+
+    [Parameter]
+    public EventCallback<ContentStudioRevisionView> OnRestore { get; set; }
+
+    private Guid? LatestRevisionId => Revisions.Count == 0 ? null : Revisions[0].RevisionId;
+
+    private static string FormatChangeType(string changeType) => changeType switch
+    {
+        "ManuallyEdited" => "Markdown Manually Edited",
+        "RevisionRestored" => "Revision Restored",
+        _ => changeType
+    };
+
+    private static string GetDiffLineClass(string kind) => kind switch
+    {
+        "added" => "bg-success-subtle text-success-emphasis",
+        "removed" => "bg-danger-subtle text-danger-emphasis",
+        _ => string.Empty
+    };
+
+    private static string GetDiffPrefix(string kind) => kind switch
+    {
+        "added" => "+ ",
+        "removed" => "- ",
+        _ => "  "
+    };
+}

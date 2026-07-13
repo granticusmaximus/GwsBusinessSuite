@@ -484,6 +484,96 @@ public sealed class ContentStudioServiceTests
         await Assert.ThrowsAsync<ArgumentException>(action);
     }
 
+    [Fact]
+    public async Task RevisionHistory_ShouldTrackDiffAndRestoreWithoutLosingCurrentContent()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var service = CreateService(
+            db,
+            factory,
+            new FakeOllamaService { GenerateTextResult = "# Original title\n\nOriginal body" });
+
+        var draft = await service.GenerateArticleAsync(new ArticleGenerationRequest
+        {
+            Topic = "Versioned Content Studio Drafts",
+            TargetAudience = "Editors",
+            PrimaryKeyword = "draft history"
+        });
+
+        var initialHistory = await service.GetRevisionHistoryAsync(draft.DraftId);
+        var initialRevision = Assert.Single(initialHistory);
+        Assert.Equal(0, initialRevision.VersionNumber);
+        Assert.Equal(SeoArticleWorkflowEventTypes.Generated, initialRevision.ChangeType);
+
+        const string editedMarkdown = "# Updated title\n\nUpdated body";
+        await service.UpdateDraftMarkdownAsync(new DraftMarkdownUpdateRequest
+        {
+            DraftId = draft.DraftId,
+            Markdown = editedMarkdown,
+            PerformedBy = "editor"
+        });
+
+        var editedHistory = await service.GetRevisionHistoryAsync(draft.DraftId);
+        Assert.Equal([1, 0], editedHistory.Select(x => x.VersionNumber));
+        Assert.Equal(SeoArticleWorkflowEventTypes.ManuallyEdited, editedHistory[0].ChangeType);
+
+        var diff = await service.GetRevisionDiffAsync(draft.DraftId, editedHistory[0].RevisionId);
+        Assert.NotNull(diff);
+        Assert.Equal(0, diff!.PreviousVersionNumber);
+        Assert.Contains(diff.Lines, x => x.Kind == "removed" && x.Text == "# Original title");
+        Assert.Contains(diff.Lines, x => x.Kind == "added" && x.Text == "# Updated title");
+
+        var restored = await service.RestoreRevisionAsync(new DraftRevisionRestoreRequest
+        {
+            DraftId = draft.DraftId,
+            RevisionId = initialRevision.RevisionId,
+            PerformedBy = "reviewer"
+        });
+
+        Assert.NotNull(restored);
+        Assert.Contains("# Original title", restored!.Markdown);
+        Assert.Equal(SeoArticleDraftStatuses.PendingReview, restored.Status);
+
+        var restoredHistory = await service.GetRevisionHistoryAsync(draft.DraftId);
+        Assert.Equal([2, 1, 0], restoredHistory.Select(x => x.VersionNumber));
+        Assert.Equal(SeoArticleWorkflowEventTypes.RevisionRestored, restoredHistory[0].ChangeType);
+
+        var restoreEvent = await db.SeoArticleWorkflowEvents
+            .SingleAsync(x => x.SeoArticleDraftId == draft.DraftId &&
+                              x.EventType == SeoArticleWorkflowEventTypes.RevisionRestored);
+        Assert.Equal("reviewer", restoreEvent.CreatedBy);
+    }
+
+    [Fact]
+    public async Task FirstVersionedEdit_ShouldCaptureBaselineForExistingDraftWithoutHistory()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var service = CreateService(db, factory, new FakeOllamaService());
+        var draft = new SeoArticleDraft
+        {
+            Topic = "Legacy draft",
+            TargetAudience = "Editors",
+            Title = "Legacy draft",
+            ArticleMarkdown = "# Legacy content",
+            Status = SeoArticleDraftStatuses.PendingReview,
+            CreatedBy = "legacy-user"
+        };
+        db.SeoArticleDrafts.Add(draft);
+        await db.SaveChangesAsync();
+
+        await service.UpdateDraftMarkdownAsync(new DraftMarkdownUpdateRequest
+        {
+            DraftId = draft.Id,
+            Markdown = "# First versioned edit",
+            PerformedBy = "editor"
+        });
+
+        var history = await service.GetRevisionHistoryAsync(draft.Id);
+        Assert.Equal([1, 0], history.Select(x => x.VersionNumber));
+        Assert.Equal("Baseline", history[1].ChangeType);
+        Assert.Equal("legacy-user", history[1].PerformedBy);
+    }
+
     private static async Task<(ApplicationDbContext Db, IAppDbContextFactory Factory)> CreateDbAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

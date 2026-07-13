@@ -48,9 +48,9 @@
   fixed: the drafts list silently capped at 20 most-recent-by-`CreatedAt`, so an old
   pending-review draft could fall off behind newer approved/rejected ones (now sorts
   pending-review first); and there was no pending-count badge in the nav despite the
-  identical pattern already existing for Comments/Docker (now added). Remaining, smaller
-  items not addressed: "revision" has no
-  diff/rollback — it's an AI regenerate-and-overwrite with no version history.
+  identical pattern already existing for Comments/Docker (now added). Revision history is
+  now append-only for generated revisions, manual edits, and restores; the draft workspace
+  includes line-level diffs and non-destructive rollback.
 - Live Show page — reviewed. It's a real, working feature but a narrow one: a local
   browser camera/mic self-monitor only (getUserMedia preview), with no backend service,
   no persistence, and no actual streaming/broadcast output. "Expansion" needs a product
