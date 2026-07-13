@@ -332,17 +332,19 @@ public sealed class AffiliateSuggestionService(
 
     private async Task<List<AffiliateOffer>> LoadCandidateOffersAsync(CancellationToken cancellationToken)
     {
-        var now = DateTimeOffset.UtcNow;
+        // SQLite can't translate range comparisons (>=) on DateTimeOffset columns (nor
+        // ORDER BY on one) - the PromotionEndsAt cutoff and UpdatedAt/CreatedAt ordering
+        // both happen in memory below, after the null-check filters (which are fine
+        // server-side) narrow things down.
         var candidates = await db.AffiliateOffers
             .AsNoTracking()
             .Where(x => x.LinkName != x.AdvertiserId) // catalog offers only, not the roster placeholder row
             .Where(x => x.TrackingUrl != null && x.TrackingUrl != string.Empty)
-            .Where(x => x.PromotionEndsAt == null || x.PromotionEndsAt >= now)
             .ToListAsync(cancellationToken);
 
-        // SQLite can't translate ORDER BY on a DateTimeOffset column, so order
-        // client-side after materializing (same pattern used elsewhere in this app).
+        var now = DateTimeOffset.UtcNow;
         return candidates
+            .Where(x => x.PromotionEndsAt == null || x.PromotionEndsAt >= now)
             .OrderByDescending(x => x.UpdatedAt ?? x.CreatedAt)
             .Take(MaxCandidateOffers)
             .ToList();

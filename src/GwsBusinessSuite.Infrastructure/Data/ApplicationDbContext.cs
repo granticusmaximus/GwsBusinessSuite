@@ -7,6 +7,7 @@ namespace GwsBusinessSuite.Infrastructure.Data;
 public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : DbContext(options), IAppDbContext
 {
     public DbSet<Contact> Contacts => Set<Contact>();
+    public DbSet<ContactActivity> ContactActivities => Set<ContactActivity>();
     public DbSet<WikiPage> WikiPages => Set<WikiPage>();
     public DbSet<CmsSite> CmsSites => Set<CmsSite>();
     public DbSet<CmsPage> CmsPages => Set<CmsPage>();
@@ -31,6 +32,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<ArticleCategory> ArticleCategories => Set<ArticleCategory>();
     public DbSet<ArticleAffiliatePlacement> ArticleAffiliatePlacements => Set<ArticleAffiliatePlacement>();
     public DbSet<ArticleAffiliateSuggestion> ArticleAffiliateSuggestions => Set<ArticleAffiliateSuggestion>();
+    public DbSet<ArticleAffiliateClick> ArticleAffiliateClicks => Set<ArticleAffiliateClick>();
+    public DbSet<CjCommissionRecord> CjCommissionRecords => Set<CjCommissionRecord>();
     public DbSet<AppUser> AppUsers => Set<AppUser>();
     public DbSet<WatchedTopic> WatchedTopics => Set<WatchedTopic>();
     public DbSet<NewsItem> NewsItems => Set<NewsItem>();
@@ -39,6 +42,15 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<Contact>().HasIndex(x => x.Status);
+        modelBuilder.Entity<Contact>().HasIndex(x => x.TrashedAt);
+        modelBuilder.Entity<ContactActivity>()
+            .HasOne<Contact>()
+            .WithMany()
+            .HasForeignKey(x => x.ContactId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<ContactActivity>().HasIndex(x => new { x.ContactId, x.CreatedAt });
+
         modelBuilder.Entity<WikiPage>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<CmsSite>().HasIndex(x => x.Slug).IsUnique();
         // Slugs are unique per parent, not per site — /services/pricing and
@@ -109,6 +121,17 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .HasForeignKey(x => x.ArticleId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<ArticleAffiliateSuggestion>().HasIndex(x => new { x.ArticleId, x.Status });
+
+        modelBuilder.Entity<ArticleAffiliateClick>()
+            .HasOne<Article>()
+            .WithMany()
+            .HasForeignKey(x => x.ArticleId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<ArticleAffiliateClick>().HasIndex(x => new { x.PlacementId, x.CreatedAt });
+        modelBuilder.Entity<ArticleAffiliateClick>().HasIndex(x => new { x.AdvertiserId, x.CreatedAt });
+
+        modelBuilder.Entity<CjCommissionRecord>().HasIndex(x => x.ExternalId).IsUnique();
+        modelBuilder.Entity<CjCommissionRecord>().HasIndex(x => x.AdvertiserId);
 
         modelBuilder.Entity<AppUser>().HasIndex(x => x.Username).IsUnique();
         modelBuilder.Entity<AppUser>().HasIndex(x => x.Role);

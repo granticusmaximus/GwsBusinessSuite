@@ -58,12 +58,32 @@ public static class AffiliateInteractionEventTypes
     public const string Click = "Click";
 }
 
+public static class ContactStatuses
+{
+    public const string Lead = "Lead";
+    public const string Prospect = "Prospect";
+    public const string Customer = "Customer";
+    public const string Inactive = "Inactive";
+
+    public static readonly string[] All = [Lead, Prospect, Customer, Inactive];
+}
+
 public sealed class Contact : AuditableEntity
 {
     public required string FullName { get; set; }
     public string? Email { get; set; }
     public string? Company { get; set; }
-    public string Status { get; set; } = "Lead";
+    public string Status { get; set; } = ContactStatuses.Lead;
+    public DateTimeOffset? FollowUpDate { get; set; }
+    public DateTimeOffset? TrashedAt { get; set; }
+}
+
+// Append-only note/activity log for a contact - CreatedAt/CreatedBy from AuditableEntity
+// double as "when" and "who logged it"; entries are never edited or reordered.
+public sealed class ContactActivity : AuditableEntity
+{
+    public Guid ContactId { get; set; }
+    public required string Note { get; set; }
 }
 
 public sealed class WikiPage : AuditableEntity
@@ -446,6 +466,38 @@ public sealed class ArticleAffiliatePlacement : AuditableEntity
     public string CallToActionText { get; set; } = "Explore Offer";
     public int SortOrder { get; set; }
     public Article? Article { get; set; }
+}
+
+// A real reader clicking a live article's ad card, recorded by the /go/{placementId}
+// redirect endpoint before forwarding to TrackingUrl. Deliberately not FK'd to
+// ArticleAffiliatePlacement (only to Article) so click history survives the article
+// being re-edited/re-suggested and its placements replaced.
+public sealed class ArticleAffiliateClick : AuditableEntity
+{
+    public Guid ArticleId { get; set; }
+    public Guid PlacementId { get; set; }
+    public string AdvertiserId { get; set; } = string.Empty;
+    public string AdvertiserName { get; set; } = string.Empty;
+    public string TrackingUrl { get; set; } = string.Empty;
+}
+
+// Best-effort import of CJ's own commission/transaction ledger for revenue reporting -
+// see CjAffiliateService.FetchCommissionsAsync for the caveat that CJ's GraphQL
+// commission-amount fields aren't independently verified against live docs here, so
+// parsing is defensive and a schema mismatch just yields no rows rather than a crash.
+public sealed class CjCommissionRecord : AuditableEntity
+{
+    // CJ's own commission/action id, used as the natural key for idempotent re-sync.
+    public required string ExternalId { get; set; }
+    public string AdvertiserId { get; set; } = string.Empty;
+    public string AdvertiserName { get; set; } = string.Empty;
+    public string OrderId { get; set; } = string.Empty;
+    public string ActionStatus { get; set; } = string.Empty;
+    public decimal SaleAmount { get; set; }
+    public decimal CommissionAmount { get; set; }
+    public string Currency { get; set; } = "USD";
+    public DateTimeOffset? EventDate { get; set; }
+    public DateTimeOffset? PostingDate { get; set; }
 }
 
 public static class ArticleAffiliateSuggestionStatuses

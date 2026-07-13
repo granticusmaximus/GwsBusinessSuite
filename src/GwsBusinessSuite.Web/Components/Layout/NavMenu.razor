@@ -1,5 +1,6 @@
 @using GwsBusinessSuite.Application.Comments
 @using GwsBusinessSuite.Application.ContentStudio
+@using GwsBusinessSuite.Application.Crm
 @using GwsBusinessSuite.Application.DockerHealth
 @using GwsBusinessSuite.Domain.Entities
 @using Microsoft.AspNetCore.Components.Authorization
@@ -8,6 +9,7 @@
 @inject ICommentService CommentService
 @inject IContentStudioService ContentStudioService
 @inject IDockerHealthService DockerHealthService
+@inject ICrmService CrmService
 
 <nav class="gws-nav">
     @if (IsAdmin)
@@ -131,7 +133,7 @@
         <NavLink class="gws-nav-link" href="admin/crm" title="CRM">
             <i class="bi bi-people-fill"></i>
             <span class="gws-nav-link-copy">
-                <span>CRM</span>
+                <span>CRM@(_dueFollowUpCount > 0 ? $" ({_dueFollowUpCount})" : "")</span>
                 <small>Contacts and activity</small>
             </span>
         </NavLink>
@@ -201,6 +203,7 @@
     private int _pendingCommentCount;
     private int _unreadDockerAlertCount;
     private int _pendingDraftCount;
+    private int _dueFollowUpCount;
 
     protected override async Task OnInitializedAsync()
     {
@@ -212,6 +215,7 @@
             _pendingCommentCount = await CommentService.CountPendingAsync();
             _unreadDockerAlertCount = await DockerHealthService.CountUnreadAlertsAsync();
             _pendingDraftCount = await ContentStudioService.CountPendingReviewAsync();
+            _dueFollowUpCount = await CrmService.CountDueFollowUpsAsync();
         }
     }
 

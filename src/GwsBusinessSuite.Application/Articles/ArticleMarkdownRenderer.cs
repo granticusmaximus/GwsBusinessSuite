@@ -20,7 +20,8 @@ public static class ArticleMarkdownRenderer
         string AdvertiserName,
         string Category,
         string TrackingUrl,
-        string CallToActionText);
+        string CallToActionText,
+        Guid PlacementId = default);
 
     public static string Render(string markdown, IReadOnlyList<ArticleAffiliatePlacement> placements)
         => Render(markdown, placements.Select(ToMarkup).ToArray());
@@ -48,7 +49,8 @@ public static class ArticleMarkdownRenderer
         placement.AdvertiserName,
         placement.Category,
         placement.TrackingUrl,
-        placement.CallToActionText);
+        placement.CallToActionText,
+        placement.Id);
 
     private static string BuildCardMarkup(AffiliatePlacementMarkup placement)
     {
@@ -59,8 +61,15 @@ public static class ArticleMarkdownRenderer
         var safeAdvertiserName = WebUtility.HtmlEncode(placement.AdvertiserName);
         var safeCategory = WebUtility.HtmlEncode(
             string.IsNullOrWhiteSpace(placement.Category) ? "General" : placement.Category);
-        var safeUrl = WebUtility.HtmlEncode(
-            string.IsNullOrWhiteSpace(placement.TrackingUrl) ? "#" : placement.TrackingUrl);
+
+        // Published articles (real ArticleAffiliatePlacement rows, which have a real Id)
+        // route through the /go/{placementId} click-tracking redirect instead of linking
+        // straight to the CJ URL. Content Studio draft previews (PlacementId == default,
+        // since drafts aren't public and aren't backed by a persisted placement row yet)
+        // fall back to the raw tracking URL - there's nothing to track a click against.
+        var safeUrl = placement.PlacementId == default
+            ? WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(placement.TrackingUrl) ? "#" : placement.TrackingUrl)
+            : $"/go/{placement.PlacementId:D}";
         var safeCallToAction = WebUtility.HtmlEncode(placement.CallToActionText);
 
         return $"<div class=\"cj-ad-card\"><p><strong>Sponsored Pick: {safeAdvertiserName}</strong></p><p>Category: {safeCategory}</p><p><a href=\"{safeUrl}\" target=\"_blank\" rel=\"noopener noreferrer nofollow sponsored\">{safeCallToAction}</a></p></div>";

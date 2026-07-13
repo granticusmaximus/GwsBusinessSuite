@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using GwsBusinessSuite.Domain.Entities;
 
 namespace GwsBusinessSuite.Application.Crm;
 
@@ -13,5 +14,15 @@ public sealed class ContactEditorModel
 
     public string? Company { get; set; }
 
-    public string Status { get; set; } = "Lead";
+    public string Status { get; set; } = ContactStatuses.Lead;
+
+    public DateTimeOffset? FollowUpDate { get; set; }
+}
+
+public sealed class ContactActivityView
+{
+    public Guid Id { get; init; }
+    public string Note { get; init; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; init; }
+    public string CreatedBy { get; init; } = string.Empty;
 }
