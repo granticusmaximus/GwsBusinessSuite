@@ -172,6 +172,46 @@ public sealed class GlobalBlockService(IAppDbContext dbContext) : IGlobalBlockSe
         return globalBlock;
     }
 
+    public async Task RenameAsync(
+        Guid siteId,
+        Guid globalBlockId,
+        string name,
+        CancellationToken cancellationToken = default)
+    {
+        var globalBlock = await dbContext.GlobalBlocks
+            .FirstOrDefaultAsync(block => block.Id == globalBlockId && block.SiteId == siteId, cancellationToken);
+        if (globalBlock is null)
+        {
+            throw new InvalidOperationException("Global block not found.");
+        }
+
+        globalBlock.Name = ValidateName(name);
+        globalBlock.UpdatedAt = DateTimeOffset.UtcNow;
+        globalBlock.UpdatedBy = "cms-global-block";
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task DeleteAsync(
+        Guid siteId,
+        Guid globalBlockId,
+        CancellationToken cancellationToken = default)
+    {
+        var globalBlock = await dbContext.GlobalBlocks
+            .FirstOrDefaultAsync(block => block.Id == globalBlockId && block.SiteId == siteId, cancellationToken);
+        if (globalBlock is null)
+        {
+            return;
+        }
+
+        // Pages that placed this block keep their own last-synced copy of its content
+        // in their own layout JSON (see GlobalBlockResolver) - deleting the shared
+        // source here just stops future syncs from propagating, it doesn't touch
+        // any page that already used it.
+        dbContext.GlobalBlocks.Remove(globalBlock);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     private static string ValidateName(string name)
     {
         var trimmed = name.Trim();

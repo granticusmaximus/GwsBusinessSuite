@@ -84,45 +84,62 @@
         }
         else
         {
-            @if (SelectedPageIdsForBulk.Count > 0)
-            {
-                <div class="d-flex align-items-center gap-2 p-2 border-bottom">
+            <div class="d-flex flex-wrap align-items-center gap-2 p-2 border-bottom">
+                <input type="search" class="form-control form-control-sm" style="max-width:16rem;"
+                       placeholder="Search title or path..." value="@SearchText" @oninput="OnSearchInput" />
+                <select class="form-select form-select-sm" style="max-width:10rem;" value="@StatusFilter" @onchange="OnStatusFilterChange">
+                    <option value="All">All statuses</option>
+                    <option value="@CmsPageStatuses.Published">Published</option>
+                    <option value="@CmsPageStatuses.Draft">Draft</option>
+                </select>
+                @if (SelectedPageIdsForBulk.Count > 0)
+                {
                     <button class="btn btn-sm btn-outline-danger" @onclick="BulkTrashSelectedPagesAsync" disabled="@IsCmsBusy">
                         <i class="bi bi-trash3 me-1"></i>Move to Trash
                     </button>
                     <span class="small text-secondary">@SelectedPageIdsForBulk.Count selected</span>
-                </div>
-            }
-            <div class="list-group list-group-flush">
-                @foreach (var cmsPage in OrderedPagesByHierarchy())
-                {
-                    <div class="list-group-item d-flex align-items-center gap-2 wp-list-row p-0">
-                        <input type="checkbox" class="form-check-input flex-shrink-0 ms-3" checked="@SelectedPageIdsForBulk.Contains(cmsPage.Id)"
-                               @onchange="e => TogglePageSelect(cmsPage.Id, (bool)(e.Value ?? false))" />
-                        <button type="button"
-                                class="list-group-item-action bg-transparent border-0 text-start flex-grow-1 py-2 pe-3"
-                                style="padding-left:@(0.5 + GetPageDepth(cmsPage) * 1.25)rem;"
-                                @onclick="() => EditPage(cmsPage.Id)"
-                                disabled="@IsCmsBusy">
-                            <div class="fw-semibold d-flex align-items-center gap-2">
-                                @(GetPageDepth(cmsPage) > 0 ? "— " : "")@cmsPage.Title
-                                @if (IsScheduled(cmsPage))
-                                {
-                                    <span class="badge text-bg-info">Scheduled for @cmsPage.PublishedAt?.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</span>
-                                }
-                                else if (cmsPage.Status != CmsPageStatuses.Published)
-                                {
-                                    <span class="badge text-bg-secondary">Draft</span>
-                                }
-                            </div>
-                            <div class="small text-secondary">/@BuildFullPath(cmsPage)</div>
-                        </button>
-                        <div class="d-flex gap-1 flex-shrink-0 wp-row-actions me-3">
-                            <a href="/admin/pages/edit/@cmsPage.Id">Edit</a>
-                        </div>
-                    </div>
                 }
             </div>
+            @if (VisiblePages().Count == 0)
+            {
+                <div class="p-4">
+                    <p class="text-secondary mb-0">No pages match your search.</p>
+                </div>
+            }
+            else
+            {
+                <div class="list-group list-group-flush">
+                    @foreach (var cmsPage in VisiblePages())
+                    {
+                        var depth = IsFiltered ? 0 : GetPageDepth(cmsPage);
+                        <div class="list-group-item d-flex align-items-center gap-2 wp-list-row p-0">
+                            <input type="checkbox" class="form-check-input flex-shrink-0 ms-3" checked="@SelectedPageIdsForBulk.Contains(cmsPage.Id)"
+                                   @onchange="e => TogglePageSelect(cmsPage.Id, (bool)(e.Value ?? false))" />
+                            <button type="button"
+                                    class="list-group-item-action bg-transparent border-0 text-start flex-grow-1 py-2 pe-3"
+                                    style="padding-left:@(0.5 + depth * 1.25)rem;"
+                                    @onclick="() => EditPage(cmsPage.Id)"
+                                    disabled="@IsCmsBusy">
+                                <div class="fw-semibold d-flex align-items-center gap-2">
+                                    @(depth > 0 ? "— " : "")@cmsPage.Title
+                                    @if (IsScheduled(cmsPage))
+                                    {
+                                        <span class="badge text-bg-info">Scheduled for @cmsPage.PublishedAt?.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</span>
+                                    }
+                                    else if (cmsPage.Status != CmsPageStatuses.Published)
+                                    {
+                                        <span class="badge text-bg-secondary">Draft</span>
+                                    }
+                                </div>
+                                <div class="small text-secondary">/@BuildFullPath(cmsPage)</div>
+                            </button>
+                            <div class="d-flex gap-1 flex-shrink-0 wp-row-actions me-3">
+                                <a href="/admin/pages/edit/@cmsPage.Id">Edit</a>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
         }
     </div>
 </div>
@@ -137,6 +154,13 @@
     private bool IsCmsBusy { get; set; }
     private string CmsStatusMessage { get; set; } = string.Empty;
     private string CmsErrorMessage { get; set; } = string.Empty;
+    private string SearchText { get; set; } = string.Empty;
+    private string StatusFilter { get; set; } = "All";
+
+    // Populated as a side effect of OrderedPagesByHierarchy's single tree walk, so
+    // GetPageDepth is an O(1) lookup instead of rebuilding a full id->page map and
+    // re-walking ancestors on every call (it's invoked 2-3x per row per render).
+    private readonly Dictionary<Guid, int> _pageDepths = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -186,34 +210,58 @@
     {
         var byParent = CmsPages.ToLookup(p => p.ParentPageId);
         var result = new List<CmsPage>();
+        _pageDepths.Clear();
 
-        void Visit(Guid? parentId)
+        void Visit(Guid? parentId, int depth)
         {
             foreach (var page in byParent[parentId])
             {
+                _pageDepths[page.Id] = depth;
                 result.Add(page);
-                Visit(page.Id);
+                Visit(page.Id, depth + 1);
             }
         }
 
-        Visit(null);
+        Visit(null, 0);
         return result;
     }
 
     private int GetPageDepth(CmsPage page)
     {
-        var byId = CmsPages.ToDictionary(p => p.Id);
-        var depth = 0;
-        var current = page;
-        var guard = 0;
-        while (current?.ParentPageId is { } parentId && byId.TryGetValue(parentId, out var parent) && guard++ < 64)
+        if (_pageDepths.Count == 0)
         {
-            depth++;
-            current = parent;
+            OrderedPagesByHierarchy();
         }
 
-        return depth;
+        return _pageDepths.GetValueOrDefault(page.Id);
     }
+
+    private bool IsFiltered => !string.IsNullOrWhiteSpace(SearchText) || StatusFilter != "All";
+
+    private List<CmsPage> VisiblePages() => IsFiltered ? FilteredPages() : OrderedPagesByHierarchy();
+
+    private List<CmsPage> FilteredPages()
+    {
+        IEnumerable<CmsPage> query = CmsPages;
+
+        if (StatusFilter != "All")
+        {
+            query = query.Where(p => p.Status == StatusFilter);
+        }
+
+        if (!string.IsNullOrWhiteSpace(SearchText))
+        {
+            query = query.Where(p =>
+                p.Title.Contains(SearchText, StringComparison.OrdinalIgnoreCase)
+                || BuildFullPath(p).Contains(SearchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return query.OrderBy(p => p.Title, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private void OnSearchInput(ChangeEventArgs e) => SearchText = e.Value?.ToString() ?? string.Empty;
+
+    private void OnStatusFilterChange(ChangeEventArgs e) => StatusFilter = e.Value?.ToString() ?? "All";
 
     private string BuildFullPath(CmsPage page) => CmsBuilderService.BuildFullPath(page, CmsPages);
 
@@ -235,6 +283,9 @@
     private async Task BulkTrashSelectedPagesAsync()
     {
         if (SelectedPageIdsForBulk.Count == 0 || !SelectedSiteId.HasValue) return;
+
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Move {SelectedPageIdsForBulk.Count} page(s) to Trash?");
+        if (!confirmed) return;
 
         var siteId = SelectedSiteId.Value;
         var ids = SelectedPageIdsForBulk.ToList();

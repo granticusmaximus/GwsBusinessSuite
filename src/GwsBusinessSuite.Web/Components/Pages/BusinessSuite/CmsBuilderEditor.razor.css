@@ -206,6 +206,45 @@
 	font-size: 0.74rem;
 }
 
+.studio-widget-card-wrap {
+	position: relative;
+}
+
+.studio-widget-card-wrap .studio-widget-card {
+	padding-right: 4.4rem;
+}
+
+.studio-widget-card-actions {
+	position: absolute;
+	top: 0.5rem;
+	right: 0.5rem;
+	display: flex;
+	gap: 0.25rem;
+}
+
+.studio-icon-btn {
+	width: 1.7rem;
+	height: 1.7rem;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border: 1px solid rgba(148, 163, 184, 0.28);
+	background: rgba(255, 255, 255, 0.9);
+	border-radius: 8px;
+	color: #64748b;
+	font-size: 0.8rem;
+}
+
+.studio-icon-btn:hover {
+	color: #1d4ed8;
+	border-color: rgba(37, 99, 235, 0.35);
+}
+
+.studio-icon-btn.studio-icon-btn-danger:hover {
+	color: #dc2626;
+	border-color: rgba(220, 38, 38, 0.35);
+}
+
 /* ── Layer tree ──────────────────────────────────────────────────────────── */
 
 .studio-layer-list {

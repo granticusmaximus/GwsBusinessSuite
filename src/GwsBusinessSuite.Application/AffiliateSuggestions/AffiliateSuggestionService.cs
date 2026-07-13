@@ -86,11 +86,17 @@ public sealed class AffiliateSuggestionService(
 
     public async Task<GenerateSuggestionsResult> GenerateForAllArticlesAsync(CancellationToken cancellationToken = default)
     {
-        var articleIds = await db.Articles
+        // SQLite can't translate ORDER BY on a DateTimeOffset column, so order
+        // client-side after materializing (same pattern used elsewhere in this app).
+        var articles = await db.Articles
             .Where(x => x.TrashedAt == null)
+            .Select(x => new { x.Id, x.PublishedAt, x.CreatedAt })
+            .ToListAsync(cancellationToken);
+
+        var articleIds = articles
             .OrderByDescending(x => x.PublishedAt ?? x.CreatedAt)
             .Select(x => x.Id)
-            .ToListAsync(cancellationToken);
+            .ToList();
 
         var processed = 0;
         var failed = 0;
@@ -299,14 +305,19 @@ public sealed class AffiliateSuggestionService(
     private async Task<List<AffiliateOffer>> LoadCandidateOffersAsync(CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
-        return await db.AffiliateOffers
+        var candidates = await db.AffiliateOffers
             .AsNoTracking()
             .Where(x => x.LinkName != x.AdvertiserId) // catalog offers only, not the roster placeholder row
             .Where(x => x.TrackingUrl != null && x.TrackingUrl != string.Empty)
             .Where(x => x.PromotionEndsAt == null || x.PromotionEndsAt >= now)
+            .ToListAsync(cancellationToken);
+
+        // SQLite can't translate ORDER BY on a DateTimeOffset column, so order
+        // client-side after materializing (same pattern used elsewhere in this app).
+        return candidates
             .OrderByDescending(x => x.UpdatedAt ?? x.CreatedAt)
             .Take(MaxCandidateOffers)
-            .ToListAsync(cancellationToken);
+            .ToList();
     }
 
     private async Task<List<(AffiliateOffer Offer, string Reasoning)>> PickOffersForArticleAsync(

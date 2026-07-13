@@ -31,4 +31,15 @@ public interface IGlobalBlockService
         Guid siteId,
         LayoutSection section,
         CancellationToken cancellationToken = default);
+
+    Task RenameAsync(
+        Guid siteId,
+        Guid globalBlockId,
+        string name,
+        CancellationToken cancellationToken = default);
+
+    Task DeleteAsync(
+        Guid siteId,
+        Guid globalBlockId,
+        CancellationToken cancellationToken = default);
 }

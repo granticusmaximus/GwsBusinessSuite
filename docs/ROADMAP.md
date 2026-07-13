@@ -58,6 +58,7 @@
   any code should be written — same category as the AI app generation queue.
 - Wiki history tracking ✅ — already fully shipped (commit `d514a56`): every save is a
   real git commit via LibGit2Sharp (`WikiService.cs`), with a full History/Diff/Revert UI
-  already in `Wiki.razor`. The roadmap simply hadn't been updated. Remaining real gap is
-  "richer editing": no page hierarchy (no parent/order), no search box, and the editor is
-  a plain textarea with no wiki-links/image embedding/TOC.
+  already in `Wiki.razor`. The roadmap simply hadn't been updated. Page hierarchy (parent
+  page selector, ordered tree) and a title/slug search box have since shipped too
+  (`Wiki.razor`). Remaining real gap is "richer editing": the editor is a plain textarea
+  with no wiki-links autocompletion, image embedding, or TOC generation.

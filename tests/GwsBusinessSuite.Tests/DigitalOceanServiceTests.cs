@@ -33,14 +33,46 @@ public sealed class DigitalOceanServiceTests
         using var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") });
         var service = CreateService(db, handler);
 
-        await service.SaveSettingsAsync(new DigitalOceanSettingsView { ApiToken = "dop_v1_secret", DropletId = "12345" });
+        await service.SaveSettingsAsync(new DigitalOceanApiSettingsInput { NewApiToken = "dop_v1_secret", DropletId = "12345" });
         var settings = await service.GetSettingsAsync();
 
+        // GetSettingsAsync never exposes the decrypted token to callers (it round-trips
+        // to the browser otherwise) - only whether one is saved and readable.
         settings.Should().NotBeNull();
-        settings!.ApiToken.Should().Be("dop_v1_secret");
+        settings!.HasApiToken.Should().BeTrue();
         settings.DropletId.Should().Be("12345");
         settings.ApiTokenUnreadable.Should().BeFalse();
         db.DigitalOceanSettings.Single().UpdatedBy.Should().Be("grantwatson");
+        db.DigitalOceanSettings.Single().ApiToken.Should().Be("enc::dop_v1_secret");
+    }
+
+    [Fact]
+    public async Task SaveSettingsAsync_ShouldLeaveExistingToken_WhenNewTokenIsBlank()
+    {
+        await using var db = await CreateDbAsync();
+        using var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") });
+        var service = CreateService(db, handler);
+
+        await service.SaveSettingsAsync(new DigitalOceanApiSettingsInput { NewApiToken = "dop_v1_secret", DropletId = "12345" });
+        await service.SaveSettingsAsync(new DigitalOceanApiSettingsInput { NewApiToken = null, DropletId = "99999" });
+
+        var row = db.DigitalOceanSettings.Single();
+        row.ApiToken.Should().Be("enc::dop_v1_secret");
+        row.DropletId.Should().Be("99999");
+    }
+
+    [Fact]
+    public async Task SaveSettingsAsync_ShouldClearToken_WhenClearApiTokenIsSet()
+    {
+        await using var db = await CreateDbAsync();
+        using var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") });
+        var service = CreateService(db, handler);
+
+        await service.SaveSettingsAsync(new DigitalOceanApiSettingsInput { NewApiToken = "dop_v1_secret", DropletId = "12345" });
+        await service.SaveSettingsAsync(new DigitalOceanApiSettingsInput { ClearApiToken = true, DropletId = "12345" });
+
+        var settings = await service.GetSettingsAsync();
+        settings!.HasApiToken.Should().BeFalse();
     }
 
     [Fact]
@@ -63,7 +95,7 @@ public sealed class DigitalOceanServiceTests
             };
         });
         var service = CreateService(db, handler);
-        await service.SaveSettingsAsync(new DigitalOceanSettingsView { ApiToken = "dop_v1_secret", DropletId = "999" });
+        await service.SaveSettingsAsync(new DigitalOceanApiSettingsInput { NewApiToken = "dop_v1_secret", DropletId = "999" });
 
         var result = await service.GetDropletInfoAsync();
 
@@ -92,7 +124,7 @@ public sealed class DigitalOceanServiceTests
             };
         });
         var service = CreateService(db, handler);
-        await service.SaveSettingsAsync(new DigitalOceanSettingsView { ApiToken = "dop_v1_secret", DropletId = "999" });
+        await service.SaveSettingsAsync(new DigitalOceanApiSettingsInput { NewApiToken = "dop_v1_secret", DropletId = "999" });
 
         var result = await service.RebootDropletAsync("grantwatson");
 
@@ -121,7 +153,7 @@ public sealed class DigitalOceanServiceTests
             };
         });
         var service = CreateService(db, handler);
-        await service.SaveSettingsAsync(new DigitalOceanSettingsView { ApiToken = "dop_v1_secret", DropletId = "999" });
+        await service.SaveSettingsAsync(new DigitalOceanApiSettingsInput { NewApiToken = "dop_v1_secret", DropletId = "999" });
 
         await service.ResizeDropletAsync("s-4vcpu-8gb", resizeDisk: true, "grantwatson");
 
@@ -139,7 +171,7 @@ public sealed class DigitalOceanServiceTests
             Content = new StringContent("{\"message\":\"Unable to authenticate\"}")
         });
         var service = CreateService(db, handler);
-        await service.SaveSettingsAsync(new DigitalOceanSettingsView { ApiToken = "bad-token", DropletId = "999" });
+        await service.SaveSettingsAsync(new DigitalOceanApiSettingsInput { NewApiToken = "bad-token", DropletId = "999" });
 
         var result = await service.RebootDropletAsync("grantwatson");
 

@@ -56,8 +56,8 @@
             <div class="row g-3 mb-3">
                 <div class="col-md-6">
                     <label class="form-label small text-secondary">API Token</label>
-                    <input type="password" class="form-control" @bind="DoApiToken" @bind:event="oninput"
-                           placeholder="@(DoTokenUnreadable ? "Saved token could not be decrypted - re-enter it" : "dop_v1_...")" />
+                    <input type="password" class="form-control" @bind="NewDoApiToken" @bind:event="oninput"
+                           placeholder="@GetApiTokenPlaceholder()" />
                 </div>
                 <div class="col-md-6">
                     <label class="form-label small text-secondary">Droplet ID <span class="text-muted">(optional - auto-detected in production)</span></label>
@@ -225,8 +225,12 @@ else
     private bool BuildImageSucceeded { get; set; }
 
     private bool _doLoaded;
-    private string DoApiToken { get; set; } = string.Empty;
+    // Never prefilled from saved settings - the token doesn't round-trip to the
+    // browser. A blank value on save means "leave the existing token untouched"
+    // (see GetApiTokenPlaceholder and SaveDoSettingsAsync).
+    private string NewDoApiToken { get; set; } = string.Empty;
     private string DoDropletId { get; set; } = string.Empty;
+    private bool HasDoApiToken { get; set; }
     private bool DoTokenUnreadable { get; set; }
     private bool IsDoSaving { get; set; }
     private bool IsDoActionBusy { get; set; }
@@ -268,14 +272,18 @@ else
         }
     }
 
+    private string GetApiTokenPlaceholder() => DoTokenUnreadable
+        ? "Saved token could not be decrypted - re-enter it"
+        : HasDoApiToken ? "A token is already saved. Enter a new token to replace it." : "dop_v1_...";
+
     private async Task LoadDoAsync()
     {
         var settings = await DigitalOceanService.GetSettingsAsync();
-        DoApiToken = settings?.ApiToken ?? string.Empty;
         DoDropletId = settings?.DropletId ?? string.Empty;
+        HasDoApiToken = settings?.HasApiToken ?? false;
         DoTokenUnreadable = settings?.ApiTokenUnreadable ?? false;
 
-        if (!string.IsNullOrWhiteSpace(DoApiToken))
+        if (HasDoApiToken)
         {
             DropletResult = await DigitalOceanService.GetDropletInfoAsync();
             if (DropletResult.Available)
@@ -291,9 +299,13 @@ else
         DoSaveMessage = string.Empty;
         try
         {
-            await DigitalOceanService.SaveSettingsAsync(new DigitalOceanSettingsView { ApiToken = DoApiToken, DropletId = DoDropletId });
+            await DigitalOceanService.SaveSettingsAsync(new DigitalOceanApiSettingsInput { NewApiToken = NewDoApiToken, DropletId = DoDropletId });
             DoSaveMessage = "Saved.";
             DoTokenUnreadable = false;
+            // The textarea reverts to the "already saved" placeholder on reload,
+            // same as SshTerminalPanel's private-key field.
+            NewDoApiToken = string.Empty;
+            HasDoApiToken = true;
             DropletResult = await DigitalOceanService.GetDropletInfoAsync();
             if (DropletResult.Available)
             {

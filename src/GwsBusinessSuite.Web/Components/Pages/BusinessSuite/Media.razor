@@ -212,6 +212,11 @@ else
         if (SelectedAsset is null) return;
         var assetId = SelectedAsset.Id;
 
+        var confirmed = await JS.InvokeAsync<bool>(
+            "confirm",
+            "Delete this media asset? If it's used on any page, that page's image will break. This cannot be undone.");
+        if (!confirmed) return;
+
         IsBusy = true;
         try
         {

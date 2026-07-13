@@ -2,8 +2,11 @@ namespace GwsBusinessSuite.Application.DigitalOcean;
 
 public sealed class DigitalOceanSettingsView
 {
-    public string ApiToken { get; init; } = string.Empty;
     public string DropletId { get; init; } = string.Empty;
+
+    // The API token never round-trips back to the browser - only whether one is saved.
+    // Same convention as HasPrivateKey below.
+    public bool HasApiToken { get; init; }
 
     // Set when a stored token exists but can no longer be decrypted (e.g. the Data
     // Protection key ring rotated) - same convention as CjConnectorSettingsView.
@@ -18,6 +21,17 @@ public sealed class DigitalOceanSettingsView
     public bool HasPrivateKey { get; init; }
     public bool SshPrivateKeyUnreadable { get; init; }
     public string? SshHostKeyFingerprint { get; init; }
+}
+
+// Save-side DTO for the API token + droplet ID, kept separate from
+// DigitalOceanSettingsView because the token has different "blank" semantics: the view
+// never prefills the current value, so a blank NewApiToken on save must mean "leave the
+// existing token untouched" (mirrors SshSettingsInput/NewPrivateKey below).
+public sealed class DigitalOceanApiSettingsInput
+{
+    public string? NewApiToken { get; init; }
+    public bool ClearApiToken { get; init; }
+    public string DropletId { get; init; } = string.Empty;
 }
 
 // Save-side DTO for the SSH connection fields, kept separate from

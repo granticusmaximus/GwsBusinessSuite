@@ -31,7 +31,7 @@ public sealed class DigitalOceanService(
             return null;
         }
 
-        var (apiToken, isUnreadable) = UnprotectApiToken(row.ApiToken);
+        var isUnreadable = !string.IsNullOrWhiteSpace(row.ApiToken) && UnprotectApiToken(row.ApiToken).IsUnreadable;
         var sshPrivateKeyUnreadable = false;
         if (!string.IsNullOrWhiteSpace(row.SshPrivateKey))
         {
@@ -48,8 +48,8 @@ public sealed class DigitalOceanService(
 
         return new DigitalOceanSettingsView
         {
-            ApiToken = apiToken,
             DropletId = row.DropletId,
+            HasApiToken = !string.IsNullOrWhiteSpace(row.ApiToken),
             ApiTokenUnreadable = isUnreadable,
             // Existing rows created before the SSH columns existed have "" / 0 from the
             // migration's column defaults (EF uses the CLR default, not the C# property
@@ -62,7 +62,7 @@ public sealed class DigitalOceanService(
         };
     }
 
-    public async Task SaveSettingsAsync(DigitalOceanSettingsView settings, CancellationToken cancellationToken = default)
+    public async Task SaveSettingsAsync(DigitalOceanApiSettingsInput settings, CancellationToken cancellationToken = default)
     {
         var row = await dbContext.DigitalOceanSettings.FirstOrDefaultAsync(cancellationToken);
         if (row is null)
@@ -71,7 +71,18 @@ public sealed class DigitalOceanService(
             dbContext.DigitalOceanSettings.Add(row);
         }
 
-        row.ApiToken = ProtectApiToken(settings.ApiToken);
+        if (settings.ClearApiToken)
+        {
+            row.ApiToken = string.Empty;
+        }
+        else if (!string.IsNullOrWhiteSpace(settings.NewApiToken))
+        {
+            row.ApiToken = ProtectApiToken(settings.NewApiToken);
+        }
+        // else: no new token supplied, leave the existing stored token untouched -
+        // the browser is never shown the real value, so a blank field just means
+        // "nothing was typed", not "clear it" (mirrors SaveSshSettingsAsync below).
+
         row.DropletId = settings.DropletId.Trim();
         row.UpdatedAt = DateTimeOffset.UtcNow;
         row.UpdatedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);

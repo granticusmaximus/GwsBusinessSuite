@@ -4,7 +4,7 @@ public interface IDigitalOceanService
 {
     Task<DigitalOceanSettingsView?> GetSettingsAsync(CancellationToken cancellationToken = default);
 
-    Task SaveSettingsAsync(DigitalOceanSettingsView settings, CancellationToken cancellationToken = default);
+    Task SaveSettingsAsync(DigitalOceanApiSettingsInput settings, CancellationToken cancellationToken = default);
 
     Task SaveSshSettingsAsync(SshSettingsInput settings, CancellationToken cancellationToken = default);
 

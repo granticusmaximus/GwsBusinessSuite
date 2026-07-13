@@ -141,21 +141,31 @@ else
                     <div class="studio-widget-grid">
                         @foreach (var globalBlock in _globalBlocks)
                         {
-                            <button class="studio-widget-card"
-                                    draggable="true"
-                                    data-gws-global-block-id="@globalBlock.Id"
-                                    data-gws-global-block-kind="@globalBlock.Kind"
-                                    ondragstart="window.gwsCmsBuilderBridge.beginGlobalBlockDrag(event)"
-                                    ondragend="window.gwsCmsBuilderBridge.endExternalDrag()"
-                                    @onclick="() => InsertGlobalBlock(globalBlock)">
-                                <span class="studio-widget-icon">
-                                    <i class="@(globalBlock.Kind == GlobalBlockKinds.Section ? "bi bi-layout-text-window" : GetWidgetIconClass(globalBlock.WidgetType ?? "paragraph"))"></i>
-                                </span>
-                                <span class="studio-widget-copy">
-                                    <strong>@globalBlock.Name</strong>
-                                    <small>@GetGlobalBlockCatalogSummary(globalBlock)</small>
-                                </span>
-                            </button>
+                            <div class="studio-widget-card-wrap">
+                                <button class="studio-widget-card"
+                                        draggable="true"
+                                        data-gws-global-block-id="@globalBlock.Id"
+                                        data-gws-global-block-kind="@globalBlock.Kind"
+                                        ondragstart="window.gwsCmsBuilderBridge.beginGlobalBlockDrag(event)"
+                                        ondragend="window.gwsCmsBuilderBridge.endExternalDrag()"
+                                        @onclick="() => InsertGlobalBlock(globalBlock)">
+                                    <span class="studio-widget-icon">
+                                        <i class="@(globalBlock.Kind == GlobalBlockKinds.Section ? "bi bi-layout-text-window" : GetWidgetIconClass(globalBlock.WidgetType ?? "paragraph"))"></i>
+                                    </span>
+                                    <span class="studio-widget-copy">
+                                        <strong>@globalBlock.Name</strong>
+                                        <small>@GetGlobalBlockCatalogSummary(globalBlock)</small>
+                                    </span>
+                                </button>
+                                <div class="studio-widget-card-actions">
+                                    <button type="button" class="studio-icon-btn" title="Rename" @onclick="() => RenameGlobalBlockAsync(globalBlock)">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button type="button" class="studio-icon-btn studio-icon-btn-danger" title="Delete" @onclick="() => DeleteGlobalBlockAsync(globalBlock)">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
                         }
                     </div>
                 }
@@ -1475,6 +1485,48 @@ else
         section.GlobalBlockId = null;
         _statusMessage = "Detached section from its global source.";
         QueueAutosave(reloadPreview: false, immediate: true);
+    }
+
+    private async Task RenameGlobalBlockAsync(GlobalBlock globalBlock)
+    {
+        if (_page is null) return;
+
+        try
+        {
+            var name = await JS.InvokeAsync<string?>("prompt", "Rename global block:", globalBlock.Name);
+            if (string.IsNullOrWhiteSpace(name) || name.Trim() == globalBlock.Name) return;
+
+            await GlobalBlockService.RenameAsync(_page.SiteId, globalBlock.Id, name);
+            _globalBlocks = (await GlobalBlockService.ListAsync(_page.SiteId)).ToList();
+            _statusMessage = "Renamed global block.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to rename global block {GlobalBlockId}.", globalBlock.Id);
+            _errorMessage = $"Failed to rename global block. {ex.Message}";
+        }
+    }
+
+    private async Task DeleteGlobalBlockAsync(GlobalBlock globalBlock)
+    {
+        if (_page is null) return;
+
+        var confirmed = await JS.InvokeAsync<bool>(
+            "confirm",
+            $"Delete the global block '{globalBlock.Name}'? Pages that already use it keep their own copy of its content, but it will stop syncing to them.");
+        if (!confirmed) return;
+
+        try
+        {
+            await GlobalBlockService.DeleteAsync(_page.SiteId, globalBlock.Id);
+            _globalBlocks = (await GlobalBlockService.ListAsync(_page.SiteId)).ToList();
+            _statusMessage = $"Deleted '{globalBlock.Name}'.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to delete global block {GlobalBlockId}.", globalBlock.Id);
+            _errorMessage = $"Failed to delete global block. {ex.Message}";
+        }
     }
 
     private void InsertGlobalBlock(GlobalBlock globalBlock)
