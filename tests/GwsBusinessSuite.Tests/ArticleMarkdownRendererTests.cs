@@ -22,7 +22,11 @@ public sealed class ArticleMarkdownRendererTests
             [placement]);
 
         Assert.Contains("Acme Tools", rendered);
-        Assert.Contains("https://example.com/track", rendered);
+        // A real ArticleAffiliatePlacement (with a real Id) routes through the
+        // /go/{placementId} click-tracking redirect rather than linking straight to the
+        // CJ tracking URL - see BuildCardMarkup.
+        Assert.Contains($"href=\"/go/{placement.Id:D}\"", rendered);
+        Assert.DoesNotContain("https://example.com/track", rendered);
         Assert.Contains("Check it out", rendered);
         Assert.DoesNotContain("{{CJ_AD_abc12345}}", rendered);
     }
@@ -54,7 +58,10 @@ public sealed class ArticleMarkdownRendererTests
         var rendered = ArticleMarkdownRenderer.Render("{{CJ_AD_xyz}}", [placement]);
 
         Assert.Contains("Category: General", rendered);
-        Assert.Contains("href=\"#\"", rendered);
+        // Even with a blank TrackingUrl, a real placement still routes through the
+        // click-tracking redirect - the redirect endpoint itself is what falls back to "#"
+        // for a placement with nothing to redirect to, not the render step.
+        Assert.Contains($"href=\"/go/{placement.Id:D}\"", rendered);
     }
 
     [Fact]

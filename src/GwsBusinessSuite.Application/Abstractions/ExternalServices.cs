@@ -5,6 +5,13 @@ public interface ICjAffiliateService
     Task<CjConnectionValidationResult> ValidateConnectionAsync(CjConnectionRequest request, CancellationToken ct = default);
     Task<CjPartnerFetchResult> FetchPartnersAsync(CjConnectionRequest request, CancellationToken ct = default);
     Task<CjLinkFetchResult> FetchLinksAsync(CjLinkFetchRequest request, CancellationToken ct = default);
+
+    // Best-effort: queries the same commissions.api.cj.com GraphQL endpoint already used
+    // for partner discovery, requesting additional commission-amount fields. CJ's exact
+    // field names for these amounts aren't independently verified against live API docs
+    // here, so parsing is defensive - a schema mismatch yields an empty result rather
+    // than throwing, see CjAffiliateService.FetchCommissionsAsync.
+    Task<CjCommissionFetchResult> FetchCommissionsAsync(CjConnectionRequest request, CancellationToken ct = default);
 }
 public interface IOllamaService
 {
@@ -66,3 +73,19 @@ public sealed record CjLinkRecord(
     string DestinationUrl,
     string PromotionType,
     DateTimeOffset? PromotionEndDate);
+
+public sealed record CjCommissionFetchResult(
+    IReadOnlyCollection<CjCommissionFetchRecord> Commissions,
+    string Message);
+
+public sealed record CjCommissionFetchRecord(
+    string ExternalId,
+    string AdvertiserId,
+    string AdvertiserName,
+    string OrderId,
+    string ActionStatus,
+    decimal SaleAmount,
+    decimal CommissionAmount,
+    string Currency,
+    DateTimeOffset? EventDate,
+    DateTimeOffset? PostingDate);

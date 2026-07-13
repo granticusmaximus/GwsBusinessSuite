@@ -1,4 +1,5 @@
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.AffiliateAnalytics;
 using GwsBusinessSuite.Application.Articles;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.Comments;
@@ -701,6 +702,19 @@ app.MapPost("/blog/{slug}/comments", async (
 
     return Results.Redirect(thanksUrl);
 }).RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-write");
+
+// Public-facing affiliate click-tracking redirect: records a click against the
+// placement, then forwards to its real CJ tracking URL. Rendered article markup links
+// here (see ArticleMarkdownRenderer.BuildCardMarkup) instead of the raw CJ URL directly.
+app.MapGet("/go/{placementId:guid}", async (
+    Guid placementId,
+    IAffiliateAnalyticsService affiliateAnalyticsService) =>
+{
+    var destinationUrl = await affiliateAnalyticsService.RecordClickAsync(placementId);
+    return destinationUrl is null
+        ? Results.Redirect("/", permanent: false)
+        : Results.Redirect(destinationUrl, permanent: false);
+}).RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
 
 app.MapGet("/resume", () => Results.Redirect("/about#resume", permanent: true))
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
