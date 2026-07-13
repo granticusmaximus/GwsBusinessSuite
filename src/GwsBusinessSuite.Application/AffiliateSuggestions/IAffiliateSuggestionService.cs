@@ -9,6 +9,11 @@ public interface IAffiliateSuggestionService
 
     Task<GenerateSuggestionsResult> GenerateForAllArticlesAsync(CancellationToken cancellationToken = default);
 
+    // Only targets articles with zero suggestions and zero placements so far - used by
+    // the scheduled sync job to catch newly published articles without re-churning
+    // Ollama calls over articles that already went through review.
+    Task<GenerateSuggestionsResult> GenerateForUnmatchedArticlesAsync(CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<ArticleSuggestionGroupView>> ListPendingSuggestionsAsync(CancellationToken cancellationToken = default);
 
     // Turns a suggestion into a real ArticleAffiliatePlacement (and inserts its slot token

@@ -19,6 +19,10 @@ public interface ICommentService
 
     Task MarkSpamAsync(Guid commentId, CancellationToken cancellationToken = default);
 
+    // Reverts an Approved or Spam comment back to Pending for re-review - there was
+    // previously no way back once a comment left Pending, short of deleting it.
+    Task MarkPendingAsync(Guid commentId, CancellationToken cancellationToken = default);
+
     Task DeleteAsync(Guid commentId, CancellationToken cancellationToken = default);
 
     Task<int> CountPendingAsync(CancellationToken cancellationToken = default);

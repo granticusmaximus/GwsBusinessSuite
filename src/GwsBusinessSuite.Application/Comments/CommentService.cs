@@ -130,6 +130,11 @@ public sealed class CommentService(
         await SetStatusAsync(commentId, CommentStatuses.Spam, cancellationToken);
     }
 
+    public async Task MarkPendingAsync(Guid commentId, CancellationToken cancellationToken = default)
+    {
+        await SetStatusAsync(commentId, CommentStatuses.Pending, cancellationToken);
+    }
+
     public async Task DeleteAsync(Guid commentId, CancellationToken cancellationToken = default)
     {
         var comment = await dbContext.Comments.FirstOrDefaultAsync(c => c.Id == commentId, cancellationToken);

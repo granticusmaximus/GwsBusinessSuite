@@ -120,6 +120,7 @@ public static class DependencyInjection
                 "Mozilla/5.0 (compatible; GWSuite/1.0; +https://grantwatson.dev)");
             client.Timeout = TimeSpan.FromSeconds(20);
         });
+        services.AddHostedService<GovernmentIntelligenceRefreshBackgroundService>();
         services.AddHttpClient<IPodcastDirectoryService, PodcastDirectoryService>(client =>
         {
             client.DefaultRequestHeaders.UserAgent.ParseAdd(
@@ -127,6 +128,7 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddHostedService<NewsRefreshBackgroundService>();
+        services.AddHostedService<CjAdsSyncBackgroundService>();
 
         return services;
     }

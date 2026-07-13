@@ -146,6 +146,36 @@ public sealed class CommentServiceTests
     }
 
     [Fact]
+    public async Task MarkPendingAsync_ShouldRevertApprovedCommentBackToPending()
+    {
+        await using var db = await CreateDbAsync();
+        var article = await CreateArticleAsync(db);
+        var service = new CommentService(db, new FixedCurrentUserAccessor("moderator"));
+        var comment = await service.SubmitAsync(article.Id, "Ada", "ada@example.com", "Great article!");
+        await service.ApproveAsync(comment.Id);
+
+        await service.MarkPendingAsync(comment.Id);
+
+        (await service.ListForModerationAsync(null)).Single().Status.Should().Be(CommentStatuses.Pending);
+    }
+
+    [Fact]
+    public async Task ListForModerationAsync_ShouldOnlyReturnMatchingStatus_WhenFilterProvided()
+    {
+        await using var db = await CreateDbAsync();
+        var article = await CreateArticleAsync(db);
+        var service = new CommentService(db, new FixedCurrentUserAccessor("moderator"));
+        var pending = await service.SubmitAsync(article.Id, "Ada", "ada@example.com", "pending one");
+        var toApprove = await service.SubmitAsync(article.Id, "Bob", "bob@example.com", "approve me");
+        await service.ApproveAsync(toApprove.Id);
+
+        var pendingOnly = await service.ListForModerationAsync(CommentStatuses.Pending);
+
+        pendingOnly.Should().ContainSingle(c => c.Id == pending.Id);
+        pendingOnly.Should().NotContain(c => c.Id == toApprove.Id);
+    }
+
+    [Fact]
     public async Task DeleteAsync_ShouldRemoveTheComment()
     {
         await using var db = await CreateDbAsync();

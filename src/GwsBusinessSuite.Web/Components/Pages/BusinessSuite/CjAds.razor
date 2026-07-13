@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "AdminOnly")]
 @using GwsBusinessSuite.Application.CjAds
+@using GwsBusinessSuite.Infrastructure.Services
 @inject ICjAdsService CjAdsService
 @inject ILogger<CjAds> Logger
 
@@ -591,8 +592,18 @@ advertiserId, StringComparison.OrdinalIgnoreCase)));
     ErrorMessage = string.Empty;
     BulkLinkSyncFailures = new List<string>();
     StatusMessage = "Syncing links for every advertiser - this can take a while for a large roster...";
+
+    // Same shared lock as the hourly CjAdsSyncBackgroundService, so a manual sync here
+    // can't run concurrently with the scheduled one.
+    var acquired = await CjAdsSyncBackgroundService.SyncLock.WaitAsync(3000);
     try
     {
+      if (!acquired)
+      {
+        StatusMessage = "A scheduled sync is already running - try again in a moment.";
+        return;
+      }
+
       var result = await CjAdsService.SyncAllLinksAsync();
       LastSyncSummary = result.Message;
       BulkLinkSyncFailures = result.FailureMessages.ToList();
@@ -612,6 +623,7 @@ advertiserId, StringComparison.OrdinalIgnoreCase)));
     }
     finally
     {
+      if (acquired) CjAdsSyncBackgroundService.SyncLock.Release();
       IsBusy = false;
     }
   }

@@ -44,7 +44,7 @@
                 <span>Loading comments…</span>
             </div>
         }
-        else if (FilteredComments.Count == 0)
+        else if (AllComments.Count == 0)
         {
             <div class="p-4">
                 <p class="text-secondary mb-0">No comments here.</p>
@@ -73,7 +73,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var comment in FilteredComments)
+                    @foreach (var comment in AllComments)
                     {
                         <tr class="wp-list-row">
                             <td>
@@ -101,6 +101,11 @@
                                     @if (comment.Status != CommentStatuses.Spam)
                                     {
                                         <button type="button" @onclick="() => ApplyAsync(comment.Id, CommentStatuses.Spam)">Spam</button>
+                                        <span> | </span>
+                                    }
+                                    @if (comment.Status != CommentStatuses.Pending)
+                                    {
+                                        <button type="button" @onclick="() => ApplyAsync(comment.Id, CommentStatuses.Pending)">Unapprove</button>
                                         <span> | </span>
                                     }
                                     <button type="button" class="text-danger" @onclick="() => DeleteAsync(comment.Id)">Delete</button>
@@ -138,21 +143,21 @@
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
 
-    private IReadOnlyList<CommentView> FilteredComments =>
-        ActiveFilter is null ? AllComments : AllComments.Where(c => c.Status == ActiveFilter).ToList();
-
     protected override async Task OnInitializedAsync()
     {
         await LoadAsync();
         _loaded = true;
     }
 
+    // Filters server-side (per the active tab) instead of always pulling every
+    // comment regardless of which tab is selected - Pending/Approved/Spam tabs now
+    // only fetch that status; only the "All" tab pulls the full table.
     private async Task LoadAsync()
     {
         ErrorMessage = string.Empty;
         try
         {
-            AllComments = (await CommentService.ListForModerationAsync(null)).ToList();
+            AllComments = (await CommentService.ListForModerationAsync(ActiveFilter)).ToList();
         }
         catch (Exception ex)
         {
@@ -165,7 +170,7 @@
     {
         ActiveFilter = filter;
         SelectedIds.Clear();
-        await Task.CompletedTask;
+        await LoadAsync();
     }
 
     private void ToggleSelect(Guid commentId, bool selected)
@@ -183,6 +188,7 @@
         {
             if (status == CommentStatuses.Approved) await CommentService.ApproveAsync(commentId);
             else if (status == CommentStatuses.Spam) await CommentService.MarkSpamAsync(commentId);
+            else if (status == CommentStatuses.Pending) await CommentService.MarkPendingAsync(commentId);
             await LoadAsync();
             StatusMessage = $"Comment marked {status}.";
         }

@@ -86,6 +86,22 @@ public sealed class AffiliateSuggestionService(
 
     public async Task<GenerateSuggestionsResult> GenerateForAllArticlesAsync(CancellationToken cancellationToken = default)
     {
+        var articleIds = await LoadOrderedArticleIdsAsync(excludeAlreadyMatched: false, cancellationToken);
+        return await GenerateForArticlesAsync(articleIds, cancellationToken);
+    }
+
+    // Only targets articles with no suggestions and no applied placements yet, so a
+    // scheduled run (see CjAdsSyncBackgroundService) doesn't keep re-churning Ollama
+    // calls and replacing suggestions the admin already dismissed or applied - it just
+    // catches newly published articles that have never been matched at all.
+    public async Task<GenerateSuggestionsResult> GenerateForUnmatchedArticlesAsync(CancellationToken cancellationToken = default)
+    {
+        var articleIds = await LoadOrderedArticleIdsAsync(excludeAlreadyMatched: true, cancellationToken);
+        return await GenerateForArticlesAsync(articleIds, cancellationToken);
+    }
+
+    private async Task<List<Guid>> LoadOrderedArticleIdsAsync(bool excludeAlreadyMatched, CancellationToken cancellationToken)
+    {
         // SQLite can't translate ORDER BY on a DateTimeOffset column, so order
         // client-side after materializing (same pattern used elsewhere in this app).
         var articles = await db.Articles
@@ -93,11 +109,23 @@ public sealed class AffiliateSuggestionService(
             .Select(x => new { x.Id, x.PublishedAt, x.CreatedAt })
             .ToListAsync(cancellationToken);
 
-        var articleIds = articles
+        var excluded = new HashSet<Guid>();
+        if (excludeAlreadyMatched)
+        {
+            var suggested = await db.ArticleAffiliateSuggestions.Select(x => x.ArticleId).Distinct().ToListAsync(cancellationToken);
+            var placed = await db.ArticleAffiliatePlacements.Select(x => x.ArticleId).Distinct().ToListAsync(cancellationToken);
+            excluded = new HashSet<Guid>(suggested.Concat(placed));
+        }
+
+        return articles
+            .Where(x => !excluded.Contains(x.Id))
             .OrderByDescending(x => x.PublishedAt ?? x.CreatedAt)
             .Select(x => x.Id)
             .ToList();
+    }
 
+    private async Task<GenerateSuggestionsResult> GenerateForArticlesAsync(List<Guid> articleIds, CancellationToken cancellationToken)
+    {
         var processed = 0;
         var failed = 0;
         var totalCreated = 0;
