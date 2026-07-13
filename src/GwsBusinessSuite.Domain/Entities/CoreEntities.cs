@@ -36,6 +36,7 @@ public static class SeoArticleWorkflowEventTypes
     public const string PublishedToSite = "PublishedToSite";
     public const string Rejected = "Rejected";
     public const string HeroImageRegenerated = "HeroImageRegenerated";
+    public const string RevisionRestored = "RevisionRestored";
 }
 
 public static class ArticleStatuses
@@ -357,6 +358,18 @@ public sealed class SeoArticleDraft : AuditableEntity
     public DateTimeOffset? RejectedAt { get; set; }
     public ICollection<SeoArticleAffiliatePlacement> AffiliatePlacements { get; set; } = new List<SeoArticleAffiliatePlacement>();
     public ICollection<SeoArticleWorkflowEvent> WorkflowEvents { get; set; } = new List<SeoArticleWorkflowEvent>();
+    public ICollection<SeoArticleDraftRevision> Revisions { get; set; } = new List<SeoArticleDraftRevision>();
+}
+
+public sealed class SeoArticleDraftRevision : AuditableEntity
+{
+    public Guid SeoArticleDraftId { get; set; }
+    public int VersionNumber { get; set; }
+    public string ArticleMarkdown { get; set; } = string.Empty;
+    public string OutlineMarkdown { get; set; } = string.Empty;
+    public string ChangeType { get; set; } = string.Empty;
+    public string Notes { get; set; } = string.Empty;
+    public SeoArticleDraft? Draft { get; set; }
 }
 
 public sealed class SeoArticleAffiliatePlacement : AuditableEntity

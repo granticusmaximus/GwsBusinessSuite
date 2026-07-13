@@ -17,6 +17,16 @@ public interface IContentStudioService
     Task<ArticleGenerationResult?> UploadHeroImageAsync(
         DraftHeroImageUploadRequest request,
         CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ContentStudioRevisionView>> GetRevisionHistoryAsync(
+        Guid draftId,
+        CancellationToken cancellationToken = default);
+    Task<ContentStudioRevisionDiff?> GetRevisionDiffAsync(
+        Guid draftId,
+        Guid revisionId,
+        CancellationToken cancellationToken = default);
+    Task<ArticleGenerationResult?> RestoreRevisionAsync(
+        DraftRevisionRestoreRequest request,
+        CancellationToken cancellationToken = default);
     Task<ArticleGenerationResult?> UpdateDraftMarkdownAsync(
         DraftMarkdownUpdateRequest request,
         CancellationToken cancellationToken = default);

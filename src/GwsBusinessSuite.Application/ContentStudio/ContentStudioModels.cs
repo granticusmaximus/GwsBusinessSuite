@@ -45,6 +45,13 @@ public sealed class DraftHeroImageUploadRequest
     public string PerformedBy { get; init; } = "content-studio";
 }
 
+public sealed class DraftRevisionRestoreRequest
+{
+    public Guid DraftId { get; init; }
+    public Guid RevisionId { get; init; }
+    public string PerformedBy { get; init; } = "content-studio";
+}
+
 public sealed class DraftPublishRequest
 {
     public Guid DraftId { get; init; }
@@ -132,6 +139,29 @@ public sealed class ContentStudioWorkflowEntry
     public string Notes { get; init; } = string.Empty;
     public string PerformedBy { get; init; } = string.Empty;
     public DateTimeOffset OccurredAt { get; init; }
+}
+
+public sealed class ContentStudioRevisionView
+{
+    public Guid RevisionId { get; init; }
+    public int VersionNumber { get; init; }
+    public string ChangeType { get; init; } = string.Empty;
+    public string Notes { get; init; } = string.Empty;
+    public string PerformedBy { get; init; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; init; }
+}
+
+public sealed class ContentStudioRevisionDiff
+{
+    public int VersionNumber { get; init; }
+    public int? PreviousVersionNumber { get; init; }
+    public IReadOnlyList<ContentStudioDiffLine> Lines { get; init; } = Array.Empty<ContentStudioDiffLine>();
+}
+
+public sealed class ContentStudioDiffLine
+{
+    public string Kind { get; init; } = "unchanged";
+    public string Text { get; init; } = string.Empty;
 }
 
 public sealed class ArticleHeroImagePreview

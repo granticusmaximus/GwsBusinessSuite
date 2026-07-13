@@ -223,6 +223,13 @@ public sealed class ContentStudioService(
             Notes = "Draft generated from article brief.",
             CreatedBy = "content-studio"
         });
+        AddRevisionSnapshot(
+            freshContext,
+            draft,
+            versionNumber: 0,
+            changeType: SeoArticleWorkflowEventTypes.Generated,
+            notes: "Initial generated draft.",
+            performedBy: "content-studio");
 
         await freshContext.SaveChangesAsync(cancellationToken);
 
@@ -293,6 +300,8 @@ public sealed class ContentStudioService(
             return null;
         }
 
+        var nextVersionNumber = await PrepareNextRevisionNumberAsync(freshContext, freshDraft, cancellationToken);
+
         freshDraft.ArticleMarkdown = revisedMarkdownWithAffiliateSlots;
         freshDraft.OutlineMarkdown = ExtractSection(revisedMarkdownWithAffiliateSlots, "## Outline");
         freshDraft.RequestedModifications = revisionNotes;
@@ -322,6 +331,13 @@ public sealed class ContentStudioService(
             Notes = revisionNotes,
             CreatedBy = request.PerformedBy
         });
+        AddRevisionSnapshot(
+            freshContext,
+            freshDraft,
+            nextVersionNumber,
+            SeoArticleWorkflowEventTypes.Revised,
+            revisionNotes,
+            request.PerformedBy);
 
         await freshContext.SaveChangesAsync(cancellationToken);
 
@@ -449,6 +465,8 @@ public sealed class ContentStudioService(
             return null;
         }
 
+        var nextVersionNumber = await PrepareNextRevisionNumberAsync(db, draft, cancellationToken);
+
         draft.ArticleMarkdown = markdown;
         draft.OutlineMarkdown = ExtractSection(markdown, "## Outline");
         draft.UpdatedAt = DateTimeOffset.UtcNow;
@@ -461,9 +479,113 @@ public sealed class ContentStudioService(
             Notes = "Markdown edited directly in the draft workspace.",
             CreatedBy = request.PerformedBy
         });
+        AddRevisionSnapshot(
+            db,
+            draft,
+            nextVersionNumber,
+            SeoArticleWorkflowEventTypes.ManuallyEdited,
+            "Markdown edited directly in the draft workspace.",
+            request.PerformedBy);
 
         await db.SaveChangesAsync(cancellationToken);
 
+        return await GetDraftAsync(draft.Id, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ContentStudioRevisionView>> GetRevisionHistoryAsync(
+        Guid draftId,
+        CancellationToken cancellationToken = default)
+    {
+        return await db.SeoArticleDraftRevisions
+            .AsNoTracking()
+            .Where(x => x.SeoArticleDraftId == draftId)
+            .OrderByDescending(x => x.VersionNumber)
+            .Select(x => new ContentStudioRevisionView
+            {
+                RevisionId = x.Id,
+                VersionNumber = x.VersionNumber,
+                ChangeType = x.ChangeType,
+                Notes = x.Notes,
+                PerformedBy = x.CreatedBy,
+                CreatedAt = x.CreatedAt
+            })
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<ContentStudioRevisionDiff?> GetRevisionDiffAsync(
+        Guid draftId,
+        Guid revisionId,
+        CancellationToken cancellationToken = default)
+    {
+        var revision = await db.SeoArticleDraftRevisions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == revisionId && x.SeoArticleDraftId == draftId, cancellationToken);
+        if (revision is null)
+        {
+            return null;
+        }
+
+        var previous = await db.SeoArticleDraftRevisions
+            .AsNoTracking()
+            .Where(x => x.SeoArticleDraftId == draftId && x.VersionNumber < revision.VersionNumber)
+            .OrderByDescending(x => x.VersionNumber)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return new ContentStudioRevisionDiff
+        {
+            VersionNumber = revision.VersionNumber,
+            PreviousVersionNumber = previous?.VersionNumber,
+            Lines = BuildLineDiff(previous?.ArticleMarkdown ?? string.Empty, revision.ArticleMarkdown)
+        };
+    }
+
+    public async Task<ArticleGenerationResult?> RestoreRevisionAsync(
+        DraftRevisionRestoreRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var draft = await db.SeoArticleDrafts.FirstOrDefaultAsync(x => x.Id == request.DraftId, cancellationToken);
+        if (draft is null)
+        {
+            return null;
+        }
+
+        var revision = await db.SeoArticleDraftRevisions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.Id == request.RevisionId && x.SeoArticleDraftId == request.DraftId,
+                cancellationToken);
+        if (revision is null)
+        {
+            throw new InvalidOperationException("The selected draft revision no longer exists.");
+        }
+
+        var nextVersionNumber = await PrepareNextRevisionNumberAsync(db, draft, cancellationToken);
+        draft.ArticleMarkdown = revision.ArticleMarkdown;
+        draft.OutlineMarkdown = revision.OutlineMarkdown;
+        draft.Status = SeoArticleDraftStatuses.PendingReview;
+        draft.RevisionNumber += 1;
+        draft.ApprovedAt = null;
+        draft.RejectedAt = null;
+        draft.UpdatedAt = DateTimeOffset.UtcNow;
+        draft.UpdatedBy = request.PerformedBy;
+
+        var notes = $"Restored content from version {revision.VersionNumber}.";
+        db.SeoArticleWorkflowEvents.Add(new SeoArticleWorkflowEvent
+        {
+            SeoArticleDraftId = draft.Id,
+            EventType = SeoArticleWorkflowEventTypes.RevisionRestored,
+            Notes = notes,
+            CreatedBy = request.PerformedBy
+        });
+        AddRevisionSnapshot(
+            db,
+            draft,
+            nextVersionNumber,
+            SeoArticleWorkflowEventTypes.RevisionRestored,
+            notes,
+            request.PerformedBy);
+
+        await db.SaveChangesAsync(cancellationToken);
         return await GetDraftAsync(draft.Id, cancellationToken);
     }
 
@@ -1040,6 +1162,105 @@ public sealed class ContentStudioService(
             .Include(x => x.AffiliatePlacements)
             .Include(x => x.WorkflowEvents)
             .FirstOrDefaultAsync(x => x.Id == draftId, cancellationToken);
+    }
+
+    private static void AddRevisionSnapshot(
+        IAppDbContext context,
+        SeoArticleDraft draft,
+        int versionNumber,
+        string changeType,
+        string notes,
+        string performedBy)
+    {
+        context.SeoArticleDraftRevisions.Add(new SeoArticleDraftRevision
+        {
+            SeoArticleDraftId = draft.Id,
+            VersionNumber = versionNumber,
+            ArticleMarkdown = draft.ArticleMarkdown,
+            OutlineMarkdown = draft.OutlineMarkdown,
+            ChangeType = changeType,
+            Notes = notes,
+            CreatedBy = performedBy
+        });
+    }
+
+    private static async Task<int> PrepareNextRevisionNumberAsync(
+        IAppDbContext context,
+        SeoArticleDraft draft,
+        CancellationToken cancellationToken)
+    {
+        var latestVersion = await context.SeoArticleDraftRevisions
+            .Where(x => x.SeoArticleDraftId == draft.Id)
+            .Select(x => (int?)x.VersionNumber)
+            .MaxAsync(cancellationToken);
+
+        if (latestVersion is not null)
+        {
+            return latestVersion.Value + 1;
+        }
+
+        context.SeoArticleDraftRevisions.Add(new SeoArticleDraftRevision
+        {
+            SeoArticleDraftId = draft.Id,
+            VersionNumber = 0,
+            ArticleMarkdown = draft.ArticleMarkdown,
+            OutlineMarkdown = draft.OutlineMarkdown,
+            ChangeType = "Baseline",
+            Notes = "Baseline captured before the first versioned edit.",
+            CreatedAt = draft.UpdatedAt ?? draft.CreatedAt,
+            CreatedBy = draft.UpdatedBy ?? draft.CreatedBy
+        });
+        return 1;
+    }
+
+    internal static IReadOnlyList<ContentStudioDiffLine> BuildLineDiff(string before, string after)
+    {
+        var beforeLines = before.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        var afterLines = after.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        var lengths = new int[beforeLines.Length + 1, afterLines.Length + 1];
+
+        for (var beforeIndex = beforeLines.Length - 1; beforeIndex >= 0; beforeIndex--)
+        {
+            for (var afterIndex = afterLines.Length - 1; afterIndex >= 0; afterIndex--)
+            {
+                lengths[beforeIndex, afterIndex] = string.Equals(beforeLines[beforeIndex], afterLines[afterIndex], StringComparison.Ordinal)
+                    ? lengths[beforeIndex + 1, afterIndex + 1] + 1
+                    : Math.Max(lengths[beforeIndex + 1, afterIndex], lengths[beforeIndex, afterIndex + 1]);
+            }
+        }
+
+        var result = new List<ContentStudioDiffLine>();
+        var i = 0;
+        var j = 0;
+        while (i < beforeLines.Length && j < afterLines.Length)
+        {
+            if (string.Equals(beforeLines[i], afterLines[j], StringComparison.Ordinal))
+            {
+                result.Add(new ContentStudioDiffLine { Kind = "unchanged", Text = beforeLines[i] });
+                i++;
+                j++;
+            }
+            else if (lengths[i + 1, j] >= lengths[i, j + 1])
+            {
+                result.Add(new ContentStudioDiffLine { Kind = "removed", Text = beforeLines[i++] });
+            }
+            else
+            {
+                result.Add(new ContentStudioDiffLine { Kind = "added", Text = afterLines[j++] });
+            }
+        }
+
+        while (i < beforeLines.Length)
+        {
+            result.Add(new ContentStudioDiffLine { Kind = "removed", Text = beforeLines[i++] });
+        }
+
+        while (j < afterLines.Length)
+        {
+            result.Add(new ContentStudioDiffLine { Kind = "added", Text = afterLines[j++] });
+        }
+
+        return result;
     }
 
     private async Task<string> GetEffectiveModelAsync(CancellationToken cancellationToken)

@@ -24,6 +24,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SeoArticleAffiliatePlacement> SeoArticleAffiliatePlacements => Set<SeoArticleAffiliatePlacement>();
     public DbSet<SeoArticleAffiliateInteraction> SeoArticleAffiliateInteractions => Set<SeoArticleAffiliateInteraction>();
     public DbSet<SeoArticleWorkflowEvent> SeoArticleWorkflowEvents => Set<SeoArticleWorkflowEvent>();
+    public DbSet<SeoArticleDraftRevision> SeoArticleDraftRevisions => Set<SeoArticleDraftRevision>();
     public DbSet<CjConnectorSettings> CjConnectorSettings => Set<CjConnectorSettings>();
     public DbSet<SiteSettings> SiteSettings => Set<SiteSettings>();
     public DbSet<Article> Articles => Set<Article>();
@@ -76,6 +77,14 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .HasForeignKey(x => x.SeoArticleDraftId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<SeoArticleWorkflowEvent>().HasIndex(x => new { x.SeoArticleDraftId, x.CreatedAt });
+        modelBuilder.Entity<SeoArticleDraftRevision>()
+            .HasOne(x => x.Draft)
+            .WithMany(x => x.Revisions)
+            .HasForeignKey(x => x.SeoArticleDraftId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<SeoArticleDraftRevision>()
+            .HasIndex(x => new { x.SeoArticleDraftId, x.VersionNumber })
+            .IsUnique();
 
         modelBuilder.Entity<Article>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<Article>().HasIndex(x => x.Status);

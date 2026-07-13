@@ -23,6 +23,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<SeoArticleAffiliatePlacement> SeoArticleAffiliatePlacements { get; }
     DbSet<SeoArticleAffiliateInteraction> SeoArticleAffiliateInteractions { get; }
     DbSet<SeoArticleWorkflowEvent> SeoArticleWorkflowEvents { get; }
+    DbSet<SeoArticleDraftRevision> SeoArticleDraftRevisions { get; }
     DbSet<CjConnectorSettings> CjConnectorSettings { get; }
     DbSet<SiteSettings> SiteSettings { get; }
     DbSet<Article> Articles { get; }

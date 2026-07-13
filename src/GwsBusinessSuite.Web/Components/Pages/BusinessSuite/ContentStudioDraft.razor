@@ -242,6 +242,56 @@ else
                         </div>
                     }
 
+                    <div class="d-flex align-items-center justify-content-between mb-3">
+                        <h5 class="mb-0">Revision History</h5>
+                        <span class="badge text-bg-light">@RevisionHistory.Count version(s)</span>
+                    </div>
+                    @if (RevisionHistory.Count == 0)
+                    {
+                        <p class="text-secondary mb-4">Revision snapshots will appear after the next generated revision or manual edit.</p>
+                    }
+                    else
+                    {
+                        <div class="list-group mb-4">
+                            @foreach (var revision in RevisionHistory)
+                            {
+                                <div class="list-group-item">
+                                    <div class="d-flex flex-wrap align-items-start justify-content-between gap-3">
+                                        <div>
+                                            <div class="fw-semibold">Version @revision.VersionNumber · @FormatWorkflowEventLabel(revision.ChangeType)</div>
+                                            <div class="small text-secondary">@FormatDate(revision.CreatedAt) by @revision.PerformedBy</div>
+                                            @if (!string.IsNullOrWhiteSpace(revision.Notes))
+                                            {
+                                                <div class="small mt-1">@revision.Notes</div>
+                                            }
+                                        </div>
+                                        <div class="d-flex gap-2">
+                                            <button class="btn btn-sm btn-outline-secondary" disabled="@IsBusy"
+                                                    @onclick="() => ToggleRevisionDiff(revision)">
+                                                @(DiffRevisionId == revision.RevisionId ? "Hide changes" : "View changes")
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-primary" disabled="@(IsBusy || revision.RevisionId == RevisionHistory.First().RevisionId)"
+                                                    @onclick="() => RestoreRevision(revision)">
+                                                Restore
+                                            </button>
+                                        </div>
+                                    </div>
+                                    @if (DiffRevisionId == revision.RevisionId && RevisionDiff is not null)
+                                    {
+                                        <div class="border rounded mt-3 overflow-auto" style="max-height: 28rem;">
+                                            <div class="small text-secondary border-bottom px-3 py-2">
+                                                Comparing version @(RevisionDiff.PreviousVersionNumber?.ToString() ?? "empty") to @RevisionDiff.VersionNumber
+                                            </div>
+                                            <pre class="mb-0 p-3 small"><code>@foreach (var line in RevisionDiff.Lines)
+                                                {<span class="@GetDiffLineClass(line.Kind)">@GetDiffPrefix(line.Kind)@line.Text</span>
+}</code></pre>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+
                     <h5 class="mb-3">Workflow History</h5>
                     @if (CurrentDraft.WorkflowHistory.Count == 0)
                     {
@@ -287,6 +337,9 @@ else
     private string HeroImagePromptInput { get; set; } = string.Empty;
     private string EditableMarkdown { get; set; } = string.Empty;
     private bool HeroImageGenerationConfigured { get; set; }
+    private List<ContentStudioRevisionView> RevisionHistory { get; set; } = new();
+    private ContentStudioRevisionDiff? RevisionDiff { get; set; }
+    private Guid? DiffRevisionId { get; set; }
 
     private bool IsMarkdownDirty =>
         CurrentDraft is not null &&
@@ -364,6 +417,7 @@ else
             IsApproved = string.Equals(CurrentDraft.Status, "Approved", StringComparison.OrdinalIgnoreCase);
             RevisionNotes = CurrentDraft.RequestedModifications;
             EditableMarkdown = CurrentDraft.Markdown;
+            await LoadRevisionHistory();
             StatusMessage = $"Loaded draft '{CurrentDraft.Title}'.";
         }
         catch (Exception ex)
@@ -572,6 +626,7 @@ else
             IsApproved = string.Equals(CurrentDraft.Status, "Approved", StringComparison.OrdinalIgnoreCase);
             RevisionNotes = CurrentDraft.RequestedModifications;
             EditableMarkdown = CurrentDraft.Markdown;
+            await LoadRevisionHistory();
             StatusMessage = successMessageFactory(CurrentDraft);
         }
         catch (Exception ex)
@@ -585,6 +640,62 @@ else
         }
 
         StateHasChanged();
+    }
+
+    private async Task LoadRevisionHistory()
+    {
+        RevisionHistory = (await ContentStudioService.GetRevisionHistoryAsync(DraftId)).ToList();
+        if (DiffRevisionId is not null && RevisionHistory.All(x => x.RevisionId != DiffRevisionId))
+        {
+            DiffRevisionId = null;
+            RevisionDiff = null;
+        }
+    }
+
+    private async Task ToggleRevisionDiff(ContentStudioRevisionView revision)
+    {
+        if (DiffRevisionId == revision.RevisionId)
+        {
+            DiffRevisionId = null;
+            RevisionDiff = null;
+            return;
+        }
+
+        ErrorMessage = string.Empty;
+        try
+        {
+            RevisionDiff = await ContentStudioService.GetRevisionDiffAsync(DraftId, revision.RevisionId);
+            DiffRevisionId = RevisionDiff is null ? null : revision.RevisionId;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load revision diff for draft {DraftId}, revision {RevisionId}.", DraftId, revision.RevisionId);
+            ErrorMessage = $"Unable to load revision changes. {ex.Message}";
+        }
+    }
+
+    private async Task RestoreRevision(ContentStudioRevisionView revision)
+    {
+        var confirmed = await JS.InvokeAsync<bool>(
+            "confirm",
+            $"Restore version {revision.VersionNumber}? The current content will remain in history and a new version will be created.");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        var user = await CurrentUserNameAsync();
+        await RunWorkflowAction(
+            async () => await ContentStudioService.RestoreRevisionAsync(new DraftRevisionRestoreRequest
+            {
+                DraftId = DraftId,
+                RevisionId = revision.RevisionId,
+                PerformedBy = user
+            }),
+            $"Restoring version {revision.VersionNumber} and preserving the current version in history.",
+            _ => $"Version {revision.VersionNumber} restored as a new pending-review revision.");
+        DiffRevisionId = null;
+        RevisionDiff = null;
     }
 
     public async ValueTask DisposeAsync()
@@ -671,9 +782,24 @@ else
             "PublishedToSite" => "Published Live",
             "PendingReview" => "Pending Review",
             "ManuallyEdited" => "Markdown Manually Edited",
+            "RevisionRestored" => "Revision Restored",
             _ => eventType
         };
     }
+
+    private static string GetDiffLineClass(string kind) => kind switch
+    {
+        "added" => "d-block bg-success-subtle text-success-emphasis",
+        "removed" => "d-block bg-danger-subtle text-danger-emphasis",
+        _ => "d-block"
+    };
+
+    private static string GetDiffPrefix(string kind) => kind switch
+    {
+        "added" => "+ ",
+        "removed" => "- ",
+        _ => "  "
+    };
 
     private async Task TrackAffiliateClick(ArticleAffiliatePlacementView placement)
     {
