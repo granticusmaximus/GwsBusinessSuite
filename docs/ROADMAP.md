@@ -66,5 +66,17 @@
   real git commit via LibGit2Sharp (`WikiService.cs`), with a full History/Diff/Revert UI
   already in `Wiki.razor`. The roadmap simply hadn't been updated. Page hierarchy (parent
   page selector, ordered tree) and a title/slug search box have since shipped too
-  (`Wiki.razor`). Remaining real gap is "richer editing": the editor is a plain textarea
-  with no wiki-links autocompletion, image embedding, or TOC generation.
+  (`Wiki.razor`).
+- Wiki richer editing ✅ — three gaps closed in `WikiMarkdownHelper.cs` +
+  `Wiki.razor`/`markdownEditor.js`/`wikiLinks.js`: (1) wiki-links: typing `[[` in the
+  editor shows a live autocomplete dropdown of matching page titles (CodeMirror
+  `cursorActivity` hook), and a resolved `[[Page Title]]` renders as a real link in
+  preview that navigates within the page (no per-page URL route exists, so it's a
+  `wikilink:{id}` href intercepted client-side rather than a browser navigation); an
+  unmatched title renders as plain emphasized text instead of a dead link. (2) Image
+  embedding: an "Insert Image" button opens the same Media Library picker pattern already
+  used in `CmsBuilderEditor.razor`, inserting real markdown image syntax at the cursor.
+  (3) TOC generation: an "Insert TOC" button walks the live Markdig AST (the same
+  pipeline instance the preview renders from) to build a nested Markdown list linking to
+  each H2-H4's actual auto-generated anchor id, so links can't drift out of sync with the
+  real headings.

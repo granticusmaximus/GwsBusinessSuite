@@ -3,9 +3,11 @@
 @attribute [Authorize(Policy = "AdminOnly")]
 @implements IAsyncDisposable
 @using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Domain.Entities
 @using Markdig
 @inject IWikiService WikiService
+@inject IMediaLibraryService MediaLibraryService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
 @inject ILogger<Wiki> Logger
@@ -121,7 +123,45 @@
                             </select>
                         </div>
                         <div class="col-12">
-                            <label class="form-label fw-semibold small">Markdown</label>
+                            <div class="d-flex align-items-center justify-content-between mb-1">
+                                <label class="form-label fw-semibold small mb-0">Markdown</label>
+                                <div class="d-flex gap-2">
+                                    <button type="button" class="btn btn-xs btn-outline-secondary" @onclick="ToggleMediaPickerAsync">
+                                        <i class="bi bi-image me-1"></i>Insert Image
+                                    </button>
+                                    <button type="button" class="btn btn-xs btn-outline-secondary" @onclick="InsertTableOfContentsAsync">
+                                        <i class="bi bi-list-ol me-1"></i>Insert TOC
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="small text-secondary mb-2">
+                                Type <code>[[</code> to link to another wiki page by title.
+                            </div>
+                            @if (_showMediaPicker)
+                            {
+                                <div class="wiki-media-picker border rounded-3 p-2 mb-2">
+                                    @if (!string.IsNullOrEmpty(_mediaPickerError))
+                                    {
+                                        <div class="text-danger small mb-0">@_mediaPickerError</div>
+                                    }
+                                    else if (_mediaAssets.Count == 0)
+                                    {
+                                        <p class="text-secondary small mb-0">No media uploaded yet. Upload images from the Media Library.</p>
+                                    }
+                                    else
+                                    {
+                                        <div class="d-flex flex-wrap gap-2">
+                                            @foreach (var asset in _mediaAssets)
+                                            {
+                                                <button type="button" class="btn btn-sm btn-outline-secondary p-1" title="@asset.FileName"
+                                                        @onclick="() => InsertMediaAssetAsync(asset)">
+                                                    <img src="@asset.Url" alt="@asset.AltText" style="width:64px;height:64px;object-fit:cover;" />
+                                                </button>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            }
                             <textarea id="@MarkdownEditorElementId">@Editor.Markdown</textarea>
                         </div>
                     </div>
@@ -265,7 +305,67 @@
         .UseAdvancedExtensions()
         .Build();
 
-    private string RenderedHtml => Markdown.ToHtml(Editor.Markdown, MarkdownPipeline);
+    private string RenderedHtml =>
+        Markdown.ToHtml(WikiMarkdownHelper.ResolveWikiLinks(Editor.Markdown, WikiPages), MarkdownPipeline);
+
+    private bool _showMediaPicker;
+    private string _mediaPickerError = string.Empty;
+    private List<MediaAssetSummary> _mediaAssets = new();
+    private DotNetObjectReference<Wiki>? _wikiLinksRef;
+    private bool _wikiLinksInitialized;
+
+    private async Task ToggleMediaPickerAsync()
+    {
+        _showMediaPicker = !_showMediaPicker;
+        if (!_showMediaPicker)
+        {
+            return;
+        }
+
+        _mediaPickerError = string.Empty;
+        try
+        {
+            _mediaAssets = (await MediaLibraryService.ListAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load media library for the wiki editor's image picker.");
+            _mediaPickerError = $"Unable to load media library. {ex.Message}";
+        }
+    }
+
+    private async Task InsertMediaAssetAsync(MediaAssetSummary asset)
+    {
+        var altText = string.IsNullOrWhiteSpace(asset.AltText) ? asset.FileName : asset.AltText;
+        await JS.InvokeVoidAsync("gwsMarkdownEditor.insertAtCursor", MarkdownEditorElementId, $"![{altText}]({asset.Url})");
+        _showMediaPicker = false;
+    }
+
+    private async Task InsertTableOfContentsAsync()
+    {
+        var toc = WikiMarkdownHelper.BuildTableOfContentsMarkdown(Editor.Markdown, MarkdownPipeline);
+        if (string.IsNullOrWhiteSpace(toc))
+        {
+            StatusMessage = "No headings (##/###/####) found to build a table of contents from.";
+            return;
+        }
+
+        await JS.InvokeVoidAsync("gwsMarkdownEditor.insertAtCursor", MarkdownEditorElementId, toc + "\n");
+    }
+
+    [JSInvokable]
+    public Task<string[]> SearchWikiLinkSuggestions(string query) =>
+        Task.FromResult(WikiMarkdownHelper.SearchPageTitles(query, WikiPages).ToArray());
+
+    [JSInvokable]
+    public async Task NavigateToWikiPageId(string pageId)
+    {
+        if (Guid.TryParse(pageId, out var id))
+        {
+            await OpenPageAsync(id);
+            StateHasChanged();
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -274,10 +374,17 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (!_wikiLinksInitialized)
+        {
+            _wikiLinksRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("gwsWikiLinks.init", _wikiLinksRef);
+            _wikiLinksInitialized = true;
+        }
+
         if (!_markdownEditorInitialized)
         {
             _markdownEditorRef = DotNetObjectReference.Create(this);
-            await JS.InvokeVoidAsync("gwsMarkdownEditor.init", MarkdownEditorElementId, _markdownEditorRef);
+            await JS.InvokeVoidAsync("gwsMarkdownEditor.init", MarkdownEditorElementId, _markdownEditorRef, new { enableWikiLinks = true });
             _markdownEditorInitialized = true;
             _lastSyncedMarkdown = Editor.Markdown;
         }
@@ -605,5 +712,19 @@
         }
 
         _markdownEditorRef?.Dispose();
+
+        if (_wikiLinksInitialized)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("gwsWikiLinks.dispose");
+            }
+            catch (JSDisconnectedException)
+            {
+                // The circuit is already gone (e.g. browser closed); nothing to clean up client-side.
+            }
+        }
+
+        _wikiLinksRef?.Dispose();
     }
 }
