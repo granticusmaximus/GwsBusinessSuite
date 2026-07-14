@@ -578,3 +578,25 @@ public sealed class PodcastEpisode : AuditableEntity
     public DateTimeOffset? PublishedAt { get; set; }
     public string ExternalId { get; set; } = string.Empty;
 }
+
+// A reference source (e.g. "clean-room" notes on how WordPress/Elementor-style features
+// behave) that CmsKnowledgeEntry rows are grouped under. Key is a human-readable slug
+// kept from the original hardcoded seed data, not used as a foreign key (entries
+// reference Id).
+public sealed class CmsKnowledgeSource : AuditableEntity
+{
+    public required string Key { get; set; }
+    public required string Name { get; set; }
+    public string LicenseNotes { get; set; } = string.Empty;
+    public string UsageGuidance { get; set; } = string.Empty;
+}
+
+public sealed class CmsKnowledgeEntry : AuditableEntity
+{
+    public Guid SourceId { get; set; }
+    public required string Capability { get; set; }
+    public string WorkflowSummary { get; set; } = string.Empty;
+    public string ImplementationHint { get; set; } = string.Empty;
+    // Comma-separated (same convention as Article.Tags / WatchedTopic.Keywords).
+    public string SuggestedBlocksCsv { get; set; } = string.Empty;
+}

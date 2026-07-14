@@ -230,6 +230,197 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
             "Connected to CJ Link Search API, but no links were returned for this advertiser/website combination. The advertiser may not have any active links, or may require deep-link generation instead of pre-built links.");
     }
 
+    // Best-effort commission import: queries the same commissions.api.cj.com GraphQL
+    // endpoint/query shape already proven to work for partner discovery
+    // (FetchPartnersViaGraphQlAsync), but requests additional commission-amount fields
+    // (saleAmount/commissionAmount/eventDate/postingDate/orderId) that CJ's public
+    // Commission Detail GraphQL schema documents. These field names aren't independently
+    // verified against live CJ API docs from this environment, so parsing below is
+    // defensive at every level - a schema mismatch degrades to zero imported rows
+    // (logged via the returned Message) rather than throwing and breaking the caller.
+    public async Task<CjCommissionFetchResult> FetchCommissionsAsync(CjConnectionRequest request, CancellationToken ct = default)
+    {
+        var endpoint = NormalizeEndpointUrl(request.EndpointUrl);
+        if (!IsCommissionsApiEndpoint(endpoint))
+        {
+            return new CjCommissionFetchResult(
+                Array.Empty<CjCommissionFetchRecord>(),
+                "Commission import requires the CJ commissions.api.cj.com GraphQL endpoint.");
+        }
+
+        var publisherId = request.PublisherId.Trim();
+        var websiteId = request.WebsiteId?.Trim();
+        var developerKey = request.DeveloperKey.Trim();
+
+        const string graphQlQuery = """
+            query CommissionSnapshot($publisherIds:[String!]!, $websiteIds:[String!]) {
+              publisherCommissions(forPublishers:$publisherIds, websiteIds:$websiteIds) {
+                count
+                records {
+                  id
+                  advertiserId
+                  advertiserName
+                  actionStatus
+                  orderId
+                  saleAmount { amount currency }
+                  commissionAmount { amount currency }
+                  eventDate
+                  postingDate
+                }
+              }
+            }
+            """;
+
+        var payload = BuildGraphQlPayload(graphQlQuery, publisherId, websiteId);
+
+        var bearerAttempt = await SendGraphQlCommissionAttemptAsync(endpoint, developerKey, payload, useBearerScheme: true, ct);
+        if (bearerAttempt.Commissions.Count > 0 && bearerAttempt.ErrorMessages.Count == 0)
+        {
+            return new CjCommissionFetchResult(bearerAttempt.Commissions, $"Fetched {bearerAttempt.Commissions.Count} commission record(s).");
+        }
+
+        var rawAttempt = await SendGraphQlCommissionAttemptAsync(endpoint, developerKey, payload, useBearerScheme: false, ct);
+        if (rawAttempt.Commissions.Count > 0 && rawAttempt.ErrorMessages.Count == 0)
+        {
+            return new CjCommissionFetchResult(rawAttempt.Commissions, $"Fetched {rawAttempt.Commissions.Count} commission record(s).");
+        }
+
+        var errorSource = bearerAttempt.ErrorMessages.Count > 0 ? bearerAttempt : rawAttempt;
+        if (errorSource.ErrorMessages.Count > 0)
+        {
+            return new CjCommissionFetchResult(
+                Array.Empty<CjCommissionFetchRecord>(),
+                $"CJ commission query returned an error: {string.Join(" | ", errorSource.ErrorMessages)}");
+        }
+
+        return new CjCommissionFetchResult(
+            Array.Empty<CjCommissionFetchRecord>(),
+            "No commission records returned. This can mean zero transactions in this account, or CJ's schema for commission fields differs from what was requested.");
+    }
+
+    private async Task<CjGraphQlCommissionAttemptResult> SendGraphQlCommissionAttemptAsync(
+        string endpoint,
+        string developerKey,
+        object payload,
+        bool useBearerScheme,
+        CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+        {
+            Content = JsonContent.Create(payload)
+        };
+
+        if (useBearerScheme)
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", developerKey);
+        }
+        else
+        {
+            request.Headers.TryAddWithoutValidation("Authorization", developerKey);
+        }
+
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var response = await http.SendAsync(request, ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+
+        var commissions = TryParseGraphQlCommissions(body);
+        var errors = TryParseGraphQlErrors(body);
+
+        return new CjGraphQlCommissionAttemptResult(response.StatusCode, response.ReasonPhrase, body, commissions, errors);
+    }
+
+    private static IReadOnlyCollection<CjCommissionFetchRecord> TryParseGraphQlCommissions(string payload)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            if (!document.RootElement.TryGetProperty("data", out var data) ||
+                data.ValueKind != JsonValueKind.Object ||
+                !data.TryGetProperty("publisherCommissions", out var commissions) ||
+                commissions.ValueKind != JsonValueKind.Object ||
+                !commissions.TryGetProperty("records", out var records) ||
+                records.ValueKind != JsonValueKind.Array)
+            {
+                return Array.Empty<CjCommissionFetchRecord>();
+            }
+
+            var parsed = new List<CjCommissionFetchRecord>();
+            foreach (var record in records.EnumerateArray())
+            {
+                try
+                {
+                    var externalId = ReadJsonString(record, "id");
+                    if (string.IsNullOrWhiteSpace(externalId))
+                    {
+                        continue; // Can't dedupe/upsert without a stable external id.
+                    }
+
+                    var saleAmount = ReadJsonMoney(record, "saleAmount");
+                    var commissionAmount = ReadJsonMoney(record, "commissionAmount");
+                    var eventDateRaw = ReadJsonString(record, "eventDate");
+                    var postingDateRaw = ReadJsonString(record, "postingDate");
+
+                    parsed.Add(new CjCommissionFetchRecord(
+                        ExternalId: externalId,
+                        AdvertiserId: ReadJsonString(record, "advertiserId"),
+                        AdvertiserName: ReadJsonString(record, "advertiserName"),
+                        OrderId: ReadJsonString(record, "orderId"),
+                        ActionStatus: ReadJsonString(record, "actionStatus"),
+                        SaleAmount: saleAmount.Amount,
+                        CommissionAmount: commissionAmount.Amount,
+                        Currency: commissionAmount.Currency ?? saleAmount.Currency ?? "USD",
+                        EventDate: DateTimeOffset.TryParse(eventDateRaw, out var eventDate) ? eventDate : null,
+                        PostingDate: DateTimeOffset.TryParse(postingDateRaw, out var postingDate) ? postingDate : null));
+                }
+                catch
+                {
+                    // One malformed record shouldn't drop the whole batch.
+                }
+            }
+
+            return parsed;
+        }
+        catch
+        {
+            return Array.Empty<CjCommissionFetchRecord>();
+        }
+    }
+
+    private static (decimal Amount, string? Currency) ReadJsonMoney(JsonElement record, string propertyName)
+    {
+        if (!record.TryGetProperty(propertyName, out var money) || money.ValueKind != JsonValueKind.Object)
+        {
+            return (0m, null);
+        }
+
+        var amount = 0m;
+        if (money.TryGetProperty("amount", out var amountElement))
+        {
+            if (amountElement.ValueKind == JsonValueKind.Number && amountElement.TryGetDecimal(out var numeric))
+            {
+                amount = numeric;
+            }
+            else if (amountElement.ValueKind == JsonValueKind.String && decimal.TryParse(amountElement.GetString(), out var parsed))
+            {
+                amount = parsed;
+            }
+        }
+
+        var currency = money.TryGetProperty("currency", out var currencyElement) && currencyElement.ValueKind == JsonValueKind.String
+            ? currencyElement.GetString()
+            : null;
+
+        return (amount, currency);
+    }
+
+    private sealed record CjGraphQlCommissionAttemptResult(
+        HttpStatusCode StatusCode,
+        string? ReasonPhrase,
+        string Body,
+        IReadOnlyCollection<CjCommissionFetchRecord> Commissions,
+        IReadOnlyCollection<string> ErrorMessages);
+
     private static string BuildLinkSearchUrl(string websiteId, string advertiserId, int pageNumber, int recordsPerPage)
     {
         var wid = Uri.EscapeDataString(websiteId);

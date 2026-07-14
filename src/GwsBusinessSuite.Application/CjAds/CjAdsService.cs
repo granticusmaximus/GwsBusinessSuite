@@ -1,4 +1,5 @@
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.AffiliateAnalytics;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -441,6 +442,78 @@ public sealed class CjAdsService(
             TotalLinksImported = totalImported,
             FailureMessages = failures
         };
+    }
+
+    // Upserts by CJ's own commission id (ExternalId) so re-running this doesn't duplicate
+    // rows and naturally picks up status changes (e.g. Pending -> Closed) on re-sync.
+    public async Task<CommissionSyncResult> SyncCommissionsAsync(CancellationToken cancellationToken = default)
+    {
+        var settings = await GetConnectorSettingsAsync(cancellationToken);
+        if (settings is null || string.IsNullOrWhiteSpace(settings.DeveloperKey))
+        {
+            return new CommissionSyncResult(false, "Connect your CJ account before syncing commissions (Developer Key is missing).", 0);
+        }
+
+        var fetched = await cjAffiliateService.FetchCommissionsAsync(
+            new CjConnectionRequest(
+                settings.DeveloperKey.Trim(),
+                settings.PublisherId.Trim(),
+                settings.EndpointUrl.Trim(),
+                settings.MaxResults,
+                string.IsNullOrWhiteSpace(settings.WebsiteId) ? null : settings.WebsiteId.Trim()),
+            cancellationToken);
+
+        if (fetched.Commissions.Count == 0)
+        {
+            return new CommissionSyncResult(true, fetched.Message, 0);
+        }
+
+        var externalIds = fetched.Commissions.Select(c => c.ExternalId).ToList();
+        var existingByExternalId = await db.CjCommissionRecords
+            .Where(r => externalIds.Contains(r.ExternalId))
+            .ToDictionaryAsync(r => r.ExternalId, cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        var imported = 0;
+        foreach (var record in fetched.Commissions)
+        {
+            if (existingByExternalId.TryGetValue(record.ExternalId, out var existing))
+            {
+                existing.AdvertiserId = record.AdvertiserId;
+                existing.AdvertiserName = record.AdvertiserName;
+                existing.OrderId = record.OrderId;
+                existing.ActionStatus = record.ActionStatus;
+                existing.SaleAmount = record.SaleAmount;
+                existing.CommissionAmount = record.CommissionAmount;
+                existing.Currency = record.Currency;
+                existing.EventDate = record.EventDate;
+                existing.PostingDate = record.PostingDate;
+                existing.UpdatedAt = now;
+                existing.UpdatedBy = "cj-commission-sync";
+            }
+            else
+            {
+                await db.CjCommissionRecords.AddAsync(new CjCommissionRecord
+                {
+                    ExternalId = record.ExternalId,
+                    AdvertiserId = record.AdvertiserId,
+                    AdvertiserName = record.AdvertiserName,
+                    OrderId = record.OrderId,
+                    ActionStatus = record.ActionStatus,
+                    SaleAmount = record.SaleAmount,
+                    CommissionAmount = record.CommissionAmount,
+                    Currency = record.Currency,
+                    EventDate = record.EventDate,
+                    PostingDate = record.PostingDate,
+                    CreatedBy = "cj-commission-sync"
+                }, cancellationToken);
+            }
+
+            imported += 1;
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return new CommissionSyncResult(true, fetched.Message, imported);
     }
 
     private static void Validate(CjPartnerSyncRequest request)

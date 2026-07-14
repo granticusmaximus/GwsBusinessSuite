@@ -1,3 +1,4 @@
+using FluentAssertions;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.CjAds;
 using GwsBusinessSuite.Infrastructure.Data;
@@ -389,6 +390,55 @@ public sealed class CjAdsServiceTests
         Assert.Equal("Active Deal", offers[0].LinkName);
     }
 
+    [Fact]
+    public async Task SyncCommissionsAsync_ShouldInsertNewRecords_AndUpdateExistingOnesByExternalId()
+    {
+        await using var db = await CreateDbAsync();
+        var secretProtector = new FakeSecretProtector();
+        var fakeCj = new FakeCjAffiliateService
+        {
+            Commissions =
+            [
+                new CjCommissionFetchRecord("cj-1", "adv-1", "Acme Tools", "order-1", "Pending", 100m, 10m, "USD", DateTimeOffset.UtcNow, null)
+            ]
+        };
+        var service = new CjAdsService(db, fakeCj, secretProtector, NullLogger<CjAdsService>.Instance);
+        await service.SaveConnectorSettingsAsync(new CjConnectorSettingsView
+        {
+            DeveloperKey = "dev-key-123",
+            PublisherId = "pub-1",
+            WebsiteId = "site-1",
+            EndpointUrl = "https://commissions.api.cj.com/query",
+            MaxResults = 100
+        });
+
+        var firstResult = await service.SyncCommissionsAsync();
+        firstResult.RecordsImported.Should().Be(1);
+        db.CjCommissionRecords.Should().ContainSingle(r => r.ExternalId == "cj-1" && r.ActionStatus == "Pending");
+
+        // Re-sync with the same external id but an updated status/amount - should update
+        // in place, not duplicate.
+        fakeCj.Commissions = [new CjCommissionFetchRecord("cj-1", "adv-1", "Acme Tools", "order-1", "Closed", 100m, 12m, "USD", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)];
+        var secondResult = await service.SyncCommissionsAsync();
+
+        secondResult.RecordsImported.Should().Be(1);
+        db.CjCommissionRecords.Should().HaveCount(1);
+        db.CjCommissionRecords.Single().ActionStatus.Should().Be("Closed");
+        db.CjCommissionRecords.Single().CommissionAmount.Should().Be(12m);
+    }
+
+    [Fact]
+    public async Task SyncCommissionsAsync_ShouldFail_WhenNoConnectorConfigured()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CjAdsService(db, new FakeCjAffiliateService(), new FakeSecretProtector(), NullLogger<CjAdsService>.Instance);
+
+        var result = await service.SyncCommissionsAsync();
+
+        result.IsSuccess.Should().BeFalse();
+        result.RecordsImported.Should().Be(0);
+    }
+
     private static CjAdsService CreateService(ApplicationDbContext db, ISecretProtector secretProtector)
     {
         return new CjAdsService(
@@ -439,6 +489,7 @@ public sealed class CjAdsServiceTests
     {
         private readonly IReadOnlyCollection<CjPartnerRecord> partners;
         private readonly bool isCompleteRoster;
+        public IReadOnlyCollection<CjCommissionFetchRecord> Commissions { get; set; } = Array.Empty<CjCommissionFetchRecord>();
 
         public FakeCjAffiliateService()
             : this(Array.Empty<CjPartnerRecord>())
@@ -464,6 +515,11 @@ public sealed class CjAdsServiceTests
         public Task<CjLinkFetchResult> FetchLinksAsync(CjLinkFetchRequest request, CancellationToken ct = default)
         {
             return Task.FromResult(new CjLinkFetchResult(Array.Empty<CjLinkRecord>(), "ok"));
+        }
+
+        public Task<CjCommissionFetchResult> FetchCommissionsAsync(CjConnectionRequest request, CancellationToken ct = default)
+        {
+            return Task.FromResult(new CjCommissionFetchResult(Commissions, "ok"));
         }
     }
 }

@@ -1,3 +1,5 @@
+using GwsBusinessSuite.Application.AffiliateAnalytics;
+
 namespace GwsBusinessSuite.Application.CjAds;
 
 public interface ICjAdsService
@@ -9,6 +11,7 @@ public interface ICjAdsService
     Task<CjOfferImportResult> ImportOffersAsync(CjOfferImportRequest request, CancellationToken cancellationToken = default);
     Task<CjLinkSyncResult> SyncLinksForAdvertiserAsync(string advertiserId, string advertiserName, CancellationToken cancellationToken = default);
     Task<CjBulkLinkSyncResult> SyncAllLinksAsync(CancellationToken cancellationToken = default);
+    Task<CommissionSyncResult> SyncCommissionsAsync(CancellationToken cancellationToken = default);
     Task<CjConnectorSettingsView?> GetConnectorSettingsAsync(CancellationToken cancellationToken = default);
     Task SaveConnectorSettingsAsync(CjConnectorSettingsView settings, CancellationToken cancellationToken = default);
 }

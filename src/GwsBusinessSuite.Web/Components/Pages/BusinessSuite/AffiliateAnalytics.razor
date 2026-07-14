@@ -1,0 +1,249 @@
+@page "/admin/affiliate-analytics"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.AffiliateAnalytics
+@using GwsBusinessSuite.Application.CjAds
+@using GwsBusinessSuite.Infrastructure.Services
+@inject IAffiliateAnalyticsService AnalyticsService
+@inject ICjAdsService CjAdsService
+@inject ILogger<AffiliateAnalytics> Logger
+
+<PageTitle>Affiliate Analytics</PageTitle>
+
+<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-graph-up-arrow me-2 text-primary"></i>Affiliate Analytics</h1>
+        <p>Click activity on live articles, and commission data imported from CJ (best-effort - see note below).</p>
+    </div>
+    <button type="button" class="btn btn-primary d-inline-flex align-items-center gap-2" @onclick="SyncCommissionsAsync" disabled="@IsBusy">
+        <i class="bi bi-arrow-repeat"></i>
+        <span>@(IsBusy ? "Syncing..." : "Sync Commissions Now")</span>
+    </button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+}
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-info" role="alert">@StatusMessage</div>
+}
+
+<div class="alert alert-warning small">
+    <i class="bi bi-info-circle me-1"></i>
+    Commission amounts come from CJ's commissions GraphQL API. The exact field names CJ uses
+    for sale/commission amounts aren't independently verified in this environment, so a schema
+    mismatch on CJ's end just means zero rows imported (see the sync message below) rather than
+    an error - click counts are unaffected either way, since those are tracked directly by this app.
+</div>
+
+@if (!_loaded)
+{
+    <p class="text-secondary">Loading...</p>
+}
+else
+{
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-secondary small">Total Clicks</div>
+                    <div class="fs-3 fw-semibold">@Dashboard.TotalClicks</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-secondary small">Total Commission (all-time)</div>
+                    <div class="fs-3 fw-semibold">@Dashboard.TotalCommissionAmount.ToString("C2")</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-6">
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white border-bottom py-3">
+                    <span class="fw-semibold">Clicks by Advertiser</span>
+                </div>
+                <div class="card-body p-0">
+                    @if (Dashboard.ClicksByAdvertiser.Count == 0)
+                    {
+                        <div class="p-3 text-secondary small">No clicks recorded yet.</div>
+                    }
+                    else
+                    {
+                        <table class="table table-sm mb-0">
+                            <thead><tr><th>Advertiser</th><th class="text-end">Clicks</th><th>Last Click</th></tr></thead>
+                            <tbody>
+                                @foreach (var row in Dashboard.ClicksByAdvertiser)
+                                {
+                                    <tr>
+                                        <td>@row.AdvertiserName</td>
+                                        <td class="text-end">@row.ClickCount</td>
+                                        <td class="small text-secondary">@row.LastClickAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white border-bottom py-3">
+                    <span class="fw-semibold">Clicks by Article</span>
+                </div>
+                <div class="card-body p-0">
+                    @if (Dashboard.ClicksByArticle.Count == 0)
+                    {
+                        <div class="p-3 text-secondary small">No clicks recorded yet.</div>
+                    }
+                    else
+                    {
+                        <table class="table table-sm mb-0">
+                            <thead><tr><th>Article</th><th class="text-end">Clicks</th></tr></thead>
+                            <tbody>
+                                @foreach (var row in Dashboard.ClicksByArticle)
+                                {
+                                    <tr>
+                                        <td>
+                                            @if (!string.IsNullOrWhiteSpace(row.ArticleSlug))
+                                            {
+                                                <a href="/blog/@row.ArticleSlug" target="_blank" rel="noopener noreferrer">@row.ArticleTitle</a>
+                                            }
+                                            else
+                                            {
+                                                @row.ArticleTitle
+                                            }
+                                        </td>
+                                        <td class="text-end">@row.ClickCount</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-6">
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white border-bottom py-3">
+                    <span class="fw-semibold">Revenue by Advertiser (CJ commission import)</span>
+                </div>
+                <div class="card-body p-0">
+                    @if (Dashboard.RevenueByAdvertiser.Count == 0)
+                    {
+                        <div class="p-3 text-secondary small">No commission data imported yet. Click "Sync Commissions Now" above.</div>
+                    }
+                    else
+                    {
+                        <table class="table table-sm mb-0">
+                            <thead><tr><th>Advertiser</th><th class="text-end">Transactions</th><th class="text-end">Sales</th><th class="text-end">Commission</th></tr></thead>
+                            <tbody>
+                                @foreach (var row in Dashboard.RevenueByAdvertiser)
+                                {
+                                    <tr>
+                                        <td>@row.AdvertiserName</td>
+                                        <td class="text-end">@row.TransactionCount</td>
+                                        <td class="text-end">@row.TotalSaleAmount.ToString("C2")</td>
+                                        <td class="text-end">@row.TotalCommissionAmount.ToString("C2")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white border-bottom py-3">
+                    <span class="fw-semibold">Recent Clicks</span>
+                </div>
+                <div class="card-body p-0">
+                    @if (Dashboard.RecentClicks.Count == 0)
+                    {
+                        <div class="p-3 text-secondary small">No clicks recorded yet.</div>
+                    }
+                    else
+                    {
+                        <ul class="list-group list-group-flush">
+                            @foreach (var click in Dashboard.RecentClicks)
+                            {
+                                <li class="list-group-item">
+                                    <div class="fw-semibold small">@click.AdvertiserName</div>
+                                    <div class="small text-secondary">@click.ArticleTitle &middot; @click.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</div>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private AffiliateAnalyticsDashboard Dashboard { get; set; } = new();
+    private bool _loaded;
+    private bool IsBusy { get; set; }
+    private string StatusMessage { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _loaded = true;
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            Dashboard = await AnalyticsService.GetDashboardAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load affiliate analytics dashboard.");
+            ErrorMessage = $"Unable to load dashboard. {ex.Message}";
+        }
+    }
+
+    private async Task SyncCommissionsAsync()
+    {
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+
+        // Same shared lock as the hourly CjAdsSyncBackgroundService, so a manual sync
+        // here can't run concurrently with the scheduled one.
+        var acquired = await CjAdsSyncBackgroundService.SyncLock.WaitAsync(3000);
+        try
+        {
+            if (!acquired)
+            {
+                StatusMessage = "A scheduled sync is already running - try again in a moment.";
+                return;
+            }
+
+            var result = await CjAdsService.SyncCommissionsAsync();
+            StatusMessage = result.Message;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Manual CJ commission sync failed.");
+            ErrorMessage = $"Commission sync failed. {ex.Message}";
+        }
+        finally
+        {
+            if (acquired) CjAdsSyncBackgroundService.SyncLock.Release();
+            IsBusy = false;
+        }
+    }
+}

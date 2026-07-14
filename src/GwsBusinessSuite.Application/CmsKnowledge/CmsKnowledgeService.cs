@@ -1,82 +1,34 @@
+using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Domain.Entities;
+using Microsoft.EntityFrameworkCore;
+
 namespace GwsBusinessSuite.Application.CmsKnowledge;
 
-public sealed class CmsKnowledgeService : ICmsKnowledgeService
+public sealed class CmsKnowledgeService(IAppDbContext db) : ICmsKnowledgeService
 {
-    private static readonly IReadOnlyList<CmsKnowledgeSource> Sources =
-    [
-        new()
-        {
-            Key = "wp-clean-room",
-            Name = "WordPress Workflow Reference (Clean Room)",
-            LicenseNotes = "Do not copy source code or proprietary assets. Reimplement behavior only.",
-            UsageGuidance = "Use as product behavior inspiration for workflows, content modeling, and admin UX."
-        },
-        new()
-        {
-            Key = "elementor-clean-room",
-            Name = "Elementor Workflow Reference (Clean Room)",
-            LicenseNotes = "Do not clone protected UI/brand assets. Build original controls and layouts.",
-            UsageGuidance = "Use as inspiration for visual editing flow, section nesting, and style controls."
-        }
-    ];
-
-    private static readonly IReadOnlyList<CmsKnowledgeEntry> Entries =
-    [
-        new()
-        {
-            SourceKey = "wp-clean-room",
-            Capability = "Template hierarchy and routing",
-            WorkflowSummary = "Resolve route to the best matching template with fallback layers.",
-            ImplementationHint = "Model template precedence in application logic and store template metadata separately from page content.",
-            SuggestedBlocks = ["template-slot", "dynamic-region", "route-layout"]
-        },
-        new()
-        {
-            SourceKey = "wp-clean-room",
-            Capability = "Content revision workflow",
-            WorkflowSummary = "Draft, review, approve, and publish content versions with audit history.",
-            ImplementationHint = "Store immutable revisions and transition events so publish rollback remains safe.",
-            SuggestedBlocks = ["revision-timeline", "approval-gate", "publish-status"]
-        },
-        new()
-        {
-            SourceKey = "elementor-clean-room",
-            Capability = "Visual section/column composition",
-            WorkflowSummary = "Construct pages from nested sections, columns, and widget blocks.",
-            ImplementationHint = "Use JSON schema versioning for block trees and validate depth/width constraints.",
-            SuggestedBlocks = ["section", "column", "widget-container"]
-        },
-        new()
-        {
-            SourceKey = "elementor-clean-room",
-            Capability = "Responsive style controls",
-            WorkflowSummary = "Define per-breakpoint spacing, typography, and visibility controls.",
-            ImplementationHint = "Store style settings as breakpoint maps with a deterministic fallback chain.",
-            SuggestedBlocks = ["responsive-style", "breakpoint-rule", "visibility-toggle"]
-        },
-        new()
-        {
-            SourceKey = "wp-clean-room",
-            Capability = "Plugin-like extension points",
-            WorkflowSummary = "Allow modular feature packs to register capabilities without core rewrites.",
-            ImplementationHint = "Add capability registration contracts and sandbox execution boundaries.",
-            SuggestedBlocks = ["extension-hook", "capability-registration", "feature-toggle"]
-        }
-    ];
-
-    public Task<IReadOnlyList<CmsKnowledgeSource>> ListSourcesAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<CmsKnowledgeSource>> ListSourcesAsync(CancellationToken cancellationToken = default)
     {
-        _ = cancellationToken;
-        return Task.FromResult(Sources);
+        var sources = await db.CmsKnowledgeSources.AsNoTracking().ToListAsync(cancellationToken);
+        return sources.OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    public Task<IReadOnlyList<CmsKnowledgeQueryResult>> SearchAsync(string query, int take = 5, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<CmsKnowledgeEntry>> ListEntriesAsync(Guid? sourceId = null, CancellationToken cancellationToken = default)
     {
-        _ = cancellationToken;
+        var query = db.CmsKnowledgeEntries.AsNoTracking();
+        if (sourceId is { } id)
+        {
+            query = query.Where(e => e.SourceId == id);
+        }
 
+        var entries = await query.ToListAsync(cancellationToken);
+        return entries.OrderBy(e => e.Capability, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    public async Task<IReadOnlyList<CmsKnowledgeQueryResult>> SearchAsync(string query, int take = 5, CancellationToken cancellationToken = default)
+    {
         if (string.IsNullOrWhiteSpace(query))
         {
-            return Task.FromResult<IReadOnlyList<CmsKnowledgeQueryResult>>([]);
+            return [];
         }
 
         var terms = query
@@ -85,14 +37,18 @@ public sealed class CmsKnowledgeService : ICmsKnowledgeService
             .Distinct()
             .ToArray();
 
-        var ranked = Entries
+        var entries = await db.CmsKnowledgeEntries.AsNoTracking().ToListAsync(cancellationToken);
+        var sourcesById = await db.CmsKnowledgeSources.AsNoTracking().ToDictionaryAsync(s => s.Id, cancellationToken);
+
+        var ranked = entries
             .Select(entry => new CmsKnowledgeQueryResult
             {
-                SourceKey = entry.SourceKey,
+                SourceId = entry.SourceId,
+                SourceName = sourcesById.TryGetValue(entry.SourceId, out var source) ? source.Name : "(unknown source)",
                 Capability = entry.Capability,
                 WorkflowSummary = entry.WorkflowSummary,
                 ImplementationHint = entry.ImplementationHint,
-                SuggestedBlocks = entry.SuggestedBlocks,
+                SuggestedBlocks = ParseBlocks(entry.SuggestedBlocksCsv),
                 Score = ScoreEntry(entry, terms)
             })
             .Where(result => result.Score > 0)
@@ -101,8 +57,114 @@ public sealed class CmsKnowledgeService : ICmsKnowledgeService
             .Take(Math.Clamp(take, 1, 20))
             .ToList();
 
-        return Task.FromResult<IReadOnlyList<CmsKnowledgeQueryResult>>(ranked);
+        return ranked;
     }
+
+    public async Task<CmsKnowledgeSource> SaveSourceAsync(CmsKnowledgeSourceEditorModel editor, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(editor);
+        if (string.IsNullOrWhiteSpace(editor.Key)) throw new ArgumentException("Key is required.", nameof(editor));
+        if (string.IsNullOrWhiteSpace(editor.Name)) throw new ArgumentException("Name is required.", nameof(editor));
+
+        var now = DateTimeOffset.UtcNow;
+        var source = editor.SourceId is { } sourceId
+            ? await db.CmsKnowledgeSources.FirstOrDefaultAsync(s => s.Id == sourceId, cancellationToken)
+            : null;
+
+        var isNew = source is null;
+        source ??= new CmsKnowledgeSource
+        {
+            Key = editor.Key.Trim(),
+            Name = editor.Name.Trim(),
+            CreatedAt = now,
+            CreatedBy = "cms-knowledge"
+        };
+
+        source.Key = editor.Key.Trim();
+        source.Name = editor.Name.Trim();
+        source.LicenseNotes = editor.LicenseNotes?.Trim() ?? string.Empty;
+        source.UsageGuidance = editor.UsageGuidance?.Trim() ?? string.Empty;
+        source.UpdatedAt = now;
+        source.UpdatedBy = "cms-knowledge";
+
+        if (isNew)
+        {
+            await db.CmsKnowledgeSources.AddAsync(source, cancellationToken);
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return source;
+    }
+
+    public async Task DeleteSourceAsync(Guid sourceId, CancellationToken cancellationToken = default)
+    {
+        var source = await db.CmsKnowledgeSources.FirstOrDefaultAsync(s => s.Id == sourceId, cancellationToken);
+        if (source is null)
+        {
+            return;
+        }
+
+        var entries = await db.CmsKnowledgeEntries.Where(e => e.SourceId == sourceId).ToListAsync(cancellationToken);
+        db.CmsKnowledgeEntries.RemoveRange(entries);
+        db.CmsKnowledgeSources.Remove(source);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<CmsKnowledgeEntry> SaveEntryAsync(CmsKnowledgeEntryEditorModel editor, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(editor);
+        if (string.IsNullOrWhiteSpace(editor.Capability)) throw new ArgumentException("Capability is required.", nameof(editor));
+
+        var sourceExists = await db.CmsKnowledgeSources.AnyAsync(s => s.Id == editor.SourceId, cancellationToken);
+        if (!sourceExists)
+        {
+            throw new InvalidOperationException("The selected knowledge source no longer exists.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var entry = editor.EntryId is { } entryId
+            ? await db.CmsKnowledgeEntries.FirstOrDefaultAsync(e => e.Id == entryId, cancellationToken)
+            : null;
+
+        var isNew = entry is null;
+        entry ??= new CmsKnowledgeEntry
+        {
+            Capability = editor.Capability.Trim(),
+            CreatedAt = now,
+            CreatedBy = "cms-knowledge"
+        };
+
+        entry.SourceId = editor.SourceId;
+        entry.Capability = editor.Capability.Trim();
+        entry.WorkflowSummary = editor.WorkflowSummary?.Trim() ?? string.Empty;
+        entry.ImplementationHint = editor.ImplementationHint?.Trim() ?? string.Empty;
+        entry.SuggestedBlocksCsv = editor.SuggestedBlocks?.Trim() ?? string.Empty;
+        entry.UpdatedAt = now;
+        entry.UpdatedBy = "cms-knowledge";
+
+        if (isNew)
+        {
+            await db.CmsKnowledgeEntries.AddAsync(entry, cancellationToken);
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return entry;
+    }
+
+    public async Task DeleteEntryAsync(Guid entryId, CancellationToken cancellationToken = default)
+    {
+        var entry = await db.CmsKnowledgeEntries.FirstOrDefaultAsync(e => e.Id == entryId, cancellationToken);
+        if (entry is null)
+        {
+            return;
+        }
+
+        db.CmsKnowledgeEntries.Remove(entry);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string[] ParseBlocks(string csv) =>
+        csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     private static int ScoreEntry(CmsKnowledgeEntry entry, IReadOnlyCollection<string> terms)
     {
@@ -110,7 +172,7 @@ public sealed class CmsKnowledgeService : ICmsKnowledgeService
         var capability = entry.Capability.ToLowerInvariant();
         var summary = entry.WorkflowSummary.ToLowerInvariant();
         var hint = entry.ImplementationHint.ToLowerInvariant();
-        var blocks = string.Join(' ', entry.SuggestedBlocks).ToLowerInvariant();
+        var blocks = entry.SuggestedBlocksCsv.ToLowerInvariant();
 
         foreach (var term in terms)
         {

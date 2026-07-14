@@ -52,6 +52,11 @@ public sealed class CjAdsSyncBackgroundService(
             logger.LogInformation(
                 "CJ Ads: affiliate suggestion sweep complete ({Processed} article(s), {Created} suggestion(s) created)",
                 suggestionResult.ArticlesProcessed, suggestionResult.SuggestionsCreated);
+
+            var commissionResult = await cjAds.SyncCommissionsAsync(ct);
+            logger.LogInformation(
+                "CJ Ads: commission sync complete ({Imported} record(s)) - {Message}",
+                commissionResult.RecordsImported, commissionResult.Message);
         }
         catch (OperationCanceledException)
         {
