@@ -37,6 +37,8 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<NewsItem> NewsItems { get; }
     DbSet<PodcastShow> PodcastShows { get; }
     DbSet<PodcastEpisode> PodcastEpisodes { get; }
+    DbSet<CmsKnowledgeSource> CmsKnowledgeSources { get; }
+    DbSet<CmsKnowledgeEntry> CmsKnowledgeEntries { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
 

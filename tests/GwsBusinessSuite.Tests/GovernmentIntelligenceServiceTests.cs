@@ -129,7 +129,61 @@ public sealed class GovernmentIntelligenceServiceTests
         houseVote.Legislation!.Facts.Should().Contain(x => x.Label == "Georgia delegation" && x.Value.Contains("Allen Yea"));
     }
 
-    private static GovernmentIntelligenceService CreateService()
+    [Fact]
+    public async Task GetSnapshotAsync_ShouldCacheResult_AndNotRefetch_WithoutForceRefresh()
+    {
+        var requestCount = 0;
+        var service = CreateService(onRequest: () => requestCount++);
+
+        await service.GetSnapshotAsync();
+        var countAfterFirst = requestCount;
+        await service.GetSnapshotAsync();
+
+        requestCount.Should().Be(countAfterFirst, "a cached snapshot should serve the second call without refetching anything");
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_ShouldRefetch_WhenForceRefreshIsTrue()
+    {
+        var requestCount = 0;
+        var service = CreateService(onRequest: () => requestCount++);
+
+        await service.GetSnapshotAsync();
+        var countAfterFirst = requestCount;
+        await service.GetSnapshotAsync(forceRefresh: true);
+
+        requestCount.Should().BeGreaterThan(countAfterFirst, "forceRefresh should evict the cache and refetch every section");
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_ShouldReturnEmptyCommunitySection_ButStillPopulateOtherSections_WhenCountyFetchFails()
+    {
+        // GetStringOrNullAsync swallows per-URL fetch failures and returns null, so one
+        // source going down (e.g. the county site) degrades only that section instead of
+        // failing the whole snapshot - State/Federal still come from live-recorded HTML/XML.
+        var service = CreateService(failingUrls: ["https://www.houstoncountyga.gov/"]);
+
+        var snapshot = await service.GetSnapshotAsync(forceRefresh: true);
+
+        snapshot.Community.Announcements.Should().BeEmpty();
+        snapshot.Community.Meetings.Should().BeEmpty();
+        snapshot.State.PressReleases.Should().HaveCount(2);
+        snapshot.Federal.SenateVotes.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_ShouldReturnEmptyStatePressReleases_WhenGovernorSiteFails_ButKeepCommunityAndFederal()
+    {
+        var service = CreateService(failingUrls: ["https://gov.georgia.gov/press-releases"]);
+
+        var snapshot = await service.GetSnapshotAsync(forceRefresh: true);
+
+        snapshot.State.PressReleases.Should().BeEmpty();
+        snapshot.Community.Announcements.Should().HaveCount(2);
+        snapshot.Federal.HouseVotes.Should().ContainSingle();
+    }
+
+    private static GovernmentIntelligenceService CreateService(Action? onRequest = null, HashSet<string>? failingUrls = null)
     {
         var responses = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -369,7 +423,14 @@ public sealed class GovernmentIntelligenceServiceTests
 
         var handler = new RecordingHandler(request =>
         {
+            onRequest?.Invoke();
             var url = request.RequestUri!.AbsoluteUri;
+
+            if (failingUrls?.Contains(url) == true)
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+            }
+
             string? body = null;
             if (url.StartsWith("https://www.legis.ga.gov/api/authentication/token?", StringComparison.OrdinalIgnoreCase))
             {

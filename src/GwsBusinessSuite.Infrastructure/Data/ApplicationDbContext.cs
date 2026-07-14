@@ -39,6 +39,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<NewsItem> NewsItems => Set<NewsItem>();
     public DbSet<PodcastShow> PodcastShows => Set<PodcastShow>();
     public DbSet<PodcastEpisode> PodcastEpisodes => Set<PodcastEpisode>();
+    public DbSet<CmsKnowledgeSource> CmsKnowledgeSources => Set<CmsKnowledgeSource>();
+    public DbSet<CmsKnowledgeEntry> CmsKnowledgeEntries => Set<CmsKnowledgeEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -149,5 +151,102 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<PodcastEpisode>().HasIndex(x => new { x.PodcastShowId, x.PublishedAt });
         modelBuilder.Entity<PodcastEpisode>().HasIndex(x => new { x.PodcastShowId, x.ExternalId });
+
+        modelBuilder.Entity<CmsKnowledgeSource>().HasIndex(x => x.Key).IsUnique();
+        modelBuilder.Entity<CmsKnowledgeEntry>().HasIndex(x => x.SourceId);
+        SeedCmsKnowledge(modelBuilder);
+    }
+
+    // Migrates the module's original hardcoded in-memory reference data (2 sources, 5
+    // entries) into the database as the initial seed, so wiring it up to real
+    // persistence doesn't lose the existing content. CreatedAt/CreatedBy must be
+    // literal (not DateTimeOffset.UtcNow) since HasData snapshots values at migration-
+    // generation time.
+    private static void SeedCmsKnowledge(ModelBuilder modelBuilder)
+    {
+        var seededAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        const string seededBy = "seed";
+
+        var wpSourceId = new Guid("11111111-1111-1111-1111-111111111101");
+        var elementorSourceId = new Guid("11111111-1111-1111-1111-111111111102");
+
+        modelBuilder.Entity<CmsKnowledgeSource>().HasData(
+            new CmsKnowledgeSource
+            {
+                Id = wpSourceId,
+                Key = "wp-clean-room",
+                Name = "WordPress Workflow Reference (Clean Room)",
+                LicenseNotes = "Do not copy source code or proprietary assets. Reimplement behavior only.",
+                UsageGuidance = "Use as product behavior inspiration for workflows, content modeling, and admin UX.",
+                CreatedAt = seededAt,
+                CreatedBy = seededBy
+            },
+            new CmsKnowledgeSource
+            {
+                Id = elementorSourceId,
+                Key = "elementor-clean-room",
+                Name = "Elementor Workflow Reference (Clean Room)",
+                LicenseNotes = "Do not clone protected UI/brand assets. Build original controls and layouts.",
+                UsageGuidance = "Use as inspiration for visual editing flow, section nesting, and style controls.",
+                CreatedAt = seededAt,
+                CreatedBy = seededBy
+            });
+
+        modelBuilder.Entity<CmsKnowledgeEntry>().HasData(
+            new CmsKnowledgeEntry
+            {
+                Id = new Guid("22222222-2222-2222-2222-222222222201"),
+                SourceId = wpSourceId,
+                Capability = "Template hierarchy and routing",
+                WorkflowSummary = "Resolve route to the best matching template with fallback layers.",
+                ImplementationHint = "Model template precedence in application logic and store template metadata separately from page content.",
+                SuggestedBlocksCsv = "template-slot,dynamic-region,route-layout",
+                CreatedAt = seededAt,
+                CreatedBy = seededBy
+            },
+            new CmsKnowledgeEntry
+            {
+                Id = new Guid("22222222-2222-2222-2222-222222222202"),
+                SourceId = wpSourceId,
+                Capability = "Content revision workflow",
+                WorkflowSummary = "Draft, review, approve, and publish content versions with audit history.",
+                ImplementationHint = "Store immutable revisions and transition events so publish rollback remains safe.",
+                SuggestedBlocksCsv = "revision-timeline,approval-gate,publish-status",
+                CreatedAt = seededAt,
+                CreatedBy = seededBy
+            },
+            new CmsKnowledgeEntry
+            {
+                Id = new Guid("22222222-2222-2222-2222-222222222203"),
+                SourceId = elementorSourceId,
+                Capability = "Visual section/column composition",
+                WorkflowSummary = "Construct pages from nested sections, columns, and widget blocks.",
+                ImplementationHint = "Use JSON schema versioning for block trees and validate depth/width constraints.",
+                SuggestedBlocksCsv = "section,column,widget-container",
+                CreatedAt = seededAt,
+                CreatedBy = seededBy
+            },
+            new CmsKnowledgeEntry
+            {
+                Id = new Guid("22222222-2222-2222-2222-222222222204"),
+                SourceId = elementorSourceId,
+                Capability = "Responsive style controls",
+                WorkflowSummary = "Define per-breakpoint spacing, typography, and visibility controls.",
+                ImplementationHint = "Store style settings as breakpoint maps with a deterministic fallback chain.",
+                SuggestedBlocksCsv = "responsive-style,breakpoint-rule,visibility-toggle",
+                CreatedAt = seededAt,
+                CreatedBy = seededBy
+            },
+            new CmsKnowledgeEntry
+            {
+                Id = new Guid("22222222-2222-2222-2222-222222222205"),
+                SourceId = wpSourceId,
+                Capability = "Plugin-like extension points",
+                WorkflowSummary = "Allow modular feature packs to register capabilities without core rewrites.",
+                ImplementationHint = "Add capability registration contracts and sandbox execution boundaries.",
+                SuggestedBlocksCsv = "extension-hook,capability-registration,feature-toggle",
+                CreatedAt = seededAt,
+                CreatedBy = seededBy
+            });
     }
 }

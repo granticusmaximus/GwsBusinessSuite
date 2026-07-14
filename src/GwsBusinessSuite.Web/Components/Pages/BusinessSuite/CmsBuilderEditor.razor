@@ -4,12 +4,14 @@
 @implements IAsyncDisposable
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.CmsBuilder
+@using GwsBusinessSuite.Application.CmsKnowledge
 @using GwsBusinessSuite.Domain.Entities
 @using System.Text.Json
 @inject ICmsBuilderService CmsBuilderService
 @inject IGlobalBlockService GlobalBlockService
 @inject GlobalBlockResolver GlobalBlockResolver
 @inject IMediaLibraryService MediaLibraryService
+@inject ICmsKnowledgeService CmsKnowledgeService
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 @inject ILogger<CmsBuilderEditor> Logger
@@ -98,6 +100,9 @@ else
             <button class="studio-tab @(_leftTab == "global" ? "is-active" : "")" @onclick='() => _leftTab = "global"'>
                 <i class="bi bi-globe2 me-1"></i>Global
             </button>
+            <button class="studio-tab @(_leftTab == "reference" ? "is-active" : "")" @onclick='() => _leftTab = "reference"'>
+                <i class="bi bi-journal-richtext me-1"></i>Reference
+            </button>
             <button class="studio-tab @(_leftTab == "layers" ? "is-active" : "")" @onclick='() => _leftTab = "layers"'>
                 <i class="bi bi-layers me-1"></i>Layers
             </button>
@@ -165,6 +170,47 @@ else
                                         <i class="bi bi-trash"></i>
                                     </button>
                                 </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        else if (_leftTab == "reference")
+        {
+            <div class="studio-panel-section">
+                <div class="studio-section-eyebrow mb-2 px-1">Clean-room workflow notes, not implementation</div>
+                <div class="d-flex gap-2 mb-2">
+                    <input class="form-control form-control-sm" placeholder="e.g. revision workflow, responsive style..."
+                           value="@_referenceQuery" @oninput="OnReferenceQueryInput" @onkeydown="OnReferenceQueryKeyDown" />
+                    <button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0" @onclick="RunReferenceSearchAsync" disabled="@string.IsNullOrWhiteSpace(_referenceQuery)">
+                        Search
+                    </button>
+                </div>
+                @if (_referenceResults.Count == 0)
+                {
+                    <div class="studio-empty-card">
+                        <p>@(_referenceSearched ? "No matches. Try different words, or add notes in the Builder Reference Library (Tools > Builder Reference)." : "Search for a capability (e.g. \"template routing\", \"nested sections\") to see clean-room workflow notes and suggested block types.")</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="studio-layer-list">
+                        @foreach (var result in _referenceResults)
+                        {
+                            <div class="studio-layer-item flex-column align-items-start py-2">
+                                <div class="fw-semibold small">@result.Capability <span class="badge text-bg-light">@result.SourceName</span></div>
+                                <div class="small text-secondary">@result.WorkflowSummary</div>
+                                <div class="small">@result.ImplementationHint</div>
+                                @if (result.SuggestedBlocks.Length > 0)
+                                {
+                                    <div class="mt-1">
+                                        @foreach (var block in result.SuggestedBlocks)
+                                        {
+                                            <span class="badge text-bg-secondary me-1">@block</span>
+                                        }
+                                    </div>
+                                }
                             </div>
                         }
                     </div>
@@ -995,6 +1041,34 @@ else
     private string _leftTab = "widgets";
     private string _previewViewport = "desktop";
     private long _previewTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    private string _referenceQuery = string.Empty;
+    private List<CmsKnowledgeQueryResult> _referenceResults = new();
+    private bool _referenceSearched;
+
+    private void OnReferenceQueryInput(ChangeEventArgs e) => _referenceQuery = e.Value?.ToString() ?? string.Empty;
+
+    private async Task OnReferenceQueryKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await RunReferenceSearchAsync();
+        }
+    }
+
+    private async Task RunReferenceSearchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_referenceQuery)) return;
+
+        try
+        {
+            _referenceResults = (await CmsKnowledgeService.SearchAsync(_referenceQuery, take: 8)).ToList();
+            _referenceSearched = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "CMS knowledge reference search failed.");
+        }
+    }
 
     // ── Computed ──────────────────────────────────────────────────────────
     private int TotalWidgetCount => _layout.Sections

@@ -1,0 +1,373 @@
+@page "/admin/cms-knowledge"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.CmsKnowledge
+@using GwsBusinessSuite.Domain.Entities
+@inject ICmsKnowledgeService KnowledgeService
+@inject IJSRuntime JS
+@inject ILogger<CmsKnowledgeBase> Logger
+
+<PageTitle>Builder Reference Library</PageTitle>
+
+<div class="page-header">
+    <h1><i class="bi bi-journal-richtext me-2 text-primary"></i>Builder Reference Library</h1>
+    <p>
+        Clean-room workflow notes (not copied source/assets) that the CMS builder's editor can
+        search for capability suggestions while you're building a page.
+    </p>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+}
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-info" role="alert">@StatusMessage</div>
+}
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white border-bottom py-3">
+        <span class="fw-semibold">Try a search</span>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-2 mb-3">
+            <input class="form-control" placeholder="e.g. responsive style, revision workflow, template routing..."
+                   value="@SearchQuery" @oninput="e => SearchQuery = e.Value?.ToString() ?? string.Empty" />
+            <button class="btn btn-primary flex-shrink-0" @onclick="RunSearchAsync" disabled="@string.IsNullOrWhiteSpace(SearchQuery)">Search</button>
+        </div>
+        @if (SearchResults.Count > 0)
+        {
+            <ul class="list-group list-group-flush">
+                @foreach (var result in SearchResults)
+                {
+                    <li class="list-group-item">
+                        <div class="fw-semibold">@result.Capability <span class="badge text-bg-light">@result.SourceName</span></div>
+                        <div class="small text-secondary">@result.WorkflowSummary</div>
+                        <div class="small">@result.ImplementationHint</div>
+                        @if (result.SuggestedBlocks.Length > 0)
+                        {
+                            <div class="mt-1">
+                                @foreach (var block in result.SuggestedBlocks)
+                                {
+                                    <span class="badge text-bg-secondary me-1">@block</span>
+                                }
+                            </div>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+        else if (_searched)
+        {
+            <p class="text-secondary mb-0">No matches.</p>
+        }
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
+                <span class="fw-semibold">Sources</span>
+                <button class="btn btn-sm btn-outline-primary" @onclick="CreateNewSource">
+                    <i class="bi bi-plus-lg me-1"></i>New Source
+                </button>
+            </div>
+            <div class="card-body p-0">
+                <div class="list-group list-group-flush">
+                    @foreach (var source in Sources)
+                    {
+                        <button type="button"
+                                class="list-group-item list-group-item-action @(SelectedSourceId == source.Id ? "active" : string.Empty)"
+                                @onclick="() => SelectSourceAsync(source.Id)">
+                            <div class="fw-semibold">@source.Name</div>
+                            <div class="small @(SelectedSourceId == source.Id ? "text-white-50" : "text-secondary")">@source.Key</div>
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white border-bottom py-3">
+                <span class="fw-semibold">@(SourceEditor.SourceId.HasValue ? "Edit Source" : "New Source")</span>
+            </div>
+            <div class="card-body">
+                <EditForm Model="SourceEditor" OnValidSubmit="SaveSourceAsync">
+                    <DataAnnotationsValidator />
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">Key</label>
+                            <InputText class="form-control" @bind-Value="SourceEditor.Key" placeholder="e.g. shopify-clean-room" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">Name</label>
+                            <InputText class="form-control" @bind-Value="SourceEditor.Name" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small fw-semibold">License Notes</label>
+                            <InputTextArea class="form-control" rows="2" @bind-Value="SourceEditor.LicenseNotes" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small fw-semibold">Usage Guidance</label>
+                            <InputTextArea class="form-control" rows="2" @bind-Value="SourceEditor.UsageGuidance" />
+                        </div>
+                    </div>
+                    <div class="mt-3 d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">Save Source</button>
+                        <button type="button" class="btn btn-outline-secondary" @onclick="CreateNewSource">Reset</button>
+                        @if (SourceEditor.SourceId.HasValue)
+                        {
+                            <button type="button" class="btn btn-outline-danger ms-auto" @onclick="DeleteSourceAsync">Delete Source &amp; Entries</button>
+                        }
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+
+        @if (SelectedSourceId.HasValue)
+        {
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white border-bottom py-3">
+                    <span class="fw-semibold">Entries for this source</span>
+                </div>
+                <div class="card-body p-0">
+                    @if (Entries.Count == 0)
+                    {
+                        <div class="p-3 text-secondary small">No entries yet.</div>
+                    }
+                    else
+                    {
+                        <ul class="list-group list-group-flush">
+                            @foreach (var entry in Entries)
+                            {
+                                <li class="list-group-item d-flex justify-content-between align-items-start gap-2">
+                                    <div>
+                                        <div class="fw-semibold">@entry.Capability</div>
+                                        <div class="small text-secondary">@entry.WorkflowSummary</div>
+                                    </div>
+                                    <div class="d-flex gap-1 flex-shrink-0">
+                                        <button class="btn btn-xs btn-outline-secondary" @onclick="() => EditEntry(entry)">Edit</button>
+                                        <button class="btn btn-xs btn-outline-danger" @onclick="() => DeleteEntryAsync(entry.Id)">Delete</button>
+                                    </div>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+            </div>
+
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white border-bottom py-3">
+                    <span class="fw-semibold">@(EntryEditor.EntryId.HasValue ? "Edit Entry" : "New Entry")</span>
+                </div>
+                <div class="card-body">
+                    <EditForm Model="EntryEditor" OnValidSubmit="SaveEntryAsync">
+                        <DataAnnotationsValidator />
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <label class="form-label small fw-semibold">Capability</label>
+                                <InputText class="form-control" @bind-Value="EntryEditor.Capability" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label small fw-semibold">Workflow Summary</label>
+                                <InputTextArea class="form-control" rows="2" @bind-Value="EntryEditor.WorkflowSummary" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label small fw-semibold">Implementation Hint</label>
+                                <InputTextArea class="form-control" rows="2" @bind-Value="EntryEditor.ImplementationHint" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label small fw-semibold">Suggested Blocks <span class="text-muted">(comma-separated)</span></label>
+                                <InputText class="form-control" @bind-Value="EntryEditor.SuggestedBlocks" />
+                            </div>
+                        </div>
+                        <div class="mt-3 d-flex gap-2">
+                            <button type="submit" class="btn btn-primary">Save Entry</button>
+                            <button type="button" class="btn btn-outline-secondary" @onclick="() => CreateNewEntry()">Reset</button>
+                        </div>
+                    </EditForm>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<CmsKnowledgeSource> Sources { get; set; } = new();
+    private List<CmsKnowledgeEntry> Entries { get; set; } = new();
+    private Guid? SelectedSourceId { get; set; }
+    private CmsKnowledgeSourceEditorModel SourceEditor { get; set; } = new();
+    private CmsKnowledgeEntryEditorModel EntryEditor { get; set; } = new();
+    private string SearchQuery { get; set; } = string.Empty;
+    private List<CmsKnowledgeQueryResult> SearchResults { get; set; } = new();
+    private bool _searched;
+    private string StatusMessage { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSourcesAsync();
+    }
+
+    private async Task LoadSourcesAsync()
+    {
+        try
+        {
+            Sources = (await KnowledgeService.ListSourcesAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load CMS knowledge sources.");
+            ErrorMessage = $"Unable to load sources. {ex.Message}";
+        }
+    }
+
+    private async Task SelectSourceAsync(Guid sourceId)
+    {
+        SelectedSourceId = sourceId;
+        var source = Sources.FirstOrDefault(s => s.Id == sourceId);
+        if (source is not null)
+        {
+            SourceEditor = new CmsKnowledgeSourceEditorModel
+            {
+                SourceId = source.Id,
+                Key = source.Key,
+                Name = source.Name,
+                LicenseNotes = source.LicenseNotes,
+                UsageGuidance = source.UsageGuidance
+            };
+        }
+
+        Entries = (await KnowledgeService.ListEntriesAsync(sourceId)).ToList();
+        CreateNewEntry(sourceId);
+    }
+
+    private void CreateNewSource()
+    {
+        SelectedSourceId = null;
+        SourceEditor = new CmsKnowledgeSourceEditorModel();
+        Entries = new();
+        StatusMessage = string.Empty;
+        ErrorMessage = string.Empty;
+    }
+
+    private void CreateNewEntry(Guid? sourceId = null)
+    {
+        EntryEditor = new CmsKnowledgeEntryEditorModel { SourceId = sourceId ?? SelectedSourceId ?? Guid.Empty };
+    }
+
+    private void EditEntry(CmsKnowledgeEntry entry)
+    {
+        EntryEditor = new CmsKnowledgeEntryEditorModel
+        {
+            EntryId = entry.Id,
+            SourceId = entry.SourceId,
+            Capability = entry.Capability,
+            WorkflowSummary = entry.WorkflowSummary,
+            ImplementationHint = entry.ImplementationHint,
+            SuggestedBlocks = entry.SuggestedBlocksCsv
+        };
+    }
+
+    private async Task SaveSourceAsync()
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        try
+        {
+            var saved = await KnowledgeService.SaveSourceAsync(SourceEditor);
+            StatusMessage = $"Saved '{saved.Name}'.";
+            await LoadSourcesAsync();
+            await SelectSourceAsync(saved.Id);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to save CMS knowledge source.");
+            ErrorMessage = $"Unable to save source. {ex.Message}";
+        }
+    }
+
+    private async Task DeleteSourceAsync()
+    {
+        if (!SourceEditor.SourceId.HasValue) return;
+
+        var confirmed = await JS.InvokeAsync<bool>("confirm", "Delete this source and all of its entries? This cannot be undone.");
+        if (!confirmed) return;
+
+        try
+        {
+            await KnowledgeService.DeleteSourceAsync(SourceEditor.SourceId.Value);
+            StatusMessage = "Source deleted.";
+            CreateNewSource();
+            await LoadSourcesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to delete CMS knowledge source.");
+            ErrorMessage = $"Unable to delete source. {ex.Message}";
+        }
+    }
+
+    private async Task SaveEntryAsync()
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        try
+        {
+            var saved = await KnowledgeService.SaveEntryAsync(EntryEditor);
+            StatusMessage = $"Saved '{saved.Capability}'.";
+            if (SelectedSourceId.HasValue)
+            {
+                Entries = (await KnowledgeService.ListEntriesAsync(SelectedSourceId.Value)).ToList();
+            }
+            CreateNewEntry();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to save CMS knowledge entry.");
+            ErrorMessage = $"Unable to save entry. {ex.Message}";
+        }
+    }
+
+    private async Task DeleteEntryAsync(Guid entryId)
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", "Delete this entry? This cannot be undone.");
+        if (!confirmed) return;
+
+        try
+        {
+            await KnowledgeService.DeleteEntryAsync(entryId);
+            if (SelectedSourceId.HasValue)
+            {
+                Entries = (await KnowledgeService.ListEntriesAsync(SelectedSourceId.Value)).ToList();
+            }
+            StatusMessage = "Entry deleted.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to delete CMS knowledge entry.");
+            ErrorMessage = $"Unable to delete entry. {ex.Message}";
+        }
+    }
+
+    private async Task RunSearchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SearchQuery)) return;
+
+        try
+        {
+            SearchResults = (await KnowledgeService.SearchAsync(SearchQuery, take: 10)).ToList();
+            _searched = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "CMS knowledge search failed.");
+            ErrorMessage = $"Search failed. {ex.Message}";
+        }
+    }
+}
