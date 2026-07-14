@@ -9,6 +9,7 @@ public sealed class UserView
     public string Role { get; init; } = string.Empty;
     public bool IsActive { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
+    public DateTimeOffset? LockoutEndAt { get; init; }
 }
 
 public sealed class CreateUserInput

@@ -17,6 +17,13 @@ public sealed class AppUser : AuditableEntity
     public string PasswordHash          { get; set; } = string.Empty;
     public string Role                  { get; set; } = AppRoles.Author;
     public bool   IsActive              { get; set; } = true;
+
+    // Reset to 0 on a successful login; incremented on each failed attempt while not
+    // already locked out. Reaching Application.Users.LoginLockoutPolicy.MaxFailedAttempts
+    // sets LockoutEndAt and resets this back to 0, so counting starts fresh after the
+    // lockout expires (or is cleared early by an admin via UnlockUserAsync).
+    public int FailedLoginAttempts      { get; set; }
+    public DateTimeOffset? LockoutEndAt { get; set; }
 }
 
 public static class SeoArticleDraftStatuses

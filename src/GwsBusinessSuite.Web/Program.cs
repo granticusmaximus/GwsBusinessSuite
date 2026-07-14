@@ -8,6 +8,7 @@ using GwsBusinessSuite.Infrastructure;
 using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.Resume;
 using GwsBusinessSuite.Application.Settings;
+using GwsBusinessSuite.Application.Users;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Web.Services;
 using GwsBusinessSuite.Web.Components;
@@ -276,8 +277,7 @@ app.MapHealthChecks("/health").AllowAnonymous();
 app.MapPost("/auth/login", async (
     HttpContext httpContext,
     IAntiforgery antiforgery,
-    IDbContextFactory<ApplicationDbContext> dbFactory,
-    IPasswordHasher<AppUser> hasher) =>
+    IUserManagementService userManagementService) =>
 {
     try
     {
@@ -292,17 +292,26 @@ app.MapPost("/auth/login", async (
     var username  = form["username"].ToString().Trim();
     var password  = form["password"].ToString();
     var returnUrl = form["returnUrl"].ToString();
+    var safeReturn = IsSafeLocalPath(returnUrl) ? returnUrl : "/admin";
 
-    await using var db = await dbFactory.CreateDbContextAsync();
-    var user = await db.AppUsers
-        .FirstOrDefaultAsync(u => u.Username == username && u.IsActive);
+    // Per-account lockout (LoginLockoutPolicy) lives behind AttemptLoginAsync, on top of
+    // the "login" rate-limit policy's per-IP window - the global limiter alone doesn't
+    // stop a distributed attempt targeting one specific account.
+    var attempt = await userManagementService.AttemptLoginAsync(username, password);
 
-    if (user is null || hasher.VerifyHashedPassword(user, user.PasswordHash, password) == PasswordVerificationResult.Failed)
+    if (attempt.IsLockedOut)
     {
-        var safeReturn = IsSafeLocalPath(returnUrl) ? returnUrl : "/admin";
+        var minutes = Math.Max(1, (int)Math.Ceiling((attempt.LockoutRemaining ?? TimeSpan.Zero).TotalMinutes));
+        return Results.LocalRedirect(
+            $"/admin/login?error=locked&minutes={minutes}&returnUrl={Uri.EscapeDataString(safeReturn)}");
+    }
+
+    if (!attempt.Succeeded || attempt.User is null)
+    {
         return Results.LocalRedirect($"/admin/login?error=invalid&returnUrl={Uri.EscapeDataString(safeReturn)}");
     }
 
+    var user = attempt.User;
     var claims = new List<Claim>
     {
         new(ClaimTypes.Name, user.Username),

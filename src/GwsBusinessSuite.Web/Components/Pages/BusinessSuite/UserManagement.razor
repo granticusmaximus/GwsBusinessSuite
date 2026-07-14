@@ -124,6 +124,12 @@
                                     <span class="badge @(user.IsActive ? "text-bg-success" : "text-bg-secondary")">
                                         @(user.IsActive ? "Active" : "Inactive")
                                     </span>
+                                    @if (IsLockedOut(user))
+                                    {
+                                        <span class="badge text-bg-warning ms-1" title="Too many failed login attempts">
+                                            Locked until @user.LockoutEndAt!.Value.ToLocalTime().ToString("h:mm tt")
+                                        </span>
+                                    }
                                 </td>
                                 <td class="small text-secondary">@user.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</td>
                                 <td class="text-end">
@@ -156,6 +162,14 @@
                                                     disabled="@(IsBusy || IsLastAdmin(user))">
                                                 @(user.IsActive ? "Deactivate" : "Activate")
                                             </button>
+                                            @if (IsLockedOut(user))
+                                            {
+                                                <button class="btn btn-sm btn-outline-warning"
+                                                        @onclick="() => Unlock(user.Id)"
+                                                        disabled="@IsBusy">
+                                                    Unlock
+                                                </button>
+                                            }
                                         }
                                     </div>
                                 </td>
@@ -340,6 +354,29 @@
     private bool IsLastAdmin(UserView user) =>
         user.Role == AppRoles.Admin &&
         Users.Count(u => u.Role == AppRoles.Admin && u.IsActive) <= 1;
+
+    private static bool IsLockedOut(UserView user) =>
+        user.LockoutEndAt is { } lockoutEnd && lockoutEnd > DateTimeOffset.UtcNow;
+
+    private async Task Unlock(Guid id)
+    {
+        ErrorMessage  = string.Empty;
+        StatusMessage = string.Empty;
+        IsBusy        = true;
+        try
+        {
+            var result = await UserManagementService.UnlockUserAsync(id);
+            if (!result.Succeeded)
+            {
+                ErrorMessage = result.FailureReason ?? "Unable to unlock user.";
+                return;
+            }
+
+            StatusMessage = "Account unlocked.";
+            await LoadUsers();
+        }
+        finally { IsBusy = false; }
+    }
 
     private static string GetRoleBadgeClass(string role) => role switch
     {

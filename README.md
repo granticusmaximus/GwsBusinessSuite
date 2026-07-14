@@ -39,6 +39,32 @@ dotnet test GwsBusinessSuite.slnx
 dotnet run --project src/GwsBusinessSuite.Web/GwsBusinessSuite.Web.csproj
 ```
 
+## Database Migrations
+
+`ApplicationDbContext` (`src/GwsBusinessSuite.Infrastructure`) requires the
+`--project`/`--startup-project` flags below every time, since the DbContext lives in
+Infrastructure but the connection string/EF tooling entry point is the Web project.
+The wrapper scripts in `scripts/` set those for you:
+
+```bash
+./scripts/add-migration.sh <MigrationName>   # dotnet ef migrations add
+./scripts/remove-migration.sh                # dotnet ef migrations remove (last, unapplied one)
+./scripts/update-database.sh                 # dotnet ef database update (optional - the app
+                                              # applies pending migrations automatically on
+                                              # startup via dbContext.Database.MigrateAsync())
+```
+
+Equivalent raw commands, if you need to pass additional `dotnet ef` flags not covered
+by the scripts:
+
+```bash
+dotnet ef migrations add <MigrationName> \
+  --project src/GwsBusinessSuite.Infrastructure --startup-project src/GwsBusinessSuite.Web
+```
+
+Always review the generated migration file(s) under
+`src/GwsBusinessSuite.Infrastructure/Migrations/` before committing.
+
 ## Key Documents
 
 - `docs/ARCHITECTURE.md`

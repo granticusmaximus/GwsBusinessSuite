@@ -52,6 +52,9 @@
     [SupplyParameterFromQuery(Name = "error")]
     public string? Error { get; set; }
 
+    [SupplyParameterFromQuery(Name = "minutes")]
+    public int? LockoutMinutes { get; set; }
+
     [CascadingParameter]
     private Task<AuthenticationState>? AuthenticationStateTask { get; set; }
 
@@ -88,6 +91,11 @@
         else if (string.Equals(Error, "ratelimit", StringComparison.OrdinalIgnoreCase))
         {
             ErrorMessage = "Too many login attempts. Please try again in 15 minutes.";
+        }
+        else if (string.Equals(Error, "locked", StringComparison.OrdinalIgnoreCase))
+        {
+            var minutesText = LockoutMinutes is > 0 ? $"{LockoutMinutes} minute(s)" : "a few minutes";
+            ErrorMessage = $"Too many failed attempts on this account. Try again in {minutesText}, or contact an administrator to unlock it.";
         }
         else
         {

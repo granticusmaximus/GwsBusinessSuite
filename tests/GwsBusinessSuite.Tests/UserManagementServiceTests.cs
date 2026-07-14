@@ -254,6 +254,141 @@ public sealed class UserManagementServiceTests
         result.Succeeded.Should().BeTrue();
     }
 
+    [Fact]
+    public async Task AttemptLoginAsync_ShouldSucceed_ForValidCredentials()
+    {
+        using var connection = await OpenConnectionAsync();
+        var service = CreateService(connection);
+        await service.CreateUserAsync(new CreateUserInput { Username = "jsmith", Password = "correct-horse-battery", Role = AppRoles.Author });
+
+        var result = await service.AttemptLoginAsync("jsmith", "correct-horse-battery");
+
+        result.Succeeded.Should().BeTrue();
+        result.IsLockedOut.Should().BeFalse();
+        result.User.Should().NotBeNull();
+        result.User!.Username.Should().Be("jsmith");
+    }
+
+    [Fact]
+    public async Task AttemptLoginAsync_ShouldFail_ForNonexistentUsername_WithoutReportingLockout()
+    {
+        using var connection = await OpenConnectionAsync();
+        var service = CreateService(connection);
+
+        var result = await service.AttemptLoginAsync("nobody", "whatever-password");
+
+        result.Succeeded.Should().BeFalse();
+        result.IsLockedOut.Should().BeFalse();
+        result.User.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task AttemptLoginAsync_ShouldFail_ForAnInactiveUser()
+    {
+        using var connection = await OpenConnectionAsync();
+        var service = CreateService(connection);
+        await service.CreateUserAsync(new CreateUserInput { Username = "jsmith", Password = "correct-horse-battery", Role = AppRoles.Author });
+        var userId = (await service.ListUsersAsync()).Single().Id;
+        await service.ToggleActiveAsync(userId);
+
+        var result = await service.AttemptLoginAsync("jsmith", "correct-horse-battery");
+
+        result.Succeeded.Should().BeFalse();
+        result.IsLockedOut.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task AttemptLoginAsync_ShouldIncrementFailedAttempts_OnWrongPassword_WithoutLockingOutBeforeTheThreshold()
+    {
+        using var connection = await OpenConnectionAsync();
+        var service = CreateService(connection);
+        await service.CreateUserAsync(new CreateUserInput { Username = "jsmith", Password = "correct-horse-battery", Role = AppRoles.Author });
+
+        for (var i = 0; i < LoginLockoutPolicy.MaxFailedAttempts - 1; i++)
+        {
+            var attempt = await service.AttemptLoginAsync("jsmith", "wrong-password");
+            attempt.Succeeded.Should().BeFalse();
+            attempt.IsLockedOut.Should().BeFalse();
+        }
+
+        await using var db = CreateReadDbContext(connection);
+        (await db.AppUsers.SingleAsync()).FailedLoginAttempts.Should().Be(LoginLockoutPolicy.MaxFailedAttempts - 1);
+    }
+
+    [Fact]
+    public async Task AttemptLoginAsync_ShouldLockAccount_AfterReachingMaxFailedAttempts_ThenRejectEvenTheCorrectPassword()
+    {
+        using var connection = await OpenConnectionAsync();
+        var service = CreateService(connection);
+        await service.CreateUserAsync(new CreateUserInput { Username = "jsmith", Password = "correct-horse-battery", Role = AppRoles.Author });
+
+        LoginAttemptResult lastAttempt = null!;
+        for (var i = 0; i < LoginLockoutPolicy.MaxFailedAttempts; i++)
+        {
+            lastAttempt = await service.AttemptLoginAsync("jsmith", "wrong-password");
+        }
+
+        lastAttempt.Succeeded.Should().BeFalse();
+        lastAttempt.IsLockedOut.Should().BeTrue();
+        lastAttempt.LockoutRemaining.Should().NotBeNull();
+
+        // Even the correct password is rejected while locked out - the lockout check
+        // runs before password verification.
+        var correctPasswordAttempt = await service.AttemptLoginAsync("jsmith", "correct-horse-battery");
+        correctPasswordAttempt.Succeeded.Should().BeFalse();
+        correctPasswordAttempt.IsLockedOut.Should().BeTrue();
+
+        await using var db = CreateReadDbContext(connection);
+        var user = await db.AppUsers.SingleAsync();
+        user.FailedLoginAttempts.Should().Be(0, "the counter resets once a lockout is triggered");
+        user.LockoutEndAt.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task UnlockUserAsync_ShouldClearLockoutAndFailedAttempts()
+    {
+        using var connection = await OpenConnectionAsync();
+        var service = CreateService(connection);
+        await service.CreateUserAsync(new CreateUserInput { Username = "jsmith", Password = "correct-horse-battery", Role = AppRoles.Author });
+        var userId = (await service.ListUsersAsync()).Single().Id;
+        for (var i = 0; i < LoginLockoutPolicy.MaxFailedAttempts; i++)
+        {
+            await service.AttemptLoginAsync("jsmith", "wrong-password");
+        }
+
+        var unlockResult = await service.UnlockUserAsync(userId);
+        unlockResult.Succeeded.Should().BeTrue();
+
+        await using var db = CreateReadDbContext(connection);
+        var user = await db.AppUsers.SingleAsync(u => u.Id == userId);
+        user.LockoutEndAt.Should().BeNull();
+        user.FailedLoginAttempts.Should().Be(0);
+
+        var loginAfterUnlock = await service.AttemptLoginAsync("jsmith", "correct-horse-battery");
+        loginAfterUnlock.Succeeded.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ResetPasswordAsync_ShouldAlsoClearAnyExistingLockout()
+    {
+        using var connection = await OpenConnectionAsync();
+        var service = CreateService(connection);
+        await service.CreateUserAsync(new CreateUserInput { Username = "jsmith", Password = "correct-horse-battery", Role = AppRoles.Author });
+        var userId = (await service.ListUsersAsync()).Single().Id;
+        for (var i = 0; i < LoginLockoutPolicy.MaxFailedAttempts; i++)
+        {
+            await service.AttemptLoginAsync("jsmith", "wrong-password");
+        }
+
+        var resetResult = await service.ResetPasswordAsync(userId, "brand-new-password-123");
+        resetResult.Succeeded.Should().BeTrue();
+
+        await using var db = CreateReadDbContext(connection);
+        var user = await db.AppUsers.SingleAsync(u => u.Id == userId);
+        user.LockoutEndAt.Should().BeNull();
+        user.FailedLoginAttempts.Should().Be(0);
+    }
+
     private static UserManagementService CreateService(SqliteConnection connection) =>
         new(
             new TestDbContextFactory(connection),

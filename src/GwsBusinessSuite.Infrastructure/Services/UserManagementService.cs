@@ -132,6 +132,11 @@ public sealed class UserManagementService(
             }
 
             user.PasswordHash = passwordHasher.HashPassword(user, newPassword);
+            // An admin actively resetting the password is a deliberate account-recovery
+            // action - waiting out a stale lockout timer on top of that would just be
+            // confusing, so clear it here rather than requiring a separate Unlock click.
+            user.FailedLoginAttempts = 0;
+            user.LockoutEndAt = null;
             user.UpdatedAt = DateTimeOffset.UtcNow;
             user.UpdatedBy = performedBy;
             await db.SaveChangesAsync(cancellationToken);
@@ -142,6 +147,76 @@ public sealed class UserManagementService(
         {
             logger.LogError(ex, "Failed to reset password for user {Id}.", userId);
             return UserManagementResult.Failure($"Unable to reset password. {ex.Message}");
+        }
+    }
+
+    public async Task<LoginAttemptResult> AttemptLoginAsync(string username, string password, CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var trimmedUsername = (username ?? string.Empty).Trim();
+        var user = await db.AppUsers
+            .FirstOrDefaultAsync(u => u.Username == trimmedUsername && u.IsActive, cancellationToken);
+
+        if (user is null)
+        {
+            return new LoginAttemptResult(false, null, false, null);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (user.LockoutEndAt is { } lockoutEnd && lockoutEnd > now)
+        {
+            // Reject before hashing the candidate password at all while locked out - no
+            // point paying the hashing cost, and it keeps the lockout check from being a
+            // timing oracle for whether the password would otherwise have been correct.
+            return new LoginAttemptResult(false, null, true, lockoutEnd - now);
+        }
+
+        var verifyResult = passwordHasher.VerifyHashedPassword(user, user.PasswordHash, password ?? string.Empty);
+        if (verifyResult == PasswordVerificationResult.Failed)
+        {
+            user.FailedLoginAttempts += 1;
+            var justLockedOut = user.FailedLoginAttempts >= LoginLockoutPolicy.MaxFailedAttempts;
+            if (justLockedOut)
+            {
+                user.LockoutEndAt = now.Add(LoginLockoutPolicy.LockoutDuration);
+                user.FailedLoginAttempts = 0;
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+            return new LoginAttemptResult(false, null, justLockedOut, justLockedOut ? LoginLockoutPolicy.LockoutDuration : null);
+        }
+
+        user.FailedLoginAttempts = 0;
+        user.LockoutEndAt = null;
+        await db.SaveChangesAsync(cancellationToken);
+
+        return new LoginAttemptResult(true, ToView(user), false, null);
+    }
+
+    public async Task<UserManagementResult> UnlockUserAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var performedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
+            var user = await db.AppUsers.FindAsync([userId], cancellationToken);
+            if (user is null)
+            {
+                return UserManagementResult.Failure("User not found.");
+            }
+
+            user.FailedLoginAttempts = 0;
+            user.LockoutEndAt = null;
+            user.UpdatedAt = DateTimeOffset.UtcNow;
+            user.UpdatedBy = performedBy;
+            await db.SaveChangesAsync(cancellationToken);
+
+            return UserManagementResult.Success();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to unlock user {Id}.", userId);
+            return UserManagementResult.Failure($"Unable to unlock user. {ex.Message}");
         }
     }
 
@@ -200,6 +275,7 @@ public sealed class UserManagementService(
         Username = user.Username,
         Role = user.Role,
         IsActive = user.IsActive,
-        CreatedAt = user.CreatedAt
+        CreatedAt = user.CreatedAt,
+        LockoutEndAt = user.LockoutEndAt
     };
 }
