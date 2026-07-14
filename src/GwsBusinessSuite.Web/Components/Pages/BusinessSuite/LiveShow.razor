@@ -2,25 +2,39 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @attribute [Authorize(Policy = "AdminOnly")]
 @using Microsoft.JSInterop
+@using GwsBusinessSuite.Application.LiveShow
 @inject IJSRuntime JS
+@inject ILiveShowService LiveShowService
+@inject NavigationManager Navigation
 @inject ILogger<LiveShow> Logger
 @implements IAsyncDisposable
 
 <PageTitle>Live Show Studio</PageTitle>
 
-<div class="page-header">
-    <div class="studio-kicker">Broadcast studio</div>
-    <h1><i class="bi bi-camera-video-fill me-2 text-primary"></i>Live Show</h1>
-    <p class="mb-0">Open your camera and microphone for a live pre-broadcast preview — just like YouTube's studio.</p>
+<div class="page-header d-flex align-items-start justify-content-between gap-3">
+    <div>
+        <div class="studio-kicker">Broadcast studio</div>
+        <h1><i class="bi bi-camera-video-fill me-2 text-primary"></i>Live Show</h1>
+        <p class="mb-0">Open your camera and microphone, then go live to a small group of invited viewers over a direct connection. Shows are recorded automatically.</p>
+    </div>
+    <a class="btn btn-outline-secondary btn-sm" href="/admin/live-show-recordings">
+        <i class="bi bi-collection-play me-1"></i>Past Shows
+    </a>
 </div>
 
 <div class="live-studio">
     <div class="live-stage">
         <div class="live-camera-shell @(IsStreaming ? "is-live" : string.Empty)">
-            @if (IsStreaming)
+            @if (IsLive)
             {
                 <div class="live-badge">
-                    <span class="live-dot"></span> LIVE PREVIEW
+                    <span class="live-dot"></span> LIVE
+                </div>
+            }
+            else if (IsStreaming)
+            {
+                <div class="live-badge">
+                    <span class="live-dot"></span> PREVIEW ONLY
                 </div>
             }
 
@@ -38,7 +52,7 @@
                             <i class="bi bi-camera-video"></i>
                         </div>
                         <h2>Ready to go live?</h2>
-                        <p>Click <strong>Start Live Show</strong> below to open your camera and microphone preview.</p>
+                        <p>Click <strong>Start Preview</strong> below to open your camera and microphone.</p>
                     </div>
                 </div>
             }
@@ -50,13 +64,21 @@
                 <i class="bi bi-exclamation-triangle-fill me-2"></i>@ErrorMessage
             </div>
         }
+
+        @if (IsLive)
+        {
+            <div class="alert alert-success mt-3">
+                <i class="bi bi-link-45deg me-2"></i>Share this link with viewers:
+                <a href="@InviteUrl" target="_blank">@InviteUrl</a>
+            </div>
+        }
     </div>
 
     <div class="live-controls">
         @if (!IsStreaming)
         {
-            <button class="btn btn-primary live-start-btn" @onclick="StartAsync">
-                <i class="bi bi-broadcast me-2"></i>Start Live Show
+            <button class="btn btn-primary live-start-btn" @onclick="StartPreviewAsync">
+                <i class="bi bi-camera-video me-2"></i>Start Preview
             </button>
         }
         else
@@ -76,9 +98,18 @@
                     <span>@(IsCameraOn ? "Camera On" : "Camera Off")</span>
                 </button>
 
-                <button class="live-control-btn is-stop" @onclick="StopAsync" title="End live show">
+                @if (!IsLive)
+                {
+                    <input class="form-control form-control-sm live-title-input" @bind="ShowTitle" placeholder="Show title" style="max-width:12rem;" />
+                    <button class="live-control-btn is-live" @onclick="GoLiveAsync" disabled="@IsBusy">
+                        <i class="bi bi-broadcast"></i>
+                        <span>Go Live</span>
+                    </button>
+                }
+
+                <button class="live-control-btn is-stop" @onclick="StopAsync" title="End live show" disabled="@IsBusy">
                     <i class="bi bi-stop-circle-fill"></i>
-                    <span>End Show</span>
+                    <span>@(IsLive ? "End Show" : "Close Preview")</span>
                 </button>
             </div>
         }
@@ -88,16 +119,16 @@
 @code {
     private ElementReference _videoRef;
     private bool IsStreaming { get; set; }
+    private bool IsLive { get; set; }
     private bool IsMicOn { get; set; } = true;
     private bool IsCameraOn { get; set; } = true;
+    private bool IsBusy { get; set; }
     private string ErrorMessage { get; set; } = string.Empty;
+    private string ShowTitle { get; set; } = string.Empty;
+    private Guid? SessionId { get; set; }
+    private string InviteUrl { get; set; } = string.Empty;
 
-    protected override Task OnAfterRenderAsync(bool firstRender)
-    {
-        return base.OnAfterRenderAsync(firstRender);
-    }
-
-    private async Task StartAsync()
+    private async Task StartPreviewAsync()
     {
         ErrorMessage = string.Empty;
 
@@ -122,10 +153,44 @@
         }
     }
 
-    private async Task StopAsync()
+    private async Task GoLiveAsync()
     {
+        IsBusy = true;
+        ErrorMessage = string.Empty;
         try
         {
+            var session = await LiveShowService.StartSessionAsync(ShowTitle);
+            SessionId = session.Id;
+            InviteUrl = new Uri(new Uri(Navigation.BaseUri), $"watch/{session.InviteToken}").ToString();
+
+            await JS.InvokeVoidAsync("liveShow.startBroadcast", session.Id);
+            IsLive = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to go live.");
+            ErrorMessage = $"Could not go live: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task StopAsync()
+    {
+        IsBusy = true;
+        try
+        {
+            if (IsLive)
+            {
+                await JS.InvokeVoidAsync("liveShow.stopBroadcast");
+                if (SessionId is { } id)
+                {
+                    await LiveShowService.EndSessionAsync(id);
+                }
+            }
+
             await JS.InvokeVoidAsync("liveShow.stop");
         }
         catch (Exception ex)
@@ -134,9 +199,13 @@
         }
 
         IsStreaming = false;
+        IsLive = false;
         IsMicOn = true;
         IsCameraOn = true;
+        SessionId = null;
+        InviteUrl = string.Empty;
         ErrorMessage = string.Empty;
+        IsBusy = false;
     }
 
     private async Task ToggleMic()
@@ -153,7 +222,16 @@
 
     public async ValueTask DisposeAsync()
     {
-        if (IsStreaming)
+        if (IsLive && SessionId is { } id)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("liveShow.stopBroadcast");
+                await LiveShowService.EndSessionAsync(id);
+            }
+            catch { /* best-effort cleanup on dispose */ }
+        }
+        else if (IsStreaming)
         {
             try { await JS.InvokeVoidAsync("liveShow.stop"); }
             catch { /* best-effort cleanup on dispose */ }

@@ -1,0 +1,305 @@
+@page "/admin/app-generation"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContentAccess")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.AppGeneration
+@using GwsBusinessSuite.Application.CmsBuilder
+@using GwsBusinessSuite.Domain.Entities
+@inject IAppGenerationService AppGenerationService
+@inject ICmsBuilderService CmsBuilderService
+@inject ILogger<AppGenerationBuilder> Logger
+
+<PageTitle>AI App Builder</PageTitle>
+
+<div class="page-header">
+    <h1><i class="bi bi-magic me-2 text-primary"></i>AI App Builder</h1>
+    <p>Chat with Ollama to draft new pages for one of your sites, then submit the plan for an admin to review and approve. Nothing goes live until it's approved.</p>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@ErrorMessage</div>
+    </div>
+}
+
+<div class="row g-4">
+    <div class="col-lg-4">
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white border-bottom py-3 fw-semibold">
+                <i class="bi bi-plus-circle me-2"></i>Start a New Request
+            </div>
+            <div class="card-body">
+                <label class="form-label fw-semibold small">Target Site</label>
+                <select class="form-select form-select-sm mb-3" @bind="NewSiteId">
+                    <option value="">Choose a site...</option>
+                    @foreach (var site in Sites)
+                    {
+                        <option value="@site.Id">@site.Name</option>
+                    }
+                </select>
+
+                <label class="form-label fw-semibold small">What should it generate?</label>
+                <textarea class="form-control form-control-sm mb-3" rows="4" @bind="NewPrompt"
+                          placeholder="e.g. A pricing page with three tiers and a comparison table"></textarea>
+
+                <button class="btn btn-primary btn-sm w-100" @onclick="StartNewAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewSiteId) || string.IsNullOrWhiteSpace(NewPrompt))">
+                    <i class="bi bi-chat-dots me-1"></i>Start Chat
+                </button>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3 fw-semibold">
+                <i class="bi bi-list-ul me-2"></i>Requests
+            </div>
+            <div class="list-group list-group-flush">
+                @foreach (var request in Requests)
+                {
+                    <button type="button"
+                            class="list-group-item list-group-item-action @(SelectedRequestId == request.Id ? "active" : "")"
+                            @onclick="() => SelectAsync(request.Id)">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <span class="fw-semibold text-truncate" style="max-width:11rem;">@request.Title</span>
+                            @RenderStatusBadge(request.Status)
+                        </div>
+                        <div class="small @(SelectedRequestId == request.Id ? "text-white-50" : "text-muted")">@request.TargetSiteName</div>
+                    </button>
+                }
+                @if (Requests.Count == 0)
+                {
+                    <div class="list-group-item text-muted small">No requests yet.</div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-8">
+        @if (Selected is null)
+        {
+            <div class="card border-0 shadow-sm">
+                <div class="card-body text-center text-muted py-5">
+                    <i class="bi bi-chat-square-text display-6 d-block mb-2"></i>
+                    Select a request on the left, or start a new one.
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="fw-semibold">@Selected.Title</div>
+                        <div class="small text-muted">@Selected.TargetSiteName</div>
+                    </div>
+                    @RenderStatusBadge(Selected.Status)
+                </div>
+                <div class="card-body">
+                    <div class="d-flex flex-column gap-2 mb-3" style="max-height:24rem;overflow-y:auto;">
+                        @foreach (var message in Selected.Messages)
+                        {
+                            var isUser = message.Role == AppGenerationMessageRoles.User;
+                            <div class="d-flex @(isUser ? "justify-content-end" : "justify-content-start")">
+                                <div class="p-2 rounded-3 @(isUser ? "bg-primary text-white" : "bg-light border") small" style="max-width:80%;white-space:pre-wrap;">
+                                    @message.Content
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    @if (Selected.GeneratedPages.Count > 0)
+                    {
+                        <div class="alert alert-info small mb-3">
+                            <i class="bi bi-file-earmark-richtext me-1"></i>
+                            Current plan: @string.Join(", ", Selected.GeneratedPages.Select(p => p.Title))
+                        </div>
+                    }
+
+                    @if (Selected.Status == AppGenerationRequestStatuses.Drafting)
+                    {
+                        <div class="input-group mb-2">
+                            <textarea class="form-control" rows="2" @bind="ChatMessage" placeholder="Reply to keep refining the plan..."></textarea>
+                            <button class="btn btn-outline-primary" @onclick="SendAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(ChatMessage))">
+                                <i class="bi bi-send"></i>
+                            </button>
+                        </div>
+                        <button class="btn btn-success btn-sm" @onclick="SubmitAsync" disabled="@(IsBusy || Selected.GeneratedPages.Count == 0)">
+                            <i class="bi bi-send-check me-1"></i>Submit for Approval
+                        </button>
+                    }
+                    else if (Selected.Status == AppGenerationRequestStatuses.PendingApproval)
+                    {
+                        <div class="alert alert-warning small mb-0">
+                            <i class="bi bi-hourglass-split me-1"></i>Waiting on an admin to review this plan.
+                        </div>
+                    }
+                    else if (Selected.Status == AppGenerationRequestStatuses.Approved)
+                    {
+                        <div class="alert alert-success small mb-0">
+                            <i class="bi bi-check-circle me-1"></i>Approved by @Selected.ApprovedBy on @Selected.ApprovedAt?.ToLocalTime().ToString("g") &mdash; pages were added to the site as drafts.
+                        </div>
+                    }
+                    else if (Selected.Status == AppGenerationRequestStatuses.Rejected)
+                    {
+                        <div class="alert alert-secondary small mb-0">
+                            <i class="bi bi-x-circle me-1"></i>Rejected@(string.IsNullOrWhiteSpace(Selected.RejectionReason) ? "." : $": {Selected.RejectionReason}")
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<CmsSite> Sites { get; set; } = [];
+    private List<AppGenerationRequestView> Requests { get; set; } = [];
+    private AppGenerationRequestView? Selected { get; set; }
+    private Guid? SelectedRequestId { get; set; }
+    private string NewSiteId { get; set; } = string.Empty;
+    private string NewPrompt { get; set; } = string.Empty;
+    private string ChatMessage { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+    private bool IsBusy { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Sites = (await CmsBuilderService.ListSitesAsync()).ToList();
+        await RefreshListAsync();
+    }
+
+    private async Task RefreshListAsync()
+    {
+        Requests = (await AppGenerationService.ListRequestsAsync()).ToList();
+        if (SelectedRequestId is { } id)
+        {
+            Selected = Requests.FirstOrDefault(r => r.Id == id);
+        }
+    }
+
+    private async Task SelectAsync(Guid requestId)
+    {
+        SelectedRequestId = requestId;
+        Selected = await AppGenerationService.GetRequestAsync(requestId);
+        ChatMessage = string.Empty;
+    }
+
+    private async Task StartNewAsync()
+    {
+        if (!Guid.TryParse(NewSiteId, out var siteId))
+        {
+            ErrorMessage = "Choose a target site first.";
+            return;
+        }
+
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            var result = await AppGenerationService.StartAsync(new StartAppGenerationInput(siteId, string.Empty, NewPrompt));
+            if (!result.Success)
+            {
+                ErrorMessage = result.ErrorMessage ?? "Could not start the request.";
+                return;
+            }
+
+            NewPrompt = string.Empty;
+            NewSiteId = string.Empty;
+            await RefreshListAsync();
+            if (result.Request is not null)
+            {
+                await SelectAsync(result.Request.Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to start an app generation request.");
+            ErrorMessage = $"Unexpected error: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task SendAsync()
+    {
+        if (Selected is null || string.IsNullOrWhiteSpace(ChatMessage))
+        {
+            return;
+        }
+
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            var result = await AppGenerationService.SendMessageAsync(Selected.Id, ChatMessage);
+            if (!result.Success)
+            {
+                ErrorMessage = result.ErrorMessage ?? "Could not send the message.";
+            }
+
+            ChatMessage = string.Empty;
+            await RefreshListAsync();
+            Selected = await AppGenerationService.GetRequestAsync(Selected.Id);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to send a chat message.");
+            ErrorMessage = $"Unexpected error: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (Selected is null)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            var result = await AppGenerationService.SubmitForApprovalAsync(Selected.Id);
+            if (!result.Success)
+            {
+                ErrorMessage = result.ErrorMessage ?? "Could not submit for approval.";
+            }
+
+            await RefreshListAsync();
+            Selected = await AppGenerationService.GetRequestAsync(Selected.Id);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to submit an app generation request for approval.");
+            ErrorMessage = $"Unexpected error: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private static RenderFragment RenderStatusBadge(string status) => builder =>
+    {
+        var (css, label) = status switch
+        {
+            AppGenerationRequestStatuses.Drafting => ("bg-secondary", "Drafting"),
+            AppGenerationRequestStatuses.PendingApproval => ("bg-warning text-dark", "Pending Approval"),
+            AppGenerationRequestStatuses.Approved => ("bg-success", "Approved"),
+            AppGenerationRequestStatuses.Rejected => ("bg-danger", "Rejected"),
+            _ => ("bg-secondary", status)
+        };
+
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"badge rounded-pill {css}");
+        builder.AddContent(2, label);
+        builder.CloseElement();
+    };
+}

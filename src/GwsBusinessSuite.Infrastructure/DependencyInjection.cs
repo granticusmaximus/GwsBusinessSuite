@@ -1,6 +1,7 @@
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.AffiliateAnalytics;
 using GwsBusinessSuite.Application.AffiliateSuggestions;
+using GwsBusinessSuite.Application.AppGeneration;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.CmsKnowledge;
 using GwsBusinessSuite.Application.Comments;
@@ -10,6 +11,7 @@ using GwsBusinessSuite.Application.DigitalOcean;
 using GwsBusinessSuite.Application.CjAds;
 using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.GovernmentIntelligence;
+using GwsBusinessSuite.Application.LiveShow;
 using GwsBusinessSuite.Application.NewsIntelligence;
 using GwsBusinessSuite.Application.Podcasts;
 using GwsBusinessSuite.Application.Resume;
@@ -105,11 +107,17 @@ public static class DependencyInjection
         services.AddScoped<IResumePdfService, ResumePdfService>();
         services.AddScoped<IAffiliateSuggestionService, AffiliateSuggestionService>();
         services.AddScoped<IAffiliateAnalyticsService, AffiliateAnalyticsService>();
+        services.AddScoped<IAppGenerationService, AppGenerationService>();
         // Same persisted volume as the SQLite DB and DP keys in production
         // (docker-compose.yml mounts gwssuite-data:/app/data); a relative dev-local path
         // otherwise (see appsettings.Development.json).
         var wikiRepoPath = configuration["Wiki:RepoPath"] ?? "/app/data/wiki-repo";
         services.AddScoped<IWikiService>(sp => new WikiService(sp.GetRequiredService<IAppDbContext>(), wikiRepoPath));
+        var liveShowRecordingsPath = configuration["LiveShow:RecordingsPath"] ?? "/app/data/live-show-recordings";
+        services.AddScoped<ILiveShowService>(sp => new LiveShowService(
+            sp.GetRequiredService<IAppDbContext>(),
+            liveShowRecordingsPath,
+            sp.GetService<ICurrentUserAccessor>()));
         services.AddHttpClient<INewsIntelligenceService, NewsIntelligenceService>(client =>
         {
             client.DefaultRequestHeaders.UserAgent.ParseAdd(

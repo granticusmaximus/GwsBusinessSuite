@@ -39,6 +39,10 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<PodcastEpisode> PodcastEpisodes { get; }
     DbSet<CmsKnowledgeSource> CmsKnowledgeSources { get; }
     DbSet<CmsKnowledgeEntry> CmsKnowledgeEntries { get; }
+    DbSet<AppGenerationRequest> AppGenerationRequests { get; }
+    DbSet<AppGenerationMessage> AppGenerationMessages { get; }
+    DbSet<LiveShowSession> LiveShowSessions { get; }
+    DbSet<LiveShowRecording> LiveShowRecordings { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
 

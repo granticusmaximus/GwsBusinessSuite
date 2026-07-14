@@ -1,0 +1,74 @@
+@page "/admin/live-show-recordings"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.LiveShow
+@inject ILiveShowService LiveShowService
+
+<PageTitle>Past Live Shows</PageTitle>
+
+<div class="page-header d-flex align-items-start justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-collection-play me-2 text-primary"></i>Past Live Shows</h1>
+        <p class="mb-0">Recordings captured automatically while broadcasting from the Live Show studio.</p>
+    </div>
+    <a class="btn btn-outline-secondary btn-sm" href="/admin/live-show">
+        <i class="bi bi-camera-video me-1"></i>Back to Studio
+    </a>
+</div>
+
+@if (Recordings.Count == 0)
+{
+    <div class="card border-0 shadow-sm">
+        <div class="card-body text-center text-muted py-5">
+            <i class="bi bi-camera-reels display-6 d-block mb-2"></i>
+            No recordings yet.
+        </div>
+    </div>
+}
+else
+{
+    <div class="row g-4">
+        @foreach (var recording in Recordings)
+        {
+            <div class="col-md-6">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="ratio ratio-16x9 bg-dark">
+                        <video controls preload="metadata" src="/admin/api/live-show/recordings/@recording.Id/file"></video>
+                    </div>
+                    <div class="card-body">
+                        <div class="fw-semibold">@recording.SessionTitle</div>
+                        <div class="small text-muted">
+                            @recording.CreatedAt.ToLocalTime().ToString("g") &middot;
+                            @FormatDuration(recording.DurationSeconds) &middot;
+                            @FormatSize(recording.FileSizeBytes)
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<LiveShowRecordingView> Recordings { get; set; } = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        Recordings = (await LiveShowService.ListRecordingsAsync()).ToList();
+    }
+
+    private static string FormatDuration(int seconds)
+    {
+        var span = TimeSpan.FromSeconds(seconds);
+        return span.Hours > 0 ? $"{span.Hours}h {span.Minutes}m" : $"{span.Minutes}m {span.Seconds}s";
+    }
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        >= 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024 * 1024):F1} GB",
+        >= 1024 * 1024 => $"{bytes / (1024.0 * 1024):F1} MB",
+        >= 1024 => $"{bytes / 1024.0:F1} KB",
+        _ => $"{bytes} B"
+    };
+}

@@ -1,0 +1,77 @@
+@page "/watch/{Token}"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@attribute [AllowAnonymous]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.JSInterop
+@using GwsBusinessSuite.Application.LiveShow
+@inject IJSRuntime JS
+@inject ILiveShowService LiveShowService
+@implements IAsyncDisposable
+
+<PageTitle>Live Show</PageTitle>
+
+<div class="live-watch-shell d-flex flex-column align-items-center justify-content-center" style="min-height:100vh;padding:2rem;">
+    @if (SessionTitle is null)
+    {
+        <div class="text-center text-muted">
+            <i class="bi bi-camera-video-off display-4 d-block mb-3"></i>
+            <h2>This link isn't live right now</h2>
+            <p>The invite link may have expired, or the show hasn't started yet.</p>
+        </div>
+    }
+    else
+    {
+        <div style="width:100%;max-width:960px;">
+            <h1 class="h4 mb-3">@SessionTitle</h1>
+            <div class="ratio ratio-16x9 bg-dark rounded-3 overflow-hidden">
+                <video @ref="_videoRef" autoplay playsinline controls style="width:100%;height:100%;object-fit:contain;"></video>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(StatusMessage))
+            {
+                <div class="alert alert-info mt-3">@StatusMessage</div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public string Token { get; set; } = string.Empty;
+
+    private ElementReference _videoRef;
+    private string? SessionTitle { get; set; }
+    private string StatusMessage { get; set; } = string.Empty;
+    private bool _joined;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var session = await LiveShowService.ValidateInviteTokenAsync(Token);
+        SessionTitle = session?.Title;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && SessionTitle is not null)
+        {
+            try
+            {
+                var sessionId = await JS.InvokeAsync<string?>("liveShow.startViewer", _videoRef, Token);
+                _joined = sessionId is not null;
+                StatusMessage = _joined ? string.Empty : "The show just ended.";
+            }
+            catch (Exception)
+            {
+                StatusMessage = "Could not connect to the broadcast.";
+            }
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_joined)
+        {
+            try { await JS.InvokeVoidAsync("liveShow.stopViewer"); }
+            catch { /* best-effort cleanup on dispose */ }
+        }
+    }
+}

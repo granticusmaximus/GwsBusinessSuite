@@ -41,6 +41,10 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<PodcastEpisode> PodcastEpisodes => Set<PodcastEpisode>();
     public DbSet<CmsKnowledgeSource> CmsKnowledgeSources => Set<CmsKnowledgeSource>();
     public DbSet<CmsKnowledgeEntry> CmsKnowledgeEntries => Set<CmsKnowledgeEntry>();
+    public DbSet<AppGenerationRequest> AppGenerationRequests => Set<AppGenerationRequest>();
+    public DbSet<AppGenerationMessage> AppGenerationMessages => Set<AppGenerationMessage>();
+    public DbSet<LiveShowSession> LiveShowSessions => Set<LiveShowSession>();
+    public DbSet<LiveShowRecording> LiveShowRecordings => Set<LiveShowRecording>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -155,6 +159,24 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<CmsKnowledgeSource>().HasIndex(x => x.Key).IsUnique();
         modelBuilder.Entity<CmsKnowledgeEntry>().HasIndex(x => x.SourceId);
         SeedCmsKnowledge(modelBuilder);
+
+        modelBuilder.Entity<AppGenerationRequest>().HasIndex(x => x.Status);
+        modelBuilder.Entity<AppGenerationRequest>().HasIndex(x => x.TargetSiteId);
+        modelBuilder.Entity<AppGenerationMessage>()
+            .HasOne(x => x.Request)
+            .WithMany(x => x.Messages)
+            .HasForeignKey(x => x.AppGenerationRequestId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<AppGenerationMessage>().HasIndex(x => new { x.AppGenerationRequestId, x.CreatedAt });
+
+        modelBuilder.Entity<LiveShowSession>().HasIndex(x => x.Status);
+        modelBuilder.Entity<LiveShowSession>().HasIndex(x => x.InviteToken).IsUnique();
+        modelBuilder.Entity<LiveShowRecording>()
+            .HasOne<LiveShowSession>()
+            .WithMany()
+            .HasForeignKey(x => x.SessionId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<LiveShowRecording>().HasIndex(x => x.SessionId);
     }
 
     // Migrates the module's original hardcoded in-memory reference data (2 sources, 5

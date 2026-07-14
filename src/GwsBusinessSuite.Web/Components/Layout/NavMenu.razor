@@ -1,3 +1,4 @@
+@using GwsBusinessSuite.Application.AppGeneration
 @using GwsBusinessSuite.Application.Comments
 @using GwsBusinessSuite.Application.ContentStudio
 @using GwsBusinessSuite.Application.Crm
@@ -10,6 +11,7 @@
 @inject IContentStudioService ContentStudioService
 @inject IDockerHealthService DockerHealthService
 @inject ICrmService CrmService
+@inject IAppGenerationService AppGenerationService
 
 <nav class="gws-nav">
     @if (IsAdmin)
@@ -38,6 +40,14 @@
         <span class="gws-nav-link-copy">
             <span>Generate with AI@(_pendingDraftCount > 0 ? $" ({_pendingDraftCount})" : "")</span>
             <small>Ollama-assisted drafts</small>
+        </span>
+    </NavLink>
+
+    <NavLink class="gws-nav-link" href="admin/app-generation" title="AI App Builder">
+        <i class="bi bi-stars"></i>
+        <span class="gws-nav-link-copy">
+            <span>AI App Builder</span>
+            <small>Chat-draft new site pages</small>
         </span>
     </NavLink>
 
@@ -127,6 +137,14 @@
             <span class="gws-nav-link-copy">
                 <span>Affiliate Suggestions</span>
                 <small>AI-matched ad placements</small>
+            </span>
+        </NavLink>
+
+        <NavLink class="gws-nav-link" href="admin/app-generation-queue" title="AI App Generation Queue">
+            <i class="bi bi-inbox-fill"></i>
+            <span class="gws-nav-link-copy">
+                <span>AI App Queue@(_pendingAppGenerationCount > 0 ? $" ({_pendingAppGenerationCount})" : "")</span>
+                <small>Review generated page plans</small>
             </span>
         </NavLink>
 
@@ -220,6 +238,7 @@
     private int _unreadDockerAlertCount;
     private int _pendingDraftCount;
     private int _dueFollowUpCount;
+    private int _pendingAppGenerationCount;
 
     protected override async Task OnInitializedAsync()
     {
@@ -232,6 +251,10 @@
             _unreadDockerAlertCount = await DockerHealthService.CountUnreadAlertsAsync();
             _pendingDraftCount = await ContentStudioService.CountPendingReviewAsync();
             _dueFollowUpCount = await CrmService.CountDueFollowUpsAsync();
+            if (_role == AppRoles.Admin)
+            {
+                _pendingAppGenerationCount = await AppGenerationService.CountPendingApprovalAsync();
+            }
         }
     }
 

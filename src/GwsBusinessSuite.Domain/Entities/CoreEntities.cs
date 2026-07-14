@@ -607,3 +607,79 @@ public sealed class CmsKnowledgeEntry : AuditableEntity
     // Comma-separated (same convention as Article.Tags / WatchedTopic.Keywords).
     public string SuggestedBlocksCsv { get; set; } = string.Empty;
 }
+
+public static class AppGenerationRequestStatuses
+{
+    public const string Drafting = "Drafting";
+    public const string PendingApproval = "PendingApproval";
+    public const string Approved = "Approved";
+    public const string Rejected = "Rejected";
+}
+
+public static class AppGenerationMessageRoles
+{
+    public const string User = "User";
+    public const string Assistant = "Assistant";
+}
+
+// An Author-initiated chat session that iteratively refines what pages should be added
+// to TargetSiteId. GeneratedPagesJson holds the latest agreed-upon List<GeneratedPageSpec>
+// (see Application.AppGeneration) snapshotted at each assistant turn - submitting for
+// approval just freezes whatever that snapshot was at the time. Nothing is written to
+// CmsPages until an Admin approves (see IAppGenerationService.ApproveAsync).
+public sealed class AppGenerationRequest : AuditableEntity
+{
+    public Guid TargetSiteId { get; set; }
+    public required string Title { get; set; }
+    public string Status { get; set; } = AppGenerationRequestStatuses.Drafting;
+    public string GeneratedPagesJson { get; set; } = "[]";
+    public string? ApprovedBy { get; set; }
+    public DateTimeOffset? ApprovedAt { get; set; }
+    public DateTimeOffset? RejectedAt { get; set; }
+    public string RejectionReason { get; set; } = string.Empty;
+    public ICollection<AppGenerationMessage> Messages { get; set; } = new List<AppGenerationMessage>();
+}
+
+// Append-only chat transcript row - CreatedAt/CreatedBy from AuditableEntity double as
+// "when" and "who sent it" for User-role rows; Assistant-role rows use CreatedBy = "ollama".
+public sealed class AppGenerationMessage : AuditableEntity
+{
+    public Guid AppGenerationRequestId { get; set; }
+    public string Role { get; set; } = AppGenerationMessageRoles.User;
+    public required string Content { get; set; }
+    public AppGenerationRequest? Request { get; set; }
+}
+
+public static class LiveShowSessionStatuses
+{
+    public const string Live = "Live";
+    public const string Ended = "Ended";
+}
+
+// A single broadcaster (Admin-only) going live to a handful of invited viewers over a
+// direct WebRTC mesh (see LiveShowHub) - InviteToken is one shared link for every viewer
+// of this session, not per-viewer, since the plan is a small trusted audience rather than
+// public/anonymous discovery. Only one session is ever Live at a time in practice, but
+// nothing here enforces that structurally - LiveShowService.StartSessionAsync ends any
+// still-open prior session first.
+public sealed class LiveShowSession : AuditableEntity
+{
+    public required string Title { get; set; }
+    public string Status { get; set; } = LiveShowSessionStatuses.Live;
+    public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? EndedAt { get; set; }
+    public required string InviteToken { get; set; }
+    public DateTimeOffset InviteExpiresAt { get; set; }
+}
+
+// One MediaRecorder-captured file per session, written by the broadcaster's own browser
+// tab as it streams (see liveShow.js) and uploaded in sequential chunks to
+// /admin/api/live-show/{sessionId}/recording-chunk, then finalized once the show ends.
+public sealed class LiveShowRecording : AuditableEntity
+{
+    public Guid SessionId { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public int DurationSeconds { get; set; }
+    public long FileSizeBytes { get; set; }
+    public string ContentType { get; set; } = "video/webm";
+}

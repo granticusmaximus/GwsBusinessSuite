@@ -3,6 +3,7 @@ using GwsBusinessSuite.Application.AffiliateAnalytics;
 using GwsBusinessSuite.Application.Articles;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.Comments;
+using GwsBusinessSuite.Application.LiveShow;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure;
 using GwsBusinessSuite.Application.ContentStudio;
@@ -12,6 +13,7 @@ using GwsBusinessSuite.Application.Users;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Web.Services;
 using GwsBusinessSuite.Web.Components;
+using GwsBusinessSuite.Web.Hubs;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -35,6 +37,7 @@ builder.Services.AddRazorComponents()
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserAccessor, CurrentUserAccessor>();
+builder.Services.AddSignalR();
 
 // Content Studio article generation can take several minutes against Ollama
 // (first-time model load especially). Extend the circuit's disconnect grace
@@ -273,6 +276,11 @@ app.UseRateLimiter();
 // Plain-text Healthy/Degraded/Unhealthy with no detail disclosure, intended for the deploy
 // pipeline's post-deploy smoke test and any external uptime monitor.
 app.MapHealthChecks("/health").AllowAnonymous();
+
+// AllowAnonymous at the connection level - unauthenticated viewers must be able to open
+// this connection to call JoinAsViewer(inviteToken); JoinAsBroadcaster separately checks
+// Context.User's role itself (see LiveShowHub) since the two roles share one hub.
+app.MapHub<LiveShowHub>("/hubs/live-show").AllowAnonymous();
 
 app.MapPost("/auth/login", async (
     HttpContext httpContext,
@@ -1070,6 +1078,38 @@ app.MapGet("/media/{id:guid}", async (Guid id, IMediaLibraryService mediaLibrary
     var content = await mediaLibraryService.GetContentAsync(id);
     return content is null ? Results.NotFound() : Results.Bytes(content.Value.Content, content.Value.ContentType);
 }).AllowAnonymous().RequireRateLimiting("public-read");
+
+// Raw request body is one MediaRecorder chunk (see liveShow.js's ondataavailable), appended
+// to the session's on-disk recording file in the order the browser calls this - the browser
+// awaits each POST before sending the next, so there's no need to buffer/reorder here.
+app.MapPost("/admin/api/live-show/{sessionId:guid}/recording-chunk", async (
+    Guid sessionId,
+    HttpRequest request,
+    ILiveShowService liveShowService) =>
+{
+    await liveShowService.AppendRecordingChunkAsync(sessionId, request.Body);
+    return Results.Ok();
+}).RequireAuthorization("AdminOnly");
+
+app.MapPost("/admin/api/live-show/{sessionId:guid}/finalize-recording", async (
+    Guid sessionId,
+    int durationSeconds,
+    ILiveShowService liveShowService) =>
+{
+    await liveShowService.FinalizeRecordingAsync(sessionId, durationSeconds);
+    return Results.Ok();
+}).RequireAuthorization("AdminOnly");
+
+// enableRangeProcessing lets the <video> player seek/scrub instead of only playing linearly.
+app.MapGet("/admin/api/live-show/recordings/{recordingId:guid}/file", async (
+    Guid recordingId,
+    ILiveShowService liveShowService) =>
+{
+    var filePath = await liveShowService.GetRecordingFilePathAsync(recordingId);
+    return filePath is null
+        ? Results.NotFound()
+        : Results.File(filePath, "video/webm", enableRangeProcessing: true);
+}).RequireAuthorization("AdminOnly");
 
 // ── CMS Pages JSON API ────────────────────────────────────────────────────
 // Used by the React frontend (apps/public-site) to fetch page content for

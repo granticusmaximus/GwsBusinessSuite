@@ -3,6 +3,7 @@ using System;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GwsBusinessSuite.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260714194244_AddAppGeneration")]
+    partial class AddAppGeneration
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
@@ -1409,99 +1412,6 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.ToTable("GlobalBlocks");
                 });
 
-            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.LiveShowRecording", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ContentType")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("CreatedBy")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("DurationSeconds")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("FileName")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<long>("FileSizeBytes")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<Guid>("SessionId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset?>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SessionId");
-
-                    b.ToTable("LiveShowRecordings");
-                });
-
-            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.LiveShowSession", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("CreatedBy")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset?>("EndedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("InviteExpiresAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("InviteToken")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("StartedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset?>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("InviteToken")
-                        .IsUnique();
-
-                    b.HasIndex("Status");
-
-                    b.ToTable("LiveShowSessions");
-                });
-
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.MediaAsset", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2248,15 +2158,6 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.HasOne("GwsBusinessSuite.Domain.Entities.Contact", null)
                         .WithMany()
                         .HasForeignKey("ContactId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.LiveShowRecording", b =>
-                {
-                    b.HasOne("GwsBusinessSuite.Domain.Entities.LiveShowSession", null)
-                        .WithMany()
-                        .HasForeignKey("SessionId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

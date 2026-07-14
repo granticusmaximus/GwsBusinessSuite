@@ -1,0 +1,205 @@
+@page "/admin/app-generation-queue"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.AppGeneration
+@using GwsBusinessSuite.Domain.Entities
+@inject IAppGenerationService AppGenerationService
+@inject ILogger<AppGenerationQueue> Logger
+
+<PageTitle>AI App Generation Queue</PageTitle>
+
+<div class="page-header">
+    <h1><i class="bi bi-inbox-fill me-2 text-primary"></i>AI App Generation Queue</h1>
+    <p>Review AI-drafted page plans before they're added to a site. Approved pages are created as Drafts so you can still adjust or publish them from the CMS builder.</p>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@ErrorMessage</div>
+    </div>
+}
+
+<div class="row g-4">
+    <div class="col-lg-4">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3 fw-semibold">
+                Pending Approval (@Requests.Count)
+            </div>
+            <div class="list-group list-group-flush">
+                @foreach (var request in Requests)
+                {
+                    <button type="button"
+                            class="list-group-item list-group-item-action @(SelectedRequestId == request.Id ? "active" : "")"
+                            @onclick="() => SelectAsync(request.Id)">
+                        <div class="fw-semibold text-truncate">@request.Title</div>
+                        <div class="small @(SelectedRequestId == request.Id ? "text-white-50" : "text-muted")">
+                            @request.TargetSiteName &middot; by @request.CreatedBy
+                        </div>
+                    </button>
+                }
+                @if (Requests.Count == 0)
+                {
+                    <div class="list-group-item text-muted small">Nothing waiting on review.</div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-8">
+        @if (Selected is null)
+        {
+            <div class="card border-0 shadow-sm">
+                <div class="card-body text-center text-muted py-5">
+                    <i class="bi bi-inbox display-6 d-block mb-2"></i>
+                    Select a request to review it.
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white border-bottom py-3">
+                    <div class="fw-semibold">@Selected.Title</div>
+                    <div class="small text-muted">Target site: @Selected.TargetSiteName &middot; requested by @Selected.CreatedBy</div>
+                </div>
+                <div class="card-body">
+                    <h6 class="fw-semibold small text-uppercase text-muted">Chat Transcript</h6>
+                    <div class="d-flex flex-column gap-2 mb-4" style="max-height:16rem;overflow-y:auto;">
+                        @foreach (var message in Selected.Messages)
+                        {
+                            var isUser = message.Role == AppGenerationMessageRoles.User;
+                            <div class="d-flex @(isUser ? "justify-content-end" : "justify-content-start")">
+                                <div class="p-2 rounded-3 @(isUser ? "bg-primary text-white" : "bg-light border") small" style="max-width:80%;white-space:pre-wrap;">
+                                    @message.Content
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    <h6 class="fw-semibold small text-uppercase text-muted">Proposed Pages (@Selected.GeneratedPages.Count)</h6>
+                    <div class="list-group mb-4">
+                        @foreach (var pageSpec in Selected.GeneratedPages)
+                        {
+                            <div class="list-group-item">
+                                <div class="fw-semibold">@pageSpec.Title <span class="text-muted small">/@pageSpec.Slug</span></div>
+                                @if (!string.IsNullOrWhiteSpace(pageSpec.MetaDescription))
+                                {
+                                    <div class="small text-muted">@pageSpec.MetaDescription</div>
+                                }
+                                <div class="small text-muted mt-1">@pageSpec.Layout.Sections.Count section(s)</div>
+                            </div>
+                        }
+                    </div>
+
+                    <div class="d-flex gap-2 align-items-start">
+                        <button class="btn btn-success" @onclick="ApproveAsync" disabled="@IsBusy">
+                            <i class="bi bi-check-circle me-1"></i>Approve
+                        </button>
+                        <div class="flex-grow-1">
+                            <textarea class="form-control form-control-sm mb-2" rows="2" @bind="RejectionReason" placeholder="Reason for rejection (optional)"></textarea>
+                            <button class="btn btn-outline-danger btn-sm" @onclick="RejectAsync" disabled="@IsBusy">
+                                <i class="bi bi-x-circle me-1"></i>Reject
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<AppGenerationRequestView> Requests { get; set; } = [];
+    private AppGenerationRequestView? Selected { get; set; }
+    private Guid? SelectedRequestId { get; set; }
+    private string RejectionReason { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+    private bool IsBusy { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshListAsync();
+    }
+
+    private async Task RefreshListAsync()
+    {
+        Requests = (await AppGenerationService.ListRequestsAsync(AppGenerationRequestStatuses.PendingApproval)).ToList();
+        if (SelectedRequestId is { } id && Requests.All(r => r.Id != id))
+        {
+            SelectedRequestId = null;
+            Selected = null;
+        }
+    }
+
+    private async Task SelectAsync(Guid requestId)
+    {
+        SelectedRequestId = requestId;
+        Selected = await AppGenerationService.GetRequestAsync(requestId);
+        RejectionReason = string.Empty;
+    }
+
+    private async Task ApproveAsync()
+    {
+        if (Selected is null)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            var result = await AppGenerationService.ApproveAsync(Selected.Id);
+            if (!result.Success)
+            {
+                ErrorMessage = result.ErrorMessage ?? "Could not approve this request.";
+                return;
+            }
+
+            await RefreshListAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to approve an app generation request.");
+            ErrorMessage = $"Unexpected error: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task RejectAsync()
+    {
+        if (Selected is null)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            var result = await AppGenerationService.RejectAsync(Selected.Id, RejectionReason);
+            if (!result.Success)
+            {
+                ErrorMessage = result.ErrorMessage ?? "Could not reject this request.";
+                return;
+            }
+
+            await RefreshListAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to reject an app generation request.");
+            ErrorMessage = $"Unexpected error: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+}

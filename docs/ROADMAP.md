@@ -32,10 +32,13 @@
   `/admin/docker-health`, calls the existing `DockerDeploymentService`. Only works when
   running locally with Docker installed; production deploys still happen via
   `docker compose up -d --build` over SSH (`.github/workflows/deploy.yml`), unchanged.
-- AI app generation approval queue — no code exists for this at all. Its closest
-  precedent (App Registry / Deployments) was deliberately deleted (commit `87d3c68`) as
-  "stubs... no longer aligned with the project direction." Needs a product decision on
-  what this actually generates before any code should be written.
+- AI app generation approval queue ✅ — an Author picks a target `CmsSite`, iteratively
+  chats with Ollama to refine a page plan (`/admin/app-generation`), then submits it for
+  an Admin to review the transcript and page preview and approve/reject
+  (`/admin/app-generation-queue`). Approval creates real `CmsPage` rows (as Drafts, not
+  auto-published) via the existing `ICmsBuilderService`; nothing is ever applied without
+  human sign-off. See `AppGenerationService.cs` for the Ollama prompt contract and the
+  defensive JSON-plan parsing.
 
 ## Phase 5 — Big Vision
 - Ingest WordPress and Elementor Pro documentation as Ollama reference material
@@ -51,11 +54,14 @@
   identical pattern already existing for Comments/Docker (now added). Revision history is
   now append-only for generated revisions, manual edits, and restores; the draft workspace
   includes line-level diffs and non-destructive rollback.
-- Live Show page — reviewed. It's a real, working feature but a narrow one: a local
-  browser camera/mic self-monitor only (getUserMedia preview), with no backend service,
-  no persistence, and no actual streaming/broadcast output. "Expansion" needs a product
-  decision first (streaming destination? persisted "shows"? viewer-facing UI?) before
-  any code should be written — same category as the AI app generation queue.
+- Live Show page ✅ — expanded from a local camera/mic self-monitor into real streaming.
+  "Go Live" starts a `LiveShowSession` and opens a direct broadcaster<->viewer WebRTC mesh
+  (STUN-only, no TURN server, sized for a handful of invited viewers) signaled over a new
+  `LiveShowHub` (SignalR); viewers open an unauthenticated, expiring invite link
+  (`/watch/{token}`) with no account needed. Each show is recorded client-side
+  (`MediaRecorder`) and uploaded in sequential chunks to disk, then listed for replay at
+  `/admin/live-show-recordings`. Known limitation: STUN-only means a viewer behind a
+  strict/symmetric NAT may fail to connect - no TURN relay is configured.
 - Wiki history tracking ✅ — already fully shipped (commit `d514a56`): every save is a
   real git commit via LibGit2Sharp (`WikiService.cs`), with a full History/Diff/Revert UI
   already in `Wiki.razor`. The roadmap simply hadn't been updated. Page hierarchy (parent
