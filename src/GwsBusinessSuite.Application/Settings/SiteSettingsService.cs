@@ -41,9 +41,16 @@ public sealed class SiteSettingsService(
         row.DefaultArticleCategoryId = settings.DefaultArticleCategoryId;
         row.DefaultAuthorByline = string.IsNullOrWhiteSpace(settings.DefaultAuthorByline) ? null : settings.DefaultAuthorByline.Trim();
         row.OllamaModelOverride = string.IsNullOrWhiteSpace(settings.OllamaModelOverride) ? null : settings.OllamaModelOverride.Trim();
-        row.OllamaTimeoutMinutesOverride = settings.OllamaTimeoutMinutesOverride is > 0 ? settings.OllamaTimeoutMinutesOverride : null;
+        // Upper bounds mirror Settings.razor's <input min/max> - those are client-side
+        // only (HTML attributes don't stop a direct API/service call), so the real
+        // enforcement has to live here too. 180 min matches the UI's generation-timeout
+        // cap; 100 MB matches its media-upload cap (MediaLibraryService's own hard
+        // ceiling on individual uploads).
+        row.OllamaTimeoutMinutesOverride = settings.OllamaTimeoutMinutesOverride is > 0
+            ? Math.Min(settings.OllamaTimeoutMinutesOverride.Value, 180)
+            : null;
         row.HeroImageModelOverride = string.IsNullOrWhiteSpace(settings.HeroImageModelOverride) ? null : settings.HeroImageModelOverride.Trim();
-        row.MaxMediaUploadSizeMb = settings.MaxMediaUploadSizeMb > 0 ? settings.MaxMediaUploadSizeMb : 8;
+        row.MaxMediaUploadSizeMb = settings.MaxMediaUploadSizeMb > 0 ? Math.Min(settings.MaxMediaUploadSizeMb, 100) : 8;
         row.UpdatedAt = DateTimeOffset.UtcNow;
         row.UpdatedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
 

@@ -4,6 +4,7 @@ using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -25,7 +26,7 @@ public sealed class AffiliateAnalyticsServiceTests
         db.ArticleAffiliatePlacements.Add(placement);
         await db.SaveChangesAsync();
 
-        var service = new AffiliateAnalyticsService(db);
+        var service = CreateService(db);
         var destination = await service.RecordClickAsync(placement.Id);
 
         destination.Should().Be("https://example.com/track");
@@ -36,7 +37,7 @@ public sealed class AffiliateAnalyticsServiceTests
     public async Task RecordClickAsync_ShouldReturnNull_WhenPlacementDoesNotExist()
     {
         await using var db = await CreateDbAsync();
-        var service = new AffiliateAnalyticsService(db);
+        var service = CreateService(db);
 
         var destination = await service.RecordClickAsync(Guid.NewGuid());
 
@@ -60,7 +61,7 @@ public sealed class AffiliateAnalyticsServiceTests
         db.ArticleAffiliatePlacements.Add(placement);
         await db.SaveChangesAsync();
 
-        var service = new AffiliateAnalyticsService(db);
+        var service = CreateService(db);
         var destination = await service.RecordClickAsync(placement.Id);
 
         destination.Should().BeNull();
@@ -69,6 +70,45 @@ public sealed class AffiliateAnalyticsServiceTests
 
     [Fact]
     public async Task GetDashboardAsync_ShouldAggregateClicksByAdvertiserAndArticle()
+    {
+        await using var db = await CreateDbAsync();
+        var article = await CreateArticleAsync(db);
+        // Two distinct placements (not the same one clicked twice) so this test measures
+        // dashboard aggregation, independent of RecordClickAsync's own per-placement
+        // click dedup (covered separately below).
+        var placementA = new ArticleAffiliatePlacement
+        {
+            ArticleId = article.Id,
+            SlotToken = "{{CJ_AD_1}}",
+            AdvertiserId = "adv-1",
+            AdvertiserName = "Acme Tools",
+            TrackingUrl = "https://example.com/track-a"
+        };
+        var placementB = new ArticleAffiliatePlacement
+        {
+            ArticleId = article.Id,
+            SlotToken = "{{CJ_AD_2}}",
+            AdvertiserId = "adv-1",
+            AdvertiserName = "Acme Tools",
+            TrackingUrl = "https://example.com/track-b"
+        };
+        db.ArticleAffiliatePlacements.AddRange(placementA, placementB);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        await service.RecordClickAsync(placementA.Id);
+        await service.RecordClickAsync(placementB.Id);
+
+        var dashboard = await service.GetDashboardAsync();
+
+        dashboard.TotalClicks.Should().Be(2);
+        dashboard.ClicksByAdvertiser.Should().ContainSingle(s => s.AdvertiserId == "adv-1" && s.ClickCount == 2);
+        dashboard.ClicksByArticle.Should().ContainSingle(s => s.ArticleId == article.Id && s.ClickCount == 2 && s.ArticleTitle == article.Title);
+        dashboard.RecentClicks.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task RecordClickAsync_ShouldNotLogASecondClickRow_ForTheSamePlacement_WithinTheDedupeWindow()
     {
         await using var db = await CreateDbAsync();
         var article = await CreateArticleAsync(db);
@@ -83,16 +123,16 @@ public sealed class AffiliateAnalyticsServiceTests
         db.ArticleAffiliatePlacements.Add(placement);
         await db.SaveChangesAsync();
 
-        var service = new AffiliateAnalyticsService(db);
-        await service.RecordClickAsync(placement.Id);
-        await service.RecordClickAsync(placement.Id);
+        // Same service/cache instance for both calls - simulates a browser back-button
+        // or refresh hitting the redirect twice in quick succession.
+        var service = CreateService(db);
 
-        var dashboard = await service.GetDashboardAsync();
+        var firstDestination = await service.RecordClickAsync(placement.Id);
+        var secondDestination = await service.RecordClickAsync(placement.Id);
 
-        dashboard.TotalClicks.Should().Be(2);
-        dashboard.ClicksByAdvertiser.Should().ContainSingle(s => s.AdvertiserId == "adv-1" && s.ClickCount == 2);
-        dashboard.ClicksByArticle.Should().ContainSingle(s => s.ArticleId == article.Id && s.ClickCount == 2 && s.ArticleTitle == article.Title);
-        dashboard.RecentClicks.Should().HaveCount(2);
+        firstDestination.Should().Be("https://example.com/track");
+        secondDestination.Should().Be("https://example.com/track");
+        db.ArticleAffiliateClicks.Should().ContainSingle();
     }
 
     [Fact]
@@ -104,13 +144,16 @@ public sealed class AffiliateAnalyticsServiceTests
             new CjCommissionRecord { ExternalId = "c2", AdvertiserId = "adv-1", AdvertiserName = "Acme Tools", SaleAmount = 50m, CommissionAmount = 5m, Currency = "USD" });
         await db.SaveChangesAsync();
 
-        var service = new AffiliateAnalyticsService(db);
+        var service = CreateService(db);
         var dashboard = await service.GetDashboardAsync();
 
         dashboard.TotalCommissionAmount.Should().Be(15m);
         dashboard.RevenueByAdvertiser.Should().ContainSingle(s =>
             s.AdvertiserId == "adv-1" && s.TransactionCount == 2 && s.TotalSaleAmount == 150m && s.TotalCommissionAmount == 15m);
     }
+
+    private static AffiliateAnalyticsService CreateService(ApplicationDbContext db) =>
+        new(db, new MemoryCache(new MemoryCacheOptions()));
 
     private static async Task<Article> CreateArticleAsync(ApplicationDbContext db)
     {

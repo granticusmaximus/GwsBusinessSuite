@@ -48,7 +48,7 @@ public sealed class UserManagementServiceTests
     }
 
     [Fact]
-    public async Task CreateUserAsync_ShouldFail_ForPasswordShorterThanEightCharacters()
+    public async Task CreateUserAsync_ShouldFail_ForPasswordShorterThanTwelveCharacters()
     {
         using var connection = await OpenConnectionAsync();
         var service = CreateService(connection);
@@ -61,8 +61,44 @@ public sealed class UserManagementServiceTests
         });
 
         result.Succeeded.Should().BeFalse();
-        result.FailureReason.Should().Contain("8 characters");
+        result.FailureReason.Should().Contain("12 characters");
         (await service.ListUsersAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateUserAsync_ShouldFail_WhenPasswordMatchesUsername()
+    {
+        using var connection = await OpenConnectionAsync();
+        var service = CreateService(connection);
+
+        var result = await service.CreateUserAsync(new CreateUserInput
+        {
+            Username = "jsmithjsmith",
+            Password = "jsmithjsmith",
+            Role = AppRoles.Author
+        });
+
+        result.Succeeded.Should().BeFalse();
+        result.FailureReason.Should().Contain("same as the username");
+    }
+
+    [Fact]
+    public async Task CreateUserAsync_ShouldFail_ForACommonlyGuessedPassword()
+    {
+        using var connection = await OpenConnectionAsync();
+        var service = CreateService(connection);
+
+        // "administrator" (13 chars) clears the length check on its own, so this
+        // specifically exercises the common-password blocklist rather than length.
+        var result = await service.CreateUserAsync(new CreateUserInput
+        {
+            Username = "jsmith",
+            Password = "administrator",
+            Role = AppRoles.Author
+        });
+
+        result.Succeeded.Should().BeFalse();
+        result.FailureReason.Should().Contain("commonly guessed");
     }
 
     [Fact]
@@ -128,7 +164,7 @@ public sealed class UserManagementServiceTests
     }
 
     [Fact]
-    public async Task ResetPasswordAsync_ShouldFail_ForPasswordShorterThanEightCharacters()
+    public async Task ResetPasswordAsync_ShouldFail_ForPasswordShorterThanTwelveCharacters()
     {
         using var connection = await OpenConnectionAsync();
         var service = CreateService(connection);
@@ -138,7 +174,21 @@ public sealed class UserManagementServiceTests
         var result = await service.ResetPasswordAsync(userId, "short1");
 
         result.Succeeded.Should().BeFalse();
-        result.FailureReason.Should().Contain("8 characters");
+        result.FailureReason.Should().Contain("12 characters");
+    }
+
+    [Fact]
+    public async Task ResetPasswordAsync_ShouldFail_WhenNewPasswordMatchesTheUsername()
+    {
+        using var connection = await OpenConnectionAsync();
+        var service = CreateService(connection);
+        await service.CreateUserAsync(new CreateUserInput { Username = "jsmithjsmith", Password = "correct-horse", Role = AppRoles.Author });
+        var userId = (await service.ListUsersAsync()).Single().Id;
+
+        var result = await service.ResetPasswordAsync(userId, "jsmithjsmith");
+
+        result.Succeeded.Should().BeFalse();
+        result.FailureReason.Should().Contain("same as the username");
     }
 
     [Fact]

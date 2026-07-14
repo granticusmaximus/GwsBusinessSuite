@@ -42,6 +42,11 @@ public sealed class UserManagementService(
             return UserManagementResult.Failure("Invalid role selected.");
         }
 
+        if (PasswordPolicy.IsWeak(input.Password, input.Username, out var weakReason))
+        {
+            return UserManagementResult.Failure($"Password {weakReason}.");
+        }
+
         try
         {
             await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -111,11 +116,6 @@ public sealed class UserManagementService(
 
     public async Task<UserManagementResult> ResetPasswordAsync(Guid userId, string newPassword, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(newPassword) || newPassword.Length < 8)
-        {
-            return UserManagementResult.Failure("Password must be at least 8 characters.");
-        }
-
         try
         {
             await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -124,6 +124,11 @@ public sealed class UserManagementService(
             if (user is null)
             {
                 return UserManagementResult.Failure("User not found.");
+            }
+
+            if (PasswordPolicy.IsWeak(newPassword, user.Username, out var weakReason))
+            {
+                return UserManagementResult.Failure($"Password {weakReason}.");
             }
 
             user.PasswordHash = passwordHasher.HashPassword(user, newPassword);

@@ -1,11 +1,24 @@
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace GwsBusinessSuite.Application.AffiliateAnalytics;
 
-public sealed class AffiliateAnalyticsService(IAppDbContext db) : IAffiliateAnalyticsService
+public sealed class AffiliateAnalyticsService(IAppDbContext db, IMemoryCache cache) : IAffiliateAnalyticsService
 {
+    // A repeat hit on the same placement within this window (browser back-button,
+    // refresh, prefetch, or a quick re-click) doesn't get its own click row - it still
+    // redirects normally, just isn't logged again. This intentionally doesn't key on
+    // client IP (no PII collection for what's an internal analytics feature) and isn't
+    // fraud-grade abuse protection - it only smooths out the cheap, common
+    // double-counting cases. A DB-side "was there a recent click for this placement"
+    // query was deliberately avoided here since it would either scan full per-placement
+    // click history (SQLite/EF Core can't push a CreatedAt >= cutoff filter to SQL for
+    // DateTimeOffset columns - see the CrmService/AffiliateSuggestionService comments on
+    // the same limitation) or require pulling the whole table down on every single click.
+    private static readonly TimeSpan ClickDedupeWindow = TimeSpan.FromMinutes(30);
+
     public async Task<string?> RecordClickAsync(Guid placementId, CancellationToken cancellationToken = default)
     {
         var placement = await db.ArticleAffiliatePlacements
@@ -17,16 +30,22 @@ public sealed class AffiliateAnalyticsService(IAppDbContext db) : IAffiliateAnal
             return null;
         }
 
-        await db.ArticleAffiliateClicks.AddAsync(new ArticleAffiliateClick
+        var dedupeCacheKey = $"affiliate-click-dedupe:{placementId}";
+        if (!cache.TryGetValue(dedupeCacheKey, out _))
         {
-            ArticleId = placement.ArticleId,
-            PlacementId = placement.Id,
-            AdvertiserId = placement.AdvertiserId,
-            AdvertiserName = placement.AdvertiserName,
-            TrackingUrl = placement.TrackingUrl,
-            CreatedBy = "affiliate-click-redirect"
-        }, cancellationToken);
-        await db.SaveChangesAsync(cancellationToken);
+            cache.Set(dedupeCacheKey, true, ClickDedupeWindow);
+
+            await db.ArticleAffiliateClicks.AddAsync(new ArticleAffiliateClick
+            {
+                ArticleId = placement.ArticleId,
+                PlacementId = placement.Id,
+                AdvertiserId = placement.AdvertiserId,
+                AdvertiserName = placement.AdvertiserName,
+                TrackingUrl = placement.TrackingUrl,
+                CreatedBy = "affiliate-click-redirect"
+            }, cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+        }
 
         return string.IsNullOrWhiteSpace(placement.TrackingUrl) ? null : placement.TrackingUrl;
     }

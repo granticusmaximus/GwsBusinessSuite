@@ -378,6 +378,11 @@
 
     private async Task SaveContactAsync()
     {
+        // Guards against a double-click/double-submit creating duplicate contacts -
+        // disabled="@IsBusy" on the submit button re-renders asynchronously, so it alone
+        // doesn't close the window between two rapid clicks.
+        if (IsBusy) return;
+
         IsBusy = true;
         ErrorMessage = string.Empty;
         StatusMessage = string.Empty;
@@ -412,7 +417,7 @@
 
     private async Task TrashSelectedContactAsync()
     {
-        if (SelectedContactId is not { } contactId)
+        if (IsBusy || SelectedContactId is not { } contactId)
         {
             return;
         }
@@ -445,6 +450,8 @@
 
     private async Task RestoreContactAsync(Guid contactId)
     {
+        if (IsBusy) return;
+
         IsBusy = true;
         ErrorMessage = string.Empty;
         StatusMessage = string.Empty;
@@ -469,6 +476,8 @@
 
     private async Task DeletePermanentlyAsync(Guid contactId)
     {
+        if (IsBusy) return;
+
         var confirmed = await JS.InvokeAsync<bool>("confirm", "Permanently delete this contact? This cannot be undone.");
         if (!confirmed) return;
 
@@ -495,7 +504,7 @@
 
     private async Task AddActivityAsync()
     {
-        if (SelectedContactId is not { } contactId || string.IsNullOrWhiteSpace(NewActivityNote))
+        if (IsBusy || SelectedContactId is not { } contactId || string.IsNullOrWhiteSpace(NewActivityNote))
         {
             return;
         }

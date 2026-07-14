@@ -468,14 +468,24 @@ public sealed class CjAdsService(
             return new CommissionSyncResult(true, fetched.Message, 0);
         }
 
-        var externalIds = fetched.Commissions.Select(c => c.ExternalId).ToList();
+        // Dedupe by ExternalId within this batch first - if CJ's API ever returns an
+        // overlapping/duplicate record (e.g. pagination overlap), keeping only the last
+        // occurrence avoids inserting two rows with the same ExternalId and hitting the
+        // unique index in SaveChangesAsync below (which would otherwise fail the entire
+        // sync with no partial progress, every run, until fixed).
+        var dedupedCommissions = fetched.Commissions
+            .GroupBy(c => c.ExternalId)
+            .Select(group => group.Last())
+            .ToList();
+
+        var externalIds = dedupedCommissions.Select(c => c.ExternalId).ToList();
         var existingByExternalId = await db.CjCommissionRecords
             .Where(r => externalIds.Contains(r.ExternalId))
             .ToDictionaryAsync(r => r.ExternalId, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         var imported = 0;
-        foreach (var record in fetched.Commissions)
+        foreach (var record in dedupedCommissions)
         {
             if (existingByExternalId.TryGetValue(record.ExternalId, out var existing))
             {

@@ -92,6 +92,34 @@ public sealed class SiteSettingsServiceTests
         Assert.Equal(10, reloaded.PostsPerPage);
     }
 
+    [Fact]
+    public async Task SaveSettingsAsync_ShouldClampMaxMediaUploadSizeMb_To100()
+    {
+        // Regression test: the Settings.razor UI caps this at 100 via an HTML max
+        // attribute only - a direct service/API call previously had no server-side
+        // ceiling at all, letting MediaLibraryService accept effectively unbounded
+        // uploads.
+        await using var db = await CreateDbAsync();
+        var service = new SiteSettingsService(db, new FixedCurrentUserAccessor("grantwatson"));
+
+        await service.SaveSettingsAsync(new SiteSettingsView(25, null, null, null, null, null, 5000));
+
+        var reloaded = await service.GetSettingsAsync();
+        Assert.Equal(100, reloaded.MaxMediaUploadSizeMb);
+    }
+
+    [Fact]
+    public async Task SaveSettingsAsync_ShouldClampOllamaTimeoutMinutesOverride_To180()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new SiteSettingsService(db, new FixedCurrentUserAccessor("grantwatson"));
+
+        await service.SaveSettingsAsync(new SiteSettingsView(25, null, null, null, 999999, null, 8));
+
+        var reloaded = await service.GetSettingsAsync();
+        Assert.Equal(180, reloaded.OllamaTimeoutMinutesOverride);
+    }
+
     private static async Task<ApplicationDbContext> CreateDbAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

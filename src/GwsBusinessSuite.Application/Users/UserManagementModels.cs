@@ -16,8 +16,12 @@ public sealed class CreateUserInput
     [Required(ErrorMessage = "Username is required.")]
     public string Username { get; init; } = string.Empty;
 
+    // Length is enforced here for immediate EditForm feedback; the fuller policy
+    // (username match, common-password blocklist) is enforced server-side in
+    // UserManagementService.Validate via PasswordPolicy.IsWeak, since DataAnnotations
+    // attributes can't easily cross-reference another property like Username.
     [Required(ErrorMessage = "Password is required.")]
-    [MinLength(8, ErrorMessage = "Password must be at least 8 characters.")]
+    [MinLength(PasswordPolicy.MinLength, ErrorMessage = "Password must be at least 12 characters.")]
     public string Password { get; init; } = string.Empty;
 
     public string Role { get; init; } = string.Empty;

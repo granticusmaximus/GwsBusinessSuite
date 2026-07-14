@@ -36,11 +36,13 @@ public sealed class CrmService(IAppDbContext dbContext, ICurrentUserAccessor? cu
             .ToList();
     }
 
+    // Excludes trashed contacts - opening a stale link/tab for a contact that's since
+    // been trashed should behave as "not found", not silently show/operate on it.
     public async Task<Contact?> GetContactAsync(Guid contactId, CancellationToken cancellationToken = default)
     {
         return await dbContext.Contacts
             .AsNoTracking()
-            .FirstOrDefaultAsync(contact => contact.Id == contactId, cancellationToken);
+            .FirstOrDefaultAsync(contact => contact.Id == contactId && contact.TrashedAt == null, cancellationToken);
     }
 
     public async Task<Contact> SaveContactAsync(ContactEditorModel editor, CancellationToken cancellationToken = default)
@@ -52,6 +54,14 @@ public sealed class CrmService(IAppDbContext dbContext, ICurrentUserAccessor? cu
         var contact = editor.ContactId is { } contactId
             ? await dbContext.Contacts.FirstOrDefaultAsync(item => item.Id == contactId, cancellationToken)
             : null;
+
+        if (contact is { TrashedAt: not null })
+        {
+            // A stale editor tab (opened before the contact was trashed elsewhere)
+            // shouldn't be able to silently keep editing a trashed record - restore it
+            // first via RestoreContactAsync.
+            throw new InvalidOperationException("This contact has been moved to Trash. Restore it before saving changes.");
+        }
 
         var isNew = contact is null;
         contact ??= new Contact
@@ -65,7 +75,15 @@ public sealed class CrmService(IAppDbContext dbContext, ICurrentUserAccessor? cu
         contact.Email = string.IsNullOrWhiteSpace(editor.Email) ? null : editor.Email.Trim();
         contact.Company = string.IsNullOrWhiteSpace(editor.Company) ? null : editor.Company.Trim();
         contact.Status = string.IsNullOrWhiteSpace(editor.Status) ? ContactStatuses.Lead : editor.Status.Trim();
-        contact.FollowUpDate = editor.FollowUpDate;
+        // Normalize to UTC midnight of the picked calendar date. Blazor's InputDate binds
+        // a plain "YYYY-MM-DD" string to DateTimeOffset by resolving the missing offset
+        // against the server process's local timezone (not the browser user's) - taking
+        // just the .Date component and re-anchoring it to TimeSpan.Zero keeps the actual
+        // calendar date the user picked, but makes "due" (ListDueFollowUpsAsync) trigger
+        // at a single deterministic UTC instant regardless of server timezone config.
+        contact.FollowUpDate = editor.FollowUpDate is { } followUpDate
+            ? new DateTimeOffset(followUpDate.Date, TimeSpan.Zero)
+            : null;
         contact.UpdatedAt = now;
         contact.UpdatedBy = performedBy;
 
@@ -147,7 +165,7 @@ public sealed class CrmService(IAppDbContext dbContext, ICurrentUserAccessor? cu
             throw new ArgumentException("Note cannot be empty.", nameof(note));
         }
 
-        var contactExists = await dbContext.Contacts.AnyAsync(c => c.Id == contactId, cancellationToken);
+        var contactExists = await dbContext.Contacts.AnyAsync(c => c.Id == contactId && c.TrashedAt == null, cancellationToken);
         if (!contactExists)
         {
             throw new InvalidOperationException("The contact this activity belongs to no longer exists.");

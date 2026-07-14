@@ -3,6 +3,7 @@
 @attribute [Authorize(Policy = "AdminOnly")]
 @using System.Globalization
 @using GwsBusinessSuite.Application.GovernmentIntelligence
+@using GwsBusinessSuite.Infrastructure.Services
 @inject IGovernmentIntelligenceService GovernmentService
 @inject ILogger<GovernmentIntelligence> Logger
 
@@ -393,7 +394,28 @@
 
     private async Task RefreshAsync()
     {
-        await LoadSnapshotAsync(forceRefresh: true);
+        // Same shared lock as the 15-minute GovernmentIntelligenceRefreshBackgroundService,
+        // so a manual refresh here can't run concurrently with the scheduled one and
+        // double-scrape the external government sites.
+        _loading = true;
+        _errorMessage = string.Empty;
+
+        var acquired = await GovernmentIntelligenceRefreshBackgroundService.RefreshLock.WaitAsync(3000);
+        try
+        {
+            if (!acquired)
+            {
+                _errorMessage = "A scheduled refresh is already running - try again in a moment.";
+                return;
+            }
+
+            await LoadSnapshotAsync(forceRefresh: true);
+        }
+        finally
+        {
+            if (acquired) GovernmentIntelligenceRefreshBackgroundService.RefreshLock.Release();
+            _loading = false;
+        }
     }
 
     private async Task LoadSnapshotAsync(bool forceRefresh)

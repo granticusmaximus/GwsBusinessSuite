@@ -70,6 +70,15 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.AccessDeniedPath = "/admin/access-denied";
         options.SlidingExpiration = true;
         options.ExpireTimeSpan = TimeSpan.FromHours(8);
+        // SameAsRequest (the framework default) is made explicit here rather than left
+        // implicit: it correctly marks the cookie Secure once UseForwardedHeaders (added
+        // below) surfaces the real scheme via X-Forwarded-Proto behind Cloudflare Tunnel.
+        // Deliberately NOT forced to Always - this container is also reachable over plain
+        // HTTP directly (no TLS termination confirmed in front of it yet as of this
+        // writing), and forcing Secure would make the browser silently drop the cookie
+        // and break login in that case.
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        options.Cookie.SameSite = SameSiteMode.Lax;
     });
 
 builder.Services.AddAuthorization(options =>
@@ -210,6 +219,27 @@ using (var scope = app.Services.CreateScope())
 }
 
 // Configure the HTTP request pipeline.
+
+// Must run before anything that reads RemoteIpAddress/Scheme (rate limiting, auth,
+// HSTS) - otherwise every rate-limit partition below keys on the proxy's IP instead of
+// the real client's, effectively collapsing all per-IP limits (including the login
+// attempt limiter) into one shared bucket. Only honors X-Forwarded-For/-Proto when the
+// *immediate* connecting peer is loopback or a Docker-assigned private-network address
+// (covers both "cloudflared on the same droplet host, forwarding to localhost" and
+// "cloudflared as a sibling container on the compose network" - see docker-compose.yml).
+// If nothing is actually proxying yet, requests arrive directly from real external IPs,
+// which never match these ranges, so the header is correctly ignored and RemoteIpAddress
+// stays the real client IP either way.
+var forwardedHeadersOptions = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+        | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
+};
+forwardedHeadersOptions.KnownIPNetworks.Add(System.Net.IPNetwork.Parse("172.16.0.0/12"));
+forwardedHeadersOptions.KnownProxies.Add(System.Net.IPAddress.Loopback);
+forwardedHeadersOptions.KnownProxies.Add(System.Net.IPAddress.IPv6Loopback);
+app.UseForwardedHeaders(forwardedHeadersOptions);
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
@@ -1576,35 +1606,8 @@ static List<string> ParseTags(string tags) =>
 // A misconfigured deploy that ships a blank/trivial AdminAuth:Password previously seeded
 // it without any complaint — the admin login would then be guessable on day one. This is
 // a floor (length + a denylist of obviously common values), not full entropy scoring.
-static bool IsWeakSeedPassword(string password, string username, out string reason)
-{
-    string[] commonWeakSeedPasswords =
-    [
-        "password", "admin", "administrator", "changeme", "letmein",
-        "12345678", "123456789", "qwertyuiop", "password123"
-    ];
-
-    if (password.Length < 12)
-    {
-        reason = "is shorter than the required 12 characters";
-        return true;
-    }
-
-    if (string.Equals(password, username, StringComparison.OrdinalIgnoreCase))
-    {
-        reason = "must not be the same as the username";
-        return true;
-    }
-
-    if (commonWeakSeedPasswords.Contains(password, StringComparer.OrdinalIgnoreCase))
-    {
-        reason = "is a commonly guessed password";
-        return true;
-    }
-
-    reason = string.Empty;
-    return false;
-}
+static bool IsWeakSeedPassword(string password, string username, out string reason) =>
+    GwsBusinessSuite.Application.Users.PasswordPolicy.IsWeak(password, username, out reason);
 
 static async Task EnsureGrantWatsonHomepageAsync(ApplicationDbContext dbContext, IConfiguration configuration, ILogger logger)
 {

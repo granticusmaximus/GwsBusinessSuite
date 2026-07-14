@@ -67,6 +67,46 @@ public sealed class CrmServiceTests
     }
 
     [Fact]
+    public async Task GetContactAsync_ShouldReturnNull_ForATrashedContact()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CrmService(db, new FixedCurrentUserAccessor("grantwatson"));
+        var contact = await service.SaveContactAsync(new ContactEditorModel { FullName = "Trashed Lookup" });
+        await service.TrashContactAsync(contact.Id);
+
+        (await service.GetContactAsync(contact.Id)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SaveContactAsync_ShouldThrow_WhenEditingAStaleEditorForATrashedContact()
+    {
+        // Simulates a browser tab that opened the contact editor before the contact was
+        // trashed elsewhere - clicking Save should fail loudly, not silently resurrect
+        // edits on a trashed record.
+        await using var db = await CreateDbAsync();
+        var service = new CrmService(db, new FixedCurrentUserAccessor("grantwatson"));
+        var contact = await service.SaveContactAsync(new ContactEditorModel { FullName = "Stale Editor" });
+        await service.TrashContactAsync(contact.Id);
+
+        var act = () => service.SaveContactAsync(new ContactEditorModel { ContactId = contact.Id, FullName = "Edited While Trashed" });
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task AddActivityAsync_ShouldThrow_WhenContactIsTrashed()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CrmService(db, new FixedCurrentUserAccessor("grantwatson"));
+        var contact = await service.SaveContactAsync(new ContactEditorModel { FullName = "Trashed Activity Target" });
+        await service.TrashContactAsync(contact.Id);
+
+        var act = () => service.AddActivityAsync(contact.Id, "A note from a stale tab");
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
     public async Task RestoreContactAsync_ShouldClearTrashedAt_AndReturnToDefaultList()
     {
         await using var db = await CreateDbAsync();
@@ -139,6 +179,26 @@ public sealed class CrmServiceTests
         due.Select(c => c.Id).Should().ContainInOrder(overdue.Id, dueToday.Id);
         due.Should().HaveCount(2);
         (await service.CountDueFollowUpsAsync()).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task SaveContactAsync_ShouldNormalizeFollowUpDate_ToUtcMidnightOfThePickedCalendarDate()
+    {
+        // Regression test: Blazor's InputDate binds a plain date string to DateTimeOffset
+        // by resolving the missing offset against the server process's local timezone,
+        // not the browser user's - SaveContactAsync must re-anchor to UTC midnight of the
+        // same calendar date so "due" is deterministic regardless of server TZ config.
+        await using var db = await CreateDbAsync();
+        var service = new CrmService(db);
+        var pickedInAFictionalPlusFiveOffset = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.FromHours(5));
+
+        var saved = await service.SaveContactAsync(new ContactEditorModel
+        {
+            FullName = "Normalized Date",
+            FollowUpDate = pickedInAFictionalPlusFiveOffset
+        });
+
+        saved.FollowUpDate.Should().Be(new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero));
     }
 
     [Fact]

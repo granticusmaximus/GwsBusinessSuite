@@ -428,6 +428,38 @@ public sealed class CjAdsServiceTests
     }
 
     [Fact]
+    public async Task SyncCommissionsAsync_ShouldNotThrow_WhenFetchReturnsDuplicateExternalIdInOneBatch()
+    {
+        // Regression test: a duplicate ExternalId within the same fetch (e.g. CJ
+        // pagination overlap) previously caused SaveChangesAsync to throw on the unique
+        // index, failing the whole sync silently every run. The service now dedupes
+        // by ExternalId (keeping the last occurrence) before inserting/updating.
+        await using var db = await CreateDbAsync();
+        var fakeCj = new FakeCjAffiliateService
+        {
+            Commissions =
+            [
+                new CjCommissionFetchRecord("cj-dup", "adv-1", "Acme Tools", "order-1", "Pending", 100m, 10m, "USD", DateTimeOffset.UtcNow, null),
+                new CjCommissionFetchRecord("cj-dup", "adv-1", "Acme Tools", "order-1", "Closed", 100m, 12m, "USD", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+            ]
+        };
+        var service = new CjAdsService(db, fakeCj, new FakeSecretProtector(), NullLogger<CjAdsService>.Instance);
+        await service.SaveConnectorSettingsAsync(new CjConnectorSettingsView
+        {
+            DeveloperKey = "dev-key-123",
+            PublisherId = "pub-1",
+            WebsiteId = "site-1",
+            EndpointUrl = "https://commissions.api.cj.com/query",
+            MaxResults = 100
+        });
+
+        Func<Task> act = async () => await service.SyncCommissionsAsync();
+
+        await act.Should().NotThrowAsync();
+        db.CjCommissionRecords.Should().ContainSingle(r => r.ExternalId == "cj-dup" && r.ActionStatus == "Closed");
+    }
+
+    [Fact]
     public async Task SyncCommissionsAsync_ShouldFail_WhenNoConnectorConfigured()
     {
         await using var db = await CreateDbAsync();
