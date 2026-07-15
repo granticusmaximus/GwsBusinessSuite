@@ -49,6 +49,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<AppGenerationMessage> AppGenerationMessages => Set<AppGenerationMessage>();
     public DbSet<LiveShowSession> LiveShowSessions => Set<LiveShowSession>();
     public DbSet<LiveShowRecording> LiveShowRecordings => Set<LiveShowRecording>();
+    public DbSet<PodcastListenProgress> PodcastListenProgresses => Set<PodcastListenProgress>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -181,6 +182,13 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .HasForeignKey(x => x.SessionId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<LiveShowRecording>().HasIndex(x => x.SessionId);
+
+        modelBuilder.Entity<PodcastListenProgress>()
+            .HasOne<PodcastEpisode>()
+            .WithMany()
+            .HasForeignKey(x => x.EpisodeId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<PodcastListenProgress>().HasIndex(x => new { x.Username, x.EpisodeId }).IsUnique();
     }
 
     // Migrates the module's original hardcoded in-memory reference data (2 sources, 5

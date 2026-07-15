@@ -139,6 +139,7 @@ public static class DependencyInjection
         });
         services.AddHostedService<NewsRefreshBackgroundService>();
         services.AddHostedService<CjAdsSyncBackgroundService>();
+        services.AddScoped<IPodcastListenProgressService, PodcastListenProgressService>();
 
         return services;
     }

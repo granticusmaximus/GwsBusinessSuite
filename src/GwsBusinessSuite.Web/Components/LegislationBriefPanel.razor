@@ -1,28 +1,28 @@
 @using GwsBusinessSuite.Application.GovernmentIntelligence
 
-<details class="gi-brief-panel">
-    <summary>@SummaryLabel</summary>
-    <div class="gi-brief-body">
-        <div class="gi-brief-topline">
-            <span class="gi-brief-kind">@Brief.Kind</span>
+<details class="mt-3 pt-3 border-top">
+    <summary class="fw-semibold" style="cursor:pointer;">@SummaryLabel</summary>
+    <div class="mt-3 p-3 border rounded bg-light">
+        <div class="d-flex justify-content-between gap-2 flex-wrap text-uppercase small text-secondary">
+            <span class="fw-bold">@Brief.Kind</span>
             <span>@Brief.Jurisdiction</span>
         </div>
 
-        <h5 class="gi-brief-title">@GetHeadline()</h5>
-        <p class="gi-brief-summary">@Brief.Summary</p>
-        <div class="gi-brief-status">Status: @Brief.Status</div>
+        <h5 class="my-2">@GetHeadline()</h5>
+        <p class="text-secondary">@Brief.Summary</p>
+        <div class="text-secondary small">Status: @Brief.Status</div>
 
-        <div class="gi-brief-grid">
+        <div class="d-flex flex-column gap-3 mt-3">
             @if (Brief.Facts.Count > 0)
             {
-                <section class="gi-brief-block">
-                    <h6>Key facts</h6>
-                    <dl class="gi-brief-facts">
+                <section class="border rounded p-3 bg-white">
+                    <h6 class="text-uppercase small text-secondary mb-3">Key facts</h6>
+                    <dl class="d-flex flex-column gap-2 mb-0">
                         @foreach (var fact in Brief.Facts)
                         {
-                            <div class="gi-brief-fact">
-                                <dt>@fact.Label</dt>
-                                <dd>@fact.Value</dd>
+                            <div>
+                                <dt class="text-uppercase small text-secondary">@fact.Label</dt>
+                                <dd class="mb-0 mt-1">@fact.Value</dd>
                             </div>
                         }
                     </dl>
@@ -31,17 +31,17 @@
 
             @if (Brief.Timeline.Count > 0)
             {
-                <section class="gi-brief-block">
-                    <h6>Timeline</h6>
-                    <div class="gi-brief-timeline">
+                <section class="border rounded p-3 bg-white">
+                    <h6 class="text-uppercase small text-secondary mb-3">Timeline</h6>
+                    <div class="d-flex flex-column gap-3">
                         @foreach (var item in Brief.Timeline)
                         {
-                            <article class="gi-brief-timeline-item">
-                                <div class="gi-brief-timeline-topline">
+                            <article>
+                                <div class="d-flex justify-content-between gap-2 flex-wrap">
                                     <strong>@item.Label</strong>
-                                    <span>@item.When</span>
+                                    <span class="text-secondary small">@item.When</span>
                                 </div>
-                                <p>@item.Detail</p>
+                                <p class="text-secondary mt-1 mb-0">@item.Detail</p>
                             </article>
                         }
                     </div>
@@ -51,7 +51,7 @@
 
         @if (Brief.Links.Count > 0)
         {
-            <div class="gi-brief-links">
+            <div class="d-flex flex-wrap gap-2 mt-3">
                 @foreach (var link in Brief.Links)
                 {
                     <a class="btn btn-outline-dark btn-sm" href="@link.Url" target="_blank" rel="noopener noreferrer" title="@link.Description">
@@ -81,112 +81,3 @@
         return $"{Brief.Measure} · {Brief.Title}";
     }
 }
-
-<style>
-    .gi-brief-panel {
-        margin-top: 1rem;
-        border-top: 1px solid #e5e7eb;
-        padding-top: .95rem;
-    }
-
-    .gi-brief-panel summary {
-        cursor: pointer;
-        font-weight: 600;
-    }
-
-    .gi-brief-body {
-        margin-top: .95rem;
-        padding: 1rem;
-        border-radius: 1rem;
-        border: 1px solid #e5e7eb;
-        background:
-            linear-gradient(180deg, rgba(250, 245, 235, .85), rgba(255, 255, 255, .98)),
-            #fff;
-    }
-
-    .gi-brief-topline,
-    .gi-brief-timeline-topline {
-        display: flex;
-        justify-content: space-between;
-        gap: .75rem;
-        flex-wrap: wrap;
-    }
-
-    .gi-brief-topline {
-        font-size: .78rem;
-        text-transform: uppercase;
-        letter-spacing: .08em;
-        color: #6b7280;
-    }
-
-    .gi-brief-kind {
-        font-weight: 700;
-        color: #92400e;
-    }
-
-    .gi-brief-title {
-        margin: .65rem 0 .5rem;
-        color: #111827;
-    }
-
-    .gi-brief-summary,
-    .gi-brief-status,
-    .gi-brief-facts dd,
-    .gi-brief-timeline-item p {
-        color: #374151;
-    }
-
-    .gi-brief-grid {
-        display: grid;
-        gap: 1rem;
-        margin-top: 1rem;
-    }
-
-    .gi-brief-block {
-        padding: 1rem;
-        border-radius: .95rem;
-        background: rgba(255, 255, 255, .9);
-        border: 1px solid #e5e7eb;
-    }
-
-    .gi-brief-block h6 {
-        margin-bottom: .8rem;
-        font-size: .82rem;
-        text-transform: uppercase;
-        letter-spacing: .08em;
-        color: #6b7280;
-    }
-
-    .gi-brief-facts {
-        display: grid;
-        gap: .8rem;
-        margin-bottom: 0;
-    }
-
-    .gi-brief-fact dt {
-        font-size: .78rem;
-        text-transform: uppercase;
-        letter-spacing: .08em;
-        color: #6b7280;
-    }
-
-    .gi-brief-fact dd {
-        margin: .2rem 0 0;
-    }
-
-    .gi-brief-timeline {
-        display: grid;
-        gap: .85rem;
-    }
-
-    .gi-brief-timeline-item p {
-        margin: .35rem 0 0;
-    }
-
-    .gi-brief-links {
-        display: flex;
-        gap: .6rem;
-        flex-wrap: wrap;
-        margin-top: 1rem;
-    }
-</style>

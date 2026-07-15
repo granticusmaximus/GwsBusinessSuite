@@ -1,368 +1,396 @@
 @page "/admin/podcasts"
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "ContributorAccess")]
+@implements IAsyncDisposable
 @using GwsBusinessSuite.Application.Podcasts
 @using Microsoft.AspNetCore.Authorization
 @inject IPodcastDirectoryService PodcastService
+@inject IPodcastListenProgressService ProgressService
 @inject ILogger<PodcastDirectory> Logger
 @inject IJSRuntime JS
 
 <PageTitle>Podcast Directory</PageTitle>
 
-<div class="pd-page">
-    <div class="page-header pd-header">
-        <div>
-            <h1><i class="bi bi-mic-fill me-2 text-danger"></i>Podcast Directory</h1>
-            <p>Search Apple Podcasts, curate a saved library, and refresh live episodes from each show's RSS feed.</p>
-        </div>
-        <div class="pd-header-actions">
-            <button class="pd-tab @(_activeTab == "discover" ? "pd-tab--active" : "")" @onclick='() => _activeTab = "discover"'>
-                Discover
-            </button>
-            <button class="pd-tab @(_activeTab == "library" ? "pd-tab--active" : "")" @onclick='() => _activeTab = "library"'>
-                Library <span class="pd-pill">@_library.Count</span>
-            </button>
-        </div>
+<div class="page-header">
+    <h1><i class="bi bi-mic-fill me-2 text-danger"></i>Podcast Directory</h1>
+    <p>Search Apple Podcasts, curate a saved library, and refresh live episodes from each show's RSS feed.</p>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert alert-success" role="alert">@_statusMessage</div>
+}
+
+@if (!string.IsNullOrWhiteSpace(_errorMessage))
+{
+    <div class="alert alert-danger" role="alert">@_errorMessage</div>
+}
+
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item">
+        <button type="button" class="nav-link @(_activeTab == "discover" ? "active" : "")" @onclick='() => _activeTab = "discover"'>
+            Discover
+        </button>
+    </li>
+    <li class="nav-item">
+        <button type="button" class="nav-link @(_activeTab == "library" ? "active" : "")" @onclick='() => _activeTab = "library"'>
+            Library <span class="badge text-bg-secondary rounded-pill ms-1">@_library.Count</span>
+        </button>
+    </li>
+</ul>
+
+@if (_initialLoading)
+{
+    <div class="d-flex align-items-center gap-2 text-secondary">
+        <span class="spinner-border spinner-border-sm"></span>
+        <span>Loading podcast directory…</span>
     </div>
-
-    @if (!string.IsNullOrWhiteSpace(_statusMessage))
-    {
-        <div class="alert alert-success" role="alert">@_statusMessage</div>
-    }
-
-    @if (!string.IsNullOrWhiteSpace(_errorMessage))
-    {
-        <div class="alert alert-danger" role="alert">@_errorMessage</div>
-    }
-
-    @if (_initialLoading)
-    {
-        <div class="pd-loading">
-            <span class="spinner-border spinner-border-sm"></span>
-            <span>Loading podcast directory…</span>
-        </div>
-    }
-    else if (_activeTab == "discover")
-    {
-        <section class="pd-panel">
-            <div class="pd-search-row">
-                <form class="pd-search-form" @onsubmit="SubmitDiscoverSearchAsync">
-                    <label class="pd-label" for="podcast-search">Search Apple Podcasts</label>
-                    <div class="pd-search-input-wrap">
-                        <i class="bi bi-search"></i>
-                        <input id="podcast-search"
-                               class="pd-search-input"
-                               placeholder="Search for podcasts, hosts, or topics"
-                               @bind="_discoverSearchInput" />
-                    </div>
-                </form>
-
-                <div class="pd-search-actions">
-                    <button class="btn btn-primary" @onclick="SubmitDiscoverSearchAsync" disabled="@_discoverLoading">Search</button>
+}
+else if (_activeTab == "discover")
+{
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-8">
+                    <label class="form-label fw-semibold small" for="podcast-search">Search Apple Podcasts</label>
+                    <form @onsubmit="SubmitDiscoverSearchAsync">
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="bi bi-search"></i></span>
+                            <input id="podcast-search" class="form-control" placeholder="Search for podcasts, hosts, or topics" @bind="_discoverSearchInput" />
+                        </div>
+                    </form>
+                </div>
+                <div class="col-md-4 d-flex gap-2">
+                    <button class="btn btn-primary flex-grow-1" @onclick="SubmitDiscoverSearchAsync" disabled="@_discoverLoading">Search</button>
                     <button class="btn btn-outline-secondary" @onclick="ResetDiscoverView" disabled="@_discoverLoading">Reset</button>
                 </div>
             </div>
 
-            <div class="pd-chip-row">
-                <button class="pd-chip @(_activeDiscoverChip == "Featured" ? "pd-chip--active" : "")"
+            <div class="d-flex flex-wrap gap-2 mt-3">
+                <button class="btn btn-sm rounded-pill @(_activeDiscoverChip == "Featured" ? "btn-dark" : "btn-outline-secondary")"
                         @onclick="ResetDiscoverView">
                     Featured
                 </button>
-                <button class="pd-chip @(_activeDiscoverChip == "All" ? "pd-chip--active" : "")"
+                <button class="btn btn-sm rounded-pill @(_activeDiscoverChip == "All" ? "btn-dark" : "btn-outline-secondary")"
                         @onclick='() => LoadDiscoverCategoryAsync("All")'>
                     All
                 </button>
                 @foreach (var category in DiscoverCategories)
                 {
-                    <button class="pd-chip @(_activeDiscoverChip == category ? "pd-chip--active" : "")"
+                    <button class="btn btn-sm rounded-pill @(_activeDiscoverChip == category ? "btn-dark" : "btn-outline-secondary")"
                             @onclick='() => LoadDiscoverCategoryAsync(category)'>
                         @category
                     </button>
                 }
             </div>
+        </div>
+    </div>
 
-            @if (_discoverLoading)
-            {
-                <div class="pd-loading">
-                    <span class="spinner-border spinner-border-sm"></span>
-                    <span>Loading podcasts…</span>
+    @if (_discoverLoading)
+    {
+        <div class="d-flex align-items-center gap-2 text-secondary">
+            <span class="spinner-border spinner-border-sm"></span>
+            <span>Loading podcasts…</span>
+        </div>
+    }
+    else if (_showFeaturedSections)
+    {
+        @foreach (var featuredSection in _featuredSections)
+        {
+            <div class="d-flex justify-content-between align-items-start gap-3 mb-2 mt-4">
+                <div>
+                    <div class="small text-uppercase fw-semibold text-secondary">@featuredSection.Icon Featured Category</div>
+                    <h2 class="h5 mb-0">@featuredSection.Category</h2>
                 </div>
-            }
-            else if (_showFeaturedSections)
-            {
-                <div class="pd-featured-stack">
-                    @foreach (var featuredSection in _featuredSections)
-                    {
-                        <section class="pd-section">
-                            <div class="pd-section-header">
-                                <div>
-                                    <div class="pd-section-kicker">@featuredSection.Icon Featured Category</div>
-                                    <h2>@featuredSection.Category</h2>
-                                </div>
-                                <button class="btn btn-sm btn-outline-secondary"
-                                        @onclick='() => LoadDiscoverCategoryAsync(featuredSection.Category)'>
-                                    View More
-                                </button>
-                            </div>
+                <button class="btn btn-sm btn-outline-secondary" @onclick='() => LoadDiscoverCategoryAsync(featuredSection.Category)'>
+                    View More
+                </button>
+            </div>
 
-                            @if (featuredSection.Podcasts.Count == 0)
-                            {
-                                <p class="pd-muted">No podcasts are available in this category right now.</p>
-                            }
-                            else
-                            {
-                                <div class="pd-grid">
-                                    @foreach (var item in featuredSection.Podcasts)
-                                    {
-                                        @RenderDiscoverCard(item)
-                                    }
-                                </div>
-                            }
-                        </section>
-                    }
-                </div>
-            }
-            else if (_discoverResults.Count == 0)
+            @if (featuredSection.Podcasts.Count == 0)
             {
-                <div class="pd-empty">
-                    <i class="bi bi-broadcast"></i>
-                    <h2>No podcasts found</h2>
-                    <p>Try a different search term or switch to another category.</p>
-                </div>
+                <p class="text-secondary small mb-0">No podcasts are available in this category right now.</p>
             }
             else
             {
-                <div class="pd-section-header">
-                    <div>
-                        <div class="pd-section-kicker">Discover Results</div>
-                        <h2>@_discoverHeading</h2>
-                    </div>
-                    <span class="pd-muted">@_discoverResults.Count podcast@(_discoverResults.Count == 1 ? "" : "s")</span>
-                </div>
-
-                <div class="pd-grid">
-                    @foreach (var item in _discoverResults)
+                <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3">
+                    @foreach (var item in featuredSection.Podcasts)
                     {
                         @RenderDiscoverCard(item)
                     }
                 </div>
             }
-        </section>
+        }
+    }
+    else if (_discoverResults.Count == 0)
+    {
+        <div class="card border-0 shadow-sm">
+            <div class="card-body text-center text-secondary py-5">
+                <i class="bi bi-broadcast display-6 d-block mb-2"></i>
+                <h2 class="h5">No podcasts found</h2>
+                <p class="mb-0">Try a different search term or switch to another category.</p>
+            </div>
+        </div>
     }
     else
     {
-        <section class="pd-panel">
-            <div class="pd-library-toolbar">
-                <div class="pd-library-search">
-                    <label class="pd-label" for="library-search">Search saved library</label>
-                    <div class="pd-search-input-wrap">
-                        <i class="bi bi-search"></i>
-                        <input id="library-search"
-                               class="pd-search-input"
-                               placeholder="Filter by title, author, or description"
-                               @bind="_librarySearch"
-                               @bind:event="oninput" />
+        <div class="d-flex justify-content-between align-items-start gap-3 mb-2">
+            <div>
+                <div class="small text-uppercase fw-semibold text-secondary">Discover Results</div>
+                <h2 class="h5 mb-0">@_discoverHeading</h2>
+            </div>
+            <span class="text-secondary small">@_discoverResults.Count podcast@(_discoverResults.Count == 1 ? "" : "s")</span>
+        </div>
+
+        <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3">
+            @foreach (var item in _discoverResults)
+            {
+                @RenderDiscoverCard(item)
+            }
+        </div>
+    }
+}
+else
+{
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-8">
+                    <label class="form-label fw-semibold small" for="library-search">Search saved library</label>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input id="library-search" class="form-control" placeholder="Filter by title, author, or description"
+                               @bind="_librarySearch" @bind:event="oninput" />
                     </div>
                 </div>
-
-                <div class="pd-library-meta">
-                    <div class="pd-library-count">@FilteredLibrary.Count podcast@((FilteredLibrary.Count == 1) ? "" : "s")</div>
+                <div class="col-md-4 d-flex justify-content-md-end align-items-center gap-2">
+                    <span class="text-secondary small">@FilteredLibrary.Count podcast@((FilteredLibrary.Count == 1) ? "" : "s")</span>
                     <button class="btn btn-outline-secondary btn-sm" @onclick="ReloadLibraryAsync">Refresh Library</button>
                 </div>
             </div>
 
             @if (LibraryCategories.Count > 0)
             {
-                <div class="pd-chip-row">
-                    <button class="pd-chip @(_selectedLibraryCategory == "All" ? "pd-chip--active" : "")"
+                <div class="d-flex flex-wrap gap-2 mt-3">
+                    <button class="btn btn-sm rounded-pill @(_selectedLibraryCategory == "All" ? "btn-dark" : "btn-outline-secondary")"
                             @onclick='() => _selectedLibraryCategory = "All"'>
-                        All <span class="pd-pill">@_library.Count</span>
+                        All <span class="badge text-bg-light rounded-pill ms-1">@_library.Count</span>
                     </button>
                     @foreach (var category in LibraryCategories)
                     {
-                        <button class="pd-chip @(_selectedLibraryCategory == category.Name ? "pd-chip--active" : "")"
+                        <button class="btn btn-sm rounded-pill @(_selectedLibraryCategory == category.Name ? "btn-dark" : "btn-outline-secondary")"
                                 @onclick='() => _selectedLibraryCategory = category.Name'>
-                            @category.Name <span class="pd-pill">@category.Count</span>
+                            @category.Name <span class="badge text-bg-light rounded-pill ms-1">@category.Count</span>
                         </button>
                     }
                 </div>
             }
+        </div>
+    </div>
 
-            @if (_library.Count == 0)
-            {
-                <div class="pd-empty">
-                    <i class="bi bi-journal-plus"></i>
-                    <h2>Your library is empty</h2>
-                    <p>Save a show from the Discover tab to start tracking episodes here.</p>
-                </div>
-            }
-            else if (FilteredLibrary.Count == 0)
-            {
-                <div class="pd-empty">
-                    <i class="bi bi-funnel"></i>
-                    <h2>No saved podcasts match</h2>
-                    <p>Clear the current search or category filter to see the rest of your library.</p>
-                </div>
-            }
-            else
-            {
-                <div class="pd-grid">
-                    @foreach (var item in FilteredLibrary)
-                    {
-                        <article class="pd-card pd-card--library">
-                            <div class="pd-card-cover">
-                                @if (!string.IsNullOrWhiteSpace(item.ImageUrl))
-                                {
-                                    <img src="@item.ImageUrl" alt="" loading="lazy" />
-                                }
-                                else
-                                {
-                                    <div class="pd-cover-fallback">@GetInitial(item.Title)</div>
-                                }
-                            </div>
-                            <div class="pd-card-body">
-                                <div class="pd-card-meta">
-                                    <span class="pd-badge">@item.Category</span>
-                                    <span class="pd-card-count">@item.EpisodeCount episode@(item.EpisodeCount == 1 ? "" : "s")</span>
-                                </div>
-                                <h3>@item.Title</h3>
-                                @if (!string.IsNullOrWhiteSpace(item.Author))
-                                {
-                                    <p class="pd-card-author">by @item.Author</p>
-                                }
-                                <p class="pd-card-description">@Describe(item.Description)</p>
-                                <div class="pd-card-footer">
-                                    <button class="btn btn-primary btn-sm" @onclick='() => OpenPodcastAsync(item.Id)'>Open Episodes</button>
-                                    @if (!string.IsNullOrWhiteSpace(item.AppleUrl))
-                                    {
-                                        <a class="btn btn-outline-secondary btn-sm" href="@item.AppleUrl" target="_blank" rel="noopener noreferrer">Apple</a>
-                                    }
-                                </div>
-                                @if (item.LastEpisodeRefreshAt.HasValue)
-                                {
-                                    <div class="pd-card-refresh">Updated @TimeAgo(item.LastEpisodeRefreshAt.Value)</div>
-                                }
-                            </div>
-                        </article>
-                    }
-                </div>
-            }
-        </section>
+    @if (_library.Count == 0)
+    {
+        <div class="card border-0 shadow-sm">
+            <div class="card-body text-center text-secondary py-5">
+                <i class="bi bi-journal-plus display-6 d-block mb-2"></i>
+                <h2 class="h5">Your library is empty</h2>
+                <p class="mb-0">Save a show from the Discover tab to start tracking episodes here.</p>
+            </div>
+        </div>
     }
-</div>
+    else if (FilteredLibrary.Count == 0)
+    {
+        <div class="card border-0 shadow-sm">
+            <div class="card-body text-center text-secondary py-5">
+                <i class="bi bi-funnel display-6 d-block mb-2"></i>
+                <h2 class="h5">No saved podcasts match</h2>
+                <p class="mb-0">Clear the current search or category filter to see the rest of your library.</p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3">
+            @foreach (var item in FilteredLibrary)
+            {
+                <div class="col">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="ratio ratio-16x9 bg-light rounded-top overflow-hidden">
+                            @if (!string.IsNullOrWhiteSpace(item.ImageUrl))
+                            {
+                                <img src="@item.ImageUrl" alt="" loading="lazy" class="w-100 h-100" style="object-fit:cover;" />
+                            }
+                            else
+                            {
+                                <div class="d-flex align-items-center justify-content-center display-6 text-danger fw-bold">@GetInitial(item.Title)</div>
+                            }
+                        </div>
+                        <div class="card-body d-flex flex-column">
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <span class="badge text-bg-primary rounded-pill">@item.Category</span>
+                                <span class="text-secondary small">@item.EpisodeCount episode@(item.EpisodeCount == 1 ? "" : "s")</span>
+                            </div>
+                            <h3 class="h6">@item.Title</h3>
+                            @if (!string.IsNullOrWhiteSpace(item.Author))
+                            {
+                                <p class="text-secondary small mb-1">by @item.Author</p>
+                            }
+                            <p class="small text-secondary">@Describe(item.Description)</p>
+                            <div class="d-flex flex-wrap gap-2 mt-auto">
+                                <button class="btn btn-primary btn-sm" @onclick='() => OpenPodcastAsync(item.Id)'>Open Episodes</button>
+                                @if (!string.IsNullOrWhiteSpace(item.AppleUrl))
+                                {
+                                    <a class="btn btn-outline-secondary btn-sm" href="@item.AppleUrl" target="_blank" rel="noopener noreferrer">Apple</a>
+                                }
+                            </div>
+                            @if (item.LastEpisodeRefreshAt.HasValue)
+                            {
+                                <div class="text-secondary small mt-2">Updated @TimeAgo(item.LastEpisodeRefreshAt.Value)</div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
 
 @if (_detailOpen)
 {
-    <div class="pd-modal-backdrop" @onclick="CloseDetail">
-        <div class="pd-modal" @onclick:stopPropagation="true">
-            <div class="pd-modal-header">
-                <div>
-                    <div class="pd-section-kicker">Podcast Detail</div>
-                    <h2>@(_selectedDetail?.Podcast.Title ?? "Loading…")</h2>
+    <div class="modal d-block" tabindex="-1" style="background: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div>
+                        <div class="small text-uppercase fw-semibold text-secondary">Podcast Detail</div>
+                        <h2 class="h5 mb-0">@(_selectedDetail?.Podcast.Title ?? "Loading…")</h2>
+                    </div>
+                    <button type="button" class="btn-close" @onclick="CloseDetail" aria-label="Close"></button>
                 </div>
-                <button class="pd-close" @onclick="CloseDetail" aria-label="Close">
-                    <i class="bi bi-x-lg"></i>
-                </button>
-            </div>
+                <div class="modal-body">
+                    @if (_detailLoading)
+                    {
+                        <div class="d-flex align-items-center gap-2 text-secondary">
+                            <span class="spinner-border spinner-border-sm"></span>
+                            <span>Loading podcast detail…</span>
+                        </div>
+                    }
+                    else if (_selectedDetail is { } detail)
+                    {
+                        <div class="row g-4 mb-3">
+                            <div class="col-md-4">
+                                <div class="ratio ratio-1x1 bg-light rounded overflow-hidden">
+                                    @if (!string.IsNullOrWhiteSpace(detail.Podcast.ImageUrl))
+                                    {
+                                        <img src="@detail.Podcast.ImageUrl" alt="" loading="lazy" class="w-100 h-100" style="object-fit:cover;" />
+                                    }
+                                    else
+                                    {
+                                        <div class="d-flex align-items-center justify-content-center display-4 text-danger fw-bold">@GetInitial(detail.Podcast.Title)</div>
+                                    }
+                                </div>
+                            </div>
+                            <div class="col-md-8">
+                                <div class="d-flex align-items-center gap-2 mb-2">
+                                    <span class="badge text-bg-primary rounded-pill">@detail.Podcast.Category</span>
+                                    <span class="text-secondary small">@detail.Podcast.EpisodeCount episode@(detail.Podcast.EpisodeCount == 1 ? "" : "s")</span>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(detail.Podcast.Author))
+                                {
+                                    <p class="text-secondary small mb-1">by @detail.Podcast.Author</p>
+                                }
+                                <p class="small text-secondary">@Describe(detail.Podcast.Description, 320)</p>
+                                <div class="d-flex flex-wrap gap-2">
+                                    <button class="btn btn-primary btn-sm" @onclick="RefreshSelectedPodcastAsync">Refresh Episodes</button>
+                                    <button class="btn btn-outline-danger btn-sm" @onclick='() => RemoveSavedPodcastAsync(detail.Podcast.Id, detail.Podcast.Title)'>Remove</button>
+                                    @if (!string.IsNullOrWhiteSpace(detail.Podcast.FeedUrl))
+                                    {
+                                        <a class="btn btn-outline-secondary btn-sm" href="@detail.Podcast.FeedUrl" target="_blank" rel="noopener noreferrer">Feed</a>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(detail.Podcast.AppleUrl))
+                                    {
+                                        <a class="btn btn-outline-secondary btn-sm" href="@detail.Podcast.AppleUrl" target="_blank" rel="noopener noreferrer">Apple</a>
+                                    }
+                                </div>
+                                @if (detail.Podcast.LastEpisodeRefreshAt.HasValue)
+                                {
+                                    <div class="text-secondary small mt-2">Episodes refreshed @TimeAgo(detail.Podcast.LastEpisodeRefreshAt.Value)</div>
+                                }
+                            </div>
+                        </div>
 
-            @if (_detailLoading)
-            {
-                <div class="pd-loading">
-                    <span class="spinner-border spinner-border-sm"></span>
-                    <span>Loading podcast detail…</span>
-                </div>
-            }
-            else if (_selectedDetail is { } detail)
-            {
-                <div class="pd-detail-hero">
-                    <div class="pd-detail-cover">
-                        @if (!string.IsNullOrWhiteSpace(detail.Podcast.ImageUrl))
+                        <div class="d-flex justify-content-between align-items-start gap-3 mb-2">
+                            <div>
+                                <div class="small text-uppercase fw-semibold text-secondary">Episodes</div>
+                                <h3 class="h6 mb-0">@detail.Episodes.Count episode@(detail.Episodes.Count == 1 ? "" : "s") ready</h3>
+                            </div>
+                            <select class="form-select form-select-sm" style="max-width:10rem;" @bind="_episodeSort">
+                                <option value="newest">Newest first</option>
+                                <option value="oldest">Oldest first</option>
+                            </select>
+                        </div>
+
+                        @if (SortedEpisodes.Count == 0)
                         {
-                            <img src="@detail.Podcast.ImageUrl" alt="" loading="lazy" />
+                            <div class="text-center text-secondary py-4">
+                                <i class="bi bi-radioactive display-6 d-block mb-2"></i>
+                                <h2 class="h6">No episodes yet</h2>
+                                <p class="mb-0 small">This feed did not return any playable episodes. Try refreshing the feed.</p>
+                            </div>
                         }
                         else
                         {
-                            <div class="pd-cover-fallback pd-cover-fallback--large">@GetInitial(detail.Podcast.Title)</div>
-                        }
-                    </div>
+                            <div class="list-group">
+                                @foreach (var episode in SortedEpisodes)
+                                {
+                                    <div class="list-group-item">
+                                        <div class="d-flex justify-content-between align-items-start gap-3 mb-1">
+                                            <h4 class="h6 mb-0">@episode.Title</h4>
+                                            <div class="d-flex align-items-center gap-2 text-secondary small flex-shrink-0">
+                                                @if (episode.PublishedAt.HasValue)
+                                                {
+                                                    <span>@episode.PublishedAt.Value.ToLocalTime().ToString("MMM d, yyyy")</span>
+                                                }
+                                                @if (episode.DurationSeconds.HasValue)
+                                                {
+                                                    <span>@FormatDuration(episode.DurationSeconds.Value)</span>
+                                                }
+                                            </div>
+                                        </div>
+                                        <p class="small text-secondary">@Describe(episode.Description, 380)</p>
 
-                    <div class="pd-detail-copy">
-                        <div class="pd-card-meta">
-                            <span class="pd-badge">@detail.Podcast.Category</span>
-                            <span class="pd-card-count">@detail.Podcast.EpisodeCount episode@(detail.Podcast.EpisodeCount == 1 ? "" : "s")</span>
-                        </div>
-                        @if (!string.IsNullOrWhiteSpace(detail.Podcast.Author))
-                        {
-                            <p class="pd-card-author">by @detail.Podcast.Author</p>
-                        }
-                        <p class="pd-detail-description">@Describe(detail.Podcast.Description, 320)</p>
-                        <div class="pd-detail-actions">
-                            <button class="btn btn-primary btn-sm" @onclick="RefreshSelectedPodcastAsync">Refresh Episodes</button>
-                            <button class="btn btn-outline-danger btn-sm" @onclick='() => RemoveSavedPodcastAsync(detail.Podcast.Id, detail.Podcast.Title)'>Remove</button>
-                            @if (!string.IsNullOrWhiteSpace(detail.Podcast.FeedUrl))
-                            {
-                                <a class="btn btn-outline-secondary btn-sm" href="@detail.Podcast.FeedUrl" target="_blank" rel="noopener noreferrer">Feed</a>
-                            }
-                            @if (!string.IsNullOrWhiteSpace(detail.Podcast.AppleUrl))
-                            {
-                                <a class="btn btn-outline-secondary btn-sm" href="@detail.Podcast.AppleUrl" target="_blank" rel="noopener noreferrer">Apple</a>
-                            }
-                        </div>
-                        @if (detail.Podcast.LastEpisodeRefreshAt.HasValue)
-                        {
-                            <div class="pd-card-refresh">Episodes refreshed @TimeAgo(detail.Podcast.LastEpisodeRefreshAt.Value)</div>
-                        }
-                    </div>
-                </div>
-
-                <div class="pd-episode-header">
-                    <div>
-                        <div class="pd-section-kicker">Episodes</div>
-                        <h3>@detail.Episodes.Count episode@(detail.Episodes.Count == 1 ? "" : "s") ready</h3>
-                    </div>
-                    <select class="form-select form-select-sm pd-sort" @bind="_episodeSort">
-                        <option value="newest">Newest first</option>
-                        <option value="oldest">Oldest first</option>
-                    </select>
-                </div>
-
-                @if (SortedEpisodes.Count == 0)
-                {
-                    <div class="pd-empty pd-empty--compact">
-                        <i class="bi bi-radioactive"></i>
-                        <h2>No episodes yet</h2>
-                        <p>This feed did not return any playable episodes. Try refreshing the feed.</p>
-                    </div>
-                }
-                else
-                {
-                    <div class="pd-episode-list">
-                        @foreach (var episode in SortedEpisodes)
-                        {
-                            <article class="pd-episode-card">
-                                <div class="pd-episode-topline">
-                                    <h4>@episode.Title</h4>
-                                    <div class="pd-episode-meta">
-                                        @if (episode.PublishedAt.HasValue)
+                                        @if (_progress.TryGetValue(episode.Id, out var progress))
                                         {
-                                            <span>@episode.PublishedAt.Value.ToLocalTime().ToString("MMM d, yyyy")</span>
+                                            if (progress.IsCompleted)
+                                            {
+                                                <div class="mb-2">
+                                                    <span class="badge text-bg-success"><i class="bi bi-check-circle-fill me-1"></i>Listened</span>
+                                                </div>
+                                            }
+                                            else if (progress.PositionSeconds > 0)
+                                            {
+                                                <div class="mb-2">
+                                                    <div class="progress" style="height:4px;" role="progressbar">
+                                                        <div class="progress-bar" style="width:@(GetProgressPercent(progress))%"></div>
+                                                    </div>
+                                                    <div class="small text-secondary mt-1">Resume from @FormatDuration(progress.PositionSeconds)</div>
+                                                </div>
+                                            }
                                         }
-                                        @if (episode.DurationSeconds.HasValue)
-                                        {
-                                            <span>@FormatDuration(episode.DurationSeconds.Value)</span>
-                                        }
+
+                                        <div class="d-flex flex-column gap-1">
+                                            <audio controls preload="none" class="w-100" src="@episode.AudioUrl"
+                                                   data-episode-id="@episode.Id"
+                                                   data-resume-seconds="@(_progress.TryGetValue(episode.Id, out var resumeProgress) ? resumeProgress.PositionSeconds : 0)"></audio>
+                                            <a class="small align-self-start" href="@episode.AudioUrl" target="_blank" rel="noopener noreferrer">Open audio</a>
+                                        </div>
                                     </div>
-                                </div>
-                                <p class="pd-episode-description">@Describe(episode.Description, 380)</p>
-                                <div class="pd-episode-audio">
-                                    <audio controls preload="none" src="@episode.AudioUrl"></audio>
-                                    <a href="@episode.AudioUrl" target="_blank" rel="noopener noreferrer">Open audio</a>
-                                </div>
-                            </article>
+                                }
+                            </div>
                         }
-                    </div>
-                }
-            }
+                    }
+                </div>
+            </div>
         </div>
     </div>
 }
@@ -389,6 +417,7 @@
     private List<PodcastCatalogItem> _discoverResults = [];
     private List<SavedPodcastSummary> _library = [];
     private Dictionary<string, SavedPodcastSummary> _libraryIndex = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<Guid, PodcastListenProgressView> _progress = new();
 
     private bool _initialLoading = true;
     private bool _discoverLoading;
@@ -407,6 +436,9 @@
     private string _errorMessage = string.Empty;
 
     private PodcastDetailView? _selectedDetail;
+
+    private DotNetObjectReference<PodcastDirectory>? _progressJsRef;
+    private bool _progressJsInitialized;
 
     private IReadOnlyList<SavedPodcastSummary> FilteredLibrary =>
         _library
@@ -437,6 +469,16 @@
     {
         await Task.WhenAll(InitializeLibraryAsync(), InitializeFeaturedAsync());
         _initialLoading = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_progressJsInitialized)
+        {
+            _progressJsRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("gwsPodcastProgress.init", _progressJsRef);
+            _progressJsInitialized = true;
+        }
     }
 
     private async Task InitializeLibraryAsync()
@@ -630,6 +672,7 @@
             if (_selectedDetail is not null)
             {
                 await LoadLibraryAsync();
+                await LoadProgressAsync();
             }
         }
         catch (Exception ex)
@@ -643,13 +686,51 @@
         }
     }
 
-    private async Task OpenSavedFromDiscoverAsync(PodcastCatalogItem item)
+    private async Task LoadProgressAsync()
     {
-        var saved = FindSavedMatch(item);
-        if (saved is not null)
+        if (_selectedDetail is null)
         {
-            await OpenPodcastAsync(saved.Id);
+            return;
         }
+
+        var episodeIds = _selectedDetail.Episodes.Select(e => e.Id).ToList();
+        _progress = (await ProgressService.GetProgressForEpisodesAsync(episodeIds))
+            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+    }
+
+    private static double GetProgressPercent(PodcastListenProgressView progress) =>
+        progress.DurationSeconds is > 0
+            ? Math.Clamp(progress.PositionSeconds * 100.0 / progress.DurationSeconds.Value, 0, 100)
+            : 0;
+
+    [JSInvokable]
+    public async Task SaveProgress(string episodeId, int positionSeconds, int? durationSeconds)
+    {
+        if (!Guid.TryParse(episodeId, out var id))
+        {
+            return;
+        }
+
+        await ProgressService.SaveProgressAsync(id, positionSeconds, durationSeconds);
+        _progress[id] = new PodcastListenProgressView(id, positionSeconds, durationSeconds,
+            durationSeconds is > 0 && positionSeconds >= durationSeconds * 0.95, DateTimeOffset.UtcNow);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public async Task MarkCompleted(string episodeId)
+    {
+        if (!Guid.TryParse(episodeId, out var id))
+        {
+            return;
+        }
+
+        await ProgressService.MarkCompletedAsync(id);
+        var existing = _progress.GetValueOrDefault(id);
+        _progress[id] = existing is null
+            ? new PodcastListenProgressView(id, 0, null, true, DateTimeOffset.UtcNow)
+            : existing with { IsCompleted = true, LastPlayedAt = DateTimeOffset.UtcNow };
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task RefreshSelectedPodcastAsync()
@@ -697,6 +778,7 @@
         _detailOpen = false;
         _selectedDetail = null;
         _detailLoading = false;
+        _progress = new();
     }
 
     private static bool MatchesLibrarySearch(SavedPodcastSummary item, string search)
@@ -707,52 +789,54 @@
                item.Description.Contains(query, StringComparison.OrdinalIgnoreCase);
     }
 
-    private RenderFragment RenderDiscoverCard(PodcastCatalogItem item) => @<article class="pd-card">
-        <div class="pd-card-cover">
-            @if (!string.IsNullOrWhiteSpace(item.ImageUrl))
-            {
-                <img src="@item.ImageUrl" alt="" loading="lazy" />
-            }
-            else
-            {
-                <div class="pd-cover-fallback">@GetInitial(item.Title)</div>
-            }
-        </div>
-        <div class="pd-card-body">
-            <div class="pd-card-meta">
-                <span class="pd-badge">@item.Category</span>
-                @if (FindSavedMatch(item) is not null)
+    private RenderFragment RenderDiscoverCard(PodcastCatalogItem item) => @<div class="col">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="ratio ratio-16x9 bg-light rounded-top overflow-hidden">
+                @if (!string.IsNullOrWhiteSpace(item.ImageUrl))
                 {
-                    <span class="pd-card-count">Saved</span>
-                }
-            </div>
-            <h3>@item.Title</h3>
-            @if (!string.IsNullOrWhiteSpace(item.Author))
-            {
-                <p class="pd-card-author">by @item.Author</p>
-            }
-            <p class="pd-card-description">@Describe(item.Description)</p>
-            <div class="pd-card-footer">
-                @if (FindSavedMatch(item) is { } saved)
-                {
-                    <button class="btn btn-primary btn-sm" @onclick='() => OpenPodcastAsync(saved.Id)'>Open Library Entry</button>
-                }
-                else if (string.IsNullOrWhiteSpace(item.FeedUrl))
-                {
-                    <button class="btn btn-outline-secondary btn-sm" disabled>Feed unavailable</button>
+                    <img src="@item.ImageUrl" alt="" loading="lazy" class="w-100 h-100" style="object-fit:cover;" />
                 }
                 else
                 {
-                    <button class="btn btn-primary btn-sm" @onclick='() => SavePodcastAsync(item)'>Save to Library</button>
-                }
-
-                @if (!string.IsNullOrWhiteSpace(item.AppleUrl))
-                {
-                    <a class="btn btn-outline-secondary btn-sm" href="@item.AppleUrl" target="_blank" rel="noopener noreferrer">Apple</a>
+                    <div class="d-flex align-items-center justify-content-center display-6 text-danger fw-bold">@GetInitial(item.Title)</div>
                 }
             </div>
+            <div class="card-body d-flex flex-column">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <span class="badge text-bg-primary rounded-pill">@item.Category</span>
+                    @if (FindSavedMatch(item) is not null)
+                    {
+                        <span class="badge text-bg-light">Saved</span>
+                    }
+                </div>
+                <h3 class="h6">@item.Title</h3>
+                @if (!string.IsNullOrWhiteSpace(item.Author))
+                {
+                    <p class="text-secondary small mb-1">by @item.Author</p>
+                }
+                <p class="small text-secondary">@Describe(item.Description)</p>
+                <div class="d-flex flex-wrap gap-2 mt-auto">
+                    @if (FindSavedMatch(item) is { } saved)
+                    {
+                        <button class="btn btn-primary btn-sm" @onclick='() => OpenPodcastAsync(saved.Id)'>Open Library Entry</button>
+                    }
+                    else if (string.IsNullOrWhiteSpace(item.FeedUrl))
+                    {
+                        <button class="btn btn-outline-secondary btn-sm" disabled>Feed unavailable</button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-primary btn-sm" @onclick='() => SavePodcastAsync(item)'>Save to Library</button>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(item.AppleUrl))
+                    {
+                        <a class="btn btn-outline-secondary btn-sm" href="@item.AppleUrl" target="_blank" rel="noopener noreferrer">Apple</a>
+                    }
+                </div>
+            </div>
         </div>
-    </article>;
+    </div>;
 
     private static string GetInitial(string value) =>
         string.IsNullOrWhiteSpace(value) ? "?" : value.Trim()[..1].ToUpperInvariant();
@@ -790,6 +874,23 @@
         return duration.TotalHours >= 1
             ? $"{(int)duration.TotalHours}h {duration.Minutes}m"
             : $"{Math.Max(1, duration.Minutes)}m";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_progressJsInitialized)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("gwsPodcastProgress.dispose");
+            }
+            catch (JSDisconnectedException)
+            {
+                // The circuit is already gone (e.g. browser closed); nothing to clean up client-side.
+            }
+        }
+
+        _progressJsRef?.Dispose();
     }
 
     private sealed record LibraryCategoryOption(string Name, int Count);

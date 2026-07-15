@@ -683,3 +683,19 @@ public sealed class LiveShowRecording : AuditableEntity
     public long FileSizeBytes { get; set; }
     public string ContentType { get; set; } = "video/webm";
 }
+
+// Apple-Podcasts-style per-user resume position - keyed by Username (not an AppUser FK)
+// to match this codebase's existing convention of storing "who" as a plain string
+// (CreatedBy/UpdatedBy), since there's no public visitor account system, only the
+// Admin/Author/Contributor accounts already tracked that way everywhere else. One row per
+// (Username, EpisodeId); IsCompleted flips true once playback nears the end (see
+// PodcastListenProgressService for the exact threshold) or the browser reports "ended".
+public sealed class PodcastListenProgress : AuditableEntity
+{
+    public Guid EpisodeId { get; set; }
+    public required string Username { get; set; }
+    public int PositionSeconds { get; set; }
+    public int? DurationSeconds { get; set; }
+    public bool IsCompleted { get; set; }
+    public DateTimeOffset LastPlayedAt { get; set; } = DateTimeOffset.UtcNow;
+}

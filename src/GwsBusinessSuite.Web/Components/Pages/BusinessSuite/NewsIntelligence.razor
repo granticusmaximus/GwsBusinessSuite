@@ -8,154 +8,152 @@
 
 <PageTitle>News Intelligence</PageTitle>
 
-<div class="ni-shell">
-
-    @* ── LEFT SIDEBAR ─────────────────────────────────────── *@
-    <aside class="ni-sidebar">
-        <div class="ni-sidebar-header">
-            <span class="ni-sidebar-title">Watched Topics</span>
-            <button class="ni-icon-btn" title="Add topic" @onclick="OpenAddForm">
-                <i class="bi bi-plus-lg"></i>
-            </button>
-        </div>
-
-        @if (_showTopicForm)
-        {
-            <div class="ni-topic-form">
-                <input class="ni-input" placeholder="Topic name"
-                       value="@_formName" @oninput="e => _formName = e.Value?.ToString() ?? string.Empty" />
-                <textarea class="ni-input ni-textarea" placeholder="Keywords (comma-separated)"
-                          @oninput="e => _formKeywords = e.Value?.ToString() ?? string.Empty"
-                          rows="2">@_formKeywords</textarea>
-                <div class="ni-color-row">
-                    <label class="ni-label">Badge color</label>
-                    <input type="color" class="ni-color-picker" @bind="_formColor" />
-                </div>
-                <div class="ni-form-actions">
-                    <button class="ni-btn ni-btn-primary" @onclick="SaveTopicAsync">
-                        @(_editingTopicId.HasValue ? "Save" : "Add")
-                    </button>
-                    <button class="ni-btn ni-btn-ghost" @onclick="CloseForm">Cancel</button>
-                </div>
-                @if (!string.IsNullOrWhiteSpace(_formError))
-                {
-                    <p class="ni-form-error">@_formError</p>
-                }
-            </div>
-        }
-
-        <nav class="ni-topic-list">
-            <button class="ni-topic-item @(_activeFilter == "all" ? "ni-topic-item--active" : "")"
-                    @onclick='() => SelectFilter("all")'>
-                <span class="ni-topic-dot" style="background:#64748b"></span>
-                <span class="ni-topic-name">All News</span>
-                <span class="ni-topic-count">@_topics.Sum(t => t.UnreadCount)</span>
-            </button>
-
-            <button class="ni-topic-item @(_activeFilter == "top" ? "ni-topic-item--active" : "")"
-                    @onclick='() => SelectFilter("top")'>
-                <span class="ni-topic-dot" style="background:#0f172a"></span>
-                <span class="ni-topic-name">Top News</span>
-            </button>
-
-            @foreach (var topic in _topics)
+<div class="page-header d-flex align-items-start justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-newspaper me-2 text-primary"></i>News Intelligence</h1>
+        <p class="mb-0">
+            @FeedHeading()
+            @if (_feed?.LastRefreshedAt.HasValue == true)
             {
-                <div class="ni-topic-row">
-                    <button class="ni-topic-item @(_activeFilter == topic.Id.ToString() ? "ni-topic-item--active" : "")"
-                            @onclick="() => SelectFilter(topic.Id.ToString())">
-                        <span class="ni-topic-dot" style="background:@topic.ColorHex"></span>
-                        <span class="ni-topic-name @(topic.IsActive ? "" : "ni-topic-name--inactive")">@topic.Name</span>
-                        @if (topic.UnreadCount > 0)
-                        {
-                            <span class="ni-topic-count">@topic.UnreadCount</span>
-                        }
-                    </button>
-                    <div class="ni-topic-actions">
-                        <button class="ni-icon-btn-sm" title="Refresh now" @onclick="() => RefreshTopicAsync(topic.Id)">
-                            <i class="bi bi-arrow-clockwise"></i>
-                        </button>
-                        <button class="ni-icon-btn-sm" title="Edit" @onclick="() => OpenEditForm(topic)">
-                            <i class="bi bi-pencil"></i>
-                        </button>
-                        <button class="ni-icon-btn-sm ni-icon-btn-danger" title="Delete"
-                                @onclick="() => DeleteTopicAsync(topic.Id)">
-                            <i class="bi bi-trash"></i>
-                        </button>
+                <span class="text-muted small">&middot; Updated @TimeAgo(_feed.LastRefreshedAt.Value)</span>
+            }
+        </p>
+    </div>
+    <button class="btn btn-primary d-inline-flex align-items-center gap-2" disabled="@_refreshing" @onclick="RefreshAllAsync">
+        <i class="bi bi-arrow-clockwise @(_refreshing ? "gws-spin" : "")"></i>
+        <span>@(_refreshing ? "Refreshing…" : "Refresh All")</span>
+    </button>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-3">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+                <span class="fw-semibold">Watched Topics</span>
+                <button class="btn btn-sm btn-outline-primary" title="Add topic" @onclick="OpenAddForm">
+                    <i class="bi bi-plus-lg"></i>
+                </button>
+            </div>
+
+            @if (_showTopicForm)
+            {
+                <div class="card-body border-bottom">
+                    <input class="form-control form-control-sm mb-2" placeholder="Topic name"
+                           value="@_formName" @oninput="e => _formName = e.Value?.ToString() ?? string.Empty" />
+                    <textarea class="form-control form-control-sm mb-2" placeholder="Keywords (comma-separated)"
+                              @oninput="e => _formKeywords = e.Value?.ToString() ?? string.Empty"
+                              rows="2">@_formKeywords</textarea>
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <label class="form-label small mb-0">Badge color</label>
+                        <input type="color" class="form-control form-control-color form-control-sm" @bind="_formColor" />
                     </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary btn-sm" @onclick="SaveTopicAsync">
+                            @(_editingTopicId.HasValue ? "Save" : "Add")
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="CloseForm">Cancel</button>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_formError))
+                    {
+                        <p class="text-danger small mt-2 mb-0">@_formError</p>
+                    }
                 </div>
             }
-        </nav>
-    </aside>
 
-    @* ── MAIN FEED ────────────────────────────────────────── *@
-    <main class="ni-feed">
-        <div class="ni-feed-header">
-            <div class="ni-feed-title">
-                <span>@FeedHeading()</span>
-                @if (_feed?.LastRefreshedAt.HasValue == true)
+            <div class="list-group list-group-flush">
+                <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center @(_activeFilter == "all" ? "active" : "")"
+                        @onclick='() => SelectFilter("all")'>
+                    <span><span class="gws-topic-dot me-2" style="background:#64748b"></span>All News</span>
+                    <span class="badge @(_activeFilter == "all" ? "text-bg-light" : "text-bg-secondary") rounded-pill">@_topics.Sum(t => t.UnreadCount)</span>
+                </button>
+
+                <button type="button" class="list-group-item list-group-item-action @(_activeFilter == "top" ? "active" : "")"
+                        @onclick='() => SelectFilter("top")'>
+                    <span class="gws-topic-dot me-2" style="background:#0f172a"></span>Top News
+                </button>
+
+                @foreach (var topic in _topics)
                 {
-                    <small class="ni-last-refresh">Updated @TimeAgo(_feed.LastRefreshedAt.Value)</small>
+                    <div class="list-group-item p-0">
+                        <div class="d-flex align-items-center">
+                            <button type="button" class="list-group-item list-group-item-action border-0 flex-grow-1 d-flex justify-content-between align-items-center @(_activeFilter == topic.Id.ToString() ? "active" : "")"
+                                    @onclick="() => SelectFilter(topic.Id.ToString())">
+                                <span>
+                                    <span class="gws-topic-dot me-2" style="background:@topic.ColorHex"></span>
+                                    <span class="@(topic.IsActive ? "" : "text-decoration-line-through text-muted")">@topic.Name</span>
+                                </span>
+                                @if (topic.UnreadCount > 0)
+                                {
+                                    <span class="badge @(_activeFilter == topic.Id.ToString() ? "text-bg-light" : "text-bg-secondary") rounded-pill">@topic.UnreadCount</span>
+                                }
+                            </button>
+                            <div class="d-flex flex-shrink-0 pe-2">
+                                <button class="btn btn-sm btn-link text-secondary p-1" title="Refresh now" @onclick="() => RefreshTopicAsync(topic.Id)">
+                                    <i class="bi bi-arrow-clockwise"></i>
+                                </button>
+                                <button class="btn btn-sm btn-link text-secondary p-1" title="Edit" @onclick="() => OpenEditForm(topic)">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <button class="btn btn-sm btn-link text-danger p-1" title="Delete" @onclick="() => DeleteTopicAsync(topic.Id)">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 }
             </div>
-            <button class="ni-btn ni-btn-primary @(_refreshing ? "ni-btn--loading" : "")"
-                    disabled="@_refreshing" @onclick="RefreshAllAsync">
-                <i class="bi bi-arrow-clockwise @(_refreshing ? "ni-spin" : "")"></i>
-                @(_refreshing ? "Refreshing…" : "Refresh All")
-            </button>
         </div>
+    </div>
 
+    <div class="col-lg-9">
         @if (ShowSourceFilters)
         {
-            <div class="ni-source-panel">
-                <div class="ni-source-panel-header">
-                    <div>
-                        <span class="ni-source-label">Outlet Filters</span>
-                        <p class="ni-source-summary">@SourceFilterSummary()</p>
+            <div class="card border-0 shadow-sm mb-3">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start gap-3 mb-2">
+                        <div>
+                            <div class="small text-uppercase fw-semibold text-secondary">Outlet Filters</div>
+                            <p class="text-secondary small mb-0">@SourceFilterSummary()</p>
+                        </div>
+                        @if (HiddenSourceFilterCount > 0)
+                        {
+                            <span class="text-secondary small text-nowrap">
+                                Showing @VisibleSourceFilters.Count of @AllSourceFilters.Count outlets
+                            </span>
+                        }
                     </div>
-                    @if (HiddenSourceFilterCount > 0)
-                    {
-                        <span class="ni-source-note">
-                            Showing @VisibleSourceFilters.Count of @AllSourceFilters.Count outlets
-                        </span>
-                    }
-                </div>
 
-                <div class="ni-source-filter">
-                    <button class="ni-source-chip @(_selectedSources.Count == 0 ? "ni-source-chip--active" : "")"
-                            @onclick="ClearSourceFilter">
-                        <span>All outlets</span>
-                        <span class="ni-source-chip-count">@CurrentViewItems().Count</span>
-                    </button>
-                    @foreach (var source in VisibleSourceFilters)
-                    {
-                        <button class="ni-source-chip @(_selectedSources.Contains(source.Name) ? "ni-source-chip--active" : "")"
-                                @onclick="() => ToggleSource(source.Name)">
-                            <span>@source.Name</span>
-                            <span class="ni-source-chip-count">@source.ArticleCount</span>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button class="btn btn-sm rounded-pill @(_selectedSources.Count == 0 ? "btn-dark" : "btn-outline-secondary")"
+                                @onclick="ClearSourceFilter">
+                            All outlets <span class="badge text-bg-light rounded-pill ms-1">@CurrentViewItems().Count</span>
                         </button>
-                    }
+                        @foreach (var source in VisibleSourceFilters)
+                        {
+                            <button class="btn btn-sm rounded-pill @(_selectedSources.Contains(source.Name) ? "btn-dark" : "btn-outline-secondary")"
+                                    @onclick="() => ToggleSource(source.Name)">
+                                @source.Name <span class="badge text-bg-light rounded-pill ms-1">@source.ArticleCount</span>
+                            </button>
+                        }
+                    </div>
                 </div>
             </div>
         }
 
         @if (!string.IsNullOrWhiteSpace(_statusMessage))
         {
-            <div class="ni-alert ni-alert-info">
-                <i class="bi bi-info-circle"></i> @_statusMessage
-            </div>
+            <div class="alert alert-info" role="alert"><i class="bi bi-info-circle me-2"></i>@_statusMessage</div>
         }
 
         @if (!string.IsNullOrWhiteSpace(_errorMessage))
         {
-            <div class="ni-alert ni-alert-error">
-                <i class="bi bi-exclamation-triangle"></i> @_errorMessage
-            </div>
+            <div class="alert alert-danger" role="alert"><i class="bi bi-exclamation-triangle me-2"></i>@_errorMessage</div>
         }
 
         @if (_loading)
         {
-            <div class="ni-loading">
-                <i class="bi bi-hourglass-split ni-spin"></i>
+            <div class="d-flex align-items-center gap-2 text-secondary">
+                <span class="spinner-border spinner-border-sm"></span>
                 <span>Loading feed…</span>
             </div>
         }
@@ -165,23 +163,24 @@
         }
         else if (_feed is null || CurrentItems().Count == 0)
         {
-            <div class="ni-empty">
-                <i class="bi bi-newspaper"></i>
-                <p>No articles yet. Click <strong>Refresh All</strong> to fetch the latest news,
-                   or add keywords to a topic and click <strong>Refresh All</strong>.</p>
+            <div class="card border-0 shadow-sm">
+                <div class="card-body text-center text-secondary py-5">
+                    <i class="bi bi-newspaper display-6 d-block mb-2"></i>
+                    <p class="mb-0">No articles yet. Click <strong>Refresh All</strong> to fetch the latest news,
+                        or add keywords to a topic and click <strong>Refresh All</strong>.</p>
+                </div>
             </div>
         }
         else
         {
-            <div class="ni-card-grid">
+            <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3">
                 @foreach (var item in CurrentItems())
                 {
                     @RenderCard(item)
                 }
             </div>
         }
-    </main>
-
+    </div>
 </div>
 
 @code {
@@ -457,166 +456,103 @@
         return CurrentViewItems().Where(SourceMatches).ToList();
     }
 
-    private RenderFragment RenderAllView() => __builder =>
-    {
-        if (_feed is null || _feed.Items.Count == 0)
-        {
-            __builder.OpenElement(0, "div");
-            __builder.AddAttribute(1, "class", "ni-empty");
-            __builder.OpenElement(2, "i");
-            __builder.AddAttribute(3, "class", "bi bi-newspaper");
-            __builder.CloseElement();
-            __builder.OpenElement(4, "p");
-            __builder.AddMarkupContent(5, "No articles yet. Click <strong>Refresh All</strong> to fetch the latest news.");
-            __builder.CloseElement();
-            __builder.CloseElement();
-            return;
+    private RenderFragment RenderAllView() => @<text>
+        @{
+            var filteredItems = CurrentViewItems().Where(SourceMatches).ToList();
         }
-
-        var filteredItems = CurrentViewItems().Where(SourceMatches).ToList();
-
-        if (filteredItems.Count == 0)
+        @if (_feed is null || _feed.Items.Count == 0)
         {
-            __builder.OpenElement(6, "div");
-            __builder.AddAttribute(7, "class", "ni-empty");
-            __builder.OpenElement(8, "i");
-            __builder.AddAttribute(9, "class", "bi bi-funnel");
-            __builder.CloseElement();
-            __builder.OpenElement(10, "p");
-            __builder.AddContent(11, "No articles match the selected source filter.");
-            __builder.CloseElement();
-            __builder.CloseElement();
-            return;
+            <div class="card border-0 shadow-sm">
+                <div class="card-body text-center text-secondary py-5">
+                    <i class="bi bi-newspaper display-6 d-block mb-2"></i>
+                    <p class="mb-0">No articles yet. Click <strong>Refresh All</strong> to fetch the latest news.</p>
+                </div>
+            </div>
         }
-
-        var topNews = filteredItems.Where(x => x.TopicId == null).ToList();
-        var topicGroups = filteredItems
-            .Where(x => x.TopicId != null)
-            .GroupBy(x => x.TopicId)
-            .OrderBy(g => g.First().TopicName)
-            .ToList();
-
-        var seq = 20;
-
-        if (topNews.Count > 0)
+        else if (filteredItems.Count == 0)
         {
-            __builder.OpenElement(seq++, "section");
-            __builder.AddAttribute(seq++, "class", "ni-section");
-            __builder.OpenElement(seq++, "h2");
-            __builder.AddAttribute(seq++, "class", "ni-section-heading");
-            __builder.OpenElement(seq++, "span");
-            __builder.AddAttribute(seq++, "class", "ni-dot");
-            __builder.AddAttribute(seq++, "style", "background:#0f172a");
-            __builder.CloseElement();
-            __builder.AddContent(seq++, "Today's Top News");
-            __builder.CloseElement();
-            __builder.OpenElement(seq++, "div");
-            __builder.AddAttribute(seq++, "class", "ni-card-grid");
-            foreach (var item in topNews)
+            <div class="card border-0 shadow-sm">
+                <div class="card-body text-center text-secondary py-5">
+                    <i class="bi bi-funnel display-6 d-block mb-2"></i>
+                    <p class="mb-0">No articles match the selected source filter.</p>
+                </div>
+            </div>
+        }
+        else
+        {
+            var topNews = filteredItems.Where(x => x.TopicId == null).ToList();
+            var topicGroups = filteredItems
+                .Where(x => x.TopicId != null)
+                .GroupBy(x => x.TopicId)
+                .OrderBy(g => g.First().TopicName)
+                .ToList();
+
+            if (topNews.Count > 0)
             {
-                var captured = item;
-                __builder.AddContent(seq++, RenderCard(captured));
+                <section class="mb-4">
+                    <h2 class="h5 d-flex align-items-center mb-3">
+                        <span class="gws-topic-dot me-2" style="background:#0f172a"></span>Today's Top News
+                    </h2>
+                    <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3">
+                        @foreach (var item in topNews)
+                        {
+                            @RenderCard(item)
+                        }
+                    </div>
+                </section>
             }
-            __builder.CloseElement();
-            __builder.CloseElement();
-        }
 
-        foreach (var group in topicGroups)
-        {
-            var first = group.First();
-            __builder.OpenElement(seq++, "section");
-            __builder.AddAttribute(seq++, "class", "ni-section");
-            __builder.OpenElement(seq++, "h2");
-            __builder.AddAttribute(seq++, "class", "ni-section-heading");
-            __builder.OpenElement(seq++, "span");
-            __builder.AddAttribute(seq++, "class", "ni-dot");
-            __builder.AddAttribute(seq++, "style", $"background:{first.TopicColorHex}");
-            __builder.CloseElement();
-            __builder.AddContent(seq++, first.TopicName);
-            __builder.OpenElement(seq++, "span");
-            __builder.AddAttribute(seq++, "class", "ni-section-count");
-            __builder.AddContent(seq++, $"({group.Count()})");
-            __builder.CloseElement();
-            __builder.CloseElement();
-            __builder.OpenElement(seq++, "div");
-            __builder.AddAttribute(seq++, "class", "ni-card-grid");
-            foreach (var item in group)
+            foreach (var group in topicGroups)
             {
-                var captured = item;
-                __builder.AddContent(seq++, RenderCard(captured));
+                var first = group.First();
+                <section class="mb-4">
+                    <h2 class="h5 d-flex align-items-center mb-3">
+                        <span class="gws-topic-dot me-2" style="background:@first.TopicColorHex"></span>
+                        @first.TopicName
+                        <span class="text-secondary small ms-2">(@group.Count())</span>
+                    </h2>
+                    <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3">
+                        @foreach (var item in group)
+                        {
+                            @RenderCard(item)
+                        }
+                    </div>
+                </section>
             }
-            __builder.CloseElement();
-            __builder.CloseElement();
         }
-    };
+    </text>;
 
-    private RenderFragment RenderCard(NewsItemDto item) => __builder =>
-    {
-        var accent = string.IsNullOrWhiteSpace(item.TopicColorHex) ? "#64748b" : item.TopicColorHex;
-        var avatarInitial = string.IsNullOrWhiteSpace(item.Source) ? "?" : item.Source.Trim()[..1].ToUpperInvariant();
-        // Ollama hasn't summarized every item yet (e.g. right after a refresh) — fall back
-        // to the RSS description rather than showing an empty card.
-        var takeText = string.IsNullOrWhiteSpace(item.OllamaSummary) ? item.Description : item.OllamaSummary;
-
-        __builder.OpenElement(0, "article");
-        __builder.AddAttribute(1, "class", "ni-card");
-        __builder.AddAttribute(2, "style", $"--ni-accent:{accent}");
-
-        if (!string.IsNullOrWhiteSpace(item.ImageUrl))
-        {
-            __builder.OpenElement(3, "img");
-            __builder.AddAttribute(4, "class", "ni-card-image");
-            __builder.AddAttribute(5, "src", item.ImageUrl);
-            __builder.AddAttribute(6, "alt", string.Empty);
-            __builder.AddAttribute(7, "loading", "lazy");
-            __builder.CloseElement();
-        }
-
-        __builder.OpenElement(8, "div");
-        __builder.AddAttribute(9, "class", "ni-card-meta");
-        __builder.OpenElement(10, "span");
-        __builder.AddAttribute(11, "class", "ni-card-avatar");
-        __builder.AddContent(12, avatarInitial);
-        __builder.CloseElement();
-        __builder.OpenElement(13, "span");
-        __builder.AddAttribute(14, "class", "ni-card-source");
-        __builder.AddContent(15, item.Source);
-        __builder.CloseElement();
-        if (item.PublishedAt.HasValue)
-        {
-            __builder.OpenElement(16, "span");
-            __builder.AddAttribute(17, "class", "ni-card-time");
-            __builder.AddContent(18, TimeAgo(item.PublishedAt.Value));
-            __builder.CloseElement();
-        }
-        __builder.CloseElement();
-
-        __builder.OpenElement(19, "a");
-        __builder.AddAttribute(20, "href", item.Url);
-        __builder.AddAttribute(21, "target", "_blank");
-        __builder.AddAttribute(22, "rel", "noopener noreferrer");
-        __builder.AddAttribute(23, "class", "ni-card-title");
-        __builder.AddContent(24, item.Title);
-        __builder.CloseElement();
-
-        if (!string.IsNullOrWhiteSpace(takeText))
-        {
-            __builder.OpenElement(25, "p");
-            __builder.AddAttribute(26, "class", "ni-card-take");
-            __builder.AddContent(27, takeText);
-            __builder.CloseElement();
-        }
-
-        __builder.OpenElement(28, "a");
-        __builder.AddAttribute(29, "href", item.Url);
-        __builder.AddAttribute(30, "target", "_blank");
-        __builder.AddAttribute(31, "rel", "noopener noreferrer");
-        __builder.AddAttribute(32, "class", "ni-card-open");
-        __builder.AddContent(33, "Open ↗");
-        __builder.CloseElement();
-
-        __builder.CloseElement();
-    };
+    private RenderFragment RenderCard(NewsItemDto item) => @<div class="col">
+        <article class="card border-0 shadow-sm h-100">
+            @if (!string.IsNullOrWhiteSpace(item.ImageUrl))
+            {
+                <div class="ratio ratio-16x9 bg-light rounded-top overflow-hidden">
+                    <img src="@item.ImageUrl" alt="" loading="lazy" class="w-100 h-100" style="object-fit:cover;" />
+                </div>
+            }
+            <div class="card-body d-flex flex-column">
+                <div class="d-flex align-items-center gap-2 mb-2 small text-secondary">
+                    <span class="gws-avatar-circle" style="background:@(string.IsNullOrWhiteSpace(item.TopicColorHex) ? "#64748b" : item.TopicColorHex)">
+                        @(string.IsNullOrWhiteSpace(item.Source) ? "?" : item.Source.Trim()[..1].ToUpperInvariant())
+                    </span>
+                    <span class="fw-semibold">@item.Source</span>
+                    @if (item.PublishedAt.HasValue)
+                    {
+                        <span>&middot; @TimeAgo(item.PublishedAt.Value)</span>
+                    }
+                </div>
+                <a href="@item.Url" target="_blank" rel="noopener noreferrer" class="h6 d-block mb-2 text-body text-decoration-none">@item.Title</a>
+                @{
+                    var takeText = string.IsNullOrWhiteSpace(item.OllamaSummary) ? item.Description : item.OllamaSummary;
+                }
+                @if (!string.IsNullOrWhiteSpace(takeText))
+                {
+                    <p class="small text-secondary flex-grow-1">@takeText</p>
+                }
+                <a href="@item.Url" target="_blank" rel="noopener noreferrer" class="small fw-semibold mt-auto">Open <i class="bi bi-box-arrow-up-right"></i></a>
+            </div>
+        </article>
+    </div>;
 
     private static string TimeAgo(DateTimeOffset dt)
     {

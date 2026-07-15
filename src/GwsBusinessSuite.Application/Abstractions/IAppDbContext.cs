@@ -44,6 +44,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<AppGenerationMessage> AppGenerationMessages { get; }
     DbSet<LiveShowSession> LiveShowSessions { get; }
     DbSet<LiveShowRecording> LiveShowRecordings { get; }
+    DbSet<PodcastListenProgress> PodcastListenProgresses { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     // For multi-step writes that must be all-or-nothing (e.g. AppGenerationService.ApproveAsync

@@ -888,3 +888,29 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     .gws-admin-bar { padding: 0 .8rem; }
     .gws-content { padding: 1.25rem; }
 }
+
+/* ── Shared spinning-icon utility (refresh buttons, loading states) ───── */
+@keyframes gws-spin { to { transform: rotate(360deg); } }
+.gws-spin { animation: gws-spin 1s linear infinite; }
+
+/* ── Small colored indicator dot (topic/category badges in list items) ── */
+.gws-topic-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+/* ── Small colored initial-letter avatar (source/author badges on cards) ─ */
+.gws-avatar-circle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 50%;
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    flex-shrink: 0;
+}
