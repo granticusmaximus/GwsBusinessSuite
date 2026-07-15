@@ -270,5 +270,85 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
                 CreatedAt = seededAt,
                 CreatedBy = seededBy
             });
+
+        SeedMoreCmsKnowledge(modelBuilder, wpSourceId, elementorSourceId, seededAt, seededBy);
+    }
+
+    // Second seeding pass (Phase 5 "Big Vision" scoping round) - more clean-room behavioral
+    // notes on commonly-requested WordPress/Elementor capabilities this app doesn't have yet,
+    // covering gaps identified when picking "dynamic content widgets" as the first one to
+    // actually build (see the posts-grid widget in CmsBlockHtmlRenderer.cs). Same rules as
+    // the original 5: describe behavior/workflow only, never copy source or proprietary
+    // assets - see each source's LicenseNotes.
+    private static void SeedMoreCmsKnowledge(
+        ModelBuilder modelBuilder, Guid wpSourceId, Guid elementorSourceId, DateTimeOffset seededAt, string seededBy)
+    {
+        modelBuilder.Entity<CmsKnowledgeEntry>().HasData(
+            new CmsKnowledgeEntry
+            {
+                Id = new Guid("22222222-2222-2222-2222-222222222206"),
+                SourceId = wpSourceId,
+                Capability = "Dynamic content loops",
+                WorkflowSummary = "Pull a filtered, ordered, live list of content items into a page instead of hand-placing each one.",
+                ImplementationHint = "Parameterize source/filter/sort/limit on the widget and re-query at render time so the block always reflects current data - never bake the list into stored page content.",
+                SuggestedBlocksCsv = "posts-grid,query-loop,content-source-picker",
+                CreatedAt = seededAt,
+                CreatedBy = seededBy
+            },
+            new CmsKnowledgeEntry
+            {
+                Id = new Guid("22222222-2222-2222-2222-222222222207"),
+                SourceId = elementorSourceId,
+                Capability = "Popup builder with trigger rules",
+                WorkflowSummary = "A modal with its own mini layout tree, shown based on a trigger condition (page load delay, exit intent, click, scroll depth) rather than being embedded inline in the page.",
+                ImplementationHint = "Model a popup as its own small layout document plus a separate trigger-rule record, and render it through the same block renderer used for regular pages so widget support stays in sync automatically.",
+                SuggestedBlocksCsv = "popup,trigger-rule,modal-overlay",
+                CreatedAt = seededAt,
+                CreatedBy = seededBy
+            },
+            new CmsKnowledgeEntry
+            {
+                Id = new Guid("22222222-2222-2222-2222-222222222208"),
+                SourceId = wpSourceId,
+                Capability = "Custom fields / structured metadata",
+                WorkflowSummary = "Attach arbitrary typed key-value fields to a content item beyond its fixed schema, without a database migration per field.",
+                ImplementationHint = "Store as a JSON dictionary column with a lightweight per-content-type field-definition list, so new fields stay both renderable and editable without ad hoc columns.",
+                SuggestedBlocksCsv = "custom-field,field-schema,meta-panel",
+                CreatedAt = seededAt,
+                CreatedBy = seededBy
+            },
+            new CmsKnowledgeEntry
+            {
+                Id = new Guid("22222222-2222-2222-2222-222222222209"),
+                SourceId = elementorSourceId,
+                Capability = "Theme builder: reusable header/footer templates",
+                WorkflowSummary = "Define a header and footer once per site, edited like any other block layout, and have every page pull from it instead of each page carrying its own nav rendering.",
+                ImplementationHint = "Model header/footer as their own special-purpose layout documents stored per-site and merged into the page at render time, ahead of/after the page's own sections.",
+                SuggestedBlocksCsv = "site-header,site-footer,template-part",
+                CreatedAt = seededAt,
+                CreatedBy = seededBy
+            },
+            new CmsKnowledgeEntry
+            {
+                Id = new Guid("22222222-2222-2222-2222-22222222020a"),
+                SourceId = wpSourceId,
+                Capability = "Widget areas / sidebars",
+                WorkflowSummary = "Named, swappable content regions that live outside the main page flow (e.g. a blog sidebar) and can hold any widget independent of the page's own content.",
+                ImplementationHint = "Define named regions per template/site, and let the same widget vocabulary used for page content be dropped into a region - don't invent a parallel widget system just for regions.",
+                SuggestedBlocksCsv = "widget-area,sidebar-region,region-slot",
+                CreatedAt = seededAt,
+                CreatedBy = seededBy
+            },
+            new CmsKnowledgeEntry
+            {
+                Id = new Guid("22222222-2222-2222-2222-22222222020b"),
+                SourceId = elementorSourceId,
+                Capability = "Conditional display rules",
+                WorkflowSummary = "Show or hide a section/widget based on device size, logged-in role, or a date range, rather than it always rendering.",
+                ImplementationHint = "Attach a small rule set to a layout node evaluated at render time, defaulting to \"always visible\" so existing content renders unchanged when no rule is set.",
+                SuggestedBlocksCsv = "display-condition,role-visibility,scheduled-visibility",
+                CreatedAt = seededAt,
+                CreatedBy = seededBy
+            });
     }
 }

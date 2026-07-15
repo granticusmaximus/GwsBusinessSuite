@@ -40,10 +40,27 @@
   human sign-off. See `AppGenerationService.cs` for the Ollama prompt contract and the
   defensive JSON-plan parsing.
 
-## Phase 5 — Big Vision
-- Ingest WordPress and Elementor Pro documentation as Ollama reference material
-- Use Ollama to suggest features and generate UI/logic based on those docs
-- Progressively copy over WordPress/Elementor features without proprietary code
+## Phase 5 — Big Vision ✅
+- Ingest WordPress and Elementor Pro documentation as Ollama reference material ✅ —
+  scoped to expanding the existing hand-authored CmsKnowledge library rather than scraping
+  (avoids any WordPress.org GPL / Elementor Pro proprietary-content licensing question
+  entirely). Added 6 more clean-room entries covering capabilities this app didn't have
+  yet: dynamic content loops, popup builder w/ trigger rules, custom fields, theme-builder
+  header/footer templates, widget areas/sidebars, and conditional display rules. See
+  `SeedMoreCmsKnowledge` in `ApplicationDbContext.cs`.
+- Use Ollama to suggest features and generate UI/logic based on those docs ✅ — wired as
+  retrieval-augmented context rather than a new standalone tool: `AppGenerationService`
+  now runs the latest chat message through `ICmsKnowledgeService.SearchAsync` and folds
+  the top 3 matching entries into the Ollama system prompt as "Reference notes," so
+  chat-drafted pages benefit from WordPress/Elementor-inspired workflow patterns without
+  any new UI or approval step.
+- Progressively copy over WordPress/Elementor features without proprietary code ✅ (first
+  one) — a "posts-grid" widget (WordPress's core "loop" concept) added to the CMS
+  builder's widget vocabulary: a live, always-current grid of the most recently published
+  Articles, configurable count/columns/image/excerpt/CTA. `CmsBlockHtmlRenderer` stays a
+  pure function (no DB access) - `PublicArticleSummary` data is fetched once per request
+  by each of Program.cs's three render call sites (live site, static export, admin
+  preview) and threaded through.
 
 ## Other Areas to Address
 - Article approval/revision queue ✅ (audited) — the approve/reject/revision UI and the

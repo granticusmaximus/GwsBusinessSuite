@@ -2,6 +2,7 @@ using FluentAssertions;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.AppGeneration;
 using GwsBusinessSuite.Application.CmsBuilder;
+using GwsBusinessSuite.Application.CmsKnowledge;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
@@ -211,8 +212,52 @@ public sealed class AppGenerationServiceTests
         pending.Should().NotContain(r => r.Id == drafting.Request!.Id);
     }
 
+    [Fact]
+    public async Task StartAsync_ShouldIncludeMatchingCmsKnowledgeEntry_InTheSystemPrompt()
+    {
+        await using var db = await CreateDbAsync();
+        var site = await CreateSiteAsync(db);
+        await CreateKnowledgeEntryAsync(db, "Dynamic content loops", "Pull a live list of posts into a page.");
+        var ollama = new FakeOllamaService { GenerateTextResult = ValidPlanReply };
+        var service = CreateService(db, ollama);
+
+        await service.StartAsync(new StartAppGenerationInput(site.Id, "Loop page", "Add a dynamic content loop of my latest posts"));
+
+        ollama.LastSystemPrompt.Should().Contain("Dynamic content loops");
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldOmitReferenceNotesSection_WhenNothingMatches()
+    {
+        // A query with no plausible keyword overlap against any CmsKnowledge entry (the
+        // real seeded library is present here via EnsureCreatedAsync's HasData, so this
+        // can't just use an ordinary phrase like "pricing page" - "page" alone matches
+        // several seeded entries).
+        await using var db = await CreateDbAsync();
+        var site = await CreateSiteAsync(db);
+        var ollama = new FakeOllamaService { GenerateTextResult = ValidPlanReply };
+        var service = CreateService(db, ollama);
+
+        await service.StartAsync(new StartAppGenerationInput(site.Id, "Zzyzx", "zzyzxqqqrrrstuv"));
+
+        ollama.LastSystemPrompt.Should().NotContain("Reference notes");
+    }
+
+    private static async Task CreateKnowledgeEntryAsync(ApplicationDbContext db, string capability, string workflowSummary)
+    {
+        var source = new CmsKnowledgeSource { Key = "test-source", Name = "Test Source" };
+        db.CmsKnowledgeSources.Add(source);
+        db.CmsKnowledgeEntries.Add(new CmsKnowledgeEntry
+        {
+            SourceId = source.Id,
+            Capability = capability,
+            WorkflowSummary = workflowSummary
+        });
+        await db.SaveChangesAsync();
+    }
+
     private static AppGenerationService CreateService(ApplicationDbContext db, IOllamaService ollama) =>
-        new(db, ollama, new SiteSettingsService(db), new CmsBuilderService(db), new FixedCurrentUserAccessor("grantwatson"));
+        new(db, ollama, new SiteSettingsService(db), new CmsBuilderService(db), new CmsKnowledgeService(db), new FixedCurrentUserAccessor("grantwatson"));
 
     private static async Task<CmsSite> CreateSiteAsync(ApplicationDbContext db)
     {
@@ -235,9 +280,13 @@ public sealed class AppGenerationServiceTests
     private sealed class FakeOllamaService : IOllamaService
     {
         public string GenerateTextResult { get; set; } = string.Empty;
+        public string? LastSystemPrompt { get; private set; }
 
-        public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
-            Task.FromResult(GenerateTextResult);
+        public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
+        {
+            LastSystemPrompt = systemPrompt;
+            return Task.FromResult(GenerateTextResult);
+        }
 
         public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyCollection<string>>(Array.Empty<string>());

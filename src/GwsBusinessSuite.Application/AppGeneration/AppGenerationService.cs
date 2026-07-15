@@ -1,5 +1,6 @@
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.CmsBuilder;
+using GwsBusinessSuite.Application.CmsKnowledge;
 using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Domain.Entities;
@@ -16,6 +17,7 @@ public sealed class AppGenerationService(
     IOllamaService ollama,
     ISiteSettingsService siteSettingsService,
     ICmsBuilderService cmsBuilderService,
+    ICmsKnowledgeService cmsKnowledgeService,
     ICurrentUserAccessor? currentUserAccessor = null) : IAppGenerationService
 {
     private readonly ICurrentUserAccessor _currentUserAccessor = currentUserAccessor ?? FixedCurrentUserAccessor.Unknown;
@@ -252,8 +254,16 @@ public sealed class AppGenerationService(
             .Select(p => p.Title)
             .ToListAsync(cancellationToken);
 
+        // Retrieval-augmented context: the latest user message is used as a keyword query
+        // against the CmsKnowledge library (WordPress/Elementor-inspired clean-room notes),
+        // so Ollama's plan benefits from established workflow patterns without every prompt
+        // dumping the entire library. No match just means no reference-notes section - the
+        // chat still works exactly as before this was wired in.
+        var latestUserMessage = transcript.LastOrDefault(m => m.Role == AppGenerationMessageRoles.User)?.Content ?? string.Empty;
+        var referenceNotes = await cmsKnowledgeService.SearchAsync(latestUserMessage, take: 3, cancellationToken: cancellationToken);
+
         var model = await GetEffectiveModelAsync(cancellationToken);
-        var systemPrompt = BuildSystemPrompt(site.Name, existingTitles);
+        var systemPrompt = BuildSystemPrompt(site.Name, existingTitles, referenceNotes);
         var userPrompt = BuildConversationPrompt(transcript);
 
         string raw;
@@ -334,20 +344,27 @@ public sealed class AppGenerationService(
     private static string BuildConversationPrompt(List<AppGenerationMessage> transcript) =>
         string.Join("\n\n", transcript.Select(m => $"{m.Role}: {m.Content}"));
 
-    private static string BuildSystemPrompt(string siteName, List<string> existingPageTitles)
+    private static string BuildSystemPrompt(string siteName, List<string> existingPageTitles, IReadOnlyList<CmsKnowledgeQueryResult> referenceNotes)
     {
         var existingSummary = existingPageTitles.Count == 0
             ? "none yet"
             : string.Join(", ", existingPageTitles.Take(20));
+
+        var referenceNotesBlock = referenceNotes.Count == 0
+            ? string.Empty
+            : "Reference notes (WordPress/Elementor-inspired workflow patterns - use as inspiration,\n"
+              + "not a requirement to include any of them):\n"
+              + string.Join("\n", referenceNotes.Select(n => $"- {n.Capability}: {n.WorkflowSummary}"))
+              + "\n\n";
 
         return """
             You are a website-building assistant embedded in a CMS admin tool. You're helping
             an author plan new pages to add to the existing site "__SITE_NAME__" (existing pages:
             __EXISTING_SUMMARY__). Nothing you propose goes live until a human admin approves it.
 
-            Have a brief, conversational back-and-forth about what the author wants. Ask at
-            most one or two clarifying questions if the request is vague, otherwise just
-            propose a concrete plan.
+            __REFERENCE_NOTES__Have a brief, conversational back-and-forth about what the author
+            wants. Ask at most one or two clarifying questions if the request is vague, otherwise
+            just propose a concrete plan.
 
             CRITICAL OUTPUT CONTRACT: whenever you have a concrete plan (even a rough first
             draft), end your reply with a fenced code block labeled json containing the FULL
@@ -381,7 +398,8 @@ public sealed class AppGenerationService(
             prose replies short - the plan JSON is what matters.
             """
             .Replace("__SITE_NAME__", siteName)
-            .Replace("__EXISTING_SUMMARY__", existingSummary);
+            .Replace("__EXISTING_SUMMARY__", existingSummary)
+            .Replace("__REFERENCE_NOTES__", referenceNotesBlock);
     }
 
     private static (string ReplyText, List<GeneratedPageSpec>? Pages) ParseAssistantTurn(string raw)

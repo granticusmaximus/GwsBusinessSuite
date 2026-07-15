@@ -694,6 +694,46 @@ else
                                           spellcheck="false"></textarea>
                             </div>
                         }
+                        else if (selWidget.WidgetType == "posts-grid")
+                        {
+                            <div class="small text-secondary mb-2">
+                                Pulls your most recently published blog posts live — nothing to pick manually, it always
+                                reflects whatever's published when the page is viewed.
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Number of Posts</label>
+                                <input class="form-control" type="number" min="1" max="12"
+                                       value='@GetProp(selWidget, "count", "3")'
+                                       @oninput='(e) => SetProp(selWidget, "count", e.Value?.ToString() ?? "3")' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Columns</label>
+                                <select class="form-select" value='@GetProp(selWidget, "columns", "3")'
+                                        @onchange='(e) => SetProp(selWidget, "columns", e.Value?.ToString() ?? "3")'>
+                                    <option value="1">1</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                    <option value="4">4</option>
+                                </select>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="postsGridShowImage"
+                                       checked="@(GetProp(selWidget, "showImage", "true") == "true")"
+                                       @onchange='(e) => SetProp(selWidget, "showImage", ((bool)(e.Value ?? true)) ? "true" : "false")' />
+                                <label class="form-check-label small" for="postsGridShowImage">Show hero image</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="postsGridShowExcerpt"
+                                       checked="@(GetProp(selWidget, "showExcerpt", "true") == "true")"
+                                       @onchange='(e) => SetProp(selWidget, "showExcerpt", ((bool)(e.Value ?? true)) ? "true" : "false")' />
+                                <label class="form-check-label small" for="postsGridShowExcerpt">Show excerpt</label>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Call-to-Action Label</label>
+                                <input class="form-control" value='@GetProp(selWidget, "ctaLabel", "Read More")'
+                                       @oninput='(e) => SetProp(selWidget, "ctaLabel", e.Value?.ToString() ?? "Read More")' />
+                            </div>
+                        }
                         else if (selWidget.WidgetType == "form")
                         {
                             <div>
@@ -1117,6 +1157,7 @@ else
         new("spacer",      "bi bi-arrows-expand-vertical", "Spacer",      "Vertical whitespace"),
         new("divider",     "bi bi-dash-lg",                "Divider",     "Horizontal rule"),
         new("html",        "bi bi-code-slash",             "HTML",        "Raw HTML block"),
+        new("posts-grid",  "bi bi-grid-3x3-gap",           "Posts Grid",  "Live grid of your latest blog posts"),
     ];
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
@@ -2471,6 +2512,7 @@ else
         "spacer"    => new() { WidgetType = "spacer",    Props = new() { ["height"] = "48" } },
         "divider"   => new() { WidgetType = "divider",   Props = new() { ["style"] = "solid" } },
         "html"      => new() { WidgetType = "html",      Props = new() { ["content"] = "<p>Custom HTML content here.</p>" } },
+        "posts-grid" => new() { WidgetType = "posts-grid", Props = new() { ["count"] = "3", ["columns"] = "3", ["showImage"] = "true", ["showExcerpt"] = "true", ["ctaLabel"] = "Read More" } },
         _           => new() { WidgetType = "paragraph", Props = new() { ["text"] = "Content", ["align"] = "left" } }
     };
 
@@ -2513,6 +2555,7 @@ else
         "spacer"      => "Spacer",
         "divider"     => "Divider",
         "html"        => "HTML",
+        "posts-grid"  => "Posts Grid",
         _             => type
     };
 
@@ -2539,6 +2582,7 @@ else
         "spacer"      => "bi bi-arrows-expand-vertical",
         "divider"     => "bi bi-dash-lg",
         "html"        => "bi bi-code-slash",
+        "posts-grid"  => "bi bi-grid-3x3-gap",
         _             => "bi bi-square"
     };
 
@@ -2558,6 +2602,7 @@ else
             "form"        => $"{GetFormFields(w).Count} field(s)",
             "spacer"      => $"{GetPropStatic(w, "height", "48")}px",
             "html"        => "Custom HTML",
+            "posts-grid"  => $"{GetPropStatic(w, "count", "3")} latest post(s)",
             _             => w.WidgetType
         };
         return raw.Length <= 38 ? raw : raw[..38] + "…";

@@ -395,7 +395,8 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     string pageSlug,
     HttpContext httpContext,
     ICmsBuilderService cmsBuilderService,
-    GlobalBlockResolver globalBlockResolver) =>
+    GlobalBlockResolver globalBlockResolver,
+    IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
     var site = await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
     if (site is null) return Results.NotFound();
@@ -418,7 +419,8 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     {
         await globalBlockResolver.ResolveAsync(site.Id, layout);
     }
-    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, pageSlug, editMode);
+    var articles = await LoadPublicArticleSummariesAsync(dbFactory);
+    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, pageSlug, editMode, articles);
     var pageTitle = System.Net.WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle);
     var metaDescription = System.Net.WebUtility.HtmlEncode(page.MetaDescription);
     var ogImageTag = string.IsNullOrWhiteSpace(page.OgImageUrl)
@@ -535,8 +537,9 @@ app.MapGet("/{**pageSlug}", (
         HttpRequest request,
         ICmsBuilderService cmsBuilderService,
         GlobalBlockResolver globalBlockResolver,
-        IConfiguration configuration) =>
-        RenderPublicCanvasPageAsync(pageSlug, request, request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration))
+        IConfiguration configuration,
+        IDbContextFactory<ApplicationDbContext> dbFactory) =>
+        RenderPublicCanvasPageAsync(pageSlug, request, request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration, dbFactory))
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
 
 app.MapGet("/blog", async (
@@ -918,7 +921,8 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
     ICmsBuilderService cmsBuilderService,
     IWebHostEnvironment env,
     GlobalBlockResolver globalBlockResolver,
-    IMediaLibraryService mediaLibraryService) =>
+    IMediaLibraryService mediaLibraryService,
+    IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
     var site = await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
     if (site is null) return Results.NotFound();
@@ -927,6 +931,9 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
     // ancestor slugs even for a page whose parent itself isn't publicly visible.
     var allPages = await cmsBuilderService.ListPagesAsync(site.Id);
     var pages = allPages.Where(p => IsCmsPagePubliclyVisible(p, DateTimeOffset.UtcNow)).ToList();
+    // Snapshotted once for the whole export, same posture as everything else in a static
+    // export being a point-in-time copy (e.g. form widgets still post back to the live site).
+    var articles = await LoadPublicArticleSummariesAsync(dbFactory);
 
     // Read the base stylesheet once — it gets embedded in every page.
     var cssFilePath = Path.Combine(env.WebRootPath, "cms-public.css");
@@ -948,7 +955,7 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
         // The full nested path (not just the leaf slug) so a form widget's hidden "_path"
         // field matches what the live /cms/{siteSlug}/{**pageSlug} route would have passed.
         var fullPath = cmsBuilderService.BuildFullPath(page, allPages);
-        var bodySections = CmsBlockHtmlRenderer.Render(layout, site.Slug, fullPath);
+        var bodySections = CmsBlockHtmlRenderer.Render(layout, site.Slug, fullPath, articles: articles);
         var pageTitle = System.Net.WebUtility.HtmlEncode(
             string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle);
         var metaDescription = System.Net.WebUtility.HtmlEncode(page.MetaDescription);
@@ -1443,9 +1450,10 @@ app.MapGet("/", (
     HttpRequest request,
     ICmsBuilderService cmsBuilderService,
     GlobalBlockResolver globalBlockResolver,
-    IConfiguration configuration) =>
+    IConfiguration configuration,
+    IDbContextFactory<ApplicationDbContext> dbFactory) =>
     IsPublicHost(httpContext)
-        ? RenderPublicCanvasPageAsync("home", request, request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration)
+        ? RenderPublicCanvasPageAsync("home", request, request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration, dbFactory)
         : Task.FromResult(Results.Redirect("/admin")))
     .AllowAnonymous().RequireRateLimiting("public-read");
 
@@ -1477,7 +1485,8 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     bool showSubmittedBanner,
     ICmsBuilderService cmsBuilderService,
     GlobalBlockResolver globalBlockResolver,
-    IConfiguration configuration)
+    IConfiguration configuration,
+    IDbContextFactory<ApplicationDbContext> dbFactory)
 {
     var siteSlug = configuration["Canvas:SiteSlug"] ?? string.Empty;
     var site = await GetConfiguredCanvasSiteAsync(cmsBuilderService, configuration);
@@ -1517,7 +1526,8 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     {
         await globalBlockResolver.ResolveAsync(site.Id, layout);
     }
-    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, fullPath);
+    var articles = await LoadPublicArticleSummariesAsync(dbFactory);
+    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, fullPath, articles: articles);
     if (showSubmittedBanner)
     {
         bodyHtml = PublicSiteHtmlRenderer.SubmittedBanner() + bodyHtml;
@@ -1621,6 +1631,29 @@ static bool IsCmsPagePubliclyVisible(CmsPage page, DateTimeOffset now) =>
 
 static bool IsArticlePubliclyVisible(Article article, DateTimeOffset now) =>
     article.TrashedAt is null && PublicationWindows.IsVisible(article.Status, ArticleStatuses.Published, article.PublishedAt, now);
+
+// Feeds the CMS builder's "posts-grid" widget (see CmsBlockHtmlRenderer.RenderPostsGrid) -
+// a small, bounded, newest-first slice of published articles, computed once per request
+// and reused by every posts-grid widget on the page regardless of each one's own "count".
+static async Task<IReadOnlyList<PublicArticleSummary>> LoadPublicArticleSummariesAsync(
+    IDbContextFactory<ApplicationDbContext> dbFactory, int take = 12)
+{
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var articles = await db.Articles.AsNoTracking().Where(a => a.TrashedAt == null).ToListAsync();
+    var now = DateTimeOffset.UtcNow;
+
+    return articles
+        .Where(a => IsArticlePubliclyVisible(a, now))
+        .OrderByDescending(a => a.PublishedAt)
+        .Take(take)
+        .Select(a => new PublicArticleSummary(
+            a.Slug,
+            a.Title,
+            a.MetaDescription,
+            a.HeroImageUrl ?? (a.HeroImageDataUri != "" ? $"/og-image/{a.Slug}" : null),
+            a.PublishedAt))
+        .ToList();
+}
 
 static CommentView? FindCommentById(IEnumerable<CommentView> comments, Guid commentId)
 {

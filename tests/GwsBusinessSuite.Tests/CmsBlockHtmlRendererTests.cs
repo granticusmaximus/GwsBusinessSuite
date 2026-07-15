@@ -269,4 +269,65 @@ public sealed class CmsBlockHtmlRendererTests
 
         Assert.DoesNotContain("<details", html);
     }
+
+    [Fact]
+    public void Render_ShouldRenderPostsGridWidget_WithSuppliedArticles()
+    {
+        var articles = new List<PublicArticleSummary>
+        {
+            new("first-post", "First Post", "First summary", "/media/first.jpg", DateTimeOffset.UtcNow),
+            new("second-post", "Second Post", "Second summary", null, DateTimeOffset.UtcNow.AddDays(-1))
+        };
+
+        var html = CmsBlockHtmlRenderer.Render(
+            Layout("""{"id":"w1","widgetType":"posts-grid","props":{"count":"2","columns":"2"}}"""),
+            articles: articles);
+
+        Assert.Contains("First Post", html);
+        Assert.Contains("href=\"/blog/first-post\"", html);
+        Assert.Contains("First summary", html);
+        Assert.Contains("Second Post", html);
+        Assert.Contains("gws-posts-grid-cols-2", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRespectCountLimit_ForPostsGridWidget()
+    {
+        var articles = Enumerable.Range(1, 5)
+            .Select(i => new PublicArticleSummary($"post-{i}", $"Post {i}", "", null, DateTimeOffset.UtcNow))
+            .ToList();
+
+        var html = CmsBlockHtmlRenderer.Render(
+            Layout("""{"id":"w1","widgetType":"posts-grid","props":{"count":"2"}}"""),
+            articles: articles);
+
+        Assert.Contains("Post 1", html);
+        Assert.Contains("Post 2", html);
+        Assert.DoesNotContain("Post 3", html);
+    }
+
+    [Fact]
+    public void Render_ShouldShowEmptyMessage_ForPostsGridWidget_WithNoArticles()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"posts-grid","props":{}}"""));
+
+        Assert.Contains("No published posts yet.", html);
+    }
+
+    [Fact]
+    public void Render_ShouldHideExcerptAndImage_ForPostsGridWidget_WhenToggledOff()
+    {
+        var articles = new List<PublicArticleSummary>
+        {
+            new("first-post", "First Post", "Should not appear", "/media/first.jpg", DateTimeOffset.UtcNow)
+        };
+
+        var html = CmsBlockHtmlRenderer.Render(
+            Layout("""{"id":"w1","widgetType":"posts-grid","props":{"showImage":"false","showExcerpt":"false"}}"""),
+            articles: articles);
+
+        Assert.DoesNotContain("Should not appear", html);
+        Assert.DoesNotContain("<img", html);
+    }
 }

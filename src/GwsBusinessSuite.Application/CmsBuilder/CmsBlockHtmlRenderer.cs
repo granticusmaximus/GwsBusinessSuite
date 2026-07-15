@@ -14,16 +14,23 @@ namespace GwsBusinessSuite.Application.CmsBuilder;
 /// the single rendering codepath shared by the Studio's own live-preview iframe, the real
 /// public site, and the static export feature — see Program.cs's three call sites.
 /// </summary>
+// A pre-fetched, already-publicly-visible-filtered article for the "posts-grid" widget -
+// the renderer stays a pure function with no DB access of its own, so callers (Program.cs's
+// three Render() call sites) load this once per request and pass it through.
+public sealed record PublicArticleSummary(string Slug, string Title, string MetaDescription, string? HeroImageUrl, DateTimeOffset? PublishedAt);
+
 public static class CmsBlockHtmlRenderer
 {
     private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
         .Build();
 
-    public static string Render(string blocksJson, string siteSlug = "", string pageSlug = "", bool editMode = false)
-        => Render(CmsBuilderJson.ParseLayout(blocksJson), siteSlug, pageSlug, editMode);
+    private static readonly IReadOnlyList<PublicArticleSummary> NoArticles = [];
 
-    public static string Render(PageLayout? layout, string siteSlug = "", string pageSlug = "", bool editMode = false)
+    public static string Render(string blocksJson, string siteSlug = "", string pageSlug = "", bool editMode = false, IReadOnlyList<PublicArticleSummary>? articles = null)
+        => Render(CmsBuilderJson.ParseLayout(blocksJson), siteSlug, pageSlug, editMode, articles);
+
+    public static string Render(PageLayout? layout, string siteSlug = "", string pageSlug = "", bool editMode = false, IReadOnlyList<PublicArticleSummary>? articles = null)
     {
         if (layout is null || layout.Sections.Count == 0)
         {
@@ -32,10 +39,11 @@ public static class CmsBlockHtmlRenderer
                 : string.Empty;
         }
 
+        var effectiveArticles = articles ?? NoArticles;
         var html = new StringBuilder();
         foreach (var section in layout.Sections)
         {
-            html.Append(RenderSection(section, siteSlug, pageSlug, editMode));
+            html.Append(RenderSection(section, siteSlug, pageSlug, editMode, effectiveArticles));
         }
 
         return html.ToString();
@@ -400,7 +408,7 @@ public static class CmsBlockHtmlRenderer
         </script>
         """;
 
-    private static string RenderSection(LayoutSection section, string siteSlug, string pageSlug, bool editMode)
+    private static string RenderSection(LayoutSection section, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles)
     {
         var sectionClass = $"gws-section {BgClass(section.Background)} {PadClass(section.Padding)}".TrimEnd();
         var columnsClass = ColsClass(section.ColumnLayout);
@@ -421,7 +429,7 @@ public static class CmsBlockHtmlRenderer
             }
             foreach (var widget in column.Widgets)
             {
-                var inner = WrapWithStyle(RenderWidget(widget, siteSlug, pageSlug, editMode), widget.Style);
+                var inner = WrapWithStyle(RenderWidget(widget, siteSlug, pageSlug, editMode, articles), widget.Style);
                 // Wrapped OUTSIDE WrapWithStyle so a widget's own background/padding
                 // overrides can never clip the selection outline, and closest('[data-gws-
                 // widget-id]') in the edit-mode script always resolves reliably regardless
@@ -448,7 +456,7 @@ public static class CmsBlockHtmlRenderer
             : $"""<div class="gws-widget-style" style="{Html(inlineStyle)}">{innerHtml}</div>""";
     }
 
-    private static string RenderWidget(LayoutWidget widget, string siteSlug, string pageSlug, bool editMode = false)
+    private static string RenderWidget(LayoutWidget widget, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles)
     {
         var p = widget.Props;
         return widget.WidgetType switch
@@ -511,8 +519,45 @@ public static class CmsBlockHtmlRenderer
             "divider" => $"""<hr class="gws-divider gws-divider-{Html(Get(p, "style", "solid"))}" />""",
             "html" => Get(p, "content"),
             "form" => RenderForm(p, siteSlug, pageSlug),
+            "posts-grid" => RenderPostsGrid(p, articles),
             _ => string.Empty
         };
+    }
+
+    // WordPress "loop"-equivalent: a live grid of the most recently published Articles,
+    // not a static block - articles is whatever the caller (Program.cs) fetched for this
+    // request, already filtered to publicly-visible ones and ordered newest-first.
+    private static string RenderPostsGrid(IReadOnlyDictionary<string, string> p, IReadOnlyList<PublicArticleSummary> articles)
+    {
+        var count = Math.Clamp(GetInt(p, "count", 3), 1, 12);
+        var columns = Get(p, "columns", "3");
+        var showImage = Get(p, "showImage", "true") == "true";
+        var showExcerpt = Get(p, "showExcerpt", "true") == "true";
+        var ctaLabel = Get(p, "ctaLabel", "Read More");
+
+        var items = articles.Take(count).ToList();
+        if (items.Count == 0)
+        {
+            return """<div class="gws-posts-grid-empty">No published posts yet.</div>""";
+        }
+
+        var sb = new StringBuilder($"""<div class="gws-posts-grid gws-posts-grid-cols-{Html(columns)}">""");
+        foreach (var article in items)
+        {
+            sb.Append($"""<a class="gws-posts-grid-item" href="/blog/{Html(article.Slug)}">""");
+            if (showImage && !string.IsNullOrWhiteSpace(article.HeroImageUrl))
+            {
+                sb.Append($"""<img src="{Html(article.HeroImageUrl)}" alt="" class="gws-posts-grid-img" />""");
+            }
+            sb.Append($"""<div class="gws-posts-grid-body"><h3 class="gws-posts-grid-title">{Html(article.Title)}</h3>""");
+            if (showExcerpt && !string.IsNullOrWhiteSpace(article.MetaDescription))
+            {
+                sb.Append($"""<p class="gws-posts-grid-excerpt">{Html(article.MetaDescription)}</p>""");
+            }
+            sb.Append($"""<span class="gws-posts-grid-cta">{Html(ctaLabel)}</span></div></a>""");
+        }
+        sb.Append("</div>");
+        return sb.ToString();
     }
 
     // <details>/<summary> gives collapsible behavior natively, no JS needed — matches this
