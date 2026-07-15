@@ -27,6 +27,37 @@ public sealed class PodcastListenProgressServiceTests
     }
 
     [Fact]
+    public async Task SaveProgressAsync_ShouldReturnThePersistedView_MatchingWhatWasSaved()
+    {
+        // Regression coverage: the caller (PodcastDirectory.razor) reflects this return
+        // value directly instead of recomputing the completion threshold itself, so the
+        // two can never drift out of sync - this asserts the return value IS the saved row.
+        await using var db = await CreateDbAsync();
+        var episode = await CreateEpisodeAsync(db);
+        var service = CreateService(db, "grantwatson");
+
+        var result = await service.SaveProgressAsync(episode.Id, 960, 1000);
+
+        result.EpisodeId.Should().Be(episode.Id);
+        result.PositionSeconds.Should().Be(960);
+        result.DurationSeconds.Should().Be(1000);
+        result.IsCompleted.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task MarkCompletedAsync_ShouldReturnThePersistedView_WithIsCompletedTrue()
+    {
+        await using var db = await CreateDbAsync();
+        var episode = await CreateEpisodeAsync(db);
+        var service = CreateService(db, "grantwatson");
+
+        var result = await service.MarkCompletedAsync(episode.Id);
+
+        result.EpisodeId.Should().Be(episode.Id);
+        result.IsCompleted.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task SaveProgressAsync_ShouldUpdateExistingRow_OnSubsequentSaves()
     {
         await using var db = await CreateDbAsync();

@@ -32,7 +32,7 @@ public sealed class PodcastListenProgressService(
             p => new PodcastListenProgressView(p.EpisodeId, p.PositionSeconds, p.DurationSeconds, p.IsCompleted, p.LastPlayedAt));
     }
 
-    public async Task SaveProgressAsync(
+    public async Task<PodcastListenProgressView> SaveProgressAsync(
         Guid episodeId, int positionSeconds, int? durationSeconds, CancellationToken cancellationToken = default)
     {
         var username = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
@@ -63,9 +63,10 @@ public sealed class PodcastListenProgressService(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        return ToView(row);
     }
 
-    public async Task MarkCompletedAsync(Guid episodeId, CancellationToken cancellationToken = default)
+    public async Task<PodcastListenProgressView> MarkCompletedAsync(Guid episodeId, CancellationToken cancellationToken = default)
     {
         var username = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
         var row = await dbContext.PodcastListenProgresses
@@ -88,5 +89,9 @@ public sealed class PodcastListenProgressService(
         row.UpdatedAt = now;
         row.UpdatedBy = username;
         await dbContext.SaveChangesAsync(cancellationToken);
+        return ToView(row);
     }
+
+    private static PodcastListenProgressView ToView(PodcastListenProgress row) =>
+        new(row.EpisodeId, row.PositionSeconds, row.DurationSeconds, row.IsCompleted, row.LastPlayedAt);
 }

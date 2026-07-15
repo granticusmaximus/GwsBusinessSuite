@@ -12,11 +12,13 @@ public interface IPodcastListenProgressService
         IReadOnlyList<Guid> episodeIds,
         CancellationToken cancellationToken = default);
 
-    // Upserts the current position for the current user. Auto-marks IsCompleted once
-    // position reaches the "nearly done" threshold when duration is known (see
-    // PodcastListenProgressService.CompletionThreshold) - the browser calling this
+    // Upserts the current position for the current user and returns the persisted result,
+    // so callers reflect the actual saved state (including whether IsCompleted was just
+    // auto-set) instead of recomputing the completion threshold themselves. Auto-marks
+    // IsCompleted once position reaches the "nearly done" threshold when duration is known
+    // (see PodcastListenProgressService.CompletionThreshold) - the browser calling this
     // periodically during playback is what drives that, not a separate explicit call.
-    Task SaveProgressAsync(
+    Task<PodcastListenProgressView> SaveProgressAsync(
         Guid episodeId,
         int positionSeconds,
         int? durationSeconds,
@@ -24,8 +26,8 @@ public interface IPodcastListenProgressService
 
     // Explicit completion signal from the browser's "ended" event - covers episodes
     // whose duration wasn't known upfront (so the position-based threshold in
-    // SaveProgressAsync couldn't fire).
-    Task MarkCompletedAsync(Guid episodeId, CancellationToken cancellationToken = default);
+    // SaveProgressAsync couldn't fire). Returns the persisted result for the same reason.
+    Task<PodcastListenProgressView> MarkCompletedAsync(Guid episodeId, CancellationToken cancellationToken = default);
 }
 
 public sealed record PodcastListenProgressView(

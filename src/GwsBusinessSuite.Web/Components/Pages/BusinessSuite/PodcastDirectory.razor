@@ -343,7 +343,7 @@ else
                             <div class="list-group">
                                 @foreach (var episode in SortedEpisodes)
                                 {
-                                    <div class="list-group-item">
+                                    <div class="list-group-item" @key="episode.Id">
                                         <div class="d-flex justify-content-between align-items-start gap-3 mb-1">
                                             <h4 class="h6 mb-0">@episode.Title</h4>
                                             <div class="d-flex align-items-center gap-2 text-secondary small flex-shrink-0">
@@ -711,9 +711,9 @@ else
             return;
         }
 
-        await ProgressService.SaveProgressAsync(id, positionSeconds, durationSeconds);
-        _progress[id] = new PodcastListenProgressView(id, positionSeconds, durationSeconds,
-            durationSeconds is > 0 && positionSeconds >= durationSeconds * 0.95, DateTimeOffset.UtcNow);
+        // Reflects whatever the service actually persisted (including the completion
+        // threshold check) rather than recomputing it here, so the two can never disagree.
+        _progress[id] = await ProgressService.SaveProgressAsync(id, positionSeconds, durationSeconds);
         await InvokeAsync(StateHasChanged);
     }
 
@@ -725,11 +725,7 @@ else
             return;
         }
 
-        await ProgressService.MarkCompletedAsync(id);
-        var existing = _progress.GetValueOrDefault(id);
-        _progress[id] = existing is null
-            ? new PodcastListenProgressView(id, 0, null, true, DateTimeOffset.UtcNow)
-            : existing with { IsCompleted = true, LastPlayedAt = DateTimeOffset.UtcNow };
+        _progress[id] = await ProgressService.MarkCompletedAsync(id);
         await InvokeAsync(StateHasChanged);
     }
 

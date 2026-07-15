@@ -262,8 +262,11 @@ public sealed class NewsIntelligenceService(
     /// Keyword search on Google News is mostly noise for narrow programming terms (e.g.
     /// "Blazor", "C#" mostly return unrelated articles that happen to contain the word),
     /// so technical topics get sources that actually carry developer discussion instead.
+    /// Only ever called from RefreshTopicAsync, which already guarantees a non-empty
+    /// keyword array (there's no "Technical Top News" concept, unlike the General path) -
+    /// so unlike FetchArticlesAsync/FetchDevToAsync, keywords here is never null.
     /// </summary>
-    private async Task<List<RawArticle>> FetchTechnicalArticlesAsync(string[]? keywords, CancellationToken ct)
+    private async Task<List<RawArticle>> FetchTechnicalArticlesAsync(string[] keywords, CancellationToken ct)
     {
         var hackerNewsTask = FetchHackerNewsAsync(keywords, ct);
         var devToTask = FetchDevToAsync(keywords, ct);
@@ -369,15 +372,12 @@ public sealed class NewsIntelligenceService(
     // from this app's droplet (TrendResearchService uses the same endpoint for Content
     // Studio's trend research). Far more relevant than Google News keyword search for
     // narrow programming terms, since it searches real developer discussion instead of
-    // general news copy that happens to contain the word.
-    private const string HackerNewsFrontPageUrl = "https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=25";
-
-    private async Task<List<RawArticle>> FetchHackerNewsAsync(string[]? keywords, CancellationToken ct)
+    // general news copy that happens to contain the word. No general/front-page fallback
+    // here (unlike Google News' top-headlines feed) - there's no "Technical Top News"
+    // concept, only per-topic keyword search, so this always takes a non-empty keyword array.
+    private async Task<List<RawArticle>> FetchHackerNewsAsync(string[] keywords, CancellationToken ct)
     {
-        var urls = keywords is null or { Length: 0 }
-            ? [HackerNewsFrontPageUrl]
-            : keywords.Select(BuildHackerNewsSearchUrl).ToArray();
-
+        var urls = keywords.Select(BuildHackerNewsSearchUrl).ToArray();
         var tasks = urls.Select(url => FetchHackerNewsFeedAsync(url, ct)).ToArray();
         var allResults = await Task.WhenAll(tasks);
 
@@ -496,38 +496,10 @@ public sealed class NewsIntelligenceService(
         }
     }
 
-    // Blind alphanumeric-stripping turns "C#" into "c" and ".NET" into "net" - neither is
-    // dev.to's real tag ("csharp"/"dotnet") - so common language/framework keywords are
-    // aliased to their actual dev.to tag first, falling back to the stripped form for
-    // anything not in the list (which is already a real tag-shaped word, e.g. "python",
-    // "blazor").
-    private static readonly Dictionary<string, string> DevToTagAliases = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["c#"] = "csharp",
-        ["csharp"] = "csharp",
-        [".net"] = "dotnet",
-        ["dotnet"] = "dotnet",
-        ["f#"] = "fsharp",
-        ["node.js"] = "node",
-        ["nodejs"] = "node",
-        ["c++"] = "cpp",
-    };
-
     private static string BuildDevToTagUrl(string keyword)
     {
-        var tag = NormalizeDevToTag(keyword);
+        var tag = DevToTagNormalizer.Normalize(keyword);
         return $"https://dev.to/api/articles?tag={Uri.EscapeDataString(tag)}&per_page={DevToPerKeywordCount}";
-    }
-
-    private static string NormalizeDevToTag(string keyword)
-    {
-        var trimmed = keyword.Trim();
-        if (DevToTagAliases.TryGetValue(trimmed, out var alias))
-        {
-            return alias;
-        }
-
-        return new string(trimmed.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
     }
 
     private sealed record DevToArticleJson(
