@@ -21,6 +21,14 @@ public sealed class AppGenerationServiceTests
         ```
         """;
 
+    private const string TwoPagePlanReply = """
+        Here's a plan with two pages.
+
+        ```json
+        {"pages":[{"title":"Pricing","slug":"pricing","metaDescription":"See our plans","layout":{"sections":[{"label":"Hero","background":"transparent","padding":"lg","columnLayout":"full","columns":[{"span":12,"widgets":[{"widgetType":"heading","props":{"text":"Pricing"}}]}]}]}},{"title":"FAQ","slug":"faq","metaDescription":"Answers to common questions","layout":{"sections":[{"label":"Hero","background":"transparent","padding":"lg","columnLayout":"full","columns":[{"span":12,"widgets":[{"widgetType":"heading","props":{"text":"FAQ"}}]}]}]}}]}
+        ```
+        """;
+
     private const string ClarifyingOnlyReply = "What tone should the page have - playful or formal?";
 
     private const string MalformedPlanReply = """
@@ -60,6 +68,70 @@ public sealed class AppGenerationServiceTests
 
         result.Success.Should().BeFalse();
         result.ErrorMessage.Should().Contain("not found");
+    }
+
+    [Fact]
+    public async Task GetRequestAsync_ShouldReturnNull_WhenRequestNotFound()
+    {
+        await using var db = await CreateDbAsync();
+        var service = CreateService(db, new FakeOllamaService());
+
+        var result = await service.GetRequestAsync(Guid.NewGuid());
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetRequestAsync_ShouldReturnFullView_WhenFound()
+    {
+        await using var db = await CreateDbAsync();
+        var site = await CreateSiteAsync(db);
+        var ollama = new FakeOllamaService { GenerateTextResult = ValidPlanReply };
+        var service = CreateService(db, ollama);
+        var started = await service.StartAsync(new StartAppGenerationInput(site.Id, "Pricing page", "Build a pricing page"));
+
+        var result = await service.GetRequestAsync(started.Request!.Id);
+
+        result.Should().NotBeNull();
+        result!.Id.Should().Be(started.Request.Id);
+        result.TargetSiteName.Should().Be(site.Name);
+        result.GeneratedPages.Should().ContainSingle(p => p.Title == "Pricing");
+        result.Messages.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldReturnFailure_ButKeepThePersistedUserMessage_WhenOllamaThrows()
+    {
+        await using var db = await CreateDbAsync();
+        var site = await CreateSiteAsync(db);
+        var ollama = new FakeOllamaService { ShouldThrow = true };
+        var service = CreateService(db, ollama);
+
+        var result = await service.StartAsync(new StartAppGenerationInput(site.Id, "Pricing page", "Build a pricing page"));
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("Ollama generation failed");
+        result.Request.Should().NotBeNull();
+        result.Request!.Status.Should().Be(AppGenerationRequestStatuses.Drafting);
+        result.Request.Messages.Should().ContainSingle(m => m.Role == AppGenerationMessageRoles.User && m.Content == "Build a pricing page");
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_ShouldReturnFailure_WhenOllamaThrowsOnASubsequentTurn()
+    {
+        await using var db = await CreateDbAsync();
+        var site = await CreateSiteAsync(db);
+        var ollama = new FakeOllamaService { GenerateTextResult = ValidPlanReply };
+        var service = CreateService(db, ollama);
+        var started = await service.StartAsync(new StartAppGenerationInput(site.Id, "Pricing page", "Build a pricing page"));
+
+        ollama.ShouldThrow = true;
+        var result = await service.SendMessageAsync(started.Request!.Id, "Make it punchier");
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("Ollama generation failed");
+        // The plan from the earlier successful turn must survive an unrelated failure later.
+        result.Request!.GeneratedPages.Should().ContainSingle(p => p.Title == "Pricing");
     }
 
     [Fact]
@@ -160,6 +232,28 @@ public sealed class AppGenerationServiceTests
         result.Request.ApprovedAt.Should().NotBeNull();
         var createdPages = db.CmsPages.Where(p => p.SiteId == site.Id).ToList();
         createdPages.Should().ContainSingle(p => p.Title == "Pricing" && p.Status == CmsPageStatuses.Draft);
+    }
+
+    [Fact]
+    public async Task ApproveAsync_ShouldCreateAllPages_ForAMultiPagePlan_InOneTransaction()
+    {
+        // Regression coverage for wrapping ApproveAsync's page-creation loop in a DB
+        // transaction (see IAppDbContext.BeginTransactionAsync) - a multi-page plan should
+        // still commit every page together on the happy path.
+        await using var db = await CreateDbAsync();
+        var site = await CreateSiteAsync(db);
+        var ollama = new FakeOllamaService { GenerateTextResult = TwoPagePlanReply };
+        var service = CreateService(db, ollama);
+        var started = await service.StartAsync(new StartAppGenerationInput(site.Id, "Two pages", "Build two pages"));
+        await service.SubmitForApprovalAsync(started.Request!.Id);
+
+        var result = await service.ApproveAsync(started.Request.Id);
+
+        result.Success.Should().BeTrue();
+        var createdPages = db.CmsPages.Where(p => p.SiteId == site.Id).ToList();
+        createdPages.Should().HaveCount(2);
+        createdPages.Should().Contain(p => p.Title == "Pricing");
+        createdPages.Should().Contain(p => p.Title == "FAQ");
     }
 
     [Fact]
@@ -281,10 +375,16 @@ public sealed class AppGenerationServiceTests
     {
         public string GenerateTextResult { get; set; } = string.Empty;
         public string? LastSystemPrompt { get; private set; }
+        public bool ShouldThrow { get; set; }
 
         public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
         {
             LastSystemPrompt = systemPrompt;
+            if (ShouldThrow)
+            {
+                throw new InvalidOperationException("Ollama is unreachable.");
+            }
+
             return Task.FromResult(GenerateTextResult);
         }
 

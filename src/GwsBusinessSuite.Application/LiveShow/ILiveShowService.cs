@@ -21,4 +21,9 @@ public interface ILiveShowService
     Task FinalizeRecordingAsync(Guid sessionId, int durationSeconds, CancellationToken cancellationToken = default);
 
     Task<string?> GetRecordingFilePathAsync(Guid recordingId, CancellationToken cancellationToken = default);
+
+    // Safety net for LiveShowHub.OnDisconnectedAsync when the broadcaster's connection
+    // drops without a clean StopAsync (crash, force-quit) - finalizes any in-progress
+    // recording and ends the session so it doesn't stay "Live" indefinitely.
+    Task HandleBroadcasterDisconnectedAsync(Guid sessionId, CancellationToken cancellationToken = default);
 }

@@ -81,6 +81,21 @@ window.liveShow = {
 			}
 		});
 
+		// withAutomaticReconnect() gives the browser a new SignalR connectionId - the
+		// server's BroadcasterConnections/group membership from before the drop is gone,
+		// so any viewer who joins during the gap (or whose offer/answer was mid-flight)
+		// would otherwise get silently stuck with no video and no error. Re-registering
+		// re-establishes it for anyone who joins afterward; already-connected viewers keep
+		// playing since WebRTC media flows peer-to-peer, not through this signaling
+		// connection.
+		this.connection.onreconnected(async () => {
+			try {
+				await this.connection.invoke("JoinAsBroadcaster", sessionId);
+			} catch {
+				// best-effort - if the session already ended server-side there's nothing to rejoin
+			}
+		});
+
 		await this.connection.start();
 		const joined = await this.connection.invoke("JoinAsBroadcaster", sessionId);
 		if (!joined) {
@@ -173,6 +188,13 @@ window.liveShow = {
 			.build();
 
 		this.connection.on("ReceiveOffer", async (fromConnectionId, sdpJson) => {
+			if (this.viewerPeerConnection) {
+				// A fresh offer (reconnect rejoin, or the broadcaster renegotiating) replaces
+				// whatever peer connection we already had - close the stale one instead of
+				// leaking it.
+				this.viewerPeerConnection.close();
+			}
+
 			this.broadcasterConnectionId = fromConnectionId;
 			const pc = new RTCPeerConnection({ iceServers: this.iceServers });
 			this.viewerPeerConnection = pc;
@@ -201,6 +223,17 @@ window.liveShow = {
 				this.viewerPeerConnection = null;
 			}
 			videoElement.srcObject = null;
+		});
+
+		// Same reasoning as the broadcaster side - a reconnect gets a new connectionId, so
+		// this viewer has to re-announce itself to whichever connection is currently
+		// registered as the broadcaster, which triggers a fresh offer/answer exchange.
+		this.connection.onreconnected(async () => {
+			try {
+				await this.connection.invoke("JoinAsViewer", inviteToken);
+			} catch {
+				// best-effort - if the show already ended there's nothing to rejoin
+			}
 		});
 
 		await this.connection.start();

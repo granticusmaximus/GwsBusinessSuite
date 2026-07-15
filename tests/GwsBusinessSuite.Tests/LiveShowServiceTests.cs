@@ -31,6 +31,86 @@ public sealed class LiveShowServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetActiveSessionAsync_ShouldReturnNull_WhenNothingIsLive()
+    {
+        await using var db = await CreateDbAsync();
+        var service = CreateService(db);
+
+        var result = await service.GetActiveSessionAsync();
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetActiveSessionAsync_ShouldReturnTheLiveSession_WhenOneExists()
+    {
+        await using var db = await CreateDbAsync();
+        var service = CreateService(db);
+        var started = await service.StartSessionAsync("My Show");
+
+        var result = await service.GetActiveSessionAsync();
+
+        result.Should().NotBeNull();
+        result!.Id.Should().Be(started.Id);
+    }
+
+    [Fact]
+    public async Task GetActiveSessionAsync_ShouldReturnNull_AfterTheSessionEnds()
+    {
+        await using var db = await CreateDbAsync();
+        var service = CreateService(db);
+        var started = await service.StartSessionAsync("My Show");
+        await service.EndSessionAsync(started.Id);
+
+        var result = await service.GetActiveSessionAsync();
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task HandleBroadcasterDisconnectedAsync_ShouldEndSession_AndFinalizeAnyInProgressRecording()
+    {
+        await using var db = await CreateDbAsync();
+        var service = CreateService(db);
+        var session = await service.StartSessionAsync("My Show");
+        await service.AppendRecordingChunkAsync(session.Id, new MemoryStream(Encoding.UTF8.GetBytes("partial")));
+
+        await service.HandleBroadcasterDisconnectedAsync(session.Id);
+
+        (await service.GetActiveSessionAsync()).Should().BeNull();
+        var recordings = await service.ListRecordingsAsync();
+        recordings.Should().ContainSingle(r => r.SessionId == session.Id);
+    }
+
+    [Fact]
+    public async Task HandleBroadcasterDisconnectedAsync_ShouldNoOp_WhenSessionDoesNotExist()
+    {
+        await using var db = await CreateDbAsync();
+        var service = CreateService(db);
+
+        // Should not throw even though nothing matches.
+        await service.HandleBroadcasterDisconnectedAsync(Guid.NewGuid());
+    }
+
+    [Fact]
+    public async Task FinalizeRecordingAsync_ShouldBeIdempotent_WhenCalledTwiceForTheSameSession()
+    {
+        // Regression coverage: LiveShowHub.OnDisconnectedAsync's cleanup path and the
+        // browser's normal StopAsync shutdown path can both call finalize for the same
+        // session in a race - the second call must not create a duplicate recording row.
+        await using var db = await CreateDbAsync();
+        var service = CreateService(db);
+        var session = await service.StartSessionAsync("My Show");
+        await service.AppendRecordingChunkAsync(session.Id, new MemoryStream(Encoding.UTF8.GetBytes("data")));
+
+        await service.FinalizeRecordingAsync(session.Id, 10);
+        await service.FinalizeRecordingAsync(session.Id, 20);
+
+        var recordings = await service.ListRecordingsAsync();
+        recordings.Should().ContainSingle(r => r.SessionId == session.Id);
+    }
+
+    [Fact]
     public async Task StartSessionAsync_ShouldEndAnyPreviousLiveSession()
     {
         await using var db = await CreateDbAsync();

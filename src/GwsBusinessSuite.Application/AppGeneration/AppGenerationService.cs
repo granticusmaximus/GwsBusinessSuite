@@ -190,26 +190,43 @@ public sealed class AppGenerationService(
             return new AppGenerationChatResult(false, "No generated pages to apply.", null);
         }
 
-        foreach (var page in pages)
+        // All-or-nothing: SavePageAsync commits each page with its own SaveChangesAsync, and
+        // CmsBuilderService auto-dedupes slug collisions instead of throwing - so without a
+        // transaction, a failure partway through a multi-page plan would leave earlier pages
+        // already committed while the request stayed PendingApproval, and a retry would
+        // recreate them all over again under deduped slugs. Wrapping the whole loop rolls
+        // every page back together on any failure.
+        await using var transaction = await dbContext.BeginTransactionAsync(cancellationToken);
+        try
         {
-            await cmsBuilderService.SavePageAsync(new CmsPageEditorModel
+            foreach (var page in pages)
             {
-                SiteId = site.Id,
-                Title = page.Title,
-                Slug = page.Slug,
-                BlocksJson = CmsBuilderJson.Serialize(page.Layout),
-                MetaDescription = page.MetaDescription,
-                Status = CmsPageStatuses.Draft
-            }, cancellationToken);
-        }
+                await cmsBuilderService.SavePageAsync(new CmsPageEditorModel
+                {
+                    SiteId = site.Id,
+                    Title = page.Title,
+                    Slug = page.Slug,
+                    BlocksJson = CmsBuilderJson.Serialize(page.Layout),
+                    MetaDescription = page.MetaDescription,
+                    Status = CmsPageStatuses.Draft
+                }, cancellationToken);
+            }
 
-        var username = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
-        request.Status = AppGenerationRequestStatuses.Approved;
-        request.ApprovedBy = username;
-        request.ApprovedAt = DateTimeOffset.UtcNow;
-        request.UpdatedAt = DateTimeOffset.UtcNow;
-        request.UpdatedBy = username;
-        await dbContext.SaveChangesAsync(cancellationToken);
+            var username = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
+            request.Status = AppGenerationRequestStatuses.Approved;
+            request.ApprovedBy = username;
+            request.ApprovedAt = DateTimeOffset.UtcNow;
+            request.UpdatedAt = DateTimeOffset.UtcNow;
+            request.UpdatedBy = username;
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
 
         return new AppGenerationChatResult(true, null, await BuildViewAsync(request, site.Name, cancellationToken));
     }

@@ -76,6 +76,11 @@ public sealed class LiveShowHub(ILiveShowService liveShowService) : Hub
             {
                 BroadcasterConnections.TryRemove(sessionId, out _);
                 await Clients.Group(GroupName(sessionId)).SendAsync("BroadcasterLeft");
+
+                // Safety net for a crash/force-quit that never called the normal StopAsync
+                // shutdown path - idempotent, so this is also a harmless no-op on a clean
+                // shutdown where StopAsync already finalized everything itself.
+                await liveShowService.HandleBroadcasterDisconnectedAsync(sessionId);
             }
             else if (BroadcasterConnections.TryGetValue(sessionId, out var currentBroadcasterConnectionId))
             {

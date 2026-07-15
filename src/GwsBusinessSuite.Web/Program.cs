@@ -148,6 +148,22 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit           = 0,
             }));
 
+    // Live Show's recording-chunk upload fires every ~3 seconds for the whole duration of
+    // a broadcast (see liveShow.js's MediaRecorder timeslice) - the standard 30/min
+    // admin-mutation budget is too tight a margin for that cadence (any jitter risks
+    // silently dropping chunks with no client-side retry), so this is a separate, more
+    // generous budget instead of leaving the endpoint unlimited.
+    options.AddPolicy("live-show-chunk", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                Window               = TimeSpan.FromMinutes(1),
+                PermitLimit          = 120,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit           = 0,
+            }));
+
     // Unauthenticated POST that writes to the database (public "form" widget submissions) —
     // a much smaller budget than read traffic to keep it useless for spam/flood attempts.
     options.AddPolicy("public-write", context =>
@@ -419,7 +435,12 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     {
         await globalBlockResolver.ResolveAsync(site.Id, layout);
     }
-    var articles = await LoadPublicArticleSummariesAsync(dbFactory);
+    // Only queries Articles when the page actually has a posts-grid widget - this route is
+    // hit on every public page view, so skipping the full-table load for the common case of
+    // no posts-grid widget matters here in a way it doesn't for the one-off export below.
+    var articles = CmsBlockHtmlRenderer.LayoutContainsPostsGrid(layout)
+        ? await LoadPublicArticleSummariesAsync(dbFactory)
+        : [];
     var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, pageSlug, editMode, articles);
     var pageTitle = System.Net.WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle);
     var metaDescription = System.Net.WebUtility.HtmlEncode(page.MetaDescription);
@@ -1096,7 +1117,7 @@ app.MapPost("/admin/api/live-show/{sessionId:guid}/recording-chunk", async (
 {
     await liveShowService.AppendRecordingChunkAsync(sessionId, request.Body);
     return Results.Ok();
-}).RequireAuthorization("AdminOnly");
+}).RequireAuthorization("AdminOnly").RequireRateLimiting("live-show-chunk");
 
 app.MapPost("/admin/api/live-show/{sessionId:guid}/finalize-recording", async (
     Guid sessionId,
@@ -1105,7 +1126,7 @@ app.MapPost("/admin/api/live-show/{sessionId:guid}/finalize-recording", async (
 {
     await liveShowService.FinalizeRecordingAsync(sessionId, durationSeconds);
     return Results.Ok();
-}).RequireAuthorization("AdminOnly");
+}).RequireAuthorization("AdminOnly").RequireRateLimiting("admin-mutation");
 
 // enableRangeProcessing lets the <video> player seek/scrub instead of only playing linearly.
 app.MapGet("/admin/api/live-show/recordings/{recordingId:guid}/file", async (
@@ -1526,7 +1547,9 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     {
         await globalBlockResolver.ResolveAsync(site.Id, layout);
     }
-    var articles = await LoadPublicArticleSummariesAsync(dbFactory);
+    var articles = CmsBlockHtmlRenderer.LayoutContainsPostsGrid(layout)
+        ? await LoadPublicArticleSummariesAsync(dbFactory)
+        : [];
     var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, fullPath, articles: articles);
     if (showSubmittedBanner)
     {

@@ -330,4 +330,26 @@ public sealed class CmsBlockHtmlRendererTests
         Assert.DoesNotContain("Should not appear", html);
         Assert.DoesNotContain("<img", html);
     }
+
+    [Fact]
+    public void LayoutContainsPostsGrid_ShouldReturnTrue_WhenAWidgetIsPostsGrid()
+    {
+        var layout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"posts-grid","props":{}}"""));
+
+        Assert.True(CmsBlockHtmlRenderer.LayoutContainsPostsGrid(layout));
+    }
+
+    [Fact]
+    public void LayoutContainsPostsGrid_ShouldReturnFalse_WhenNoWidgetIsPostsGrid()
+    {
+        var layout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"heading","props":{"text":"Hi"}}"""));
+
+        Assert.False(CmsBlockHtmlRenderer.LayoutContainsPostsGrid(layout));
+    }
+
+    [Fact]
+    public void LayoutContainsPostsGrid_ShouldReturnFalse_ForNullLayout()
+    {
+        Assert.False(CmsBlockHtmlRenderer.LayoutContainsPostsGrid(null));
+    }
 }

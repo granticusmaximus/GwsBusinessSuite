@@ -27,6 +27,13 @@ public static class CmsBlockHtmlRenderer
 
     private static readonly IReadOnlyList<PublicArticleSummary> NoArticles = [];
 
+    // Lets callers skip fetching PublicArticleSummary data entirely for the (common) case
+    // of a page with no posts-grid widget at all, rather than unconditionally querying the
+    // Articles table on every public page render regardless of whether anything on the
+    // page would use it.
+    public static bool LayoutContainsPostsGrid(PageLayout? layout) =>
+        layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "posts-grid")));
+
     public static string Render(string blocksJson, string siteSlug = "", string pageSlug = "", bool editMode = false, IReadOnlyList<PublicArticleSummary>? articles = null)
         => Render(CmsBuilderJson.ParseLayout(blocksJson), siteSlug, pageSlug, editMode, articles);
 

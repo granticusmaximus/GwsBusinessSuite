@@ -1,5 +1,6 @@
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace GwsBusinessSuite.Application.Abstractions;
 
@@ -44,6 +45,11 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<LiveShowSession> LiveShowSessions { get; }
     DbSet<LiveShowRecording> LiveShowRecordings { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+
+    // For multi-step writes that must be all-or-nothing (e.g. AppGenerationService.ApproveAsync
+    // creating several CmsPages) - most callers never need this, since a single SaveChangesAsync
+    // is already atomic on its own.
+    Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>

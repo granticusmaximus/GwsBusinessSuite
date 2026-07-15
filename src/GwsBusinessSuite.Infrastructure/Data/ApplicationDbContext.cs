@@ -1,11 +1,15 @@
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace GwsBusinessSuite.Infrastructure.Data;
 
 public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : DbContext(options), IAppDbContext
 {
+    public Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
+        Database.BeginTransactionAsync(cancellationToken);
+
     public DbSet<Contact> Contacts => Set<Contact>();
     public DbSet<ContactActivity> ContactActivities => Set<ContactActivity>();
     public DbSet<WikiPage> WikiPages => Set<WikiPage>();

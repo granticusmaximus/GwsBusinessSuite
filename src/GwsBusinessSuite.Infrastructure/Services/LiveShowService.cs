@@ -133,6 +133,19 @@ public sealed class LiveShowService(
 
     public async Task FinalizeRecordingAsync(Guid sessionId, int durationSeconds, CancellationToken cancellationToken = default)
     {
+        // Idempotent by design - the normal shutdown path (LiveShow.razor's StopAsync)
+        // calls this via the browser before tearing down the SignalR connection, but
+        // LiveShowHub.OnDisconnectedAsync also calls it (through HandleBroadcasterDisconnectedAsync)
+        // as a safety net for abnormal disconnects (crash, force-quit). Those two paths can
+        // race - the hub's disconnect handler can fire before the deliberate shutdown's
+        // EndSessionAsync call lands - so finalizing twice for the same session must be a
+        // safe no-op rather than creating a duplicate LiveShowRecording row.
+        var alreadyFinalized = await dbContext.LiveShowRecordings.AnyAsync(r => r.SessionId == sessionId, cancellationToken);
+        if (alreadyFinalized)
+        {
+            return;
+        }
+
         var filePath = GetFilePath(sessionId);
         if (!File.Exists(filePath))
         {
@@ -151,6 +164,26 @@ public sealed class LiveShowService(
         });
         await dbContext.SaveChangesAsync(cancellationToken);
         WriteLocks.TryRemove(sessionId, out _);
+    }
+
+    // Safety net for the broadcaster's browser disappearing without a clean StopAsync
+    // (crash, force-quit, lid closed) - LiveShowHub.OnDisconnectedAsync calls this so the
+    // session doesn't stay "Live" (and its invite link "valid") for up to its full 6-hour
+    // lifetime, and so any partially-written recording still gets a discoverable DB row
+    // instead of becoming an orphaned file nobody can find. Duration is computed
+    // server-side from the session's own StartedAt rather than trusting a client-reported
+    // value that was never sent.
+    public async Task HandleBroadcasterDisconnectedAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    {
+        var session = await dbContext.LiveShowSessions.FirstOrDefaultAsync(s => s.Id == sessionId, cancellationToken);
+        if (session is null)
+        {
+            return;
+        }
+
+        var durationSeconds = Math.Max(0, (int)(DateTimeOffset.UtcNow - session.StartedAt).TotalSeconds);
+        await FinalizeRecordingAsync(sessionId, durationSeconds, cancellationToken);
+        await EndSessionAsync(sessionId, cancellationToken);
     }
 
     public async Task<string?> GetRecordingFilePathAsync(Guid recordingId, CancellationToken cancellationToken = default)
