@@ -534,6 +534,18 @@ public sealed class ArticleAffiliateSuggestion : AuditableEntity
     public Article? Article { get; set; }
 }
 
+public static class WatchedTopicTypes
+{
+    // General: Google News RSS keyword search + dev.to - broad current-events coverage.
+    // Technical: Hacker News Algolia search + dev.to, no Google News - keyword news search
+    // is mostly noise for narrow programming terms (e.g. "Blazor", "C#"), so technical
+    // topics get sources that actually carry developer discussion instead.
+    public const string General = "General";
+    public const string Technical = "Technical";
+
+    public static readonly string[] All = [General, Technical];
+}
+
 public sealed class WatchedTopic : AuditableEntity
 {
     public required string Name { get; set; }
@@ -542,6 +554,7 @@ public sealed class WatchedTopic : AuditableEntity
     public string ColorHex { get; set; } = "#6366f1";
     public bool IsActive { get; set; } = true;
     public DateTimeOffset? LastFetchedAt { get; set; }
+    public string TopicType { get; set; } = WatchedTopicTypes.General;
 }
 
 public sealed class NewsItem : AuditableEntity

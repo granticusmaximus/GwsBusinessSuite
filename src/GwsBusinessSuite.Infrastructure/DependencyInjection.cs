@@ -138,6 +138,7 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddHostedService<NewsRefreshBackgroundService>();
+        services.AddHostedService<TopNewsRefreshBackgroundService>();
         services.AddHostedService<CjAdsSyncBackgroundService>();
         services.AddScoped<IPodcastListenProgressService, PodcastListenProgressService>();
 

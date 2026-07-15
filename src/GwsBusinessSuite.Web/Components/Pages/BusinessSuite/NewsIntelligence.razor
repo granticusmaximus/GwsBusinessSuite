@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "AdminOnly")]
 @using GwsBusinessSuite.Application.NewsIntelligence
+@using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Infrastructure.Services
 @inject INewsIntelligenceService NewsService
 @inject ILogger<NewsIntelligence> Logger
@@ -19,10 +20,16 @@
             }
         </p>
     </div>
-    <button class="btn btn-primary d-inline-flex align-items-center gap-2" disabled="@_refreshing" @onclick="RefreshAllAsync">
-        <i class="bi bi-arrow-clockwise @(_refreshing ? "gws-spin" : "")"></i>
-        <span>@(_refreshing ? "Refreshing…" : "Refresh All")</span>
-    </button>
+    <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2" disabled="@(_refreshing || _refreshingTopNews)" @onclick="RefreshTopNewsOnlyAsync" title="Refresh just the general Top News feed (auto-refreshes every 20 minutes)">
+            <i class="bi bi-lightning-charge @(_refreshingTopNews ? "gws-spin" : "")"></i>
+            <span>@(_refreshingTopNews ? "Refreshing…" : "Refresh Top News")</span>
+        </button>
+        <button class="btn btn-primary d-inline-flex align-items-center gap-2" disabled="@(_refreshing || _refreshingTopNews)" @onclick="RefreshAllAsync">
+            <i class="bi bi-arrow-clockwise @(_refreshing ? "gws-spin" : "")"></i>
+            <span>@(_refreshing ? "Refreshing…" : "Refresh All")</span>
+        </button>
+    </div>
 </div>
 
 <div class="row g-4">
@@ -43,6 +50,16 @@
                     <textarea class="form-control form-control-sm mb-2" placeholder="Keywords (comma-separated)"
                               @oninput="e => _formKeywords = e.Value?.ToString() ?? string.Empty"
                               rows="2">@_formKeywords</textarea>
+                    <label class="form-label small mb-1">Topic type</label>
+                    <select class="form-select form-select-sm mb-1" @bind="_formTopicType">
+                        <option value="@WatchedTopicTypes.General">General (Google News + dev.to)</option>
+                        <option value="@WatchedTopicTypes.Technical">Technical / Programming (Hacker News + dev.to)</option>
+                    </select>
+                    <div class="small text-secondary mb-2">
+                        @(_formTopicType == WatchedTopicTypes.Technical
+                            ? "Best for languages/frameworks - searches Hacker News and dev.to instead of general news."
+                            : "Best for regions, people, or current events - searches Google News and dev.to.")
+                    </div>
                     <div class="d-flex align-items-center gap-2 mb-2">
                         <label class="form-label small mb-0">Badge color</label>
                         <input type="color" class="form-control form-control-color form-control-sm" @bind="_formColor" />
@@ -80,6 +97,10 @@
                                     @onclick="() => SelectFilter(topic.Id.ToString())">
                                 <span>
                                     <span class="gws-topic-dot me-2" style="background:@topic.ColorHex"></span>
+                                    @if (topic.TopicType == WatchedTopicTypes.Technical)
+                                    {
+                                        <i class="bi bi-code-slash me-1" title="Technical topic (Hacker News + dev.to)"></i>
+                                    }
                                     <span class="@(topic.IsActive ? "" : "text-decoration-line-through text-muted")">@topic.Name</span>
                                 </span>
                                 @if (topic.UnreadCount > 0)
@@ -194,6 +215,7 @@
     private string _activeFilter = "all";   // "all" | "top" | topic-id string
     private bool _loading;
     private bool _refreshing;
+    private bool _refreshingTopNews;
     private string _statusMessage = string.Empty;
     private string _errorMessage = string.Empty;
 
@@ -208,6 +230,7 @@
     private string _formName = string.Empty;
     private string _formKeywords = string.Empty;
     private string _formColor = "#6366f1";
+    private string _formTopicType = WatchedTopicTypes.General;
     private string _formError = string.Empty;
 
     protected override async Task OnInitializedAsync()
@@ -303,6 +326,40 @@
         }
     }
 
+    private async Task RefreshTopNewsOnlyAsync()
+    {
+        _refreshingTopNews = true;
+        _statusMessage = string.Empty;
+        _errorMessage = string.Empty;
+
+        // Same shared lock as RefreshAllAsync and the two scheduled background services -
+        // without it, this could run concurrently with either and double-write the Top
+        // News rows.
+        var acquired = await NewsRefreshBackgroundService.RefreshLock.WaitAsync(3000);
+        try
+        {
+            if (!acquired)
+            {
+                _statusMessage = "A background refresh is already running — try again in a moment.";
+                return;
+            }
+
+            await NewsService.RefreshTopNewsAsync();
+            await LoadFeedAsync();
+            _statusMessage = "Top News refreshed.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Top News refresh failed");
+            _errorMessage = $"Top News refresh failed: {ex.Message}";
+        }
+        finally
+        {
+            if (acquired) NewsRefreshBackgroundService.RefreshLock.Release();
+            _refreshingTopNews = false;
+        }
+    }
+
     private async Task RefreshTopicAsync(Guid topicId)
     {
         _statusMessage = string.Empty;
@@ -358,6 +415,7 @@
         _editingTopicId = null;
         _formName = _formKeywords = _formError = string.Empty;
         _formColor = "#6366f1";
+        _formTopicType = WatchedTopicTypes.General;
         _showTopicForm = true;
     }
 
@@ -367,6 +425,7 @@
         _formName = topic.Name;
         _formKeywords = topic.Keywords;
         _formColor = topic.ColorHex;
+        _formTopicType = topic.TopicType;
         _formError = string.Empty;
         _showTopicForm = true;
     }
@@ -382,11 +441,11 @@
             if (_editingTopicId.HasValue)
             {
                 var existing = _topics.First(t => t.Id == _editingTopicId.Value);
-                await NewsService.UpdateTopicAsync(_editingTopicId.Value, _formName, _formKeywords, _formColor, existing.IsActive);
+                await NewsService.UpdateTopicAsync(_editingTopicId.Value, _formName, _formKeywords, _formColor, existing.IsActive, _formTopicType);
             }
             else
             {
-                await NewsService.CreateTopicAsync(_formName, _formKeywords, _formColor);
+                await NewsService.CreateTopicAsync(_formName, _formKeywords, _formColor, _formTopicType);
             }
             CloseForm();
             await LoadTopicsAsync();

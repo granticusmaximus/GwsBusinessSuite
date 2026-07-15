@@ -138,6 +138,42 @@ public sealed class NewsIntelligenceServiceTests
         Assert.Equal("AI", item.TopicName);
     }
 
+    [Fact]
+    public async Task CreateTopicAsync_ShouldPersistTopicType()
+    {
+        var (_, factory) = await CreateDbAsync();
+        var service = CreateService(factory);
+
+        var created = await service.CreateTopicAsync("Blazor", "blazor", "#2563eb", WatchedTopicTypes.Technical);
+
+        Assert.Equal(WatchedTopicTypes.Technical, created.TopicType);
+        var topics = await service.ListTopicsAsync();
+        Assert.Equal(WatchedTopicTypes.Technical, Assert.Single(topics).TopicType);
+    }
+
+    [Fact]
+    public async Task CreateTopicAsync_ShouldDefaultToGeneral_WhenTopicTypeIsNotRecognized()
+    {
+        var (_, factory) = await CreateDbAsync();
+        var service = CreateService(factory);
+
+        var created = await service.CreateTopicAsync("Atlanta", "atlanta", "#ef4444", "not-a-real-type");
+
+        Assert.Equal(WatchedTopicTypes.General, created.TopicType);
+    }
+
+    [Fact]
+    public async Task UpdateTopicAsync_ShouldChangeTopicType()
+    {
+        var (_, factory) = await CreateDbAsync();
+        var service = CreateService(factory);
+        var created = await service.CreateTopicAsync("Python", "python", "#16a34a", WatchedTopicTypes.General);
+
+        var updated = await service.UpdateTopicAsync(created.Id, "Python", "python", "#16a34a", isActive: true, WatchedTopicTypes.Technical);
+
+        Assert.Equal(WatchedTopicTypes.Technical, updated.TopicType);
+    }
+
     private static NewsIntelligenceService CreateService(IAppDbContextFactory factory)
     {
         var options = Options.Create(new ContentStudioOptions { Model = "llama3.2" });

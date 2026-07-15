@@ -59,10 +59,10 @@ public sealed class NewsIntelligenceService(
 
         return topics.Select(t => new WatchedTopicSummary(
             t.Id, t.Name, t.Keywords, t.ColorHex, t.IsActive, t.LastFetchedAt,
-            countMap.GetValueOrDefault(t.Id, 0))).ToList();
+            countMap.GetValueOrDefault(t.Id, 0), t.TopicType)).ToList();
     }
 
-    public async Task<WatchedTopicSummary> CreateTopicAsync(string name, string keywords, string colorHex, CancellationToken ct = default)
+    public async Task<WatchedTopicSummary> CreateTopicAsync(string name, string keywords, string colorHex, string topicType, CancellationToken ct = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
         var topic = new WatchedTopic
@@ -70,14 +70,15 @@ public sealed class NewsIntelligenceService(
             Name = name.Trim(),
             Keywords = keywords.Trim(),
             ColorHex = colorHex,
-            IsActive = true
+            IsActive = true,
+            TopicType = NormalizeTopicType(topicType)
         };
         db.WatchedTopics.Add(topic);
         await db.SaveChangesAsync(ct);
-        return new WatchedTopicSummary(topic.Id, topic.Name, topic.Keywords, topic.ColorHex, topic.IsActive, null, 0);
+        return new WatchedTopicSummary(topic.Id, topic.Name, topic.Keywords, topic.ColorHex, topic.IsActive, null, 0, topic.TopicType);
     }
 
-    public async Task<WatchedTopicSummary> UpdateTopicAsync(Guid id, string name, string keywords, string colorHex, bool isActive, CancellationToken ct = default)
+    public async Task<WatchedTopicSummary> UpdateTopicAsync(Guid id, string name, string keywords, string colorHex, bool isActive, string topicType, CancellationToken ct = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
         var topic = await db.WatchedTopics.FindAsync([id], ct)
@@ -87,10 +88,14 @@ public sealed class NewsIntelligenceService(
         topic.Keywords = keywords.Trim();
         topic.ColorHex = colorHex;
         topic.IsActive = isActive;
+        topic.TopicType = NormalizeTopicType(topicType);
         topic.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
-        return new WatchedTopicSummary(topic.Id, topic.Name, topic.Keywords, topic.ColorHex, topic.IsActive, topic.LastFetchedAt, 0);
+        return new WatchedTopicSummary(topic.Id, topic.Name, topic.Keywords, topic.ColorHex, topic.IsActive, topic.LastFetchedAt, 0, topic.TopicType);
     }
+
+    private static string NormalizeTopicType(string topicType) =>
+        WatchedTopicTypes.All.Contains(topicType) ? topicType : WatchedTopicTypes.General;
 
     public async Task DeleteTopicAsync(Guid id, CancellationToken ct = default)
     {
@@ -161,9 +166,11 @@ public sealed class NewsIntelligenceService(
             return;
         }
 
-        logger.LogInformation("Refreshing topic '{Name}': {Keywords}", topic.Name, string.Join(", ", keywords));
+        logger.LogInformation("Refreshing topic '{Name}' ({Type}): {Keywords}", topic.Name, topic.TopicType, string.Join(", ", keywords));
 
-        var articles = await FetchArticlesAsync(keywords, ct);
+        var articles = topic.TopicType == WatchedTopicTypes.Technical
+            ? await FetchTechnicalArticlesAsync(keywords, ct)
+            : await FetchArticlesAsync(keywords, ct);
         logger.LogInformation("Topic '{Name}': fetched {Count} articles", topic.Name, articles.Count);
 
         await PruneAndSaveItemsAsync(db, topicId, articles, MaxItemsPerTopic, ct);
@@ -240,6 +247,32 @@ public sealed class NewsIntelligenceService(
         var merged = new List<RawArticle>();
 
         foreach (var article in googleTask.Result.Concat(devToTask.Result))
+        {
+            if (seenUrls.Add(article.Url))
+                merged.Add(article);
+        }
+
+        return merged
+            .OrderByDescending(a => a.PublishedAt ?? DateTimeOffset.MinValue)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Technical-topic pipeline: Hacker News + dev.to, deliberately excluding Google News.
+    /// Keyword search on Google News is mostly noise for narrow programming terms (e.g.
+    /// "Blazor", "C#" mostly return unrelated articles that happen to contain the word),
+    /// so technical topics get sources that actually carry developer discussion instead.
+    /// </summary>
+    private async Task<List<RawArticle>> FetchTechnicalArticlesAsync(string[]? keywords, CancellationToken ct)
+    {
+        var hackerNewsTask = FetchHackerNewsAsync(keywords, ct);
+        var devToTask = FetchDevToAsync(keywords, ct);
+        await Task.WhenAll(hackerNewsTask, devToTask);
+
+        var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var merged = new List<RawArticle>();
+
+        foreach (var article in hackerNewsTask.Result.Concat(devToTask.Result))
         {
             if (seenUrls.Add(article.Url))
                 merged.Add(article);
@@ -331,6 +364,79 @@ public sealed class NewsIntelligenceService(
     private static string BuildGoogleSearchUrl(string keyword) =>
         $"https://news.google.com/rss/search?q={Uri.EscapeDataString(keyword)}&hl=en-US&gl=US&ceid=US:en";
 
+    // ── Hacker News (technical topics only) ──────────────────
+    // Algolia's HN Search API - no auth, no documented rate limit, already proven reliable
+    // from this app's droplet (TrendResearchService uses the same endpoint for Content
+    // Studio's trend research). Far more relevant than Google News keyword search for
+    // narrow programming terms, since it searches real developer discussion instead of
+    // general news copy that happens to contain the word.
+    private const string HackerNewsFrontPageUrl = "https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=25";
+
+    private async Task<List<RawArticle>> FetchHackerNewsAsync(string[]? keywords, CancellationToken ct)
+    {
+        var urls = keywords is null or { Length: 0 }
+            ? [HackerNewsFrontPageUrl]
+            : keywords.Select(BuildHackerNewsSearchUrl).ToArray();
+
+        var tasks = urls.Select(url => FetchHackerNewsFeedAsync(url, ct)).ToArray();
+        var allResults = await Task.WhenAll(tasks);
+
+        var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var merged = new List<RawArticle>();
+
+        foreach (var batch in allResults)
+        {
+            foreach (var article in batch)
+            {
+                if (seenUrls.Add(article.Url))
+                    merged.Add(article);
+            }
+        }
+
+        return merged;
+    }
+
+    private async Task<List<RawArticle>> FetchHackerNewsFeedAsync(string url, CancellationToken ct)
+    {
+        try
+        {
+            var payload = await http.GetFromJsonAsync<HackerNewsResponse>(url, ct);
+            if (payload?.Hits is null) return [];
+
+            return payload.Hits
+                .Where(hit => !string.IsNullOrWhiteSpace(hit.Title))
+                .Select(hit => new RawArticle(
+                    hit.Title ?? string.Empty,
+                    string.IsNullOrWhiteSpace(hit.Url) ? $"https://news.ycombinator.com/item?id={hit.ObjectId}" : hit.Url!,
+                    "Hacker News",
+                    DateTimeOffset.TryParse(hit.CreatedAt, out var created) ? created : null,
+                    string.Empty))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to fetch Hacker News feed: {Url}", url);
+            return [];
+        }
+    }
+
+    private static string BuildHackerNewsSearchUrl(string keyword)
+    {
+        var twoWeeksAgo = DateTimeOffset.UtcNow.AddDays(-14).ToUnixTimeSeconds();
+        return "https://hn.algolia.com/api/v1/search"
+            + $"?tags=story&query={Uri.EscapeDataString(keyword)}"
+            + $"&numericFilters={Uri.EscapeDataString($"created_at_i>{twoWeeksAgo}")}"
+            + "&hitsPerPage=20";
+    }
+
+    private sealed record HackerNewsResponse(HackerNewsHit[]? Hits);
+
+    private sealed record HackerNewsHit(
+        string? Title,
+        string? Url,
+        [property: System.Text.Json.Serialization.JsonPropertyName("objectID")] string? ObjectId,
+        [property: System.Text.Json.Serialization.JsonPropertyName("created_at")] string? CreatedAt);
+
     // ── dev.to ────────────────────────────────────────────────
     // dev.to's public API needs no auth for reading, and unlike Google News RSS it
     // reliably returns a real cover image per article - the source this app's image
@@ -390,10 +496,38 @@ public sealed class NewsIntelligenceService(
         }
     }
 
+    // Blind alphanumeric-stripping turns "C#" into "c" and ".NET" into "net" - neither is
+    // dev.to's real tag ("csharp"/"dotnet") - so common language/framework keywords are
+    // aliased to their actual dev.to tag first, falling back to the stripped form for
+    // anything not in the list (which is already a real tag-shaped word, e.g. "python",
+    // "blazor").
+    private static readonly Dictionary<string, string> DevToTagAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["c#"] = "csharp",
+        ["csharp"] = "csharp",
+        [".net"] = "dotnet",
+        ["dotnet"] = "dotnet",
+        ["f#"] = "fsharp",
+        ["node.js"] = "node",
+        ["nodejs"] = "node",
+        ["c++"] = "cpp",
+    };
+
     private static string BuildDevToTagUrl(string keyword)
     {
-        var tag = new string(keyword.Trim().ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+        var tag = NormalizeDevToTag(keyword);
         return $"https://dev.to/api/articles?tag={Uri.EscapeDataString(tag)}&per_page={DevToPerKeywordCount}";
+    }
+
+    private static string NormalizeDevToTag(string keyword)
+    {
+        var trimmed = keyword.Trim();
+        if (DevToTagAliases.TryGetValue(trimmed, out var alias))
+        {
+            return alias;
+        }
+
+        return new string(trimmed.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
     }
 
     private sealed record DevToArticleJson(
