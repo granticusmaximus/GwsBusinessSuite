@@ -4,13 +4,20 @@ services:
     ports:
       - "80:8080"
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       # Point the app at the Ollama container on the internal Docker network.
       # These override the localhost defaults in appsettings.json.
       ContentStudio__BaseUrl: http://ollama:11434
       ExternalServices__OllamaBaseUrl: http://ollama:11434
+      # TURN stays disabled when these values are absent. When the optional `turn`
+      # profile is enabled, the app derives short-lived browser credentials from the
+      # same secret coturn uses; the shared secret itself is never sent to clients.
+      LiveShow__Ice__Turn__Urls__0: ${TURN_URL_UDP:-}
+      LiveShow__Ice__Turn__Urls__1: ${TURN_URL_TCP:-}
+      LiveShow__Ice__Turn__SharedSecret: ${TURN_SHARED_SECRET:-}
     restart: always
     volumes:
       - gwssuite-data:/app/data

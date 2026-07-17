@@ -39,6 +39,26 @@ dotnet test GwsBusinessSuite.slnx
 dotnet run --project src/GwsBusinessSuite.Web/GwsBusinessSuite.Web.csproj
 ```
 
+## Live Show TURN Relay
+
+Live Show supports coturn for viewers whose networks cannot establish a direct WebRTC
+connection. The app generates short-lived TURN REST credentials; do not put static TURN
+usernames or browser credentials in source control.
+
+For the Docker deployment:
+
+1. Point a public DNS record such as `turn.example.com` at the host. If the domain uses
+   Cloudflare DNS, keep this record DNS-only; the normal HTTP proxy does not carry TURN.
+2. Copy the TURN settings from `.env.example` into the deployment host's `.env`, replacing
+   the sample host and generating a long random shared secret.
+3. Allow inbound TCP/UDP 3478 and UDP 49160-49200 in the host/cloud firewall.
+4. Run `docker compose -f docker-compose.yml -f docker-compose.turn.yml up -d --build`,
+   or push to `main`; the deployment workflow includes the override automatically when
+   the required TURN variables are present.
+
+The Live Show studio displays `TURN relay ready` when the app has both relay URLs and the
+shared secret. Without them it keeps the existing STUN/direct-connection fallback.
+
 ## Database Migrations
 
 `ApplicationDbContext` (`src/GwsBusinessSuite.Infrastructure`) requires the

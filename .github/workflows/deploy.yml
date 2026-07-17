@@ -56,7 +56,13 @@ jobs:
 
             # Rebuild and restart with zero-downtime swap
             docker compose pull --quiet || true
-            docker compose up -d --build --remove-orphans
+            if grep -qE '^TURN_SHARED_SECRET=.{32,}$' .env 2>/dev/null && grep -qE '^TURN_URL_UDP=turn:' .env 2>/dev/null; then
+              echo "TURN configuration found; deploying the coturn relay."
+              docker compose -f docker-compose.yml -f docker-compose.turn.yml up -d --build --remove-orphans
+            else
+              echo "TURN configuration not found; deploying with STUN/direct connectivity only."
+              docker compose up -d --build --remove-orphans
+            fi
 
             # Smoke test: a container reporting "up" doesn't mean the app inside it is
             # actually serving traffic (DB migration failures, a bad config value, etc.

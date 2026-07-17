@@ -17,3 +17,13 @@ public sealed record LiveShowRecordingView(
     int DurationSeconds,
     long FileSizeBytes,
     DateTimeOffset CreatedAt);
+
+public sealed record LiveShowIceServerView(
+    IReadOnlyList<string> Urls,
+    string? Username = null,
+    string? Credential = null);
+
+public sealed record LiveShowIceConfiguration(
+    IReadOnlyList<LiveShowIceServerView> IceServers,
+    bool IsTurnConfigured,
+    DateTimeOffset? TurnCredentialsExpireAt);

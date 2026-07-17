@@ -6,6 +6,7 @@
 @using GwsBusinessSuite.Application.LiveShow
 @inject IJSRuntime JS
 @inject ILiveShowService LiveShowService
+@inject ILiveShowIceServerProvider IceServerProvider
 @implements IAsyncDisposable
 
 <PageTitle>Live Show</PageTitle>
@@ -55,6 +56,8 @@
         {
             try
             {
+                var iceConfiguration = IceServerProvider.CreateConfiguration();
+                await JS.InvokeVoidAsync("liveShow.configureIceServers", iceConfiguration.IceServers);
                 var sessionId = await JS.InvokeAsync<string?>("liveShow.startViewer", _videoRef, Token);
                 _joined = sessionId is not null;
                 StatusMessage = _joined ? string.Empty : "The show just ended.";

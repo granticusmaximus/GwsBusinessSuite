@@ -57,6 +57,10 @@ builder.Services.AddOutputCache(options =>
 });
 builder.Services.AddSingleton<IPublicContentCacheInvalidator, OutputCachePublicContentInvalidator>();
 builder.Services.AddSingleton<PerformanceTelemetry>();
+builder.Services.AddOptions<LiveShowIceOptions>()
+    .Bind(builder.Configuration.GetSection("LiveShow:Ice"));
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<ILiveShowIceServerProvider, LiveShowIceServerProvider>();
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserAccessor, CurrentUserAccessor>();

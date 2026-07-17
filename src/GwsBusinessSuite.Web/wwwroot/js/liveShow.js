@@ -1,8 +1,7 @@
 // Broadcaster preview (getUserMedia) plus a real broadcaster<->viewer WebRTC mesh: the
-// server (LiveShowHub) only relays signaling messages, never media. STUN-only NAT
-// traversal (no TURN server configured) - fine for the small invited-viewer audience this
-// was scoped for, but a peer behind a strict/symmetric NAT may fail to connect; that's a
-// known, disclosed limitation rather than a bug.
+// server (LiveShowHub) only relays signaling messages, never media. ICE configuration is
+// supplied by the server before joining so production can add short-lived TURN relay
+// credentials without embedding the coturn shared secret in this public script.
 window.liveShow = {
 	stream: null,
 	connection: null,
@@ -14,6 +13,21 @@ window.liveShow = {
 	mediaRecorder: null,
 	recordingStartedAt: null,
 	iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+
+	configureIceServers(iceServers) {
+		if (!Array.isArray(iceServers) || iceServers.length === 0) {
+			this.iceServers = [{ urls: "stun:stun.l.google.com:19302" }];
+			return;
+		}
+
+		this.iceServers = iceServers
+			.map((server) => ({
+				urls: server.urls,
+				...(server.username ? { username: server.username } : {}),
+				...(server.credential ? { credential: server.credential } : {}),
+			}))
+			.filter((server) => Array.isArray(server.urls) && server.urls.length > 0);
+	},
 
 	async start(videoElement) {
 		try {

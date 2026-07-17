@@ -73,12 +73,14 @@
   includes line-level diffs and non-destructive rollback.
 - Live Show page ✅ — expanded from a local camera/mic self-monitor into real streaming.
   "Go Live" starts a `LiveShowSession` and opens a direct broadcaster<->viewer WebRTC mesh
-  (STUN-only, no TURN server, sized for a handful of invited viewers) signaled over a new
+  (sized for a handful of invited viewers) signaled over a new
   `LiveShowHub` (SignalR); viewers open an unauthenticated, expiring invite link
   (`/watch/{token}`) with no account needed. Each show is recorded client-side
   (`MediaRecorder`) and uploaded in sequential chunks to disk, then listed for replay at
-  `/admin/live-show-recordings`. Known limitation: STUN-only means a viewer behind a
-  strict/symmetric NAT may fail to connect - no TURN relay is configured.
+  `/admin/live-show-recordings`. TURN relay support now covers viewers behind strict or
+  symmetric NAT: the server mints short-lived coturn REST credentials, both broadcaster
+  and viewer receive the same configured ICE pool, and Docker provides an opt-in coturn
+  override with automatic production activation when the required `.env` values exist.
 - Wiki history tracking ✅ — already fully shipped (commit `d514a56`): every save is a
   real git commit via LibGit2Sharp (`WikiService.cs`), with a full History/Diff/Revert UI
   already in `Wiki.razor`. The roadmap simply hadn't been updated. Page hierarchy (parent
