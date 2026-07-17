@@ -1095,7 +1095,7 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     .gws-layout.gws-mobile-nav-open .gws-sidebar { transform: translateX(0); }
     .gws-sidebar-backdrop {
         position: fixed;
-        inset: var(--gws-admin-bar-height) 0 0;
+        inset: var(--gws-admin-bar-height) 0 0 min(86vw, 320px);
         z-index: 19;
         display: block;
         border: 0;
