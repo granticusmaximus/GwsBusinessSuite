@@ -5,6 +5,7 @@ using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -183,6 +184,7 @@ public sealed class NewsIntelligenceServiceTests
             new FakeOllamaService(),
             options,
             new HttpClient(),
+            new MemoryCache(new MemoryCacheOptions()),
             NullLogger<NewsIntelligenceService>.Instance);
     }
 

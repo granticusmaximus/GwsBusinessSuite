@@ -560,12 +560,12 @@ public sealed class WatchedTopic : AuditableEntity
     public string ColorHex { get; set; } = "#6366f1";
     public bool IsActive { get; set; } = true;
     public DateTimeOffset? LastFetchedAt { get; set; }
-    public string TopicType { get; set; } = WatchedTopicTypes.General;
+    public string TopicType { get; set; } = WatchedTopicTypes.Technical;
 }
 
 public sealed class NewsItem : AuditableEntity
 {
-    // Null = "Today's Top News" (not tied to a specific topic)
+    // Null = "All News"/"Breaking News" (the shared topicless pool, not tied to a specific topic)
     public Guid? TopicId { get; set; }
     public required string Title { get; set; }
     public required string Url { get; set; }

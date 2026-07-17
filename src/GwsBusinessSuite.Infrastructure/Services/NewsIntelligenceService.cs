@@ -5,6 +5,7 @@ using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.NewsIntelligence;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -15,6 +16,7 @@ public sealed class NewsIntelligenceService(
     IOllamaService ollama,
     IOptions<ContentStudioOptions> studioOptions,
     HttpClient http,
+    IMemoryCache cache,
     ILogger<NewsIntelligenceService> logger) : INewsIntelligenceService
 {
     // Google News RSS is used exclusively because:
@@ -270,12 +272,22 @@ public sealed class NewsIntelligenceService(
     {
         var hackerNewsTask = FetchHackerNewsAsync(keywords, ct);
         var devToTask = FetchDevToAsync(keywords, ct);
-        await Task.WhenAll(hackerNewsTask, devToTask);
+        var techBlogsTask = FetchCuratedTechBlogsAsync(ct);
+        await Task.WhenAll(hackerNewsTask, devToTask, techBlogsTask);
+
+        // Curated blogs have no keyword-search API (unlike HN Algolia / dev.to tags), so
+        // match the topic's keywords via case-insensitive substring search against each
+        // already-fetched item's title/description instead.
+        var matchedTechBlogs = techBlogsTask.Result
+            .Where(a => keywords.Any(k =>
+                a.Title.Contains(k, StringComparison.OrdinalIgnoreCase) ||
+                a.Description.Contains(k, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
 
         var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var merged = new List<RawArticle>();
 
-        foreach (var article in hackerNewsTask.Result.Concat(devToTask.Result))
+        foreach (var article in hackerNewsTask.Result.Concat(devToTask.Result).Concat(matchedTechBlogs))
         {
             if (seenUrls.Add(article.Url))
                 merged.Add(article);
@@ -436,6 +448,54 @@ public sealed class NewsIntelligenceService(
         string? Url,
         [property: System.Text.Json.Serialization.JsonPropertyName("objectID")] string? ObjectId,
         [property: System.Text.Json.Serialization.JsonPropertyName("created_at")] string? CreatedAt);
+
+    // ── Curated engineering blogs (Technical topics only) ─────
+    // These feeds have no search API, so the whole set is fetched in full and then
+    // keyword-matched per topic. Fetched at most once per cache window regardless of how
+    // many Technical topics are refreshed in one pass (RefreshAllAsync's topic loop is
+    // sequential, so the first Technical topic populates the cache and every subsequent
+    // one - including any per-topic "Refresh now" click within the TTL - reuses it,
+    // avoiding redundant fetches of the same ~13 feeds).
+    private const string TechBlogCacheKey = "news-intel:curated-tech-blogs";
+    private static readonly TimeSpan TechBlogCacheDuration = TimeSpan.FromMinutes(15);
+
+    private async Task<List<RawArticle>> FetchCuratedTechBlogsAsync(CancellationToken ct)
+    {
+        if (cache.TryGetValue(TechBlogCacheKey, out List<RawArticle>? cached) && cached is not null)
+            return cached;
+
+        var tasks = CuratedTechBlogFeeds.Feeds
+            .Select(f => FetchTechBlogFeedAsync(f.Name, f.Url, ct))
+            .ToArray();
+        var merged = (await Task.WhenAll(tasks)).SelectMany(x => x).ToList();
+
+        cache.Set(TechBlogCacheKey, merged, TechBlogCacheDuration);
+        return merged;
+    }
+
+    private async Task<List<RawArticle>> FetchTechBlogFeedAsync(string name, string url, CancellationToken ct)
+    {
+        try
+        {
+            var content = await http.GetStringAsync(url, ct);
+            var feed = FeedReader.ReadFromString(content);
+
+            return feed.Items
+                .Where(item => !string.IsNullOrWhiteSpace(item.Link))
+                .Select(item => new RawArticle(
+                    item.Title ?? string.Empty,
+                    item.Link!,
+                    name,
+                    item.PublishingDate,
+                    StripHtml(item.Description ?? string.Empty)))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to fetch curated tech blog feed {Name} ({Url})", name, url);
+            return [];
+        }
+    }
 
     // ── dev.to ────────────────────────────────────────────────
     // dev.to's public API needs no auth for reading, and unlike Google News RSS it

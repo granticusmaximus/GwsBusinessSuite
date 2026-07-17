@@ -939,12 +939,19 @@ app.MapGet("/__not-found", async (HttpContext httpContext, ICmsBuilderService cm
 // with all CSS inlined (no external links), making the archive fully portable.
 app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
     string siteSlug,
+    HttpRequest request,
     ICmsBuilderService cmsBuilderService,
     IWebHostEnvironment env,
     GlobalBlockResolver globalBlockResolver,
     IMediaLibraryService mediaLibraryService,
     IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
+    // The posts-grid widget always pulls from this app's own blog (not the exported
+    // CmsSite), so a static export can't bundle those articles - they still live on the
+    // running app. Rewrite the widget's /blog/{slug} links and /og-image/{slug} thumbnails
+    // to absolute URLs back here instead of leaving them as root-relative paths that 404
+    // once the export is deployed to a different static host.
+    var liveSiteBaseUrl = $"{request.Scheme}://{request.Host}";
     var site = await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
     if (site is null) return Results.NotFound();
 
@@ -1004,6 +1011,10 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
             </body>
             </html>
             """;
+
+        pageHtml = pageHtml
+            .Replace("href=\"/blog/", $"href=\"{liveSiteBaseUrl}/blog/", StringComparison.Ordinal)
+            .Replace("src=\"/og-image/", $"src=\"{liveSiteBaseUrl}/og-image/", StringComparison.Ordinal);
 
         foreach (Match match in mediaReferencePattern.Matches(pageHtml))
         {

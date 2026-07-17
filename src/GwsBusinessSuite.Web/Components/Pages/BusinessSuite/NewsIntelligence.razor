@@ -21,9 +21,9 @@
         </p>
     </div>
     <div class="d-flex gap-2">
-        <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2" disabled="@(_refreshing || _refreshingTopNews)" @onclick="RefreshTopNewsOnlyAsync" title="Refresh just the general Top News feed (auto-refreshes every 20 minutes)">
+        <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2" disabled="@(_refreshing || _refreshingTopNews)" @onclick="RefreshTopNewsOnlyAsync" title="Refresh the shared general news pool behind All News and Breaking News (auto-refreshes every 20 minutes)">
             <i class="bi bi-lightning-charge @(_refreshingTopNews ? "gws-spin" : "")"></i>
-            <span>@(_refreshingTopNews ? "Refreshing…" : "Refresh Top News")</span>
+            <span>@(_refreshingTopNews ? "Refreshing…" : "Refresh All News")</span>
         </button>
         <button class="btn btn-primary d-inline-flex align-items-center gap-2" disabled="@(_refreshing || _refreshingTopNews)" @onclick="RefreshAllAsync">
             <i class="bi bi-arrow-clockwise @(_refreshing ? "gws-spin" : "")"></i>
@@ -84,9 +84,9 @@
                     <span class="badge @(_activeFilter == "all" ? "text-bg-light" : "text-bg-secondary") rounded-pill">@_topics.Sum(t => t.UnreadCount)</span>
                 </button>
 
-                <button type="button" class="list-group-item list-group-item-action @(_activeFilter == "top" ? "active" : "")"
-                        @onclick='() => SelectFilter("top")'>
-                    <span class="gws-topic-dot me-2" style="background:#0f172a"></span>Top News
+                <button type="button" class="list-group-item list-group-item-action @(_activeFilter == "breaking" ? "active" : "")"
+                        @onclick='() => SelectFilter("breaking")'>
+                    <span class="gws-topic-dot me-2" style="background:#0f172a"></span>Breaking News
                 </button>
 
                 @foreach (var topic in _topics)
@@ -212,7 +212,7 @@
     // ── State ────────────────────────────────────────────────
     private List<WatchedTopicSummary> _topics = [];
     private NewsFeedResult? _feed;
-    private string _activeFilter = "all";   // "all" | "top" | topic-id string
+    private string _activeFilter = "all";   // "all" | "breaking" | topic-id string
     private bool _loading;
     private bool _refreshing;
     private bool _refreshingTopNews;
@@ -230,7 +230,7 @@
     private string _formName = string.Empty;
     private string _formKeywords = string.Empty;
     private string _formColor = "#6366f1";
-    private string _formTopicType = WatchedTopicTypes.General;
+    private string _formTopicType = WatchedTopicTypes.Technical;
     private string _formError = string.Empty;
 
     protected override async Task OnInitializedAsync()
@@ -253,9 +253,10 @@
         _errorMessage = string.Empty;
         try
         {
-            // For "top" filter we pass null topicId (Top News has null in DB).
-            // For "all" we also pass null so the service returns everything.
-            Guid? queryTopicId = _activeFilter == "all" || _activeFilter == "top"
+            // Both "all" and "breaking" read from the same topicless general pool
+            // (TopicId == null in the DB) - the service returns everything when
+            // topicId is null, and CurrentViewItems() narrows it down client-side.
+            Guid? queryTopicId = _activeFilter == "all" || _activeFilter == "breaking"
                 ? null
                 : Guid.Parse(_activeFilter);
 
@@ -346,12 +347,12 @@
 
             await NewsService.RefreshTopNewsAsync();
             await LoadFeedAsync();
-            _statusMessage = "Top News refreshed.";
+            _statusMessage = "All News refreshed.";
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Top News refresh failed");
-            _errorMessage = $"Top News refresh failed: {ex.Message}";
+            Logger.LogError(ex, "All News refresh failed");
+            _errorMessage = $"All News refresh failed: {ex.Message}";
         }
         finally
         {
@@ -415,7 +416,7 @@
         _editingTopicId = null;
         _formName = _formKeywords = _formError = string.Empty;
         _formColor = "#6366f1";
-        _formTopicType = WatchedTopicTypes.General;
+        _formTopicType = WatchedTopicTypes.Technical;
         _showTopicForm = true;
     }
 
@@ -462,14 +463,22 @@
     private string FeedHeading() => _activeFilter switch
     {
         "all" => "All News",
-        "top" => "Today's Top News",
+        "breaking" => "Breaking News",
         _ => _topics.FirstOrDefault(t => t.Id.ToString() == _activeFilter)?.Name ?? "Feed"
     };
+
+    // dev.to isn't a "news outlet" the way the parsed Google News publishers are - it's
+    // excluded here so it never appears as a toggleable checkbox, and SourceMatches below
+    // always lets its items through regardless of which outlets are actually selected.
+    private const string DevToSourceName = "dev.to";
+
+    private static bool IsDevToSource(string? source) =>
+        string.Equals(NormalizeSourceName(source), DevToSourceName, StringComparison.OrdinalIgnoreCase);
 
     private List<SourceFilterOption> AllSourceFilters =>
         CurrentViewItems()
             .Select(x => NormalizeSourceName(x.Source))
-            .Where(source => source.Length > 0)
+            .Where(source => source.Length > 0 && !string.Equals(source, DevToSourceName, StringComparison.OrdinalIgnoreCase))
             .GroupBy(source => source, StringComparer.OrdinalIgnoreCase)
             .Select(group => new SourceFilterOption(group.First(), group.Count()))
             .OrderByDescending(option => option.ArticleCount)
@@ -499,15 +508,32 @@
     };
 
     private bool SourceMatches(NewsItemDto item) =>
-        _selectedSources.Count == 0 || _selectedSources.Contains(NormalizeSourceName(item.Source));
+        IsDevToSource(item.Source) || _selectedSources.Count == 0 || _selectedSources.Contains(NormalizeSourceName(item.Source));
+
+    // Signal words used to approximate "breaking news" - there's no authoritative
+    // breaking-news flag in the Google News RSS / dev.to feeds this pulls from, so this
+    // is a simple, transparent keyword heuristic rather than a real editorial signal.
+    private static readonly string[] BreakingSignalWords =
+        ["breaking", "urgent", "alert", "developing", "live updates", "just in"];
+
+    private static bool IsBreakingNews(NewsItemDto item) =>
+        BreakingSignalWords.Any(w =>
+            item.Title.Contains(w, StringComparison.OrdinalIgnoreCase) ||
+            item.Description.Contains(w, StringComparison.OrdinalIgnoreCase));
 
     private List<NewsItemDto> CurrentViewItems()
     {
         if (_feed is null) return [];
 
-        return _activeFilter == "top"
-            ? _feed.Items.Where(x => x.TopicId == null).ToList()
-            : _feed.Items.ToList();
+        return _activeFilter switch
+        {
+            // "All News" is a flat, topic-free aggregator - topic items never appear here.
+            "all" => _feed.Items.Where(x => x.TopicId == null).ToList(),
+            // "Breaking News" is a keyword-filtered slice of that same topicless pool.
+            "breaking" => _feed.Items.Where(x => x.TopicId == null && IsBreakingNews(x)).ToList(),
+            // A specific topic id - already scoped server-side by GetFeedAsync(topicId).
+            _ => _feed.Items.ToList()
+        };
     }
 
     private List<NewsItemDto> CurrentItems()
@@ -515,11 +541,13 @@
         return CurrentViewItems().Where(SourceMatches).ToList();
     }
 
+    // A flat, traditional aggregator of the topicless general pool - no topic grouping,
+    // no sections. Topics are only ever reachable via their own sidebar row.
     private RenderFragment RenderAllView() => @<text>
         @{
             var filteredItems = CurrentViewItems().Where(SourceMatches).ToList();
         }
-        @if (_feed is null || _feed.Items.Count == 0)
+        @if (CurrentViewItems().Count == 0)
         {
             <div class="card border-0 shadow-sm">
                 <div class="card-body text-center text-secondary py-5">
@@ -539,45 +567,12 @@
         }
         else
         {
-            var topNews = filteredItems.Where(x => x.TopicId == null).ToList();
-            var topicGroups = filteredItems
-                .Where(x => x.TopicId != null)
-                .GroupBy(x => x.TopicId)
-                .OrderBy(g => g.First().TopicName)
-                .ToList();
-
-            if (topNews.Count > 0)
-            {
-                <section class="mb-4">
-                    <h2 class="h5 d-flex align-items-center mb-3">
-                        <span class="gws-topic-dot me-2" style="background:#0f172a"></span>Today's Top News
-                    </h2>
-                    <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3">
-                        @foreach (var item in topNews)
-                        {
-                            @RenderCard(item)
-                        }
-                    </div>
-                </section>
-            }
-
-            foreach (var group in topicGroups)
-            {
-                var first = group.First();
-                <section class="mb-4">
-                    <h2 class="h5 d-flex align-items-center mb-3">
-                        <span class="gws-topic-dot me-2" style="background:@first.TopicColorHex"></span>
-                        @first.TopicName
-                        <span class="text-secondary small ms-2">(@group.Count())</span>
-                    </h2>
-                    <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3">
-                        @foreach (var item in group)
-                        {
-                            @RenderCard(item)
-                        }
-                    </div>
-                </section>
-            }
+            <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3">
+                @foreach (var item in filteredItems)
+                {
+                    @RenderCard(item)
+                }
+            </div>
         }
     </text>;
 

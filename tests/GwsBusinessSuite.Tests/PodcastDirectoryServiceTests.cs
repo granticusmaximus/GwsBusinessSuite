@@ -224,6 +224,75 @@ public sealed class PodcastDirectoryServiceTests
         savedShow.LastEpisodeRefreshAt.Should().NotBeNull();
     }
 
+    // Regression test: a transient feed outage (or malformed XML) used to delete-then-
+    // replace every existing episode with an empty set, and still stamp
+    // LastEpisodeRefreshAt, blocking retry for the full refresh window while showing zero
+    // episodes. A failed fetch should now leave existing episodes and the refresh
+    // timestamp untouched.
+    [Fact]
+    public async Task GetPodcastDetailAsync_ShouldPreserveExistingEpisodes_WhenAFeedRefreshFails()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var feedUrl = "https://feeds.example.com/tech-weekly.xml";
+        var requestCount = 0;
+        using var handler = new RecordingHandler(request =>
+        {
+            requestCount++;
+            if (requestCount == 1)
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        """
+                        <?xml version="1.0" encoding="UTF-8"?>
+                        <rss version="2.0">
+                          <channel>
+                            <title>Tech Weekly</title>
+                            <item>
+                              <title>Episode One</title>
+                              <description>First episode</description>
+                              <enclosure url="https://cdn.example.com/ep-1.mp3" type="audio/mpeg" length="123" />
+                              <guid>ep-1</guid>
+                              <pubDate>Wed, 09 Jul 2026 12:00:00 GMT</pubDate>
+                            </item>
+                          </channel>
+                        </rss>
+                        """,
+                        Encoding.UTF8,
+                        "application/rss+xml")
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                Content = new StringContent("feed is down", Encoding.UTF8, "text/plain")
+            };
+        });
+
+        var service = CreateService(factory, handler);
+        var save = await service.SavePodcastAsync(new PodcastCatalogItem(
+            Title: "Tech Weekly",
+            Author: "Grant",
+            Description: "Latest episodes",
+            Category: "Technology",
+            FeedUrl: feedUrl,
+            ImageUrl: string.Empty,
+            AppleUrl: "https://podcasts.apple.com/us/podcast/tech-weekly/id101",
+            ItunesId: "101"));
+
+        var firstDetail = await service.GetPodcastDetailAsync(save.Podcast.Id, refreshEpisodes: true);
+        firstDetail!.Episodes.Should().HaveCount(1);
+        var firstRefreshAt = (await db.PodcastShows.SingleAsync()).LastEpisodeRefreshAt;
+        firstRefreshAt.Should().NotBeNull();
+
+        var secondDetail = await service.GetPodcastDetailAsync(save.Podcast.Id, refreshEpisodes: true);
+
+        secondDetail!.Episodes.Should().HaveCount(1, "a failed refresh must not wipe existing episodes");
+        secondDetail.Episodes[0].Title.Should().Be("Episode One");
+        var secondRefreshAt = (await db.PodcastShows.SingleAsync()).LastEpisodeRefreshAt;
+        secondRefreshAt.Should().Be(firstRefreshAt, "a failed refresh must not reset the retry window");
+    }
+
     private static PodcastDirectoryService CreateService(IAppDbContextFactory factory, HttpMessageHandler handler)
     {
         var client = new HttpClient(handler);

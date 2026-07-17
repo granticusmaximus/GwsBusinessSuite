@@ -143,9 +143,16 @@ public sealed class WikiService(IAppDbContext dbContext, string repoPath) : IWik
             return null;
         }
 
-        var fileName = FileNameFor(page.Slug);
+        // The page may have been renamed since either commit, so the file's path back then
+        // isn't necessarily its current slug - resolve each side's actual historical path
+        // rather than assuming both commits used today's filename.
+        var fromFileName = ResolveFileNameForRevision(repo, page, fromSha);
+        var toFileName = ResolveFileNameForRevision(repo, page, toSha);
+
         using var patch = repo.Diff.Compare<Patch>(fromCommit.Tree, toCommit.Tree);
-        var entry = patch.FirstOrDefault(change => change.Path == fileName);
+        var entry = patch.FirstOrDefault(change =>
+            change.Path == toFileName || change.Path == fromFileName ||
+            change.OldPath == toFileName || change.OldPath == fromFileName);
         return entry?.Patch;
     }
 
@@ -159,8 +166,29 @@ public sealed class WikiService(IAppDbContext dbContext, string repoPath) : IWik
 
         using var repo = OpenOrInitRepository();
         var commit = repo.Lookup<Commit>(sha);
-        var entry = commit?.Tree[FileNameFor(page.Slug)];
+        if (commit is null)
+        {
+            return null;
+        }
+
+        // Same rename problem as GetDiffAsync - a pre-rename revision only exists in the
+        // tree under its old filename, not today's slug.
+        var fileName = ResolveFileNameForRevision(repo, page, sha);
+        var entry = commit.Tree[fileName];
         return entry?.Target is Blob blob ? blob.GetContentText() : null;
+    }
+
+    // Re-walks the same rename-following history query GetHistoryAsync uses and returns the
+    // path the page's file actually had at the given commit, falling back to today's
+    // filename if the sha isn't found in this page's history at all.
+    private static string ResolveFileNameForRevision(Repository repo, WikiPage page, string sha)
+    {
+        var currentFileName = FileNameFor(page.Slug);
+        var match = repo.Commits
+            .QueryBy(currentFileName, new CommitFilter { SortBy = CommitSortStrategies.Topological })
+            .FirstOrDefault(entry => string.Equals(entry.Commit.Sha, sha, StringComparison.OrdinalIgnoreCase));
+
+        return match?.Path ?? currentFileName;
     }
 
     public async Task<WikiPage> RevertToRevisionAsync(Guid wikiPageId, string sha, string performedBy, CancellationToken cancellationToken = default)

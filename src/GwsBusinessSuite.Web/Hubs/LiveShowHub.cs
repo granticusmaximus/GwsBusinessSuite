@@ -59,13 +59,30 @@ public sealed class LiveShowHub(ILiveShowService liveShowService) : Hub
     }
 
     public Task SendOffer(string targetConnectionId, string sdp) =>
-        Clients.Client(targetConnectionId).SendAsync("ReceiveOffer", Context.ConnectionId, sdp);
+        RelaySignalAsync(targetConnectionId, "ReceiveOffer", sdp);
 
     public Task SendAnswer(string targetConnectionId, string sdp) =>
-        Clients.Client(targetConnectionId).SendAsync("ReceiveAnswer", Context.ConnectionId, sdp);
+        RelaySignalAsync(targetConnectionId, "ReceiveAnswer", sdp);
 
     public Task SendIceCandidate(string targetConnectionId, string candidateJson) =>
-        Clients.Client(targetConnectionId).SendAsync("ReceiveIceCandidate", Context.ConnectionId, candidateJson);
+        RelaySignalAsync(targetConnectionId, "ReceiveIceCandidate", candidateJson);
+
+    // The hub is AllowAnonymous (viewers join via an unauthenticated invite link), so
+    // without this check any connected client could relay a fabricated offer/answer/ICE
+    // candidate to an arbitrary connectionId. Requiring both ends to have already joined
+    // the *same* session (via JoinAsBroadcaster/JoinAsViewer, which populate
+    // ConnectionSessions) confines relaying to peers that are actually part of that show.
+    private Task RelaySignalAsync(string targetConnectionId, string method, string payload)
+    {
+        if (!ConnectionSessions.TryGetValue(Context.ConnectionId, out var callerSessionId) ||
+            !ConnectionSessions.TryGetValue(targetConnectionId, out var targetSessionId) ||
+            callerSessionId != targetSessionId)
+        {
+            return Task.CompletedTask;
+        }
+
+        return Clients.Client(targetConnectionId).SendAsync(method, Context.ConnectionId, payload);
+    }
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {

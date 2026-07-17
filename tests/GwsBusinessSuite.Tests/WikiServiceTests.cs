@@ -157,6 +157,52 @@ public sealed class WikiServiceTests : IDisposable
         history.Select(h => h.Message).Should().Contain("Create Old Title");
     }
 
+    // Regression test: GetRevisionContentAsync/GetDiffAsync/RevertToRevisionAsync used to
+    // look up historical git blobs by the page's *current* slug, so any revision from
+    // before a rename couldn't be found (the old commit's tree only has the old filename).
+    [Fact]
+    public async Task RevertToRevisionAsync_ShouldRestoreContent_FromBeforeASlugRename()
+    {
+        await using var db = await CreateDbAsync();
+        var service = CreateService(db);
+
+        var created = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Old Title",
+            Markdown = "Original content."
+        }, "grantwatson");
+        var preRenameSha = (await service.GetHistoryAsync(created.Id))[0].Sha;
+
+        await service.SavePageAsync(new WikiPageEditorModel
+        {
+            WikiPageId = created.Id,
+            Title = "New Title",
+            Slug = "new-title",
+            Markdown = "Original content."
+        }, "grantwatson");
+
+        await service.SavePageAsync(new WikiPageEditorModel
+        {
+            WikiPageId = created.Id,
+            Title = "New Title",
+            Slug = "new-title",
+            Markdown = "Content after rename."
+        }, "grantwatson");
+
+        var preRenameContent = await service.GetRevisionContentAsync(created.Id, preRenameSha);
+        preRenameContent.Should().Be("Original content.");
+
+        var history = await service.GetHistoryAsync(created.Id);
+        var latestSha = history[0].Sha;
+        var diff = await service.GetDiffAsync(created.Id, preRenameSha, latestSha);
+        diff.Should().NotBeNullOrEmpty();
+        diff.Should().Contain("Content after rename.");
+
+        var reverted = await service.RevertToRevisionAsync(created.Id, preRenameSha, "grantwatson");
+        reverted.Markdown.Should().Be("Original content.");
+        reverted.Slug.Should().Be("new-title", "reverting content shouldn't undo the rename itself");
+    }
+
     [Fact]
     public async Task RevertToRevisionAsync_ShouldRestoreOldContent_AsANewCommit()
     {

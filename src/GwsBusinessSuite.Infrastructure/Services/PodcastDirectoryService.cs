@@ -242,6 +242,19 @@ public sealed class PodcastDirectoryService(
     {
         var episodes = await FetchEpisodesAsync(show.FeedUrl, cancellationToken);
 
+        if (episodes.Count == 0)
+        {
+            // FetchEpisodesAsync swallows feed-down/DNS/malformed-XML failures and returns
+            // empty rather than throwing, so an empty result here is indistinguishable from
+            // a transient outage. Skip the delete-then-replace and leave LastEpisodeRefreshAt
+            // untouched so the next scheduled refresh retries instead of waiting out the full
+            // EpisodeRefreshHours window with zero episodes on display.
+            logger.LogWarning(
+                "Podcast feed {FeedUrl} returned no episodes; keeping existing episodes for show {ShowId} and retrying next cycle.",
+                show.FeedUrl, show.Id);
+            return;
+        }
+
         await db.PodcastEpisodes.Where(x => x.PodcastShowId == show.Id).ExecuteDeleteAsync(cancellationToken);
 
         foreach (var episode in episodes)

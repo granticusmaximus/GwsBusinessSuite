@@ -140,30 +140,41 @@ public sealed class LiveShowService(
         // race - the hub's disconnect handler can fire before the deliberate shutdown's
         // EndSessionAsync call lands - so finalizing twice for the same session must be a
         // safe no-op rather than creating a duplicate LiveShowRecording row.
-        var alreadyFinalized = await dbContext.LiveShowRecordings.AnyAsync(r => r.SessionId == sessionId, cancellationToken);
-        if (alreadyFinalized)
+        // No more chunks should be appended for this session once finalization is being
+        // attempted, regardless of outcome - remove the write lock on every exit path
+        // (not just the happy path) so a session whose file went missing, or whose
+        // finalize call otherwise short-circuits, doesn't leak its SemaphoreSlim for the
+        // rest of the process lifetime.
+        try
         {
-            return;
-        }
+            var alreadyFinalized = await dbContext.LiveShowRecordings.AnyAsync(r => r.SessionId == sessionId, cancellationToken);
+            if (alreadyFinalized)
+            {
+                return;
+            }
 
-        var filePath = GetFilePath(sessionId);
-        if (!File.Exists(filePath))
-        {
-            return;
-        }
+            var filePath = GetFilePath(sessionId);
+            if (!File.Exists(filePath))
+            {
+                return;
+            }
 
-        var fileInfo = new FileInfo(filePath);
-        var username = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
-        dbContext.LiveShowRecordings.Add(new LiveShowRecording
+            var fileInfo = new FileInfo(filePath);
+            var username = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
+            dbContext.LiveShowRecordings.Add(new LiveShowRecording
+            {
+                SessionId = sessionId,
+                FileName = Path.GetFileName(filePath),
+                DurationSeconds = durationSeconds,
+                FileSizeBytes = fileInfo.Length,
+                CreatedBy = username
+            });
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        finally
         {
-            SessionId = sessionId,
-            FileName = Path.GetFileName(filePath),
-            DurationSeconds = durationSeconds,
-            FileSizeBytes = fileInfo.Length,
-            CreatedBy = username
-        });
-        await dbContext.SaveChangesAsync(cancellationToken);
-        WriteLocks.TryRemove(sessionId, out _);
+            WriteLocks.TryRemove(sessionId, out _);
+        }
     }
 
     // Safety net for the broadcaster's browser disappearing without a clean StopAsync
