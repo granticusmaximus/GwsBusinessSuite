@@ -342,9 +342,9 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadArticles();
-        await LoadCategoriesAsync();
-        await LoadTrashedArticlesAsync();
+        // Each loader creates its own DbContext through DbFactory, so these independent
+        // reads can overlap instead of making the editor wait for three round trips.
+        await Task.WhenAll(LoadArticles(), LoadCategoriesAsync(), LoadTrashedArticlesAsync());
     }
 
     private async Task LoadArticles()

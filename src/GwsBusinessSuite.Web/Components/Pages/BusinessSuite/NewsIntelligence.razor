@@ -235,8 +235,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadTopicsAsync();
-        await LoadFeedAsync();
+        await ReloadAsync();
     }
 
     // ── Data loading ─────────────────────────────────────────
@@ -270,6 +269,11 @@
         }
         finally { _loading = false; }
     }
+
+    // These reads use separate factory-created DbContexts, so they can safely overlap.
+    // Keeping them behind one helper also avoids reintroducing serial reloads after a
+    // refresh or topic mutation.
+    private Task ReloadAsync() => Task.WhenAll(LoadTopicsAsync(), LoadFeedAsync());
 
     // ── Actions ──────────────────────────────────────────────
 
@@ -311,8 +315,7 @@
             }
 
             await NewsService.RefreshAllAsync();
-            await LoadTopicsAsync();
-            await LoadFeedAsync();
+            await ReloadAsync();
             _statusMessage = "Feed refreshed.";
         }
         catch (Exception ex)
@@ -379,8 +382,7 @@
             }
 
             await NewsService.RefreshTopicAsync(topicId);
-            await LoadTopicsAsync();
-            await LoadFeedAsync();
+            await ReloadAsync();
         }
         catch (Exception ex)
         {
@@ -399,8 +401,7 @@
         {
             await NewsService.DeleteTopicAsync(topicId);
             if (_activeFilter == topicId.ToString()) _activeFilter = "all";
-            await LoadTopicsAsync();
-            await LoadFeedAsync();
+            await ReloadAsync();
         }
         catch (Exception ex)
         {

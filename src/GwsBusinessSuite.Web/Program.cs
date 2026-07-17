@@ -44,6 +44,10 @@ builder.Services.AddInfrastructure(builder.Configuration);
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+// Compress server-rendered HTML, JSON/API responses, and static assets. Forwarded
+// headers surface the original HTTPS scheme behind Cloudflare, so HTTPS compression
+// must be enabled explicitly or production traffic would silently skip it.
+builder.Services.AddResponseCompression(options => options.EnableForHttps = true);
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserAccessor, CurrentUserAccessor>();
@@ -286,6 +290,7 @@ app.UseStatusCodePagesWithReExecute("/__not-found", createScopeForStatusCodePage
 // HTTP-only in Docker — remove HTTPS redirect so the container runs cleanly on port 8080
 
 // Serve Blazor static assets before auth checks.
+app.UseResponseCompression();
 app.UseStaticFiles();
 
 if (!string.IsNullOrWhiteSpace(normalizedPathBase))

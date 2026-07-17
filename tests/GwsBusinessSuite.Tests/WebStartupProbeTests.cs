@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Hosting;
 using Microsoft.EntityFrameworkCore;
@@ -121,6 +123,41 @@ public sealed class WebStartupProbeTests
             {
                 Directory.Delete(tempDir, recursive: true);
             }
+        }
+    }
+
+    [Fact]
+    public async Task ResponseCompressionCompressesEligibleResponses()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = Environments.Development
+        });
+
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddResponseCompression(options => options.EnableForHttps = true);
+
+        var app = builder.Build();
+        app.UseResponseCompression();
+        app.MapGet("/payload", () => new string('x', 4096));
+
+        await app.StartAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        try
+        {
+            var server = app.Services.GetRequiredService<IServer>();
+            var address = server.Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+            using var client = new HttpClient();
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{address}/payload");
+            request.Headers.AcceptEncoding.ParseAdd("gzip");
+
+            using var response = await client.SendAsync(request);
+
+            response.EnsureSuccessStatusCode();
+            response.Content.Headers.ContentEncoding.Should().Contain("gzip");
+        }
+        finally
+        {
+            await app.StopAsync().WaitAsync(TimeSpan.FromSeconds(5));
         }
     }
 
