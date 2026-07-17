@@ -356,7 +356,7 @@
 
             await RunRefreshWithProgressAsync(() => NewsService.RefreshAllAsync());
             await ReloadAsync();
-            _statusMessage = "Feed refreshed.";
+            SetRefreshOutcome("Feed refreshed.");
         }
         catch (Exception ex)
         {
@@ -390,7 +390,7 @@
 
             await RunRefreshWithProgressAsync(() => NewsService.RefreshTopNewsAsync());
             await LoadFeedAsync();
-            _statusMessage = "All News refreshed.";
+            SetRefreshOutcome("All News refreshed.");
         }
         catch (Exception ex)
         {
@@ -424,6 +424,7 @@
 
             await RunRefreshWithProgressAsync(() => NewsService.RefreshTopicAsync(topicId));
             await ReloadAsync();
+            SetRefreshOutcome("Topic refreshed.");
         }
         catch (Exception ex)
         {
@@ -458,6 +459,17 @@
     private static string FormatDuration(long milliseconds) => milliseconds >= 1000
         ? $"{milliseconds / 1000d:0.0}s"
         : $"{milliseconds}ms";
+
+    private void SetRefreshOutcome(string successMessage)
+    {
+        if (string.IsNullOrWhiteSpace(_refreshStatus.LastError))
+        {
+            _statusMessage = successMessage;
+            return;
+        }
+
+        _errorMessage = $"Refresh completed with errors: {_refreshStatus.LastError}";
+    }
 
     private async Task DeleteTopicAsync(Guid topicId)
     {

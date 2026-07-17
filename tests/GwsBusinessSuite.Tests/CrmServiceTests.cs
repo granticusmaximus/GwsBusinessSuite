@@ -218,6 +218,28 @@ public sealed class CrmServiceTests
         (await service.CountDueFollowUpsAsync()).Should().Be(0);
     }
 
+    [Fact]
+    public async Task GetDashboardAsync_ShouldReturnContactsAndDueFollowUpsFromOneSnapshot()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CrmService(db);
+        var due = await service.SaveContactAsync(new ContactEditorModel
+        {
+            FullName = "Due contact",
+            FollowUpDate = DateTimeOffset.UtcNow.AddDays(-1)
+        });
+        await service.SaveContactAsync(new ContactEditorModel
+        {
+            FullName = "Future contact",
+            FollowUpDate = DateTimeOffset.UtcNow.AddDays(3)
+        });
+
+        var dashboard = await service.GetDashboardAsync();
+
+        dashboard.Contacts.Should().HaveCount(2);
+        dashboard.DueFollowUps.Should().ContainSingle(contact => contact.Id == due.Id);
+    }
+
     private static async Task<ApplicationDbContext> CreateDbAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

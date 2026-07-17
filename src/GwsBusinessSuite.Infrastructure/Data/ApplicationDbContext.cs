@@ -7,6 +7,20 @@ namespace GwsBusinessSuite.Infrastructure.Data;
 
 public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : DbContext(options), IAppDbContext
 {
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        SynchronizeNewsItemTimestamps();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        SynchronizeNewsItemTimestamps();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
     public Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
         Database.BeginTransactionAsync(cancellationToken);
 
@@ -112,6 +126,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<Article>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<Article>().HasIndex(x => x.Status);
         modelBuilder.Entity<Article>().HasIndex(x => x.PublishedAt);
+        modelBuilder.Entity<Article>().HasIndex(x => new { x.Status, x.PublishedAtUnixSeconds });
         modelBuilder.Entity<Article>().HasIndex(x => x.CategoryId);
         modelBuilder.Entity<Article>()
             .HasOne<ArticleCategory>()
@@ -190,6 +205,22 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .HasForeignKey(x => x.EpisodeId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<PodcastListenProgress>().HasIndex(x => new { x.Username, x.EpisodeId }).IsUnique();
+    }
+
+    private void SynchronizeNewsItemTimestamps()
+    {
+        foreach (var entry in ChangeTracker.Entries<NewsItem>()
+                     .Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+        {
+            entry.Entity.FetchedAtUnixSeconds = entry.Entity.FetchedAt.ToUnixTimeSeconds();
+            entry.Entity.PublishedAtUnixSeconds = entry.Entity.PublishedAt?.ToUnixTimeSeconds();
+        }
+
+        foreach (var entry in ChangeTracker.Entries<Article>()
+                     .Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+        {
+            entry.Entity.PublishedAtUnixSeconds = entry.Entity.PublishedAt?.ToUnixTimeSeconds();
+        }
     }
 
     // Migrates the module's original hardcoded in-memory reference data (2 sources, 5

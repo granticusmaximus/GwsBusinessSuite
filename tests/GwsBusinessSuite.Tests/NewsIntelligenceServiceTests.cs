@@ -185,6 +185,7 @@ public sealed class NewsIntelligenceServiceTests
             options,
             new HttpClient(),
             new MemoryCache(new MemoryCacheOptions()),
+            new NewsRefreshState(),
             NullLogger<NewsIntelligenceService>.Instance);
     }
 

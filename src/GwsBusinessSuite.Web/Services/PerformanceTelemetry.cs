@@ -10,7 +10,9 @@ public sealed class PerformanceTelemetry
     public void Record(HttpContext context, TimeSpan elapsed)
     {
         var endpoint = context.GetEndpoint() as RouteEndpoint;
-        var route = endpoint?.RoutePattern.RawText ?? context.Request.Path.Value ?? "/";
+        // Avoid unbounded cardinality from arbitrary 404/static-asset paths. Routed
+        // endpoints use their stable templates; everything else shares one bucket.
+        var route = endpoint?.RoutePattern.RawText ?? "<static-or-unmatched>";
         var key = $"{context.Request.Method} {route}";
         _routes.GetOrAdd(key, static _ => new RouteMetric()).Record(elapsed, context.Response.StatusCode);
     }

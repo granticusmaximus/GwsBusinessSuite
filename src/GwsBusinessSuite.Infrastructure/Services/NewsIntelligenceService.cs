@@ -72,34 +72,50 @@ public sealed class NewsIntelligenceService(
 
     public async Task<WatchedTopicSummary> CreateTopicAsync(string name, string keywords, string colorHex, string topicType, CancellationToken ct = default)
     {
-        await using var db = await dbContextFactory.CreateDbContextAsync(ct);
-        var topic = new WatchedTopic
+        await WriteLock.WaitAsync(ct);
+        try
         {
-            Name = name.Trim(),
-            Keywords = keywords.Trim(),
-            ColorHex = colorHex,
-            IsActive = true,
-            TopicType = NormalizeTopicType(topicType)
-        };
-        db.WatchedTopics.Add(topic);
-        await db.SaveChangesAsync(ct);
-        return new WatchedTopicSummary(topic.Id, topic.Name, topic.Keywords, topic.ColorHex, topic.IsActive, null, 0, topic.TopicType);
+            await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+            var topic = new WatchedTopic
+            {
+                Name = name.Trim(),
+                Keywords = keywords.Trim(),
+                ColorHex = colorHex,
+                IsActive = true,
+                TopicType = NormalizeTopicType(topicType)
+            };
+            db.WatchedTopics.Add(topic);
+            await db.SaveChangesAsync(ct);
+            return new WatchedTopicSummary(topic.Id, topic.Name, topic.Keywords, topic.ColorHex, topic.IsActive, null, 0, topic.TopicType);
+        }
+        finally
+        {
+            WriteLock.Release();
+        }
     }
 
     public async Task<WatchedTopicSummary> UpdateTopicAsync(Guid id, string name, string keywords, string colorHex, bool isActive, string topicType, CancellationToken ct = default)
     {
-        await using var db = await dbContextFactory.CreateDbContextAsync(ct);
-        var topic = await db.WatchedTopics.FindAsync([id], ct)
-            ?? throw new InvalidOperationException($"Topic {id} not found");
+        await WriteLock.WaitAsync(ct);
+        try
+        {
+            await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+            var topic = await db.WatchedTopics.FindAsync([id], ct)
+                ?? throw new InvalidOperationException($"Topic {id} not found");
 
-        topic.Name = name.Trim();
-        topic.Keywords = keywords.Trim();
-        topic.ColorHex = colorHex;
-        topic.IsActive = isActive;
-        topic.TopicType = NormalizeTopicType(topicType);
-        topic.UpdatedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync(ct);
-        return new WatchedTopicSummary(topic.Id, topic.Name, topic.Keywords, topic.ColorHex, topic.IsActive, topic.LastFetchedAt, 0, topic.TopicType);
+            topic.Name = name.Trim();
+            topic.Keywords = keywords.Trim();
+            topic.ColorHex = colorHex;
+            topic.IsActive = isActive;
+            topic.TopicType = NormalizeTopicType(topicType);
+            topic.UpdatedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(ct);
+            return new WatchedTopicSummary(topic.Id, topic.Name, topic.Keywords, topic.ColorHex, topic.IsActive, topic.LastFetchedAt, 0, topic.TopicType);
+        }
+        finally
+        {
+            WriteLock.Release();
+        }
     }
 
     private static string NormalizeTopicType(string topicType) =>
@@ -107,16 +123,23 @@ public sealed class NewsIntelligenceService(
 
     public async Task DeleteTopicAsync(Guid id, CancellationToken ct = default)
     {
-        await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+        await WriteLock.WaitAsync(ct);
+        try
+        {
+            await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+            await using var transaction = await db.BeginTransactionAsync(ct);
+            var topic = await db.WatchedTopics.FindAsync([id], ct);
+            if (topic is null) return;
 
-        var topic = await db.WatchedTopics.FindAsync([id], ct);
-        if (topic is null) return;
-
-        // ExecuteDeleteAsync avoids loading news items into memory and is safe
-        // if a concurrent refresh is touching the same rows simultaneously.
-        await db.NewsItems.Where(n => n.TopicId == id).ExecuteDeleteAsync(ct);
-        db.WatchedTopics.Remove(topic);
-        await db.SaveChangesAsync(ct);
+            await db.NewsItems.Where(n => n.TopicId == id).ExecuteDeleteAsync(ct);
+            db.WatchedTopics.Remove(topic);
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        finally
+        {
+            WriteLock.Release();
+        }
     }
 
     // ── Feed read ─────────────────────────────────────────────
@@ -258,6 +281,7 @@ public sealed class NewsIntelligenceService(
         {
             logger.LogError(ex, "Failed to refresh {WorkItem}", workItem.Name);
             refreshState.FailItem(workItem.Name, ex, timings);
+            if (ex is OperationCanceledException && ct.IsCancellationRequested) throw;
         }
     }
 

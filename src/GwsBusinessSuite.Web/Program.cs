@@ -635,15 +635,15 @@ app.MapGet("/blog", async (
         effectivePageSize = effectivePageSize is 10 or 12 or 25 or 50 ? effectivePageSize : 12;
 
         await using var db = await dbFactory.CreateDbContextAsync();
-        // SQLite can't translate ORDER BY on a DateTimeOffset column, so order client-side
-        // after materializing (same pattern as the existing /api/blog handler above).
-        var articles = (await db.Articles
+        var nowUnixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var articles = await db.Articles
             .AsNoTracking()
-            .Where(a => a.TrashedAt == null)
-            .ToListAsync())
-            .Where(a => IsArticlePubliclyVisible(a, DateTimeOffset.UtcNow))
-            .OrderByDescending(a => a.PublishedAt)
-            .ToList();
+            .Where(a => a.TrashedAt == null
+                && a.Status == ArticleStatuses.Published
+                && a.PublishedAtUnixSeconds != null
+                && a.PublishedAtUnixSeconds <= nowUnixSeconds)
+            .OrderByDescending(a => a.PublishedAtUnixSeconds)
+            .ToListAsync();
 
         var categoryLookup = await db.ArticleCategories.AsNoTracking().ToDictionaryAsync(c => c.Id);
         var categories = categoryLookup.Values
@@ -873,11 +873,14 @@ app.MapGet("/sitemap.xml", async (
         });
 
     await using var db = await dbFactory.CreateDbContextAsync();
+    var nowUnixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
     var visibleArticles = (await db.Articles
             .AsNoTracking()
-            .Where(article => article.TrashedAt == null)
+            .Where(article => article.TrashedAt == null
+                && article.Status == ArticleStatuses.Published
+                && article.PublishedAtUnixSeconds != null
+                && article.PublishedAtUnixSeconds <= nowUnixSeconds)
             .ToListAsync())
-        .Where(article => IsArticlePubliclyVisible(article, DateTimeOffset.UtcNow))
         .Select(article => new PublicSiteHtmlRenderer.SitemapEntry(
             ResolvePublicUrl(baseUrl, null, $"/blog/{article.Slug}"),
             article.UpdatedAt ?? article.PublishedAt ?? article.CreatedAt));
@@ -909,13 +912,16 @@ app.MapGet("/rss.xml", async (
     var site = await GetConfiguredCanvasSiteAsync(cmsBuilderService, configuration);
     var siteName = site?.Name ?? configuration["Canvas:SiteName"] ?? "Site";
 
+    var nowUnixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
     var items = (await db.Articles
             .AsNoTracking()
-            .Where(article => article.TrashedAt == null)
+            .Where(article => article.TrashedAt == null
+                && article.Status == ArticleStatuses.Published
+                && article.PublishedAtUnixSeconds != null
+                && article.PublishedAtUnixSeconds <= nowUnixSeconds)
+            .OrderByDescending(article => article.PublishedAtUnixSeconds)
+            .Take(20)
             .ToListAsync())
-        .Where(article => IsArticlePubliclyVisible(article, DateTimeOffset.UtcNow))
-        .OrderByDescending(article => article.PublishedAt)
-        .Take(20)
         .Select(article => new PublicSiteHtmlRenderer.RssItem(
             article.Title,
             CombineAbsoluteUrl(baseUrl, $"/blog/{article.Slug}"),
@@ -1274,14 +1280,17 @@ app.MapGet("/api/cms/{siteSlug}/pages/{pageSlug}", async (
 app.MapGet("/api/blog", async (IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
     await using var db = await dbFactory.CreateDbContextAsync();
+    var nowUnixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
     var articles = await db.Articles
         .AsNoTracking()
-        .Where(a => a.TrashedAt == null)
+        .Where(a => a.TrashedAt == null
+            && a.Status == ArticleStatuses.Published
+            && a.PublishedAtUnixSeconds != null
+            && a.PublishedAtUnixSeconds <= nowUnixSeconds)
+        .OrderByDescending(a => a.PublishedAtUnixSeconds)
         .ToListAsync();
 
     var result = articles
-        .Where(a => IsArticlePubliclyVisible(a, DateTimeOffset.UtcNow))
-        .OrderByDescending(a => a.PublishedAt)
         .Select(a => new
         {
             a.Slug,
@@ -1736,12 +1745,14 @@ static async Task<IReadOnlyList<PublicArticleSummary>> LoadPublicArticleSummarie
     IDbContextFactory<ApplicationDbContext> dbFactory, int take = 12)
 {
     await using var db = await dbFactory.CreateDbContextAsync();
-    var articles = await db.Articles.AsNoTracking().Where(a => a.TrashedAt == null).ToListAsync();
-    var now = DateTimeOffset.UtcNow;
-
-    return articles
-        .Where(a => IsArticlePubliclyVisible(a, now))
-        .OrderByDescending(a => a.PublishedAt)
+    var nowUnixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+    return await db.Articles
+        .AsNoTracking()
+        .Where(a => a.TrashedAt == null
+            && a.Status == ArticleStatuses.Published
+            && a.PublishedAtUnixSeconds != null
+            && a.PublishedAtUnixSeconds <= nowUnixSeconds)
+        .OrderByDescending(a => a.PublishedAtUnixSeconds)
         .Take(take)
         .Select(a => new PublicArticleSummary(
             a.Slug,
@@ -1749,7 +1760,7 @@ static async Task<IReadOnlyList<PublicArticleSummary>> LoadPublicArticleSummarie
             a.MetaDescription,
             a.HeroImageUrl ?? (a.HeroImageDataUri != "" ? $"/og-image/{a.Slug}" : null),
             a.PublishedAt))
-        .ToList();
+        .ToListAsync();
 }
 
 static CommentView? FindCommentById(IEnumerable<CommentView> comments, Guid commentId)
