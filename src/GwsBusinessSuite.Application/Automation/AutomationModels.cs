@@ -40,6 +40,7 @@ public sealed record AutomationNodeView(
     bool RetryOnFail,
     int MaxTries,
     int WaitBetweenTriesMs,
+    int TimeoutMs,
     string Notes);
 
 public sealed record AutomationConnectionView(
@@ -56,6 +57,11 @@ public sealed record AutomationExecutionSummary(
     DateTimeOffset? StartedAt,
     DateTimeOffset? FinishedAt,
     string ErrorMessage);
+
+public sealed record AutomationWaitStatus(
+    string WaitingNodeTypeKey,
+    string WaitingNodeName,
+    DateTimeOffset? ResumeAt);
 
 public sealed record AutomationCredentialSummary(
     Guid Id,
@@ -76,6 +82,7 @@ public sealed record AutomationExecutionView(
     string ErrorMessage,
     DateTimeOffset? StartedAt,
     DateTimeOffset? FinishedAt,
+    AutomationWaitStatus? Wait,
     IReadOnlyList<AutomationNodeExecutionView> Nodes);
 
 public sealed record AutomationNodeExecutionView(
@@ -117,6 +124,7 @@ public sealed class AutomationNodeEditor
     public bool RetryOnFail { get; init; }
     public int MaxTries { get; init; } = 1;
     public int WaitBetweenTriesMs { get; init; }
+    public int TimeoutMs { get; init; }
     public string Notes { get; init; } = string.Empty;
 }
 
@@ -142,7 +150,8 @@ public sealed record AutomationNodeSnapshot(
     bool ContinueOnFail,
     bool RetryOnFail,
     int MaxTries,
-    int WaitBetweenTriesMs);
+    int WaitBetweenTriesMs,
+    int TimeoutMs);
 
 public sealed record AutomationConnectionSnapshot(
     Guid SourceNodeId,

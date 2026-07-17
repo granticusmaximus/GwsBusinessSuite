@@ -16,6 +16,14 @@ UI assets, trademarks, node definitions, or enterprise-only implementation detai
 - `IAutomationWorkflowService` owns graph editing, validation, versioning, and activation.
 - `IAutomationExecutionService` executes published snapshots, not a graph that may be edited
   during a run.
+- Execution state (the remaining node queue and merge buffers) is checkpointed to
+  `AutomationExecution.PendingStateJson` after every node step, so a `Wait`/`Approval` pause or
+  an app restart mid-run can both resume from the exact point they left off, against the
+  workflow version the execution started on (`IAutomationWorkflowService.GetSnapshotByVersionAsync`),
+  not whichever version is newest at resume time.
+- `AutomationResumeBackgroundService` sweeps for executions whose wait time has elapsed and for
+  `Running` executions whose heartbeat has gone stale (an orphaned run from a crashed process),
+  resuming both through the same `IAutomationExecutionService.ResumeAsync` path.
 
 ## Capability matrix
 
@@ -23,11 +31,11 @@ UI assets, trademarks, node definitions, or enterprise-only implementation detai
 | --- | --- | --- |
 | Visual graph editor | Initial canvas, palette, inspector, connections, persisted positions | Marquee selection, copy/paste, undo/redo, minimap, sticky notes, keyboard command bar |
 | Workflow lifecycle | Draft editing, validation, immutable publish versions, activate/deactivate | Tags, folders/projects, sharing roles, workflow history diff/restore, import/export/templates |
-| Execution engine | Deterministic DAG execution, branching, labeled-input joins, multi-item fan-out, batching, retries, continue-on-fail, per-node evidence | Sub-workflows, durable waits/resume, partial execution, retry from failure |
-| Core nodes | Manual/Webhook/Schedule triggers; Set Fields, If, HTTP Request, Split Out, Batch, Merge, Limit, Sort, Remove Duplicates, Template, Date & Time, No Operation, Stop and Error | Wait, Code, Execute Workflow, Respond to Webhook, approval |
+| Execution engine | Deterministic DAG execution, branching, labeled-input joins, multi-item fan-out, batching, retries, continue-on-fail, per-node evidence, checkpointed frontier with crash recovery, cooperative cancellation, per-node timeouts | Sub-workflows, partial execution, retry from a failed node |
+| Core nodes | Manual/Webhook/Schedule triggers; Set Fields, If, HTTP Request, Split Out, Batch, Merge, Limit, Sort, Remove Duplicates, Template, Date & Time, No Operation, Stop and Error, Wait, Approval | Code, Execute Workflow, Respond to Webhook |
 | Data mapping | JSON items and `{{ $json.path }}` expressions | Full expression editor, node references, item linking, binary data, pinned/mock data |
 | Credentials | Protected credential records and credential references | OAuth2 refresh, credential types, sharing, external secret stores, rotation/audit |
-| Operations | Run list, node logs, timestamps, errors, outputs | Filtering, retention/pruning, cancel, concurrency controls, metrics, OpenTelemetry |
+| Operations | Run list, node logs, timestamps, errors, outputs, cancel, resume, approve/reject | Filtering, retention/pruning, concurrency controls, metrics, OpenTelemetry |
 | Scale and reliability | In-process execution with durable records | Queue transport, independent workers, webhook processors, leader election, Postgres |
 | AI automation | Registry can host AI nodes | Agents, tools, memory, vector stores, model credentials, human approval nodes |
 | Governance | Admin-only boundary and immutable version snapshots | Projects/RBAC, audit stream, environment promotion, source control, security audit |

@@ -15,6 +15,7 @@ public sealed class AutomationTriggerService(
     TimeProvider timeProvider) : IAutomationTriggerService
 {
     private static readonly SemaphoreSlim ScheduleLock = new(1, 1);
+    private static readonly SemaphoreSlim ResumeLock = new(1, 1);
 
     public async Task<AutomationExecutionView?> TriggerWebhookAsync(
         string path,
@@ -73,6 +74,45 @@ public sealed class AutomationTriggerService(
             return due.Count;
         }
         finally { ScheduleLock.Release(); }
+    }
+
+    public async Task<int> ResumeDueWaitsAsync(CancellationToken cancellationToken = default)
+    {
+        if (!await ResumeLock.WaitAsync(0, cancellationToken)) return 0;
+        try
+        {
+            var nowUnix = timeProvider.GetUtcNow().ToUnixTimeSeconds();
+            var orphanCutoff = nowUnix - AutomationExecutionService.OrphanThresholdSeconds;
+            var due = await db.AutomationExecutions.AsNoTracking().Where(item =>
+                (item.Status == AutomationExecutionStatuses.Waiting
+                    && item.ResumeAtUnixSeconds != null && item.ResumeAtUnixSeconds <= nowUnix)
+                || (item.Status == AutomationExecutionStatuses.Running
+                    && item.HeartbeatAtUnixSeconds != null && item.HeartbeatAtUnixSeconds < orphanCutoff))
+                .Select(item => item.Id)
+                .ToListAsync(cancellationToken);
+
+            var resumed = 0;
+            foreach (var executionId in due)
+            {
+                try { await executionService.ResumeAsync(executionId, cancellationToken: cancellationToken); resumed++; }
+                catch (InvalidOperationException) { /* execution moved on (e.g. canceled) between the sweep query and resume */ }
+            }
+            return resumed;
+        }
+        finally { ResumeLock.Release(); }
+    }
+
+    public async Task<AutomationExecutionView?> ResumeViaWebhookAsync(string token, string bodyJson, CancellationToken cancellationToken = default)
+    {
+        var execution = await db.AutomationExecutions.AsNoTracking().FirstOrDefaultAsync(item =>
+            item.Status == AutomationExecutionStatuses.Waiting && item.ResumeToken == token, cancellationToken);
+        if (execution is null) return null;
+        if (execution.WaitingNodeTypeKey != "core.wait")
+            throw new InvalidOperationException("This execution is not waiting on a resume webhook.");
+
+        using var body = JsonDocument.Parse(string.IsNullOrWhiteSpace(bodyJson) ? "{}" : bodyJson);
+        var mergeFields = JsonSerializer.Serialize(new { _resume = body.RootElement });
+        return await executionService.ResumeAsync(execution.Id, "main", mergeFields, cancellationToken);
     }
 
     private static bool FixedTimeEquals(string? expected, string? actual)

@@ -24,6 +24,8 @@ public sealed partial class AutomationNodeRegistry(IAutomationHttpClient httpCli
         new("core.dateTime", 1, "Date & Time", "Adds the current UTC time in ISO and Unix formats.", "Data", "bi-calendar3", false, ["main"], "{\"outputField\":\"timestamp\"}"),
         new("core.noOp", 1, "No Operation", "Passes input through unchanged for layout and debugging.", "Flow", "bi-arrow-right-circle", false, ["main"], "{}"),
         new("core.stopError", 1, "Stop and Error", "Stops the workflow with a configured error message.", "Flow", "bi-exclamation-octagon", false, ["main"], "{\"message\":\"Workflow stopped\"}"),
+        new("core.wait", 1, "Wait", "Pauses the workflow until a duration, timestamp, or resume webhook.", "Flow", "bi-hourglass-split", false, ["main"], "{\"mode\":\"duration\",\"durationMs\":60000,\"timestamp\":null}"),
+        new("core.approval", 1, "Approval", "Pauses the workflow for a human decision.", "Flow", "bi-person-check", false, ["approved", "rejected"], "{\"message\":\"Approve this step?\",\"timeoutHours\":0}"),
     ];
 
     public IReadOnlyList<AutomationNodeDefinition> ListDefinitions() => Definitions;
@@ -55,6 +57,7 @@ public sealed partial class AutomationNodeRegistry(IAutomationHttpClient httpCli
             "core.dateTime" => ExecuteDateTime(node, input),
             "core.noOp" => SingleOutput("main", input),
             "core.stopError" => throw new InvalidOperationException(ResolveText(ParseObject(node.ParametersJson, node.Name)["message"]?.GetValue<string>() ?? "Workflow stopped.", input)),
+            "core.wait" or "core.approval" => throw new InvalidOperationException($"{node.Name} must be paused and resumed by the execution engine, not called directly."),
             _ => throw new InvalidOperationException($"Node type '{node.TypeKey}' is not executable.")
         };
     }

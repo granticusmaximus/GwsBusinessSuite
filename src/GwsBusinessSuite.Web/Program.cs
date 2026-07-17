@@ -653,6 +653,33 @@ app.MapMethods("/hooks/{path}", ["GET", "POST"], async (
     catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
 }).AllowAnonymous().RequireRateLimiting("public-write");
 
+// Resumes an execution paused at a Wait node in webhook mode. The token is a per-execution
+// opaque secret minted when the Wait node pauses (see AutomationExecutionService.PauseAsync),
+// not a guessable path like the trigger webhook above, so no separate credential check is needed.
+app.MapPost("/hooks/resume/{token}", async (
+    string token,
+    HttpRequest request,
+    IAutomationTriggerService triggerService) =>
+{
+    const long maxBodyBytes = 1024 * 1024;
+    if (request.ContentLength > maxBodyBytes) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+
+    using var reader = new StreamReader(request.Body);
+    var bodyJson = await reader.ReadToEndAsync();
+    if (Encoding.UTF8.GetByteCount(bodyJson) > maxBodyBytes) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+    if (string.IsNullOrWhiteSpace(bodyJson)) bodyJson = "{}";
+
+    try
+    {
+        var execution = await triggerService.ResumeViaWebhookAsync(token, bodyJson, request.HttpContext.RequestAborted);
+        return execution is null
+            ? Results.NotFound(new { error = "No execution is waiting on this resume token." })
+            : Results.Ok(new { execution.Id, execution.Status, execution.OutputJson, execution.ErrorMessage });
+    }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+}).AllowAnonymous().RequireRateLimiting("public-write");
+
 app.MapGet("/{**pageSlug}", (
         string pageSlug,
         HttpRequest request,

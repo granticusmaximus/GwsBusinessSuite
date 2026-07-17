@@ -806,6 +806,7 @@ public sealed class AutomationNode : AuditableEntity
     public bool RetryOnFail { get; set; }
     public int MaxTries { get; set; } = 1;
     public int WaitBetweenTriesMs { get; set; }
+    public int TimeoutMs { get; set; }
     public string Notes { get; set; } = string.Empty;
     public AutomationWorkflow? Workflow { get; set; }
 }
@@ -852,6 +853,15 @@ public sealed class AutomationExecution : AuditableEntity
     public DateTimeOffset? FinishedAt { get; set; }
     public long? FinishedAtUnixSeconds { get; set; }
     public Guid? RetryOfExecutionId { get; set; }
+    public string PendingStateJson { get; set; } = "{}";
+    public long? HeartbeatAtUnixSeconds { get; set; }
+    public Guid? WaitingNodeId { get; set; }
+    public string? WaitingNodeName { get; set; }
+    public string? WaitingNodeTypeKey { get; set; }
+    public string? WaitingInputJson { get; set; }
+    public DateTimeOffset? ResumeAt { get; set; }
+    public long? ResumeAtUnixSeconds { get; set; }
+    public string? ResumeToken { get; set; }
     public AutomationWorkflow? Workflow { get; set; }
     public ICollection<AutomationNodeExecution> NodeExecutions { get; set; } = new List<AutomationNodeExecution>();
 }

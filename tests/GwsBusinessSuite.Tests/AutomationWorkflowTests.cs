@@ -275,6 +275,284 @@ public sealed class AutomationWorkflowTests
         execution.Nodes.Count(node => node.NodeTypeKey == "core.merge").Should().Be(1);
     }
 
+    [Fact]
+    public async Task Wait_ShouldPauseThenResumeAfterDurationElapses()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var timeProvider = new FakeTimeProvider();
+        var workflowService = new AutomationWorkflowService(db, registry, timeProvider);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), timeProvider);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, timeProvider);
+        var workflow = await workflowService.CreateAsync("Wait then greet");
+        var trigger = workflow.Nodes.Single();
+        var wait = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Pause", TypeKey = "core.wait", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"mode\":\"duration\",\"durationMs\":60000}"
+        });
+        var setNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "After wait", TypeKey = "core.set", PositionX = 600, PositionY = 180,
+            ParametersJson = "{\"values\":{\"resumed\":true}}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, trigger.Id, "main", wait.Id);
+        await workflowService.AddConnectionAsync(workflow.Id, wait.Id, "main", setNode.Id);
+        await workflowService.PublishAsync(workflow.Id, "Wait version");
+
+        var paused = await executionService.ExecuteAsync(workflow.Id, "{\"id\":1}");
+
+        paused.Status.Should().Be(AutomationExecutionStatuses.Waiting);
+        paused.Wait.Should().NotBeNull();
+        paused.Wait!.WaitingNodeTypeKey.Should().Be("core.wait");
+        paused.Wait.ResumeAt.Should().NotBeNull();
+        paused.Nodes.Should().NotContain(node => node.NodeTypeKey == "core.set");
+
+        timeProvider.UtcNow = paused.Wait.ResumeAt!.Value.AddSeconds(1);
+        var resumed = await executionService.ResumeAsync(paused.Id);
+
+        resumed.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        resumed.Nodes.Should().Contain(node => node.NodeTypeKey == "core.set");
+        resumed.OutputJson.Should().Contain("resumed");
+    }
+
+    [Fact]
+    public async Task Approval_ShouldRouteToApprovedOutputWhenApproved()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Approval approved path");
+        var trigger = workflow.Nodes.Single();
+        var approval = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Manager approval", TypeKey = "core.approval", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"message\":\"Approve?\"}"
+        });
+        var approvedNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Approved path", TypeKey = "core.set", PositionX = 600, PositionY = 100,
+            ParametersJson = "{\"values\":{\"outcome\":\"approved\"}}"
+        });
+        var rejectedNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Rejected path", TypeKey = "core.set", PositionX = 600, PositionY = 260,
+            ParametersJson = "{\"values\":{\"outcome\":\"rejected\"}}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, trigger.Id, "main", approval.Id);
+        await workflowService.AddConnectionAsync(workflow.Id, approval.Id, "approved", approvedNode.Id);
+        await workflowService.AddConnectionAsync(workflow.Id, approval.Id, "rejected", rejectedNode.Id);
+        await workflowService.PublishAsync(workflow.Id, "Approval version");
+
+        var paused = await executionService.ExecuteAsync(workflow.Id, "{\"id\":1}");
+        paused.Status.Should().Be(AutomationExecutionStatuses.Waiting);
+        paused.Wait!.WaitingNodeTypeKey.Should().Be("core.approval");
+
+        var resumed = await executionService.ResolveApprovalAsync(paused.Id, approved: true);
+
+        resumed.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        resumed.OutputJson.Should().Contain("approved");
+        resumed.Nodes.Should().NotContain(node => node.NodeName == "Rejected path");
+    }
+
+    [Fact]
+    public async Task Approval_ShouldRouteToRejectedOutputWhenRejected()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Approval rejected path");
+        var trigger = workflow.Nodes.Single();
+        var approval = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Manager approval", TypeKey = "core.approval", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"message\":\"Approve?\"}"
+        });
+        var approvedNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Approved path", TypeKey = "core.set", PositionX = 600, PositionY = 100,
+            ParametersJson = "{\"values\":{\"outcome\":\"approved\"}}"
+        });
+        var rejectedNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Rejected path", TypeKey = "core.set", PositionX = 600, PositionY = 260,
+            ParametersJson = "{\"values\":{\"outcome\":\"rejected\"}}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, trigger.Id, "main", approval.Id);
+        await workflowService.AddConnectionAsync(workflow.Id, approval.Id, "approved", approvedNode.Id);
+        await workflowService.AddConnectionAsync(workflow.Id, approval.Id, "rejected", rejectedNode.Id);
+        await workflowService.PublishAsync(workflow.Id, "Approval version");
+
+        var paused = await executionService.ExecuteAsync(workflow.Id, "{\"id\":1}");
+        var resumed = await executionService.ResolveApprovalAsync(paused.Id, approved: false);
+
+        resumed.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        resumed.OutputJson.Should().Contain("rejected");
+        resumed.Nodes.Should().NotContain(node => node.NodeName == "Approved path");
+    }
+
+    [Fact]
+    public async Task Cancel_ShouldStopAPausedExecutionAndBlockFurtherResume()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Cancelable wait");
+        var trigger = workflow.Nodes.Single();
+        var wait = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Pause", TypeKey = "core.wait", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"mode\":\"duration\",\"durationMs\":3600000}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, trigger.Id, "main", wait.Id);
+        await workflowService.PublishAsync(workflow.Id, "Cancel version");
+
+        var paused = await executionService.ExecuteAsync(workflow.Id, "{}");
+        paused.Status.Should().Be(AutomationExecutionStatuses.Waiting);
+
+        var canceled = await executionService.CancelAsync(paused.Id);
+
+        canceled.Status.Should().Be(AutomationExecutionStatuses.Canceled);
+        var act = () => executionService.ResumeAsync(paused.Id);
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task NodeTimeout_ShouldFailEachAttemptAndStopTheExecution()
+    {
+        await using var db = await CreateDbAsync();
+        var httpClient = new FakeHttpClient { Delay = TimeSpan.FromMilliseconds(300) };
+        var registry = new AutomationNodeRegistry(httpClient);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Slow call");
+        var trigger = workflow.Nodes.Single();
+        var httpNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Slow request", TypeKey = "core.httpRequest", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"method\":\"GET\",\"url\":\"https://example.com\"}",
+            RetryOnFail = true, MaxTries = 2, WaitBetweenTriesMs = 0, TimeoutMs = 100
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, trigger.Id, "main", httpNode.Id);
+        await workflowService.PublishAsync(workflow.Id, "Timeout version");
+
+        var execution = await executionService.ExecuteAsync(workflow.Id, "{}");
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Failed);
+        var httpAttempts = execution.Nodes.Where(node => node.NodeTypeKey == "core.httpRequest").ToList();
+        httpAttempts.Should().HaveCount(2);
+        httpAttempts.Should().OnlyContain(node => node.ErrorMessage.Contains("timed out"));
+    }
+
+    [Fact]
+    public async Task ResumeDueWaitsAsync_ShouldRecoverAnOrphanedRunningExecution()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var timeProvider = new FakeTimeProvider();
+        var workflowService = new AutomationWorkflowService(db, registry, timeProvider);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), timeProvider);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, timeProvider);
+        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, timeProvider);
+        var workflow = await workflowService.CreateAsync("Orphan recovery");
+        var trigger = workflow.Nodes.Single();
+        var setNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Finish", TypeKey = "core.set", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"values\":{\"done\":true}}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, trigger.Id, "main", setNode.Id);
+        var version = await workflowService.PublishAsync(workflow.Id, "Orphan version");
+
+        // Simulate a process crash mid-run: an execution row left in Running status with a stale
+        // heartbeat and a checkpointed frontier still pointing at the un-run Set node - the same
+        // shape AutomationExecutionService's internal frontier serializer produces.
+        var frontierJson = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            Queue = new[] { new { NodeId = setNode.Id, Input = System.Text.Json.JsonSerializer.SerializeToElement(new { }), TargetInput = "main" } },
+            MergeBuffers = Array.Empty<object>(),
+            LastOutput = System.Text.Json.JsonSerializer.SerializeToElement(new { })
+        });
+        var staleExecution = new AutomationExecution
+        {
+            WorkflowId = workflow.Id,
+            WorkflowVersion = version,
+            Mode = AutomationExecutionModes.Manual,
+            Status = AutomationExecutionStatuses.Running,
+            InputJson = "{}",
+            StartedAt = timeProvider.GetUtcNow(),
+            StartedAtUnixSeconds = timeProvider.GetUtcNow().ToUnixTimeSeconds(),
+            HeartbeatAtUnixSeconds = timeProvider.GetUtcNow().ToUnixTimeSeconds(),
+            PendingStateJson = frontierJson,
+            CreatedBy = "test"
+        };
+        db.AutomationExecutions.Add(staleExecution);
+        await db.SaveChangesAsync();
+
+        timeProvider.UtcNow = timeProvider.UtcNow.AddMinutes(20);
+        var resumedCount = await triggerService.ResumeDueWaitsAsync();
+
+        resumedCount.Should().Be(1);
+        var finished = await workflowService.GetExecutionAsync(staleExecution.Id);
+        finished!.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        finished.Nodes.Should().Contain(node => node.NodeTypeKey == "core.set");
+    }
+
+    [Fact]
+    public async Task Resume_ShouldUseTheWorkflowVersionTheExecutionStartedOn()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var timeProvider = new FakeTimeProvider();
+        var workflowService = new AutomationWorkflowService(db, registry, timeProvider);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), timeProvider);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, timeProvider);
+        var workflow = await workflowService.CreateAsync("Version pinned wait");
+        var trigger = workflow.Nodes.Single();
+        var wait = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Pause", TypeKey = "core.wait", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"mode\":\"duration\",\"durationMs\":60000}"
+        });
+        var v1Node = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Version 1 path", TypeKey = "core.set", PositionX = 600, PositionY = 180,
+            ParametersJson = "{\"values\":{\"version\":\"v1\"}}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, trigger.Id, "main", wait.Id);
+        await workflowService.AddConnectionAsync(workflow.Id, wait.Id, "main", v1Node.Id);
+        await workflowService.PublishAsync(workflow.Id, "Version 1");
+
+        var paused = await executionService.ExecuteAsync(workflow.Id, "{}");
+        paused.Status.Should().Be(AutomationExecutionStatuses.Waiting);
+        paused.WorkflowVersion.Should().Be(1);
+
+        // Republish a structurally different graph as version 2 while the execution is still paused.
+        await workflowService.DeleteNodeAsync(workflow.Id, v1Node.Id);
+        var v2Node = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Version 2 path", TypeKey = "core.set", PositionX = 600, PositionY = 260,
+            ParametersJson = "{\"values\":{\"version\":\"v2\"}}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, wait.Id, "main", v2Node.Id);
+        await workflowService.PublishAsync(workflow.Id, "Version 2");
+
+        timeProvider.UtcNow = timeProvider.UtcNow.AddMinutes(5);
+        var resumed = await executionService.ResumeAsync(paused.Id);
+
+        resumed.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        resumed.WorkflowVersion.Should().Be(1);
+        resumed.OutputJson.Should().Contain("v1");
+        resumed.OutputJson.Should().NotContain("v2");
+    }
+
     private static AutomationNodeEditor NewSetNode(string name, double x) => new()
     {
         Name = name,
@@ -285,7 +563,7 @@ public sealed class AutomationWorkflowTests
     };
 
     private static AutomationNodeSnapshot Node(string typeKey, string parametersJson) => new(
-        Guid.NewGuid(), typeKey, typeKey, 1, parametersJson, null, false, false, false, 1, 0);
+        Guid.NewGuid(), typeKey, typeKey, 1, parametersJson, null, false, false, false, 1, 0, 0);
 
     private static async Task<ApplicationDbContext> CreateDbAsync()
     {
@@ -299,13 +577,24 @@ public sealed class AutomationWorkflowTests
 
     private sealed class FakeHttpClient : IAutomationHttpClient
     {
-        public Task<AutomationHttpResponse> SendAsync(AutomationHttpRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new AutomationHttpResponse(200, "{}", new Dictionary<string, string>()));
+        public TimeSpan Delay { get; set; } = TimeSpan.Zero;
+
+        public async Task<AutomationHttpResponse> SendAsync(AutomationHttpRequest request, CancellationToken cancellationToken = default)
+        {
+            if (Delay > TimeSpan.Zero) await Task.Delay(Delay, cancellationToken);
+            return new AutomationHttpResponse(200, "{}", new Dictionary<string, string>());
+        }
     }
 
     private sealed class FakeSecretProtector : ISecretProtector
     {
         public string Protect(string plaintext) => $"protected::{Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(plaintext))}";
         public string Unprotect(string protectedValue) => System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(protectedValue[11..]));
+    }
+
+    private sealed class FakeTimeProvider : TimeProvider
+    {
+        public DateTimeOffset UtcNow { get; set; } = DateTimeOffset.UtcNow;
+        public override DateTimeOffset GetUtcNow() => UtcNow;
     }
 }

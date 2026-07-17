@@ -17,6 +17,7 @@ public interface IAutomationWorkflowService
     Task<int> PublishAsync(Guid workflowId, string changeSummary, CancellationToken cancellationToken = default);
     Task SetActiveAsync(Guid workflowId, bool active, CancellationToken cancellationToken = default);
     Task<AutomationWorkflowSnapshot?> GetPublishedSnapshotAsync(Guid workflowId, CancellationToken cancellationToken = default);
+    Task<AutomationWorkflowSnapshot?> GetSnapshotByVersionAsync(Guid workflowId, int versionNumber, CancellationToken cancellationToken = default);
     Task<AutomationExecutionView?> GetExecutionAsync(Guid executionId, CancellationToken cancellationToken = default);
 }
 
@@ -27,6 +28,20 @@ public interface IAutomationExecutionService
         string inputJson = "{}",
         string mode = "Manual",
         Guid? retryOfExecutionId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<AutomationExecutionView> ResumeAsync(
+        Guid executionId,
+        string signalPort = "main",
+        string? mergeFieldsJson = null,
+        CancellationToken cancellationToken = default);
+
+    Task<AutomationExecutionView> CancelAsync(Guid executionId, CancellationToken cancellationToken = default);
+
+    Task<AutomationExecutionView> ResolveApprovalAsync(
+        Guid executionId,
+        bool approved,
+        string? comment = null,
         CancellationToken cancellationToken = default);
 }
 
@@ -57,4 +72,6 @@ public interface IAutomationTriggerService
 {
     Task<AutomationExecutionView?> TriggerWebhookAsync(string path, string inputJson, string? providedSecret, CancellationToken cancellationToken = default);
     Task<int> RunDueSchedulesAsync(CancellationToken cancellationToken = default);
+    Task<int> ResumeDueWaitsAsync(CancellationToken cancellationToken = default);
+    Task<AutomationExecutionView?> ResumeViaWebhookAsync(string token, string bodyJson, CancellationToken cancellationToken = default);
 }

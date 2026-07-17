@@ -259,6 +259,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<AutomationExecution>()
             .HasIndex(x => new { x.WorkflowId, x.StartedAtUnixSeconds });
         modelBuilder.Entity<AutomationExecution>().HasIndex(x => x.Status);
+        modelBuilder.Entity<AutomationExecution>()
+            .HasIndex(x => new { x.Status, x.ResumeAtUnixSeconds });
+        modelBuilder.Entity<AutomationExecution>().HasIndex(x => x.ResumeToken).IsUnique();
         modelBuilder.Entity<AutomationNodeExecution>()
             .HasOne(x => x.Execution)
             .WithMany(x => x.NodeExecutions)

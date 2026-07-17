@@ -143,6 +143,7 @@ public sealed class AutomationWorkflowService(
         node.RetryOnFail = editor.RetryOnFail;
         node.MaxTries = Math.Clamp(editor.MaxTries, 1, 10);
         node.WaitBetweenTriesMs = Math.Clamp(editor.WaitBetweenTriesMs, 0, 60_000);
+        node.TimeoutMs = Math.Clamp(editor.TimeoutMs, 0, 600_000);
         node.Notes = editor.Notes?.Trim() ?? string.Empty;
         node.UpdatedAt = timeProvider.GetUtcNow();
         node.UpdatedBy = "user";
@@ -275,6 +276,27 @@ public sealed class AutomationWorkflowService(
                 errors.Add($"Merge node '{mergeNode.Name}' needs at least two differently labeled inputs, such as input1 and input2.");
         }
 
+        foreach (var waitNode in workflow.Nodes.Where(node => node.TypeKey == "core.wait" && !node.IsDisabled))
+        {
+            var mode = ReadStringParameter(waitNode.ParametersJson, "mode");
+            if (mode is not ("duration" or "timestamp" or "webhook"))
+            {
+                errors.Add($"Wait node '{waitNode.Name}' needs mode to be duration, timestamp, or webhook.");
+            }
+            else if (mode == "duration" && ReadIntParameter(waitNode.ParametersJson, "durationMs") is not (>= 1000))
+            {
+                errors.Add($"Wait node '{waitNode.Name}' needs durationMs of at least 1000.");
+            }
+            else if (mode == "timestamp" && !DateTimeOffset.TryParse(ReadStringParameter(waitNode.ParametersJson, "timestamp"), out _))
+            {
+                errors.Add($"Wait node '{waitNode.Name}' needs a valid ISO-8601 timestamp.");
+            }
+        }
+
+        foreach (var approvalNode in workflow.Nodes.Where(node => node.TypeKey == "core.approval" && !node.IsDisabled))
+            if (ReadIntParameter(approvalNode.ParametersJson, "timeoutHours") is int hours and < 0)
+                errors.Add($"Approval node '{approvalNode.Name}' needs timeoutHours to be 0 or greater.");
+
         var nodeIds = workflow.Nodes.Select(node => node.Id).ToHashSet();
         if (workflow.Connections.Any(connection => !nodeIds.Contains(connection.SourceNodeId) || !nodeIds.Contains(connection.TargetNodeId)))
             errors.Add("One or more connections reference a missing node.");
@@ -340,6 +362,15 @@ public sealed class AutomationWorkflowService(
             .Where(item => item.WorkflowId == workflowId)
             .OrderByDescending(item => item.VersionNumber)
             .FirstOrDefaultAsync(cancellationToken);
+        return version is null
+            ? null
+            : JsonSerializer.Deserialize<AutomationWorkflowSnapshot>(version.SnapshotJson, SnapshotJsonOptions);
+    }
+
+    public async Task<AutomationWorkflowSnapshot?> GetSnapshotByVersionAsync(Guid workflowId, int versionNumber, CancellationToken cancellationToken = default)
+    {
+        var version = await db.AutomationWorkflowVersions.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.WorkflowId == workflowId && item.VersionNumber == versionNumber, cancellationToken);
         return version is null
             ? null
             : JsonSerializer.Deserialize<AutomationWorkflowSnapshot>(version.SnapshotJson, SnapshotJsonOptions);
@@ -416,7 +447,7 @@ public sealed class AutomationWorkflowService(
         Version = version,
         Nodes = workflow.Nodes.Select(node => new AutomationNodeSnapshot(
             node.Id, node.Name, node.TypeKey, node.TypeVersion, node.ParametersJson, node.CredentialId,
-            node.IsDisabled, node.ContinueOnFail, node.RetryOnFail, node.MaxTries, node.WaitBetweenTriesMs)).ToList(),
+            node.IsDisabled, node.ContinueOnFail, node.RetryOnFail, node.MaxTries, node.WaitBetweenTriesMs, node.TimeoutMs)).ToList(),
         Connections = workflow.Connections.Select(connection => new AutomationConnectionSnapshot(
             connection.SourceNodeId, connection.SourceOutput, connection.TargetNodeId, connection.TargetInput)).ToList()
     };
@@ -439,7 +470,7 @@ public sealed class AutomationWorkflowService(
     private static AutomationNodeView ToNodeView(AutomationNode node) => new(
         node.Id, node.Name, node.TypeKey, node.TypeVersion, node.PositionX, node.PositionY,
         node.ParametersJson, node.CredentialId, node.IsDisabled, node.ContinueOnFail,
-        node.RetryOnFail, node.MaxTries, node.WaitBetweenTriesMs, node.Notes);
+        node.RetryOnFail, node.MaxTries, node.WaitBetweenTriesMs, node.TimeoutMs, node.Notes);
 
     private static AutomationConnectionView ToConnectionView(AutomationConnection connection) => new(
         connection.Id, connection.SourceNodeId, connection.SourceOutput, connection.TargetNodeId, connection.TargetInput);
@@ -447,6 +478,9 @@ public sealed class AutomationWorkflowService(
     internal static AutomationExecutionView ToExecutionView(AutomationExecution execution) => new(
         execution.Id, execution.WorkflowId, execution.WorkflowVersion, execution.Mode, execution.Status,
         execution.InputJson, execution.OutputJson, execution.ErrorMessage, execution.StartedAt, execution.FinishedAt,
+        execution.WaitingNodeId.HasValue
+            ? new AutomationWaitStatus(execution.WaitingNodeTypeKey ?? string.Empty, execution.WaitingNodeName ?? string.Empty, execution.ResumeAt)
+            : null,
         execution.NodeExecutions.OrderBy(node => node.StartedAtUnixSeconds).Select(node => new AutomationNodeExecutionView(
             node.Id, node.NodeId, node.NodeName, node.NodeTypeKey, node.Status, node.Attempt,
             node.InputJson, node.OutputJson, node.ErrorMessage, node.StartedAt, node.FinishedAt)).ToList());

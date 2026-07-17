@@ -131,6 +131,7 @@ public static class DependencyInjection
         services.AddScoped<IAutomationExecutionService, AutomationExecutionService>();
         services.AddScoped<IAutomationTriggerService, AutomationTriggerService>();
         services.AddHostedService<AutomationScheduleBackgroundService>();
+        services.AddHostedService<AutomationResumeBackgroundService>();
         // Same persisted volume as the SQLite DB and DP keys in production
         // (docker-compose.yml mounts gwssuite-data:/app/data); a relative dev-local path
         // otherwise (see appsettings.Development.json).

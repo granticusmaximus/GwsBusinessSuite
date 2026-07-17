@@ -125,6 +125,8 @@ else
                     {
                         <div class="row g-2 mb-3"><div class="col-6"><label class="form-label small">Max tries</label><input class="form-control form-control-sm" type="number" min="1" max="10" @bind="_nodeMaxTries" /></div><div class="col-6"><label class="form-label small">Wait (ms)</label><input class="form-control form-control-sm" type="number" min="0" max="60000" @bind="_nodeWaitMs" /></div></div>
                     }
+                    <label class="form-label small fw-semibold">Timeout (ms, 0 = none)</label>
+                    <input class="form-control form-control-sm mb-3" type="number" min="0" max="600000" @bind="_nodeTimeoutMs" />
                     <div class="d-grid gap-2"><button class="btn btn-sm btn-primary" @onclick="SaveSelectedNode" disabled="@_busy">Save node</button><button class="btn btn-sm btn-outline-danger" @onclick="DeleteSelectedNode" disabled="@_busy">Delete node</button></div>
                 }
             </aside>
@@ -158,14 +160,34 @@ else
                 {
                     @if (_latestExecution is not null)
                     {
-                        <div class="execution-result @(_latestExecution.Status == "Succeeded" ? "is-success" : "is-failure")">
+                        <div class="execution-result @(_latestExecution.Status == AutomationExecutionStatuses.Succeeded ? "is-success" : _latestExecution.Status == AutomationExecutionStatuses.Waiting ? "is-waiting" : "is-failure")">
                             <strong>@_latestExecution.Status</strong><span>@_latestExecution.ErrorMessage</span><pre>@_latestExecution.OutputJson</pre>
                         </div>
+                        @if (_latestExecution.Status == AutomationExecutionStatuses.Waiting && _latestExecution.Wait is not null)
+                        {
+                            <div class="execution-wait-actions mb-3">
+                                @if (_latestExecution.Wait.WaitingNodeTypeKey == "core.approval")
+                                {
+                                    <span class="me-2">Waiting for approval at <strong>@_latestExecution.Wait.WaitingNodeName</strong></span>
+                                    <button class="btn btn-sm btn-success me-1" @onclick="() => ResolveApproval(true)" disabled="@_busy">Approve</button>
+                                    <button class="btn btn-sm btn-outline-danger me-1" @onclick="() => ResolveApproval(false)" disabled="@_busy">Reject</button>
+                                }
+                                else
+                                {
+                                    <span class="me-2">Waiting at <strong>@_latestExecution.Wait.WaitingNodeName</strong>@(_latestExecution.Wait.ResumeAt is not null ? $" until {FormatDate(_latestExecution.Wait.ResumeAt)}" : " for a resume webhook")</span>
+                                }
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="CancelLatestExecution" disabled="@_busy">Cancel</button>
+                            </div>
+                        }
+                        else if (_latestExecution.Status == AutomationExecutionStatuses.Running)
+                        {
+                            <div class="execution-wait-actions mb-3"><button class="btn btn-sm btn-outline-secondary" @onclick="CancelLatestExecution" disabled="@_busy">Cancel</button></div>
+                        }
                     }
                     <div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Status</th><th>Mode</th><th>Started</th><th>Duration</th><th></th></tr></thead><tbody>
                         @foreach (var run in _view.RecentExecutions)
                         {
-                            <tr><td><span class="badge @(run.Status == "Succeeded" ? "text-bg-success" : run.Status == "Failed" ? "text-bg-danger" : "text-bg-secondary")">@run.Status</span></td><td>@run.Mode</td><td>@FormatDate(run.StartedAt)</td><td>@Duration(run.StartedAt, run.FinishedAt)</td><td class="text-end"><button class="btn btn-sm btn-link" @onclick="() => LoadExecution(run.Id)">Inspect</button></td></tr>
+                            <tr><td><span class="badge @(run.Status == AutomationExecutionStatuses.Succeeded ? "text-bg-success" : run.Status == AutomationExecutionStatuses.Failed ? "text-bg-danger" : run.Status == AutomationExecutionStatuses.Waiting ? "text-bg-warning" : "text-bg-secondary")">@run.Status</span></td><td>@run.Mode</td><td>@FormatDate(run.StartedAt)</td><td>@Duration(run.StartedAt, run.FinishedAt)</td><td class="text-end"><button class="btn btn-sm btn-link" @onclick="() => LoadExecution(run.Id)">Inspect</button></td></tr>
                         }
                     </tbody></table></div>
                 }
@@ -192,7 +214,7 @@ else
     private string _nodeName = "", _nodeParameters = "{}", _nodeNotes = "";
     private Guid? _nodeCredentialId;
     private bool _nodeDisabled, _nodeContinueOnFail, _nodeRetryOnFail;
-    private int _nodeMaxTries = 1, _nodeWaitMs;
+    private int _nodeMaxTries = 1, _nodeWaitMs, _nodeTimeoutMs;
     private Guid? _connectionSource, _connectionTarget;
     private string _connectionOutput = "main", _connectionTargetInput = "main";
     private ElementReference _canvas;
@@ -236,7 +258,7 @@ else
         if (node is null) return;
         _nodeName = node.Name; _nodeParameters = node.ParametersJson; _nodeNotes = node.Notes; _nodeDisabled = node.IsDisabled;
         _nodeCredentialId = node.CredentialId;
-        _nodeContinueOnFail = node.ContinueOnFail; _nodeRetryOnFail = node.RetryOnFail; _nodeMaxTries = node.MaxTries; _nodeWaitMs = node.WaitBetweenTriesMs;
+        _nodeContinueOnFail = node.ContinueOnFail; _nodeRetryOnFail = node.RetryOnFail; _nodeMaxTries = node.MaxTries; _nodeWaitMs = node.WaitBetweenTriesMs; _nodeTimeoutMs = node.TimeoutMs;
     }
     private void ClearSelection() => _selectedNodeId = null;
     private void Back() => Navigation.NavigateTo("/admin/automation");
@@ -256,7 +278,7 @@ else
         if (_selectedNode is null) return;
         await Work(async () =>
         {
-            await WorkflowService.SaveNodeAsync(WorkflowId, new AutomationNodeEditor { Id = _selectedNode.Id, Name = _nodeName, TypeKey = _selectedNode.TypeKey, TypeVersion = _selectedNode.TypeVersion, PositionX = _selectedNode.PositionX, PositionY = _selectedNode.PositionY, ParametersJson = _nodeParameters, CredentialId = _nodeCredentialId, IsDisabled = _nodeDisabled, ContinueOnFail = _nodeContinueOnFail, RetryOnFail = _nodeRetryOnFail, MaxTries = _nodeMaxTries, WaitBetweenTriesMs = _nodeWaitMs, Notes = _nodeNotes });
+            await WorkflowService.SaveNodeAsync(WorkflowId, new AutomationNodeEditor { Id = _selectedNode.Id, Name = _nodeName, TypeKey = _selectedNode.TypeKey, TypeVersion = _selectedNode.TypeVersion, PositionX = _selectedNode.PositionX, PositionY = _selectedNode.PositionY, ParametersJson = _nodeParameters, CredentialId = _nodeCredentialId, IsDisabled = _nodeDisabled, ContinueOnFail = _nodeContinueOnFail, RetryOnFail = _nodeRetryOnFail, MaxTries = _nodeMaxTries, WaitBetweenTriesMs = _nodeWaitMs, TimeoutMs = _nodeTimeoutMs, Notes = _nodeNotes });
             await Reload(); SelectNode(_selectedNodeId!.Value); _message = "Node saved.";
         });
     }
@@ -277,6 +299,20 @@ else
     private async Task ToggleActive() => await Work(async () => { await WorkflowService.SetActiveAsync(WorkflowId, _view!.Status != AutomationWorkflowStatuses.Active); await Reload(); _message = _view!.Status == AutomationWorkflowStatuses.Active ? "Workflow activated." : "Workflow deactivated."; });
     private async Task RunWorkflow() => await Work(async () => { _latestExecution = await ExecutionService.ExecuteAsync(WorkflowId, _runInput); _bottomTab = "runs"; await Reload(); Show(_latestExecution.Status == AutomationExecutionStatuses.Succeeded ? "Workflow completed successfully." : _latestExecution.ErrorMessage, _latestExecution.Status != AutomationExecutionStatuses.Succeeded); });
     private async Task LoadExecution(Guid id) => await Work(async () => { _latestExecution = await WorkflowService.GetExecutionAsync(id); _bottomTab = "runs"; });
+    private async Task ResolveApproval(bool approved) => await Work(async () =>
+    {
+        if (_latestExecution is null) return;
+        _latestExecution = await ExecutionService.ResolveApprovalAsync(_latestExecution.Id, approved);
+        await Reload();
+        _message = approved ? "Approved. Workflow resumed." : "Rejected. Workflow resumed.";
+    });
+    private async Task CancelLatestExecution() => await Work(async () =>
+    {
+        if (_latestExecution is null) return;
+        _latestExecution = await ExecutionService.CancelAsync(_latestExecution.Id);
+        await Reload();
+        _message = "Execution canceled.";
+    });
 
     private async Task Work(Func<Task> action)
     {
