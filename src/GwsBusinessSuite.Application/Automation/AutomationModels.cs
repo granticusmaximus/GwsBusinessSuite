@@ -151,7 +151,7 @@ public sealed record AutomationConnectionSnapshot(
     string TargetInput);
 
 public sealed record AutomationNodeRunResult(
-    IReadOnlyDictionary<string, JsonElement> Outputs,
+    IReadOnlyDictionary<string, IReadOnlyList<JsonElement>> Outputs,
     string DisplayOutputJson);
 
 public sealed record AutomationHttpRequest(

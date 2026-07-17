@@ -54,8 +54,12 @@ public sealed class AutomationExecutionService(
 
             var nodesById = snapshot.Nodes.ToDictionary(node => node.Id);
             var outgoing = snapshot.Connections.GroupBy(connection => connection.SourceNodeId).ToDictionary(group => group.Key, group => group.ToList());
-            var queue = new Queue<(AutomationNodeSnapshot Node, JsonElement Input)>();
-            foreach (var trigger in startNodes) queue.Enqueue((trigger, input.Clone()));
+            var incomingPorts = snapshot.Connections.GroupBy(connection => connection.TargetNodeId).ToDictionary(
+                group => group.Key,
+                group => group.Select(connection => connection.TargetInput).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+            var mergeBuffers = new Dictionary<Guid, Dictionary<string, Queue<JsonElement>>>();
+            var queue = new Queue<(AutomationNodeSnapshot Node, JsonElement Input, string TargetInput)>();
+            foreach (var trigger in startNodes) queue.Enqueue((trigger, input.Clone(), "main"));
             var lastOutput = input.Clone();
             var steps = 0;
 
@@ -63,18 +67,24 @@ public sealed class AutomationExecutionService(
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (++steps > 10_000) throw new InvalidOperationException("Execution exceeded the 10,000 node-step safety limit.");
+                var nodeInput = work.Input;
+                if (work.Node.TypeKey == "core.merge" && !work.Node.IsDisabled)
+                {
+                    nodeInput = TryBuildMergedInput(work.Node.Id, work.TargetInput, work.Input, incomingPorts, mergeBuffers);
+                    if (nodeInput.ValueKind == JsonValueKind.Undefined) continue;
+                }
                 var result = work.Node.IsDisabled
-                    ? new AutomationNodeRunResult(new Dictionary<string, JsonElement> { ["main"] = work.Input.Clone() }, work.Input.GetRawText())
-                    : await ExecuteNodeWithEvidenceAsync(execution, work.Node, work.Input, cancellationToken);
-                lastOutput = result.Outputs.Values.LastOrDefault().ValueKind == JsonValueKind.Undefined
-                    ? lastOutput
-                    : result.Outputs.Values.Last().Clone();
+                    ? SingleItemResult("main", nodeInput)
+                    : await ExecuteNodeWithEvidenceAsync(execution, work.Node, nodeInput, cancellationToken);
+                var latestItem = result.Outputs.Values.SelectMany(items => items).LastOrDefault();
+                if (latestItem.ValueKind != JsonValueKind.Undefined) lastOutput = latestItem.Clone();
 
                 if (!outgoing.TryGetValue(work.Node.Id, out var connections)) continue;
                 foreach (var connection in connections)
                 {
-                    if (!result.Outputs.TryGetValue(connection.SourceOutput, out var output)) continue;
-                    if (nodesById.TryGetValue(connection.TargetNodeId, out var target)) queue.Enqueue((target, output.Clone()));
+                    if (!result.Outputs.TryGetValue(connection.SourceOutput, out var outputs)) continue;
+                    if (!nodesById.TryGetValue(connection.TargetNodeId, out var target)) continue;
+                    foreach (var output in outputs) queue.Enqueue((target, output.Clone(), connection.TargetInput));
                 }
             }
 
@@ -160,12 +170,42 @@ public sealed class AutomationExecutionService(
                 if (node.ContinueOnFail)
                 {
                     var error = JsonSerializer.SerializeToElement(new { error = ex.Message, node = node.Name });
-                    return new AutomationNodeRunResult(new Dictionary<string, JsonElement> { ["main"] = error }, error.GetRawText());
+                    return SingleItemResult("main", error);
                 }
                 throw;
             }
         }
         throw new InvalidOperationException("Node execution ended without a result.");
+    }
+
+    private static AutomationNodeRunResult SingleItemResult(string port, JsonElement value)
+    {
+        var cloned = value.Clone();
+        return new AutomationNodeRunResult(
+            new Dictionary<string, IReadOnlyList<JsonElement>> { [port] = [cloned] },
+            cloned.GetRawText());
+    }
+
+    private static JsonElement TryBuildMergedInput(
+        Guid nodeId,
+        string targetInput,
+        JsonElement input,
+        IReadOnlyDictionary<Guid, List<string>> incomingPorts,
+        IDictionary<Guid, Dictionary<string, Queue<JsonElement>>> mergeBuffers)
+    {
+        if (!mergeBuffers.TryGetValue(nodeId, out var ports))
+            mergeBuffers[nodeId] = ports = new Dictionary<string, Queue<JsonElement>>(StringComparer.OrdinalIgnoreCase);
+        if (!ports.TryGetValue(targetInput, out var values)) ports[targetInput] = values = new Queue<JsonElement>();
+        values.Enqueue(input.Clone());
+
+        var requiredPorts = incomingPorts.TryGetValue(nodeId, out var configured) ? configured : [targetInput];
+        if (requiredPorts.Count < 2 || requiredPorts.Any(port => !ports.TryGetValue(port, out var queued) || queued.Count == 0))
+            return default;
+
+        var merged = new System.Text.Json.Nodes.JsonObject();
+        foreach (var port in requiredPorts)
+            merged[port] = System.Text.Json.Nodes.JsonNode.Parse(ports[port].Dequeue().GetRawText());
+        return JsonSerializer.SerializeToElement(merged);
     }
 
     private async Task<AutomationExecutionView> LoadExecutionAsync(Guid executionId, CancellationToken cancellationToken)

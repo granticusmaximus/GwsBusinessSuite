@@ -265,6 +265,16 @@ public sealed class AutomationWorkflowService(
             if (ReadIntParameter(node.ParametersJson, "intervalMinutes") is not (>= 1 and <= 525600))
                 errors.Add($"Schedule Trigger '{node.Name}' needs intervalMinutes between 1 and 525600.");
 
+        foreach (var mergeNode in workflow.Nodes.Where(node => node.TypeKey == "core.merge" && !node.IsDisabled))
+        {
+            var inputs = workflow.Connections.Where(connection => connection.TargetNodeId == mergeNode.Id)
+                .Select(connection => connection.TargetInput)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (inputs.Count < 2)
+                errors.Add($"Merge node '{mergeNode.Name}' needs at least two differently labeled inputs, such as input1 and input2.");
+        }
+
         var nodeIds = workflow.Nodes.Select(node => node.Id).ToHashSet();
         if (workflow.Connections.Any(connection => !nodeIds.Contains(connection.SourceNodeId) || !nodeIds.Contains(connection.TargetNodeId)))
             errors.Add("One or more connections reference a missing node.");

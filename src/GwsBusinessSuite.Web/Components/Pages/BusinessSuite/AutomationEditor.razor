@@ -144,12 +144,13 @@ else
                         <select class="form-select form-select-sm" @bind="_connectionOutput"><option value="main">main</option><option value="true">true</option><option value="false">false</option></select>
                         <i class="bi bi-arrow-right"></i>
                         <select class="form-select form-select-sm" @bind="_connectionTarget"><option value="">Target node</option>@foreach (var node in _view.Nodes) { <option value="@node.Id">@node.Name</option> }</select>
+                        <input class="form-control form-control-sm" @bind="_connectionTargetInput" placeholder="Target input" aria-label="Target input label" />
                         <button class="btn btn-sm btn-outline-primary" @onclick="AddConnection" disabled="@_busy">Connect</button>
                     </div>
                     <div class="connection-list">
                         @foreach (var connection in _view.Connections)
                         {
-                            <div><span>@NodeName(connection.SourceNodeId)</span><code>@connection.SourceOutput</code><i class="bi bi-arrow-right"></i><span>@NodeName(connection.TargetNodeId)</span><button class="btn btn-sm btn-link text-danger" @onclick="() => DeleteConnection(connection.Id)"><i class="bi bi-x-lg"></i></button></div>
+                            <div><span>@NodeName(connection.SourceNodeId)</span><code>@connection.SourceOutput</code><i class="bi bi-arrow-right"></i><code>@connection.TargetInput</code><span>@NodeName(connection.TargetNodeId)</span><button class="btn btn-sm btn-link text-danger" @onclick="() => DeleteConnection(connection.Id)"><i class="bi bi-x-lg"></i></button></div>
                         }
                     </div>
                 }
@@ -193,7 +194,7 @@ else
     private bool _nodeDisabled, _nodeContinueOnFail, _nodeRetryOnFail;
     private int _nodeMaxTries = 1, _nodeWaitMs;
     private Guid? _connectionSource, _connectionTarget;
-    private string _connectionOutput = "main";
+    private string _connectionOutput = "main", _connectionTargetInput = "main";
     private ElementReference _canvas;
     private IJSObjectReference? _module;
     private DotNetObjectReference<AutomationEditor>? _dotNetRef;
@@ -267,7 +268,7 @@ else
     private async Task AddConnection()
     {
         if (_connectionSource is null || _connectionTarget is null) { Show("Choose a source and target node.", true); return; }
-        await Work(async () => { await WorkflowService.AddConnectionAsync(WorkflowId, _connectionSource.Value, _connectionOutput, _connectionTarget.Value); await Reload(); _message = "Connection added."; });
+        await Work(async () => { await WorkflowService.AddConnectionAsync(WorkflowId, _connectionSource.Value, _connectionOutput, _connectionTarget.Value, _connectionTargetInput); await Reload(); _message = "Connection added."; });
     }
     private async Task DeleteConnection(Guid id) => await Work(async () => { await WorkflowService.DeleteConnectionAsync(WorkflowId, id); await Reload(); _message = "Connection removed."; });
     private async Task SaveMetadata() => await Work(async () => { await WorkflowService.UpdateMetadataAsync(WorkflowId, _name, _description, _tags); await Reload(); _message = "Workflow saved."; });

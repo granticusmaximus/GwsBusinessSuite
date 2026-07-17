@@ -1,6 +1,7 @@
 using FluentAssertions;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Automation;
+using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -147,6 +148,133 @@ public sealed class AutomationWorkflowTests
         execution.Nodes.Should().HaveCount(2);
     }
 
+    [Fact]
+    public async Task SplitOut_ShouldFanOutEachItemToDownstreamNodes()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Item fan-out");
+        var split = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Each customer",
+            TypeKey = "core.splitOut",
+            PositionX = 350,
+            PositionY = 180,
+            ParametersJson = "{\"field\":\"customers\"}"
+        });
+        var template = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Greeting",
+            TypeKey = "core.template",
+            PositionX = 600,
+            PositionY = 180,
+            ParametersJson = "{\"outputField\":\"message\",\"template\":\"Hello {{ $json.name }}\"}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", split.Id);
+        await workflowService.AddConnectionAsync(workflow.Id, split.Id, "main", template.Id);
+        await workflowService.PublishAsync(workflow.Id, "Fan-out version");
+
+        var execution = await executionService.ExecuteAsync(workflow.Id,
+            "{\"customers\":[{\"name\":\"Ada\"},{\"name\":\"Grace\"},{\"name\":\"Katherine\"}]}");
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        execution.Nodes.Count(node => node.NodeTypeKey == "core.template").Should().Be(3);
+        execution.OutputJson.Should().Contain("Hello Katherine");
+    }
+
+    [Fact]
+    public async Task DataNodes_ShouldSortDeduplicateAndLimitArrayValues()
+    {
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var input = System.Text.Json.JsonSerializer.SerializeToElement(new
+        {
+            items = new[]
+            {
+                new { id = 2, name = "Beta" },
+                new { id = 1, name = "Alpha" },
+                new { id = 2, name = "Duplicate" },
+                new { id = 3, name = "Gamma" }
+            }
+        });
+
+        var distinct = await registry.ExecuteAsync(Node("core.removeDuplicates", "{\"field\":\"items\",\"compareBy\":\"id\"}"), input, null);
+        var sorted = await registry.ExecuteAsync(Node("core.sort", "{\"field\":\"items\",\"sortBy\":\"id\",\"direction\":\"descending\"}"), distinct.Outputs["main"].Single(), null);
+        var limited = await registry.ExecuteAsync(Node("core.limit", "{\"field\":\"items\",\"maxItems\":2,\"keep\":\"first\"}"), sorted.Outputs["main"].Single(), null);
+
+        using var document = System.Text.Json.JsonDocument.Parse(limited.DisplayOutputJson);
+        var items = document.RootElement.GetProperty("items");
+        items.GetArrayLength().Should().Be(2);
+        items[0].GetProperty("id").GetInt32().Should().Be(3);
+        items[1].GetProperty("id").GetInt32().Should().Be(2);
+    }
+
+    [Fact]
+    public async Task StopAndError_ShouldFailExecutionWithConfiguredMessage()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Guarded workflow");
+        var stop = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Reject order",
+            TypeKey = "core.stopError",
+            PositionX = 400,
+            PositionY = 180,
+            ParametersJson = "{\"message\":\"Order {{ $json.orderId }} was rejected\"}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", stop.Id);
+        await workflowService.PublishAsync(workflow.Id, "Guard version");
+
+        var execution = await executionService.ExecuteAsync(workflow.Id, "{\"orderId\":42}");
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Failed);
+        execution.ErrorMessage.Should().Be("Order 42 was rejected");
+    }
+
+    [Fact]
+    public async Task Merge_ShouldWaitForAndCombineLabeledInputs()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Merge branches");
+        var trigger = workflow.Nodes.Single();
+        var customer = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Customer branch", TypeKey = "core.set", PositionX = 350, PositionY = 100,
+            ParametersJson = "{\"values\":{\"branch\":\"customer\"}}"
+        });
+        var order = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Order branch", TypeKey = "core.set", PositionX = 350, PositionY = 300,
+            ParametersJson = "{\"values\":{\"branch\":\"order\"}}"
+        });
+        var merge = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Join data", TypeKey = "core.merge", PositionX = 650, PositionY = 200, ParametersJson = "{}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, trigger.Id, "main", customer.Id);
+        await workflowService.AddConnectionAsync(workflow.Id, trigger.Id, "main", order.Id);
+        await workflowService.AddConnectionAsync(workflow.Id, customer.Id, "main", merge.Id, "customer");
+        await workflowService.AddConnectionAsync(workflow.Id, order.Id, "main", merge.Id, "order");
+        await workflowService.PublishAsync(workflow.Id, "Merge version");
+
+        var execution = await executionService.ExecuteAsync(workflow.Id, "{\"id\":7}");
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        execution.OutputJson.Should().Contain("customer");
+        execution.OutputJson.Should().Contain("order");
+        execution.Nodes.Count(node => node.NodeTypeKey == "core.merge").Should().Be(1);
+    }
+
     private static AutomationNodeEditor NewSetNode(string name, double x) => new()
     {
         Name = name,
@@ -155,6 +283,9 @@ public sealed class AutomationWorkflowTests
         PositionY = 180,
         ParametersJson = "{\"values\":{}}"
     };
+
+    private static AutomationNodeSnapshot Node(string typeKey, string parametersJson) => new(
+        Guid.NewGuid(), typeKey, typeKey, 1, parametersJson, null, false, false, false, 1, 0);
 
     private static async Task<ApplicationDbContext> CreateDbAsync()
     {

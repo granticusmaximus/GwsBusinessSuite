@@ -23,8 +23,8 @@ UI assets, trademarks, node definitions, or enterprise-only implementation detai
 | --- | --- | --- |
 | Visual graph editor | Initial canvas, palette, inspector, connections, persisted positions | Marquee selection, copy/paste, undo/redo, minimap, sticky notes, keyboard command bar |
 | Workflow lifecycle | Draft editing, validation, immutable publish versions, activate/deactivate | Tags, folders/projects, sharing roles, workflow history diff/restore, import/export/templates |
-| Execution engine | Deterministic DAG execution, branching, retries, continue-on-fail, per-node evidence | Loops, joins, sub-workflows, durable waits/resume, partial execution, retry from failure |
-| Core nodes | Manual Trigger, Set Fields, If, HTTP Request | Webhook, Schedule, Merge, Loop, Wait, Code, Execute Workflow, Respond to Webhook |
+| Execution engine | Deterministic DAG execution, branching, labeled-input joins, multi-item fan-out, batching, retries, continue-on-fail, per-node evidence | Sub-workflows, durable waits/resume, partial execution, retry from failure |
+| Core nodes | Manual/Webhook/Schedule triggers; Set Fields, If, HTTP Request, Split Out, Batch, Merge, Limit, Sort, Remove Duplicates, Template, Date & Time, No Operation, Stop and Error | Wait, Code, Execute Workflow, Respond to Webhook, approval |
 | Data mapping | JSON items and `{{ $json.path }}` expressions | Full expression editor, node references, item linking, binary data, pinned/mock data |
 | Credentials | Protected credential records and credential references | OAuth2 refresh, credential types, sharing, external secret stores, rotation/audit |
 | Operations | Run list, node logs, timestamps, errors, outputs | Filtering, retention/pruning, cancel, concurrency controls, metrics, OpenTelemetry |
@@ -35,6 +35,36 @@ UI assets, trademarks, node definitions, or enterprise-only implementation detai
 
 The system should reach capability parity progressively. “Parity” means equivalent user
 outcomes inside GWS Business Suite, not a pixel-identical clone or reuse of restricted code.
+
+## Clean-room product research
+
+The July 2026 design review used public product documentation as behavioral research only.
+No vendor source, screenshots, icons, templates, names, or proprietary node schemas are
+embedded in GWS. General workflow concepts and the GWS adaptations are:
+
+| Public reference | General concept | GWS adaptation |
+| --- | --- | --- |
+| [n8n workflow and flow-logic documentation](https://docs.n8n.io/flow-logic/) | Item streams, data mapping, branches, loops, waits, sub-workflows, run inspection | Typed node registry, JSON item streams, immutable published graphs, per-node evidence |
+| [Node-RED concepts](https://nodered.org/docs/user-guide/concepts) | Palette/workspace/sidebar model, message passing, scoped context, reusable subflows | GWS visual canvas and future workflow/node/global variable scopes |
+| [Zapier Paths and filters](https://help.zapier.com/hc/en-us/articles/8496180919949-Filter-and-path-rules-in-Zap-workflows) | Business-friendly conditions, paths, delays, test records, human review | Condition builder, durable timers, pinned test data, approval nodes |
+| [Power Automate cloud flows](https://learn.microsoft.com/power-automate/overview-cloud) | Connector-oriented triggers/actions and approval-centered business processes | First-party GWS connectors and auditable approval tasks |
+| [Temporal workflows](https://docs.temporal.io/workflows) | Durable event history, deterministic recovery, timers, signals, child workflows | Persisted execution checkpoints and resumable background workers |
+| [GitHub Actions workflows](https://docs.github.com/actions/concepts/workflows-and-actions/workflows) | Reusable workflows, concurrency controls, environments, run cancellation and artifacts | Sub-workflows, concurrency keys, environment promotion, output artifacts |
+
+## Delivery sequence
+
+1. **Item processing and graph composition:** multi-item outputs, split, batch, merge,
+   transforms, labeled inputs, branches, and explicit failure nodes.
+2. **Durability:** persisted node queue/checkpoints, Wait Until, webhook resume, approval
+   tasks, cancellation, timeout policies, and safe restart recovery.
+3. **Reuse and testing:** execute-workflow nodes, input/output contracts, pinned data,
+   partial runs, retry from a failed node, templates, import/export, diff, and restore.
+4. **Editor productivity:** typed property controls, data browser, expression autocomplete,
+   undo/redo, copy/paste, multi-select, auto-layout, minimap, sticky notes, and command search.
+5. **Connectors:** GWS CMS, CRM, CJ, email, Ollama/AI, database, storage, calendar, social,
+   analytics, and a versioned connector development contract.
+6. **Production scale and governance:** worker queues, leases, concurrency keys, retention,
+   OpenTelemetry, RBAC/projects, audit events, secret rotation, and environment promotion.
 
 ## Safety rules
 

@@ -14,6 +14,16 @@ public sealed partial class AutomationNodeRegistry(IAutomationHttpClient httpCli
         new("core.set", 1, "Set Fields", "Adds or replaces JSON fields using literal values or expressions.", "Data", "bi-braces", false, ["main"], "{\"values\":{\"message\":\"Hello from GWS\"}}"),
         new("core.if", 1, "If", "Routes an item to the true or false output.", "Flow", "bi-signpost-split-fill", false, ["true", "false"], "{\"left\":\"{{ $json.enabled }}\",\"operator\":\"equals\",\"right\":\"true\"}"),
         new("core.httpRequest", 1, "HTTP Request", "Calls an HTTP API and returns status, headers, and response data.", "Actions", "bi-globe2", false, ["main"], "{\"method\":\"GET\",\"url\":\"https://example.com\",\"headers\":{},\"body\":\"\"}"),
+        new("core.splitOut", 1, "Split Out", "Emits one item for each value in an array field.", "Data", "bi-distribute-vertical", false, ["main"], "{\"field\":\"items\",\"includeSource\":false}"),
+        new("core.batch", 1, "Batch Items", "Groups an input array into smaller batches.", "Flow", "bi-collection", false, ["main"], "{\"field\":\"items\",\"batchSize\":10}"),
+        new("core.merge", 1, "Merge", "Waits for labeled inputs and combines them into one item.", "Flow", "bi-bezier2", false, ["main"], "{}"),
+        new("core.limit", 1, "Limit", "Keeps the first or last items from an array.", "Data", "bi-funnel", false, ["main"], "{\"field\":\"items\",\"maxItems\":10,\"keep\":\"first\"}"),
+        new("core.sort", 1, "Sort", "Sorts an array by a JSON field.", "Data", "bi-sort-down", false, ["main"], "{\"field\":\"items\",\"sortBy\":\"name\",\"direction\":\"ascending\"}"),
+        new("core.removeDuplicates", 1, "Remove Duplicates", "Removes repeated array items using a selected field.", "Data", "bi-intersect", false, ["main"], "{\"field\":\"items\",\"compareBy\":\"id\"}"),
+        new("core.template", 1, "Template", "Builds formatted text from the current JSON item.", "Data", "bi-file-text", false, ["main"], "{\"outputField\":\"text\",\"template\":\"Hello {{ $json.name }}\"}"),
+        new("core.dateTime", 1, "Date & Time", "Adds the current UTC time in ISO and Unix formats.", "Data", "bi-calendar3", false, ["main"], "{\"outputField\":\"timestamp\"}"),
+        new("core.noOp", 1, "No Operation", "Passes input through unchanged for layout and debugging.", "Flow", "bi-arrow-right-circle", false, ["main"], "{}"),
+        new("core.stopError", 1, "Stop and Error", "Stops the workflow with a configured error message.", "Flow", "bi-exclamation-octagon", false, ["main"], "{\"message\":\"Workflow stopped\"}"),
     ];
 
     public IReadOnlyList<AutomationNodeDefinition> ListDefinitions() => Definitions;
@@ -35,8 +45,118 @@ public sealed partial class AutomationNodeRegistry(IAutomationHttpClient httpCli
             "core.set" => ExecuteSet(node, input),
             "core.if" => ExecuteIf(node, input),
             "core.httpRequest" => await ExecuteHttpAsync(node, input, credentialJson, cancellationToken),
+            "core.splitOut" => ExecuteSplitOut(node, input),
+            "core.batch" => ExecuteBatch(node, input),
+            "core.merge" => SingleOutput("main", input),
+            "core.limit" => ExecuteLimit(node, input),
+            "core.sort" => ExecuteSort(node, input),
+            "core.removeDuplicates" => ExecuteRemoveDuplicates(node, input),
+            "core.template" => ExecuteTemplate(node, input),
+            "core.dateTime" => ExecuteDateTime(node, input),
+            "core.noOp" => SingleOutput("main", input),
+            "core.stopError" => throw new InvalidOperationException(ResolveText(ParseObject(node.ParametersJson, node.Name)["message"]?.GetValue<string>() ?? "Workflow stopped.", input)),
             _ => throw new InvalidOperationException($"Node type '{node.TypeKey}' is not executable.")
         };
+    }
+
+    private static AutomationNodeRunResult ExecuteSplitOut(AutomationNodeSnapshot node, JsonElement input)
+    {
+        var root = ParseObject(node.ParametersJson, node.Name);
+        var field = root["field"]?.GetValue<string>()?.Trim() ?? "items";
+        var source = RequireObject(input, node.Name);
+        var array = ResolveNode(source, field) as JsonArray
+            ?? throw new InvalidOperationException($"{node.Name} expected '{field}' to be an array.");
+        var includeSource = root["includeSource"]?.GetValue<bool>() ?? false;
+        var items = new List<JsonElement>();
+        foreach (var value in array)
+        {
+            JsonNode? output = value?.DeepClone();
+            if (includeSource)
+            {
+                var wrapper = source.DeepClone().AsObject();
+                wrapper[field.Split('.').Last()] = output;
+                output = wrapper;
+            }
+            items.Add(JsonSerializer.SerializeToElement(output));
+        }
+        return MultipleOutput("main", items);
+    }
+
+    private static AutomationNodeRunResult ExecuteBatch(AutomationNodeSnapshot node, JsonElement input)
+    {
+        var root = ParseObject(node.ParametersJson, node.Name);
+        var field = root["field"]?.GetValue<string>()?.Trim() ?? "items";
+        var size = Math.Clamp(root["batchSize"]?.GetValue<int>() ?? 10, 1, 1000);
+        var source = RequireObject(input, node.Name);
+        var array = ResolveNode(source, field) as JsonArray
+            ?? throw new InvalidOperationException($"{node.Name} expected '{field}' to be an array.");
+        var batches = array.Select(item => item?.DeepClone()).Chunk(size)
+            .Select(chunk => JsonSerializer.SerializeToElement(new JsonObject
+            {
+                ["items"] = new JsonArray(chunk.ToArray()),
+                ["count"] = chunk.Length
+            })).ToList();
+        return MultipleOutput("main", batches);
+    }
+
+    private static AutomationNodeRunResult ExecuteLimit(AutomationNodeSnapshot node, JsonElement input)
+    {
+        var root = ParseObject(node.ParametersJson, node.Name);
+        var field = root["field"]?.GetValue<string>()?.Trim() ?? "items";
+        var max = Math.Clamp(root["maxItems"]?.GetValue<int>() ?? 10, 0, 10_000);
+        var source = RequireObject(input, node.Name);
+        var array = ResolveNode(source, field) as JsonArray
+            ?? throw new InvalidOperationException($"{node.Name} expected '{field}' to be an array.");
+        var values = string.Equals(root["keep"]?.GetValue<string>(), "last", StringComparison.OrdinalIgnoreCase)
+            ? array.Skip(Math.Max(0, array.Count - max))
+            : array.Take(max);
+        return SingleOutput("main", ReplaceArray(source, field, values));
+    }
+
+    private static AutomationNodeRunResult ExecuteSort(AutomationNodeSnapshot node, JsonElement input)
+    {
+        var root = ParseObject(node.ParametersJson, node.Name);
+        var field = root["field"]?.GetValue<string>()?.Trim() ?? "items";
+        var sortBy = root["sortBy"]?.GetValue<string>()?.Trim() ?? string.Empty;
+        var source = RequireObject(input, node.Name);
+        var array = ResolveNode(source, field) as JsonArray
+            ?? throw new InvalidOperationException($"{node.Name} expected '{field}' to be an array.");
+        var values = array.Select(item => item?.DeepClone()).ToList();
+        values.Sort((left, right) => CompareNodes(ResolveNode(left, sortBy), ResolveNode(right, sortBy)));
+        if (string.Equals(root["direction"]?.GetValue<string>(), "descending", StringComparison.OrdinalIgnoreCase)) values.Reverse();
+        return SingleOutput("main", ReplaceArray(source, field, values));
+    }
+
+    private static AutomationNodeRunResult ExecuteRemoveDuplicates(AutomationNodeSnapshot node, JsonElement input)
+    {
+        var root = ParseObject(node.ParametersJson, node.Name);
+        var field = root["field"]?.GetValue<string>()?.Trim() ?? "items";
+        var compareBy = root["compareBy"]?.GetValue<string>()?.Trim() ?? string.Empty;
+        var source = RequireObject(input, node.Name);
+        var array = ResolveNode(source, field) as JsonArray
+            ?? throw new InvalidOperationException($"{node.Name} expected '{field}' to be an array.");
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var values = array.Where(item => seen.Add((ResolveNode(item, compareBy) ?? item)?.ToJsonString() ?? "null"))
+            .Select(item => item?.DeepClone());
+        return SingleOutput("main", ReplaceArray(source, field, values));
+    }
+
+    private static AutomationNodeRunResult ExecuteTemplate(AutomationNodeSnapshot node, JsonElement input)
+    {
+        var root = ParseObject(node.ParametersJson, node.Name);
+        var output = input.ValueKind == JsonValueKind.Object ? JsonNode.Parse(input.GetRawText())!.AsObject() : new JsonObject { ["value"] = JsonNode.Parse(input.GetRawText()) };
+        output[root["outputField"]?.GetValue<string>()?.Trim() ?? "text"] = ResolveText(root["template"]?.GetValue<string>() ?? string.Empty, input);
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    private static AutomationNodeRunResult ExecuteDateTime(AutomationNodeSnapshot node, JsonElement input)
+    {
+        var root = ParseObject(node.ParametersJson, node.Name);
+        var field = root["outputField"]?.GetValue<string>()?.Trim() ?? "timestamp";
+        var output = input.ValueKind == JsonValueKind.Object ? JsonNode.Parse(input.GetRawText())!.AsObject() : new JsonObject { ["value"] = JsonNode.Parse(input.GetRawText()) };
+        var now = DateTimeOffset.UtcNow;
+        output[field] = new JsonObject { ["iso"] = now.ToString("O"), ["unixSeconds"] = now.ToUnixTimeSeconds() };
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
     }
 
     private static AutomationNodeRunResult ExecuteSet(AutomationNodeSnapshot node, JsonElement input)
@@ -125,8 +245,52 @@ public sealed partial class AutomationNodeRegistry(IAutomationHttpClient httpCli
     {
         var cloned = value.Clone();
         return new AutomationNodeRunResult(
-            new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase) { [port] = cloned },
+            new Dictionary<string, IReadOnlyList<JsonElement>>(StringComparer.OrdinalIgnoreCase) { [port] = [cloned] },
             cloned.GetRawText());
+    }
+
+    private static AutomationNodeRunResult MultipleOutput(string port, IReadOnlyList<JsonElement> values)
+    {
+        var cloned = values.Select(value => value.Clone()).ToList();
+        return new AutomationNodeRunResult(
+            new Dictionary<string, IReadOnlyList<JsonElement>>(StringComparer.OrdinalIgnoreCase) { [port] = cloned },
+            JsonSerializer.Serialize(cloned));
+    }
+
+    private static JsonObject RequireObject(JsonElement input, string nodeName) => input.ValueKind == JsonValueKind.Object
+        ? JsonNode.Parse(input.GetRawText())!.AsObject()
+        : throw new InvalidOperationException($"{nodeName} requires an object input.");
+
+    private static JsonNode? ResolveNode(JsonNode? root, string path)
+    {
+        if (root is null || string.IsNullOrWhiteSpace(path)) return root;
+        var current = root;
+        foreach (var segment in path.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            current = current is JsonObject obj && obj.TryGetPropertyValue(segment, out var next) ? next : null;
+        return current;
+    }
+
+    private static JsonElement ReplaceArray(JsonObject source, string field, IEnumerable<JsonNode?> values)
+    {
+        var output = source.DeepClone().AsObject();
+        var segments = field.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        JsonObject parent = output;
+        for (var index = 0; index < segments.Length - 1; index++)
+        {
+            if (parent[segments[index]] is not JsonObject child) parent[segments[index]] = child = new JsonObject();
+            parent = child;
+        }
+        parent[segments.Last()] = new JsonArray(values.Select(value => value?.DeepClone()).ToArray());
+        return JsonSerializer.SerializeToElement(output);
+    }
+
+    private static int CompareNodes(JsonNode? left, JsonNode? right)
+    {
+        if (left is null) return right is null ? 0 : -1;
+        if (right is null) return 1;
+        if (decimal.TryParse(left.ToString(), out var leftNumber) && decimal.TryParse(right.ToString(), out var rightNumber))
+            return leftNumber.CompareTo(rightNumber);
+        return string.Compare(left.ToString(), right.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static JsonObject ParseObject(string json, string label)
