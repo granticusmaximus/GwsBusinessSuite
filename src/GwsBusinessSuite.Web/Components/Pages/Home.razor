@@ -1,14 +1,8 @@
 @page "/admin"
 @attribute [Authorize(Policy = "AdminOnly")]
-@using GwsBusinessSuite.Application.Comments
-@using GwsBusinessSuite.Application.ContentStudio
-@using GwsBusinessSuite.Application.Crm
-@using GwsBusinessSuite.Application.DockerHealth
+@using GwsBusinessSuite.Application.AdminPortal
 @using Microsoft.AspNetCore.Authorization
-@inject ICommentService CommentService
-@inject IContentStudioService ContentStudioService
-@inject ICrmService CrmService
-@inject IDockerHealthService DockerHealthService
+@inject IAdminPortalSummaryService SummaryService
 
 <PageTitle>Dashboard · GWS Business Suite</PageTitle>
 
@@ -98,15 +92,11 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var draftsTask = ContentStudioService.CountPendingReviewAsync();
-        var commentsTask = CommentService.CountPendingAsync();
-        var followUpsTask = CrmService.CountDueFollowUpsAsync();
-        var alertsTask = DockerHealthService.CountUnreadAlertsAsync();
-        await Task.WhenAll(draftsTask, commentsTask, followUpsTask, alertsTask);
-        _pendingDrafts = await draftsTask;
-        _pendingComments = await commentsTask;
-        _dueFollowUps = await followUpsTask;
-        _unreadAlerts = await alertsTask;
+        var summary = await SummaryService.GetAsync(includeApprovalQueue: true);
+        _pendingDrafts = summary.PendingDrafts;
+        _pendingComments = summary.PendingComments;
+        _dueFollowUps = summary.DueFollowUps;
+        _unreadAlerts = summary.UnreadSystemAlerts;
     }
 
     private static string GreetingPeriod()

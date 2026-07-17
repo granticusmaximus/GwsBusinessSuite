@@ -1,4 +1,5 @@
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.AdminPortal;
 using GwsBusinessSuite.Application.AffiliateAnalytics;
 using GwsBusinessSuite.Application.AffiliateSuggestions;
 using GwsBusinessSuite.Application.AppGeneration;
@@ -54,6 +55,7 @@ public static class DependencyInjection
             .AddInterceptors(serviceProvider.GetRequiredService<PublicContentCacheInvalidationInterceptor>()));
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
         services.AddScoped<IAppDbContextFactory, AppDbContextFactory>();
+        services.AddScoped<IAdminPortalSummaryService, AdminPortalSummaryService>();
         services.AddScoped<ISecretProtector, DataProtectionSecretProtector>();
         services.AddHttpClient<ICjAffiliateService, CjAffiliateService>();
         services.AddHttpClient<IOllamaService, OllamaService>((serviceProvider, client) =>

@@ -1,18 +1,10 @@
-@using GwsBusinessSuite.Application.AppGeneration
-@using GwsBusinessSuite.Application.Comments
-@using GwsBusinessSuite.Application.ContentStudio
-@using GwsBusinessSuite.Application.Crm
-@using GwsBusinessSuite.Application.DockerHealth
+@using GwsBusinessSuite.Application.AdminPortal
 @using GwsBusinessSuite.Domain.Entities
 @using Microsoft.AspNetCore.Components.Authorization
 @using System.Security.Claims
 @inject AuthenticationStateProvider AuthProvider
 @inject NavigationManager Navigation
-@inject ICommentService CommentService
-@inject IContentStudioService ContentStudioService
-@inject IDockerHealthService DockerHealthService
-@inject ICrmService CrmService
-@inject IAppGenerationService AppGenerationService
+@inject IAdminPortalSummaryService SummaryService
 
 <nav class="gws-nav" aria-label="Primary">
     @if (IsAdmin)
@@ -176,18 +168,12 @@
         _role = state.User.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
         if (state.User.Identity?.IsAuthenticated != true) return;
 
-        var commentsTask = CommentService.CountPendingAsync();
-        var dockerTask = DockerHealthService.CountUnreadAlertsAsync();
-        var draftsTask = ContentStudioService.CountPendingReviewAsync();
-        var followUpsTask = CrmService.CountDueFollowUpsAsync();
-        var approvalsTask = IsAdmin ? AppGenerationService.CountPendingApprovalAsync() : Task.FromResult(0);
-        await Task.WhenAll(commentsTask, dockerTask, draftsTask, followUpsTask, approvalsTask);
-
-        _pendingCommentCount = await commentsTask;
-        _unreadDockerAlertCount = await dockerTask;
-        _pendingDraftCount = await draftsTask;
-        _dueFollowUpCount = await followUpsTask;
-        _pendingAppGenerationCount = await approvalsTask;
+        var summary = await SummaryService.GetAsync(IsAdmin);
+        _pendingCommentCount = summary.PendingComments;
+        _unreadDockerAlertCount = summary.UnreadSystemAlerts;
+        _pendingDraftCount = summary.PendingDrafts;
+        _dueFollowUpCount = summary.DueFollowUps;
+        _pendingAppGenerationCount = summary.PendingAppApprovals;
     }
 
     private bool IsGroupOpen(IEnumerable<string> prefixes)
