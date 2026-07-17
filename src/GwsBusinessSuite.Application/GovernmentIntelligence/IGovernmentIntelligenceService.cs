@@ -17,7 +17,8 @@ public sealed record CommunityCoverage(
     IReadOnlyList<CivicUpdate> Announcements,
     IReadOnlyList<CivicMeeting> Meetings,
     IReadOnlyList<CivicResourceSection> ResourceSections,
-    IReadOnlyList<LegislationDetailBrief> LegislationBriefs);
+    IReadOnlyList<LegislationDetailBrief> LegislationBriefs,
+    IReadOnlyList<CivicEvent> LocalEvents);
 
 public sealed record StateGovernmentCoverage(
     string Summary,
@@ -47,6 +48,15 @@ public sealed record CivicMeeting(
     DateOnly? MeetingDate,
     string Location,
     string Source);
+
+public sealed record CivicEvent(
+    string Title,
+    string Url,
+    DateTimeOffset? StartAt,
+    DateTimeOffset? EndAt,
+    string Location,
+    string Source,
+    string? ImageUrl);
 
 public sealed record CivicResourceSection(
     string Title,

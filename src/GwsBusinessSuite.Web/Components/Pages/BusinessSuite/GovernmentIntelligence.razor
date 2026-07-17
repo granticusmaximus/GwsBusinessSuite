@@ -134,6 +134,33 @@ else if (_snapshot is not null)
                                         </div>
                                     }
                                 </section>
+
+                                <section>
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <h3 class="h6 text-uppercase text-muted mb-0">Local Events</h3>
+                                        <span class="badge text-bg-light">@_snapshot.Community.LocalEvents.Count</span>
+                                    </div>
+                                    <p class="text-muted small mb-2">Covers Perry's city calendar and Robins Region Chamber of Commerce listings. Refreshes hourly via a background job, independent of the Refresh button above.</p>
+                                    @if (_snapshot.Community.LocalEvents.Count == 0)
+                                    {
+                                        <p class="text-muted mb-0">No local events were returned.</p>
+                                    }
+                                    else
+                                    {
+                                        <div class="list-group">
+                                            @foreach (var localEvent in _snapshot.Community.LocalEvents)
+                                            {
+                                                <a class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" href="@localEvent.Url" target="_blank" rel="noopener noreferrer">
+                                                    <div>
+                                                        <div class="fw-semibold">@localEvent.Title</div>
+                                                        <div class="text-secondary small">@FormatEventWhen(localEvent) · @localEvent.Source</div>
+                                                    </div>
+                                                    <i class="bi bi-box-arrow-up-right"></i>
+                                                </a>
+                                            }
+                                        </div>
+                                    }
+                                </section>
                             </div>
                         </div>
                     </div>
@@ -460,6 +487,11 @@ else if (_snapshot is not null)
 
     private static string FormatDate(DateOnly? value) =>
         value is null ? "Date unavailable" : value.Value.ToString("MMMM dd, yyyy", CultureInfo.InvariantCulture);
+
+    private static string FormatEventWhen(CivicEvent localEvent) =>
+        localEvent.StartAt is null
+            ? "Date unavailable"
+            : localEvent.StartAt.Value.ToString("MMM dd, yyyy h:mm tt", CultureInfo.InvariantCulture);
 
     private RenderFragment RenderLegislationBriefComponent(LegislationDetailBrief? brief, string summaryLabel) => builder =>
     {

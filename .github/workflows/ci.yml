@@ -23,5 +23,8 @@ jobs:
       - name: Build
         run: dotnet build GwsBusinessSuite.slnx --no-restore -c Release
 
+      - name: Install Playwright Chromium
+        run: pwsh tests/GwsBusinessSuite.Tests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
       - name: Test
         run: dotnet test tests/GwsBusinessSuite.Tests/GwsBusinessSuite.Tests.csproj --no-build -c Release

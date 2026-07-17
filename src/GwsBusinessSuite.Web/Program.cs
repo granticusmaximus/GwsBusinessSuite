@@ -26,6 +26,16 @@ using System.Text.RegularExpressions;
 using System.Threading.RateLimiting;
 
 
+// Docker-build-time hook: `dotnet GwsBusinessSuite.Web.dll --install-playwright-browsers`
+// installs the Chromium binary Microsoft.Playwright needs (LocalEventsScraperService)
+// without requiring PowerShell, which the mcr.microsoft.com/dotnet/aspnet base image
+// doesn't have (the usual playwright.ps1 install script needs it). Must exit before
+// touching WebApplication.CreateBuilder/the DB/anything else below.
+if (args is ["--install-playwright-browsers"])
+{
+    Environment.Exit(Microsoft.Playwright.Program.Main(["install", "chromium"]));
+}
+
 var builder = WebApplication.CreateBuilder(args);
 var configuredPathBase = builder.Configuration["Hosting:PathBase"];
 

@@ -449,7 +449,19 @@ public sealed class GovernmentIntelligenceServiceTests
 
         var client = new HttpClient(handler);
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
-        return new GovernmentIntelligenceService(client, memoryCache, NullLogger<GovernmentIntelligenceService>.Instance);
+        return new GovernmentIntelligenceService(
+            client, memoryCache, NullLogger<GovernmentIntelligenceService>.Instance, new StubLocalEventsScraperService());
+    }
+
+    // Local Events is populated from the injected scraper, not a URL fetched inside
+    // BuildCommunityCoverageAsync, so it's entirely orthogonal to these HTTP-fixture-based
+    // tests - a trivial always-empty stub keeps that separation clean.
+    private sealed class StubLocalEventsScraperService : ILocalEventsScraperService
+    {
+        public Task<IReadOnlyList<CivicEvent>> RefreshAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<CivicEvent>>([]);
+
+        public IReadOnlyList<CivicEvent> GetCachedEventsOrEmpty() => [];
     }
 
     private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler

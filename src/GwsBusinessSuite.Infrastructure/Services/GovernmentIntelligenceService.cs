@@ -15,7 +15,8 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 public sealed class GovernmentIntelligenceService(
     HttpClient http,
     IMemoryCache cache,
-    ILogger<GovernmentIntelligenceService> logger) : IGovernmentIntelligenceService
+    ILogger<GovernmentIntelligenceService> logger,
+    ILocalEventsScraperService localEventsScraper) : IGovernmentIntelligenceService
 {
     private const string SnapshotCacheKey = "government-intelligence:snapshot";
     private const string CountyHomeUrl = "https://www.houstoncountyga.gov/";
@@ -164,7 +165,11 @@ public sealed class GovernmentIntelligenceService(
                     new CivicResourceLink("School District Home", SchoolsHomeUrl, "Houston County School District official homepage.")
                 ])
             ],
-            BuildCommunityLegislationBriefs());
+            BuildCommunityLegislationBriefs(),
+            // Never triggers a browser launch - this is a cheap cache read.
+            // LocalEventsRefreshBackgroundService owns the actual Playwright scrape on
+            // its own hourly cadence, independent of this snapshot's 15-minute cycle.
+            localEventsScraper.GetCachedEventsOrEmpty());
     }
 
     private async Task<StateGovernmentCoverage> BuildStateCoverageAsync(CancellationToken ct)
@@ -1320,6 +1325,7 @@ public sealed class GovernmentIntelligenceService(
     private static CommunityCoverage EmptyCommunityCoverage() =>
         new(
             "Community coverage is temporarily unavailable.",
+            [],
             [],
             [],
             [],

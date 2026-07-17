@@ -131,6 +131,8 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddHostedService<GovernmentIntelligenceRefreshBackgroundService>();
+        services.AddSingleton<ILocalEventsScraperService, LocalEventsScraperService>();
+        services.AddHostedService<LocalEventsRefreshBackgroundService>();
         services.AddHttpClient<IPodcastDirectoryService, PodcastDirectoryService>(client =>
         {
             client.DefaultRequestHeaders.UserAgent.ParseAdd(

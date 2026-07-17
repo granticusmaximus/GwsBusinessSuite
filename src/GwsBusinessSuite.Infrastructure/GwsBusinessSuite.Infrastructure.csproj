@@ -30,6 +30,11 @@
     <!-- Community license (free for individuals/small companies) - accepted at
          startup via QuestPDF.Settings.License in ResumePdfService. -->
     <PackageReference Include="QuestPDF" Version="2025.7.0" />
+    <!-- Headless-browser scraping for LocalEventsScraperService - the only sources this
+         needs (Perry, GA's FullCalendar widget and Robins Region Chamber's GrowthZone
+         cards) render their event data client-side, so plain HttpClient + regex (this
+         file's usual pattern for GovernmentIntelligenceService) can't see it at all. -->
+    <PackageReference Include="Microsoft.Playwright" Version="1.61.0" />
   </ItemGroup>
 
   <PropertyGroup>
