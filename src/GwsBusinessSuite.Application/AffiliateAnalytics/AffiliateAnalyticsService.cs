@@ -27,9 +27,40 @@ public sealed class AffiliateAnalyticsService(IAppDbContext db, IMemoryCache cac
 
         if (placement is null)
         {
-            return null;
+            var rotation = await db.ArticleAffiliateRotations
+                .AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Id == placementId, cancellationToken);
+            if (rotation is null)
+            {
+                return null;
+            }
+
+            return await RecordClickAsync(
+                rotation.Id,
+                rotation.ArticleId,
+                rotation.AdvertiserId,
+                rotation.AdvertiserName,
+                rotation.TrackingUrl,
+                cancellationToken);
         }
 
+        return await RecordClickAsync(
+            placement.Id,
+            placement.ArticleId,
+            placement.AdvertiserId,
+            placement.AdvertiserName,
+            placement.TrackingUrl,
+            cancellationToken);
+    }
+
+    private async Task<string?> RecordClickAsync(
+        Guid placementId,
+        Guid articleId,
+        string advertiserId,
+        string advertiserName,
+        string trackingUrl,
+        CancellationToken cancellationToken)
+    {
         var dedupeCacheKey = $"affiliate-click-dedupe:{placementId}";
         if (!cache.TryGetValue(dedupeCacheKey, out _))
         {
@@ -37,17 +68,17 @@ public sealed class AffiliateAnalyticsService(IAppDbContext db, IMemoryCache cac
 
             await db.ArticleAffiliateClicks.AddAsync(new ArticleAffiliateClick
             {
-                ArticleId = placement.ArticleId,
-                PlacementId = placement.Id,
-                AdvertiserId = placement.AdvertiserId,
-                AdvertiserName = placement.AdvertiserName,
-                TrackingUrl = placement.TrackingUrl,
+                ArticleId = articleId,
+                PlacementId = placementId,
+                AdvertiserId = advertiserId,
+                AdvertiserName = advertiserName,
+                TrackingUrl = trackingUrl,
                 CreatedBy = "affiliate-click-redirect"
             }, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
         }
 
-        return string.IsNullOrWhiteSpace(placement.TrackingUrl) ? null : placement.TrackingUrl;
+        return string.IsNullOrWhiteSpace(trackingUrl) ? null : trackingUrl;
     }
 
     public async Task<AffiliateAnalyticsDashboard> GetDashboardAsync(CancellationToken cancellationToken = default)

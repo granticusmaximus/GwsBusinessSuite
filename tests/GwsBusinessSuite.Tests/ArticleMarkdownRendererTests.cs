@@ -98,6 +98,24 @@ public sealed class ArticleMarkdownRendererTests
     }
 
     [Fact]
+    public void Render_ShouldAppendAutomaticRotationWithoutChangingManualTokens()
+    {
+        var rotationId = Guid.NewGuid();
+        var rotation = new ArticleMarkdownRenderer.AffiliatePlacementMarkup(
+            string.Empty, "Rotating Partner", "Software", "https://example.com/rotating", "View offer", rotationId);
+
+        var rendered = ArticleMarkdownRenderer.Render(
+            "Original article body.",
+            Array.Empty<ArticleAffiliatePlacement>(),
+            rotation);
+
+        Assert.StartsWith("Original article body.", rendered);
+        Assert.Contains("Rotating Partner", rendered);
+        Assert.Contains($"href=\"/go/{rotationId:D}\"", rendered);
+        Assert.DoesNotContain("https://example.com/rotating", rendered);
+    }
+
+    [Fact]
     public void GenerateSlotToken_ShouldProduceUniqueCjAdTokens()
     {
         var first = ArticleMarkdownRenderer.GenerateSlotToken();

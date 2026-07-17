@@ -1,0 +1,4 @@
+.workflow-card { transition: transform .16s ease, box-shadow .16s ease; color: inherit; background: var(--bs-body-bg); }
+.workflow-card:hover { transform: translateY(-2px); box-shadow: 0 .75rem 1.8rem rgba(15, 23, 42, .12) !important; }
+.workflow-description { min-height: 2.5rem; }
+.automation-icon { width: 2.5rem; height: 2.5rem; border-radius: .8rem; display: grid; place-items: center; color: #4f46e5; background: rgba(79,70,229,.1); font-size: 1.15rem; }

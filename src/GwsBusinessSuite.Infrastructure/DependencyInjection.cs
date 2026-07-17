@@ -2,7 +2,9 @@ using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.AdminPortal;
 using GwsBusinessSuite.Application.AffiliateAnalytics;
 using GwsBusinessSuite.Application.AffiliateSuggestions;
+using GwsBusinessSuite.Application.AffiliateRotations;
 using GwsBusinessSuite.Application.AppGeneration;
+using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.CmsKnowledge;
 using GwsBusinessSuite.Application.Comments;
@@ -86,6 +88,7 @@ public static class DependencyInjection
             });
         });
         services.AddMemoryCache();
+        services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<NewsRefreshState>();
         services.AddHttpClient<ITrendResearchService, TrendResearchService>();
         services.AddScoped<IDockerDeploymentService, DockerDeploymentService>();
@@ -115,7 +118,19 @@ public static class DependencyInjection
         services.AddScoped<IResumePdfService, ResumePdfService>();
         services.AddScoped<IAffiliateSuggestionService, AffiliateSuggestionService>();
         services.AddScoped<IAffiliateAnalyticsService, AffiliateAnalyticsService>();
+        services.AddScoped<IAffiliateRotationService, AffiliateRotationService>();
         services.AddScoped<IAppGenerationService, AppGenerationService>();
+        services.AddHttpClient<IAutomationHttpClient, AutomationHttpClient>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-WorkflowAutomation/1.0");
+        });
+        services.AddScoped<IAutomationNodeRegistry, AutomationNodeRegistry>();
+        services.AddScoped<IAutomationCredentialService, AutomationCredentialService>();
+        services.AddScoped<IAutomationWorkflowService, AutomationWorkflowService>();
+        services.AddScoped<IAutomationExecutionService, AutomationExecutionService>();
+        services.AddScoped<IAutomationTriggerService, AutomationTriggerService>();
+        services.AddHostedService<AutomationScheduleBackgroundService>();
         // Same persisted volume as the SQLite DB and DP keys in production
         // (docker-compose.yml mounts gwssuite-data:/app/data); a relative dev-local path
         // otherwise (see appsettings.Development.json).

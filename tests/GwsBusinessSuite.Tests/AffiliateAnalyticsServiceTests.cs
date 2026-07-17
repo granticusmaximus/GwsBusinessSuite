@@ -46,6 +46,33 @@ public sealed class AffiliateAnalyticsServiceTests
     }
 
     [Fact]
+    public async Task RecordClickAsync_ShouldTrackDurableRotationAssignment()
+    {
+        await using var db = await CreateDbAsync();
+        var article = await CreateArticleAsync(db);
+        var now = DateTimeOffset.UtcNow;
+        var rotation = new ArticleAffiliateRotation
+        {
+            ArticleId = article.Id,
+            AdvertiserId = "adv-rotation",
+            AdvertiserName = "Rotating Partner",
+            TrackingUrl = "https://example.com/rotation",
+            StartsAt = now,
+            StartsAtUnixSeconds = now.ToUnixTimeSeconds(),
+            ExpiresAt = now.AddHours(48),
+            ExpiresAtUnixSeconds = now.AddHours(48).ToUnixTimeSeconds()
+        };
+        db.ArticleAffiliateRotations.Add(rotation);
+        await db.SaveChangesAsync();
+
+        var destination = await CreateService(db).RecordClickAsync(rotation.Id);
+
+        destination.Should().Be("https://example.com/rotation");
+        db.ArticleAffiliateClicks.Should().ContainSingle(click =>
+            click.PlacementId == rotation.Id && click.AdvertiserId == "adv-rotation");
+    }
+
+    [Fact]
     public async Task RecordClickAsync_ShouldReturnNull_WhenTrackingUrlIsBlank()
     {
         await using var db = await CreateDbAsync();

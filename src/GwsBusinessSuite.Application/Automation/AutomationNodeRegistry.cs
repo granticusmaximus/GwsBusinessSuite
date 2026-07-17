@@ -1,0 +1,158 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+
+namespace GwsBusinessSuite.Application.Automation;
+
+public sealed partial class AutomationNodeRegistry(IAutomationHttpClient httpClient) : IAutomationNodeRegistry
+{
+    private static readonly IReadOnlyList<AutomationNodeDefinition> Definitions =
+    [
+        new("core.manualTrigger", 1, "Manual Trigger", "Starts when you select Run workflow.", "Triggers", "bi-play-circle-fill", true, ["main"], "{}"),
+        new("core.webhookTrigger", 1, "Webhook Trigger", "Starts an active workflow from its public webhook path.", "Triggers", "bi-broadcast-pin", true, ["main"], "{\"path\":\"incoming-event\"}"),
+        new("core.scheduleTrigger", 1, "Schedule Trigger", "Starts an active workflow at a recurring minute interval.", "Triggers", "bi-clock-fill", true, ["main"], "{\"intervalMinutes\":60}"),
+        new("core.set", 1, "Set Fields", "Adds or replaces JSON fields using literal values or expressions.", "Data", "bi-braces", false, ["main"], "{\"values\":{\"message\":\"Hello from GWS\"}}"),
+        new("core.if", 1, "If", "Routes an item to the true or false output.", "Flow", "bi-signpost-split-fill", false, ["true", "false"], "{\"left\":\"{{ $json.enabled }}\",\"operator\":\"equals\",\"right\":\"true\"}"),
+        new("core.httpRequest", 1, "HTTP Request", "Calls an HTTP API and returns status, headers, and response data.", "Actions", "bi-globe2", false, ["main"], "{\"method\":\"GET\",\"url\":\"https://example.com\",\"headers\":{},\"body\":\"\"}"),
+    ];
+
+    public IReadOnlyList<AutomationNodeDefinition> ListDefinitions() => Definitions;
+
+    public AutomationNodeDefinition? Find(string typeKey, int version = 1) => Definitions.FirstOrDefault(
+        definition => definition.Version == version && definition.TypeKey.Equals(typeKey, StringComparison.OrdinalIgnoreCase));
+
+    public async Task<AutomationNodeRunResult> ExecuteAsync(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        string? credentialJson,
+        CancellationToken cancellationToken = default)
+    {
+        return node.TypeKey switch
+        {
+            "core.manualTrigger" => SingleOutput("main", input),
+            "core.webhookTrigger" => SingleOutput("main", input),
+            "core.scheduleTrigger" => SingleOutput("main", input),
+            "core.set" => ExecuteSet(node, input),
+            "core.if" => ExecuteIf(node, input),
+            "core.httpRequest" => await ExecuteHttpAsync(node, input, credentialJson, cancellationToken),
+            _ => throw new InvalidOperationException($"Node type '{node.TypeKey}' is not executable.")
+        };
+    }
+
+    private static AutomationNodeRunResult ExecuteSet(AutomationNodeSnapshot node, JsonElement input)
+    {
+        var root = ParseObject(node.ParametersJson, node.Name);
+        var output = input.ValueKind == JsonValueKind.Object
+            ? JsonNode.Parse(input.GetRawText())!.AsObject()
+            : new JsonObject { ["value"] = JsonNode.Parse(input.GetRawText()) };
+        if (root["values"] is JsonObject values)
+        {
+            foreach (var pair in values)
+            {
+                output[pair.Key] = pair.Value is JsonValue value && value.TryGetValue<string>(out var text)
+                    ? JsonValue.Create(ResolveText(text, input))
+                    : pair.Value?.DeepClone();
+            }
+        }
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    private static AutomationNodeRunResult ExecuteIf(AutomationNodeSnapshot node, JsonElement input)
+    {
+        var root = ParseObject(node.ParametersJson, node.Name);
+        var left = ResolveText(root["left"]?.GetValue<string>() ?? string.Empty, input);
+        var right = ResolveText(root["right"]?.GetValue<string>() ?? string.Empty, input);
+        var op = root["operator"]?.GetValue<string>()?.Trim().ToLowerInvariant() ?? "equals";
+        var isTrue = op switch
+        {
+            "equals" => string.Equals(left, right, StringComparison.OrdinalIgnoreCase),
+            "notequals" => !string.Equals(left, right, StringComparison.OrdinalIgnoreCase),
+            "contains" => left.Contains(right, StringComparison.OrdinalIgnoreCase),
+            "exists" => !string.IsNullOrWhiteSpace(left),
+            "greaterthan" => decimal.TryParse(left, out var l) && decimal.TryParse(right, out var r) && l > r,
+            "lessthan" => decimal.TryParse(left, out var l) && decimal.TryParse(right, out var r) && l < r,
+            _ => throw new InvalidOperationException($"If node operator '{op}' is not supported.")
+        };
+        return SingleOutput(isTrue ? "true" : "false", input);
+    }
+
+    private async Task<AutomationNodeRunResult> ExecuteHttpAsync(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        string? credentialJson,
+        CancellationToken cancellationToken)
+    {
+        var root = ParseObject(node.ParametersJson, node.Name);
+        var methodText = root["method"]?.GetValue<string>()?.Trim().ToUpperInvariant() ?? "GET";
+        var url = ResolveText(root["url"]?.GetValue<string>() ?? string.Empty, input);
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            throw new InvalidOperationException("HTTP Request URL must be an absolute HTTP or HTTPS URL.");
+
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        AddHeaders(headers, root["headers"] as JsonObject, input);
+        if (!string.IsNullOrWhiteSpace(credentialJson))
+        {
+            var credential = ParseObject(credentialJson, "Credential");
+            AddHeaders(headers, credential["headers"] as JsonObject, input);
+        }
+        var body = root["body"] is JsonValue bodyValue && bodyValue.TryGetValue<string>(out var bodyText)
+            ? ResolveText(bodyText, input)
+            : root["body"]?.ToJsonString();
+        var response = await httpClient.SendAsync(new AutomationHttpRequest(
+            new HttpMethod(methodText), uri.ToString(), body, headers), cancellationToken);
+
+        JsonNode? parsedBody;
+        try { parsedBody = JsonNode.Parse(response.Body); }
+        catch (JsonException) { parsedBody = JsonValue.Create(response.Body); }
+        var output = new JsonObject
+        {
+            ["statusCode"] = response.StatusCode,
+            ["body"] = parsedBody,
+            ["headers"] = JsonSerializer.SerializeToNode(response.Headers)
+        };
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    private static void AddHeaders(Dictionary<string, string> destination, JsonObject? source, JsonElement input)
+    {
+        if (source is null) return;
+        foreach (var pair in source)
+            if (pair.Value is JsonValue value && value.TryGetValue<string>(out var text))
+                destination[pair.Key] = ResolveText(text, input);
+    }
+
+    private static AutomationNodeRunResult SingleOutput(string port, JsonElement value)
+    {
+        var cloned = value.Clone();
+        return new AutomationNodeRunResult(
+            new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase) { [port] = cloned },
+            cloned.GetRawText());
+    }
+
+    private static JsonObject ParseObject(string json, string label)
+    {
+        try { return JsonNode.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json)?.AsObject() ?? new JsonObject(); }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            throw new InvalidOperationException($"{label} parameters are not a JSON object: {ex.Message}");
+        }
+    }
+
+    private static string ResolveText(string template, JsonElement input)
+    {
+        return ExpressionPattern().Replace(template, match => ResolvePath(input, match.Groups[1].Value));
+    }
+
+    private static string ResolvePath(JsonElement input, string path)
+    {
+        var current = input;
+        foreach (var segment in path.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(segment, out current)) return string.Empty;
+        }
+        return current.ValueKind == JsonValueKind.String ? current.GetString() ?? string.Empty : current.GetRawText();
+    }
+
+    [GeneratedRegex(@"\{\{\s*\$json(?:\.([A-Za-z0-9_.-]+))?\s*\}\}", RegexOptions.Compiled)]
+    private static partial Regex ExpressionPattern();
+}

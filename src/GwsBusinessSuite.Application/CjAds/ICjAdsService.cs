@@ -14,4 +14,5 @@ public interface ICjAdsService
     Task<CommissionSyncResult> SyncCommissionsAsync(CancellationToken cancellationToken = default);
     Task<CjConnectorSettingsView?> GetConnectorSettingsAsync(CancellationToken cancellationToken = default);
     Task SaveConnectorSettingsAsync(CjConnectorSettingsView settings, CancellationToken cancellationToken = default);
+    Task SetAutomaticArticleRotationEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
 }

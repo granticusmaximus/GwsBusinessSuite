@@ -30,6 +30,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<SiteSettings> SiteSettings { get; }
     DbSet<Article> Articles { get; }
     DbSet<ArticleAffiliatePlacement> ArticleAffiliatePlacements { get; }
+    DbSet<ArticleAffiliateRotation> ArticleAffiliateRotations { get; }
     DbSet<ArticleAffiliateSuggestion> ArticleAffiliateSuggestions { get; }
     DbSet<ArticleAffiliateClick> ArticleAffiliateClicks { get; }
     DbSet<CjCommissionRecord> CjCommissionRecords { get; }
@@ -45,6 +46,13 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<LiveShowSession> LiveShowSessions { get; }
     DbSet<LiveShowRecording> LiveShowRecordings { get; }
     DbSet<PodcastListenProgress> PodcastListenProgresses { get; }
+    DbSet<AutomationWorkflow> AutomationWorkflows { get; }
+    DbSet<AutomationNode> AutomationNodes { get; }
+    DbSet<AutomationConnection> AutomationConnections { get; }
+    DbSet<AutomationWorkflowVersion> AutomationWorkflowVersions { get; }
+    DbSet<AutomationCredential> AutomationCredentials { get; }
+    DbSet<AutomationExecution> AutomationExecutions { get; }
+    DbSet<AutomationNodeExecution> AutomationNodeExecutions { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     // For multi-step writes that must be all-or-nothing (e.g. AppGenerationService.ApproveAsync

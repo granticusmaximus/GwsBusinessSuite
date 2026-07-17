@@ -1,6 +1,8 @@
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.AffiliateAnalytics;
+using GwsBusinessSuite.Application.AffiliateRotations;
 using GwsBusinessSuite.Application.Articles;
+using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.Comments;
 using GwsBusinessSuite.Application.LiveShow;
@@ -609,6 +611,48 @@ app.MapPost("/cms/{siteSlug}/submit", async (
 // anymore (a fixed segment can't follow it) — form submissions redirect back to the page
 // itself with ?submitted=1 instead, handled inline by RenderPublicCanvasPageAsync.
 
+// Public automation webhook boundary. The workflow must be active and published; a
+// Webhook Trigger can optionally reference a protected credential containing a "secret"
+// property, supplied by callers through X-GWS-Webhook-Secret.
+app.MapMethods("/hooks/{path}", ["GET", "POST"], async (
+    string path,
+    HttpRequest request,
+    IAutomationTriggerService triggerService) =>
+{
+    const long maxBodyBytes = 1024 * 1024;
+    if (request.ContentLength > maxBodyBytes) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+
+    string inputJson;
+    if (HttpMethods.IsGet(request.Method))
+    {
+        inputJson = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            query = request.Query.ToDictionary(item => item.Key, item => item.Value.ToString())
+        });
+    }
+    else
+    {
+        using var reader = new StreamReader(request.Body);
+        inputJson = await reader.ReadToEndAsync();
+        if (Encoding.UTF8.GetByteCount(inputJson) > maxBodyBytes) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+        if (string.IsNullOrWhiteSpace(inputJson)) inputJson = "{}";
+    }
+
+    try
+    {
+        var execution = await triggerService.TriggerWebhookAsync(
+            path,
+            inputJson,
+            request.Headers["X-GWS-Webhook-Secret"].FirstOrDefault(),
+            request.HttpContext.RequestAborted);
+        return execution is null
+            ? Results.NotFound(new { error = "Webhook not found." })
+            : Results.Ok(new { execution.Id, execution.Status, execution.OutputJson, execution.ErrorMessage });
+    }
+    catch (UnauthorizedAccessException) { return Results.Unauthorized(); }
+    catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+}).AllowAnonymous().RequireRateLimiting("public-write");
+
 app.MapGet("/{**pageSlug}", (
         string pageSlug,
         HttpRequest request,
@@ -718,6 +762,7 @@ app.MapGet("/blog/{slug}", async (
         IDbContextFactory<ApplicationDbContext> dbFactory,
         ICmsBuilderService cmsBuilderService,
         ICommentService commentService,
+        IAffiliateRotationService affiliateRotationService,
         IConfiguration configuration) =>
     {
         await using var db = await dbFactory.CreateDbContextAsync();
@@ -747,7 +792,11 @@ app.MapGet("/blog/{slug}", async (
         }
 
         var heroImageUrl = a.HeroImageUrl ?? (a.HeroImageDataUri != "" ? $"/og-image/{a.Slug}" : null);
-        var renderedMarkdown = ArticleMarkdownRenderer.Render(a.BodyMarkdown, a.AffiliatePlacements.OrderBy(p => p.SortOrder).ToList());
+        var rotatingPlacement = await affiliateRotationService.GetActivePlacementAsync(a.Id);
+        var renderedMarkdown = ArticleMarkdownRenderer.Render(
+            a.BodyMarkdown,
+            a.AffiliatePlacements.OrderBy(p => p.SortOrder).ToList(),
+            rotatingPlacement);
         var articleCategory = a.CategoryId.HasValue
             ? await db.ArticleCategories.AsNoTracking().FirstOrDefaultAsync(c => c.Id == a.CategoryId.Value)
             : null;
@@ -1315,7 +1364,8 @@ app.MapGet("/api/blog", async (IDbContextFactory<ApplicationDbContext> dbFactory
 
 app.MapGet("/api/blog/{slug}", async (
     string slug,
-    IDbContextFactory<ApplicationDbContext> dbFactory) =>
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    IAffiliateRotationService affiliateRotationService) =>
 {
     await using var db = await dbFactory.CreateDbContextAsync();
     var a = await db.Articles
@@ -1328,9 +1378,11 @@ app.MapGet("/api/blog/{slug}", async (
     var heroImageUrl = a.HeroImageUrl
         ?? (a.HeroImageDataUri != "" ? $"/og-image/{a.Slug}" : null);
 
+    var rotatingPlacement = await affiliateRotationService.GetActivePlacementAsync(a.Id);
     var renderedMarkdown = ArticleMarkdownRenderer.Render(
         a.BodyMarkdown,
-        a.AffiliatePlacements.OrderBy(p => p.SortOrder).ToList());
+        a.AffiliatePlacements.OrderBy(p => p.SortOrder).ToList(),
+        rotatingPlacement);
 
     return Results.Ok(new
     {

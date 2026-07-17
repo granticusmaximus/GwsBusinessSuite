@@ -1,4 +1,5 @@
 using GwsBusinessSuite.Application.AffiliateSuggestions;
+using GwsBusinessSuite.Application.AffiliateRotations;
 using GwsBusinessSuite.Application.CjAds;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -52,6 +53,14 @@ public sealed class CjAdsSyncBackgroundService(
             logger.LogInformation(
                 "CJ Ads: affiliate suggestion sweep complete ({Processed} article(s), {Created} suggestion(s) created)",
                 suggestionResult.ArticlesProcessed, suggestionResult.SuggestionsCreated);
+
+            var rotations = scope.ServiceProvider.GetRequiredService<IAffiliateRotationService>();
+            var rotationResult = await rotations.RefreshAsync(cancellationToken: ct);
+            logger.LogInformation(
+                "CJ Ads: 48-hour rotation sweep complete ({Created} assigned, {Preserved} preserved) - {Message}",
+                rotationResult.AssignmentsCreated,
+                rotationResult.AssignmentsPreserved,
+                rotationResult.Message);
 
             var commissionResult = await cjAds.SyncCommissionsAsync(ct);
             logger.LogInformation(

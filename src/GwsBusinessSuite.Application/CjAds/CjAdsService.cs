@@ -407,6 +407,29 @@ public sealed class CjAdsService(
     {
         var partners = await ListPartnersAsync(cancellationToken: cancellationToken);
 
+        // Validate shared connector settings once. Previously the same missing Website ID
+        // exception was caught once per advertiser, producing a huge and misleading failure
+        // list even though none of the advertiser calls had started.
+        if (partners.Count > 0)
+        {
+            var settings = await GetConnectorSettingsAsync(cancellationToken);
+            var configurationError = settings is null || string.IsNullOrWhiteSpace(settings.DeveloperKey)
+                ? "Connect your CJ account before syncing links (Developer Key is missing)."
+                : string.IsNullOrWhiteSpace(settings.WebsiteId)
+                    ? "Website ID is required for CJ tracking links. Open Connector, enter the Website ID assigned to your site in CJ, and save it before syncing."
+                    : string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(configurationError))
+            {
+                return new CjBulkLinkSyncResult
+                {
+                    IsSuccess = false,
+                    Message = configurationError,
+                    ConfigurationError = configurationError
+                };
+            }
+        }
+
         var processed = 0;
         var failed = 0;
         var totalImported = 0;
@@ -866,6 +889,7 @@ public sealed class CjAdsService(
             WebsiteId = row.WebsiteId,
             EndpointUrl = row.EndpointUrl,
             MaxResults = row.MaxResults,
+            AutomaticArticleRotationEnabled = row.AutomaticArticleRotationEnabled,
             DeveloperKeyUnreadable = isUnreadable
         };
     }
@@ -877,7 +901,7 @@ public sealed class CjAdsService(
 
         if (row is null)
         {
-            row = new CjConnectorSettings();
+            row = new CjConnectorSettings { Id = CjConnectorSettings.WellKnownId };
             db.CjConnectorSettings.Add(row);
         }
 
@@ -886,9 +910,27 @@ public sealed class CjAdsService(
         row.WebsiteId = settings.WebsiteId;
         row.EndpointUrl = settings.EndpointUrl;
         row.MaxResults = settings.MaxResults;
+        row.AutomaticArticleRotationEnabled = settings.AutomaticArticleRotationEnabled;
         row.UpdatedAt = DateTimeOffset.UtcNow;
         row.UpdatedBy = "user";
 
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task SetAutomaticArticleRotationEnabledAsync(
+        bool enabled,
+        CancellationToken cancellationToken = default)
+    {
+        var row = await db.CjConnectorSettings.FirstOrDefaultAsync(cancellationToken);
+        if (row is null)
+        {
+            row = new CjConnectorSettings { Id = CjConnectorSettings.WellKnownId };
+            db.CjConnectorSettings.Add(row);
+        }
+
+        row.AutomaticArticleRotationEnabled = enabled;
+        row.UpdatedAt = DateTimeOffset.UtcNow;
+        row.UpdatedBy = "user";
         await db.SaveChangesAsync(cancellationToken);
     }
 

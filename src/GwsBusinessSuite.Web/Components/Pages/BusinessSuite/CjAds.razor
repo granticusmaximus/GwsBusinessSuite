@@ -2,8 +2,10 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "AdminOnly")]
 @using GwsBusinessSuite.Application.CjAds
+@using GwsBusinessSuite.Application.AffiliateRotations
 @using GwsBusinessSuite.Infrastructure.Services
 @inject ICjAdsService CjAdsService
+@inject IAffiliateRotationService AffiliateRotationService
 @inject ILogger<CjAds> Logger
 
 <PageTitle>CJ Ads Manager</PageTitle>
@@ -48,11 +50,21 @@
           <span>Refresh My Advertisers</span>
         </button>
         <button class="btn btn-outline-success d-inline-flex align-items-center gap-2" @onclick="SyncAllLinks"
-                disabled="@IsBusy">
+                disabled="@(IsBusy || !CanSyncLinks)">
           <i class="bi bi-cloud-download"></i>
           <span>Sync All Links (@FilteredPartners.Count advertisers)</span>
         </button>
       </div>
+      @if (IsConnected && !CanSyncLinks)
+      {
+        <div class="alert alert-warning d-flex align-items-start gap-2 mt-3 mb-0">
+          <i class="bi bi-exclamation-triangle-fill mt-1"></i>
+          <div>
+            <div class="fw-semibold">Website ID is required before links can sync.</div>
+            <div class="small">Open Connector and enter the Website ID assigned to this site in your CJ account. It is what CJ uses to generate site-specific tracking links.</div>
+          </div>
+        </div>
+      }
       @if (!string.IsNullOrWhiteSpace(LastSyncSummary))
       {
         <p class="text-secondary small mb-0 mt-3">@LastSyncSummary</p>
@@ -68,6 +80,44 @@
             }
           </ul>
         </div>
+      }
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white border-bottom py-3 d-flex flex-wrap align-items-center justify-content-between gap-2">
+      <div>
+        <div class="fw-semibold">48-hour blog ad rotation</div>
+        <div class="small text-secondary">One stable sponsored card per active published post, rotated from synced CJ links every 48 hours.</div>
+      </div>
+      <span class="badge @(AutomaticRotationEnabled ? "text-bg-success" : "text-bg-secondary")">
+        @(AutomaticRotationEnabled ? "Active" : "Paused")
+      </span>
+    </div>
+    <div class="card-body">
+      <div class="row g-3 align-items-center">
+        <div class="col-lg-7">
+          <div class="d-flex flex-wrap gap-4">
+            <div><div class="fs-5 fw-semibold">@RotationAssignedCount / @RotationActiveArticleCount</div><div class="small text-secondary">posts assigned</div></div>
+            <div><div class="fs-5 fw-semibold">@RotationEligibleOfferCount</div><div class="small text-secondary">eligible CJ links</div></div>
+            <div><div class="fs-5 fw-semibold">@FormatNextRotation()</div><div class="small text-secondary">next rotation</div></div>
+          </div>
+        </div>
+        <div class="col-lg-5">
+          <div class="d-flex flex-wrap justify-content-lg-end gap-2">
+            <button class="btn btn-outline-secondary" @onclick="ToggleAutomaticRotation" disabled="@IsBusy">
+              <i class="bi @(AutomaticRotationEnabled ? "bi-pause-fill" : "bi-play-fill") me-1"></i>
+              @(AutomaticRotationEnabled ? "Pause rotation" : "Resume rotation")
+            </button>
+            <button class="btn btn-primary" @onclick="RotateNow" disabled="@(IsBusy || !AutomaticRotationEnabled || !CanSyncLinks)">
+              <i class="bi bi-arrow-repeat me-1"></i>Rotate now
+            </button>
+          </div>
+        </div>
+      </div>
+      @if (RotationEligibleOfferCount == 0)
+      {
+        <p class="small text-secondary mt-3 mb-0">No posts will change until advertiser links have been synced successfully.</p>
       }
     </div>
   </div>
@@ -128,7 +178,7 @@
                 <div class="accordion-body">
                   <div class="d-flex justify-content-end gap-2 mb-2">
                     <button type="button" class="btn btn-sm btn-outline-success d-inline-flex align-items-center gap-1"
-                            @onclick="() => SyncLinksForAdvertiser(partner)" disabled="@IsBusy">
+                            @onclick="() => SyncLinksForAdvertiser(partner)" disabled="@(IsBusy || !CanSyncLinks)">
                       <i class="bi bi-cloud-download"></i>
                       <span>Sync Links</span>
                     </button>
@@ -204,8 +254,7 @@
             <button type="button" class="btn-close" aria-label="Close" @onclick="CloseConnectorModal"></button>
           </div>
           <div class="modal-body">
-            <p class="text-secondary">Enter your CJ Developer Key and Publisher ID (CID). Website ID is optional and is only
-              used as an additional filter.</p>
+            <p class="text-secondary">Enter your CJ Developer Key, Publisher ID (CID), and Website ID. CJ requires the Website ID to generate tracking links for this site.</p>
               <div class="row g-3">
                 <div class="col-md-6">
                   <label class="form-label fw-semibold small">Developer Key</label>
@@ -223,8 +272,9 @@
                   <input class="form-control" @bind="ConnectorPublisherId" autocomplete="off" />
                 </div>
                 <div class="col-md-6">
-                  <label class="form-label fw-semibold small">Website ID (Optional)</label>
-                  <input class="form-control" @bind="ConnectorWebsiteId" autocomplete="off" />
+                  <label class="form-label fw-semibold small">Website ID <span class="text-danger">*</span></label>
+                  <input class="form-control" @bind="ConnectorWebsiteId" autocomplete="off" required aria-describedby="cjWebsiteIdHelp" />
+                  <div id="cjWebsiteIdHelp" class="form-text">Use the numeric Website ID assigned to your site in CJ, not the site URL or Publisher ID.</div>
                 </div>
                 <div class="col-md-6">
                   <label class="form-label fw-semibold small">Endpoint URL</label>
@@ -351,8 +401,14 @@ new(StringComparer.OrdinalIgnoreCase);
   private int ConnectorMaxResults { get; set; } = 100;
   private string ConnectorMessage { get; set; } = string.Empty;
   private bool ConnectorMessageIsError { get; set; }
+  private bool AutomaticRotationEnabled { get; set; } = true;
+  private int RotationActiveArticleCount { get; set; }
+  private int RotationEligibleOfferCount { get; set; }
+  private int RotationAssignedCount { get; set; }
+  private DateTimeOffset? NextRotationAt { get; set; }
 
   private string SearchTerm { get; set; } = string.Empty;
+  private bool CanSyncLinks => IsConnected && !string.IsNullOrWhiteSpace(ConnectorWebsiteId);
 
   private List<CjPartnerView> FilteredPartners =>
       Partners
@@ -368,6 +424,7 @@ new(StringComparer.OrdinalIgnoreCase);
   {
     await LoadSavedConnectorSettings();
     await LoadPartners();
+    await LoadRotationStatus();
   }
 
   private void OpenConnectorModal()
@@ -389,6 +446,9 @@ new(StringComparer.OrdinalIgnoreCase);
         ConnectorWebsiteId = saved.WebsiteId;
         ConnectorEndpointUrl = saved.EndpointUrl;
         ConnectorMaxResults = saved.MaxResults;
+        AutomaticRotationEnabled = saved.AutomaticArticleRotationEnabled;
+        IsConnected = !string.IsNullOrWhiteSpace(saved.DeveloperKey)
+          && !string.IsNullOrWhiteSpace(saved.PublisherId);
 
         if (saved.DeveloperKeyUnreadable)
         {
@@ -574,6 +634,9 @@ advertiserId, StringComparison.OrdinalIgnoreCase)));
           UpdatedAt = DateTimeOffset.UtcNow
         };
       }
+
+      await AffiliateRotationService.RefreshAsync();
+      await LoadRotationStatus();
     }
     catch (Exception ex)
     {
@@ -605,6 +668,14 @@ advertiserId, StringComparison.OrdinalIgnoreCase)));
       }
 
       var result = await CjAdsService.SyncAllLinksAsync();
+      if (!string.IsNullOrWhiteSpace(result.ConfigurationError))
+      {
+        ErrorMessage = result.ConfigurationError;
+        StatusMessage = string.Empty;
+        ShowConnectorModal = true;
+        return;
+      }
+
       LastSyncSummary = result.Message;
       BulkLinkSyncFailures = result.FailureMessages.ToList();
       StatusMessage = string.Empty;
@@ -614,6 +685,8 @@ advertiserId, StringComparison.OrdinalIgnoreCase)));
       // pre-sync data.
       AdvertiserOffersById.Clear();
       await LoadPartners();
+      await AffiliateRotationService.RefreshAsync();
+      await LoadRotationStatus();
     }
     catch (Exception ex)
     {
@@ -703,7 +776,8 @@ advertiserId, StringComparison.OrdinalIgnoreCase)));
     PublisherId = ConnectorPublisherId,
     WebsiteId = ConnectorWebsiteId,
     EndpointUrl = ConnectorEndpointUrl,
-    MaxResults = ConnectorMaxResults
+    MaxResults = ConnectorMaxResults,
+    AutomaticArticleRotationEnabled = AutomaticRotationEnabled
   };
 
   private async Task SaveConnectorSettings()
@@ -715,6 +789,79 @@ advertiserId, StringComparison.OrdinalIgnoreCase)));
       ConnectorMessage = "Credentials saved.";
     });
   }
+
+  private async Task LoadRotationStatus()
+  {
+    try
+    {
+      var status = await AffiliateRotationService.GetStatusAsync();
+      AutomaticRotationEnabled = status.IsEnabled;
+      RotationActiveArticleCount = status.ActiveArticleCount;
+      RotationEligibleOfferCount = status.EligibleOfferCount;
+      RotationAssignedCount = status.AssignedArticleCount;
+      NextRotationAt = status.NextRotationAt;
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Unable to load affiliate rotation status.");
+    }
+  }
+
+  private async Task ToggleAutomaticRotation()
+  {
+    IsBusy = true;
+    ErrorMessage = string.Empty;
+    try
+    {
+      AutomaticRotationEnabled = !AutomaticRotationEnabled;
+      await CjAdsService.SetAutomaticArticleRotationEnabledAsync(AutomaticRotationEnabled);
+      if (AutomaticRotationEnabled)
+      {
+        var result = await AffiliateRotationService.RefreshAsync();
+        StatusMessage = result.Message;
+      }
+      else
+      {
+        StatusMessage = "Automatic CJ ad rotation is paused. Existing article content and assignment history were preserved.";
+      }
+      await LoadRotationStatus();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Unable to change affiliate rotation setting.");
+      AutomaticRotationEnabled = !AutomaticRotationEnabled;
+      ErrorMessage = $"Unable to change rotation setting. {ex.Message}";
+    }
+    finally
+    {
+      IsBusy = false;
+    }
+  }
+
+  private async Task RotateNow()
+  {
+    IsBusy = true;
+    ErrorMessage = string.Empty;
+    try
+    {
+      var result = await AffiliateRotationService.RefreshAsync(force: true);
+      StatusMessage = result.Message;
+      await LoadRotationStatus();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Unable to rotate affiliate assignments.");
+      ErrorMessage = $"Unable to rotate article ads. {ex.Message}";
+    }
+    finally
+    {
+      IsBusy = false;
+    }
+  }
+
+  private string FormatNextRotation() => NextRotationAt is null
+    ? "Not scheduled"
+    : NextRotationAt.Value.ToLocalTime().ToString("MMM d, h:mm tt");
 
   private void ClearSearch()
   {

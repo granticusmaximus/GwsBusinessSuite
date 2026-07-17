@@ -49,6 +49,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<Article> Articles => Set<Article>();
     public DbSet<ArticleCategory> ArticleCategories => Set<ArticleCategory>();
     public DbSet<ArticleAffiliatePlacement> ArticleAffiliatePlacements => Set<ArticleAffiliatePlacement>();
+    public DbSet<ArticleAffiliateRotation> ArticleAffiliateRotations => Set<ArticleAffiliateRotation>();
     public DbSet<ArticleAffiliateSuggestion> ArticleAffiliateSuggestions => Set<ArticleAffiliateSuggestion>();
     public DbSet<ArticleAffiliateClick> ArticleAffiliateClicks => Set<ArticleAffiliateClick>();
     public DbSet<CjCommissionRecord> CjCommissionRecords => Set<CjCommissionRecord>();
@@ -64,6 +65,13 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<LiveShowSession> LiveShowSessions => Set<LiveShowSession>();
     public DbSet<LiveShowRecording> LiveShowRecordings => Set<LiveShowRecording>();
     public DbSet<PodcastListenProgress> PodcastListenProgresses => Set<PodcastListenProgress>();
+    public DbSet<AutomationWorkflow> AutomationWorkflows => Set<AutomationWorkflow>();
+    public DbSet<AutomationNode> AutomationNodes => Set<AutomationNode>();
+    public DbSet<AutomationConnection> AutomationConnections => Set<AutomationConnection>();
+    public DbSet<AutomationWorkflowVersion> AutomationWorkflowVersions => Set<AutomationWorkflowVersion>();
+    public DbSet<AutomationCredential> AutomationCredentials => Set<AutomationCredential>();
+    public DbSet<AutomationExecution> AutomationExecutions => Set<AutomationExecution>();
+    public DbSet<AutomationNodeExecution> AutomationNodeExecutions => Set<AutomationNodeExecution>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -141,6 +149,16 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<ArticleAffiliatePlacement>().HasIndex(x => new { x.ArticleId, x.SortOrder });
 
+        modelBuilder.Entity<ArticleAffiliateRotation>()
+            .HasOne(x => x.Article)
+            .WithMany()
+            .HasForeignKey(x => x.ArticleId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<ArticleAffiliateRotation>()
+            .HasIndex(x => new { x.ArticleId, x.EndedAtUnixSeconds, x.ExpiresAtUnixSeconds });
+        modelBuilder.Entity<ArticleAffiliateRotation>()
+            .HasIndex(x => new { x.AffiliateOfferId, x.StartsAtUnixSeconds });
+
         modelBuilder.Entity<ArticleAffiliateSuggestion>()
             .HasOne(x => x.Article)
             .WithMany()
@@ -205,6 +223,49 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .HasForeignKey(x => x.EpisodeId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<PodcastListenProgress>().HasIndex(x => new { x.Username, x.EpisodeId }).IsUnique();
+
+        modelBuilder.Entity<AutomationWorkflow>().HasIndex(x => x.Status);
+        modelBuilder.Entity<AutomationWorkflow>().HasIndex(x => x.Name);
+        modelBuilder.Entity<AutomationWorkflow>().HasIndex(x => x.WebhookPath).IsUnique();
+        modelBuilder.Entity<AutomationWorkflow>().HasIndex(x => new { x.Status, x.NextScheduledAtUnixSeconds });
+        modelBuilder.Entity<AutomationNode>()
+            .HasOne(x => x.Workflow)
+            .WithMany(x => x.Nodes)
+            .HasForeignKey(x => x.WorkflowId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<AutomationNode>().HasIndex(x => new { x.WorkflowId, x.Name }).IsUnique();
+        modelBuilder.Entity<AutomationConnection>()
+            .HasOne(x => x.Workflow)
+            .WithMany(x => x.Connections)
+            .HasForeignKey(x => x.WorkflowId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<AutomationConnection>()
+            .HasIndex(x => new { x.WorkflowId, x.SourceNodeId, x.SourceOutput, x.TargetNodeId, x.TargetInput })
+            .IsUnique();
+        modelBuilder.Entity<AutomationWorkflowVersion>()
+            .HasOne(x => x.Workflow)
+            .WithMany(x => x.Versions)
+            .HasForeignKey(x => x.WorkflowId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<AutomationWorkflowVersion>()
+            .HasIndex(x => new { x.WorkflowId, x.VersionNumber })
+            .IsUnique();
+        modelBuilder.Entity<AutomationCredential>().HasIndex(x => x.Name);
+        modelBuilder.Entity<AutomationExecution>()
+            .HasOne(x => x.Workflow)
+            .WithMany()
+            .HasForeignKey(x => x.WorkflowId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<AutomationExecution>()
+            .HasIndex(x => new { x.WorkflowId, x.StartedAtUnixSeconds });
+        modelBuilder.Entity<AutomationExecution>().HasIndex(x => x.Status);
+        modelBuilder.Entity<AutomationNodeExecution>()
+            .HasOne(x => x.Execution)
+            .WithMany(x => x.NodeExecutions)
+            .HasForeignKey(x => x.ExecutionId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<AutomationNodeExecution>()
+            .HasIndex(x => new { x.ExecutionId, x.StartedAtUnixSeconds });
     }
 
     private void SynchronizeNewsItemTimestamps()

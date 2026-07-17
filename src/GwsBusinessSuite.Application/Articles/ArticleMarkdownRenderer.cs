@@ -26,6 +26,17 @@ public static class ArticleMarkdownRenderer
     public static string Render(string markdown, IReadOnlyList<ArticleAffiliatePlacement> placements)
         => Render(markdown, placements.Select(ToMarkup).ToArray());
 
+    public static string Render(
+        string markdown,
+        IReadOnlyList<ArticleAffiliatePlacement> placements,
+        AffiliatePlacementMarkup? rotatingPlacement)
+    {
+        var rendered = Render(markdown, placements);
+        return rotatingPlacement is null
+            ? rendered
+            : AppendRotatingCard(rendered, rotatingPlacement.Value);
+    }
+
     public static string Render(string markdown, IReadOnlyList<AffiliatePlacementMarkup> placements)
     {
         var rendered = markdown;
@@ -73,6 +84,19 @@ public static class ArticleMarkdownRenderer
         var safeCallToAction = WebUtility.HtmlEncode(placement.CallToActionText);
 
         return $"<div class=\"cj-ad-card\"><p><strong>Sponsored Pick: {safeAdvertiserName}</strong></p><p>Category: {safeCategory}</p><p><a href=\"{safeUrl}\" target=\"_blank\" rel=\"noopener noreferrer nofollow sponsored\">{safeCallToAction}</a></p></div>";
+    }
+
+    private static string AppendRotatingCard(string markdown, AffiliatePlacementMarkup placement)
+    {
+        if (string.IsNullOrWhiteSpace(placement.TrackingUrl))
+        {
+            return markdown;
+        }
+
+        // Automatic rotations are deliberately appended at render time rather than
+        // inserting a token into BodyMarkdown. That keeps the editorial source and its
+        // revision history unchanged while the durable assignment rotates independently.
+        return $"{markdown.TrimEnd()}\n\n{BuildCardMarkup(placement)}";
     }
 
     /// <summary>

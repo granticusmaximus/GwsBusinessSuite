@@ -66,6 +66,10 @@
   preview) and threaded through.
 
 ## Other Areas to Address
+- Workflow Automation (n8n-class, clean-room) 🚧 — foundational graph persistence,
+  immutable publish versions, protected credential references, execution history, core node
+  registry, and visual Blazor editor are tracked in `docs/WORKFLOW_AUTOMATION.md`. Advanced
+  parity work remains explicitly staged there rather than copying n8n source or assets.
 - Article approval/revision queue ✅ (audited) — the approve/reject/revision UI and the
   full workflow-event-history timeline were already complete. Two real gaps found and
   fixed: the drafts list silently capped at 20 most-recent-by-`CreatedAt`, so an old

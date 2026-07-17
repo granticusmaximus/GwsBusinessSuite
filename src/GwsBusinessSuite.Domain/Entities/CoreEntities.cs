@@ -326,6 +326,7 @@ public sealed class CjConnectorSettings : AuditableEntity
     public string WebsiteId { get; set; } = string.Empty;
     public string EndpointUrl { get; set; } = "https://commissions.api.cj.com/query";
     public int MaxResults { get; set; } = 100;
+    public bool AutomaticArticleRotationEnabled { get; set; } = true;
 }
 
 // WordPress-style "Settings" (General/Reading/Writing/Media/AI) — a singleton row for
@@ -479,6 +480,29 @@ public sealed class ArticleAffiliatePlacement : AuditableEntity
     public string TrackingUrl { get; set; } = string.Empty;
     public string CallToActionText { get; set; } = "Explore Offer";
     public int SortOrder { get; set; }
+    public Article? Article { get; set; }
+}
+
+// One durable CJ assignment for an article's automatic sponsored card. Rows are kept as
+// history so a reader who leaves an article open across a rotation boundary still follows
+// the offer that was actually displayed. Current assignments are selected by their numeric
+// UTC window columns; this keeps the hot public-blog query inside SQLite.
+public sealed class ArticleAffiliateRotation : AuditableEntity
+{
+    public Guid ArticleId { get; set; }
+    public Guid AffiliateOfferId { get; set; }
+    public string AdvertiserId { get; set; } = string.Empty;
+    public string AdvertiserName { get; set; } = string.Empty;
+    public string LinkName { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public string TrackingUrl { get; set; } = string.Empty;
+    public string CallToActionText { get; set; } = "Explore Offer";
+    public DateTimeOffset StartsAt { get; set; }
+    public long StartsAtUnixSeconds { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public long ExpiresAtUnixSeconds { get; set; }
+    public DateTimeOffset? EndedAt { get; set; }
+    public long? EndedAtUnixSeconds { get; set; }
     public Article? Article { get; set; }
 }
 
@@ -722,4 +746,130 @@ public sealed class PodcastListenProgress : AuditableEntity
     public int? DurationSeconds { get; set; }
     public bool IsCompleted { get; set; }
     public DateTimeOffset LastPlayedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public static class AutomationWorkflowStatuses
+{
+    public const string Draft = "Draft";
+    public const string Active = "Active";
+    public const string Inactive = "Inactive";
+}
+
+public static class AutomationExecutionStatuses
+{
+    public const string Queued = "Queued";
+    public const string Running = "Running";
+    public const string Succeeded = "Succeeded";
+    public const string Failed = "Failed";
+    public const string Canceled = "Canceled";
+    public const string Waiting = "Waiting";
+}
+
+public static class AutomationExecutionModes
+{
+    public const string Manual = "Manual";
+    public const string Webhook = "Webhook";
+    public const string Schedule = "Schedule";
+    public const string Retry = "Retry";
+}
+
+public sealed class AutomationWorkflow : AuditableEntity
+{
+    public required string Name { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public string Status { get; set; } = AutomationWorkflowStatuses.Draft;
+    public string TagsCsv { get; set; } = string.Empty;
+    public int CurrentVersion { get; set; }
+    public DateTimeOffset? PublishedAt { get; set; }
+    public DateTimeOffset? LastExecutedAt { get; set; }
+    public string? WebhookPath { get; set; }
+    public int? ScheduleIntervalMinutes { get; set; }
+    public DateTimeOffset? NextScheduledAt { get; set; }
+    public long? NextScheduledAtUnixSeconds { get; set; }
+    public ICollection<AutomationNode> Nodes { get; set; } = new List<AutomationNode>();
+    public ICollection<AutomationConnection> Connections { get; set; } = new List<AutomationConnection>();
+    public ICollection<AutomationWorkflowVersion> Versions { get; set; } = new List<AutomationWorkflowVersion>();
+}
+
+public sealed class AutomationNode : AuditableEntity
+{
+    public Guid WorkflowId { get; set; }
+    public required string Name { get; set; }
+    public required string TypeKey { get; set; }
+    public int TypeVersion { get; set; } = 1;
+    public double PositionX { get; set; }
+    public double PositionY { get; set; }
+    public string ParametersJson { get; set; } = "{}";
+    public Guid? CredentialId { get; set; }
+    public bool IsDisabled { get; set; }
+    public bool ContinueOnFail { get; set; }
+    public bool RetryOnFail { get; set; }
+    public int MaxTries { get; set; } = 1;
+    public int WaitBetweenTriesMs { get; set; }
+    public string Notes { get; set; } = string.Empty;
+    public AutomationWorkflow? Workflow { get; set; }
+}
+
+public sealed class AutomationConnection : AuditableEntity
+{
+    public Guid WorkflowId { get; set; }
+    public Guid SourceNodeId { get; set; }
+    public string SourceOutput { get; set; } = "main";
+    public Guid TargetNodeId { get; set; }
+    public string TargetInput { get; set; } = "main";
+    public AutomationWorkflow? Workflow { get; set; }
+}
+
+public sealed class AutomationWorkflowVersion : AuditableEntity
+{
+    public Guid WorkflowId { get; set; }
+    public int VersionNumber { get; set; }
+    public string SnapshotJson { get; set; } = "{}";
+    public string ChangeSummary { get; set; } = string.Empty;
+    public AutomationWorkflow? Workflow { get; set; }
+}
+
+public sealed class AutomationCredential : AuditableEntity
+{
+    public required string Name { get; set; }
+    public required string TypeKey { get; set; }
+    public string ProtectedData { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public DateTimeOffset? LastUsedAt { get; set; }
+}
+
+public sealed class AutomationExecution : AuditableEntity
+{
+    public Guid WorkflowId { get; set; }
+    public int WorkflowVersion { get; set; }
+    public string Mode { get; set; } = AutomationExecutionModes.Manual;
+    public string Status { get; set; } = AutomationExecutionStatuses.Queued;
+    public string InputJson { get; set; } = "{}";
+    public string OutputJson { get; set; } = "{}";
+    public string ErrorMessage { get; set; } = string.Empty;
+    public DateTimeOffset? StartedAt { get; set; }
+    public long? StartedAtUnixSeconds { get; set; }
+    public DateTimeOffset? FinishedAt { get; set; }
+    public long? FinishedAtUnixSeconds { get; set; }
+    public Guid? RetryOfExecutionId { get; set; }
+    public AutomationWorkflow? Workflow { get; set; }
+    public ICollection<AutomationNodeExecution> NodeExecutions { get; set; } = new List<AutomationNodeExecution>();
+}
+
+public sealed class AutomationNodeExecution : AuditableEntity
+{
+    public Guid ExecutionId { get; set; }
+    public Guid NodeId { get; set; }
+    public string NodeName { get; set; } = string.Empty;
+    public string NodeTypeKey { get; set; } = string.Empty;
+    public string Status { get; set; } = AutomationExecutionStatuses.Queued;
+    public int Attempt { get; set; } = 1;
+    public string InputJson { get; set; } = "{}";
+    public string OutputJson { get; set; } = "{}";
+    public string ErrorMessage { get; set; } = string.Empty;
+    public DateTimeOffset StartedAt { get; set; }
+    public long StartedAtUnixSeconds { get; set; }
+    public DateTimeOffset? FinishedAt { get; set; }
+    public long? FinishedAtUnixSeconds { get; set; }
+    public AutomationExecution? Execution { get; set; }
 }

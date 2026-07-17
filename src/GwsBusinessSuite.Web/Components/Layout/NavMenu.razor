@@ -99,6 +99,10 @@
         <details class="gws-nav-group" open="@IsGroupOpen(OperationsPrefixes)">
             <summary><span>Operations</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
             <div class="gws-nav-group-items">
+                <NavLink class="gws-nav-link" href="admin/automation" title="Workflow Automation">
+                    <i class="bi bi-diagram-3-fill" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Automation</span><small>Build and run workflows</small></span>
+                </NavLink>
                 <NavLink class="gws-nav-link" href="admin/cj-ads" title="CJ Ads">
                     <i class="bi bi-tags-fill" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>CJ Ads</span><small>Affiliate campaigns</small></span>
@@ -153,7 +157,7 @@
     private static readonly string[] PublishingPrefixes = ["admin/article", "admin/content-studio", "admin/app-generation", "admin/media", "admin/pages", "admin/appearance"];
     private static readonly string[] RelationshipPrefixes = ["admin/comments", "admin/crm", "admin/users"];
     private static readonly string[] IntelligencePrefixes = ["admin/news-intelligence", "admin/government-intelligence", "admin/podcasts"];
-    private static readonly string[] OperationsPrefixes = ["admin/cj-ads", "admin/affiliate", "admin/app-generation-queue", "admin/wiki", "admin/cms-knowledge", "admin/live-show", "admin/ollama", "admin/docker"];
+    private static readonly string[] OperationsPrefixes = ["admin/automation", "admin/cj-ads", "admin/affiliate", "admin/app-generation-queue", "admin/wiki", "admin/cms-knowledge", "admin/live-show", "admin/ollama", "admin/docker"];
 
     private string _role = string.Empty;
     private int _pendingCommentCount;

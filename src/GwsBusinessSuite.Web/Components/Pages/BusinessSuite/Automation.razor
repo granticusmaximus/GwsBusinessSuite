@@ -1,0 +1,126 @@
+@page "/admin/automation"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using GwsBusinessSuite.Application.Automation
+@inject IAutomationWorkflowService WorkflowService
+@inject NavigationManager Navigation
+@inject ILogger<Automation> Logger
+
+<PageTitle>Workflow Automation</PageTitle>
+
+<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-diagram-3-fill me-2 text-primary"></i>Workflow Automation</h1>
+        <p>Build, publish, run, and inspect durable business automations.</p>
+    </div>
+    <div class="d-flex gap-2"><a class="btn btn-outline-secondary" href="/admin/automation/credentials"><i class="bi bi-key-fill me-1"></i>Credentials</a><button class="btn btn-primary" @onclick="OpenCreate"><i class="bi bi-plus-lg me-1"></i>New workflow</button></div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-8">
+                <label class="form-label small fw-semibold" for="workflowSearch">Search workflows</label>
+                <input id="workflowSearch" class="form-control" @bind="_search" @bind:event="oninput" placeholder="Name or description" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small fw-semibold" for="workflowStatus">Status</label>
+                <select id="workflowStatus" class="form-select" @bind="_statusFilter">
+                    <option value="">All statuses</option>
+                    <option>Active</option><option>Inactive</option><option>Draft</option>
+                </select>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <div class="text-secondary py-5 text-center"><span class="spinner-border spinner-border-sm me-2"></span>Loading workflows…</div>
+}
+else if (FilteredWorkflows.Count == 0)
+{
+    <div class="card border-0 shadow-sm"><div class="card-body text-center py-5">
+        <i class="bi bi-diagram-3 fs-1 text-secondary"></i>
+        <h2 class="h5 mt-3">No workflows yet</h2>
+        <p class="text-secondary">Create a workflow to open the visual editor with a Manual Trigger ready to connect.</p>
+        <button class="btn btn-primary" @onclick="OpenCreate">Create workflow</button>
+    </div></div>
+}
+else
+{
+    <div class="row g-3">
+        @foreach (var workflow in FilteredWorkflows)
+        {
+            <div class="col-xl-4 col-md-6">
+                <button type="button" class="card border-0 shadow-sm h-100 w-100 text-start workflow-card" @onclick="() => OpenWorkflow(workflow.Id)">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between gap-2 mb-3">
+                            <div class="automation-icon"><i class="bi bi-diagram-3-fill"></i></div>
+                            <span class="badge @StatusClass(workflow.Status)">@workflow.Status</span>
+                        </div>
+                        <h2 class="h5">@workflow.Name</h2>
+                        <p class="text-secondary small workflow-description">@(string.IsNullOrWhiteSpace(workflow.Description) ? "No description" : workflow.Description)</p>
+                        <div class="d-flex flex-wrap gap-3 small text-secondary">
+                            <span><i class="bi bi-box me-1"></i>@workflow.NodeCount nodes</span>
+                            <span><i class="bi bi-layers me-1"></i>v@workflow.CurrentVersion</span>
+                            <span><i class="bi bi-clock me-1"></i>@FormatLastRun(workflow.LastExecutedAt)</span>
+                        </div>
+                    </div>
+                </button>
+            </div>
+        }
+    </div>
+}
+
+@if (_showCreate)
+{
+    <div class="modal-backdrop fade show"></div>
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+        <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+            <div class="modal-header"><h2 class="modal-title h5">Create workflow</h2><button class="btn-close" @onclick="CloseCreate" aria-label="Close"></button></div>
+            <div class="modal-body">
+                <label class="form-label fw-semibold" for="newWorkflowName">Name</label>
+                <input id="newWorkflowName" class="form-control mb-3" @bind="_newName" placeholder="Customer follow-up" />
+                <label class="form-label fw-semibold" for="newWorkflowDescription">Description</label>
+                <textarea id="newWorkflowDescription" class="form-control" rows="3" @bind="_newDescription"></textarea>
+            </div>
+            <div class="modal-footer"><button class="btn btn-outline-secondary" @onclick="CloseCreate">Cancel</button><button class="btn btn-primary" @onclick="CreateWorkflow" disabled="@_busy">Create and open</button></div>
+        </div></div>
+    </div>
+}
+
+@code {
+    private List<AutomationWorkflowSummary> _workflows = [];
+    private bool _loading = true, _busy, _showCreate;
+    private string _search = "", _statusFilter = "", _newName = "", _newDescription = "", _error = "";
+
+    private List<AutomationWorkflowSummary> FilteredWorkflows => _workflows.Where(workflow =>
+        (string.IsNullOrWhiteSpace(_search) || workflow.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) || workflow.Description.Contains(_search, StringComparison.OrdinalIgnoreCase))
+        && (string.IsNullOrWhiteSpace(_statusFilter) || workflow.Status.Equals(_statusFilter, StringComparison.OrdinalIgnoreCase))).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _workflows = (await WorkflowService.ListAsync()).ToList(); }
+        catch (Exception ex) { Logger.LogError(ex, "Unable to load automation workflows."); _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private void OpenCreate() { _newName = ""; _newDescription = ""; _showCreate = true; }
+    private void CloseCreate() => _showCreate = false;
+    private void OpenWorkflow(Guid id) => Navigation.NavigateTo($"/admin/automation/{id}");
+    private async Task CreateWorkflow()
+    {
+        _busy = true; _error = "";
+        try { var created = await WorkflowService.CreateAsync(_newName, _newDescription); Navigation.NavigateTo($"/admin/automation/{created.Id}"); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+    private static string StatusClass(string status) => status == "Active" ? "text-bg-success" : status == "Inactive" ? "text-bg-secondary" : "text-bg-warning";
+    private static string FormatLastRun(DateTimeOffset? value) => value is null ? "Never run" : value.Value.ToLocalTime().ToString("MMM d, h:mm tt");
+}

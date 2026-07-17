@@ -471,6 +471,47 @@ public sealed class CjAdsServiceTests
         result.RecordsImported.Should().Be(0);
     }
 
+    [Fact]
+    public async Task SyncAllLinksAsync_ShouldReturnOneConfigurationError_WhenWebsiteIdIsMissing()
+    {
+        await using var db = await CreateDbAsync();
+        db.AffiliateOffers.AddRange(
+            new GwsBusinessSuite.Domain.Entities.AffiliateOffer
+            {
+                Network = "CJ",
+                AdvertiserId = "adv-1",
+                AdvertiserName = "Advertiser One",
+                LinkName = "adv-1",
+                RelationshipStatus = "joined",
+                CreatedBy = "test"
+            },
+            new GwsBusinessSuite.Domain.Entities.AffiliateOffer
+            {
+                Network = "CJ",
+                AdvertiserId = "adv-2",
+                AdvertiserName = "Advertiser Two",
+                LinkName = "adv-2",
+                RelationshipStatus = "joined",
+                CreatedBy = "test"
+            });
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, new FakeSecretProtector());
+        await service.SaveConnectorSettingsAsync(new CjConnectorSettingsView
+        {
+            DeveloperKey = "dev-key",
+            PublisherId = "publisher",
+            WebsiteId = string.Empty
+        });
+
+        var result = await service.SyncAllLinksAsync();
+
+        result.IsSuccess.Should().BeFalse();
+        result.ConfigurationError.Should().Contain("Website ID");
+        result.FailureMessages.Should().BeEmpty();
+        result.AdvertisersFailed.Should().Be(0);
+    }
+
     private static CjAdsService CreateService(ApplicationDbContext db, ISecretProtector secretProtector)
     {
         return new CjAdsService(

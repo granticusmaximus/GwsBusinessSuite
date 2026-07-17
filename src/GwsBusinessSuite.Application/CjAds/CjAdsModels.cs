@@ -84,6 +84,7 @@ public sealed class CjBulkLinkSyncResult
     public int AdvertisersFailed { get; init; }
     public int TotalLinksImported { get; init; }
     public IReadOnlyList<string> FailureMessages { get; init; } = Array.Empty<string>();
+    public string ConfigurationError { get; init; } = string.Empty;
 }
 
 public sealed class CjConnectorSettingsView
@@ -93,6 +94,7 @@ public sealed class CjConnectorSettingsView
     public string WebsiteId { get; init; } = string.Empty;
     public string EndpointUrl { get; init; } = "https://commissions.api.cj.com/query";
     public int MaxResults { get; init; } = 100;
+    public bool AutomaticArticleRotationEnabled { get; init; } = true;
 
     /// <summary>
     /// True when a developer key is stored but could not be decrypted (e.g. the Data
