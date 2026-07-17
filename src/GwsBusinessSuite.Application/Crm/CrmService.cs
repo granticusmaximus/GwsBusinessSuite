@@ -208,6 +208,26 @@ public sealed class CrmService(IAppDbContext dbContext, ICurrentUserAccessor? cu
             .ToList();
     }
 
+    public async Task<CrmDashboardData> GetDashboardAsync(CancellationToken cancellationToken = default)
+    {
+        var contacts = await dbContext.Contacts
+            .AsNoTracking()
+            .Where(contact => contact.TrashedAt == null)
+            .ToListAsync(cancellationToken);
+
+        var orderedContacts = contacts
+            .OrderByDescending(contact => contact.UpdatedAt ?? contact.CreatedAt)
+            .ThenBy(contact => contact.FullName)
+            .ToList();
+        var now = DateTimeOffset.UtcNow;
+        var dueFollowUps = contacts
+            .Where(contact => contact.FollowUpDate <= now)
+            .OrderBy(contact => contact.FollowUpDate)
+            .ToList();
+
+        return new CrmDashboardData(orderedContacts, dueFollowUps);
+    }
+
     public async Task<int> CountDueFollowUpsAsync(CancellationToken cancellationToken = default)
     {
         var due = await ListDueFollowUpsAsync(cancellationToken);

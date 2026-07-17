@@ -282,32 +282,21 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadContactsAsync();
-        await LoadDueFollowUpsAsync();
+        await LoadDashboardAsync();
     }
 
-    private async Task LoadContactsAsync()
+    private async Task LoadDashboardAsync()
     {
         try
         {
-            Contacts = (await CrmService.ListContactsAsync()).ToList();
+            var dashboard = await CrmService.GetDashboardAsync();
+            Contacts = dashboard.Contacts.ToList();
+            DueFollowUps = dashboard.DueFollowUps.ToList();
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Unable to load CRM contacts.");
+            Logger.LogError(ex, "Unable to load CRM dashboard.");
             ErrorMessage = $"Unable to load contacts. {ex.Message}";
-        }
-    }
-
-    private async Task LoadDueFollowUpsAsync()
-    {
-        try
-        {
-            DueFollowUps = (await CrmService.ListDueFollowUpsAsync()).ToList();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Unable to load CRM follow-ups.");
         }
     }
 
@@ -401,8 +390,7 @@
                 FollowUpDate = saved.FollowUpDate
             };
             StatusMessage = $"Saved contact '{saved.FullName}'.";
-            await LoadContactsAsync();
-            await LoadDueFollowUpsAsync();
+            await LoadDashboardAsync();
         }
         catch (Exception ex)
         {
@@ -434,8 +422,7 @@
             await CrmService.TrashContactAsync(contactId);
             StatusMessage = "Contact moved to Trash.";
             CreateNewContact();
-            await LoadContactsAsync();
-            await LoadDueFollowUpsAsync();
+            await LoadDashboardAsync();
         }
         catch (Exception ex)
         {
@@ -460,7 +447,7 @@
         {
             await CrmService.RestoreContactAsync(contactId);
             TrashedContacts = (await CrmService.ListTrashedContactsAsync()).ToList();
-            await LoadContactsAsync();
+            await LoadDashboardAsync();
             StatusMessage = "Restored the contact from Trash.";
         }
         catch (Exception ex)

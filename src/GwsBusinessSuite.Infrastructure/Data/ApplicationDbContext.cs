@@ -147,7 +147,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<AppUser>().HasIndex(x => x.Username).IsUnique();
         modelBuilder.Entity<AppUser>().HasIndex(x => x.Role);
 
-        modelBuilder.Entity<NewsItem>().HasIndex(x => new { x.TopicId, x.FetchedAt });
+        modelBuilder.Entity<NewsItem>().HasIndex(x => new { x.TopicId, x.FetchedAtUnixSeconds });
+        modelBuilder.Entity<NewsItem>().HasIndex(x => x.PublishedAtUnixSeconds);
         modelBuilder.Entity<NewsItem>().HasIndex(x => x.Url);
 
         modelBuilder.Entity<PodcastShow>().HasIndex(x => x.Category);

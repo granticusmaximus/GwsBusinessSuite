@@ -12,6 +12,7 @@ public interface INewsIntelligenceService
     Task RefreshTopicAsync(Guid topicId, CancellationToken ct = default);
     Task RefreshTopNewsAsync(CancellationToken ct = default);
     Task RefreshAllAsync(CancellationToken ct = default);
+    NewsRefreshStatus GetRefreshStatus();
 }
 
 public sealed record WatchedTopicSummary(
@@ -41,3 +42,24 @@ public sealed record NewsItemDto(
 public sealed record NewsFeedResult(
     IReadOnlyList<NewsItemDto> Items,
     DateTimeOffset? LastRefreshedAt);
+
+public sealed record NewsRefreshTiming(
+    string WorkItem,
+    string Stage,
+    long DurationMilliseconds,
+    int ItemCount);
+
+public sealed record NewsRefreshStatus(
+    bool IsRunning,
+    string Phase,
+    int CompletedItems,
+    int TotalItems,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? CompletedAt,
+    IReadOnlyList<string> ActiveItems,
+    IReadOnlyList<NewsRefreshTiming> Timings,
+    string? LastError)
+{
+    public static NewsRefreshStatus Idle { get; } = new(
+        false, "Idle", 0, 0, null, null, [], [], null);
+}

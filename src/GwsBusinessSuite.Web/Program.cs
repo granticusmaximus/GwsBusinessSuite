@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
 using System.IO.Compression;
 using System.Security.Claims;
@@ -48,6 +49,14 @@ builder.Services.AddRazorComponents()
 // headers surface the original HTTPS scheme behind Cloudflare, so HTTPS compression
 // must be enabled explicitly or production traffic would silently skip it.
 builder.Services.AddResponseCompression(options => options.EnableForHttps = true);
+builder.Services.AddOutputCache(options =>
+{
+    options.AddPolicy(OutputCachePublicContentInvalidator.Tag, policy => policy
+        .Expire(TimeSpan.FromMinutes(2))
+        .Tag(OutputCachePublicContentInvalidator.Tag));
+});
+builder.Services.AddSingleton<IPublicContentCacheInvalidator, OutputCachePublicContentInvalidator>();
+builder.Services.AddSingleton<PerformanceTelemetry>();
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserAccessor, CurrentUserAccessor>();
@@ -301,12 +310,38 @@ if (!string.IsNullOrWhiteSpace(normalizedPathBase))
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
+app.Use(async (context, next) =>
+{
+    var timer = System.Diagnostics.Stopwatch.StartNew();
+    try
+    {
+        await next(context);
+    }
+    finally
+    {
+        timer.Stop();
+        context.RequestServices.GetRequiredService<PerformanceTelemetry>().Record(context, timer.Elapsed);
+    }
+});
+app.UseOutputCache();
 app.UseAntiforgery();
 app.UseRateLimiter();
 
 // Plain-text Healthy/Degraded/Unhealthy with no detail disclosure, intended for the deploy
 // pipeline's post-deploy smoke test and any external uptime monitor.
 app.MapHealthChecks("/health").AllowAnonymous();
+
+app.MapGet("/admin/api/performance", (
+    PerformanceTelemetry telemetry,
+    GwsBusinessSuite.Application.NewsIntelligence.INewsIntelligenceService newsService) =>
+    Results.Ok(new
+    {
+        generatedAt = DateTimeOffset.UtcNow,
+        routes = telemetry.Snapshot(),
+        newsRefresh = newsService.GetRefreshStatus()
+    }))
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("public-read");
 
 // AllowAnonymous at the connection level - unauthenticated viewers must be able to open
 // this connection to call JoinAsViewer(inviteToken); JoinAsBroadcaster separately checks
@@ -411,7 +446,8 @@ app.MapGet("/og-image/{slug}", async (
     catch { return Results.NotFound(); }
 
     return Results.Bytes(bytes, mime);
-}).AllowAnonymous().RequireRateLimiting("public-read");
+}).AllowAnonymous().RequireRateLimiting("public-read")
+    .CacheOutput(OutputCachePublicContentInvalidator.Tag);
 
 // Serves a CmsSite/CmsPage built via the admin Pages screens ("/admin/pages") as a
 // standalone public HTML page. These pages are independent of the apps/public-site React
@@ -492,7 +528,8 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
         """;
 
     return Results.Content(html, "text/html");
-}).AllowAnonymous().RequireRateLimiting("public-read");
+}).AllowAnonymous().RequireRateLimiting("public-read")
+    .CacheOutput(OutputCachePublicContentInvalidator.Tag);
 
 // Handles "form" widget submissions (see CmsBlockHtmlRenderer's "form" case). Fixed URL
 // per site rather than per page — the submitted page's (possibly nested) full path travels
@@ -576,7 +613,8 @@ app.MapGet("/{**pageSlug}", (
         IConfiguration configuration,
         IDbContextFactory<ApplicationDbContext> dbFactory) =>
         RenderPublicCanvasPageAsync(pageSlug, request, request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration, dbFactory))
-    .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
+    .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read")
+    .CacheOutput(OutputCachePublicContentInvalidator.Tag);
 
 app.MapGet("/blog", async (
         HttpRequest request,
@@ -1511,7 +1549,8 @@ app.MapGet("/", (
     IsPublicHost(httpContext)
         ? RenderPublicCanvasPageAsync("home", request, request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration, dbFactory)
         : Task.FromResult(Results.Redirect("/admin")))
-    .AllowAnonymous().RequireRateLimiting("public-read");
+    .AllowAnonymous().RequireRateLimiting("public-read")
+    .CacheOutput(OutputCachePublicContentInvalidator.Tag);
 
 app.Run();
 

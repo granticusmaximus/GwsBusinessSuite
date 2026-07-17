@@ -4,6 +4,8 @@ namespace GwsBusinessSuite.Application.Crm;
 
 public interface ICrmService
 {
+    Task<CrmDashboardData> GetDashboardAsync(CancellationToken cancellationToken = default);
+
     // Excludes trashed contacts unless includeTrashed is set - mirrors CmsBuilder's
     // ListPagesAsync/ListTrashedPagesAsync split.
     Task<IReadOnlyList<Contact>> ListContactsAsync(bool includeTrashed = false, CancellationToken cancellationToken = default);
@@ -31,3 +33,7 @@ public interface ICrmService
 
     Task<int> CountDueFollowUpsAsync(CancellationToken cancellationToken = default);
 }
+
+public sealed record CrmDashboardData(
+    IReadOnlyList<Contact> Contacts,
+    IReadOnlyList<Contact> DueFollowUps);

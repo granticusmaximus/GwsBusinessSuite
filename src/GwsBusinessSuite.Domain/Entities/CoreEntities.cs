@@ -571,6 +571,9 @@ public sealed class NewsItem : AuditableEntity
     public required string Url { get; set; }
     public string Source { get; set; } = string.Empty;
     public DateTimeOffset? PublishedAt { get; set; }
+    // Numeric UTC companions keep range filters and ordering inside SQLite. The original
+    // DateTimeOffset values remain the display/source-of-truth fields.
+    public long? PublishedAtUnixSeconds { get; set; }
     public string Description { get; set; } = string.Empty;
     public string OllamaSummary { get; set; } = string.Empty;
 
@@ -579,6 +582,7 @@ public sealed class NewsItem : AuditableEntity
     public string? ImageUrl { get; set; }
 
     public DateTimeOffset FetchedAt { get; set; } = DateTimeOffset.UtcNow;
+    public long FetchedAtUnixSeconds { get; set; }
 }
 
 public sealed class PodcastShow : AuditableEntity

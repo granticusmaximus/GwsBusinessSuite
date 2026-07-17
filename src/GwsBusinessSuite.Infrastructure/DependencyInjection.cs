@@ -26,6 +26,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http.Resilience;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Polly;
 
 namespace GwsBusinessSuite.Infrastructure;
@@ -46,7 +47,11 @@ public static class DependencyInjection
 
         services.Configure<ContentStudioOptions>(configuration.GetSection(ContentStudioOptions.SectionName));
 
-        services.AddDbContextFactory<ApplicationDbContext>(options => options.UseSqlite(connectionString));
+        services.TryAddSingleton<IPublicContentCacheInvalidator, NoOpPublicContentCacheInvalidator>();
+        services.AddSingleton<PublicContentCacheInvalidationInterceptor>();
+        services.AddDbContextFactory<ApplicationDbContext>((serviceProvider, options) => options
+            .UseSqlite(connectionString)
+            .AddInterceptors(serviceProvider.GetRequiredService<PublicContentCacheInvalidationInterceptor>()));
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
         services.AddScoped<IAppDbContextFactory, AppDbContextFactory>();
         services.AddScoped<ISecretProtector, DataProtectionSecretProtector>();
@@ -79,6 +84,7 @@ public static class DependencyInjection
             });
         });
         services.AddMemoryCache();
+        services.AddSingleton<NewsRefreshState>();
         services.AddHttpClient<ITrendResearchService, TrendResearchService>();
         services.AddScoped<IDockerDeploymentService, DockerDeploymentService>();
         services.AddScoped<ICjAdsService, CjAdsService>();

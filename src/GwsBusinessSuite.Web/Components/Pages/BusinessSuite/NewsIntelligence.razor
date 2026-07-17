@@ -175,6 +175,45 @@
             <div class="alert alert-danger" role="alert"><i class="bi bi-exclamation-triangle me-2"></i>@_errorMessage</div>
         }
 
+        @if (_refreshStatus.IsRunning || _refreshStatus.Timings.Count > 0)
+        {
+            <div class="card border-0 shadow-sm mb-3">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="fw-semibold">Refresh pipeline</span>
+                        <span class="text-secondary small">@_refreshStatus.Phase</span>
+                    </div>
+                    <div class="progress mb-2" role="progressbar" aria-valuenow="@RefreshProgressPercent" aria-valuemin="0" aria-valuemax="100">
+                        <div class="progress-bar progress-bar-striped @(_refreshStatus.IsRunning ? "progress-bar-animated" : "")"
+                             style="width:@RefreshProgressPercent%">@_refreshStatus.CompletedItems / @_refreshStatus.TotalItems</div>
+                    </div>
+                    @if (_refreshStatus.ActiveItems.Count > 0)
+                    {
+                        <div class="small text-secondary mb-2">Active: @string.Join(", ", _refreshStatus.ActiveItems)</div>
+                    }
+                    @if (_refreshStatus.Timings.Count > 0)
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-sm mb-0 small">
+                                <thead><tr><th>Feed</th><th>Stage</th><th class="text-end">Items</th><th class="text-end">Time</th></tr></thead>
+                                <tbody>
+                                    @foreach (var timing in _refreshStatus.Timings.OrderByDescending(t => t.DurationMilliseconds).Take(12))
+                                    {
+                                        <tr>
+                                            <td>@timing.WorkItem</td>
+                                            <td>@timing.Stage</td>
+                                            <td class="text-end">@timing.ItemCount</td>
+                                            <td class="text-end">@FormatDuration(timing.DurationMilliseconds)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
         @if (_loading)
         {
             <div class="d-flex align-items-center gap-2 text-secondary">
@@ -218,6 +257,7 @@
     private bool _refreshingTopNews;
     private string _statusMessage = string.Empty;
     private string _errorMessage = string.Empty;
+    private NewsRefreshStatus _refreshStatus = NewsRefreshStatus.Idle;
 
     // Empty means "no filter" (show every source). Populated with the sources the user
     // has explicitly chosen to show - can combine any number of sources at once.
@@ -314,7 +354,7 @@
                 return;
             }
 
-            await NewsService.RefreshAllAsync();
+            await RunRefreshWithProgressAsync(() => NewsService.RefreshAllAsync());
             await ReloadAsync();
             _statusMessage = "Feed refreshed.";
         }
@@ -348,7 +388,7 @@
                 return;
             }
 
-            await NewsService.RefreshTopNewsAsync();
+            await RunRefreshWithProgressAsync(() => NewsService.RefreshTopNewsAsync());
             await LoadFeedAsync();
             _statusMessage = "All News refreshed.";
         }
@@ -366,6 +406,7 @@
 
     private async Task RefreshTopicAsync(Guid topicId)
     {
+        _refreshing = true;
         _statusMessage = string.Empty;
         _errorMessage = string.Empty;
 
@@ -381,7 +422,7 @@
                 return;
             }
 
-            await NewsService.RefreshTopicAsync(topicId);
+            await RunRefreshWithProgressAsync(() => NewsService.RefreshTopicAsync(topicId));
             await ReloadAsync();
         }
         catch (Exception ex)
@@ -392,8 +433,31 @@
         finally
         {
             if (acquired) NewsRefreshBackgroundService.RefreshLock.Release();
+            _refreshing = false;
         }
     }
+
+    private async Task RunRefreshWithProgressAsync(Func<Task> refresh)
+    {
+        var refreshTask = refresh();
+        while (!refreshTask.IsCompleted)
+        {
+            _refreshStatus = NewsService.GetRefreshStatus();
+            await InvokeAsync(StateHasChanged);
+            await Task.WhenAny(refreshTask, Task.Delay(300));
+        }
+
+        await refreshTask;
+        _refreshStatus = NewsService.GetRefreshStatus();
+    }
+
+    private int RefreshProgressPercent => _refreshStatus.TotalItems == 0
+        ? 0
+        : (int)Math.Round(100d * _refreshStatus.CompletedItems / _refreshStatus.TotalItems);
+
+    private static string FormatDuration(long milliseconds) => milliseconds >= 1000
+        ? $"{milliseconds / 1000d:0.0}s"
+        : $"{milliseconds}ms";
 
     private async Task DeleteTopicAsync(Guid topicId)
     {

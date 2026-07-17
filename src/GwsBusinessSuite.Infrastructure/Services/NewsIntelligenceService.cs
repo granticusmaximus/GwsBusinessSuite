@@ -1,4 +1,6 @@
 using System.Net.Http.Json;
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using CodeHollow.FeedReader;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.ContentStudio;
@@ -17,6 +19,7 @@ public sealed class NewsIntelligenceService(
     IOptions<ContentStudioOptions> studioOptions,
     HttpClient http,
     IMemoryCache cache,
+    NewsRefreshState refreshState,
     ILogger<NewsIntelligenceService> logger) : INewsIntelligenceService
 {
     // Google News RSS is used exclusively because:
@@ -29,6 +32,11 @@ public sealed class NewsIntelligenceService(
     private const int MaxItemsPerTopic = 30;
     private const int MaxTopNewsItems = 25;
     private const int NewsItemTtlHours = 24;
+    private const int MaxConcurrentRefreshes = 3;
+    private static readonly SemaphoreSlim WriteLock = new(1, 1);
+    private static readonly Meter Meter = new("GwsBusinessSuite.NewsIntelligence", "1.0");
+    private static readonly Histogram<double> RefreshDuration = Meter.CreateHistogram<double>(
+        "gws.news.refresh.duration", "s", "News refresh stage duration");
 
     private string OllamaModel => studioOptions.Value.Model;
 
@@ -43,21 +51,19 @@ public sealed class NewsIntelligenceService(
             .OrderBy(t => t.Name)
             .ToListAsync(ct);
 
-        var cutoff = DateTimeOffset.UtcNow.AddHours(-NewsItemTtlHours);
+        var cutoffUnixSeconds = DateTimeOffset.UtcNow.AddHours(-NewsItemTtlHours).ToUnixTimeSeconds();
         var topicIds = topics.Select(t => t.Id).ToList();
 
-        // SQLite can't translate range comparisons (>=) on DateTimeOffset columns,
-        // so pull the (small) candidate set down and filter/group in memory.
-        var recent = await db.NewsItems
+        var recentCounts = await db.NewsItems
             .AsNoTracking()
-            .Where(n => n.TopicId != null && topicIds.Contains(n.TopicId!.Value))
-            .Select(n => new { n.TopicId, n.FetchedAt })
+            .Where(n => n.TopicId != null
+                && topicIds.Contains(n.TopicId!.Value)
+                && n.FetchedAtUnixSeconds >= cutoffUnixSeconds)
+            .GroupBy(n => n.TopicId!.Value)
+            .Select(group => new { TopicId = group.Key, Count = group.Count() })
             .ToListAsync(ct);
 
-        var countMap = recent
-            .Where(n => n.FetchedAt >= cutoff)
-            .GroupBy(n => n.TopicId!.Value)
-            .ToDictionary(g => g.Key, g => g.Count());
+        var countMap = recentCounts.ToDictionary(x => x.TopicId, x => x.Count);
 
         return topics.Select(t => new WatchedTopicSummary(
             t.Id, t.Name, t.Keywords, t.ColorHex, t.IsActive, t.LastFetchedAt,
@@ -119,27 +125,24 @@ public sealed class NewsIntelligenceService(
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
 
-        var cutoff = DateTimeOffset.UtcNow.AddHours(-NewsItemTtlHours);
+        var cutoffUnixSeconds = DateTimeOffset.UtcNow.AddHours(-NewsItemTtlHours).ToUnixTimeSeconds();
         var topicMap = await db.WatchedTopics.AsNoTracking().ToDictionaryAsync(t => t.Id, ct);
 
         IQueryable<NewsItem> query = db.NewsItems.AsNoTracking();
         if (topicId.HasValue)
             query = query.Where(n => n.TopicId == topicId.Value);
 
-        // SQLite can't translate range comparisons (>=) on DateTimeOffset columns,
-        // so the cutoff filter and ordering both happen in memory below.
-        var items = await query.ToListAsync(ct);
-
-        items = items
-            .Where(n => n.FetchedAt >= cutoff)
-            .OrderByDescending(n => n.PublishedAt ?? n.FetchedAt)
+        var items = await query
+            .Where(n => n.FetchedAtUnixSeconds >= cutoffUnixSeconds)
+            .OrderByDescending(n => n.PublishedAtUnixSeconds ?? n.FetchedAtUnixSeconds)
             .Take(100)
-            .ToList();
+            .ToListAsync(ct);
 
         var dtos = items.Select(n =>
         {
-            var topicName  = n.TopicId.HasValue && topicMap.TryGetValue(n.TopicId.Value, out var t)  ? t.Name     : "Top News";
-            var topicColor = n.TopicId.HasValue && topicMap.TryGetValue(n.TopicId.Value, out var tc) ? tc.ColorHex : "#64748b";
+            var topic = n.TopicId is { } id && topicMap.TryGetValue(id, out var match) ? match : null;
+            var topicName = topic?.Name ?? "Top News";
+            var topicColor = topic?.ColorHex ?? "#64748b";
             return new NewsItemDto(n.Id, n.TopicId, topicName, topicColor, n.Title, n.Url,
                 n.Source, n.PublishedAt, n.Description, n.OllamaSummary, n.FetchedAt, n.ImageUrl);
         }).ToList();
@@ -152,84 +155,192 @@ public sealed class NewsIntelligenceService(
 
     public async Task RefreshTopicAsync(Guid topicId, CancellationToken ct = default)
     {
-        await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+        var workItem = await LoadTopicWorkItemAsync(topicId, ct);
+        if (workItem is null) return;
 
-        var topic = await db.WatchedTopics.FindAsync([topicId], ct);
-        if (topic is null || !topic.IsActive) return;
-
-        var keywords = topic.Keywords
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(k => k.Length > 0)
-            .ToArray();
-
-        if (keywords.Length == 0)
+        refreshState.Begin(1);
+        try
         {
-            logger.LogWarning("Topic '{Name}' has no keywords — skipping", topic.Name);
-            return;
+            await RefreshWorkItemAsync(workItem, ct);
         }
-
-        logger.LogInformation("Refreshing topic '{Name}' ({Type}): {Keywords}", topic.Name, topic.TopicType, string.Join(", ", keywords));
-
-        var articles = topic.TopicType == WatchedTopicTypes.Technical
-            ? await FetchTechnicalArticlesAsync(keywords, ct)
-            : await FetchArticlesAsync(keywords, ct);
-        logger.LogInformation("Topic '{Name}': fetched {Count} articles", topic.Name, articles.Count);
-
-        await PruneAndSaveItemsAsync(db, topicId, articles, MaxItemsPerTopic, ct);
-
-        topic.LastFetchedAt = DateTimeOffset.UtcNow;
-        topic.UpdatedAt     = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync(ct);
+        finally
+        {
+            refreshState.Finish();
+        }
     }
 
     public async Task RefreshTopNewsAsync(CancellationToken ct = default)
     {
-        await using var db = await dbContextFactory.CreateDbContextAsync(ct);
-        logger.LogInformation("Refreshing top news");
-        var articles = await FetchArticlesAsync(keywords: null, ct);
-        logger.LogInformation("Top news: fetched {Count} articles", articles.Count);
-        await PruneAndSaveItemsAsync(db, topicId: null, articles, MaxTopNewsItems, ct);
+        refreshState.Begin(1);
+        try
+        {
+            await RefreshWorkItemAsync(RefreshWorkItem.TopNews, ct);
+        }
+        finally
+        {
+            refreshState.Finish();
+        }
     }
 
     public async Task RefreshAllAsync(CancellationToken ct = default)
     {
-        await RefreshTopNewsAsync(ct);
-
-        List<Guid> activeTopicIds;
+        var workItems = new List<RefreshWorkItem> { RefreshWorkItem.TopNews };
         await using (var db = await dbContextFactory.CreateDbContextAsync(ct))
         {
-            activeTopicIds = await db.WatchedTopics
+            workItems.AddRange(await db.WatchedTopics
                 .AsNoTracking()
                 .Where(t => t.IsActive)
-                .Select(t => t.Id)
-                .ToListAsync(ct);
+                .OrderBy(t => t.Name)
+                .Select(t => new RefreshWorkItem(t.Id, t.Name, t.Keywords, t.TopicType, MaxItemsPerTopic))
+                .ToListAsync(ct));
         }
 
-        foreach (var id in activeTopicIds)
+        refreshState.Begin(workItems.Count);
+        var totalTimer = Stopwatch.StartNew();
+        try
         {
-            if (ct.IsCancellationRequested) break;
-            try   { await RefreshTopicAsync(id, ct); }
-            catch (Exception ex) { logger.LogError(ex, "Failed to refresh topic {TopicId}", id); }
+            await Parallel.ForEachAsync(
+                workItems,
+                new ParallelOptions { MaxDegreeOfParallelism = MaxConcurrentRefreshes, CancellationToken = ct },
+                async (workItem, token) => await RefreshWorkItemAsync(workItem, token));
+
+            await WriteLock.WaitAsync(ct);
+            try
+            {
+                await using var pruneDb = await dbContextFactory.CreateDbContextAsync(ct);
+                var cutoffUnixSeconds = DateTimeOffset.UtcNow.AddHours(-NewsItemTtlHours).ToUnixTimeSeconds();
+                var pruned = await pruneDb.NewsItems
+                    .Where(n => n.FetchedAtUnixSeconds < cutoffUnixSeconds)
+                    .ExecuteDeleteAsync(ct);
+                if (pruned > 0)
+                    logger.LogInformation("Pruned {Count} expired news items", pruned);
+            }
+            finally
+            {
+                WriteLock.Release();
+            }
         }
+        finally
+        {
+            totalTimer.Stop();
+            RefreshDuration.Record(totalTimer.Elapsed.TotalSeconds,
+                new KeyValuePair<string, object?>("stage", "all"));
+            logger.LogInformation(
+                "News refresh completed in {DurationMs} ms for {WorkItemCount} work items",
+                totalTimer.ElapsedMilliseconds, workItems.Count);
+            refreshState.Finish();
+        }
+    }
 
-        // Prune items older than 24h using direct SQL to avoid concurrency collisions.
-        // SQLite can't translate a DateTimeOffset "<" comparison, so the cutoff check
-        // happens in memory and only the resulting id list is sent to ExecuteDeleteAsync.
-        await using var pruneDb = await dbContextFactory.CreateDbContextAsync(ct);
-        var cutoff = DateTimeOffset.UtcNow.AddHours(-NewsItemTtlHours);
-        var staleIds = (await pruneDb.NewsItems
-                .AsNoTracking()
-                .Select(n => new { n.Id, n.FetchedAt })
-                .ToListAsync(ct))
-            .Where(n => n.FetchedAt < cutoff)
-            .Select(n => n.Id)
-            .ToList();
+    public NewsRefreshStatus GetRefreshStatus() => refreshState.Snapshot;
 
-        var pruned = staleIds.Count > 0
-            ? await pruneDb.NewsItems.Where(n => staleIds.Contains(n.Id)).ExecuteDeleteAsync(ct)
-            : 0;
-        if (pruned > 0)
-            logger.LogInformation("Pruned {Count} expired news items", pruned);
+    private async Task<RefreshWorkItem?> LoadTopicWorkItemAsync(Guid topicId, CancellationToken ct)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+        return await db.WatchedTopics
+            .AsNoTracking()
+            .Where(t => t.Id == topicId && t.IsActive)
+            .Select(t => new RefreshWorkItem(t.Id, t.Name, t.Keywords, t.TopicType, MaxItemsPerTopic))
+            .FirstOrDefaultAsync(ct);
+    }
+
+    private async Task RefreshWorkItemAsync(RefreshWorkItem workItem, CancellationToken ct)
+    {
+        var timings = new List<NewsRefreshTiming>();
+        refreshState.StartItem(workItem.Name);
+        try
+        {
+            var prepared = await PrepareWorkItemAsync(workItem, timings, ct);
+            await CommitPreparedAsync(prepared, timings, ct);
+            refreshState.CompleteItem(workItem.Name, timings);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to refresh {WorkItem}", workItem.Name);
+            refreshState.FailItem(workItem.Name, ex, timings);
+        }
+    }
+
+    private async Task<PreparedRefresh> PrepareWorkItemAsync(
+        RefreshWorkItem workItem,
+        List<NewsRefreshTiming> timings,
+        CancellationToken ct)
+    {
+        var keywords = workItem.TopicId is null
+            ? null
+            : workItem.Keywords
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(k => k.Length > 0)
+                .ToArray();
+
+        if (workItem.TopicId is not null && keywords is { Length: 0 })
+            throw new InvalidOperationException($"Topic '{workItem.Name}' has no keywords.");
+
+        var articles = workItem.TopicType == WatchedTopicTypes.Technical
+            ? await FetchTechnicalArticlesAsync(keywords!, workItem.Name, timings, ct)
+            : await FetchArticlesAsync(keywords, workItem.Name, timings, ct);
+
+        var selected = articles.Take(workItem.MaxItems).ToList();
+        var summaries = await MeasureStageAsync(
+            workItem.Name, "Ollama summary", selected.Count,
+            () => BatchSummarizeAsync(selected, ct), timings);
+
+        return new PreparedRefresh(workItem, selected, summaries);
+    }
+
+    private async Task CommitPreparedAsync(
+        PreparedRefresh prepared,
+        List<NewsRefreshTiming> timings,
+        CancellationToken ct)
+    {
+        await WriteLock.WaitAsync(ct);
+        var timer = Stopwatch.StartNew();
+        try
+        {
+            await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+            await using var transaction = await db.BeginTransactionAsync(ct);
+
+            await db.NewsItems.Where(n => n.TopicId == prepared.WorkItem.TopicId).ExecuteDeleteAsync(ct);
+            var fetchedAt = DateTimeOffset.UtcNow;
+
+            for (var i = 0; i < prepared.Articles.Count; i++)
+            {
+                var article = prepared.Articles[i];
+                db.NewsItems.Add(new NewsItem
+                {
+                    TopicId = prepared.WorkItem.TopicId,
+                    Title = Truncate(article.Title, 500),
+                    Url = article.Url,
+                    Source = Truncate(article.Source, 200),
+                    PublishedAt = article.PublishedAt,
+                    PublishedAtUnixSeconds = article.PublishedAt?.ToUnixTimeSeconds(),
+                    Description = Truncate(article.Description, 1000),
+                    OllamaSummary = prepared.Summaries.ElementAtOrDefault(i) ?? string.Empty,
+                    ImageUrl = string.IsNullOrWhiteSpace(article.ImageUrl) ? null : Truncate(article.ImageUrl, 1000),
+                    FetchedAt = fetchedAt,
+                    FetchedAtUnixSeconds = fetchedAt.ToUnixTimeSeconds()
+                });
+            }
+
+            if (prepared.WorkItem.TopicId is { } topicId)
+            {
+                var topic = await db.WatchedTopics.FindAsync([topicId], ct);
+                if (topic is not null)
+                {
+                    topic.LastFetchedAt = fetchedAt;
+                    topic.UpdatedAt = fetchedAt;
+                }
+            }
+
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        finally
+        {
+            timer.Stop();
+            WriteLock.Release();
+            RecordTiming(prepared.WorkItem.Name, "SQLite commit", timer.Elapsed, prepared.Articles.Count, timings);
+        }
     }
 
     // ── Combined sources ─────────────────────────────────────
@@ -239,10 +350,16 @@ public sealed class NewsIntelligenceService(
     /// When <paramref name="keywords"/> is null, returns each source's general/top feed.
     /// When keywords are provided, runs one search per keyword per source and merges everything.
     /// </summary>
-    private async Task<List<RawArticle>> FetchArticlesAsync(string[]? keywords, CancellationToken ct)
+    private async Task<List<RawArticle>> FetchArticlesAsync(
+        string[]? keywords,
+        string workItem,
+        List<NewsRefreshTiming> timings,
+        CancellationToken ct)
     {
-        var googleTask = FetchGoogleNewsAsync(keywords, ct);
-        var devToTask = FetchDevToAsync(keywords, ct);
+        var googleTask = MeasureStageAsync(
+            workItem, "Google News", 0, () => FetchGoogleNewsAsync(keywords, ct), timings);
+        var devToTask = MeasureStageAsync(
+            workItem, "dev.to", 0, () => FetchDevToAsync(keywords, ct), timings);
         await Task.WhenAll(googleTask, devToTask);
 
         var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -268,11 +385,18 @@ public sealed class NewsIntelligenceService(
     /// keyword array (there's no "Technical Top News" concept, unlike the General path) -
     /// so unlike FetchArticlesAsync/FetchDevToAsync, keywords here is never null.
     /// </summary>
-    private async Task<List<RawArticle>> FetchTechnicalArticlesAsync(string[] keywords, CancellationToken ct)
+    private async Task<List<RawArticle>> FetchTechnicalArticlesAsync(
+        string[] keywords,
+        string workItem,
+        List<NewsRefreshTiming> timings,
+        CancellationToken ct)
     {
-        var hackerNewsTask = FetchHackerNewsAsync(keywords, ct);
-        var devToTask = FetchDevToAsync(keywords, ct);
-        var techBlogsTask = FetchCuratedTechBlogsAsync(ct);
+        var hackerNewsTask = MeasureStageAsync(
+            workItem, "Hacker News", 0, () => FetchHackerNewsAsync(keywords, ct), timings);
+        var devToTask = MeasureStageAsync(
+            workItem, "dev.to", 0, () => FetchDevToAsync(keywords, ct), timings);
+        var techBlogsTask = MeasureStageAsync(
+            workItem, "Curated blogs", 0, () => FetchCuratedTechBlogsAsync(ct), timings);
         await Task.WhenAll(hackerNewsTask, devToTask, techBlogsTask);
 
         // Curated blogs have no keyword-search API (unlike HN Algolia / dev.to tags), so
@@ -571,38 +695,6 @@ public sealed class NewsIntelligenceService(
 
     // ── Ollama summarisation ──────────────────────────────────
 
-    private async Task PruneAndSaveItemsAsync(
-        IAppDbContext db,
-        Guid? topicId,
-        List<RawArticle> articles,
-        int maxItems,
-        CancellationToken ct)
-    {
-        await db.NewsItems.Where(n => n.TopicId == topicId).ExecuteDeleteAsync(ct);
-
-        var toSave   = articles.Take(maxItems).ToList();
-        var summaries = await BatchSummarizeAsync(toSave, ct);
-
-        for (var i = 0; i < toSave.Count; i++)
-        {
-            var a = toSave[i];
-            db.NewsItems.Add(new NewsItem
-            {
-                TopicId      = topicId,
-                Title        = Truncate(a.Title, 500),
-                Url          = a.Url,
-                Source       = Truncate(a.Source, 200),
-                PublishedAt  = a.PublishedAt,
-                Description  = Truncate(a.Description, 1000),
-                OllamaSummary = summaries.ElementAtOrDefault(i) ?? string.Empty,
-                ImageUrl     = string.IsNullOrWhiteSpace(a.ImageUrl) ? null : Truncate(a.ImageUrl, 1000),
-                FetchedAt    = DateTimeOffset.UtcNow
-            });
-        }
-
-        await db.SaveChangesAsync(ct);
-    }
-
     private async Task<List<string>> BatchSummarizeAsync(List<RawArticle> articles, CancellationToken ct)
     {
         if (articles.Count == 0) return [];
@@ -646,6 +738,49 @@ public sealed class NewsIntelligenceService(
 
     // ── Helpers ───────────────────────────────────────────────
 
+    private async Task<T> MeasureStageAsync<T>(
+        string workItem,
+        string stage,
+        int fallbackItemCount,
+        Func<Task<T>> action,
+        List<NewsRefreshTiming> timings)
+    {
+        var timer = Stopwatch.StartNew();
+        try
+        {
+            var result = await action();
+            var itemCount = result is System.Collections.ICollection collection
+                ? collection.Count
+                : fallbackItemCount;
+            timer.Stop();
+            RecordTiming(workItem, stage, timer.Elapsed, itemCount, timings);
+            return result;
+        }
+        catch
+        {
+            timer.Stop();
+            RecordTiming(workItem, stage, timer.Elapsed, fallbackItemCount, timings);
+            throw;
+        }
+    }
+
+    private void RecordTiming(
+        string workItem,
+        string stage,
+        TimeSpan elapsed,
+        int itemCount,
+        List<NewsRefreshTiming> timings)
+    {
+        var timing = new NewsRefreshTiming(workItem, stage, (long)elapsed.TotalMilliseconds, itemCount);
+        lock (timings) timings.Add(timing);
+        RefreshDuration.Record(elapsed.TotalSeconds,
+            new KeyValuePair<string, object?>("work_item", workItem),
+            new KeyValuePair<string, object?>("stage", stage));
+        logger.LogInformation(
+            "News refresh {WorkItem} stage {Stage} completed in {DurationMs} ms with {ItemCount} items",
+            workItem, stage, timing.DurationMilliseconds, itemCount);
+    }
+
     private static string StripHtml(string html)
     {
         if (string.IsNullOrWhiteSpace(html)) return string.Empty;
@@ -672,4 +807,20 @@ public sealed class NewsIntelligenceService(
         DateTimeOffset? PublishedAt,
         string Description,
         string? ImageUrl = null);
+
+    private sealed record RefreshWorkItem(
+        Guid? TopicId,
+        string Name,
+        string Keywords,
+        string TopicType,
+        int MaxItems)
+    {
+        public static RefreshWorkItem TopNews { get; } = new(
+            null, "Top News", string.Empty, WatchedTopicTypes.General, MaxTopNewsItems);
+    }
+
+    private sealed record PreparedRefresh(
+        RefreshWorkItem WorkItem,
+        List<RawArticle> Articles,
+        List<string> Summaries);
 }
