@@ -1658,8 +1658,12 @@ else
         }
     }
 
-    private void ReloadPreview() =>
-        _previewTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    private void ReloadPreview()
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        _previewTimestamp = Math.Max(_previewTimestamp + 1, now);
+        StateHasChanged();
+    }
 
     private string CurrentFullPath => _page is null ? string.Empty : CmsBuilderService.BuildFullPath(_page, _allPagesInSite);
 

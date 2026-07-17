@@ -100,6 +100,7 @@ public static class CmsBlockHtmlRenderer
 
           var drag = null;
           var paletteDragTarget = null;
+          var paletteDragTargetKey = '';
           var html5Indicator = null;
 
           function createIndicator() {
@@ -203,6 +204,21 @@ public static class CmsBlockHtmlRenderer
             indicator.style.top = (target.mode === 'widget' && !target.insertAfter ? target.rect.top : target.rect.bottom) + 'px';
           }
 
+          function reportExternalDragTarget(target) {
+            var payload = {
+              type: 'cms:external-drag-target',
+              sectionId: target && target.sectionId ? target.sectionId : '',
+              columnId: target && target.columnId ? target.columnId : '',
+              targetWidgetId: target && target.widgetId ? target.widgetId : '',
+              insertAfter: !!(target && target.insertAfter)
+            };
+            var key = [payload.sectionId, payload.columnId, payload.targetWidgetId, payload.insertAfter].join('|');
+            if (key !== paletteDragTargetKey) {
+              paletteDragTargetKey = key;
+              send(payload);
+            }
+          }
+
           document.addEventListener('mousedown', function (e) {
             var handle = e.target.closest('[data-gws-drag-handle-for]');
             if (!handle) return;
@@ -263,6 +279,7 @@ public static class CmsBlockHtmlRenderer
             e.dataTransfer.dropEffect = 'copy';
             if (!html5Indicator) html5Indicator = createIndicator();
             paletteDragTarget = target;
+            reportExternalDragTarget(target);
             drawDropIndicator(target, html5Indicator);
           }, true);
 
@@ -274,6 +291,7 @@ public static class CmsBlockHtmlRenderer
             var target = resolveDropTarget(e.clientX, e.clientY, null) || paletteDragTarget;
             clearDropVisuals(html5Indicator);
             paletteDragTarget = null;
+            paletteDragTargetKey = '';
             if (globalBlockId) {
               send({
                 type: 'cms:insert-global',
@@ -283,6 +301,7 @@ public static class CmsBlockHtmlRenderer
                 targetWidgetId: target && target.widgetId ? target.widgetId : '',
                 insertAfter: !!(target && target.insertAfter)
               });
+              send({ type: 'cms:external-drag-committed' });
               return;
             }
             if (!widgetType) return;
@@ -294,6 +313,7 @@ public static class CmsBlockHtmlRenderer
               targetWidgetId: target && target.widgetId ? target.widgetId : '',
               insertAfter: !!(target && target.insertAfter)
             });
+            send({ type: 'cms:external-drag-committed' });
           }, true);
 
           function findDirectStyleWrapper(container) {
@@ -407,6 +427,7 @@ public static class CmsBlockHtmlRenderer
             } else if (e.data.type === 'cms:palette-drag-end') {
               clearDropVisuals(html5Indicator);
               paletteDragTarget = null;
+              paletteDragTargetKey = '';
             }
           });
 

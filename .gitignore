@@ -16,6 +16,7 @@ TestResults/
 coverage/
 *.coverage
 *.coveragexml
+.playwright-cli/
 
 # Local databases and generated state
 *.db

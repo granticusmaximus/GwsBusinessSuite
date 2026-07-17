@@ -6,6 +6,8 @@
 window.gwsCmsBuilderBridge = (function () {
     let _dotNetRef = null;
     let _boundHandler = null;
+    let _boundParentDragOver = null;
+    let _externalDrag = null;
 
     function iframe() {
         return document.getElementById('cms-builder-iframe');
@@ -16,6 +18,14 @@ window.gwsCmsBuilderBridge = (function () {
         _boundHandler = handleMessage;
         window.addEventListener('message', _boundHandler);
         window.addEventListener('keydown', handleKeydown);
+        _boundParentDragOver = function (event) {
+            // Events inside the iframe belong to its document. Receiving dragover here
+            // means the pointer left the iframe, so its last target is no longer valid.
+            if (_externalDrag && event.target !== iframe()) {
+                _externalDrag.target = null;
+            }
+        };
+        document.addEventListener('dragover', _boundParentDragOver, true);
     }
 
     function dispose() {
@@ -24,6 +34,11 @@ window.gwsCmsBuilderBridge = (function () {
             _boundHandler = null;
         }
         window.removeEventListener('keydown', handleKeydown);
+        if (_boundParentDragOver) {
+            document.removeEventListener('dragover', _boundParentDragOver, true);
+            _boundParentDragOver = null;
+        }
+        _externalDrag = null;
         _dotNetRef = null;
     }
 
@@ -79,6 +94,7 @@ window.gwsCmsBuilderBridge = (function () {
         event.dataTransfer.dropEffect = 'copy';
         event.dataTransfer.setData('application/x-gws-widget-type', widgetType);
         event.dataTransfer.setData('text/plain', widgetType);
+        _externalDrag = { kind: 'widget', id: widgetType, target: null, committed: false };
     }
 
     function beginGlobalBlockDrag(event) {
@@ -98,10 +114,39 @@ window.gwsCmsBuilderBridge = (function () {
         event.dataTransfer.setData('application/x-gws-global-block-id', globalBlockId);
         event.dataTransfer.setData('application/x-gws-global-block-kind', globalBlockKind);
         event.dataTransfer.setData('text/plain', globalBlockId);
+        _externalDrag = { kind: 'global', id: globalBlockId, target: null, committed: false };
     }
 
     function endExternalDrag() {
-        sendToIframe({ type: 'cms:palette-drag-end' });
+        // Chromium can deliver dragenter/dragover into a same-origin iframe and still omit
+        // its drop event when the source is in the parent. Let a normal iframe drop win
+        // first; otherwise commit the last iframe-reported target exactly once.
+        const completedDrag = _externalDrag;
+        window.setTimeout(function () {
+            if (completedDrag && !completedDrag.committed && completedDrag.target && _dotNetRef) {
+                const target = completedDrag.target;
+                if (completedDrag.kind === 'global') {
+                    _dotNetRef.invokeMethodAsync('OnCanvasInsertGlobalAsync',
+                        completedDrag.id,
+                        target.sectionId || '',
+                        target.columnId || '',
+                        target.targetWidgetId || '',
+                        !!target.insertAfter);
+                } else {
+                    _dotNetRef.invokeMethodAsync('OnCanvasInsertWidgetAsync',
+                        completedDrag.id,
+                        target.sectionId || '',
+                        target.columnId || '',
+                        target.targetWidgetId || '',
+                        !!target.insertAfter);
+                }
+                completedDrag.committed = true;
+            }
+            if (_externalDrag === completedDrag) {
+                _externalDrag = null;
+            }
+            sendToIframe({ type: 'cms:palette-drag-end' });
+        }, 50);
     }
 
     function handleMessage(event) {
@@ -147,6 +192,21 @@ window.gwsCmsBuilderBridge = (function () {
                         data.columnId || '',
                         data.targetWidgetId || '',
                         !!data.insertAfter);
+                }
+                break;
+            case 'cms:external-drag-target':
+                if (_externalDrag) {
+                    _externalDrag.target = {
+                        sectionId: data.sectionId || '',
+                        columnId: data.columnId || '',
+                        targetWidgetId: data.targetWidgetId || '',
+                        insertAfter: !!data.insertAfter
+                    };
+                }
+                break;
+            case 'cms:external-drag-committed':
+                if (_externalDrag) {
+                    _externalDrag.committed = true;
                 }
                 break;
             case 'cms:ready':

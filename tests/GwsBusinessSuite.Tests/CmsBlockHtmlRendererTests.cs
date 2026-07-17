@@ -185,6 +185,15 @@ public sealed class CmsBlockHtmlRendererTests
     }
 
     [Fact]
+    public void EditModeScript_ShouldReportCrossFrameDragTargetsAndCommittedDrops()
+    {
+        var script = CmsBlockHtmlRenderer.BuildEditModeScript();
+
+        Assert.Contains("cms:external-drag-target", script);
+        Assert.Contains("cms:external-drag-committed", script);
+    }
+
+    [Fact]
     public void Render_ShouldShowEmptyColumnDropHint_InEditMode()
     {
         var html = CmsBlockHtmlRenderer.Render(

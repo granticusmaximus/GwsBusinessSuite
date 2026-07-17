@@ -22,6 +22,9 @@
 - Contact form with submission handling
 - Revision history for CMS pages
 - CMS builder is a combination of WordPress features and Elementor Pro features
+- Cross-frame canvas editing browser verification: palette widgets, global blocks, and
+  in-preview reordering now persist and refresh immediately in Chromium, including a
+  fallback handshake for browsers that omit the iframe `drop` event
 - Static export: download a CmsSite as a ZIP of static HTML/CSS files, including
   nested page paths, publicly-visible pages only, and bundled media assets
 
