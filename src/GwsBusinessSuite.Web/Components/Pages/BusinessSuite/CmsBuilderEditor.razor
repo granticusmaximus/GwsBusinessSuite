@@ -559,7 +559,7 @@ else
                                             {
                                                 <button type="button" class="studio-media-picker-item" title="@asset.FileName"
                                                         @onclick="() => SelectMediaAsset(selWidget, asset)">
-                                                    <img src="@asset.Url" alt="@asset.AltText" />
+                                                    <img src="@asset.ThumbnailUrl" alt="@asset.AltText" loading="lazy" />
                                                 </button>
                                             }
                                         </div>

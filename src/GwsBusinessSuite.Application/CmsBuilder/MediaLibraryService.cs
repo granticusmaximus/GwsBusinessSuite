@@ -2,6 +2,7 @@ using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using SkiaSharp;
 
 namespace GwsBusinessSuite.Application.CmsBuilder;
 
@@ -12,6 +13,9 @@ public sealed class MediaLibraryService(IAppDbContext dbContext, ISiteSettingsSe
     // hand rather than AI-generated, so a hard cap guards against someone dropping a
     // multi-MB file into a SQLite TEXT column. Configurable via Settings > Media.
     private const long DefaultMaxContentBytes = 8 * 1024 * 1024;
+
+    // Longest edge for a generated thumbnail - plenty for the admin grid's small tiles.
+    private const int ThumbnailMaxDimension = 320;
 
     // Raster-format magic bytes. A browser's reported Content-Type is attacker-controlled
     // (trivial to relabel an .svg or .html payload as "image/png" before upload), and that
@@ -29,13 +33,36 @@ public sealed class MediaLibraryService(IAppDbContext dbContext, ISiteSettingsSe
 
     public async Task<IReadOnlyList<MediaAssetSummary>> ListAsync(CancellationToken cancellationToken = default)
     {
+        // Explicitly projects away DataUri - without this, EF Core materializes every
+        // asset's full base64 file content (up to the configured upload cap, default
+        // 8MB/asset) just to build a lightweight summary list that never uses it. This
+        // runs on every /admin/media page load and after every upload/delete/alt-text save.
         var assets = await dbContext.MediaAssets
             .AsNoTracking()
+            .Select(asset => new
+            {
+                asset.Id,
+                asset.FileName,
+                asset.ContentType,
+                asset.AltText,
+                asset.SizeBytes,
+                asset.CreatedAt
+            })
             .ToListAsync(cancellationToken);
 
         return assets
             .OrderByDescending(asset => asset.CreatedAt)
-            .Select(ToSummary)
+            .Select(asset => new MediaAssetSummary
+            {
+                Id = asset.Id,
+                FileName = asset.FileName,
+                ContentType = asset.ContentType,
+                AltText = asset.AltText,
+                SizeBytes = asset.SizeBytes,
+                CreatedAt = asset.CreatedAt,
+                Url = $"/media/{asset.Id}",
+                ThumbnailUrl = $"/media/{asset.Id}/thumb"
+            })
             .ToList();
     }
 
@@ -78,6 +105,7 @@ public sealed class MediaLibraryService(IAppDbContext dbContext, ISiteSettingsSe
             FileName = fileName.Trim(),
             ContentType = detectedContentType,
             DataUri = $"data:{detectedContentType};base64,{Convert.ToBase64String(content)}",
+            ThumbnailDataUri = TryGenerateThumbnail(content),
             AltText = altText?.Trim() ?? string.Empty,
             SizeBytes = content.Length,
             CreatedBy = "cms-media-library"
@@ -87,6 +115,43 @@ public sealed class MediaLibraryService(IAppDbContext dbContext, ISiteSettingsSe
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return ToSummary(asset);
+    }
+
+    // Best-effort: a thumbnail failure (corrupt/unsupported-by-SkiaSharp bytes, e.g. an
+    // animated GIF's exotic encoding) must never block the upload itself, since the full
+    // asset is already validated and stored regardless. Returns null (meaning "just serve
+    // the full asset for this one too") both on failure and when the original is already
+    // small enough that a separate smaller copy wouldn't help.
+    private static string? TryGenerateThumbnail(byte[] content)
+    {
+        try
+        {
+            using var original = SKBitmap.Decode(content);
+            if (original is null || (original.Width <= ThumbnailMaxDimension && original.Height <= ThumbnailMaxDimension))
+            {
+                return null;
+            }
+
+            var scale = Math.Min(
+                (float)ThumbnailMaxDimension / original.Width,
+                (float)ThumbnailMaxDimension / original.Height);
+            var targetWidth = Math.Max(1, (int)Math.Round(original.Width * scale));
+            var targetHeight = Math.Max(1, (int)Math.Round(original.Height * scale));
+
+            using var resized = original.Resize(new SKImageInfo(targetWidth, targetHeight), SKSamplingOptions.Default);
+            if (resized is null)
+            {
+                return null;
+            }
+
+            using var image = SKImage.FromBitmap(resized);
+            using var encoded = image.Encode(SKEncodedImageFormat.Jpeg, 80);
+            return $"data:image/jpeg;base64,{Convert.ToBase64String(encoded.ToArray())}";
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string? DetectImageContentType(byte[] content)
@@ -127,6 +192,32 @@ public sealed class MediaLibraryService(IAppDbContext dbContext, ISiteSettingsSe
         return (asset.ContentType, Convert.FromBase64String(base64Payload));
     }
 
+    public async Task<(string ContentType, byte[] Content)?> GetThumbnailContentAsync(Guid mediaAssetId, CancellationToken cancellationToken = default)
+    {
+        var asset = await dbContext.MediaAssets
+            .AsNoTracking()
+            .Select(a => new { a.Id, a.ContentType, a.DataUri, a.ThumbnailDataUri })
+            .FirstOrDefaultAsync(a => a.Id == mediaAssetId, cancellationToken);
+
+        if (asset is null)
+        {
+            return null;
+        }
+
+        var (effectiveDataUri, effectiveContentType) = asset.ThumbnailDataUri is null
+            ? (asset.DataUri, asset.ContentType)
+            : (asset.ThumbnailDataUri, "image/jpeg");
+
+        var commaIndex = effectiveDataUri.IndexOf(',');
+        if (commaIndex < 0)
+        {
+            return null;
+        }
+
+        var base64Payload = effectiveDataUri[(commaIndex + 1)..];
+        return (effectiveContentType, Convert.FromBase64String(base64Payload));
+    }
+
     public async Task<MediaAssetSummary?> UpdateAltTextAsync(Guid mediaAssetId, string altText, CancellationToken cancellationToken = default)
     {
         var asset = await dbContext.MediaAssets.FirstOrDefaultAsync(item => item.Id == mediaAssetId, cancellationToken);
@@ -161,6 +252,7 @@ public sealed class MediaLibraryService(IAppDbContext dbContext, ISiteSettingsSe
         AltText = asset.AltText,
         SizeBytes = asset.SizeBytes,
         CreatedAt = asset.CreatedAt,
-        Url = $"/media/{asset.Id}"
+        Url = $"/media/{asset.Id}",
+        ThumbnailUrl = $"/media/{asset.Id}/thumb"
     };
 }

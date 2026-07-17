@@ -9,4 +9,5 @@ public sealed class MediaAssetSummary
     public long SizeBytes { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public string Url { get; set; } = string.Empty;
+    public string ThumbnailUrl { get; set; } = string.Empty;
 }

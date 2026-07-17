@@ -1107,6 +1107,15 @@ app.MapGet("/media/{id:guid}", async (Guid id, IMediaLibraryService mediaLibrary
     return content is null ? Results.NotFound() : Results.Bytes(content.Value.Content, content.Value.ContentType);
 }).AllowAnonymous().RequireRateLimiting("public-read");
 
+// Falls back to the full-size asset when no thumbnail was generated (pre-thumbnailing
+// uploads, or an original already small enough that a copy wasn't worth storing) - see
+// MediaLibraryService.GetThumbnailContentAsync.
+app.MapGet("/media/{id:guid}/thumb", async (Guid id, IMediaLibraryService mediaLibraryService) =>
+{
+    var content = await mediaLibraryService.GetThumbnailContentAsync(id);
+    return content is null ? Results.NotFound() : Results.Bytes(content.Value.Content, content.Value.ContentType);
+}).AllowAnonymous().RequireRateLimiting("public-read");
+
 // Raw request body is one MediaRecorder chunk (see liveShow.js's ondataavailable), appended
 // to the session's on-disk recording file in the order the browser calls this - the browser
 // awaits each POST before sending the next, so there's no need to buffer/reorder here.

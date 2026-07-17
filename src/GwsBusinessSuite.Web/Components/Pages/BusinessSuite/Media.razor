@@ -61,7 +61,7 @@ else
         @foreach (var asset in FilteredAssets)
         {
             <div class="media-card" @onclick="() => OpenDetails(asset)">
-                <img src="@asset.Url" alt="@asset.AltText" />
+                <img src="@asset.ThumbnailUrl" alt="@asset.AltText" loading="lazy" />
                 <div class="media-card-body">
                     <div class="small text-truncate fw-semibold" title="@asset.FileName">@asset.FileName</div>
                     <div class="small text-secondary">@FormatSize(asset.SizeBytes) · @asset.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")</div>

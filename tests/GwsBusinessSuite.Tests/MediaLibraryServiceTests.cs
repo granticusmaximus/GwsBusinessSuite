@@ -141,6 +141,76 @@ public sealed class MediaLibraryServiceTests
         (await service.GetContentAsync(Guid.NewGuid())).Should().BeNull();
     }
 
+    [Fact]
+    public async Task GetThumbnailContentAsync_ShouldReturnASmallerImage_ForALargeUpload()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new MediaLibraryService(db, new GwsBusinessSuite.Application.Settings.SiteSettingsService(db));
+        var largeImage = CreateRealPng(width: 1200, height: 800);
+
+        var uploaded = await service.UploadAsync("big-photo.png", largeImage, string.Empty);
+
+        var thumbnail = await service.GetThumbnailContentAsync(uploaded.Id);
+        thumbnail.Should().NotBeNull();
+        thumbnail!.Value.ContentType.Should().Be("image/jpeg");
+        thumbnail.Value.Content.Length.Should().BeLessThan(largeImage.Length);
+
+        using var decoded = SkiaSharp.SKBitmap.Decode(thumbnail.Value.Content);
+        decoded.Should().NotBeNull();
+        decoded!.Width.Should().BeLessThanOrEqualTo(320);
+        decoded.Height.Should().BeLessThanOrEqualTo(320);
+    }
+
+    [Fact]
+    public async Task GetThumbnailContentAsync_ShouldFallBackToTheFullAsset_WhenOriginalIsAlreadySmall()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new MediaLibraryService(db, new GwsBusinessSuite.Application.Settings.SiteSettingsService(db));
+        var smallImage = CreateRealPng(width: 100, height: 100);
+
+        var uploaded = await service.UploadAsync("small-icon.png", smallImage, string.Empty);
+
+        var thumbnail = await service.GetThumbnailContentAsync(uploaded.Id);
+        thumbnail.Should().NotBeNull();
+        thumbnail!.Value.ContentType.Should().Be("image/png");
+        thumbnail.Value.Content.Should().BeEquivalentTo(smallImage);
+    }
+
+    [Fact]
+    public async Task GetThumbnailContentAsync_ShouldFallBackToTheFullAsset_WhenBytesArentActuallyDecodable()
+    {
+        // PngBytes only satisfies the magic-byte sniff (DetectImageContentType), not a real
+        // decodable image - SKBitmap.Decode will fail, so this exercises the catch-and-fall-
+        // back branch of TryGenerateThumbnail, not just the "already small" branch above.
+        await using var db = await CreateDbAsync();
+        var service = new MediaLibraryService(db, new GwsBusinessSuite.Application.Settings.SiteSettingsService(db));
+
+        var uploaded = await service.UploadAsync("undecodable.png", PngBytes, string.Empty);
+
+        var thumbnail = await service.GetThumbnailContentAsync(uploaded.Id);
+        thumbnail.Should().NotBeNull();
+        thumbnail!.Value.Content.Should().BeEquivalentTo(PngBytes);
+    }
+
+    [Fact]
+    public async Task GetThumbnailContentAsync_ShouldReturnNull_ForUnknownId()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new MediaLibraryService(db, new GwsBusinessSuite.Application.Settings.SiteSettingsService(db));
+
+        (await service.GetThumbnailContentAsync(Guid.NewGuid())).Should().BeNull();
+    }
+
+    private static byte[] CreateRealPng(int width, int height)
+    {
+        using var bitmap = new SkiaSharp.SKBitmap(width, height);
+        using var canvas = new SkiaSharp.SKCanvas(bitmap);
+        canvas.Clear(SkiaSharp.SKColors.CornflowerBlue);
+        using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+        using var encoded = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+        return encoded.ToArray();
+    }
+
     private static async Task<ApplicationDbContext> CreateDbAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

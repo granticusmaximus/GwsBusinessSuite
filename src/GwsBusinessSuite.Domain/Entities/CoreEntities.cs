@@ -211,6 +211,12 @@ public sealed class MediaAsset : AuditableEntity
     public required string DataUri { get; set; }
     public string AltText { get; set; } = string.Empty;
     public long SizeBytes { get; set; }
+
+    // Null means "no thumbnail was generated" - either the original was already small
+    // enough that a separate copy wouldn't help, or generation failed - and callers fall
+    // back to serving DataUri directly (see MediaLibraryService.GetThumbnailContentAsync).
+    // Always image/jpeg regardless of the original's format, to keep this small.
+    public string? ThumbnailDataUri { get; set; }
 }
 
 public sealed class FormSubmission : AuditableEntity

@@ -155,7 +155,7 @@
                                             {
                                                 <button type="button" class="btn btn-sm btn-outline-secondary p-1" title="@asset.FileName"
                                                         @onclick="() => InsertMediaAssetAsync(asset)">
-                                                    <img src="@asset.Url" alt="@asset.AltText" style="width:64px;height:64px;object-fit:cover;" />
+                                                    <img src="@asset.ThumbnailUrl" alt="@asset.AltText" loading="lazy" style="width:64px;height:64px;object-fit:cover;" />
                                                 </button>
                                             }
                                         </div>

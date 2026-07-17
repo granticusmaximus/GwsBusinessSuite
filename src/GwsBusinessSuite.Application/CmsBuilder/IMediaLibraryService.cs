@@ -16,6 +16,12 @@ public interface IMediaLibraryService
 
     Task<(string ContentType, byte[] Content)?> GetContentAsync(Guid mediaAssetId, CancellationToken cancellationToken = default);
 
+    // Falls back to the full-size content (via the same DataUri) when the asset has no
+    // stored thumbnail - either it was uploaded before thumbnailing existed, the original
+    // was already small enough that one wasn't generated, or generation failed at upload
+    // time. Callers never need to branch on which case it is.
+    Task<(string ContentType, byte[] Content)?> GetThumbnailContentAsync(Guid mediaAssetId, CancellationToken cancellationToken = default);
+
     Task<MediaAssetSummary?> UpdateAltTextAsync(Guid mediaAssetId, string altText, CancellationToken cancellationToken = default);
 
     Task DeleteAsync(Guid mediaAssetId, CancellationToken cancellationToken = default);
