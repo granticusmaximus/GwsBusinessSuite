@@ -8,8 +8,10 @@
             {
                 <header class="gws-admin-bar">
                     <div class="gws-admin-bar-start">
-                        <button type="button" class="gws-sidebar-toggle" title="Collapse sidebar">
-                            <i class="bi bi-chevron-bar-left"></i>
+                        <button type="button" class="gws-sidebar-toggle" title="Collapse sidebar"
+                                aria-label="Collapse sidebar" aria-controls="gws-sidebar" aria-expanded="true">
+                            <i class="bi bi-chevron-bar-left gws-sidebar-toggle-desktop" aria-hidden="true"></i>
+                            <i class="bi bi-list gws-sidebar-toggle-mobile" aria-hidden="true"></i>
                         </button>
                         <div class="gws-admin-bar-brand">
                             <img src="favicon.svg" alt="" class="gws-admin-bar-icon" />
@@ -17,12 +19,28 @@
                         </div>
                     </div>
                     <div class="gws-admin-bar-actions">
+                        <button type="button" class="gws-command-trigger" data-gws-command-open
+                                aria-label="Search the admin portal" aria-haspopup="dialog">
+                            <i class="bi bi-search" aria-hidden="true"></i>
+                            <span>Search</span>
+                            <kbd>⌘K</kbd>
+                        </button>
                         <NotificationBell @rendermode="InteractiveServer" />
-                        <span class="gws-admin-bar-user">
-                            <i class="bi bi-person-circle"></i>
-                            @authState.User.Identity?.Name
-                        </span>
-                        <a class="gws-admin-bar-link" href="/auth/logout">Sign Out</a>
+                        <details class="gws-account-menu">
+                            <summary aria-label="Open account menu">
+                                <span class="gws-account-avatar" aria-hidden="true">@UserInitial(authState.User.Identity?.Name)</span>
+                                <span class="gws-account-name">@authState.User.Identity?.Name</span>
+                                <i class="bi bi-chevron-down" aria-hidden="true"></i>
+                            </summary>
+                            <div class="gws-account-popover">
+                                <div class="gws-account-popover-user">
+                                    <strong>@authState.User.Identity?.Name</strong>
+                                    <span>Administrator</span>
+                                </div>
+                                <a href="/admin/settings"><i class="bi bi-gear" aria-hidden="true"></i> Settings</a>
+                                <a href="/auth/logout"><i class="bi bi-box-arrow-right" aria-hidden="true"></i> Sign out</a>
+                            </div>
+                        </details>
                     </div>
                 </header>
             }
@@ -30,9 +48,11 @@
             <div class="gws-layout-body">
                 @if (!IsChromelessRoute)
                 {
-                    <aside class="gws-sidebar">
+                    <aside class="gws-sidebar" id="gws-sidebar" aria-label="Admin navigation">
                         <NavMenu />
                     </aside>
+                    <button type="button" class="gws-sidebar-backdrop" data-gws-sidebar-close
+                            aria-label="Close navigation"></button>
                 }
 
                 <div class="gws-body">
@@ -41,6 +61,26 @@
                     </main>
                 </div>
             </div>
+
+            @if (!IsChromelessRoute)
+            {
+                <div class="gws-command-layer" data-gws-command-layer hidden>
+                    <button type="button" class="gws-command-backdrop" data-gws-command-close
+                            aria-label="Close search"></button>
+                    <section class="gws-command-dialog" role="dialog" aria-modal="true"
+                             aria-labelledby="gws-command-title">
+                        <header>
+                            <i class="bi bi-search" aria-hidden="true"></i>
+                            <label id="gws-command-title" class="visually-hidden" for="gws-command-input">Search the admin portal</label>
+                            <input id="gws-command-input" data-gws-command-input type="search"
+                                   placeholder="Search pages and tools…" autocomplete="off" />
+                            <kbd>Esc</kbd>
+                        </header>
+                        <div class="gws-command-results" data-gws-command-results></div>
+                        <footer>Type to filter · Use ↑ ↓ to move · Enter to open</footer>
+                    </section>
+                </div>
+            }
         </div>
     </Authorized>
 
@@ -67,4 +107,7 @@
                 || path.StartsWith("admin/ssh-terminal-window", StringComparison.OrdinalIgnoreCase);
         }
     }
+
+    private static string UserInitial(string? username) =>
+        string.IsNullOrWhiteSpace(username) ? "A" : username.Trim()[0].ToString().ToUpperInvariant();
 }

@@ -1,5 +1,5 @@
 /* ── Design tokens ───────────────────────────────────────────
-   Dense admin chrome (dark sidebar + slim admin bar + panel content area),
+   Calm admin chrome with comfortable targets and consistent panel geometry,
    now sharing the exact palette/type pairing as the public grantwatson.dev
    site (see wwwroot/public-site.css :root) instead of its own separate
    wp-admin-blue scheme, so the two apps read as one product. Variable
@@ -7,11 +7,11 @@
    scoped .razor.css file that already reads them picks up the new values
    automatically - only the values changed. */
 :root {
-    --gws-sidebar-width: 224px;
-    --gws-sidebar-collapsed-width: 60px;
+    --gws-sidebar-width: 248px;
+    --gws-sidebar-collapsed-width: 68px;
     --gws-sidebar-accent: #f59e0b;
     --gws-sidebar-accent-hover: #d97706;
-    --gws-admin-bar-height: 36px;
+    --gws-admin-bar-height: 52px;
     --gws-sidebar-bg: #1c1917;
     --gws-sidebar-hover-bg: #2a2522;
     --gws-sidebar-text: #d6d3d1;
@@ -27,6 +27,9 @@
     --gws-text-soft: #a8a29e;
     --gws-font-serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
     --gws-font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+    --gws-radius-sm: 8px;
+    --gws-radius-md: 12px;
+    --gws-control-height: 40px;
     /* Kept for any component still referencing the old glass tokens by name. */
     --gws-shadow-lg: var(--gws-shadow-md);
 }
@@ -95,6 +98,13 @@ body {
 
 h1:focus { outline: none; }
 
+:where(a, button, input, select, textarea, summary):focus-visible {
+    outline: 3px solid rgba(245, 158, 11, 0.55);
+    outline-offset: 2px;
+}
+
+.gws-no-scroll { overflow: hidden; }
+
 /* ── App layout ──────────────────────────────────────────── */
 .gws-layout {
     min-height: 100vh;
@@ -118,7 +128,8 @@ h1:focus { outline: none; }
     align-items: center;
     justify-content: space-between;
     padding: 0 1rem;
-    font-size: .8rem;
+    border-bottom: 1px solid var(--gws-panel-border);
+    font-size: .82rem;
 }
 
 .gws-admin-bar-start {
@@ -131,16 +142,18 @@ h1:focus { outline: none; }
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 1.6rem;
-    height: 1.6rem;
+    width: 2.5rem;
+    height: 2.5rem;
     border: none;
     background: transparent;
     color: var(--gws-sidebar-text);
-    border-radius: 3px;
+    border-radius: var(--gws-radius-sm);
     cursor: pointer;
     font-size: .95rem;
     transition: background .12s ease, color .12s ease;
 }
+
+.gws-sidebar-toggle-mobile { display: none; }
 
 .gws-sidebar-toggle:hover {
     background: var(--gws-sidebar-hover-bg);
@@ -172,25 +185,83 @@ h1:focus { outline: none; }
 .gws-admin-bar-actions {
     display: flex;
     align-items: center;
-    gap: 1.1rem;
+    gap: .65rem;
 }
 
-.gws-admin-bar-user {
+.gws-command-trigger {
+    min-height: 2.35rem;
+    min-width: 13rem;
     display: inline-flex;
     align-items: center;
-    gap: .4rem;
-    color: var(--gws-sidebar-text-soft);
+    gap: .55rem;
+    padding: 0 .7rem;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-sm);
+    background: var(--gws-panel-bg);
+    color: var(--gws-text-soft);
+    cursor: pointer;
+    text-align: left;
 }
 
-.gws-admin-bar-link {
+.gws-command-trigger span { flex: 1; }
+.gws-command-trigger:hover { color: var(--gws-text-strong); border-color: #44403c; }
+
+.gws-command-trigger kbd,
+.gws-command-dialog kbd {
+    padding: .12rem .38rem;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: 5px;
+    background: var(--gws-panel-bg-2);
+    color: var(--gws-text-soft);
+    font: 600 .7rem var(--gws-font-sans);
+    box-shadow: none;
+}
+
+.gws-account-menu { position: relative; }
+.gws-account-menu > summary {
+    min-height: 2.5rem;
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .25rem .45rem;
+    border-radius: var(--gws-radius-sm);
     color: var(--gws-sidebar-text);
-    text-decoration: none;
+    cursor: pointer;
+    list-style: none;
+}
+.gws-account-menu > summary::-webkit-details-marker { display: none; }
+.gws-account-menu > summary:hover { background: var(--gws-sidebar-hover-bg); color: #fff; }
+.gws-account-menu > summary .bi-chevron-down { font-size: .65rem; }
+.gws-account-menu[open] > summary .bi-chevron-down { transform: rotate(180deg); }
+
+.gws-account-avatar {
+    width: 1.8rem;
+    height: 1.8rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--gws-sidebar-accent);
+    color: #1c1917;
+    font-weight: 800;
 }
 
-.gws-admin-bar-link:hover {
-    color: #fff;
-    text-decoration: underline;
+.gws-account-popover {
+    position: absolute;
+    top: calc(100% + .5rem);
+    right: 0;
+    z-index: 100;
+    width: 220px;
+    padding: .45rem;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-md);
+    background: var(--gws-panel-bg);
+    box-shadow: var(--gws-shadow-md);
 }
+.gws-account-popover-user { display: flex; flex-direction: column; padding: .65rem .7rem .75rem; border-bottom: 1px solid var(--gws-panel-border); margin-bottom: .35rem; }
+.gws-account-popover-user span { color: var(--gws-text-soft); font-size: .75rem; margin-top: .1rem; }
+.gws-account-popover a { display: flex; align-items: center; gap: .65rem; padding: .6rem .7rem; border-radius: 7px; color: var(--gws-text-strong); text-decoration: none; }
+.gws-account-popover a:hover { background: var(--gws-panel-bg-2); }
 
 .gws-layout-body {
     display: flex;
@@ -210,8 +281,11 @@ h1:focus { outline: none; }
     height: calc(100vh - var(--gws-admin-bar-height));
     overflow-y: auto;
     flex-shrink: 0;
-    padding: .5rem 0;
+    padding: .75rem .55rem;
+    transition: width .18s ease, transform .22s ease;
 }
+
+.gws-sidebar-backdrop { display: none; }
 
 /* The sidebar is fixed and taken out of flow, so .gws-body reserves its own
    space with a matching left margin instead of relying on flex layout — that
@@ -265,24 +339,54 @@ h1:focus { outline: none; }
     flex: 1;
 }
 
-.gws-nav-section {
-    font-size: .68rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: .08em;
+.gws-nav-home {
+    margin-bottom: .45rem;
+    background: rgba(255, 255, 255, .025);
+}
+
+.gws-nav-group {
+    border-top: 1px solid rgba(255, 255, 255, .045);
+    padding: .3rem 0;
+}
+
+.gws-nav-group > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 2.25rem;
+    padding: .35rem .65rem;
+    border-radius: 7px;
     color: var(--gws-sidebar-text-soft);
-    padding: 1rem 1rem .4rem;
+    cursor: pointer;
+    list-style: none;
+    font-size: .68rem;
+    font-weight: 750;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+}
+
+.gws-nav-group > summary::-webkit-details-marker { display: none; }
+.gws-nav-group > summary:hover { background: rgba(255, 255, 255, .025); color: var(--gws-sidebar-text); }
+.gws-nav-group > summary i { font-size: .65rem; transition: transform .15s ease; }
+.gws-nav-group[open] > summary i { transform: rotate(90deg); }
+.gws-nav-group-items { padding-bottom: .2rem; }
+
+.gws-nav-footer {
+    margin-top: auto;
+    padding-top: .55rem;
+    border-top: 1px solid rgba(255, 255, 255, .06);
 }
 
 .gws-nav-link {
     display: flex;
     align-items: center;
     gap: .65rem;
-    padding: .55rem 1rem;
-    border-left: 3px solid transparent;
+    min-height: 2.65rem;
+    padding: .5rem .65rem;
+    border-radius: 8px;
     color: var(--gws-sidebar-text);
     text-decoration: none;
-    font-size: .86rem;
+    font-size: .84rem;
     font-weight: 500;
     transition: background .12s ease, color .12s ease, border-color .12s ease;
     white-space: nowrap;
@@ -303,8 +407,27 @@ h1:focus { outline: none; }
 }
 
 .gws-nav-link-copy small {
-    display: none;
+    display: block;
+    overflow: hidden;
+    color: var(--gws-sidebar-text-soft);
+    font-size: .68rem;
+    font-weight: 400;
+    line-height: 1.25;
+    text-overflow: ellipsis;
 }
+
+.gws-nav-count {
+    min-width: 1.35rem;
+    padding: .12rem .35rem;
+    border-radius: 999px;
+    background: rgba(245, 158, 11, .17);
+    color: #fbbf24;
+    font-size: .68rem;
+    font-weight: 750;
+    line-height: 1.2;
+    text-align: center;
+}
+.gws-nav-count-danger { background: rgba(239, 68, 68, .16); color: #fca5a5; }
 
 .gws-nav-link:hover {
     background: var(--gws-sidebar-hover-bg);
@@ -317,8 +440,8 @@ h1:focus { outline: none; }
 
 .gws-nav-link.active {
     background: var(--gws-sidebar-hover-bg);
-    border-left-color: var(--gws-sidebar-accent);
     color: #fff;
+    box-shadow: inset 3px 0 0 var(--gws-sidebar-accent);
 }
 
 .gws-nav-link.active i {
@@ -326,7 +449,7 @@ h1:focus { outline: none; }
 }
 
 /* ── Collapsible sidebar ─────────────────────────────────────
-   Toggled by plain (non-Blazor) JS - see gwsInitSidebarToggle in app.js,
+   Toggled by plain (non-Blazor) JS in app.js,
    which flips this class on .gws-layout and remembers it in localStorage.
    Kept outside Blazor's interactivity entirely because MainLayout isn't
    always rendered interactively (e.g. the static Dashboard route), so a
@@ -340,15 +463,15 @@ h1:focus { outline: none; }
     margin-left: var(--gws-sidebar-collapsed-width);
 }
 
-.gws-layout.gws-sidebar-collapsed .gws-nav-section {
-    display: none;
-}
+.gws-layout.gws-sidebar-collapsed .gws-nav-group > summary { display: none; }
+.gws-layout.gws-sidebar-collapsed .gws-nav-group > .gws-nav-group-items { display: block !important; }
+.gws-layout.gws-sidebar-collapsed .gws-nav-group { border: 0; padding: .12rem 0; }
 
 .gws-layout.gws-sidebar-collapsed .gws-nav-link {
     justify-content: center;
     padding-left: 0;
     padding-right: 0;
-    border-left: none;
+    min-height: 2.75rem;
 }
 
 .gws-layout.gws-sidebar-collapsed .gws-nav-link.active {
@@ -364,21 +487,21 @@ h1:focus { outline: none; }
 .gws-layout.gws-sidebar-collapsed .gws-nav-link-copy {
     display: none;
 }
+.gws-layout.gws-sidebar-collapsed .gws-nav-count { display: none; }
 
 /* ── Page header ─────────────────────────────────────────── */
 .page-header {
-    margin-bottom: 1.25rem;
-    padding: 1rem 1.25rem;
-    border: 1px solid var(--gws-panel-border);
-    border-radius: 4px;
-    background: var(--gws-panel-bg);
-    box-shadow: var(--gws-shadow-sm);
+    margin-bottom: 1.75rem;
+    padding: .25rem 0 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
 }
 
 .page-header h1 {
-    font-family: var(--gws-font-serif);
-    font-size: 1.55rem;
-    font-weight: 800;
+    font-family: var(--gws-font-sans);
+    font-size: 1.75rem;
+    font-weight: 750;
     color: var(--gws-text-strong);
     margin-bottom: .3rem;
     letter-spacing: -.01em;
@@ -391,7 +514,7 @@ h1:focus { outline: none; }
 }
 
 .card {
-    border-radius: 4px !important;
+    border-radius: var(--gws-radius-md) !important;
     background: var(--gws-panel-bg);
     border-color: var(--gws-panel-border);
     color: var(--gws-text-strong);
@@ -411,9 +534,12 @@ h1:focus { outline: none; }
 }
 
 .btn {
-    border-radius: 3px;
+    min-height: var(--gws-control-height);
+    border-radius: var(--gws-radius-sm);
     font-weight: 600;
 }
+
+.btn-sm { min-height: 34px; }
 
 .btn-primary {
     background: var(--gws-sidebar-accent);
@@ -448,7 +574,8 @@ h1:focus { outline: none; }
 .form-check-input,
 .form-control:focus,
 .form-select:focus {
-    border-radius: 3px;
+    min-height: var(--gws-control-height);
+    border-radius: var(--gws-radius-sm);
     background-color: var(--gws-panel-bg-2);
     border-color: var(--gws-panel-border);
     color: var(--gws-text-strong);
@@ -465,6 +592,47 @@ h1:focus { outline: none; }
 }
 
 .form-label { color: var(--gws-text-soft); }
+
+.form-text { color: var(--gws-text-soft); line-height: 1.5; }
+
+/* ── Global command palette ─────────────────────────────── */
+.gws-command-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 1100;
+    display: grid;
+    place-items: start center;
+    padding: min(14vh, 8rem) 1rem 1rem;
+}
+.gws-command-layer[hidden] { display: none; }
+.gws-command-backdrop { position: absolute; inset: 0; border: 0; background: rgba(0, 0, 0, .68); backdrop-filter: blur(5px); }
+.gws-command-dialog {
+    position: relative;
+    width: min(640px, 100%);
+    max-height: min(680px, 74vh);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid #44403c;
+    border-radius: 16px;
+    background: var(--gws-panel-bg);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .6);
+}
+.gws-command-dialog > header { display: flex; align-items: center; gap: .75rem; padding: .85rem 1rem; border-bottom: 1px solid var(--gws-panel-border); }
+.gws-command-dialog > header > i { color: var(--gws-text-soft); font-size: 1.05rem; }
+.gws-command-dialog input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--gws-text-strong); font-size: 1rem; }
+.gws-command-dialog input::placeholder { color: var(--gws-text-soft); }
+.gws-command-results { overflow-y: auto; padding: .5rem; }
+.gws-command-result { display: grid; grid-template-columns: 2rem 1fr auto; align-items: center; gap: .65rem; padding: .65rem .75rem; border-radius: 9px; color: var(--gws-text-strong); text-decoration: none; }
+.gws-command-result:hover,
+.gws-command-result.is-selected { background: var(--gws-panel-bg-2); color: var(--gws-text-strong); }
+.gws-command-result > i { color: var(--gws-sidebar-accent); text-align: center; }
+.gws-command-result > span { display: flex; min-width: 0; flex-direction: column; }
+.gws-command-result strong { font-size: .88rem; }
+.gws-command-result small { overflow: hidden; color: var(--gws-text-soft); font-size: .75rem; text-overflow: ellipsis; white-space: nowrap; }
+.gws-command-result em { color: var(--gws-text-soft); font-size: .68rem; font-style: normal; text-transform: uppercase; letter-spacing: .05em; }
+.gws-command-empty { padding: 2.5rem 1rem; color: var(--gws-text-soft); text-align: center; }
+.gws-command-dialog > footer { padding: .55rem 1rem; border-top: 1px solid var(--gws-panel-border); color: var(--gws-text-soft); font-size: .7rem; }
 
 /* ── Bootstrap component dark-mode overrides ───────────────
    Bootstrap 5's own component CSS (tables, modals, dropdowns, alerts,
@@ -627,9 +795,24 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 }
 
 /* ── Dashboard cards ─────────────────────────────────────── */
+.gws-eyebrow {
+    display: block;
+    margin-bottom: .35rem;
+    color: var(--gws-sidebar-accent);
+    font-size: .7rem;
+    font-weight: 750;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+}
+
+.gws-dashboard-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 2rem; }
+.gws-dashboard-quick-actions { display: flex; flex-wrap: wrap; gap: .65rem; }
+.gws-section-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+.gws-section-heading h2 { margin: 0; font-size: 1.1rem; font-weight: 700; }
+
 .gws-stat-icon {
-    width: 38px;
-    height: 38px;
+    width: 42px;
+    height: 42px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -637,6 +820,12 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     font-size: 1.1rem;
     flex-shrink: 0;
 }
+
+.gws-attention-card { color: inherit; border: 1px solid var(--gws-panel-border); transition: border-color .14s ease, transform .14s ease, box-shadow .14s ease; }
+.gws-attention-card:hover { color: inherit; border-color: #44403c; transform: translateY(-2px); box-shadow: var(--gws-shadow-md); }
+.gws-attention-count { margin: 1.1rem 0 .35rem; color: var(--gws-text-strong); font-size: 2rem; font-weight: 750; line-height: 1; letter-spacing: -.04em; }
+.gws-card-arrow { color: var(--gws-text-soft); transition: transform .14s ease, color .14s ease; }
+.gws-attention-card:hover .gws-card-arrow { color: var(--gws-sidebar-accent); transform: translate(2px, -2px); }
 
 .gws-module-card {
     transition: transform .14s ease, box-shadow .14s ease;
@@ -646,9 +835,12 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 
 .gws-module-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(15, 23, 42, .09) !important;
+    box-shadow: var(--gws-shadow-md) !important;
     color: inherit;
 }
+
+.gws-module-chevron { align-self: center; color: var(--gws-text-soft); font-size: .75rem; }
+.gws-module-card:hover .gws-module-chevron { color: var(--gws-sidebar-accent); transform: translateX(2px); }
 
 .gws-module-icon {
     width: 40px;
@@ -883,10 +1075,54 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 }
 /* ── Responsive ──────────────────────────────────────────── */
 @media (max-width: 767.98px) {
-    .gws-sidebar { display: none; }
+    .gws-admin-bar { padding: 0 .55rem; }
+    .gws-admin-bar-brand span,
+    .gws-command-trigger span,
+    .gws-command-trigger kbd,
+    .gws-account-name,
+    .gws-account-menu > summary .bi-chevron-down { display: none; }
+    .gws-command-trigger { min-width: 2.5rem; width: 2.5rem; justify-content: center; padding: 0; }
+    .gws-sidebar-toggle-desktop { display: none; }
+    .gws-sidebar-toggle-mobile { display: inline-block; font-size: 1.25rem; }
+    .gws-sidebar {
+        display: flex;
+        top: var(--gws-admin-bar-height);
+        width: min(86vw, 320px);
+        min-width: min(86vw, 320px);
+        transform: translateX(-105%);
+        box-shadow: 18px 0 50px rgba(0, 0, 0, .5);
+    }
+    .gws-layout.gws-mobile-nav-open .gws-sidebar { transform: translateX(0); }
+    .gws-sidebar-backdrop {
+        position: fixed;
+        inset: var(--gws-admin-bar-height) 0 0;
+        z-index: 19;
+        display: block;
+        border: 0;
+        background: rgba(0, 0, 0, .6);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity .2s ease;
+    }
+    .gws-layout.gws-mobile-nav-open .gws-sidebar-backdrop { opacity: 1; pointer-events: auto; }
     .gws-layout .gws-body { margin-left: 0; }
-    .gws-admin-bar { padding: 0 .8rem; }
     .gws-content { padding: 1.25rem; }
+    .page-header { flex-wrap: wrap; align-items: flex-start !important; gap: 1rem !important; }
+    .page-header > :last-child:not(:first-child) { width: 100%; flex-wrap: wrap; }
+    .page-header > :last-child:not(:first-child) > .btn { flex: 1 1 auto; }
+    .gws-command-layer { padding-top: 4.25rem; }
+    .gws-command-dialog { max-height: calc(100vh - 5.25rem); }
+    .gws-command-result { grid-template-columns: 2rem 1fr; }
+    .gws-command-result em { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        scroll-behavior: auto !important;
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+    }
 }
 
 /* ── Shared spinning-icon utility (refresh buttons, loading states) ───── */

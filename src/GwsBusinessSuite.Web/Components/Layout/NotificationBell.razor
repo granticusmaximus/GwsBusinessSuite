@@ -5,8 +5,9 @@
 @inject NavigationManager Navigation
 
 <div class="notif-bell-wrap">
-    <button class="notif-bell-btn" @onclick="ToggleOpen" title="Notifications">
-        <i class="bi bi-bell-fill"></i>
+    <button type="button" class="notif-bell-btn" @onclick="ToggleOpen" title="Notifications"
+            aria-label="Notifications" aria-expanded="@IsOpen">
+        <i class="bi bi-bell-fill" aria-hidden="true"></i>
         @if (UnreadCount > 0)
         {
             <span class="notif-bell-badge">@(UnreadCount > 9 ? "9+" : UnreadCount.ToString())</span>

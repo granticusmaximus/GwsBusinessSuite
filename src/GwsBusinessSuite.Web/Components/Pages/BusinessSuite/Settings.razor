@@ -25,7 +25,9 @@
 
 @if (!string.IsNullOrWhiteSpace(StatusMessage))
 {
-    <div class="alert alert-success" role="alert">@StatusMessage</div>
+    <div class="alert alert-success gws-settings-notice" role="status" aria-live="polite">
+        <i class="bi bi-check-circle-fill me-2" aria-hidden="true"></i>@StatusMessage
+    </div>
 }
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
@@ -41,20 +43,24 @@
 }
 else
 {
-    <ul class="nav nav-tabs mb-4">
-        @foreach (var tab in Tabs)
-        {
-            <li class="nav-item">
-                <button type="button" class="nav-link @(ActiveTab == tab ? "active" : string.Empty)" @onclick="() => ActiveTab = tab">
-                    @tab
+    <div class="gws-settings-layout">
+        <nav class="gws-settings-nav" aria-label="Settings categories">
+            @foreach (var tab in Tabs)
+            {
+                <button type="button" class="gws-settings-nav-item @(ActiveTab == tab.Key ? "active" : string.Empty)"
+                        aria-label="@tab.Key" aria-current="@(ActiveTab == tab.Key ? "page" : null)" @onclick="() => SelectTab(tab.Key)">
+                    <i class="bi @tab.Icon" aria-hidden="true"></i>
+                    <span><strong>@tab.Key</strong><small>@tab.Description</small></span>
+                    <i class="bi bi-chevron-right ms-auto" aria-hidden="true"></i>
                 </button>
-            </li>
-        }
-    </ul>
+            }
+        </nav>
+
+        <section class="gws-settings-content" aria-label="@ActiveTab settings">
 
     @if (ActiveTab == "General")
     {
-        <div class="card border-0 shadow-sm" style="max-width: 640px;">
+        <div class="card border-0 shadow-sm">
             <div class="card-body">
                 <div class="mb-3">
                     <label class="form-label small text-secondary">Site name</label>
@@ -65,13 +71,13 @@ else
                     <input class="form-control" @bind="SiteSlugInput" />
                     <div class="form-text">Changing this affects any URLs or references built from the site slug.</div>
                 </div>
-                <button class="btn btn-primary" @onclick="SaveGeneralAsync" disabled="@IsBusy">Save changes</button>
+                <div class="gws-settings-actions"><span>Changes affect the public site immediately.</span><button class="btn btn-primary" @onclick="SaveGeneralAsync" disabled="@IsBusy">@(IsBusy ? "Saving…" : "Save changes")</button></div>
             </div>
         </div>
     }
     else if (ActiveTab == "Reading")
     {
-        <div class="card border-0 shadow-sm" style="max-width: 480px;">
+        <div class="card border-0 shadow-sm">
             <div class="card-body">
                 <div class="mb-3">
                     <label class="form-label small text-secondary">Blog posts per page</label>
@@ -83,13 +89,13 @@ else
                     </select>
                     <div class="form-text">Applies to the public /blog listing.</div>
                 </div>
-                <button class="btn btn-primary" @onclick="SaveReadingAsync" disabled="@IsBusy">Save changes</button>
+                <div class="gws-settings-actions"><span>Controls the public blog listing.</span><button class="btn btn-primary" @onclick="SaveReadingAsync" disabled="@IsBusy">@(IsBusy ? "Saving…" : "Save changes")</button></div>
             </div>
         </div>
     }
     else if (ActiveTab == "Writing")
     {
-        <div class="card border-0 shadow-sm" style="max-width: 560px;">
+        <div class="card border-0 shadow-sm">
             <div class="card-body">
                 <div class="mb-3">
                     <label class="form-label small text-secondary">Default category for new posts</label>
@@ -106,26 +112,26 @@ else
                     <input class="form-control" @bind="DefaultAuthorBylineInput" placeholder="e.g. Grant Watson" />
                     <div class="form-text">Leave blank to have new posts default to whatever the editor currently uses.</div>
                 </div>
-                <button class="btn btn-primary" @onclick="SaveWritingAsync" disabled="@IsBusy">Save changes</button>
+                <div class="gws-settings-actions"><span>Used as defaults for new posts.</span><button class="btn btn-primary" @onclick="SaveWritingAsync" disabled="@IsBusy">@(IsBusy ? "Saving…" : "Save changes")</button></div>
             </div>
         </div>
     }
     else if (ActiveTab == "Media")
     {
-        <div class="card border-0 shadow-sm" style="max-width: 480px;">
+        <div class="card border-0 shadow-sm">
             <div class="card-body">
                 <div class="mb-3">
                     <label class="form-label small text-secondary">Max upload size (MB)</label>
                     <input class="form-control" type="number" min="1" max="100" @bind="MaxUploadSizeMbInput" />
                     <div class="form-text">Applies to hero images and the media library.</div>
                 </div>
-                <button class="btn btn-primary" @onclick="SaveMediaAsync" disabled="@IsBusy">Save changes</button>
+                <div class="gws-settings-actions"><span>Applies to future uploads.</span><button class="btn btn-primary" @onclick="SaveMediaAsync" disabled="@IsBusy">@(IsBusy ? "Saving…" : "Save changes")</button></div>
             </div>
         </div>
     }
     else if (ActiveTab == "AI (Ollama)")
     {
-        <div class="card border-0 shadow-sm" style="max-width: 560px;">
+        <div class="card border-0 shadow-sm">
             <div class="card-body">
                 <div class="mb-3">
                     <label class="form-label small text-secondary">Model override</label>
@@ -148,14 +154,23 @@ else
                         not work against a Linux-hosted Ollama instance. Leave blank to disable the button.
                     </div>
                 </div>
-                <button class="btn btn-primary" @onclick="SaveAiAsync" disabled="@IsBusy">Save changes</button>
+                <div class="gws-settings-actions"><span>Overrides deployment defaults for this site.</span><button class="btn btn-primary" @onclick="SaveAiAsync" disabled="@IsBusy">@(IsBusy ? "Saving…" : "Save changes")</button></div>
             </div>
         </div>
     }
+        </section>
+    </div>
 }
 
 @code {
-    private static readonly string[] Tabs = ["General", "Reading", "Writing", "Media", "AI (Ollama)"];
+    private static readonly SettingsTab[] Tabs =
+    [
+        new("General", "bi-sliders", "Site identity and URLs"),
+        new("Reading", "bi-book", "Public blog display"),
+        new("Writing", "bi-pencil", "Post defaults"),
+        new("Media", "bi-image", "Upload limits"),
+        new("AI (Ollama)", "bi-stars", "Models and generation")
+    ];
     private string ActiveTab { get; set; } = "General";
 
     private bool _loaded;
@@ -176,6 +191,13 @@ else
     private string HeroImageModelOverrideInput { get; set; } = string.Empty;
 
     private List<ArticleCategory> Categories { get; set; } = new();
+
+    private void SelectTab(string tab)
+    {
+        ActiveTab = tab;
+        StatusMessage = string.Empty;
+        ErrorMessage = string.Empty;
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -294,4 +316,6 @@ else
             IsBusy = false;
         }
     }
+
+    private sealed record SettingsTab(string Key, string Icon, string Description);
 }

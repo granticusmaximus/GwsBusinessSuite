@@ -1,93 +1,121 @@
 @page "/admin"
+@attribute [Authorize(Policy = "AdminOnly")]
+@using GwsBusinessSuite.Application.Comments
+@using GwsBusinessSuite.Application.ContentStudio
+@using GwsBusinessSuite.Application.Crm
+@using GwsBusinessSuite.Application.DockerHealth
+@using Microsoft.AspNetCore.Authorization
+@inject ICommentService CommentService
+@inject IContentStudioService ContentStudioService
+@inject ICrmService CrmService
+@inject IDockerHealthService DockerHealthService
 
-<PageTitle>GWS Business Suite</PageTitle>
+<PageTitle>Dashboard · GWS Business Suite</PageTitle>
 
-<div class="page-header">
-    <h1>Dashboard</h1>
-    <p>Your AI-assisted business operating system.</p>
-</div>
-
-<div class="row g-3 mb-4">
-    <div class="col-6 col-xl-4">
-        <div class="card border-0 shadow-sm h-100">
-            <div class="card-body">
-                <div class="gws-stat-icon bg-primary-subtle text-primary mb-3">
-                    <i class="bi bi-file-earmark-text"></i>
-                </div>
-                <div class="fs-2 fw-bold lh-1 mb-1">0</div>
-                <div class="fw-semibold text-dark" style="font-size:.85rem;">Articles</div>
-                <div class="text-muted mt-1" style="font-size:.78rem;">Drafts awaiting generation</div>
-            </div>
-        </div>
+<div class="page-header gws-dashboard-header">
+    <div>
+        <span class="gws-eyebrow">@DateTimeOffset.Now.ToString("dddd, MMMM d")</span>
+        <h1>Good @GreetingPeriod()</h1>
+        <p>Here’s what needs your attention across the business today.</p>
     </div>
-    <div class="col-6 col-xl-4">
-        <div class="card border-0 shadow-sm h-100">
-            <div class="card-body">
-                <div class="gws-stat-icon bg-success-subtle text-success mb-3">
-                    <i class="bi bi-tags-fill"></i>
-                </div>
-                <div class="fs-2 fw-bold lh-1 mb-1">0</div>
-                <div class="fw-semibold text-dark" style="font-size:.85rem;">CJ Ads</div>
-                <div class="text-muted mt-1" style="font-size:.78rem;">Partner ads synced</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-xl-4">
-        <div class="card border-0 shadow-sm h-100">
-            <div class="card-body">
-                <div class="gws-stat-icon bg-info-subtle text-info mb-3">
-                    <i class="bi bi-cpu-fill"></i>
-                </div>
-                <div class="fs-2 fw-bold lh-1 mb-1">&#x2713;</div>
-                <div class="fw-semibold text-dark" style="font-size:.85rem;">Ollama</div>
-                <div class="text-muted mt-1" style="font-size:.78rem;">Local model server</div>
-            </div>
-        </div>
+    <div class="gws-dashboard-quick-actions" aria-label="Quick actions">
+        <a class="btn btn-primary" href="/admin/article-editor"><i class="bi bi-pencil-square me-1" aria-hidden="true"></i>Manage posts</a>
+        <a class="btn btn-outline-secondary" href="/admin/content-studio"><i class="bi bi-magic me-1" aria-hidden="true"></i>Generate draft</a>
     </div>
 </div>
 
-<div class="text-uppercase text-muted fw-semibold mb-3" style="font-size:.65rem; letter-spacing:.1em;">Modules</div>
-
-<div class="row g-3">
-    @foreach (var module in Modules)
-    {
-        <div class="col-md-6 col-xl-4">
-            <a class="card border-0 shadow-sm h-100 text-decoration-none gws-module-card" href="@module.Url">
-                <div class="card-body d-flex align-items-start gap-3">
-                    <div class="gws-module-icon @module.IconClass">
-                        <i class="bi @module.Icon"></i>
+<section aria-labelledby="attention-heading" class="mb-5">
+    <div class="gws-section-heading">
+        <div><span class="gws-eyebrow">Today</span><h2 id="attention-heading">Needs attention</h2></div>
+        <span class="text-secondary small">Live operational counts</span>
+    </div>
+    <div class="row g-3">
+        @foreach (var item in AttentionItems)
+        {
+            <div class="col-sm-6 col-xl-3">
+                <a class="card gws-attention-card h-100 text-decoration-none" href="@item.Url">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start gap-3">
+                            <span class="gws-stat-icon @item.IconClass"><i class="bi @item.Icon" aria-hidden="true"></i></span>
+                            <i class="bi bi-arrow-up-right gws-card-arrow" aria-hidden="true"></i>
+                        </div>
+                        <div class="gws-attention-count">@item.Count</div>
+                        <div class="fw-semibold">@item.Title</div>
+                        <div class="text-secondary small mt-1">@item.Description</div>
                     </div>
-                    <div>
-                        <div class="fw-semibold text-dark mb-1" style="font-size:.9rem;">@module.Title</div>
-                        <div class="text-muted" style="font-size:.8rem;">@module.Description</div>
+                </a>
+            </div>
+        }
+    </div>
+</section>
+
+<section aria-labelledby="workspace-heading">
+    <div class="gws-section-heading">
+        <div><span class="gws-eyebrow">Workspace</span><h2 id="workspace-heading">Pick up where you left off</h2></div>
+    </div>
+    <div class="row g-3">
+        @foreach (var module in Modules)
+        {
+            <div class="col-md-6 col-xl-4">
+                <a class="card h-100 text-decoration-none gws-module-card" href="@module.Url">
+                    <div class="card-body d-flex align-items-start gap-3">
+                        <div class="gws-module-icon @module.IconClass"><i class="bi @module.Icon" aria-hidden="true"></i></div>
+                        <div class="min-w-0">
+                            <div class="fw-semibold mb-1">@module.Title</div>
+                            <div class="text-secondary small">@module.Description</div>
+                        </div>
+                        <i class="bi bi-chevron-right gws-module-chevron ms-auto" aria-hidden="true"></i>
                     </div>
-                </div>
-            </a>
-        </div>
-    }
-</div>
+                </a>
+            </div>
+        }
+    </div>
+</section>
 
 @code {
-    private sealed record DashboardModule(string Title, string Description, string Url, string Icon, string IconClass);
+    private int _pendingDrafts;
+    private int _pendingComments;
+    private int _dueFollowUps;
+    private int _unreadAlerts;
 
-    private readonly List<DashboardModule> Modules =
+    private IReadOnlyList<AttentionItem> AttentionItems =>
     [
-        new("Content Studio", "Generate SEO articles, review drafts, publish live to the blog, and manage affiliate placements.", "/admin/content-studio", "bi-pencil-square", "bg-primary-subtle text-primary"),
-        new("CJ Ads Manager", "Review partner ads and choose affiliate links to insert into articles.", "/admin/cj-ads",
-"bi-tags-fill", "bg-success-subtle text-success"),
-        new("CRM", "Track leads, contacts, companies, notes, and future client opportunities.", "/admin/crm", "bi-people-fill",
-"bg-indigo-subtle text-primary"),
-        new("Knowledge Base", "Create internal documentation, wiki pages, and operating procedures.", "/admin/wiki",
-"bi-journal-bookmark-fill", "bg-warning-subtle text-warning"),
-        new("Pages", "Create WordPress-inspired pages, blocks, templates, and site navigation.", "/admin/pages",
-"bi-layout-three-columns", "bg-danger-subtle text-danger"),
-        new("Podcast Directory", "Search Apple Podcasts, save shows, and keep episode feeds refreshed inside the portal.", "/admin/podcasts",
-"bi-mic-fill", "bg-danger-subtle text-danger"),
-        new("Government Intelligence", "Track Houston County, Georgia state actions, and live House and Senate votes from official sources.", "/admin/government-intelligence",
-"bi-building", "bg-info-subtle text-info"),
-        new("Ollama Console", "Test local model connectivity and prompt workflows.", "/admin/ollama-console", "bi-cpu-fill",
-"bg-secondary-subtle text-secondary"),
-        new("User Management", "Create accounts, assign roles, and control portal access.", "/admin/users", "bi-person-fill-gear",
-"bg-dark-subtle text-dark"),
+        new("Drafts to review", "Ready for editorial review", _pendingDrafts, "/admin/content-studio", "bi-file-earmark-check", "bg-primary-subtle text-primary"),
+        new("Comments", "Waiting for moderation", _pendingComments, "/admin/comments", "bi-chat-left-text", "bg-info-subtle text-info"),
+        new("Follow-ups", "Due or overdue in CRM", _dueFollowUps, "/admin/crm", "bi-calendar2-check", "bg-warning-subtle text-warning"),
+        new("System alerts", "Unread container alerts", _unreadAlerts, "/admin/docker-health", "bi-heart-pulse", _unreadAlerts > 0 ? "bg-danger-subtle text-danger" : "bg-success-subtle text-success")
     ];
+
+    private static readonly IReadOnlyList<DashboardModule> Modules =
+    [
+        new("Publishing", "Write posts, generate drafts, manage media, and publish pages.", "/admin/article-editor", "bi-pencil-square", "bg-primary-subtle text-primary"),
+        new("Relationships", "Manage contacts, follow-ups, comments, and portal users.", "/admin/crm", "bi-people-fill", "bg-info-subtle text-info"),
+        new("Intelligence", "Monitor media, podcasts, community news, and government activity.", "/admin/news-intelligence", "bi-newspaper", "bg-warning-subtle text-warning"),
+        new("Affiliate revenue", "Manage CJ campaigns, placement suggestions, and analytics.", "/admin/affiliate-analytics", "bi-graph-up-arrow", "bg-success-subtle text-success"),
+        new("Knowledge", "Open your operational wiki and CMS builder reference library.", "/admin/wiki", "bi-journal-bookmark-fill", "bg-secondary-subtle text-secondary"),
+        new("Operations", "Review containers, Ollama models, broadcasts, and deployments.", "/admin/docker-health", "bi-box-seam", "bg-danger-subtle text-danger")
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var draftsTask = ContentStudioService.CountPendingReviewAsync();
+        var commentsTask = CommentService.CountPendingAsync();
+        var followUpsTask = CrmService.CountDueFollowUpsAsync();
+        var alertsTask = DockerHealthService.CountUnreadAlertsAsync();
+        await Task.WhenAll(draftsTask, commentsTask, followUpsTask, alertsTask);
+        _pendingDrafts = await draftsTask;
+        _pendingComments = await commentsTask;
+        _dueFollowUps = await followUpsTask;
+        _unreadAlerts = await alertsTask;
+    }
+
+    private static string GreetingPeriod()
+    {
+        var hour = DateTime.Now.Hour;
+        if (hour < 12) return "morning";
+        return hour < 18 ? "afternoon" : "evening";
+    }
+
+    private sealed record AttentionItem(string Title, string Description, int Count, string Url, string Icon, string IconClass);
+    private sealed record DashboardModule(string Title, string Description, string Url, string Icon, string IconClass);
 }

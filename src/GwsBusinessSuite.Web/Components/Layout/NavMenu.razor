@@ -7,232 +7,162 @@
 @using Microsoft.AspNetCore.Components.Authorization
 @using System.Security.Claims
 @inject AuthenticationStateProvider AuthProvider
+@inject NavigationManager Navigation
 @inject ICommentService CommentService
 @inject IContentStudioService ContentStudioService
 @inject IDockerHealthService DockerHealthService
 @inject ICrmService CrmService
 @inject IAppGenerationService AppGenerationService
 
-<nav class="gws-nav">
+<nav class="gws-nav" aria-label="Primary">
     @if (IsAdmin)
     {
-        <NavLink class="gws-nav-link" href="admin" Match="NavLinkMatch.All" title="Dashboard">
-            <i class="bi bi-speedometer2"></i>
-            <span class="gws-nav-link-copy">
-                <span>Dashboard</span>
-                <small>Suite overview</small>
-            </span>
+        <NavLink class="gws-nav-link gws-nav-home" href="admin" Match="NavLinkMatch.All" title="Dashboard">
+            <i class="bi bi-grid-1x2-fill" aria-hidden="true"></i>
+            <span class="gws-nav-link-copy"><span>Home</span><small>Your work at a glance</small></span>
         </NavLink>
     }
 
-    <div class="gws-nav-section">Posts</div>
+    <details class="gws-nav-group" open="@IsGroupOpen(PublishingPrefixes)">
+        <summary><span>Publishing</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
+        <div class="gws-nav-group-items">
+            <NavLink class="gws-nav-link" href="admin/article-editor" title="All Posts">
+                <i class="bi bi-pencil-square" aria-hidden="true"></i>
+                <span class="gws-nav-link-copy"><span>Posts</span><small>Write and publish</small></span>
+            </NavLink>
+            <NavLink class="gws-nav-link" href="admin/content-studio" title="Content Studio">
+                <i class="bi bi-magic" aria-hidden="true"></i>
+                <span class="gws-nav-link-copy"><span>Content Studio</span><small>AI-assisted drafts</small></span>
+                @if (_pendingDraftCount > 0) { <span class="gws-nav-count">@_pendingDraftCount</span> }
+            </NavLink>
+            <NavLink class="gws-nav-link" href="admin/app-generation" title="AI App Builder">
+                <i class="bi bi-stars" aria-hidden="true"></i>
+                <span class="gws-nav-link-copy"><span>AI Page Builder</span><small>Draft new site pages</small></span>
+            </NavLink>
+            @if (IsContributorOrAbove)
+            {
+                <NavLink class="gws-nav-link" href="admin/media" title="Media Library">
+                    <i class="bi bi-images" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Media</span><small>Images for posts and pages</small></span>
+                </NavLink>
+                <NavLink class="gws-nav-link" href="admin/pages" title="Pages">
+                    <i class="bi bi-layout-three-columns" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Pages</span><small>Build and organize pages</small></span>
+                </NavLink>
+                <NavLink class="gws-nav-link" href="admin/appearance/menus" title="Menus">
+                    <i class="bi bi-list" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Menus</span><small>Header and footer navigation</small></span>
+                </NavLink>
+                <NavLink class="gws-nav-link" href="admin/appearance/customize" title="Appearance">
+                    <i class="bi bi-palette" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Appearance</span><small>Brand, fonts and CSS</small></span>
+                </NavLink>
+            }
+        </div>
+    </details>
 
-    <NavLink class="gws-nav-link" href="admin/article-editor" title="All Posts">
-        <i class="bi bi-pencil"></i>
-        <span class="gws-nav-link-copy">
-            <span>All Posts</span>
-            <small>Write &amp; publish</small>
-        </span>
-    </NavLink>
-
-    <NavLink class="gws-nav-link" href="admin/content-studio" title="Generate with AI">
-        <i class="bi bi-magic"></i>
-        <span class="gws-nav-link-copy">
-            <span>Generate with AI@(_pendingDraftCount > 0 ? $" ({_pendingDraftCount})" : "")</span>
-            <small>Ollama-assisted drafts</small>
-        </span>
-    </NavLink>
-
-    <NavLink class="gws-nav-link" href="admin/app-generation" title="AI App Builder">
-        <i class="bi bi-stars"></i>
-        <span class="gws-nav-link-copy">
-            <span>AI App Builder</span>
-            <small>Chat-draft new site pages</small>
-        </span>
-    </NavLink>
-
-    @if (IsContributorOrAbove)
-    {
-        <div class="gws-nav-section">Media</div>
-
-        <NavLink class="gws-nav-link" href="admin/media" title="Media Library">
-            <i class="bi bi-images"></i>
-            <span class="gws-nav-link-copy">
-                <span>Media Library</span>
-                <small>Images for posts &amp; pages</small>
-            </span>
-        </NavLink>
-
-        <NavLink class="gws-nav-link" href="admin/podcasts" title="Podcast Directory">
-            <i class="bi bi-mic-fill"></i>
-            <span class="gws-nav-link-copy">
-                <span>Podcast Directory</span>
-                <small>Search, save &amp; refresh shows</small>
-            </span>
-        </NavLink>
-
-        <div class="gws-nav-section">Pages</div>
-
-        <NavLink class="gws-nav-link" href="admin/pages" title="Pages">
-            <i class="bi bi-layout-three-columns"></i>
-            <span class="gws-nav-link-copy">
-                <span>Pages</span>
-                <small>Create &amp; edit site pages</small>
-            </span>
-        </NavLink>
-
-        <div class="gws-nav-section">Appearance</div>
-
-        <NavLink class="gws-nav-link" href="admin/appearance/menus" title="Menus">
-            <i class="bi bi-list"></i>
-            <span class="gws-nav-link-copy">
-                <span>Menus</span>
-                <small>Header &amp; footer navigation</small>
-            </span>
-        </NavLink>
-
-        <NavLink class="gws-nav-link" href="admin/appearance/customize" title="Customize">
-            <i class="bi bi-palette"></i>
-            <span class="gws-nav-link-copy">
-                <span>Customize</span>
-                <small>Accent color, fonts &amp; CSS</small>
-            </span>
-        </NavLink>
-    }
-
-    <div class="gws-nav-section">Comments</div>
-
-    <NavLink class="gws-nav-link" href="admin/comments" title="Comments">
-        <i class="bi bi-chat-left-text"></i>
-        <span class="gws-nav-link-copy">
-            <span>Comments@(_pendingCommentCount > 0 ? $" ({_pendingCommentCount})" : "")</span>
-            <small>Moderate visitor comments</small>
-        </span>
-    </NavLink>
+    <details class="gws-nav-group" open="@IsGroupOpen(RelationshipPrefixes)">
+        <summary><span>Relationships</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
+        <div class="gws-nav-group-items">
+            <NavLink class="gws-nav-link" href="admin/comments" title="Comments">
+                <i class="bi bi-chat-left-text" aria-hidden="true"></i>
+                <span class="gws-nav-link-copy"><span>Comments</span><small>Moderate visitor replies</small></span>
+                @if (_pendingCommentCount > 0) { <span class="gws-nav-count">@_pendingCommentCount</span> }
+            </NavLink>
+            @if (IsAdmin)
+            {
+                <NavLink class="gws-nav-link" href="admin/crm" title="CRM">
+                    <i class="bi bi-people-fill" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>CRM</span><small>Contacts and activity</small></span>
+                    @if (_dueFollowUpCount > 0) { <span class="gws-nav-count">@_dueFollowUpCount</span> }
+                </NavLink>
+                <NavLink class="gws-nav-link" href="admin/users" title="User Management">
+                    <i class="bi bi-person-gear" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Users</span><small>Accounts and roles</small></span>
+                </NavLink>
+            }
+        </div>
+    </details>
 
     @if (IsAdmin)
     {
-        <div class="gws-nav-section">Users</div>
+        <details class="gws-nav-group" open="@IsGroupOpen(IntelligencePrefixes)">
+            <summary><span>Intelligence</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
+            <div class="gws-nav-group-items">
+                <NavLink class="gws-nav-link" href="admin/news-intelligence" title="Media Watch">
+                    <i class="bi bi-newspaper" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Media Watch</span><small>AI-curated topic feeds</small></span>
+                </NavLink>
+                <NavLink class="gws-nav-link" href="admin/government-intelligence" title="Civic Watch">
+                    <i class="bi bi-building" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Civic Watch</span><small>Community and government</small></span>
+                </NavLink>
+                <NavLink class="gws-nav-link" href="admin/podcasts" title="Podcast Directory">
+                    <i class="bi bi-mic-fill" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Podcasts</span><small>Saved shows and episodes</small></span>
+                </NavLink>
+            </div>
+        </details>
 
-        <NavLink class="gws-nav-link" href="admin/users" title="User Management">
-            <i class="bi bi-people-fill"></i>
-            <span class="gws-nav-link-copy">
-                <span>User Management</span>
-                <small>Accounts &amp; roles</small>
-            </span>
-        </NavLink>
+        <details class="gws-nav-group" open="@IsGroupOpen(OperationsPrefixes)">
+            <summary><span>Operations</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
+            <div class="gws-nav-group-items">
+                <NavLink class="gws-nav-link" href="admin/cj-ads" title="CJ Ads">
+                    <i class="bi bi-tags-fill" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>CJ Ads</span><small>Affiliate campaigns</small></span>
+                </NavLink>
+                <NavLink class="gws-nav-link" href="admin/affiliate-suggestions" title="Affiliate Suggestions">
+                    <i class="bi bi-link-45deg" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Suggestions</span><small>AI-matched placements</small></span>
+                </NavLink>
+                <NavLink class="gws-nav-link" href="admin/affiliate-analytics" title="Affiliate Analytics">
+                    <i class="bi bi-graph-up-arrow" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Analytics</span><small>Clicks and commission</small></span>
+                </NavLink>
+                <NavLink class="gws-nav-link" href="admin/app-generation-queue" title="AI App Queue">
+                    <i class="bi bi-inbox-fill" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Approval Queue</span><small>Review generated plans</small></span>
+                    @if (_pendingAppGenerationCount > 0) { <span class="gws-nav-count">@_pendingAppGenerationCount</span> }
+                </NavLink>
+                <NavLink class="gws-nav-link" href="admin/wiki" title="Knowledge Base">
+                    <i class="bi bi-journal-bookmark-fill" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Knowledge Base</span><small>Operational reference</small></span>
+                </NavLink>
+                <NavLink class="gws-nav-link" href="admin/cms-knowledge" title="Builder Reference">
+                    <i class="bi bi-journal-richtext" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Builder Reference</span><small>CMS workflow notes</small></span>
+                </NavLink>
+                <NavLink class="gws-nav-link" href="admin/live-show" title="Live Show">
+                    <i class="bi bi-camera-video-fill" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Live Show</span><small>Broadcast studio</small></span>
+                </NavLink>
+                <NavLink class="gws-nav-link" href="admin/ollama-console" title="Ollama Console">
+                    <i class="bi bi-cpu-fill" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Ollama</span><small>Local model console</small></span>
+                </NavLink>
+                <NavLink class="gws-nav-link" href="admin/docker-health" title="Docker Management">
+                    <i class="bi bi-box-seam" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Docker</span><small>Containers and deployment</small></span>
+                    @if (_unreadDockerAlertCount > 0) { <span class="gws-nav-count gws-nav-count-danger">@_unreadDockerAlertCount</span> }
+                </NavLink>
+            </div>
+        </details>
 
-        <div class="gws-nav-section">Tools</div>
-
-        <NavLink class="gws-nav-link" href="admin/cj-ads" title="CJ Ads">
-            <i class="bi bi-tags-fill"></i>
-            <span class="gws-nav-link-copy">
-                <span>CJ Ads</span>
-                <small>Affiliate campaigns</small>
-            </span>
-        </NavLink>
-
-        <NavLink class="gws-nav-link" href="admin/affiliate-suggestions" title="Affiliate Suggestions">
-            <i class="bi bi-magic"></i>
-            <span class="gws-nav-link-copy">
-                <span>Affiliate Suggestions</span>
-                <small>AI-matched ad placements</small>
-            </span>
-        </NavLink>
-
-        <NavLink class="gws-nav-link" href="admin/app-generation-queue" title="AI App Generation Queue">
-            <i class="bi bi-inbox-fill"></i>
-            <span class="gws-nav-link-copy">
-                <span>AI App Queue@(_pendingAppGenerationCount > 0 ? $" ({_pendingAppGenerationCount})" : "")</span>
-                <small>Review generated page plans</small>
-            </span>
-        </NavLink>
-
-        <NavLink class="gws-nav-link" href="admin/affiliate-analytics" title="Affiliate Analytics">
-            <i class="bi bi-graph-up-arrow"></i>
-            <span class="gws-nav-link-copy">
-                <span>Affiliate Analytics</span>
-                <small>Clicks &amp; CJ commission revenue</small>
-            </span>
-        </NavLink>
-
-        <NavLink class="gws-nav-link" href="admin/crm" title="CRM">
-            <i class="bi bi-people-fill"></i>
-            <span class="gws-nav-link-copy">
-                <span>CRM@(_dueFollowUpCount > 0 ? $" ({_dueFollowUpCount})" : "")</span>
-                <small>Contacts and activity</small>
-            </span>
-        </NavLink>
-
-        <NavLink class="gws-nav-link" href="admin/wiki" title="Knowledge Base">
-            <i class="bi bi-journal-bookmark-fill"></i>
-            <span class="gws-nav-link-copy">
-                <span>Knowledge Base</span>
-                <small>Operational reference</small>
-            </span>
-        </NavLink>
-
-        <NavLink class="gws-nav-link" href="admin/cms-knowledge" title="Builder Reference Library">
-            <i class="bi bi-journal-richtext"></i>
-            <span class="gws-nav-link-copy">
-                <span>Builder Reference</span>
-                <small>Clean-room workflow notes for the CMS builder</small>
-            </span>
-        </NavLink>
-
-        <NavLink class="gws-nav-link" href="admin/live-show" title="Live Show">
-            <i class="bi bi-camera-video-fill"></i>
-            <span class="gws-nav-link-copy">
-                <span>Live Show</span>
-                <small>Camera broadcast studio</small>
-            </span>
-        </NavLink>
-
-        <NavLink class="gws-nav-link" href="admin/news-intelligence" title="Media Watch">
-            <i class="bi bi-newspaper"></i>
-            <span class="gws-nav-link-copy">
-                <span>Media Watch</span>
-                <small>AI-curated topic feeds</small>
-            </span>
-        </NavLink>
-
-        <NavLink class="gws-nav-link" href="admin/government-intelligence" title="Civic Watch">
-            <i class="bi bi-building"></i>
-            <span class="gws-nav-link-copy">
-                <span>Civic Watch</span>
-                <small>Community, state &amp; Congress tracking</small>
-            </span>
-        </NavLink>
-
-        <NavLink class="gws-nav-link" href="admin/ollama-console" title="Ollama Console">
-            <i class="bi bi-cpu-fill"></i>
-            <span class="gws-nav-link-copy">
-                <span>Ollama Console</span>
-                <small>Local model console</small>
-            </span>
-        </NavLink>
-
-        <NavLink class="gws-nav-link" href="admin/docker-health" title="Docker Management">
-            <i class="bi bi-box-seam"></i>
-            <span class="gws-nav-link-copy">
-                <span>Docker Management@(_unreadDockerAlertCount > 0 ? $" ({_unreadDockerAlertCount})" : "")</span>
-                <small>Containers, exec &amp; DigitalOcean</small>
-            </span>
-        </NavLink>
-
-        <div class="gws-nav-section">Settings</div>
-
-        <NavLink class="gws-nav-link" href="admin/settings" title="General">
-            <i class="bi bi-gear-fill"></i>
-            <span class="gws-nav-link-copy">
-                <span>General</span>
-                <small>Site, reading, writing, media &amp; AI</small>
-            </span>
-        </NavLink>
+        <div class="gws-nav-footer">
+            <NavLink class="gws-nav-link" href="admin/settings" title="Settings">
+                <i class="bi bi-gear-fill" aria-hidden="true"></i>
+                <span class="gws-nav-link-copy"><span>Settings</span><small>Portal preferences</small></span>
+            </NavLink>
+        </div>
     }
 </nav>
 
 @code {
+    private static readonly string[] PublishingPrefixes = ["admin/article", "admin/content-studio", "admin/app-generation", "admin/media", "admin/pages", "admin/appearance"];
+    private static readonly string[] RelationshipPrefixes = ["admin/comments", "admin/crm", "admin/users"];
+    private static readonly string[] IntelligencePrefixes = ["admin/news-intelligence", "admin/government-intelligence", "admin/podcasts"];
+    private static readonly string[] OperationsPrefixes = ["admin/cj-ads", "admin/affiliate", "admin/app-generation-queue", "admin/wiki", "admin/cms-knowledge", "admin/live-show", "admin/ollama", "admin/docker"];
+
     private string _role = string.Empty;
     private int _pendingCommentCount;
     private int _unreadDockerAlertCount;
@@ -244,20 +174,28 @@
     {
         var state = await AuthProvider.GetAuthenticationStateAsync();
         _role = state.User.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
+        if (state.User.Identity?.IsAuthenticated != true) return;
 
-        if (state.User.Identity?.IsAuthenticated == true)
-        {
-            _pendingCommentCount = await CommentService.CountPendingAsync();
-            _unreadDockerAlertCount = await DockerHealthService.CountUnreadAlertsAsync();
-            _pendingDraftCount = await ContentStudioService.CountPendingReviewAsync();
-            _dueFollowUpCount = await CrmService.CountDueFollowUpsAsync();
-            if (_role == AppRoles.Admin)
-            {
-                _pendingAppGenerationCount = await AppGenerationService.CountPendingApprovalAsync();
-            }
-        }
+        var commentsTask = CommentService.CountPendingAsync();
+        var dockerTask = DockerHealthService.CountUnreadAlertsAsync();
+        var draftsTask = ContentStudioService.CountPendingReviewAsync();
+        var followUpsTask = CrmService.CountDueFollowUpsAsync();
+        var approvalsTask = IsAdmin ? AppGenerationService.CountPendingApprovalAsync() : Task.FromResult(0);
+        await Task.WhenAll(commentsTask, dockerTask, draftsTask, followUpsTask, approvalsTask);
+
+        _pendingCommentCount = await commentsTask;
+        _unreadDockerAlertCount = await dockerTask;
+        _pendingDraftCount = await draftsTask;
+        _dueFollowUpCount = await followUpsTask;
+        _pendingAppGenerationCount = await approvalsTask;
     }
 
-    private bool IsAdmin              => _role == AppRoles.Admin;
+    private bool IsGroupOpen(IEnumerable<string> prefixes)
+    {
+        var path = Navigation.ToBaseRelativePath(Navigation.Uri);
+        return prefixes.Any(prefix => path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private bool IsAdmin => _role == AppRoles.Admin;
     private bool IsContributorOrAbove => _role is AppRoles.Admin or AppRoles.Contributor;
 }
