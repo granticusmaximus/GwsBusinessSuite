@@ -22,9 +22,13 @@ window.liveShow = {
 
 		this.iceServers = iceServers
 			.map((server) => ({
-				urls: server.urls,
-				...(server.username ? { username: server.username } : {}),
-				...(server.credential ? { credential: server.credential } : {}),
+				urls: server.urls ?? server.Urls,
+				...((server.username ?? server.Username)
+					? { username: server.username ?? server.Username }
+					: {}),
+				...((server.credential ?? server.Credential)
+					? { credential: server.credential ?? server.Credential }
+					: {}),
 			}))
 			.filter((server) => Array.isArray(server.urls) && server.urls.length > 0);
 	},

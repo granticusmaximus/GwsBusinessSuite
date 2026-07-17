@@ -56,7 +56,7 @@ For the Docker deployment:
    or push to `main`; the deployment workflow includes the override automatically when
    the required TURN variables are present.
 
-The Live Show studio displays `TURN relay ready` when the app has both relay URLs and the
+The Live Show studio displays `TURN relay configured` when the app has both relay URLs and the
 shared secret. Without them it keeps the existing STUN/direct-connection fallback.
 
 ## Database Migrations

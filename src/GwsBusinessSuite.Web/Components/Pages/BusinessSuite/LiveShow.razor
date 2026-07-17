@@ -19,7 +19,7 @@
         <p class="mb-0">Open your camera and microphone, then go live to a small group of invited viewers. Shows are recorded automatically.</p>
         <span class="badge mt-2 @(IceServerProvider.IsTurnConfigured ? "text-bg-success" : "text-bg-warning")">
             <i class="bi @(IceServerProvider.IsTurnConfigured ? "bi-shield-check" : "bi-exclamation-triangle") me-1"></i>
-            @(IceServerProvider.IsTurnConfigured ? "TURN relay ready" : "Direct connection only")
+            @(IceServerProvider.IsTurnConfigured ? "TURN relay configured" : "Direct connection only")
         </span>
     </div>
     <a class="btn btn-outline-secondary btn-sm" href="/admin/live-show-recordings">
