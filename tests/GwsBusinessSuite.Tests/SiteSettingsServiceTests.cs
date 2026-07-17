@@ -16,7 +16,7 @@ public sealed class SiteSettingsServiceTests
 
         var settings = await service.GetSettingsAsync();
 
-        Assert.Equal(10, settings.PostsPerPage);
+        Assert.Equal(12, settings.PostsPerPage);
         Assert.Null(settings.DefaultArticleCategoryId);
         Assert.Null(settings.DefaultAuthorByline);
         Assert.Null(settings.OllamaModelOverride);
@@ -89,7 +89,7 @@ public sealed class SiteSettingsServiceTests
 
         var reloaded = await service.GetSettingsAsync();
 
-        Assert.Equal(10, reloaded.PostsPerPage);
+        Assert.Equal(12, reloaded.PostsPerPage);
     }
 
     [Fact]

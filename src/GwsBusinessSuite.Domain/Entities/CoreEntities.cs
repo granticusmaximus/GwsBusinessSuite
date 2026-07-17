@@ -335,7 +335,7 @@ public sealed class SiteSettings : AuditableEntity
 {
     public static readonly Guid WellKnownId = new("51771145-0000-0000-0000-000000000001");
 
-    public int PostsPerPage { get; set; } = 10;
+    public int PostsPerPage { get; set; } = 12;
     public Guid? DefaultArticleCategoryId { get; set; }
     public string? DefaultAuthorByline { get; set; }
     public string? OllamaModelOverride { get; set; }

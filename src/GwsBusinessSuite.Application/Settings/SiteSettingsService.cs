@@ -37,7 +37,7 @@ public sealed class SiteSettingsService(
             db.SiteSettings.Add(row);
         }
 
-        row.PostsPerPage = settings.PostsPerPage is 10 or 25 or 50 ? settings.PostsPerPage : 10;
+        row.PostsPerPage = settings.PostsPerPage is 10 or 12 or 25 or 50 ? settings.PostsPerPage : 12;
         row.DefaultArticleCategoryId = settings.DefaultArticleCategoryId;
         row.DefaultAuthorByline = string.IsNullOrWhiteSpace(settings.DefaultAuthorByline) ? null : settings.DefaultAuthorByline.Trim();
         row.OllamaModelOverride = string.IsNullOrWhiteSpace(settings.OllamaModelOverride) ? null : settings.OllamaModelOverride.Trim();

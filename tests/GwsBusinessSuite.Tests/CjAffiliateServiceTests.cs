@@ -408,6 +408,40 @@ public sealed class CjAffiliateServiceTests
         Assert.Contains(payloads, x => x.Contains("\"publisherIds\":[\"pub-1\"]", StringComparison.Ordinal) && !x.Contains("\"websiteIds\"", StringComparison.Ordinal));
     }
 
+    // CJ's real Link Search API doesn't return a plain "click-url" field - the actual
+    // tracking link is embedded as an <a href="..."> inside "link-code-html". Regression
+    // coverage for the bug where this was being ignored and code fell back to the
+    // advertiser's plain (non-tracking) destination URL instead.
+    [Fact]
+    public async Task FetchLinksAsync_ShouldExtractClickUrl_FromLinkCodeHtmlAnchor()
+    {
+        var observedUris = new List<Uri>();
+        using var handler = new RecordingHandler(
+            observedUris,
+            responseFactory: _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    {"links":[{"link-id":"555","link-name":"20% Off","destination":"https://www.acme.com/sale","link-code-html":"<a href=\"http://www.anrdoezrs.net/click-1234567-9876543\">20% Off</a><img src=\"http://www.awltovhc.com/image-1234567-9876543\" border=\"0\"/>"}]}
+                    """,
+                    Encoding.UTF8,
+                    "application/json")
+            });
+        using var client = new HttpClient(handler);
+        var service = new CjAffiliateService(client);
+
+        var result = await service.FetchLinksAsync(new CjLinkFetchRequest(
+            DeveloperKey: "dev-key",
+            PublisherId: "pub-1",
+            WebsiteId: "web-1",
+            AdvertiserId: "1001",
+            MaxResults: 10));
+
+        var link = Assert.Single(result.Links);
+        Assert.Equal("http://www.anrdoezrs.net/click-1234567-9876543", link.ClickUrl);
+        Assert.Equal("https://www.acme.com/sale", link.DestinationUrl);
+    }
+
     [Fact]
     public async Task ValidateConnectionAsync_ShouldSucceed_WhenNoRecordsReturned()
     {

@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
@@ -549,7 +550,15 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
         }
 
         var linkName = Read(element, "linkName", "link-name", "link_name", "promotionalName", "promotional-name", "name");
-        var clickUrl = Read(element, "clickUrl", "click-url", "click_url", "linkCode", "link-code");
+        var clickUrl = Read(element, "clickUrl", "click-url", "click_url");
+        if (string.IsNullOrWhiteSpace(clickUrl))
+        {
+            // CJ's Link Search API doesn't return a plain click-url field - the real tracking
+            // link is embedded as an <a href="..."> inside link-code-html (or the JS variant).
+            var linkCodeHtml = Read(element, "linkCodeHtml", "link-code-html", "link_code_html",
+                "linkCodeJavascript", "link-code-javascript", "linkCode", "link-code");
+            clickUrl = ExtractHrefFromAnchorHtml(linkCodeHtml);
+        }
         var destination = Read(element, "destination", "destinationUrl", "destination-url", "landingPageUrl", "landing-page-url");
 
         if (string.IsNullOrWhiteSpace(linkName) && string.IsNullOrWhiteSpace(clickUrl) && string.IsNullOrWhiteSpace(destination))
@@ -586,7 +595,15 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
                 .Select(element =>
                 {
                     var linkName = ReadValue(element, "link-name", "linkName", "promotional-name", "name");
-                    var clickUrl = ReadValue(element, "click-url", "clickUrl", "link-code", "linkCode");
+                    var clickUrl = ReadValue(element, "click-url", "clickUrl");
+                    if (string.IsNullOrWhiteSpace(clickUrl))
+                    {
+                        // Same fallback as the JSON path: the real tracking link is embedded as
+                        // an <a href="..."> inside link-code-html, not a plain click-url field.
+                        var linkCodeHtml = ReadValue(element, "link-code-html", "linkCodeHtml",
+                            "link-code-javascript", "linkCodeJavascript", "link-code", "linkCode");
+                        clickUrl = ExtractHrefFromAnchorHtml(linkCodeHtml);
+                    }
                     var destination = ReadValue(element, "destination", "destination-url", "destinationUrl", "landing-page-url");
 
                     if (string.IsNullOrWhiteSpace(linkName) && string.IsNullOrWhiteSpace(clickUrl) && string.IsNullOrWhiteSpace(destination))
@@ -1409,6 +1426,21 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
         }
 
         return string.Empty;
+    }
+
+    private static readonly Regex AnchorHrefRegex = new(
+        """<a\s[^>]*href\s*=\s*["']([^"']+)["']""",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static string ExtractHrefFromAnchorHtml(string html)
+    {
+        if (string.IsNullOrWhiteSpace(html))
+        {
+            return string.Empty;
+        }
+
+        var match = AnchorHrefRegex.Match(html);
+        return match.Success ? System.Net.WebUtility.HtmlDecode(match.Groups[1].Value) : string.Empty;
     }
 }
 

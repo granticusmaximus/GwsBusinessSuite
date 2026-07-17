@@ -579,7 +579,7 @@ app.MapGet("/blog", async (
         // A missing ?pageSize= falls back to the site's configured default (Settings >
         // Reading) rather than a hardcoded 10 - an explicit query param still overrides it.
         var effectivePageSize = pageSize ?? (await siteSettingsService.GetSettingsAsync()).PostsPerPage;
-        effectivePageSize = effectivePageSize is 10 or 25 or 50 ? effectivePageSize : 10;
+        effectivePageSize = effectivePageSize is 10 or 12 or 25 or 50 ? effectivePageSize : 12;
 
         await using var db = await dbFactory.CreateDbContextAsync();
         // SQLite can't translate ORDER BY on a DateTimeOffset column, so order client-side

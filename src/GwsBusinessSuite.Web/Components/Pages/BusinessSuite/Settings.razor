@@ -77,6 +77,7 @@ else
                     <label class="form-label small text-secondary">Blog posts per page</label>
                     <select class="form-select" @bind="PostsPerPageInput">
                         <option value="10">10</option>
+                        <option value="12">12</option>
                         <option value="25">25</option>
                         <option value="50">50</option>
                     </select>
@@ -166,7 +167,7 @@ else
     private string SiteNameInput { get; set; } = string.Empty;
     private string SiteSlugInput { get; set; } = string.Empty;
 
-    private int PostsPerPageInput { get; set; } = 10;
+    private int PostsPerPageInput { get; set; } = 12;
     private string DefaultCategoryIdInput { get; set; } = string.Empty;
     private string DefaultAuthorBylineInput { get; set; } = string.Empty;
     private int MaxUploadSizeMbInput { get; set; } = 8;
