@@ -275,6 +275,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        _refreshStatus = NewsService.GetRefreshStatus();
         await ReloadAsync();
     }
 
