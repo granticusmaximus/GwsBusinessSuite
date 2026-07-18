@@ -139,6 +139,7 @@ public sealed class AffiliateRotationService(
                     LinkName = selected.LinkName,
                     Category = selected.Category ?? string.Empty,
                     TrackingUrl = selected.TrackingUrl!,
+                    ImageUrl = selected.ImageUrl,
                     StartsAt = now,
                     StartsAtUnixSeconds = nowUnixSeconds,
                     ExpiresAt = expiresAt,
@@ -248,12 +249,14 @@ public sealed class AffiliateRotationService(
             .FirstOrDefaultAsync(cancellationToken);
 
     private static ArticleMarkdownRenderer.AffiliatePlacementMarkup ToMarkup(ArticleAffiliateRotation rotation) => new(
-        string.Empty,
-        rotation.AdvertiserName,
-        rotation.Category,
-        rotation.TrackingUrl,
-        rotation.CallToActionText,
-        rotation.Id);
+        SlotToken: string.Empty,
+        AdvertiserName: rotation.AdvertiserName,
+        Category: rotation.Category,
+        TrackingUrl: rotation.TrackingUrl,
+        CallToActionText: rotation.CallToActionText,
+        PlacementId: rotation.Id,
+        LinkName: rotation.LinkName,
+        ImageUrl: rotation.ImageUrl);
 
     private static bool IsJoinedRelationship(string? status) =>
         status is not null && (status.Equals("joined", StringComparison.OrdinalIgnoreCase)

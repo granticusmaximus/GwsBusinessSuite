@@ -62,6 +62,7 @@ public sealed class AffiliateSuggestionService(
                 LinkName = pick.Offer.LinkName,
                 Category = pick.Offer.Category ?? string.Empty,
                 TrackingUrl = pick.Offer.TrackingUrl ?? string.Empty,
+                ImageUrl = pick.Offer.ImageUrl,
                 Reasoning = pick.Reasoning,
                 Rank = rank,
                 Status = ArticleAffiliateSuggestionStatuses.Pending,
@@ -208,6 +209,7 @@ public sealed class AffiliateSuggestionService(
                             LinkName = x.LinkName,
                             Category = x.Category,
                             TrackingUrl = x.TrackingUrl,
+                            ImageUrl = x.ImageUrl,
                             Reasoning = x.Reasoning,
                             Rank = x.Rank,
                             Status = x.Status
@@ -291,8 +293,10 @@ public sealed class AffiliateSuggestionService(
             SlotToken = slotToken,
             AdvertiserId = suggestion.AdvertiserId,
             AdvertiserName = suggestion.AdvertiserName,
+            LinkName = suggestion.LinkName,
             Category = suggestion.Category,
             TrackingUrl = suggestion.TrackingUrl,
+            ImageUrl = suggestion.ImageUrl,
             CallToActionText = "Explore Offer",
             SortOrder = existingPlacementCount,
             CreatedBy = "ai-affiliate-match"

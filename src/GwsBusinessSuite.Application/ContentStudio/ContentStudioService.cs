@@ -698,8 +698,10 @@ public sealed class ContentStudioService(
                     SlotToken = draftPlacement.SlotToken,
                     AdvertiserId = draftPlacement.AdvertiserId,
                     AdvertiserName = draftPlacement.AdvertiserName,
+                    LinkName = draftPlacement.LinkName,
                     Category = draftPlacement.Category,
                     TrackingUrl = draftPlacement.TrackingUrl,
+                    ImageUrl = draftPlacement.ImageUrl,
                     CallToActionText = draftPlacement.CallToActionText,
                     SortOrder = draftPlacement.SortOrder,
                     CreatedBy = request.PerformedBy
@@ -983,8 +985,10 @@ public sealed class ContentStudioService(
                 SlotToken = AffiliateSlotTokens[i],
                 AdvertiserId = offer.AdvertiserId,
                 AdvertiserName = offer.AdvertiserName,
+                LinkName = offer.LinkName,
                 Category = offer.Category,
                 TrackingUrl = offer.TrackingUrl,
+                ImageUrl = offer.ImageUrl,
                 CallToActionText = "Explore Offer",
                 SortOrder = i + 1,
                 CreatedBy = "content-studio"
@@ -998,11 +1002,13 @@ public sealed class ContentStudioService(
     {
         var markup = placements
             .Select(placement => new ArticleMarkdownRenderer.AffiliatePlacementMarkup(
-                placement.SlotToken,
-                placement.AdvertiserName,
-                placement.Category,
-                placement.TrackingUrl,
-                placement.CallToActionText))
+                SlotToken: placement.SlotToken,
+                AdvertiserName: placement.AdvertiserName,
+                Category: placement.Category,
+                TrackingUrl: placement.TrackingUrl,
+                CallToActionText: placement.CallToActionText,
+                LinkName: placement.LinkName,
+                ImageUrl: placement.ImageUrl))
             .ToArray();
 
         return ArticleMarkdownRenderer.Render(markdown, markup);
@@ -1032,8 +1038,10 @@ public sealed class ContentStudioService(
                     SlotToken = x.SlotToken,
                     AdvertiserId = x.AdvertiserId,
                     AdvertiserName = x.AdvertiserName,
+                    LinkName = x.LinkName,
                     Category = x.Category,
                     TrackingUrl = x.TrackingUrl,
+                    ImageUrl = x.ImageUrl,
                     CallToActionText = x.CallToActionText,
                     SortOrder = x.SortOrder,
                     Impressions = interaction.Impressions,

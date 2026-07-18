@@ -100,8 +100,10 @@ public sealed class ScoredAffiliateOfferView
 {
     public string AdvertiserId { get; init; } = string.Empty;
     public string AdvertiserName { get; init; } = string.Empty;
+    public string LinkName { get; init; } = string.Empty;
     public string Category { get; init; } = string.Empty;
     public string TrackingUrl { get; init; } = string.Empty;
+    public string? ImageUrl { get; init; }
     public double Score { get; init; }
 }
 
@@ -110,8 +112,10 @@ public sealed class ArticleAffiliatePlacementView
     public string SlotToken { get; init; } = string.Empty;
     public string AdvertiserId { get; init; } = string.Empty;
     public string AdvertiserName { get; init; } = string.Empty;
+    public string LinkName { get; init; } = string.Empty;
     public string Category { get; init; } = string.Empty;
     public string TrackingUrl { get; init; } = string.Empty;
+    public string? ImageUrl { get; init; }
     public string CallToActionText { get; init; } = "Explore Offer";
     public int SortOrder { get; init; }
     public int Impressions { get; init; }

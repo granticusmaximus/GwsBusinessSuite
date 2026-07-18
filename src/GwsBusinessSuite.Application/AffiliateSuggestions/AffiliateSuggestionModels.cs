@@ -8,6 +8,7 @@ public sealed class AffiliateSuggestionView
     public string LinkName { get; init; } = string.Empty;
     public string Category { get; init; } = string.Empty;
     public string TrackingUrl { get; init; } = string.Empty;
+    public string? ImageUrl { get; init; }
     public string Reasoning { get; init; } = string.Empty;
     public int Rank { get; init; }
     public string Status { get; init; } = string.Empty;

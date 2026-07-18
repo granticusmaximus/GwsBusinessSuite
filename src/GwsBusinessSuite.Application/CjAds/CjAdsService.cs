@@ -376,6 +376,7 @@ public sealed class CjAdsService(
                 LinkName = string.IsNullOrWhiteSpace(link.LinkName) ? "CJ Link" : link.LinkName,
                 Category = link.PromotionType,
                 TrackingUrl = trackingUrl,
+                ImageUrl = link.ImageUrl,
                 PromotionEndsAt = link.PromotionEndDate,
                 CreatedAt = now,
                 CreatedBy = "cj-link-sync"

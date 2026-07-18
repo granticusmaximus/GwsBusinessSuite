@@ -536,13 +536,16 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
 
         var linkName = Read(element, "linkName", "link-name", "link_name", "promotionalName", "promotional-name", "name");
         var clickUrl = Read(element, "clickUrl", "click-url", "click_url");
-        if (string.IsNullOrWhiteSpace(clickUrl))
+        var imageUrl = Read(element, "imageUrl", "image-url", "image_url", "creativeUrl", "creative-url");
+        if (string.IsNullOrWhiteSpace(clickUrl) || string.IsNullOrWhiteSpace(imageUrl))
         {
             // CJ's Link Search API doesn't return a plain click-url field - the real tracking
             // link is embedded as an <a href="..."> inside link-code-html (or the JS variant).
+            // Banner-type links carry their creative image the same way, as a nested <img src>.
             var linkCodeHtml = Read(element, "linkCodeHtml", "link-code-html", "link_code_html",
                 "linkCodeJavascript", "link-code-javascript", "linkCode", "link-code");
-            clickUrl = ExtractHrefFromAnchorHtml(linkCodeHtml);
+            if (string.IsNullOrWhiteSpace(clickUrl)) clickUrl = ExtractHrefFromAnchorHtml(linkCodeHtml);
+            if (string.IsNullOrWhiteSpace(imageUrl)) imageUrl = ExtractImageSrcFromHtml(linkCodeHtml) ?? string.Empty;
         }
         var destination = Read(element, "destination", "destinationUrl", "destination-url", "landingPageUrl", "landing-page-url");
 
@@ -564,7 +567,8 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
             ClickUrl: clickUrl,
             DestinationUrl: destination,
             PromotionType: Read(element, "promotionType", "promotion-type", "promotion_type"),
-            PromotionEndDate: endDate);
+            PromotionEndDate: endDate,
+            ImageUrl: string.IsNullOrWhiteSpace(imageUrl) ? null : imageUrl);
     }
 
     private static IReadOnlyCollection<CjLinkRecord> TryParseLinksXml(string payload)
@@ -581,13 +585,16 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
                 {
                     var linkName = ReadValue(element, "link-name", "linkName", "promotional-name", "name");
                     var clickUrl = ReadValue(element, "click-url", "clickUrl");
-                    if (string.IsNullOrWhiteSpace(clickUrl))
+                    var imageUrl = ReadValue(element, "image-url", "imageUrl", "creative-url", "creativeUrl");
+                    if (string.IsNullOrWhiteSpace(clickUrl) || string.IsNullOrWhiteSpace(imageUrl))
                     {
-                        // Same fallback as the JSON path: the real tracking link is embedded as
-                        // an <a href="..."> inside link-code-html, not a plain click-url field.
+                        // Same fallback as the JSON path: the real tracking link (and, for
+                        // banner links, the creative image) is embedded inside link-code-html,
+                        // not plain click-url/image-url fields.
                         var linkCodeHtml = ReadValue(element, "link-code-html", "linkCodeHtml",
                             "link-code-javascript", "linkCodeJavascript", "link-code", "linkCode");
-                        clickUrl = ExtractHrefFromAnchorHtml(linkCodeHtml);
+                        if (string.IsNullOrWhiteSpace(clickUrl)) clickUrl = ExtractHrefFromAnchorHtml(linkCodeHtml);
+                        if (string.IsNullOrWhiteSpace(imageUrl)) imageUrl = ExtractImageSrcFromHtml(linkCodeHtml) ?? string.Empty;
                     }
                     var destination = ReadValue(element, "destination", "destination-url", "destinationUrl", "landing-page-url");
 
@@ -609,7 +616,8 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
                         ClickUrl: clickUrl,
                         DestinationUrl: destination,
                         PromotionType: ReadValue(element, "promotion-type", "promotionType"),
-                        PromotionEndDate: endDate);
+                        PromotionEndDate: endDate,
+                        ImageUrl: string.IsNullOrWhiteSpace(imageUrl) ? null : imageUrl);
                 })
                 .Where(x => x is not null)
                 .Cast<CjLinkRecord>()
@@ -1417,6 +1425,10 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
         """<a\s[^>]*href\s*=\s*["']([^"']+)["']""",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    private static readonly Regex ImgSrcRegex = new(
+        """<img\s[^>]*src\s*=\s*["']([^"']+)["']""",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     private static string ExtractHrefFromAnchorHtml(string html)
     {
         if (string.IsNullOrWhiteSpace(html))
@@ -1426,6 +1438,19 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
 
         var match = AnchorHrefRegex.Match(html);
         return match.Success ? System.Net.WebUtility.HtmlDecode(match.Groups[1].Value) : string.Empty;
+    }
+
+    // Banner-type CJ links embed an <img> tag inside link-code-html; text links have none.
+    // A blank result here just means "no creative image", not a parse failure.
+    private static string? ExtractImageSrcFromHtml(string html)
+    {
+        if (string.IsNullOrWhiteSpace(html))
+        {
+            return null;
+        }
+
+        var match = ImgSrcRegex.Match(html);
+        return match.Success ? System.Net.WebUtility.HtmlDecode(match.Groups[1].Value) : null;
     }
 }
 

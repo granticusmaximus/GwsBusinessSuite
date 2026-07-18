@@ -354,6 +354,7 @@ public sealed class AffiliateOffer : AuditableEntity
     public string? RelationshipStatus { get; set; }
     public string? Category { get; set; }
     public string? TrackingUrl { get; set; }
+    public string? ImageUrl { get; set; }
     public DateTimeOffset? PromotionEndsAt { get; set; }
 }
 
@@ -412,8 +413,10 @@ public sealed class SeoArticleAffiliatePlacement : AuditableEntity
     public string SlotToken { get; set; } = string.Empty;
     public string AdvertiserId { get; set; } = string.Empty;
     public string AdvertiserName { get; set; } = string.Empty;
+    public string LinkName { get; set; } = string.Empty;
     public string Category { get; set; } = string.Empty;
     public string TrackingUrl { get; set; } = string.Empty;
+    public string? ImageUrl { get; set; }
     public string CallToActionText { get; set; } = "Explore Offer";
     public int SortOrder { get; set; }
     public SeoArticleDraft? Draft { get; set; }
@@ -476,8 +479,10 @@ public sealed class ArticleAffiliatePlacement : AuditableEntity
     public string SlotToken { get; set; } = string.Empty;
     public string AdvertiserId { get; set; } = string.Empty;
     public string AdvertiserName { get; set; } = string.Empty;
+    public string LinkName { get; set; } = string.Empty;
     public string Category { get; set; } = string.Empty;
     public string TrackingUrl { get; set; } = string.Empty;
+    public string? ImageUrl { get; set; }
     public string CallToActionText { get; set; } = "Explore Offer";
     public int SortOrder { get; set; }
     public Article? Article { get; set; }
@@ -496,6 +501,7 @@ public sealed class ArticleAffiliateRotation : AuditableEntity
     public string LinkName { get; set; } = string.Empty;
     public string Category { get; set; } = string.Empty;
     public string TrackingUrl { get; set; } = string.Empty;
+    public string? ImageUrl { get; set; }
     public string CallToActionText { get; set; } = "Explore Offer";
     public DateTimeOffset StartsAt { get; set; }
     public long StartsAtUnixSeconds { get; set; }
@@ -559,6 +565,7 @@ public sealed class ArticleAffiliateSuggestion : AuditableEntity
     public string LinkName { get; set; } = string.Empty;
     public string Category { get; set; } = string.Empty;
     public string TrackingUrl { get; set; } = string.Empty;
+    public string? ImageUrl { get; set; }
     public string Reasoning { get; set; } = string.Empty;
     public int Rank { get; set; }
     public string Status { get; set; } = ArticleAffiliateSuggestionStatuses.Pending;

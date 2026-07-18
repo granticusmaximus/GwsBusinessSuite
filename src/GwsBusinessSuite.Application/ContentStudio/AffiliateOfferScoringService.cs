@@ -52,8 +52,10 @@ public sealed class AffiliateOfferScoringService(IAppDbContext db) : IAffiliateO
             {
                 AdvertiserId = x.Offer.AdvertiserId,
                 AdvertiserName = x.Offer.AdvertiserName,
+                LinkName = x.Offer.LinkName,
                 Category = x.Offer.Category ?? string.Empty,
                 TrackingUrl = x.Offer.TrackingUrl ?? string.Empty,
+                ImageUrl = x.Offer.ImageUrl,
                 Score = x.Score
             })
             .ToArray();

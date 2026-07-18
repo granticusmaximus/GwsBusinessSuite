@@ -21,7 +21,9 @@ public static class ArticleMarkdownRenderer
         string Category,
         string TrackingUrl,
         string CallToActionText,
-        Guid PlacementId = default);
+        Guid PlacementId = default,
+        string LinkName = "",
+        string? ImageUrl = null);
 
     public static string Render(string markdown, IReadOnlyList<ArticleAffiliatePlacement> placements)
         => Render(markdown, placements.Select(ToMarkup).ToArray());
@@ -56,22 +58,31 @@ public static class ArticleMarkdownRenderer
     }
 
     private static AffiliatePlacementMarkup ToMarkup(ArticleAffiliatePlacement placement) => new(
-        placement.SlotToken,
-        placement.AdvertiserName,
-        placement.Category,
-        placement.TrackingUrl,
-        placement.CallToActionText,
-        placement.Id);
+        SlotToken: placement.SlotToken,
+        AdvertiserName: placement.AdvertiserName,
+        Category: placement.Category,
+        TrackingUrl: placement.TrackingUrl,
+        CallToActionText: placement.CallToActionText,
+        PlacementId: placement.Id,
+        LinkName: placement.LinkName,
+        ImageUrl: placement.ImageUrl);
 
     private static string BuildCardMarkup(AffiliatePlacementMarkup placement)
     {
-        // Advertiser/category/CTA text and the tracking URL all ultimately come from data
-        // (CJ sync, manual entry) rather than a trusted constant, so they're HTML-encoded
-        // before being embedded — otherwise a crafted advertiser name or URL could inject
-        // markup into every article that references it.
+        // Advertiser name, link text, the tracking URL, and the image URL all ultimately
+        // come from data (CJ sync, manual entry) rather than a trusted constant, so they're
+        // HTML-encoded before being embedded — otherwise a crafted value could inject markup
+        // into every article that references it.
         var safeAdvertiserName = WebUtility.HtmlEncode(placement.AdvertiserName);
-        var safeCategory = WebUtility.HtmlEncode(
-            string.IsNullOrWhiteSpace(placement.Category) ? "General" : placement.Category);
+
+        // The link's own name/text (CJ's LinkName, or whatever the offer was originally
+        // titled) is what the card links with - not a synthesized "advertiser + category"
+        // phrase. CallToActionText/"Explore Offer" is only a fallback for placements saved
+        // before LinkName existed.
+        var linkText = !string.IsNullOrWhiteSpace(placement.LinkName)
+            ? placement.LinkName
+            : (!string.IsNullOrWhiteSpace(placement.CallToActionText) ? placement.CallToActionText : "Explore Offer");
+        var safeLinkText = WebUtility.HtmlEncode(linkText);
 
         // Published articles (real ArticleAffiliatePlacement rows, which have a real Id)
         // route through the /go/{placementId} click-tracking redirect instead of linking
@@ -81,9 +92,12 @@ public static class ArticleMarkdownRenderer
         var safeUrl = placement.PlacementId == default
             ? WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(placement.TrackingUrl) ? "#" : placement.TrackingUrl)
             : $"/go/{placement.PlacementId:D}";
-        var safeCallToAction = WebUtility.HtmlEncode(placement.CallToActionText);
 
-        return $"<div class=\"cj-ad-card\"><p><strong>Sponsored Pick: {safeAdvertiserName}</strong></p><p>Category: {safeCategory}</p><p><a href=\"{safeUrl}\" target=\"_blank\" rel=\"noopener noreferrer nofollow sponsored\">{safeCallToAction}</a></p></div>";
+        var imageMarkup = string.IsNullOrWhiteSpace(placement.ImageUrl)
+            ? string.Empty
+            : $"<img src=\"{WebUtility.HtmlEncode(placement.ImageUrl)}\" alt=\"{safeAdvertiserName}\" loading=\"lazy\" style=\"max-width:160px;max-height:120px;object-fit:contain;vertical-align:middle;margin-right:.6rem;\" />";
+
+        return $"<div class=\"cj-ad-card\"><p><strong>Sponsored Pick:</strong> <a href=\"{safeUrl}\" target=\"_blank\" rel=\"noopener noreferrer nofollow sponsored\">{imageMarkup}{safeLinkText}</a></p></div>";
     }
 
     private static string AppendRotatingCard(string markdown, AffiliatePlacementMarkup placement)

@@ -72,7 +72,8 @@ public sealed record CjLinkRecord(
     string ClickUrl,
     string DestinationUrl,
     string PromotionType,
-    DateTimeOffset? PromotionEndDate);
+    DateTimeOffset? PromotionEndDate,
+    string? ImageUrl = null);
 
 public sealed record CjCommissionFetchResult(
     IReadOnlyCollection<CjCommissionFetchRecord> Commissions,

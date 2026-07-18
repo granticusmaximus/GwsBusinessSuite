@@ -901,8 +901,10 @@ else
 
                 existing.AdvertiserId = offer.AdvertiserId;
                 existing.AdvertiserName = offer.AdvertiserName;
+                existing.LinkName = offer.LinkName;
                 existing.Category = offer.Category ?? string.Empty;
                 existing.TrackingUrl = offer.TrackingUrl ?? string.Empty;
+                existing.ImageUrl = offer.ImageUrl;
                 existing.CallToActionText = string.IsNullOrWhiteSpace(PlacementCallToActionText)
                     ? "Explore Offer"
                     : PlacementCallToActionText.Trim();
@@ -917,8 +919,10 @@ else
                     SlotToken = ArticleMarkdownRenderer.GenerateSlotToken(),
                     AdvertiserId = offer.AdvertiserId,
                     AdvertiserName = offer.AdvertiserName,
+                    LinkName = offer.LinkName,
                     Category = offer.Category ?? string.Empty,
                     TrackingUrl = offer.TrackingUrl ?? string.Empty,
+                    ImageUrl = offer.ImageUrl,
                     CallToActionText = string.IsNullOrWhiteSpace(PlacementCallToActionText)
                         ? "Explore Offer"
                         : PlacementCallToActionText.Trim(),
