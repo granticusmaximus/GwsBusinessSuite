@@ -915,9 +915,16 @@ app.MapGet("/go/{placementId:guid}", async (
     IAffiliateAnalyticsService affiliateAnalyticsService) =>
 {
     var destinationUrl = await affiliateAnalyticsService.RecordClickAsync(placementId);
-    return destinationUrl is null
-        ? Results.Redirect("/", permanent: false)
-        : Results.Redirect(destinationUrl, permanent: false);
+    if (destinationUrl is null)
+    {
+        // Redirecting to "/" here silently looked like the ad worked while actually
+        // sending visitors to the homepage - not honest, and impossible to notice without
+        // digging through rendered article HTML. A missing/expired placement or a blank
+        // tracking URL is a real data problem worth surfacing, not swallowing.
+        app.Logger.LogWarning("Affiliate click redirect had no destination URL for placement {PlacementId}.", placementId);
+        return Results.NotFound();
+    }
+    return Results.Redirect(destinationUrl, permanent: false);
 }).RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
 
 app.MapGet("/resume", () => Results.Redirect("/about#resume", permanent: true))

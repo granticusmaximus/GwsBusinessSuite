@@ -233,12 +233,16 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
 
     // Best-effort commission import: queries the same commissions.api.cj.com GraphQL
     // endpoint/query shape already proven to work for partner discovery
-    // (FetchPartnersViaGraphQlAsync), but requests additional commission-amount fields
-    // (saleAmount/commissionAmount/eventDate/postingDate/orderId) that CJ's public
-    // Commission Detail GraphQL schema documents. These field names aren't independently
-    // verified against live CJ API docs from this environment, so parsing below is
-    // defensive at every level - a schema mismatch degrades to zero imported rows
-    // (logged via the returned Message) rather than throwing and breaking the caller.
+    // (FetchPartnersViaGraphQlAsync). Field names below were corrected against a live
+    // "Cannot query field" schema-validation error from CJ: saleAmount/commissionAmount
+    // don't exist as {amount currency} objects - CJ exposes pre-converted USD scalars
+    // (saleAmountUsd/pubCommissionAmountUsd) instead. There's no per-record "id" field
+    // either; commissionId is used as the stable external id - CJ's error didn't suggest
+    // it for the "id" field directly (it suggested aid/sid, which map to advertiser/sub
+    // ids already captured elsewhere), but it did surface commissionId as a valid field
+    // on this type, and it's the only candidate that means "this commission record's own
+    // identifier". Parsing below stays defensive - a further schema mismatch degrades to
+    // zero imported rows (logged via the returned Message) rather than throwing.
     public async Task<CjCommissionFetchResult> FetchCommissionsAsync(CjConnectionRequest request, CancellationToken ct = default)
     {
         var endpoint = NormalizeEndpointUrl(request.EndpointUrl);
@@ -258,13 +262,13 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
               publisherCommissions(forPublishers:$publisherIds, websiteIds:$websiteIds) {
                 count
                 records {
-                  id
+                  commissionId
                   advertiserId
                   advertiserName
                   actionStatus
                   orderId
-                  saleAmount { amount currency }
-                  commissionAmount { amount currency }
+                  saleAmountUsd
+                  pubCommissionAmountUsd
                   eventDate
                   postingDate
                 }
@@ -351,14 +355,14 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
             {
                 try
                 {
-                    var externalId = ReadJsonString(record, "id");
+                    var externalId = ReadJsonString(record, "commissionId");
                     if (string.IsNullOrWhiteSpace(externalId))
                     {
                         continue; // Can't dedupe/upsert without a stable external id.
                     }
 
-                    var saleAmount = ReadJsonMoney(record, "saleAmount");
-                    var commissionAmount = ReadJsonMoney(record, "commissionAmount");
+                    var saleAmount = ReadJsonDecimal(record, "saleAmountUsd");
+                    var commissionAmount = ReadJsonDecimal(record, "pubCommissionAmountUsd");
                     var eventDateRaw = ReadJsonString(record, "eventDate");
                     var postingDateRaw = ReadJsonString(record, "postingDate");
 
@@ -368,9 +372,9 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
                         AdvertiserName: ReadJsonString(record, "advertiserName"),
                         OrderId: ReadJsonString(record, "orderId"),
                         ActionStatus: ReadJsonString(record, "actionStatus"),
-                        SaleAmount: saleAmount.Amount,
-                        CommissionAmount: commissionAmount.Amount,
-                        Currency: commissionAmount.Currency ?? saleAmount.Currency ?? "USD",
+                        SaleAmount: saleAmount,
+                        CommissionAmount: commissionAmount,
+                        Currency: "USD",
                         EventDate: DateTimeOffset.TryParse(eventDateRaw, out var eventDate) ? eventDate : null,
                         PostingDate: DateTimeOffset.TryParse(postingDateRaw, out var postingDate) ? postingDate : null));
                 }
@@ -388,31 +392,12 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
         }
     }
 
-    private static (decimal Amount, string? Currency) ReadJsonMoney(JsonElement record, string propertyName)
+    private static decimal ReadJsonDecimal(JsonElement record, string propertyName)
     {
-        if (!record.TryGetProperty(propertyName, out var money) || money.ValueKind != JsonValueKind.Object)
-        {
-            return (0m, null);
-        }
-
-        var amount = 0m;
-        if (money.TryGetProperty("amount", out var amountElement))
-        {
-            if (amountElement.ValueKind == JsonValueKind.Number && amountElement.TryGetDecimal(out var numeric))
-            {
-                amount = numeric;
-            }
-            else if (amountElement.ValueKind == JsonValueKind.String && decimal.TryParse(amountElement.GetString(), out var parsed))
-            {
-                amount = parsed;
-            }
-        }
-
-        var currency = money.TryGetProperty("currency", out var currencyElement) && currencyElement.ValueKind == JsonValueKind.String
-            ? currencyElement.GetString()
-            : null;
-
-        return (amount, currency);
+        if (!record.TryGetProperty(propertyName, out var value)) return 0m;
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var numeric)) return numeric;
+        if (value.ValueKind == JsonValueKind.String && decimal.TryParse(value.GetString(), out var parsed)) return parsed;
+        return 0m;
     }
 
     private sealed record CjGraphQlCommissionAttemptResult(
