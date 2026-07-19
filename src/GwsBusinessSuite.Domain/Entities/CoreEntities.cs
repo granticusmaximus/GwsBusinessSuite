@@ -97,8 +97,30 @@ public sealed class WikiPage : AuditableEntity
 {
     public required string Title { get; set; }
     public required string Slug { get; set; }
+    // Superseded by BlocksJson (see below) - kept only so the one-time startup backfill
+    // (WikiMarkdownBackfillService) has something to read from. Safe to drop in a later
+    // migration once every environment has actually run that backfill at least once.
     public string Markdown { get; set; } = string.Empty;
+    public string BlocksJson { get; set; } = "[]";
+    public string? Icon { get; set; }
+    public string? CoverImageUrl { get; set; }
+    public int SortOrder { get; set; }
     public Guid? ParentWikiPageId { get; set; }
+    public ICollection<WikiPageRevision> Revisions { get; set; } = new List<WikiPageRevision>();
+}
+
+// Bounded DB-snapshot history, mirroring CmsPageRevision/PageRevisionService exactly
+// (same MaxRevisionsPerPage trim-on-save pattern) - replaces the old git-commit-per-save
+// model now that page content is structured blocks rather than a single Markdown string.
+public sealed class WikiPageRevision : AuditableEntity
+{
+    public Guid WikiPageId { get; set; }
+    public int RevisionNumber { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string Slug { get; set; } = string.Empty;
+    public string BlocksJson { get; set; } = "[]";
+    public string Label { get; set; } = string.Empty;
+    public WikiPage? WikiPage { get; set; }
 }
 
 public static class CmsFontPairings

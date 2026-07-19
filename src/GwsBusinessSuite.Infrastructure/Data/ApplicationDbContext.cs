@@ -27,6 +27,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<Contact> Contacts => Set<Contact>();
     public DbSet<ContactActivity> ContactActivities => Set<ContactActivity>();
     public DbSet<WikiPage> WikiPages => Set<WikiPage>();
+    public DbSet<WikiPageRevision> WikiPageRevisions => Set<WikiPageRevision>();
     public DbSet<CmsSite> CmsSites => Set<CmsSite>();
     public DbSet<CmsPage> CmsPages => Set<CmsPage>();
     public DbSet<CmsPageCategory> CmsPageCategories => Set<CmsPageCategory>();
@@ -85,6 +86,12 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<ContactActivity>().HasIndex(x => new { x.ContactId, x.CreatedAt });
 
         modelBuilder.Entity<WikiPage>().HasIndex(x => x.Slug).IsUnique();
+        modelBuilder.Entity<WikiPageRevision>()
+            .HasOne(x => x.WikiPage)
+            .WithMany(x => x.Revisions)
+            .HasForeignKey(x => x.WikiPageId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<WikiPageRevision>().HasIndex(x => new { x.WikiPageId, x.RevisionNumber }).IsUnique();
         modelBuilder.Entity<CmsSite>().HasIndex(x => x.Slug).IsUnique();
         // Slugs are unique per parent, not per site — /services/pricing and
         // /products/pricing can coexist since their full paths differ.

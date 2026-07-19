@@ -2,19 +2,17 @@ using System.Text;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
-using LibGit2Sharp;
 using Microsoft.EntityFrameworkCore;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
-// The DB (WikiPage.Markdown) stays the source of truth for current-state reads - those
-// paths are unchanged from before this class started managing git history. A local git
-// repo is a side channel that SavePageAsync/DeletePageAsync write one commit to on every
-// change, and that history/diff/revert reads from live (no bounded DB revision table,
-// unlike CmsPageRevision - git history here is unbounded, matching OtterWiki).
-public sealed class WikiService(IAppDbContext dbContext, string repoPath) : IWikiService
+// DB-snapshot history (WikiPageRevision), mirroring CmsPageRevision/PageRevisionService's
+// MaxRevisionsPerPage trim-on-save pattern - replaces the old git-commit-per-save model
+// (see git history for the LibGit2Sharp version) now that page content is structured
+// WikiBlock JSON rather than a single Markdown string that read well as a prose diff.
+public sealed class WikiService(IAppDbContext dbContext) : IWikiService
 {
-    private const string CommitAuthorEmail = "wiki@grantwatson.dev";
+    private const int MaxRevisionsPerPage = 20;
 
     public async Task<IReadOnlyList<WikiPage>> ListPagesAsync(CancellationToken cancellationToken = default)
     {
@@ -23,7 +21,8 @@ public sealed class WikiService(IAppDbContext dbContext, string repoPath) : IWik
             .ToListAsync(cancellationToken);
 
         return pages
-            .OrderByDescending(page => page.UpdatedAt ?? page.CreatedAt)
+            .OrderBy(page => page.ParentWikiPageId.HasValue)
+            .ThenBy(page => page.SortOrder)
             .ThenBy(page => page.Title)
             .ToList();
     }
@@ -50,10 +49,9 @@ public sealed class WikiService(IAppDbContext dbContext, string repoPath) : IWik
             Title = string.Empty,
             Slug = string.Empty,
             CreatedAt = now,
-            CreatedBy = performedBy
+            CreatedBy = performedBy,
+            SortOrder = await NextSortOrderAsync(editor.ParentWikiPageId, cancellationToken)
         };
-
-        var previousSlug = page.Slug;
 
         var requestedSlug = string.IsNullOrWhiteSpace(editor.Slug)
             ? CreateSlug(editor.Title)
@@ -62,7 +60,9 @@ public sealed class WikiService(IAppDbContext dbContext, string repoPath) : IWik
 
         page.Title = editor.Title.Trim();
         page.Slug = uniqueSlug;
-        page.Markdown = editor.Markdown.Trim();
+        page.BlocksJson = string.IsNullOrWhiteSpace(editor.BlocksJson) ? "[]" : editor.BlocksJson;
+        page.Icon = string.IsNullOrWhiteSpace(editor.Icon) ? null : editor.Icon.Trim();
+        page.CoverImageUrl = string.IsNullOrWhiteSpace(editor.CoverImageUrl) ? null : editor.CoverImageUrl.Trim();
         page.ParentWikiPageId = editor.ParentWikiPageId;
         page.UpdatedAt = now;
         page.UpdatedBy = performedBy;
@@ -73,12 +73,7 @@ public sealed class WikiService(IAppDbContext dbContext, string repoPath) : IWik
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
-
-        CommitPageToGit(
-            page,
-            previousSlugToRemove: !isNew && !string.Equals(previousSlug, page.Slug, StringComparison.Ordinal) ? previousSlug : null,
-            message: isNew ? $"Create {page.Title}" : $"Update {page.Title}",
-            performedBy);
+        await CreateRevisionAsync(page, performedBy, cancellationToken);
 
         return page;
     }
@@ -91,122 +86,210 @@ public sealed class WikiService(IAppDbContext dbContext, string repoPath) : IWik
             return;
         }
 
+        // WikiPageRevisions cascade-delete via the FK configured in ApplicationDbContext.
         dbContext.WikiPages.Remove(page);
         await dbContext.SaveChangesAsync(cancellationToken);
-
-        DeletePageFromGit(page, performedBy);
     }
 
-    public async Task<IReadOnlyList<WikiRevisionView>> GetHistoryAsync(Guid wikiPageId, CancellationToken cancellationToken = default)
-    {
-        var page = await GetPageAsync(wikiPageId, cancellationToken);
-        if (page is null)
-        {
-            return [];
-        }
-
-        using var repo = OpenOrInitRepository();
-        if (repo.Head.Tip is null)
-        {
-            return [];
-        }
-
-        // The default QueryBy(path) overload uses LibGit2Sharp's rename-following
-        // "FullHistory" algorithm, which has a longstanding upstream bug that throws
-        // KeyNotFoundException on some perfectly ordinary linear histories (see
-        // libgit2/libgit2sharp#1410/#1401/#1599) - forcing a topological sort avoids it.
-        return repo.Commits
-            .QueryBy(FileNameFor(page.Slug), new CommitFilter { SortBy = CommitSortStrategies.Topological })
-            .Select(entry => new WikiRevisionView
-            {
-                Sha = entry.Commit.Sha,
-                Message = entry.Commit.MessageShort,
-                AuthorName = entry.Commit.Author.Name,
-                When = entry.Commit.Author.When
-            })
-            .ToList();
-    }
-
-    public async Task<string?> GetDiffAsync(Guid wikiPageId, string fromSha, string toSha, CancellationToken cancellationToken = default)
-    {
-        var page = await GetPageAsync(wikiPageId, cancellationToken);
-        if (page is null)
-        {
-            return null;
-        }
-
-        using var repo = OpenOrInitRepository();
-        var fromCommit = repo.Lookup<Commit>(fromSha);
-        var toCommit = repo.Lookup<Commit>(toSha);
-        if (fromCommit is null || toCommit is null)
-        {
-            return null;
-        }
-
-        // The page may have been renamed since either commit, so the file's path back then
-        // isn't necessarily its current slug - resolve each side's actual historical path
-        // rather than assuming both commits used today's filename.
-        var fromFileName = ResolveFileNameForRevision(repo, page, fromSha);
-        var toFileName = ResolveFileNameForRevision(repo, page, toSha);
-
-        using var patch = repo.Diff.Compare<Patch>(fromCommit.Tree, toCommit.Tree);
-        var entry = patch.FirstOrDefault(change =>
-            change.Path == toFileName || change.Path == fromFileName ||
-            change.OldPath == toFileName || change.OldPath == fromFileName);
-        return entry?.Patch;
-    }
-
-    public async Task<string?> GetRevisionContentAsync(Guid wikiPageId, string sha, CancellationToken cancellationToken = default)
-    {
-        var page = await GetPageAsync(wikiPageId, cancellationToken);
-        if (page is null)
-        {
-            return null;
-        }
-
-        using var repo = OpenOrInitRepository();
-        var commit = repo.Lookup<Commit>(sha);
-        if (commit is null)
-        {
-            return null;
-        }
-
-        // Same rename problem as GetDiffAsync - a pre-rename revision only exists in the
-        // tree under its old filename, not today's slug.
-        var fileName = ResolveFileNameForRevision(repo, page, sha);
-        var entry = commit.Tree[fileName];
-        return entry?.Target is Blob blob ? blob.GetContentText() : null;
-    }
-
-    // Re-walks the same rename-following history query GetHistoryAsync uses and returns the
-    // path the page's file actually had at the given commit, falling back to today's
-    // filename if the sha isn't found in this page's history at all.
-    private static string ResolveFileNameForRevision(Repository repo, WikiPage page, string sha)
-    {
-        var currentFileName = FileNameFor(page.Slug);
-        var match = repo.Commits
-            .QueryBy(currentFileName, new CommitFilter { SortBy = CommitSortStrategies.Topological })
-            .FirstOrDefault(entry => string.Equals(entry.Commit.Sha, sha, StringComparison.OrdinalIgnoreCase));
-
-        return match?.Path ?? currentFileName;
-    }
-
-    public async Task<WikiPage> RevertToRevisionAsync(Guid wikiPageId, string sha, string performedBy, CancellationToken cancellationToken = default)
+    public async Task ReorderPageAsync(
+        Guid wikiPageId,
+        Guid? newParentWikiPageId,
+        int newSortOrder,
+        string performedBy,
+        CancellationToken cancellationToken = default)
     {
         var page = await dbContext.WikiPages.FirstOrDefaultAsync(item => item.Id == wikiPageId, cancellationToken)
             ?? throw new InvalidOperationException("The wiki page no longer exists.");
 
-        var oldContent = await GetRevisionContentAsync(wikiPageId, sha, cancellationToken)
+        if (newParentWikiPageId == wikiPageId)
+        {
+            throw new InvalidOperationException("A page cannot be its own parent.");
+        }
+        if (newParentWikiPageId is { } candidateParentId && await IsDescendantAsync(wikiPageId, candidateParentId, cancellationToken))
+        {
+            throw new InvalidOperationException("Cannot move a page under one of its own descendants.");
+        }
+
+        var siblings = await dbContext.WikiPages
+            .Where(item => item.ParentWikiPageId == newParentWikiPageId && item.Id != wikiPageId)
+            .OrderBy(item => item.SortOrder)
+            .ToListAsync(cancellationToken);
+
+        siblings.Insert(Math.Clamp(newSortOrder, 0, siblings.Count), page);
+
+        var now = DateTimeOffset.UtcNow;
+        page.ParentWikiPageId = newParentWikiPageId;
+        for (var index = 0; index < siblings.Count; index++)
+        {
+            siblings[index].SortOrder = index;
+            siblings[index].UpdatedAt = now;
+            siblings[index].UpdatedBy = performedBy;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<WikiRevisionView>> GetHistoryAsync(Guid wikiPageId, CancellationToken cancellationToken = default)
+    {
+        var revisions = await dbContext.WikiPageRevisions
+            .AsNoTracking()
+            .Where(revision => revision.WikiPageId == wikiPageId)
+            .OrderByDescending(revision => revision.RevisionNumber)
+            .ToListAsync(cancellationToken);
+
+        return revisions
+            .Select(revision => new WikiRevisionView
+            {
+                Id = revision.Id,
+                RevisionNumber = revision.RevisionNumber,
+                Label = revision.Label,
+                AuthorName = revision.CreatedBy,
+                When = revision.CreatedAt
+            })
+            .ToList();
+    }
+
+    public async Task<string?> GetStructuralDiffAsync(
+        Guid wikiPageId,
+        Guid fromRevisionId,
+        Guid toRevisionId,
+        CancellationToken cancellationToken = default)
+    {
+        var revisions = await dbContext.WikiPageRevisions
+            .AsNoTracking()
+            .Where(revision => revision.WikiPageId == wikiPageId && (revision.Id == fromRevisionId || revision.Id == toRevisionId))
+            .ToListAsync(cancellationToken);
+
+        var from = revisions.FirstOrDefault(revision => revision.Id == fromRevisionId);
+        var to = revisions.FirstOrDefault(revision => revision.Id == toRevisionId);
+        if (from is null || to is null)
+        {
+            return null;
+        }
+
+        return BuildStructuralDiff(WikiBlockJson.ParseBlocks(from.BlocksJson), WikiBlockJson.ParseBlocks(to.BlocksJson));
+    }
+
+    public async Task<WikiPage> RevertToRevisionAsync(Guid wikiPageId, Guid revisionId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var page = await dbContext.WikiPages.FirstOrDefaultAsync(item => item.Id == wikiPageId, cancellationToken)
+            ?? throw new InvalidOperationException("The wiki page no longer exists.");
+        var revision = await dbContext.WikiPageRevisions.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == revisionId && item.WikiPageId == wikiPageId, cancellationToken)
             ?? throw new InvalidOperationException("That revision no longer exists.");
 
         return await SavePageAsync(new WikiPageEditorModel
         {
             WikiPageId = page.Id,
-            Title = page.Title,
-            Slug = page.Slug,
-            Markdown = oldContent,
+            Title = revision.Title,
+            Slug = revision.Slug,
+            BlocksJson = revision.BlocksJson,
+            Icon = page.Icon,
+            CoverImageUrl = page.CoverImageUrl,
             ParentWikiPageId = page.ParentWikiPageId
         }, performedBy, cancellationToken);
+    }
+
+    private async Task CreateRevisionAsync(WikiPage page, string performedBy, CancellationToken cancellationToken)
+    {
+        var nextNumber = await dbContext.WikiPageRevisions
+            .Where(revision => revision.WikiPageId == page.Id)
+            .Select(revision => revision.RevisionNumber)
+            .ToListAsync(cancellationToken) is { Count: > 0 } numbers
+                ? numbers.Max() + 1
+                : 1;
+
+        await dbContext.WikiPageRevisions.AddAsync(new WikiPageRevision
+        {
+            WikiPageId = page.Id,
+            RevisionNumber = nextNumber,
+            Title = page.Title,
+            Slug = page.Slug,
+            BlocksJson = page.BlocksJson,
+            CreatedBy = performedBy
+        }, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        await TrimOldRevisionsAsync(page.Id, cancellationToken);
+    }
+
+    private async Task TrimOldRevisionsAsync(Guid wikiPageId, CancellationToken cancellationToken)
+    {
+        var revisions = await dbContext.WikiPageRevisions
+            .Where(revision => revision.WikiPageId == wikiPageId)
+            .OrderByDescending(revision => revision.RevisionNumber)
+            .ToListAsync(cancellationToken);
+
+        if (revisions.Count <= MaxRevisionsPerPage)
+        {
+            return;
+        }
+
+        var toDelete = revisions.Skip(MaxRevisionsPerPage).ToList();
+        dbContext.WikiPageRevisions.RemoveRange(toDelete);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string BuildStructuralDiff(IReadOnlyList<WikiBlock> from, IReadOnlyList<WikiBlock> to)
+    {
+        var fromById = from.ToDictionary(block => block.Id);
+        var toById = to.ToDictionary(block => block.Id);
+        var lines = new List<string>();
+
+        foreach (var block in from)
+        {
+            if (!toById.ContainsKey(block.Id))
+            {
+                lines.Add($"- [{block.Type}] {WikiBlockHtmlRenderer.PlainTextPreview(block)}");
+            }
+        }
+
+        foreach (var block in to)
+        {
+            if (!fromById.TryGetValue(block.Id, out var previous))
+            {
+                lines.Add($"+ [{block.Type}] {WikiBlockHtmlRenderer.PlainTextPreview(block)}");
+            }
+            else if (!string.Equals(WikiBlockJson.Serialize([previous]), WikiBlockJson.Serialize([block]), StringComparison.Ordinal))
+            {
+                lines.Add($"~ [{block.Type}] {WikiBlockHtmlRenderer.PlainTextPreview(block)}");
+            }
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    private async Task<int> NextSortOrderAsync(Guid? parentWikiPageId, CancellationToken cancellationToken)
+    {
+        var siblingOrders = await dbContext.WikiPages
+            .Where(page => page.ParentWikiPageId == parentWikiPageId)
+            .Select(page => page.SortOrder)
+            .ToListAsync(cancellationToken);
+        return siblingOrders.Count == 0 ? 0 : siblingOrders.Max() + 1;
+    }
+
+    private async Task<bool> IsDescendantAsync(Guid ancestorId, Guid candidateId, CancellationToken cancellationToken)
+    {
+        var parentById = await dbContext.WikiPages.AsNoTracking()
+            .Select(page => new { page.Id, page.ParentWikiPageId })
+            .ToDictionaryAsync(page => page.Id, page => page.ParentWikiPageId, cancellationToken);
+
+        var current = candidateId;
+        var guard = 0;
+        while (parentById.TryGetValue(current, out var parent) && guard++ < 128)
+        {
+            if (parent is null)
+            {
+                return false;
+            }
+            if (parent == ancestorId)
+            {
+                return true;
+            }
+            current = parent.Value;
+        }
+
+        return false;
     }
 
     internal static string CreateSlug(string value)
@@ -259,65 +342,5 @@ public sealed class WikiService(IAppDbContext dbContext, string repoPath) : IWik
 
             counter++;
         }
-    }
-
-    private static string FileNameFor(string slug) => $"{slug}.md";
-
-    private Repository OpenOrInitRepository()
-    {
-        Directory.CreateDirectory(repoPath);
-        if (!Repository.IsValid(repoPath))
-        {
-            Repository.Init(repoPath);
-        }
-
-        return new Repository(repoPath);
-    }
-
-    private void CommitPageToGit(WikiPage page, string? previousSlugToRemove, string message, string performedBy)
-    {
-        using var repo = OpenOrInitRepository();
-
-        if (previousSlugToRemove is not null)
-        {
-            var oldPath = Path.Combine(repoPath, FileNameFor(previousSlugToRemove));
-            if (File.Exists(oldPath))
-            {
-                File.Delete(oldPath);
-            }
-        }
-
-        File.WriteAllText(Path.Combine(repoPath, FileNameFor(page.Slug)), page.Markdown);
-        Commands.Stage(repo, "*");
-        TryCommit(repo, message, performedBy);
-    }
-
-    private void DeletePageFromGit(WikiPage page, string performedBy)
-    {
-        using var repo = OpenOrInitRepository();
-
-        var path = Path.Combine(repoPath, FileNameFor(page.Slug));
-        if (!File.Exists(path))
-        {
-            return;
-        }
-
-        File.Delete(path);
-        Commands.Stage(repo, "*");
-        TryCommit(repo, $"Delete {page.Title}", performedBy);
-    }
-
-    private static void TryCommit(Repository repo, string message, string performedBy)
-    {
-        if (!repo.RetrieveStatus().IsDirty)
-        {
-            // Nothing actually changed (e.g. saving with identical content) - Commit()
-            // throws EmptyCommitException in that case, so skip it rather than catch it.
-            return;
-        }
-
-        var signature = new Signature(
-            string.IsNullOrWhiteSpace(performedBy) ? "wiki" : performedBy, CommitAuthorEmail, DateTimeOffset.UtcNow);
-        repo.Commit(message, signature, signature);
     }
 }

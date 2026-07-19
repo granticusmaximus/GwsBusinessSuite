@@ -9,6 +9,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<Contact> Contacts { get; }
     DbSet<ContactActivity> ContactActivities { get; }
     DbSet<WikiPage> WikiPages { get; }
+    DbSet<WikiPageRevision> WikiPageRevisions { get; }
     DbSet<CmsSite> CmsSites { get; }
     DbSet<CmsPage> CmsPages { get; }
     DbSet<CmsPageCategory> CmsPageCategories { get; }

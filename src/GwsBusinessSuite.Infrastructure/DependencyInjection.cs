@@ -132,11 +132,7 @@ public static class DependencyInjection
         services.AddScoped<IAutomationTriggerService, AutomationTriggerService>();
         services.AddHostedService<AutomationScheduleBackgroundService>();
         services.AddHostedService<AutomationResumeBackgroundService>();
-        // Same persisted volume as the SQLite DB and DP keys in production
-        // (docker-compose.yml mounts gwssuite-data:/app/data); a relative dev-local path
-        // otherwise (see appsettings.Development.json).
-        var wikiRepoPath = configuration["Wiki:RepoPath"] ?? "/app/data/wiki-repo";
-        services.AddScoped<IWikiService>(sp => new WikiService(sp.GetRequiredService<IAppDbContext>(), wikiRepoPath));
+        services.AddScoped<IWikiService, WikiService>();
         var liveShowRecordingsPath = configuration["LiveShow:RecordingsPath"] ?? "/app/data/live-show-recordings";
         services.AddScoped<ILiveShowService>(sp => new LiveShowService(
             sp.GetRequiredService<IAppDbContext>(),

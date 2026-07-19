@@ -12,6 +12,7 @@ using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.Resume;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Application.Users;
+using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Web.Services;
 using GwsBusinessSuite.Web.Components;
@@ -240,6 +241,7 @@ using (var scope = app.Services.CreateScope())
 
     await EnsureGrantWatsonHomepageAsync(dbContext, app.Configuration, app.Logger);
     await EnsureAboutPageResumeSectionAsync(dbContext, app.Logger);
+    await EnsureWikiPagesHaveBlocksAsync(dbContext, app.Logger);
 
     if (!await dbContext.AppUsers.AnyAsync())
     {
@@ -2017,6 +2019,34 @@ static async Task EnsureAboutPageResumeSectionAsync(ApplicationDbContext dbConte
     }
 
     await dbContext.SaveChangesAsync();
+}
+
+// One-time content migration: the Wiki moved from a single Markdown-string page body
+// (WikiPage.Markdown) to structured blocks (WikiPage.BlocksJson) as part of the block
+// editor rebuild. Any page whose BlocksJson is still the empty-array default but whose old
+// Markdown column has content gets that content wrapped into a single legacy "markdown"
+// block (rendered through the existing Markdig pipeline unchanged) so nothing is lost -
+// idempotent, since a page that already has blocks is left alone on every subsequent run.
+static async Task EnsureWikiPagesHaveBlocksAsync(ApplicationDbContext dbContext, ILogger logger)
+{
+    var pagesNeedingBackfill = await dbContext.WikiPages
+        .Where(page => page.BlocksJson == "[]" && page.Markdown != "")
+        .ToListAsync();
+    if (pagesNeedingBackfill.Count == 0)
+    {
+        return;
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    foreach (var page in pagesNeedingBackfill)
+    {
+        page.BlocksJson = WikiBlockJson.Serialize(WikiBlockJson.FromLegacyMarkdown(page.Markdown));
+        page.UpdatedAt = now;
+        page.UpdatedBy = "system";
+    }
+
+    await dbContext.SaveChangesAsync();
+    logger.LogInformation("Backfilled {Count} wiki page(s) from Markdown into a legacy block.", pagesNeedingBackfill.Count);
 }
 
 // These mutation endpoints are authenticated, but cookie auth alone gives no CSRF

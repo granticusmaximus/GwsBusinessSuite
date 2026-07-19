@@ -8,10 +8,10 @@ public interface IWikiService
     Task<WikiPage?> GetPageAsync(Guid wikiPageId, CancellationToken cancellationToken = default);
     Task<WikiPage> SavePageAsync(WikiPageEditorModel editor, string performedBy, CancellationToken cancellationToken = default);
     Task DeletePageAsync(Guid wikiPageId, string performedBy, CancellationToken cancellationToken = default);
+    Task ReorderPageAsync(Guid wikiPageId, Guid? newParentWikiPageId, int newSortOrder, string performedBy, CancellationToken cancellationToken = default);
 
-    // Git-backed history - unbounded, sourced live from the repo rather than a DB table.
+    // Bounded DB-snapshot history (WikiPageRevision), replacing the old git-log-based history.
     Task<IReadOnlyList<WikiRevisionView>> GetHistoryAsync(Guid wikiPageId, CancellationToken cancellationToken = default);
-    Task<string?> GetDiffAsync(Guid wikiPageId, string fromSha, string toSha, CancellationToken cancellationToken = default);
-    Task<string?> GetRevisionContentAsync(Guid wikiPageId, string sha, CancellationToken cancellationToken = default);
-    Task<WikiPage> RevertToRevisionAsync(Guid wikiPageId, string sha, string performedBy, CancellationToken cancellationToken = default);
+    Task<string?> GetStructuralDiffAsync(Guid wikiPageId, Guid fromRevisionId, Guid toRevisionId, CancellationToken cancellationToken = default);
+    Task<WikiPage> RevertToRevisionAsync(Guid wikiPageId, Guid revisionId, string performedBy, CancellationToken cancellationToken = default);
 }
