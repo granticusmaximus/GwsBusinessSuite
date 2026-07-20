@@ -50,6 +50,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SeoArticleWorkflowEvent> SeoArticleWorkflowEvents => Set<SeoArticleWorkflowEvent>();
     public DbSet<SeoArticleDraftRevision> SeoArticleDraftRevisions => Set<SeoArticleDraftRevision>();
     public DbSet<CjConnectorSettings> CjConnectorSettings => Set<CjConnectorSettings>();
+    public DbSet<NotionConnectorSettings> NotionConnectorSettings => Set<NotionConnectorSettings>();
     public DbSet<SiteSettings> SiteSettings => Set<SiteSettings>();
     public DbSet<Article> Articles => Set<Article>();
     public DbSet<ArticleCategory> ArticleCategories => Set<ArticleCategory>();
@@ -114,6 +115,11 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<WikiDatabaseProperty>().HasIndex(x => new { x.WikiDatabaseId, x.SortOrder });
         modelBuilder.Entity<WikiDatabaseRow>().HasIndex(x => new { x.WikiDatabaseId, x.SortOrder });
         modelBuilder.Entity<WikiDatabaseView>().HasIndex(x => new { x.WikiDatabaseId, x.SortOrder });
+        // Non-unique: manually authored pages/databases/rows/properties have a null NotionId.
+        modelBuilder.Entity<WikiPage>().HasIndex(x => x.NotionId);
+        modelBuilder.Entity<WikiDatabase>().HasIndex(x => x.NotionId);
+        modelBuilder.Entity<WikiDatabaseRow>().HasIndex(x => x.NotionId);
+        modelBuilder.Entity<WikiDatabaseProperty>().HasIndex(x => x.NotionId);
         modelBuilder.Entity<CmsSite>().HasIndex(x => x.Slug).IsUnique();
         // Slugs are unique per parent, not per site — /services/pricing and
         // /products/pricing can coexist since their full paths differ.

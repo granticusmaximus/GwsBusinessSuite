@@ -106,6 +106,12 @@ public sealed class WikiPage : AuditableEntity
     public string? CoverImageUrl { get; set; }
     public int SortOrder { get; set; }
     public Guid? ParentWikiPageId { get; set; }
+    // Null for pages authored directly in this app. Set on the page's first Notion sync and
+    // used thereafter for upsert-by-external-id reconciliation - see NotionSyncService.
+    public string? NotionId { get; set; }
+    // Set when a synced page is archived/trashed/no longer returned by Notion; a soft flag,
+    // not a delete, so nothing locally derived from the page (links, revisions) is lost.
+    public DateTimeOffset? NotionArchivedAt { get; set; }
     public ICollection<WikiPageRevision> Revisions { get; set; } = new List<WikiPageRevision>();
 }
 
@@ -155,6 +161,10 @@ public sealed class WikiDatabase : AuditableEntity
     public string? Icon { get; set; }
     public Guid? ParentWikiPageId { get; set; }
     public int SortOrder { get; set; }
+    // See WikiPage.NotionId/NotionArchivedAt - same upsert-by-external-id + soft-archive
+    // reconciliation, applied to databases instead of pages.
+    public string? NotionId { get; set; }
+    public DateTimeOffset? NotionArchivedAt { get; set; }
     public ICollection<WikiDatabaseProperty> Properties { get; set; } = new List<WikiDatabaseProperty>();
     public ICollection<WikiDatabaseRow> Rows { get; set; } = new List<WikiDatabaseRow>();
     public ICollection<WikiDatabaseView> Views { get; set; } = new List<WikiDatabaseView>();
@@ -169,6 +179,9 @@ public sealed class WikiDatabaseProperty : AuditableEntity
     // Select/MultiSelect: {"options":[{"id":"...","label":"To Do","color":"#..."}]}.
     // Empty object for every other type.
     public string ConfigJson { get; set; } = "{}";
+    // See WikiPage.NotionId - lets NotionSyncService upsert this property by Notion's own
+    // property id on re-sync instead of duplicating it.
+    public string? NotionId { get; set; }
     public WikiDatabase? WikiDatabase { get; set; }
 }
 
@@ -181,6 +194,9 @@ public sealed class WikiDatabaseRow : AuditableEntity
     // option ids for multiSelect, ISO-8601 string for date. CreatedTime is never stored
     // here - it reads straight from CreatedAt.
     public string PropertyValuesJson { get; set; } = "{}";
+    // See WikiPage.NotionId/NotionArchivedAt.
+    public string? NotionId { get; set; }
+    public DateTimeOffset? NotionArchivedAt { get; set; }
     public WikiDatabase? WikiDatabase { get; set; }
 }
 
@@ -422,6 +438,23 @@ public sealed class CjConnectorSettings : AuditableEntity
     public string EndpointUrl { get; set; } = "https://commissions.api.cj.com/query";
     public int MaxResults { get; set; } = 100;
     public bool AutomaticArticleRotationEnabled { get; set; } = true;
+}
+
+public sealed class NotionConnectorSettings : AuditableEntity
+{
+    // Singleton row — always upserted using WellKnownId.
+    public static readonly Guid WellKnownId = new("00701104-0000-0000-0000-000000000001");
+
+    // Notion internal-integration token, encrypted at rest via ISecretProtector - same
+    // convention as CjConnectorSettings.DeveloperKey. No OAuth anywhere in this app.
+    public string IntegrationToken { get; set; } = string.Empty;
+    // Cosmetic - fetched once via GET /v1/users/me when the token is saved.
+    public string? WorkspaceName { get; set; }
+    public bool AutoSyncEnabled { get; set; } = true;
+    public DateTimeOffset? LastSyncedAt { get; set; }
+    public int LastSyncImportedCount { get; set; }
+    public int LastSyncUpdatedCount { get; set; }
+    public int LastSyncArchivedCount { get; set; }
 }
 
 // WordPress-style "Settings" (General/Reading/Writing/Media/AI) — a singleton row for

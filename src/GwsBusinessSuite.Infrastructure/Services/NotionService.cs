@@ -1,0 +1,136 @@
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+using GwsBusinessSuite.Application.Wiki;
+
+namespace GwsBusinessSuite.Infrastructure.Services;
+
+// Thin, raw-JSON HTTP client over Notion's public API - no OAuth (an internal-integration
+// Bearer token, matching every other integration in this app), a pinned Notion-Version so
+// the response shape doesn't shift under us as Notion evolves the API. Raw JsonDocument
+// parsing rather than source-generated contracts, matching CjAffiliateService's preference -
+// Notion's API is clean, well-documented JSON, so none of CJ's defensive multi-scheme
+// probing is needed here.
+public sealed class NotionService(HttpClient httpClient) : INotionService
+{
+    private const string NotionVersion = "2022-06-28";
+
+    public async Task<NotionValidationResult> ValidateConnectionAsync(string integrationToken, CancellationToken cancellationToken = default)
+    {
+        using var request = CreateRequest(HttpMethod.Get, "users/me", integrationToken);
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            return new NotionValidationResult(false, ExtractErrorMessage(body, response.StatusCode), null);
+        }
+
+        using var document = JsonDocument.Parse(body);
+        var workspaceName = document.RootElement.TryGetProperty("bot", out var bot)
+            && bot.TryGetProperty("workspace_name", out var workspaceNameElement)
+            && workspaceNameElement.ValueKind == JsonValueKind.String
+                ? workspaceNameElement.GetString()
+                : null;
+
+        return new NotionValidationResult(true, "Connected.", workspaceName);
+    }
+
+    public async Task<NotionPage> SearchAsync(string integrationToken, string? cursor, CancellationToken cancellationToken = default)
+    {
+        var payload = new Dictionary<string, object?> { ["page_size"] = 100 };
+        if (!string.IsNullOrWhiteSpace(cursor))
+        {
+            payload["start_cursor"] = cursor;
+        }
+
+        return await PostPageAsync(integrationToken, "search", payload, cancellationToken);
+    }
+
+    public async Task<NotionPage> GetBlockChildrenAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default)
+    {
+        var path = $"blocks/{Uri.EscapeDataString(blockId)}/children?page_size=100"
+            + (string.IsNullOrWhiteSpace(cursor) ? string.Empty : $"&start_cursor={Uri.EscapeDataString(cursor)}");
+        using var request = CreateRequest(HttpMethod.Get, path, integrationToken);
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return ParsePage(body);
+    }
+
+    public async Task<JsonElement?> GetDatabaseAsync(string integrationToken, string databaseId, CancellationToken cancellationToken = default)
+    {
+        using var request = CreateRequest(HttpMethod.Get, $"databases/{Uri.EscapeDataString(databaseId)}", integrationToken);
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        using var document = JsonDocument.Parse(body);
+        return document.RootElement.Clone();
+    }
+
+    public async Task<NotionPage> QueryDatabaseAsync(string integrationToken, string databaseId, string? cursor, CancellationToken cancellationToken = default)
+    {
+        var payload = new Dictionary<string, object?> { ["page_size"] = 100 };
+        if (!string.IsNullOrWhiteSpace(cursor))
+        {
+            payload["start_cursor"] = cursor;
+        }
+
+        return await PostPageAsync(integrationToken, $"databases/{Uri.EscapeDataString(databaseId)}/query", payload, cancellationToken);
+    }
+
+    private async Task<NotionPage> PostPageAsync(string integrationToken, string path, Dictionary<string, object?> payload, CancellationToken cancellationToken)
+    {
+        using var request = CreateRequest(HttpMethod.Post, path, integrationToken);
+        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return ParsePage(body);
+    }
+
+    private static NotionPage ParsePage(string body)
+    {
+        using var document = JsonDocument.Parse(body);
+        var root = document.RootElement;
+        var results = root.TryGetProperty("results", out var resultsElement) && resultsElement.ValueKind == JsonValueKind.Array
+            ? resultsElement.EnumerateArray().Select(item => item.Clone()).ToList()
+            : [];
+        var hasMore = root.TryGetProperty("has_more", out var hasMoreElement) && hasMoreElement.ValueKind == JsonValueKind.True;
+        var nextCursor = root.TryGetProperty("next_cursor", out var cursorElement) && cursorElement.ValueKind == JsonValueKind.String
+            ? cursorElement.GetString()
+            : null;
+
+        return new NotionPage(results, hasMore, nextCursor);
+    }
+
+    private static string ExtractErrorMessage(string body, System.Net.HttpStatusCode statusCode)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.TryGetProperty("message", out var messageElement) && messageElement.ValueKind == JsonValueKind.String)
+            {
+                return messageElement.GetString() ?? statusCode.ToString();
+            }
+        }
+        catch (JsonException)
+        {
+            // Fall through to the status-code-only message below.
+        }
+
+        return $"Notion API request failed with status {(int)statusCode}.";
+    }
+
+    private static HttpRequestMessage CreateRequest(HttpMethod method, string path, string integrationToken)
+    {
+        var request = new HttpRequestMessage(method, path);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", integrationToken);
+        request.Headers.Add("Notion-Version", NotionVersion);
+        return request;
+    }
+}
