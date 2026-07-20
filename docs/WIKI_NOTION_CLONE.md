@@ -43,16 +43,32 @@ research only.
   (`SavePageAsync`) never change an existing page's parent/position; only
   `ReorderPageAsync` does, so a page can't be silently re-parented with stale sibling
   ordering by an unrelated content edit.
+- `WikiDatabase`/`WikiDatabaseProperty`/`WikiDatabaseRow`/`WikiDatabaseView`
+  (`src/GwsBusinessSuite.Application/Wiki/WikiDatabaseModels.cs`,
+  `src/GwsBusinessSuite.Infrastructure/Services/WikiDatabaseService.cs`) are Notion-style
+  typed records: one JSON blob per row (`PropertyValuesJson`, keyed by property id) rather
+  than a normalized property-value table, same complexity tier as the page block model.
+  `WikiDatabaseViewLogic` (filter/sort/`GroupForBoard`) is a pure, DB-free function set over
+  an already-loaded row list — same split as `WikiBlockHtmlRenderer` vs. `WikiService`.
+  Databases slot into the *same* sidebar tree as pages (`ParentWikiPageId`) rather than
+  living inside a page's block content — inline-embedded databases and "rows that open as
+  full pages" are both deferred (see Delivery sequence).
+- Board view's drag-and-drop is native HTML5 DnD wired directly in Blazor
+  (`@ondragstart`/`@ondragover:preventDefault`/`@ondrop` in `WikiDatabaseEditor.razor`) plus
+  the existing global `wwwroot/js/dragReorder.js` shim (12 lines; only job is
+  `dataTransfer.setData()` so Chromium continues the drag) — the same pattern the CMS
+  Builder's Layers panel already uses, not a new JS module.
 
 ## Capability matrix
 
 | Capability family | Foundation status | Expansion target |
 | --- | --- | --- |
 | Page model | Nested pages (flat parent-id + explicit sibling `SortOrder`), icon, cover image | — |
-| Block editor | Slash-command insert, drag-reorder, Tab/Shift-Tab indent, inline bold/italic/link (Ctrl+B/I/K), `[[Page]]` autocomplete, paste-as-plain-text | Nested nested columns, synced/reusable blocks, comments, mentions |
+| Block editor | Slash-command insert, drag-reorder, Tab/Shift-Tab indent, inline bold/italic/link (Ctrl+B/I/K), `[[Page]]` autocomplete, paste-as-plain-text | Nested columns, synced/reusable blocks, comments, mentions |
 | Core block types | paragraph, heading 1-3, bulleted/numbered list item, to-do, toggle, quote, callout, code, divider, image, embed, legacy markdown (pre-migration content) | table, richer embeds (oEmbed previews) |
 | History | Bounded DB snapshot revisions (20/page), structural diff (added/removed/changed blocks), revert-as-new-version | — |
-| Databases | Not started | Typed properties (select, multi-select, date, checkbox, ...), Table/Board/Calendar/Gallery views, filter/sort/group |
+| Databases | Typed properties (title, text, number, select, multi-select, date, checkbox, url, created-time), Table view (inline-editable cells), Board view (grouped by a Select property, native-HTML5-DnD reordering across columns) | Calendar view, Gallery view, formula/relation/rollup properties, person/files properties |
+| Databases — structure | Databases share the page sidebar tree, move-up/down + reparent like pages | Inline-embedded databases within a page's blocks, rows that open as full sub-pages |
 | Import/sync | Not started | Live Notion API sync via a pasted internal integration token (matches every other integration in this app — CJ, Ollama, DigitalOcean all use pasted API keys, not OAuth), upsert-by-Notion-id reconciliation |
 | Visibility | Admin-only (`/admin/wiki`), same as before | Public-facing wiki view |
 
@@ -63,10 +79,13 @@ research only.
    formatting, true collapsible page tree with move-up/down and reparenting, DB-snapshot
    history, page icon/cover, one-time Markdown-to-legacy-block backfill for pre-existing
    pages. Git/LibGit2Sharp removed.
-2. **Databases**: `WikiDatabase`/`WikiDatabaseProperty`/`WikiDatabaseRow`/`WikiDatabaseView`
-   entities; Table/Board/Calendar/Gallery views with filter/sort/group; a database embeds
-   into a page as a block or lives as its own page (rows can open as full pages, like
-   Notion).
+2. **Databases** (delivered — Table + Board; Calendar/Gallery follow-up not yet started):
+   typed-property records with a property editor, Table view with inline-editable cells,
+   Board view grouped by a Select property with native-HTML5-DnD card reordering across
+   columns. Calendar view (no existing UI pattern anywhere in this codebase to build from —
+   scoped out of this pass) and Gallery view (trivial once this data model exists — a
+   near-copy of the Media Library's CSS-grid card list) are the next slice, along with
+   inline-embedded databases and rows-as-full-pages.
 3. **Notion API import/sync**: a `NotionConnectorSettings` singleton (encrypted integration
    token via `ISecretProtector`, matching `CjConnectorSettings`) + a typed-HttpClient
    `NotionService` + a `NotionSyncBackgroundService` (matching `CjAdsSyncBackgroundService`'s
