@@ -63,12 +63,16 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
         page.BlocksJson = string.IsNullOrWhiteSpace(editor.BlocksJson) ? "[]" : editor.BlocksJson;
         page.Icon = string.IsNullOrWhiteSpace(editor.Icon) ? null : editor.Icon.Trim();
         page.CoverImageUrl = string.IsNullOrWhiteSpace(editor.CoverImageUrl) ? null : editor.CoverImageUrl.Trim();
-        page.ParentWikiPageId = editor.ParentWikiPageId;
         page.UpdatedAt = now;
         page.UpdatedBy = performedBy;
 
         if (isNew)
         {
+            // Only set on create - once a page exists, moving it to a different parent/position
+            // goes through ReorderPageAsync instead, which renumbers siblings and guards
+            // against cycles. Letting a content save silently re-parent it too would leave
+            // stale/colliding SortOrder values under whichever parent it lands on.
+            page.ParentWikiPageId = editor.ParentWikiPageId;
             await dbContext.WikiPages.AddAsync(page, cancellationToken);
         }
 

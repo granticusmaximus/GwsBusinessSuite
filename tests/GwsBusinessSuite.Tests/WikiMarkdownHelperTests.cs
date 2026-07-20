@@ -42,7 +42,7 @@ public sealed class WikiMarkdownHelperTests
     }
 
     [Fact]
-    public void SearchPageTitles_ShouldFilterCaseInsensitively()
+    public void SearchLinkSuggestions_ShouldFilterCaseInsensitively()
     {
         var pages = new List<WikiPage>
         {
@@ -51,31 +51,32 @@ public sealed class WikiMarkdownHelperTests
             new() { Title = "deployment checklist", Slug = "c", Markdown = "" }
         };
 
-        var result = WikiMarkdownHelper.SearchPageTitles("deploy", pages);
+        var result = WikiMarkdownHelper.SearchLinkSuggestions("deploy", pages);
 
-        result.Should().BeEquivalentTo(["Deployment Runbook", "deployment checklist"]);
+        result.Select(s => s.Title).Should().BeEquivalentTo(["Deployment Runbook", "deployment checklist"]);
+        result.Should().OnlyContain(s => s.Id != Guid.Empty);
     }
 
     [Fact]
-    public void SearchPageTitles_ShouldReturnAllUpToMax_WhenQueryIsEmpty()
+    public void SearchLinkSuggestions_ShouldReturnAllUpToMax_WhenQueryIsEmpty()
     {
         var pages = Enumerable.Range(1, 20)
             .Select(i => new WikiPage { Title = $"Page {i}", Slug = $"page-{i}", Markdown = "" })
             .ToList();
 
-        var result = WikiMarkdownHelper.SearchPageTitles(string.Empty, pages, maxResults: 5);
+        var result = WikiMarkdownHelper.SearchLinkSuggestions(string.Empty, pages, maxResults: 5);
 
         result.Should().HaveCount(5);
     }
 
     [Fact]
-    public void SearchPageTitles_ShouldRespectMaxResults()
+    public void SearchLinkSuggestions_ShouldRespectMaxResults()
     {
         var pages = Enumerable.Range(1, 10)
             .Select(i => new WikiPage { Title = $"Deploy {i}", Slug = $"deploy-{i}", Markdown = "" })
             .ToList();
 
-        var result = WikiMarkdownHelper.SearchPageTitles("deploy", pages, maxResults: 3);
+        var result = WikiMarkdownHelper.SearchLinkSuggestions("deploy", pages, maxResults: 3);
 
         result.Should().HaveCount(3);
     }

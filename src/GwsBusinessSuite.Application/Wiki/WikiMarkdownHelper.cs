@@ -39,14 +39,14 @@ public static class WikiMarkdownHelper
         });
     }
 
-    public static IReadOnlyList<string> SearchPageTitles(string query, IReadOnlyList<WikiPage> pages, int maxResults = 8)
+    public static IReadOnlyList<WikiLinkSuggestion> SearchLinkSuggestions(string query, IReadOnlyList<WikiPage> pages, int maxResults = 8)
     {
         var candidates = string.IsNullOrWhiteSpace(query)
             ? pages
             : pages.Where(p => p.Title.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
 
         return candidates
-            .Select(p => p.Title)
+            .Select(p => new WikiLinkSuggestion(p.Id, p.Title))
             .Take(maxResults)
             .ToList();
     }
