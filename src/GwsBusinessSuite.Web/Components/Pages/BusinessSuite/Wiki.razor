@@ -440,12 +440,32 @@
     private void CreateNewPage()
     {
         SelectedPageId = null;
+        SelectedDatabaseId = null;
         Editor = new WikiPageEditorModel();
         History = new();
         DiffRevisionKey = null;
         _editorGeneration++;
         StatusMessage = "Ready to create a new wiki page.";
         ErrorMessage = string.Empty;
+    }
+
+    private async Task CreateNewDatabaseAsync() => await Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        var database = await WikiDatabaseService.CreateDatabaseAsync("Untitled Database", null, user);
+        await LoadTreeAsync(selectFirstPage: false);
+        await OpenDatabaseAsync(database.Id);
+        StatusMessage = $"Created database '{database.Title}'.";
+    });
+
+    private Task OpenDatabaseAsync(Guid wikiDatabaseId)
+    {
+        SelectedPageId = null;
+        SelectedDatabaseId = wikiDatabaseId;
+        DiffRevisionKey = null;
+        StatusMessage = string.Empty;
+        ErrorMessage = string.Empty;
+        return Task.CompletedTask;
     }
 
     private async Task OpenPageAsync(Guid wikiPageId)
@@ -459,6 +479,7 @@
                 return;
             }
 
+            SelectedDatabaseId = null;
             SelectedPageId = page.Id;
             Editor = new WikiPageEditorModel
             {
@@ -697,22 +718,33 @@
         }
     }
 
-    // Recursive depth-first flatten via ToLookup(ParentWikiPageId), rendered as an indented
-    // flat list with expand/collapse rather than a nested component - mirrors Pages.razor's
+    // A page and a database look interchangeable in the sidebar tree (both have a title,
+    // icon, parent, and sort order), so this is what tree rendering/reordering actually
+    // operates over - WikiPage/WikiDatabase-specific behavior (opening, saving, deleting)
+    // still dispatches through their own services once a node is selected.
+    private readonly record struct WikiTreeNode(Guid Id, string Title, string? Icon, Guid? ParentId, int SortOrder, bool IsDatabase);
+
+    private List<WikiTreeNode> AllTreeNodes() =>
+        WikiPages.Select(p => new WikiTreeNode(p.Id, p.Title, p.Icon, p.ParentWikiPageId, p.SortOrder, false))
+            .Concat(WikiDatabases.Select(d => new WikiTreeNode(d.Id, d.Title, d.Icon, d.ParentWikiPageId, d.SortOrder, true)))
+            .ToList();
+
+    // Recursive depth-first flatten via ToLookup(ParentId), rendered as an indented flat
+    // list with expand/collapse rather than a nested component - mirrors Pages.razor's
     // OrderedPagesByHierarchy()/GetPageDepth() for CMS pages.
-    private List<WikiPage> OrderedPagesByHierarchy()
+    private List<WikiTreeNode> OrderedTreeNodes()
     {
-        var byParent = WikiPages.ToLookup(p => p.ParentWikiPageId);
-        var result = new List<WikiPage>();
+        var byParent = AllTreeNodes().ToLookup(n => n.ParentId);
+        var result = new List<WikiTreeNode>();
 
         void Visit(Guid? parentId)
         {
-            foreach (var page in byParent[parentId].OrderBy(p => p.SortOrder))
+            foreach (var node in byParent[parentId].OrderBy(n => n.SortOrder))
             {
-                result.Add(page);
+                result.Add(node);
                 if (parentId is null || IsExpanded(parentId.Value))
                 {
-                    Visit(page.Id);
+                    Visit(node.Id);
                 }
             }
         }
@@ -721,23 +753,23 @@
         return result;
     }
 
-    private bool HasChildren(Guid pageId) => WikiPages.Any(p => p.ParentWikiPageId == pageId);
-    private bool IsExpanded(Guid pageId) => _expandedPageIds.Contains(pageId);
-    private void ToggleExpanded(Guid pageId)
+    private bool HasChildren(Guid nodeId) => AllTreeNodes().Any(n => n.ParentId == nodeId);
+    private bool IsExpanded(Guid nodeId) => _expandedPageIds.Contains(nodeId);
+    private void ToggleExpanded(Guid nodeId)
     {
-        if (!_expandedPageIds.Add(pageId))
+        if (!_expandedPageIds.Add(nodeId))
         {
-            _expandedPageIds.Remove(pageId);
+            _expandedPageIds.Remove(nodeId);
         }
     }
 
-    private int GetWikiPageDepth(WikiPage page)
+    private int GetNodeDepth(WikiTreeNode node)
     {
-        var byId = WikiPages.ToDictionary(p => p.Id);
+        var byId = AllTreeNodes().ToDictionary(n => n.Id);
         var depth = 0;
-        var current = page;
+        var current = (WikiTreeNode?)node;
         var guard = 0;
-        while (current?.ParentWikiPageId is { } parentId && byId.TryGetValue(parentId, out var parent) && guard++ < 64)
+        while (current?.ParentId is { } parentId && byId.TryGetValue(parentId, out var parent) && guard++ < 64)
         {
             depth++;
             current = parent;
@@ -749,18 +781,29 @@
     // With no search query, the tree is shown collapsed to top-level + expanded branches.
     // Once searching, a matched child's ancestors may not themselves be expanded, so tree
     // order stops making sense - fall back to a flat alphabetical list of matches.
-    private List<WikiPage> FilteredAndOrderedPages()
+    private List<WikiTreeNode> FilteredAndOrderedNodes()
     {
         if (string.IsNullOrWhiteSpace(SearchQuery))
         {
-            return OrderedPagesByHierarchy();
+            return OrderedTreeNodes();
         }
 
-        return WikiPages
-            .Where(p => p.Title.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase)
-                || p.Slug.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(p => p.Title, StringComparer.OrdinalIgnoreCase)
+        return AllTreeNodes()
+            .Where(n => n.Title.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(n => n.Title, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private async Task OpenNodeAsync(WikiTreeNode node)
+    {
+        if (node.IsDatabase)
+        {
+            await OpenDatabaseAsync(node.Id);
+        }
+        else
+        {
+            await OpenPageAsync(node.Id);
+        }
     }
 
     // Mirrors EditPage.razor's ParentPageOptions() for CMS pages - a BFS from the open page
