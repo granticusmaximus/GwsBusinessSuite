@@ -123,6 +123,79 @@ public sealed class WikiPageRevision : AuditableEntity
     public WikiPage? WikiPage { get; set; }
 }
 
+public static class WikiDatabasePropertyTypes
+{
+    // Exactly one Title property per database (required, primary label) - every other type
+    // is repeatable.
+    public const string Title = "title";
+    public const string Text = "text";
+    public const string Number = "number";
+    public const string Select = "select";
+    public const string MultiSelect = "multiSelect";
+    public const string Date = "date";
+    public const string Checkbox = "checkbox";
+    public const string Url = "url";
+    // Auto-populated, read-only, backed by the row's own CreatedAt - never stored in
+    // PropertyValuesJson.
+    public const string CreatedTime = "createdTime";
+}
+
+public static class WikiDatabaseViewTypes
+{
+    public const string Table = "table";
+    public const string Board = "board";
+}
+
+// Slots into the same sidebar tree as WikiPage (ParentWikiPageId) rather than being nested
+// inside a page's block content - see docs/WIKI_NOTION_CLONE.md for why inline-embedded
+// databases and rows-as-full-pages are deferred past this phase.
+public sealed class WikiDatabase : AuditableEntity
+{
+    public required string Title { get; set; }
+    public string? Icon { get; set; }
+    public Guid? ParentWikiPageId { get; set; }
+    public int SortOrder { get; set; }
+    public ICollection<WikiDatabaseProperty> Properties { get; set; } = new List<WikiDatabaseProperty>();
+    public ICollection<WikiDatabaseRow> Rows { get; set; } = new List<WikiDatabaseRow>();
+    public ICollection<WikiDatabaseView> Views { get; set; } = new List<WikiDatabaseView>();
+}
+
+public sealed class WikiDatabaseProperty : AuditableEntity
+{
+    public Guid WikiDatabaseId { get; set; }
+    public required string Name { get; set; }
+    public required string Type { get; set; }
+    public int SortOrder { get; set; }
+    // Select/MultiSelect: {"options":[{"id":"...","label":"To Do","color":"#..."}]}.
+    // Empty object for every other type.
+    public string ConfigJson { get; set; } = "{}";
+    public WikiDatabase? WikiDatabase { get; set; }
+}
+
+public sealed class WikiDatabaseRow : AuditableEntity
+{
+    public Guid WikiDatabaseId { get; set; }
+    public int SortOrder { get; set; }
+    // Dictionary<propertyId (string GUID), value> - value shape depends on the property's
+    // Type: string for text/url/select, decimal for number, bool for checkbox, string[] of
+    // option ids for multiSelect, ISO-8601 string for date. CreatedTime is never stored
+    // here - it reads straight from CreatedAt.
+    public string PropertyValuesJson { get; set; } = "{}";
+    public WikiDatabase? WikiDatabase { get; set; }
+}
+
+public sealed class WikiDatabaseView : AuditableEntity
+{
+    public Guid WikiDatabaseId { get; set; }
+    public required string Name { get; set; }
+    public required string Type { get; set; }
+    public int SortOrder { get; set; }
+    // {"filters":[{"propertyId","operator","value"}],"sorts":[{"propertyId","direction"}],
+    //  "groupByPropertyId":"..."} (groupByPropertyId is board-only).
+    public string ConfigJson { get; set; } = "{}";
+    public WikiDatabase? WikiDatabase { get; set; }
+}
+
 public static class CmsFontPairings
 {
     public const string Elegant = "elegant";

@@ -133,6 +133,7 @@ public static class DependencyInjection
         services.AddHostedService<AutomationScheduleBackgroundService>();
         services.AddHostedService<AutomationResumeBackgroundService>();
         services.AddScoped<IWikiService, WikiService>();
+        services.AddScoped<IWikiDatabaseService, WikiDatabaseService>();
         var liveShowRecordingsPath = configuration["LiveShow:RecordingsPath"] ?? "/app/data/live-show-recordings";
         services.AddScoped<ILiveShowService>(sp => new LiveShowService(
             sp.GetRequiredService<IAppDbContext>(),

@@ -28,6 +28,10 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<ContactActivity> ContactActivities => Set<ContactActivity>();
     public DbSet<WikiPage> WikiPages => Set<WikiPage>();
     public DbSet<WikiPageRevision> WikiPageRevisions => Set<WikiPageRevision>();
+    public DbSet<WikiDatabase> WikiDatabases => Set<WikiDatabase>();
+    public DbSet<WikiDatabaseProperty> WikiDatabaseProperties => Set<WikiDatabaseProperty>();
+    public DbSet<WikiDatabaseRow> WikiDatabaseRows => Set<WikiDatabaseRow>();
+    public DbSet<WikiDatabaseView> WikiDatabaseViews => Set<WikiDatabaseView>();
     public DbSet<CmsSite> CmsSites => Set<CmsSite>();
     public DbSet<CmsPage> CmsPages => Set<CmsPage>();
     public DbSet<CmsPageCategory> CmsPageCategories => Set<CmsPageCategory>();
@@ -92,6 +96,24 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .HasForeignKey(x => x.WikiPageId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<WikiPageRevision>().HasIndex(x => new { x.WikiPageId, x.RevisionNumber }).IsUnique();
+        modelBuilder.Entity<WikiDatabaseProperty>()
+            .HasOne(x => x.WikiDatabase)
+            .WithMany(x => x.Properties)
+            .HasForeignKey(x => x.WikiDatabaseId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<WikiDatabaseRow>()
+            .HasOne(x => x.WikiDatabase)
+            .WithMany(x => x.Rows)
+            .HasForeignKey(x => x.WikiDatabaseId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<WikiDatabaseView>()
+            .HasOne(x => x.WikiDatabase)
+            .WithMany(x => x.Views)
+            .HasForeignKey(x => x.WikiDatabaseId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<WikiDatabaseProperty>().HasIndex(x => new { x.WikiDatabaseId, x.SortOrder });
+        modelBuilder.Entity<WikiDatabaseRow>().HasIndex(x => new { x.WikiDatabaseId, x.SortOrder });
+        modelBuilder.Entity<WikiDatabaseView>().HasIndex(x => new { x.WikiDatabaseId, x.SortOrder });
         modelBuilder.Entity<CmsSite>().HasIndex(x => x.Slug).IsUnique();
         // Slugs are unique per parent, not per site — /services/pricing and
         // /products/pricing can coexist since their full paths differ.

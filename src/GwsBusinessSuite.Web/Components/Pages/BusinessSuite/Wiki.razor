@@ -6,6 +6,7 @@
 @using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Domain.Entities
 @inject IWikiService WikiService
+@inject IWikiDatabaseService WikiDatabaseService
 @inject IMediaLibraryService MediaLibraryService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
@@ -40,53 +41,58 @@
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
                 <span class="fw-semibold">Pages</span>
-                <button class="btn btn-sm btn-outline-primary" @onclick="CreateNewPage" disabled="@IsBusy">
-                    <i class="bi bi-plus-lg me-1"></i>New Page
-                </button>
+                <div class="d-flex gap-1">
+                    <button class="btn btn-sm btn-outline-primary" @onclick="CreateNewPage" disabled="@IsBusy" title="New page">
+                        <i class="bi bi-file-earmark-plus"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-primary" @onclick="CreateNewDatabaseAsync" disabled="@IsBusy" title="New database">
+                        <i class="bi bi-grid-3x3-gap-fill"></i>
+                    </button>
+                </div>
             </div>
             <div class="card-body border-bottom py-2">
                 <input class="form-control form-control-sm" @bind="SearchQuery" @bind:event="oninput"
-                       placeholder="Search pages by title or slug..." />
+                       placeholder="Search pages and databases..." />
             </div>
             <div class="card-body p-0">
-                @if (WikiPages.Count == 0)
+                @if (AllTreeNodes().Count == 0)
                 {
                     <div class="p-4 text-secondary">
-                        <p class="mb-0">No wiki pages yet. Create the first page to capture procedures or notes.</p>
+                        <p class="mb-0">Nothing here yet. Create a page or database to get started.</p>
                     </div>
                 }
-                else if (FilteredAndOrderedPages().Count == 0)
+                else if (FilteredAndOrderedNodes().Count == 0)
                 {
                     <div class="p-4 text-secondary">
-                        <p class="mb-0">No pages match "@SearchQuery".</p>
+                        <p class="mb-0">Nothing matches "@SearchQuery".</p>
                     </div>
                 }
                 else
                 {
                     <div class="wiki-tree">
-                        @foreach (var wikiPage in FilteredAndOrderedPages())
+                        @foreach (var node in FilteredAndOrderedNodes())
                         {
-                            <div class="wiki-tree-row @(SelectedPageId == wikiPage.Id ? "active" : "")"
-                                 style="padding-left:@(0.5 + GetWikiPageDepth(wikiPage) * 1.25)rem;">
-                                @if (HasChildren(wikiPage.Id) && string.IsNullOrWhiteSpace(SearchQuery))
+                            <div class="wiki-tree-row @((node.IsDatabase ? SelectedDatabaseId == node.Id : SelectedPageId == node.Id) ? "active" : "")"
+                                 style="padding-left:@(0.5 + GetNodeDepth(node) * 1.25)rem;">
+                                @if (HasChildren(node.Id) && string.IsNullOrWhiteSpace(SearchQuery))
                                 {
-                                    <button type="button" class="wiki-tree-toggle" @onclick="() => ToggleExpanded(wikiPage.Id)">
-                                        <i class="bi @(IsExpanded(wikiPage.Id) ? "bi-caret-down-fill" : "bi-caret-right-fill")"></i>
+                                    <button type="button" class="wiki-tree-toggle" @onclick="() => ToggleExpanded(node.Id)">
+                                        <i class="bi @(IsExpanded(node.Id) ? "bi-caret-down-fill" : "bi-caret-right-fill")"></i>
                                     </button>
                                 }
                                 else
                                 {
                                     <span class="wiki-tree-spacer"></span>
                                 }
-                                <button type="button" class="wiki-tree-label" @onclick="() => OpenPageAsync(wikiPage.Id)" disabled="@IsBusy">
-                                    <span class="wiki-tree-icon">@(string.IsNullOrWhiteSpace(wikiPage.Icon) ? "📄" : wikiPage.Icon)</span>
-                                    <span class="wiki-tree-title">@wikiPage.Title</span>
+                                <button type="button" class="wiki-tree-label" @onclick="() => OpenNodeAsync(node)" disabled="@IsBusy">
+                                    <span class="wiki-tree-icon">@(string.IsNullOrWhiteSpace(node.Icon) ? (node.IsDatabase ? "🗄️" : "📄") : node.Icon)</span>
+                                    <span class="wiki-tree-title">@node.Title</span>
                                 </button>
                                 <div class="wiki-tree-actions">
-                                    <button type="button" class="btn btn-xs btn-link p-0" title="Move up" @onclick="() => MovePageAsync(wikiPage, -1)" disabled="@IsBusy">
+                                    <button type="button" class="btn btn-xs btn-link p-0" title="Move up" @onclick="() => MoveNodeAsync(node, -1)" disabled="@IsBusy">
                                         <i class="bi bi-chevron-up"></i>
                                     </button>
-                                    <button type="button" class="btn btn-xs btn-link p-0" title="Move down" @onclick="() => MovePageAsync(wikiPage, 1)" disabled="@IsBusy">
+                                    <button type="button" class="btn btn-xs btn-link p-0" title="Move down" @onclick="() => MoveNodeAsync(node, 1)" disabled="@IsBusy">
                                         <i class="bi bi-chevron-down"></i>
                                     </button>
                                 </div>
@@ -99,6 +105,12 @@
     </div>
 
     <div class="col-lg-9">
+        @if (SelectedDatabaseId is { } openDatabaseId)
+        {
+            <WikiDatabaseEditor WikiDatabaseId="openDatabaseId" OnChanged="() => LoadTreeAsync(selectFirstPage: false)" />
+        }
+        else
+        {
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
                 <span class="fw-semibold">@EditorHeader</span>
@@ -287,6 +299,7 @@
                 </div>
             </div>
         }
+        }
     </div>
 </div>
 
@@ -294,8 +307,10 @@
     private const int MaxHistoryDisplay = 20;
 
     private List<WikiPage> WikiPages { get; set; } = new();
+    private List<WikiDatabase> WikiDatabases { get; set; } = new();
     private WikiPageEditorModel Editor { get; set; } = new();
     private Guid? SelectedPageId { get; set; }
+    private Guid? SelectedDatabaseId { get; set; }
     private bool IsBusy { get; set; }
     private string SearchQuery { get; set; } = string.Empty;
     private string StatusMessage { get; set; } = string.Empty;
@@ -375,7 +390,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadPagesAsync(selectFirstPage: false);
+        await LoadTreeAsync(selectFirstPage: false);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -404,11 +419,12 @@
 
     private Task<string> CurrentUserNameAsync() => CurrentUserAccessor.GetCurrentUsernameAsync();
 
-    private async Task LoadPagesAsync(bool selectFirstPage)
+    private async Task LoadTreeAsync(bool selectFirstPage)
     {
         try
         {
             WikiPages = (await WikiService.ListPagesAsync()).ToList();
+            WikiDatabases = (await WikiDatabaseService.ListDatabasesAsync()).ToList();
             if (selectFirstPage && WikiPages.Count > 0)
             {
                 await OpenPageAsync(WikiPages[0].Id);
@@ -416,8 +432,8 @@
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Unable to load wiki pages.");
-            ErrorMessage = $"Unable to load wiki pages. {ex.Message}";
+            Logger.LogError(ex, "Unable to load the wiki page/database tree.");
+            ErrorMessage = $"Unable to load pages and databases. {ex.Message}";
         }
     }
 
@@ -506,7 +522,7 @@
             // reflects exactly what was just saved (that's where BlocksJson came from), so
             // resetting it would only cost the user their cursor position for no benefit.
             StatusMessage = $"Saved wiki page '{saved.Title}'.";
-            await LoadPagesAsync(selectFirstPage: false);
+            await LoadTreeAsync(selectFirstPage: false);
             await LoadHistoryAsync(saved.Id);
         }
         catch (Exception ex)
@@ -537,7 +553,7 @@
             await WikiService.DeletePageAsync(wikiPageId, user);
             StatusMessage = "Wiki page deleted.";
             CreateNewPage();
-            await LoadPagesAsync(selectFirstPage: false);
+            await LoadTreeAsync(selectFirstPage: false);
         }
         catch (Exception ex)
         {
@@ -550,12 +566,12 @@
         }
     }
 
-    private async Task MovePageAsync(WikiPage page, int direction)
+    private async Task MoveNodeAsync(WikiTreeNode node, int direction)
     {
-        var siblings = OrderedPagesByHierarchy()
-            .Where(p => p.ParentWikiPageId == page.ParentWikiPageId)
+        var siblings = OrderedTreeNodes()
+            .Where(n => n.ParentId == node.ParentId)
             .ToList();
-        var currentIndex = siblings.FindIndex(p => p.Id == page.Id);
+        var currentIndex = siblings.FindIndex(n => n.Id == node.Id);
         var targetIndex = currentIndex + direction;
         if (currentIndex < 0 || targetIndex < 0 || targetIndex >= siblings.Count)
         {
@@ -565,8 +581,15 @@
         await Work(async () =>
         {
             var user = await CurrentUserNameAsync();
-            await WikiService.ReorderPageAsync(page.Id, page.ParentWikiPageId, targetIndex, user);
-            await LoadPagesAsync(selectFirstPage: false);
+            if (node.IsDatabase)
+            {
+                await WikiDatabaseService.ReorderDatabaseAsync(node.Id, node.ParentId, targetIndex, user);
+            }
+            else
+            {
+                await WikiService.ReorderPageAsync(node.Id, node.ParentId, targetIndex, user);
+            }
+            await LoadTreeAsync(selectFirstPage: false);
         });
     }
 
@@ -581,7 +604,7 @@
         {
             var user = await CurrentUserNameAsync();
             await WikiService.ReorderPageAsync(wikiPageId, Editor.ParentWikiPageId, int.MaxValue, user);
-            await LoadPagesAsync(selectFirstPage: false);
+            await LoadTreeAsync(selectFirstPage: false);
             StatusMessage = "Page moved.";
         });
     }
@@ -660,7 +683,7 @@
             _editorGeneration++;
             DiffRevisionKey = null;
             StatusMessage = $"Reverted '{reverted.Title}' to an earlier version.";
-            await LoadPagesAsync(selectFirstPage: false);
+            await LoadTreeAsync(selectFirstPage: false);
             await LoadHistoryAsync(wikiPageId);
         }
         catch (Exception ex)

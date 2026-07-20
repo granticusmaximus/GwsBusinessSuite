@@ -10,6 +10,10 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<ContactActivity> ContactActivities { get; }
     DbSet<WikiPage> WikiPages { get; }
     DbSet<WikiPageRevision> WikiPageRevisions { get; }
+    DbSet<WikiDatabase> WikiDatabases { get; }
+    DbSet<WikiDatabaseProperty> WikiDatabaseProperties { get; }
+    DbSet<WikiDatabaseRow> WikiDatabaseRows { get; }
+    DbSet<WikiDatabaseView> WikiDatabaseViews { get; }
     DbSet<CmsSite> CmsSites { get; }
     DbSet<CmsPage> CmsPages { get; }
     DbSet<CmsPageCategory> CmsPageCategories { get; }
