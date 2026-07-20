@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace GwsBusinessSuite.Application.Wiki;
 
@@ -48,6 +49,7 @@ public sealed record WikiBlock(
     IReadOnlyList<WikiRichTextSpan> RichText,
     IReadOnlyDictionary<string, string> Props)
 {
+    [JsonIgnore]
     public string PlainText => string.Concat(RichText.Select(span => span.Text));
 }
 

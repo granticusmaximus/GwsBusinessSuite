@@ -5,7 +5,6 @@
 @using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Domain.Entities
-@using Markdig
 @inject IWikiService WikiService
 @inject IMediaLibraryService MediaLibraryService
 @inject ICurrentUserAccessor CurrentUserAccessor
@@ -16,8 +15,8 @@
 
 <div class="page-header">
     <h1><i class="bi bi-journal-bookmark-fill me-2 text-warning"></i>Knowledge Base</h1>
-    <p>Store internal documentation, SOPs, app notes, and business operating knowledge. Every save is a git commit,
-        so full history and diffs are always available.</p>
+    <p>Store internal documentation, SOPs, app notes, and business operating knowledge with a block-based editor.
+        Every save keeps a version snapshot you can inspect or revert to.</p>
 </div>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
@@ -37,10 +36,9 @@
 }
 
 <div class="row g-4">
-    <div class="col-lg-4">
+    <div class="col-lg-3">
         <div class="card border-0 shadow-sm h-100">
-            <div
-                class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
+            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
                 <span class="fw-semibold">Pages</span>
                 <button class="btn btn-sm btn-outline-primary" @onclick="CreateNewPage" disabled="@IsBusy">
                     <i class="bi bi-plus-lg me-1"></i>New Page
@@ -65,23 +63,34 @@
                 }
                 else
                 {
-                    <div class="list-group list-group-flush">
+                    <div class="wiki-tree">
                         @foreach (var wikiPage in FilteredAndOrderedPages())
                         {
-                            <button type="button"
-                                    class="list-group-item list-group-item-action d-flex justify-content-between align-items-start gap-2 @(SelectedPageId == wikiPage.Id ? "active" : string.Empty)"
-                                    style="padding-left:@(0.75 + GetWikiPageDepth(wikiPage) * 1.25)rem;"
-                                    @onclick="() => OpenPageAsync(wikiPage.Id)" disabled="@IsBusy">
-                                <div>
-                                    <div class="fw-semibold">@(GetWikiPageDepth(wikiPage) > 0 ? "— " : "")@wikiPage.Title</div>
-                                    <div class="small @(SelectedPageId == wikiPage.Id ? "text-white-50" : "text-secondary")">
-                                        @wikiPage.Slug
-                                    </div>
+                            <div class="wiki-tree-row @(SelectedPageId == wikiPage.Id ? "active" : "")"
+                                 style="padding-left:@(0.5 + GetWikiPageDepth(wikiPage) * 1.25)rem;">
+                                @if (HasChildren(wikiPage.Id) && string.IsNullOrWhiteSpace(SearchQuery))
+                                {
+                                    <button type="button" class="wiki-tree-toggle" @onclick="() => ToggleExpanded(wikiPage.Id)">
+                                        <i class="bi @(IsExpanded(wikiPage.Id) ? "bi-caret-down-fill" : "bi-caret-right-fill")"></i>
+                                    </button>
+                                }
+                                else
+                                {
+                                    <span class="wiki-tree-spacer"></span>
+                                }
+                                <button type="button" class="wiki-tree-label" @onclick="() => OpenPageAsync(wikiPage.Id)" disabled="@IsBusy">
+                                    <span class="wiki-tree-icon">@(string.IsNullOrWhiteSpace(wikiPage.Icon) ? "📄" : wikiPage.Icon)</span>
+                                    <span class="wiki-tree-title">@wikiPage.Title</span>
+                                </button>
+                                <div class="wiki-tree-actions">
+                                    <button type="button" class="btn btn-xs btn-link p-0" title="Move up" @onclick="() => MovePageAsync(wikiPage, -1)" disabled="@IsBusy">
+                                        <i class="bi bi-chevron-up"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-xs btn-link p-0" title="Move down" @onclick="() => MovePageAsync(wikiPage, 1)" disabled="@IsBusy">
+                                        <i class="bi bi-chevron-down"></i>
+                                    </button>
                                 </div>
-                                <span class="badge @(SelectedPageId == wikiPage.Id ? "text-bg-light" : "text-bg-secondary")">
-                                    @((wikiPage.UpdatedAt ?? wikiPage.CreatedAt).ToLocalTime().ToString("yyyy-MM-dd"))
-                                </span>
-                            </button>
+                            </div>
                         }
                     </div>
                 }
@@ -89,10 +98,9 @@
         </div>
     </div>
 
-    <div class="col-lg-8">
+    <div class="col-lg-9">
         <div class="card border-0 shadow-sm">
-            <div
-                class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
+            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
                 <span class="fw-semibold">@EditorHeader</span>
                 <span class="badge @(SelectedPageId.HasValue ? "text-bg-primary" : "text-bg-secondary")">
                     @(SelectedPageId.HasValue ? "Editing Existing Page" : "New Page")
@@ -103,75 +111,86 @@
                     <DataAnnotationsValidator />
                     <ValidationSummary />
 
-                    <div class="row g-3">
-                        <div class="col-md-8">
+                    <div class="row g-3 mb-2">
+                        <div class="col-md-1">
+                            <label class="form-label fw-semibold small">Icon</label>
+                            <input class="form-control text-center" @bind="Editor.Icon" placeholder="📄" maxlength="4" />
+                        </div>
+                        <div class="col-md-7">
                             <label class="form-label fw-semibold small">Title</label>
-                            <InputText class="form-control" @bind-Value="Editor.Title" placeholder="Runbook title" />
+                            <InputText class="form-control" @bind-Value="Editor.Title" placeholder="Page title" />
                         </div>
                         <div class="col-md-4">
                             <label class="form-label fw-semibold small">Slug</label>
                             <InputText class="form-control" @bind-Value="Editor.Slug" placeholder="optional-slug" />
                         </div>
+                        @if (SelectedPageId.HasValue)
+                        {
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold small">Parent Page</label>
+                                <select class="form-select" @bind="ParentWikiPageIdSelection" @bind:after="MoveToSelectedParentAsync">
+                                    <option value="">— Top level —</option>
+                                    @foreach (var candidate in WikiParentPageOptions())
+                                    {
+                                        <option value="@candidate.Id">@candidate.Title</option>
+                                    }
+                                </select>
+                            </div>
+                        }
                         <div class="col-md-6">
-                            <label class="form-label fw-semibold small">Parent Page</label>
-                            <select class="form-select" @bind="ParentWikiPageIdSelection">
-                                <option value="">— Top level —</option>
-                                @foreach (var candidate in WikiParentPageOptions())
-                                {
-                                    <option value="@candidate.Id">@candidate.Title</option>
-                                }
-                            </select>
-                        </div>
-                        <div class="col-12">
-                            <div class="d-flex align-items-center justify-content-between mb-1">
-                                <label class="form-label fw-semibold small mb-0">Markdown</label>
-                                <div class="d-flex gap-2">
-                                    <button type="button" class="btn btn-xs btn-outline-secondary" @onclick="ToggleMediaPickerAsync">
-                                        <i class="bi bi-image me-1"></i>Insert Image
-                                    </button>
-                                    <button type="button" class="btn btn-xs btn-outline-secondary" @onclick="InsertTableOfContentsAsync">
-                                        <i class="bi bi-list-ol me-1"></i>Insert TOC
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="small text-secondary mb-2">
-                                Type <code>[[</code> to link to another wiki page by title.
-                            </div>
-                            @if (_showMediaPicker)
+                            <label class="form-label fw-semibold small d-flex justify-content-between">
+                                <span>Cover image</span>
+                                <button type="button" class="btn btn-xs btn-outline-secondary" @onclick="ToggleCoverPickerAsync">
+                                    <i class="bi bi-image me-1"></i>@(string.IsNullOrWhiteSpace(Editor.CoverImageUrl) ? "Add" : "Change")
+                                </button>
+                            </label>
+                            @if (!string.IsNullOrWhiteSpace(Editor.CoverImageUrl))
                             {
-                                <div class="wiki-media-picker border rounded-3 p-2 mb-2">
-                                    @if (!string.IsNullOrEmpty(_mediaPickerError))
+                                <div class="wiki-cover-preview">
+                                    <img src="@Editor.CoverImageUrl" alt="Cover" loading="lazy" />
+                                    <button type="button" class="btn btn-xs btn-link text-danger" @onclick="() => Editor.CoverImageUrl = null">Remove</button>
+                                </div>
+                            }
+                        </div>
+                    </div>
+
+                    @if (_showCoverPicker)
+                    {
+                        <div class="wiki-media-picker border rounded-3 p-2 mb-3">
+                            @if (!string.IsNullOrEmpty(_mediaPickerError))
+                            {
+                                <div class="text-danger small mb-0">@_mediaPickerError</div>
+                            }
+                            else if (_mediaAssets.Count == 0)
+                            {
+                                <p class="text-secondary small mb-0">No media uploaded yet. Upload images from the Media Library.</p>
+                            }
+                            else
+                            {
+                                <div class="d-flex flex-wrap gap-2">
+                                    @foreach (var asset in _mediaAssets)
                                     {
-                                        <div class="text-danger small mb-0">@_mediaPickerError</div>
-                                    }
-                                    else if (_mediaAssets.Count == 0)
-                                    {
-                                        <p class="text-secondary small mb-0">No media uploaded yet. Upload images from the Media Library.</p>
-                                    }
-                                    else
-                                    {
-                                        <div class="d-flex flex-wrap gap-2">
-                                            @foreach (var asset in _mediaAssets)
-                                            {
-                                                <button type="button" class="btn btn-sm btn-outline-secondary p-1" title="@asset.FileName"
-                                                        @onclick="() => InsertMediaAssetAsync(asset)">
-                                                    <img src="@asset.ThumbnailUrl" alt="@asset.AltText" loading="lazy" style="width:64px;height:64px;object-fit:cover;" />
-                                                </button>
-                                            }
-                                        </div>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary p-1" title="@asset.FileName"
+                                                @onclick="() => SelectCoverAsync(asset)">
+                                            <img src="@asset.ThumbnailUrl" alt="@asset.AltText" loading="lazy" style="width:64px;height:64px;object-fit:cover;" />
+                                        </button>
                                     }
                                 </div>
                             }
-                            <textarea id="@MarkdownEditorElementId">@Editor.Markdown</textarea>
                         </div>
+                    }
+
+                    <label class="form-label fw-semibold small mb-1">Content</label>
+                    <div class="small text-secondary mb-2">
+                        Type <code>/</code> for block commands, <code>[[</code> to link to another page, Tab/Shift+Tab to indent.
                     </div>
+                    <div class="wiki-block-editor" @ref="_blockEditorContainer"></div>
 
                     <div class="mt-3 d-flex flex-wrap gap-2">
                         <button type="submit" class="btn btn-primary" disabled="@IsBusy">
                             <i class="bi bi-floppy-fill me-1"></i>Save Page
                         </button>
-                        <button type="button" class="btn btn-outline-secondary" @onclick="CreateNewPage"
-                                disabled="@IsBusy">
+                        <button type="button" class="btn btn-outline-secondary" @onclick="CreateNewPage" disabled="@IsBusy">
                             Reset
                         </button>
                         <button type="button" class="btn btn-outline-danger" @onclick="DeleteSelectedPageAsync"
@@ -188,27 +207,19 @@
                 <span class="fw-semibold">Preview</span>
             </div>
             <div class="card-body">
-                @if (string.IsNullOrWhiteSpace(Editor.Markdown))
-                {
-                    <p class="text-secondary mb-0">Markdown preview appears here after you enter content.</p>
-                }
-                else
-                {
-                    <div class="wiki-rendered-preview">@((MarkupString)RenderedHtml)</div>
-                }
+                <div class="wiki-rendered-preview">@((MarkupString)RenderedHtml)</div>
             </div>
         </div>
 
         @if (SelectedPageId.HasValue)
         {
             <div class="card border-0 shadow-sm mt-4">
-                <div
-                    class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
+                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
                     <div>
                         <div class="fw-semibold">History</div>
-                        <div class="small text-secondary">Every save is a git commit - full history, diffs, and revert.</div>
+                        <div class="small text-secondary">Bounded version snapshots - the last @MaxHistoryDisplay are kept.</div>
                     </div>
-                    <span class="badge text-bg-secondary">@History.Count commit@(History.Count == 1 ? "" : "s")</span>
+                    <span class="badge text-bg-secondary">@History.Count version@(History.Count == 1 ? "" : "s")</span>
                 </div>
                 <div class="card-body p-0">
                     @if (!string.IsNullOrEmpty(HistoryErrorMessage))
@@ -218,7 +229,7 @@
                     @if (History.Count == 0)
                     {
                         <div class="p-4">
-                            <p class="text-secondary mb-0">No commits yet - saving this page will create the first one.</p>
+                            <p class="text-secondary mb-0">No versions yet - saving this page will create the first one.</p>
                         </div>
                     }
                     else
@@ -232,7 +243,7 @@
                                     <div class="d-flex justify-content-between align-items-start gap-2">
                                         <div>
                                             <div class="fw-semibold small">
-                                                <code class="me-1">@revision.ShortSha</code>@revision.Message
+                                                <code class="me-1">v@(revision.RevisionNumber)</code>@(string.IsNullOrWhiteSpace(revision.Label) ? "Saved" : revision.Label)
                                             </div>
                                             <div class="small text-secondary mt-1">
                                                 @revision.AuthorName &middot; @revision.When.ToLocalTime().ToString("g")
@@ -245,18 +256,18 @@
                                                     Diff
                                                 </button>
                                             }
-                                            <button class="btn btn-xs btn-outline-primary" @onclick="() => RevertToRevisionAsync(revision.Sha)"
+                                            <button class="btn btn-xs btn-outline-primary" @onclick="() => RevertToRevisionAsync(revision.Id)"
                                                     disabled="@IsHistoryBusy">
                                                 Revert
                                             </button>
                                         </div>
                                     </div>
-                                    @if (DiffShaKey == revision.Sha)
+                                    @if (DiffRevisionKey == revision.Id)
                                     {
                                         <div class="mt-3 border-top pt-3">
                                             @if (string.IsNullOrEmpty(DiffText))
                                             {
-                                                <div class="small text-secondary">No textual changes in this commit.</div>
+                                                <div class="small text-secondary">No block changes between these versions.</div>
                                             }
                                             else
                                             {
@@ -280,6 +291,8 @@
 </div>
 
 @code {
+    private const int MaxHistoryDisplay = 20;
+
     private List<WikiPage> WikiPages { get; set; } = new();
     private WikiPageEditorModel Editor { get; set; } = new();
     private Guid? SelectedPageId { get; set; }
@@ -287,37 +300,36 @@
     private string SearchQuery { get; set; } = string.Empty;
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
+    private readonly HashSet<Guid> _expandedPageIds = new();
 
     private List<WikiRevisionView> History { get; set; } = new();
     private bool IsHistoryBusy { get; set; }
     private string HistoryErrorMessage { get; set; } = string.Empty;
-    private string? DiffShaKey { get; set; }
+    private Guid? DiffRevisionKey { get; set; }
     private string? DiffText { get; set; }
 
-    private const string MarkdownEditorElementId = "wiki-body-textarea";
-    private bool _markdownEditorInitialized;
-    private string? _lastSyncedMarkdown;
-    private DotNetObjectReference<Wiki>? _markdownEditorRef;
+    private ElementReference _blockEditorContainer;
+    private IJSObjectReference? _blockEditorModule;
+    private DotNetObjectReference<Wiki>? _blockEditorRef;
+    private bool _blockEditorInitialized;
+    private int _editorGeneration;
+    private int _blockEditorSyncedGeneration = -1;
 
     private string EditorHeader => SelectedPageId.HasValue ? "Edit Wiki Page" : "Create Wiki Page";
 
-    private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
-        .UseAdvancedExtensions()
-        .Build();
-
     private string RenderedHtml =>
-        Markdown.ToHtml(WikiMarkdownHelper.ResolveWikiLinks(Editor.Markdown, WikiPages), MarkdownPipeline);
+        WikiBlockHtmlRenderer.RenderPage(WikiBlockJson.ParseBlocks(Editor.BlocksJson), WikiPages);
 
-    private bool _showMediaPicker;
+    private bool _showCoverPicker;
     private string _mediaPickerError = string.Empty;
     private List<MediaAssetSummary> _mediaAssets = new();
     private DotNetObjectReference<Wiki>? _wikiLinksRef;
     private bool _wikiLinksInitialized;
 
-    private async Task ToggleMediaPickerAsync()
+    private async Task ToggleCoverPickerAsync()
     {
-        _showMediaPicker = !_showMediaPicker;
-        if (!_showMediaPicker)
+        _showCoverPicker = !_showCoverPicker;
+        if (!_showCoverPicker)
         {
             return;
         }
@@ -329,33 +341,20 @@
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Unable to load media library for the wiki editor's image picker.");
+            Logger.LogError(ex, "Unable to load media library for the wiki cover picker.");
             _mediaPickerError = $"Unable to load media library. {ex.Message}";
         }
     }
 
-    private async Task InsertMediaAssetAsync(MediaAssetSummary asset)
+    private void SelectCoverAsync(MediaAssetSummary asset)
     {
-        var altText = string.IsNullOrWhiteSpace(asset.AltText) ? asset.FileName : asset.AltText;
-        await JS.InvokeVoidAsync("gwsMarkdownEditor.insertAtCursor", MarkdownEditorElementId, $"![{altText}]({asset.Url})");
-        _showMediaPicker = false;
-    }
-
-    private async Task InsertTableOfContentsAsync()
-    {
-        var toc = WikiMarkdownHelper.BuildTableOfContentsMarkdown(Editor.Markdown, MarkdownPipeline);
-        if (string.IsNullOrWhiteSpace(toc))
-        {
-            StatusMessage = "No headings (##/###/####) found to build a table of contents from.";
-            return;
-        }
-
-        await JS.InvokeVoidAsync("gwsMarkdownEditor.insertAtCursor", MarkdownEditorElementId, toc + "\n");
+        Editor.CoverImageUrl = asset.Url;
+        _showCoverPicker = false;
     }
 
     [JSInvokable]
-    public Task<string[]> SearchWikiLinkSuggestions(string query) =>
-        Task.FromResult(WikiMarkdownHelper.SearchPageTitles(query, WikiPages).ToArray());
+    public Task<IReadOnlyList<WikiLinkSuggestion>> SearchWikiLinkSuggestions(string query) =>
+        Task.FromResult(WikiMarkdownHelper.SearchLinkSuggestions(query, WikiPages));
 
     [JSInvokable]
     public async Task NavigateToWikiPageId(string pageId)
@@ -365,6 +364,13 @@
             await OpenPageAsync(id);
             StateHasChanged();
         }
+    }
+
+    [JSInvokable]
+    public async Task OnBlocksChanged(string blocksJson)
+    {
+        Editor.BlocksJson = blocksJson;
+        await InvokeAsync(StateHasChanged);
     }
 
     protected override async Task OnInitializedAsync()
@@ -381,26 +387,19 @@
             _wikiLinksInitialized = true;
         }
 
-        if (!_markdownEditorInitialized)
+        if (!_blockEditorInitialized)
         {
-            _markdownEditorRef = DotNetObjectReference.Create(this);
-            await JS.InvokeVoidAsync("gwsMarkdownEditor.init", MarkdownEditorElementId, _markdownEditorRef, new { enableWikiLinks = true });
-            _markdownEditorInitialized = true;
-            _lastSyncedMarkdown = Editor.Markdown;
+            _blockEditorRef = DotNetObjectReference.Create(this);
+            _blockEditorModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js");
+            await _blockEditorModule.InvokeVoidAsync("initialize", _blockEditorContainer, _blockEditorRef, Editor.BlocksJson);
+            _blockEditorInitialized = true;
+            _blockEditorSyncedGeneration = _editorGeneration;
         }
-        else if (!string.Equals(Editor.Markdown, _lastSyncedMarkdown, StringComparison.Ordinal))
+        else if (_blockEditorSyncedGeneration != _editorGeneration)
         {
-            await JS.InvokeVoidAsync("gwsMarkdownEditor.setValue", MarkdownEditorElementId, Editor.Markdown);
-            _lastSyncedMarkdown = Editor.Markdown;
+            await _blockEditorModule!.InvokeVoidAsync("setBlocks", _blockEditorContainer, Editor.BlocksJson);
+            _blockEditorSyncedGeneration = _editorGeneration;
         }
-    }
-
-    [JSInvokable]
-    public async Task OnMarkdownChanged(string value)
-    {
-        Editor.Markdown = value;
-        _lastSyncedMarkdown = value;
-        await InvokeAsync(StateHasChanged);
     }
 
     private Task<string> CurrentUserNameAsync() => CurrentUserAccessor.GetCurrentUsernameAsync();
@@ -427,7 +426,8 @@
         SelectedPageId = null;
         Editor = new WikiPageEditorModel();
         History = new();
-        DiffShaKey = null;
+        DiffRevisionKey = null;
+        _editorGeneration++;
         StatusMessage = "Ready to create a new wiki page.";
         ErrorMessage = string.Empty;
     }
@@ -449,10 +449,13 @@
                 WikiPageId = page.Id,
                 Title = page.Title,
                 Slug = page.Slug,
-                Markdown = page.Markdown,
+                BlocksJson = page.BlocksJson,
+                Icon = page.Icon,
+                CoverImageUrl = page.CoverImageUrl,
                 ParentWikiPageId = page.ParentWikiPageId
             };
-            DiffShaKey = null;
+            _editorGeneration++;
+            DiffRevisionKey = null;
             StatusMessage = $"Opened wiki page '{page.Title}'.";
             ErrorMessage = string.Empty;
             await LoadHistoryAsync(page.Id);
@@ -494,9 +497,14 @@
                 WikiPageId = saved.Id,
                 Title = saved.Title,
                 Slug = saved.Slug,
-                Markdown = saved.Markdown,
+                BlocksJson = saved.BlocksJson,
+                Icon = saved.Icon,
+                CoverImageUrl = saved.CoverImageUrl,
                 ParentWikiPageId = saved.ParentWikiPageId
             };
+            // Deliberately not bumping _editorGeneration here - the block editor's DOM already
+            // reflects exactly what was just saved (that's where BlocksJson came from), so
+            // resetting it would only cost the user their cursor position for no benefit.
             StatusMessage = $"Saved wiki page '{saved.Title}'.";
             await LoadPagesAsync(selectFirstPage: false);
             await LoadHistoryAsync(saved.Id);
@@ -542,11 +550,67 @@
         }
     }
 
+    private async Task MovePageAsync(WikiPage page, int direction)
+    {
+        var siblings = OrderedPagesByHierarchy()
+            .Where(p => p.ParentWikiPageId == page.ParentWikiPageId)
+            .ToList();
+        var currentIndex = siblings.FindIndex(p => p.Id == page.Id);
+        var targetIndex = currentIndex + direction;
+        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= siblings.Count)
+        {
+            return;
+        }
+
+        await Work(async () =>
+        {
+            var user = await CurrentUserNameAsync();
+            await WikiService.ReorderPageAsync(page.Id, page.ParentWikiPageId, targetIndex, user);
+            await LoadPagesAsync(selectFirstPage: false);
+        });
+    }
+
+    private async Task MoveToSelectedParentAsync()
+    {
+        if (SelectedPageId is not { } wikiPageId)
+        {
+            return;
+        }
+
+        await Work(async () =>
+        {
+            var user = await CurrentUserNameAsync();
+            await WikiService.ReorderPageAsync(wikiPageId, Editor.ParentWikiPageId, int.MaxValue, user);
+            await LoadPagesAsync(selectFirstPage: false);
+            StatusMessage = "Page moved.";
+        });
+    }
+
+    private async Task Work(Func<Task> action)
+    {
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Wiki page move failed.");
+            ErrorMessage = $"Unable to move wiki page. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     private async Task ToggleDiffAsync(WikiRevisionView revision, WikiRevisionView previousRevision)
     {
-        if (DiffShaKey == revision.Sha)
+        if (DiffRevisionKey == revision.Id)
         {
-            DiffShaKey = null;
+            DiffRevisionKey = null;
             DiffText = null;
             return;
         }
@@ -558,47 +622,50 @@
 
         try
         {
-            DiffText = await WikiService.GetDiffAsync(wikiPageId, previousRevision.Sha, revision.Sha);
-            DiffShaKey = revision.Sha;
+            DiffText = await WikiService.GetStructuralDiffAsync(wikiPageId, previousRevision.Id, revision.Id);
+            DiffRevisionKey = revision.Id;
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Unable to load diff for wiki page {WikiPageId} at {Sha}.", wikiPageId, revision.Sha);
+            Logger.LogError(ex, "Unable to load diff for wiki page {WikiPageId} between revisions.", wikiPageId);
             HistoryErrorMessage = $"Unable to load diff. {ex.Message}";
         }
     }
 
-    private async Task RevertToRevisionAsync(string sha)
+    private async Task RevertToRevisionAsync(Guid revisionId)
     {
         if (SelectedPageId is not { } wikiPageId)
         {
             return;
         }
 
-        var confirmed = await JS.InvokeAsync<bool>("confirm", "Revert to this version? This creates a new commit with the old content - nothing is lost.");
+        var confirmed = await JS.InvokeAsync<bool>("confirm", "Revert to this version? This creates a new version with the old content - nothing is lost.");
         if (!confirmed) return;
 
         IsHistoryBusy = true;
         try
         {
             var user = await CurrentUserNameAsync();
-            var reverted = await WikiService.RevertToRevisionAsync(wikiPageId, sha, user);
+            var reverted = await WikiService.RevertToRevisionAsync(wikiPageId, revisionId, user);
             Editor = new WikiPageEditorModel
             {
                 WikiPageId = reverted.Id,
                 Title = reverted.Title,
                 Slug = reverted.Slug,
-                Markdown = reverted.Markdown,
+                BlocksJson = reverted.BlocksJson,
+                Icon = reverted.Icon,
+                CoverImageUrl = reverted.CoverImageUrl,
                 ParentWikiPageId = reverted.ParentWikiPageId
             };
-            DiffShaKey = null;
+            _editorGeneration++;
+            DiffRevisionKey = null;
             StatusMessage = $"Reverted '{reverted.Title}' to an earlier version.";
             await LoadPagesAsync(selectFirstPage: false);
             await LoadHistoryAsync(wikiPageId);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Unable to revert wiki page {WikiPageId} to {Sha}.", wikiPageId, sha);
+            Logger.LogError(ex, "Unable to revert wiki page {WikiPageId} to revision {RevisionId}.", wikiPageId, revisionId);
             HistoryErrorMessage = $"Unable to revert. {ex.Message}";
         }
         finally
@@ -607,9 +674,9 @@
         }
     }
 
-    // Mirrors Pages.razor's OrderedPagesByHierarchy()/GetPageDepth() for CMS pages - a
-    // recursive depth-first flatten via ToLookup(ParentWikiPageId), rendered as an
-    // indented flat list rather than a nested component.
+    // Recursive depth-first flatten via ToLookup(ParentWikiPageId), rendered as an indented
+    // flat list with expand/collapse rather than a nested component - mirrors Pages.razor's
+    // OrderedPagesByHierarchy()/GetPageDepth() for CMS pages.
     private List<WikiPage> OrderedPagesByHierarchy()
     {
         var byParent = WikiPages.ToLookup(p => p.ParentWikiPageId);
@@ -617,15 +684,28 @@
 
         void Visit(Guid? parentId)
         {
-            foreach (var page in byParent[parentId])
+            foreach (var page in byParent[parentId].OrderBy(p => p.SortOrder))
             {
                 result.Add(page);
-                Visit(page.Id);
+                if (parentId is null || IsExpanded(parentId.Value))
+                {
+                    Visit(page.Id);
+                }
             }
         }
 
         Visit(null);
         return result;
+    }
+
+    private bool HasChildren(Guid pageId) => WikiPages.Any(p => p.ParentWikiPageId == pageId);
+    private bool IsExpanded(Guid pageId) => _expandedPageIds.Contains(pageId);
+    private void ToggleExpanded(Guid pageId)
+    {
+        if (!_expandedPageIds.Add(pageId))
+        {
+            _expandedPageIds.Remove(pageId);
+        }
     }
 
     private int GetWikiPageDepth(WikiPage page)
@@ -643,10 +723,9 @@
         return depth;
     }
 
-    // With no search query, the full tree is shown in hierarchy order. Once searching,
-    // a matched child's ancestors may not themselves match, so tree order stops making
-    // sense - fall back to a flat alphabetical list of matches (still indented per each
-    // page's real depth, just not grouped under its ancestors).
+    // With no search query, the tree is shown collapsed to top-level + expanded branches.
+    // Once searching, a matched child's ancestors may not themselves be expanded, so tree
+    // order stops making sense - fall back to a flat alphabetical list of matches.
     private List<WikiPage> FilteredAndOrderedPages()
     {
         if (string.IsNullOrWhiteSpace(SearchQuery))
@@ -661,9 +740,9 @@
             .ToList();
     }
 
-    // Mirrors EditPage.razor's ParentPageOptions() for CMS pages - a BFS from the open
-    // page excluding itself and every descendant, so the <select> can never offer a
-    // choice that would create a cycle.
+    // Mirrors EditPage.razor's ParentPageOptions() for CMS pages - a BFS from the open page
+    // excluding itself and every descendant, so the <select> can never offer a choice that
+    // would create a cycle (ReorderPageAsync also guards this server-side).
     private List<WikiPage> WikiParentPageOptions()
     {
         if (!SelectedPageId.HasValue)
@@ -693,17 +772,19 @@
     }
 
     private static string DiffLineClass(string line) =>
-        line.StartsWith('+') && !line.StartsWith("+++") ? "text-success"
-        : line.StartsWith('-') && !line.StartsWith("---") ? "text-danger"
+        line.StartsWith('+') ? "text-success"
+        : line.StartsWith('-') ? "text-danger"
+        : line.StartsWith('~') ? "text-warning"
         : "text-secondary";
 
     public async ValueTask DisposeAsync()
     {
-        if (_markdownEditorInitialized)
+        if (_blockEditorInitialized && _blockEditorModule is not null)
         {
             try
             {
-                await JS.InvokeVoidAsync("gwsMarkdownEditor.destroy", MarkdownEditorElementId);
+                await _blockEditorModule.InvokeVoidAsync("dispose", _blockEditorContainer);
+                await _blockEditorModule.DisposeAsync();
             }
             catch (JSDisconnectedException)
             {
@@ -711,7 +792,7 @@
             }
         }
 
-        _markdownEditorRef?.Dispose();
+        _blockEditorRef?.Dispose();
 
         if (_wikiLinksInitialized)
         {

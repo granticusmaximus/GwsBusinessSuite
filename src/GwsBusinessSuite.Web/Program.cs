@@ -2029,8 +2029,12 @@ static async Task EnsureAboutPageResumeSectionAsync(ApplicationDbContext dbConte
 // idempotent, since a page that already has blocks is left alone on every subsequent run.
 static async Task EnsureWikiPagesHaveBlocksAsync(ApplicationDbContext dbContext, ILogger logger)
 {
+    // The AddWikiBlockEditor migration defaulted every existing row's new BlocksJson column
+    // to "" (EF's AddColumn default for a non-nullable string with no fluent HasDefaultValue),
+    // not the "[]" the WikiPage.BlocksJson property initializer normally gives a fresh
+    // in-memory entity - both count as "no blocks yet" here.
     var pagesNeedingBackfill = await dbContext.WikiPages
-        .Where(page => page.BlocksJson == "[]" && page.Markdown != "")
+        .Where(page => (page.BlocksJson == "" || page.BlocksJson == "[]") && page.Markdown != "")
         .ToListAsync();
     if (pagesNeedingBackfill.Count == 0)
     {

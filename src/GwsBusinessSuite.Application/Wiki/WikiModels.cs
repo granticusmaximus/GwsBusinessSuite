@@ -18,8 +18,6 @@ public sealed class WikiPageEditorModel
     public string? CoverImageUrl { get; set; }
 
     public Guid? ParentWikiPageId { get; set; }
-
-    public int SortOrder { get; set; }
 }
 
 // One row per save, bounded to WikiService.MaxRevisionsPerPage (oldest trimmed on write) -

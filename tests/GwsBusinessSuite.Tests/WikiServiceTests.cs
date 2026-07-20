@@ -7,27 +7,22 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GwsBusinessSuite.Tests;
 
-// Git operations here are local and deterministic (no live external dependency, unlike
-// SSH), so this exercises the real WikiService against a real temp git repo per test
-// rather than mocking anything out.
-public sealed class WikiServiceTests : IDisposable
+public sealed class WikiServiceTests
 {
-    private readonly string _repoPath = Path.Combine(Path.GetTempPath(), $"gws-wiki-test-{Guid.NewGuid():N}");
-
     [Fact]
     public async Task SavePageAsync_ShouldCreateUpdateAndDeleteWikiPages()
     {
         await using var db = await CreateDbAsync();
-        var service = CreateService(db);
+        var service = new WikiService(db);
 
         var created = await service.SavePageAsync(new WikiPageEditorModel
         {
             Title = "Internal Runbook",
-            Markdown = "# Internal Runbook\n\nSteps go here."
+            BlocksJson = ParagraphBlocks("Steps go here.")
         }, "grantwatson");
 
         created.Slug.Should().Be("internal-runbook");
-        created.Markdown.Should().Contain("Steps go here.");
+        created.BlocksJson.Should().Contain("Steps go here.");
         created.CreatedBy.Should().Be("grantwatson");
 
         var listed = await service.ListPagesAsync();
@@ -41,11 +36,11 @@ public sealed class WikiServiceTests : IDisposable
         {
             WikiPageId = created.Id,
             Title = "Internal Runbook",
-            Markdown = "# Internal Runbook\n\nUpdated steps."
+            BlocksJson = ParagraphBlocks("Updated steps.")
         }, "grantwatson");
 
         updated.Id.Should().Be(created.Id);
-        updated.Markdown.Should().Contain("Updated steps.");
+        updated.BlocksJson.Should().Contain("Updated steps.");
         updated.UpdatedAt.Should().NotBeNull();
         updated.UpdatedBy.Should().Be("grantwatson");
 
@@ -58,18 +53,18 @@ public sealed class WikiServiceTests : IDisposable
     public async Task SavePageAsync_ShouldGenerateUniqueSlugsForDuplicateTitles()
     {
         await using var db = await CreateDbAsync();
-        var service = CreateService(db);
+        var service = new WikiService(db);
 
         var first = await service.SavePageAsync(new WikiPageEditorModel
         {
             Title = "Team Notes",
-            Markdown = "First page"
+            BlocksJson = ParagraphBlocks("First page")
         }, "grantwatson");
 
         var second = await service.SavePageAsync(new WikiPageEditorModel
         {
             Title = "Team Notes",
-            Markdown = "Second page"
+            BlocksJson = ParagraphBlocks("Second page")
         }, "grantwatson");
 
         first.Slug.Should().Be("team-notes");
@@ -77,244 +72,195 @@ public sealed class WikiServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SavePageAsync_ShouldCreateOneCommitPerSave_AndDiffShouldShowTheChange()
+    public async Task SavePageAsync_ShouldCreateOneRevisionPerSave_AndDiffShouldShowTheChange()
     {
         await using var db = await CreateDbAsync();
-        var service = CreateService(db);
+        var service = new WikiService(db);
 
         var created = await service.SavePageAsync(new WikiPageEditorModel
         {
             Title = "Deploy Steps",
-            Markdown = "Step one."
+            BlocksJson = ParagraphBlocks("Step one.")
         }, "grantwatson");
 
-        var updated = await service.SavePageAsync(new WikiPageEditorModel
+        await service.SavePageAsync(new WikiPageEditorModel
         {
             WikiPageId = created.Id,
             Title = "Deploy Steps",
-            Markdown = "Step one.\nStep two."
+            BlocksJson = ParagraphBlocks("Step two.")
         }, "grantwatson");
 
         var history = await service.GetHistoryAsync(created.Id);
         history.Should().HaveCount(2);
-        history[0].Message.Should().Be("Update Deploy Steps");
-        history[1].Message.Should().Be("Create Deploy Steps");
+        history[0].RevisionNumber.Should().Be(2, "history is newest-first");
+        history[1].RevisionNumber.Should().Be(1);
         history.Should().OnlyContain(entry => entry.AuthorName == "grantwatson");
 
-        var diff = await service.GetDiffAsync(created.Id, history[1].Sha, history[0].Sha);
+        var diff = await service.GetStructuralDiffAsync(created.Id, history[1].Id, history[0].Id);
         diff.Should().NotBeNullOrEmpty();
         diff.Should().Contain("Step two.");
     }
 
     [Fact]
-    public async Task SavePageAsync_WithoutContentChange_ShouldNotCreateAnEmptyCommit()
+    public async Task SavePageAsync_ShouldTrimOldRevisions_BeyondMaxRevisionsPerPage()
     {
         await using var db = await CreateDbAsync();
-        var service = CreateService(db);
+        var service = new WikiService(db);
 
         var created = await service.SavePageAsync(new WikiPageEditorModel
         {
-            Title = "Static Page",
-            Markdown = "Nothing ever changes here."
+            Title = "Frequently Edited",
+            BlocksJson = ParagraphBlocks("v0")
         }, "grantwatson");
 
-        // Re-saving identical content should be a no-op on the git side.
-        await service.SavePageAsync(new WikiPageEditorModel
+        for (var i = 1; i <= 25; i++)
         {
-            WikiPageId = created.Id,
-            Title = "Static Page",
-            Markdown = "Nothing ever changes here."
-        }, "grantwatson");
+            await service.SavePageAsync(new WikiPageEditorModel
+            {
+                WikiPageId = created.Id,
+                Title = "Frequently Edited",
+                BlocksJson = ParagraphBlocks($"v{i}")
+            }, "grantwatson");
+        }
 
         var history = await service.GetHistoryAsync(created.Id);
-        history.Should().HaveCount(1);
+        history.Should().HaveCount(20, "revisions are trimmed to WikiService.MaxRevisionsPerPage");
+        history[0].RevisionNumber.Should().Be(26, "the newest revisions are kept, not the oldest");
     }
 
     [Fact]
-    public async Task SavePageAsync_ShouldPreserveHistory_AcrossASlugRename()
+    public async Task RevertToRevisionAsync_ShouldRestoreOldContent_AsANewVersion()
     {
         await using var db = await CreateDbAsync();
-        var service = CreateService(db);
-
-        var created = await service.SavePageAsync(new WikiPageEditorModel
-        {
-            Title = "Old Title",
-            Markdown = "Original content."
-        }, "grantwatson");
-
-        var renamed = await service.SavePageAsync(new WikiPageEditorModel
-        {
-            WikiPageId = created.Id,
-            Title = "New Title",
-            Slug = "new-title",
-            Markdown = "Original content."
-        }, "grantwatson");
-
-        renamed.Slug.Should().Be("new-title");
-
-        var history = await service.GetHistoryAsync(created.Id);
-        history.Should().HaveCount(2);
-        history.Select(h => h.Message).Should().Contain("Create Old Title");
-    }
-
-    // Regression test: GetRevisionContentAsync/GetDiffAsync/RevertToRevisionAsync used to
-    // look up historical git blobs by the page's *current* slug, so any revision from
-    // before a rename couldn't be found (the old commit's tree only has the old filename).
-    [Fact]
-    public async Task RevertToRevisionAsync_ShouldRestoreContent_FromBeforeASlugRename()
-    {
-        await using var db = await CreateDbAsync();
-        var service = CreateService(db);
-
-        var created = await service.SavePageAsync(new WikiPageEditorModel
-        {
-            Title = "Old Title",
-            Markdown = "Original content."
-        }, "grantwatson");
-        var preRenameSha = (await service.GetHistoryAsync(created.Id))[0].Sha;
-
-        await service.SavePageAsync(new WikiPageEditorModel
-        {
-            WikiPageId = created.Id,
-            Title = "New Title",
-            Slug = "new-title",
-            Markdown = "Original content."
-        }, "grantwatson");
-
-        await service.SavePageAsync(new WikiPageEditorModel
-        {
-            WikiPageId = created.Id,
-            Title = "New Title",
-            Slug = "new-title",
-            Markdown = "Content after rename."
-        }, "grantwatson");
-
-        var preRenameContent = await service.GetRevisionContentAsync(created.Id, preRenameSha);
-        preRenameContent.Should().Be("Original content.");
-
-        var history = await service.GetHistoryAsync(created.Id);
-        var latestSha = history[0].Sha;
-        var diff = await service.GetDiffAsync(created.Id, preRenameSha, latestSha);
-        diff.Should().NotBeNullOrEmpty();
-        diff.Should().Contain("Content after rename.");
-
-        var reverted = await service.RevertToRevisionAsync(created.Id, preRenameSha, "grantwatson");
-        reverted.Markdown.Should().Be("Original content.");
-        reverted.Slug.Should().Be("new-title", "reverting content shouldn't undo the rename itself");
-    }
-
-    [Fact]
-    public async Task RevertToRevisionAsync_ShouldRestoreOldContent_AsANewCommit()
-    {
-        await using var db = await CreateDbAsync();
-        var service = CreateService(db);
+        var service = new WikiService(db);
 
         var created = await service.SavePageAsync(new WikiPageEditorModel
         {
             Title = "Onboarding",
-            Markdown = "Version one."
+            BlocksJson = ParagraphBlocks("Version one.")
         }, "grantwatson");
-        var firstSha = (await service.GetHistoryAsync(created.Id))[0].Sha;
+        var firstRevisionId = (await service.GetHistoryAsync(created.Id))[0].Id;
 
         await service.SavePageAsync(new WikiPageEditorModel
         {
             WikiPageId = created.Id,
             Title = "Onboarding",
-            Markdown = "Version two."
+            BlocksJson = ParagraphBlocks("Version two.")
         }, "grantwatson");
 
-        var reverted = await service.RevertToRevisionAsync(created.Id, firstSha, "grantwatson");
+        var reverted = await service.RevertToRevisionAsync(created.Id, firstRevisionId, "grantwatson");
 
-        reverted.Markdown.Should().Be("Version one.");
+        reverted.BlocksJson.Should().Contain("Version one.");
 
         var history = await service.GetHistoryAsync(created.Id);
-        history.Should().HaveCount(3, "the revert itself should be a new commit, not a history rewrite");
-        history[0].Message.Should().Be("Update Onboarding");
+        history.Should().HaveCount(3, "the revert itself is a new version, not a history rewrite");
     }
 
     [Fact]
-    public async Task SavePageAsync_ShouldPersistAndClearParentWikiPageId()
+    public async Task SavePageAsync_ShouldSetParentOnlyAtCreation_NotOnSubsequentContentSaves()
     {
         await using var db = await CreateDbAsync();
-        var service = CreateService(db);
+        var service = new WikiService(db);
 
         var parent = await service.SavePageAsync(new WikiPageEditorModel
         {
             Title = "Parent Page",
-            Markdown = "Parent content."
+            BlocksJson = ParagraphBlocks("Parent content.")
         }, "grantwatson");
 
         var child = await service.SavePageAsync(new WikiPageEditorModel
         {
             Title = "Child Page",
-            Markdown = "Child content.",
+            BlocksJson = ParagraphBlocks("Child content."),
             ParentWikiPageId = parent.Id
         }, "grantwatson");
 
         child.ParentWikiPageId.Should().Be(parent.Id);
 
-        var madeTopLevel = await service.SavePageAsync(new WikiPageEditorModel
+        // A content-only save with a different ParentWikiPageId in the editor model must not
+        // silently re-parent an existing page - that would leave stale/colliding SortOrder
+        // values under the new parent since only ReorderPageAsync renumbers siblings.
+        var resaved = await service.SavePageAsync(new WikiPageEditorModel
         {
             WikiPageId = child.Id,
             Title = "Child Page",
-            Markdown = "Child content.",
+            BlocksJson = ParagraphBlocks("Child content, edited."),
             ParentWikiPageId = null
         }, "grantwatson");
 
-        madeTopLevel.ParentWikiPageId.Should().BeNull();
+        resaved.ParentWikiPageId.Should().Be(parent.Id, "content saves must not change the parent");
     }
 
     [Fact]
-    public async Task RevertToRevisionAsync_ShouldPreserveParentWikiPageId()
+    public async Task ReorderPageAsync_ShouldChangeParentAndRenumberSiblings()
     {
         await using var db = await CreateDbAsync();
-        var service = CreateService(db);
+        var service = new WikiService(db);
 
-        var parent = await service.SavePageAsync(new WikiPageEditorModel
-        {
-            Title = "Parent Page",
-            Markdown = "Parent content."
-        }, "grantwatson");
+        var oldParent = await service.SavePageAsync(new WikiPageEditorModel { Title = "Old Parent", BlocksJson = ParagraphBlocks("x") }, "u");
+        var newParent = await service.SavePageAsync(new WikiPageEditorModel { Title = "New Parent", BlocksJson = ParagraphBlocks("x") }, "u");
+        var child = await service.SavePageAsync(new WikiPageEditorModel { Title = "Child", BlocksJson = ParagraphBlocks("x"), ParentWikiPageId = oldParent.Id }, "u");
+        var sibling = await service.SavePageAsync(new WikiPageEditorModel { Title = "Existing Under New Parent", BlocksJson = ParagraphBlocks("x"), ParentWikiPageId = newParent.Id }, "u");
 
-        var child = await service.SavePageAsync(new WikiPageEditorModel
-        {
-            Title = "Child Page",
-            Markdown = "Version one.",
-            ParentWikiPageId = parent.Id
-        }, "grantwatson");
-        var firstSha = (await service.GetHistoryAsync(child.Id))[0].Sha;
+        await service.ReorderPageAsync(child.Id, newParent.Id, 0, "u");
 
-        await service.SavePageAsync(new WikiPageEditorModel
-        {
-            WikiPageId = child.Id,
-            Title = "Child Page",
-            Markdown = "Version two.",
-            ParentWikiPageId = parent.Id
-        }, "grantwatson");
+        var moved = await service.GetPageAsync(child.Id);
+        moved!.ParentWikiPageId.Should().Be(newParent.Id);
+        moved.SortOrder.Should().Be(0, "inserted at index 0");
 
-        var reverted = await service.RevertToRevisionAsync(child.Id, firstSha, "grantwatson");
-
-        reverted.ParentWikiPageId.Should().Be(parent.Id, "reverting content should not silently detach the page from its parent");
+        var movedSibling = await service.GetPageAsync(sibling.Id);
+        movedSibling!.SortOrder.Should().Be(1, "the existing child was pushed to index 1");
     }
 
     [Fact]
-    public async Task DeletePageAsync_ShouldRemoveTheFileFromTheRepo()
+    public async Task ReorderPageAsync_ShouldRejectSelfParenting()
     {
         await using var db = await CreateDbAsync();
-        var service = CreateService(db);
+        var service = new WikiService(db);
+
+        var page = await service.SavePageAsync(new WikiPageEditorModel { Title = "Page", BlocksJson = ParagraphBlocks("x") }, "u");
+
+        var act = () => service.ReorderPageAsync(page.Id, page.Id, 0, "u");
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task ReorderPageAsync_ShouldRejectMovingAPageUnderItsOwnDescendant()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiService(db);
+
+        var grandparent = await service.SavePageAsync(new WikiPageEditorModel { Title = "Grandparent", BlocksJson = ParagraphBlocks("x") }, "u");
+        var parent = await service.SavePageAsync(new WikiPageEditorModel { Title = "Parent", BlocksJson = ParagraphBlocks("x"), ParentWikiPageId = grandparent.Id }, "u");
+        var child = await service.SavePageAsync(new WikiPageEditorModel { Title = "Child", BlocksJson = ParagraphBlocks("x"), ParentWikiPageId = parent.Id }, "u");
+
+        var act = () => service.ReorderPageAsync(grandparent.Id, child.Id, 0, "u");
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task DeletePageAsync_ShouldCascadeDeleteRevisions()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiService(db);
 
         var created = await service.SavePageAsync(new WikiPageEditorModel
         {
             Title = "Temp Page",
-            Markdown = "Temporary content."
+            BlocksJson = ParagraphBlocks("Temporary content.")
         }, "grantwatson");
 
         await service.DeletePageAsync(created.Id, "grantwatson");
 
-        File.Exists(Path.Combine(_repoPath, "temp-page.md")).Should().BeFalse();
+        (await db.WikiPageRevisions.Where(r => r.WikiPageId == created.Id).ToListAsync()).Should().BeEmpty();
     }
 
-    private WikiService CreateService(ApplicationDbContext db) => new(db, _repoPath);
+    private static string ParagraphBlocks(string text) => WikiBlockJson.Serialize(
+    [
+        new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0, [new WikiRichTextSpan(text)], new Dictionary<string, string>())
+    ]);
 
     private static async Task<ApplicationDbContext> CreateDbAsync()
     {
@@ -328,20 +274,5 @@ public sealed class WikiServiceTests : IDisposable
         var db = new ApplicationDbContext(options);
         await db.Database.EnsureCreatedAsync();
         return db;
-    }
-
-    public void Dispose()
-    {
-        if (Directory.Exists(_repoPath))
-        {
-            // Git objects are written read-only on some platforms; normalize attributes
-            // before deleting so cleanup doesn't throw.
-            foreach (var file in Directory.EnumerateFiles(_repoPath, "*", SearchOption.AllDirectories))
-            {
-                File.SetAttributes(file, FileAttributes.Normal);
-            }
-
-            Directory.Delete(_repoPath, recursive: true);
-        }
     }
 }
