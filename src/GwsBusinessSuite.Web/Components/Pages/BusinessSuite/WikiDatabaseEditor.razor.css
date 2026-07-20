@@ -1,0 +1,28 @@
+.wiki-db-board {
+    align-items: flex-start;
+}
+
+.wiki-db-board-column {
+    flex: 0 0 260px;
+    background: #f6f7f9;
+    border-radius: 0.5rem;
+    padding: 0.6rem;
+    min-height: 120px;
+}
+
+.wiki-db-board-column-header {
+    padding: 0 0.15rem;
+}
+
+.wiki-db-board-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.4rem;
+    padding: 0.5rem 0.6rem;
+    margin-bottom: 0.5rem;
+    cursor: grab;
+}
+
+.wiki-db-board-card:active {
+    cursor: grabbing;
+}

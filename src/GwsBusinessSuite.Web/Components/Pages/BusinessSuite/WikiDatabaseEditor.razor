@@ -1,0 +1,503 @@
+@using System.Text.Json.Nodes
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+@inject IWikiDatabaseService WikiDatabaseService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject IJSRuntime JS
+@inject ILogger<WikiDatabaseEditor> Logger
+
+@if (_loading)
+{
+    <div class="text-secondary py-5 text-center"><span class="spinner-border spinner-border-sm me-2"></span>Loading database…</div>
+}
+else if (Database is null)
+{
+    <div class="alert alert-danger">Database not found.</div>
+}
+else
+{
+    <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
+            <div class="d-flex align-items-center gap-2 flex-grow-1 min-w-0">
+                <input class="form-control form-control-sm text-center" style="width:3rem;" @bind="_titleIcon" @bind:after="SaveMetadataAsync" maxlength="4" placeholder="🗄️" />
+                <input class="form-control form-control-sm fw-semibold" @bind="_title" @bind:after="SaveMetadataAsync" />
+            </div>
+            <div class="d-flex gap-2 flex-shrink-0">
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _showProperties = !_showProperties" disabled="@IsBusy">
+                    <i class="bi bi-list-columns-reverse me-1"></i>Properties
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="DeleteDatabaseAsync" disabled="@IsBusy">
+                    <i class="bi bi-trash me-1"></i>Delete
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+            {
+                <div class="alert alert-danger py-2 small">@ErrorMessage</div>
+            }
+
+            @if (_showProperties)
+            {
+                <div class="wiki-db-property-editor border rounded-3 p-3 mb-3">
+                    <div class="fw-semibold small mb-2">Properties</div>
+                    @foreach (var property in Database.Properties.OrderBy(p => p.SortOrder))
+                    {
+                        <div class="row g-2 align-items-center mb-2">
+                            <div class="col-md-4">
+                                <input class="form-control form-control-sm" value="@property.Name"
+                                       disabled="@(property.Type == WikiDatabasePropertyTypes.Title || IsBusy)"
+                                       @onchange="e => RenamePropertyAsync(property, e.Value?.ToString() ?? property.Name)" />
+                            </div>
+                            <div class="col-md-3"><span class="badge text-bg-secondary">@property.Type</span></div>
+                            @if (property.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect)
+                            {
+                                <div class="col-md-4">
+                                    <input class="form-control form-control-sm" placeholder="Option A, Option B, ..."
+                                           value="@string.Join(", ", WikiDatabasePropertyConfig.GetOptions(property).Select(o => o.Label))"
+                                           @onchange="e => SetPropertyOptionsAsync(property, e.Value?.ToString() ?? string.Empty)" disabled="@IsBusy" />
+                                </div>
+                            }
+                            <div class="col-md-1 text-end">
+                                @if (property.Type != WikiDatabasePropertyTypes.Title)
+                                {
+                                    <button type="button" class="btn btn-xs btn-link text-danger p-0" @onclick="() => DeletePropertyAsync(property)" disabled="@IsBusy">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    }
+                    <div class="row g-2 align-items-center mt-2">
+                        <div class="col-md-4"><input class="form-control form-control-sm" placeholder="New property name" @bind="_newPropertyName" /></div>
+                        <div class="col-md-3">
+                            <select class="form-select form-select-sm" @bind="_newPropertyType">
+                                @foreach (var type in AddablePropertyTypes)
+                                {
+                                    <option value="@type">@type</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-5">
+                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddPropertyAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(_newPropertyName))">
+                                <i class="bi bi-plus-lg me-1"></i>Add property
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            <ul class="nav nav-tabs mb-3">
+                @foreach (var view in Database.Views.OrderBy(v => v.SortOrder))
+                {
+                    <li class="nav-item">
+                        <button type="button" class="nav-link @(view.Id == _activeViewId ? "active" : "")" @onclick="() => _activeViewId = view.Id">
+                            <i class="bi @(view.Type == WikiDatabaseViewTypes.Board ? "bi-kanban" : "bi-table") me-1"></i>@view.Name
+                        </button>
+                    </li>
+                }
+                <li class="nav-item">
+                    <button type="button" class="nav-link text-secondary" @onclick="AddBoardViewAsync" disabled="@IsBusy" title="Add a Board view grouped by a Select property">
+                        <i class="bi bi-plus-lg me-1"></i>Board view
+                    </button>
+                </li>
+            </ul>
+
+            @{ var titleProperty = Database.Properties.First(p => p.Type == WikiDatabasePropertyTypes.Title); }
+
+            @if (ActiveView is { Type: WikiDatabaseViewTypes.Board })
+            {
+                var groupByProperty = Database.Properties.FirstOrDefault(p => p.Id.ToString() == ActiveViewConfig?.GroupByPropertyId)
+                    ?? Database.Properties.FirstOrDefault(p => p.Type == WikiDatabasePropertyTypes.Select);
+                if (groupByProperty is null)
+                {
+                    <div class="text-secondary small">This Board view's Select property was removed. Add a Select property to use it again.</div>
+                }
+                else
+                {
+                    var groups = WikiDatabaseViewLogic.GroupForBoard(Database.Rows.ToList(), groupByProperty);
+                    <div class="wiki-db-board d-flex gap-3 overflow-auto pb-2">
+                        @foreach (var group in groups)
+                        {
+                            <div class="wiki-db-board-column" @ondragover:preventDefault @ondrop="() => DropOnColumnAsync(groupByProperty, group.OptionId)">
+                                <div class="wiki-db-board-column-header fw-semibold small mb-2">@group.Label <span class="text-secondary">(@group.Rows.Count)</span></div>
+                                @foreach (var row in group.Rows)
+                                {
+                                    <div class="wiki-db-board-card" draggable="true" @ondragstart="() => StartDragRow(row)" @ondragend="EndDragRow">
+                                        <div class="fw-semibold small">@(GetText(row, titleProperty) ?? "Untitled")</div>
+                                        @foreach (var property in Database.Properties.Where(p => p.Id != titleProperty.Id && p.Id != groupByProperty.Id).Take(3))
+                                        {
+                                            var text = WikiPropertyValues.GetDisplayText(property, WikiPropertyValues.ParseObject(row.PropertyValuesJson), row.CreatedAt);
+                                            @if (!string.IsNullOrWhiteSpace(text))
+                                            {
+                                                <span class="badge text-bg-light border me-1">@text</span>
+                                            }
+                                        }
+                                    </div>
+                                }
+                                <button type="button" class="btn btn-sm btn-link" @onclick="() => AddRowToGroupAsync(groupByProperty, group.OptionId)" disabled="@IsBusy">
+                                    <i class="bi bi-plus-lg me-1"></i>New
+                                </button>
+                            </div>
+                        }
+                    </div>
+                }
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead>
+                            <tr>
+                                @foreach (var property in Database.Properties.OrderBy(p => p.SortOrder))
+                                {
+                                    <th>@property.Name</th>
+                                }
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in Database.Rows.OrderBy(r => r.SortOrder))
+                            {
+                                <tr>
+                                    @foreach (var property in Database.Properties.OrderBy(p => p.SortOrder))
+                                    {
+                                        <td>
+                                            @switch (property.Type)
+                                            {
+                                                case WikiDatabasePropertyTypes.Title:
+                                                case WikiDatabasePropertyTypes.Text:
+                                                case WikiDatabasePropertyTypes.Url:
+                                                    <input class="form-control form-control-sm" value="@GetText(row, property)" disabled="@IsBusy"
+                                                           @onchange="e => SetTextAsync(row, property, e.Value?.ToString())" />
+                                                    break;
+                                                case WikiDatabasePropertyTypes.Number:
+                                                    <input type="number" class="form-control form-control-sm" value="@GetNumber(row, property)" disabled="@IsBusy"
+                                                           @onchange="e => SetNumberAsync(row, property, e.Value?.ToString())" />
+                                                    break;
+                                                case WikiDatabasePropertyTypes.Checkbox:
+                                                    <input type="checkbox" checked="@GetCheckbox(row, property)" disabled="@IsBusy"
+                                                           @onchange="e => SetCheckboxAsync(row, property, (bool)(e.Value ?? false))" />
+                                                    break;
+                                                case WikiDatabasePropertyTypes.Date:
+                                                    <input type="date" class="form-control form-control-sm" value="@GetDateInputValue(row, property)" disabled="@IsBusy"
+                                                           @onchange="e => SetDateAsync(row, property, e.Value?.ToString())" />
+                                                    break;
+                                                case WikiDatabasePropertyTypes.Select:
+                                                    <select class="form-select form-select-sm" disabled="@IsBusy" @onchange="e => SetSelectAsync(row, property, e.Value?.ToString())">
+                                                        <option value="">—</option>
+                                                        @foreach (var option in WikiDatabasePropertyConfig.GetOptions(property))
+                                                        {
+                                                            <option value="@option.Id" selected="@(GetText(row, property) == option.Id)">@option.Label</option>
+                                                        }
+                                                    </select>
+                                                    break;
+                                                case WikiDatabasePropertyTypes.MultiSelect:
+                                                    @foreach (var option in WikiDatabasePropertyConfig.GetOptions(property))
+                                                    {
+                                                        <div class="form-check form-check-inline">
+                                                            <input class="form-check-input" type="checkbox" disabled="@IsBusy"
+                                                                   checked="@GetMultiSelect(row, property).Contains(option.Id)"
+                                                                   @onchange="e => ToggleMultiSelectAsync(row, property, option.Id, (bool)(e.Value ?? false))" />
+                                                            <label class="form-check-label small">@option.Label</label>
+                                                        </div>
+                                                    }
+                                                    break;
+                                                case WikiDatabasePropertyTypes.CreatedTime:
+                                                    <span class="small text-secondary">@row.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")</span>
+                                                    break;
+                                            }
+                                        </td>
+                                    }
+                                    <td>
+                                        <button type="button" class="btn btn-xs btn-link text-danger p-0" @onclick="() => DeleteRowAsync(row)" disabled="@IsBusy">
+                                            <i class="bi bi-x-lg"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddRowAsync" disabled="@IsBusy">
+                    <i class="bi bi-plus-lg me-1"></i>New row
+                </button>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid WikiDatabaseId { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private static readonly IReadOnlyList<string> AddablePropertyTypes =
+    [
+        WikiDatabasePropertyTypes.Text, WikiDatabasePropertyTypes.Number, WikiDatabasePropertyTypes.Select,
+        WikiDatabasePropertyTypes.MultiSelect, WikiDatabasePropertyTypes.Date, WikiDatabasePropertyTypes.Checkbox,
+        WikiDatabasePropertyTypes.Url, WikiDatabasePropertyTypes.CreatedTime
+    ];
+
+    private WikiDatabase? Database;
+    private bool _loading = true;
+    private bool IsBusy;
+    private string ErrorMessage = string.Empty;
+    private bool _showProperties;
+    private Guid? _activeViewId;
+    private Guid? _draggedRowId;
+    private string _title = string.Empty;
+    private string _titleIcon = string.Empty;
+    private string _newPropertyName = string.Empty;
+    private string _newPropertyType = WikiDatabasePropertyTypes.Text;
+
+    private WikiDatabaseView? ActiveView =>
+        Database?.Views.FirstOrDefault(v => v.Id == _activeViewId) ?? Database?.Views.OrderBy(v => v.SortOrder).FirstOrDefault();
+    private WikiDatabaseViewConfig? ActiveViewConfig => ActiveView is null ? null : WikiDatabaseViewConfigJson.Parse(ActiveView.ConfigJson);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Database?.Id != WikiDatabaseId)
+        {
+            _activeViewId = null;
+            await ReloadAsync();
+        }
+    }
+
+    private Task<string> CurrentUserNameAsync() => CurrentUserAccessor.GetCurrentUsernameAsync();
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            Database = await WikiDatabaseService.GetDatabaseAsync(WikiDatabaseId);
+            if (Database is not null)
+            {
+                _title = Database.Title;
+                _titleIcon = Database.Icon ?? string.Empty;
+                if (_activeViewId is null || Database.Views.All(v => v.Id != _activeViewId))
+                {
+                    _activeViewId = Database.Views.OrderBy(v => v.SortOrder).FirstOrDefault()?.Id;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load wiki database {WikiDatabaseId}.", WikiDatabaseId);
+            ErrorMessage = $"Unable to load database. {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task Work(Func<Task> action)
+    {
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Wiki database operation failed for {WikiDatabaseId}.", WikiDatabaseId);
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task SaveMetadataAsync() => await Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        await WikiDatabaseService.RenameDatabaseAsync(WikiDatabaseId, _title, _titleIcon, user);
+        await ReloadAsync();
+        await OnChanged.InvokeAsync();
+    });
+
+    private async Task DeleteDatabaseAsync()
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", "Delete this database and all its rows? This cannot be undone.");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        await Work(async () =>
+        {
+            var user = await CurrentUserNameAsync();
+            await WikiDatabaseService.DeleteDatabaseAsync(WikiDatabaseId, user);
+            await OnChanged.InvokeAsync();
+        });
+    }
+
+    private async Task AddPropertyAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newPropertyName))
+        {
+            return;
+        }
+
+        await Work(async () =>
+        {
+            var user = await CurrentUserNameAsync();
+            var editor = new WikiDatabasePropertyEditor { Name = _newPropertyName, Type = _newPropertyType, Options = [] };
+            await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, user);
+            _newPropertyName = string.Empty;
+            await ReloadAsync();
+        });
+    }
+
+    private async Task RenamePropertyAsync(WikiDatabaseProperty property, string newName) => await Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        var editor = new WikiDatabasePropertyEditor { Id = property.Id, Name = newName, Type = property.Type, Options = WikiDatabasePropertyConfig.GetOptions(property) };
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, user);
+        await ReloadAsync();
+    });
+
+    private async Task SetPropertyOptionsAsync(WikiDatabaseProperty property, string rawOptions) => await Work(async () =>
+    {
+        var labels = rawOptions.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var existingByLabel = WikiDatabasePropertyConfig.GetOptions(property).ToDictionary(o => o.Label, StringComparer.OrdinalIgnoreCase);
+        var options = labels
+            .Select(label => existingByLabel.TryGetValue(label, out var found) ? found : new WikiDatabasePropertyOption(Guid.NewGuid().ToString(), label, "#6c757d"))
+            .ToList();
+
+        var user = await CurrentUserNameAsync();
+        var editor = new WikiDatabasePropertyEditor { Id = property.Id, Name = property.Name, Type = property.Type, Options = options };
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, user);
+        await ReloadAsync();
+    });
+
+    private async Task DeletePropertyAsync(WikiDatabaseProperty property) => await Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        await WikiDatabaseService.DeletePropertyAsync(WikiDatabaseId, property.Id, user);
+        await ReloadAsync();
+    });
+
+    private async Task AddBoardViewAsync()
+    {
+        var groupByProperty = Database?.Properties.FirstOrDefault(p => p.Type == WikiDatabasePropertyTypes.Select);
+        if (groupByProperty is null)
+        {
+            ErrorMessage = "Add a Select property before creating a Board view.";
+            return;
+        }
+
+        await Work(async () =>
+        {
+            var user = await CurrentUserNameAsync();
+            var config = new WikiDatabaseViewConfig([], [], groupByProperty.Id.ToString());
+            var view = await WikiDatabaseService.SaveViewAsync(WikiDatabaseId, null, "Board", WikiDatabaseViewTypes.Board, config, user);
+            await ReloadAsync();
+            _activeViewId = view.Id;
+        });
+    }
+
+    private async Task AddRowAsync() => await Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        await WikiDatabaseService.SaveRowAsync(WikiDatabaseId, new WikiDatabaseRowEditor(), user);
+        await ReloadAsync();
+    });
+
+    private async Task AddRowToGroupAsync(WikiDatabaseProperty groupByProperty, string optionId) => await Work(async () =>
+    {
+        var values = new JsonObject();
+        if (!string.IsNullOrEmpty(optionId))
+        {
+            WikiPropertyValues.SetText(values, groupByProperty.Id, optionId);
+        }
+
+        var user = await CurrentUserNameAsync();
+        var editor = new WikiDatabaseRowEditor { Values = values.ToDictionary(kv => kv.Key, kv => kv.Value) };
+        await WikiDatabaseService.SaveRowAsync(WikiDatabaseId, editor, user);
+        await ReloadAsync();
+    });
+
+    private async Task DeleteRowAsync(WikiDatabaseRow row) => await Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        await WikiDatabaseService.DeleteRowAsync(WikiDatabaseId, row.Id, user);
+        await ReloadAsync();
+    });
+
+    private void StartDragRow(WikiDatabaseRow row) => _draggedRowId = row.Id;
+    private void EndDragRow() => _draggedRowId = null;
+
+    private async Task DropOnColumnAsync(WikiDatabaseProperty groupByProperty, string optionId)
+    {
+        if (_draggedRowId is not { } rowId)
+        {
+            return;
+        }
+
+        _draggedRowId = null;
+        await Work(async () =>
+        {
+            var user = await CurrentUserNameAsync();
+            await WikiDatabaseService.MoveRowAsync(WikiDatabaseId, rowId, groupByProperty.Id, string.IsNullOrEmpty(optionId) ? null : optionId, int.MaxValue, user);
+            await ReloadAsync();
+        });
+    }
+
+    private async Task SaveRowValueAsync(WikiDatabaseRow row, Action<JsonObject> mutate) => await Work(async () =>
+    {
+        var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+        mutate(values);
+        var user = await CurrentUserNameAsync();
+        var editor = new WikiDatabaseRowEditor { Id = row.Id, Values = values.ToDictionary(kv => kv.Key, kv => kv.Value) };
+        await WikiDatabaseService.SaveRowAsync(WikiDatabaseId, editor, user);
+        await ReloadAsync();
+    });
+
+    private Task SetTextAsync(WikiDatabaseRow row, WikiDatabaseProperty property, string? value) =>
+        SaveRowValueAsync(row, values => WikiPropertyValues.SetText(values, property.Id, value));
+
+    private Task SetNumberAsync(WikiDatabaseRow row, WikiDatabaseProperty property, string? raw) =>
+        SaveRowValueAsync(row, values => WikiPropertyValues.SetNumber(values, property.Id, decimal.TryParse(raw, out var number) ? number : null));
+
+    private Task SetCheckboxAsync(WikiDatabaseRow row, WikiDatabaseProperty property, bool value) =>
+        SaveRowValueAsync(row, values => WikiPropertyValues.SetCheckbox(values, property.Id, value));
+
+    private Task SetDateAsync(WikiDatabaseRow row, WikiDatabaseProperty property, string? raw) =>
+        SaveRowValueAsync(row, values => WikiPropertyValues.SetDate(values, property.Id, DateTimeOffset.TryParse(raw, out var date) ? date : null));
+
+    private Task SetSelectAsync(WikiDatabaseRow row, WikiDatabaseProperty property, string? optionId) =>
+        SaveRowValueAsync(row, values => WikiPropertyValues.SetText(values, property.Id, string.IsNullOrEmpty(optionId) ? null : optionId));
+
+    private Task ToggleMultiSelectAsync(WikiDatabaseRow row, WikiDatabaseProperty property, string optionId, bool isChecked)
+    {
+        var current = WikiPropertyValues.GetMultiSelect(WikiPropertyValues.ParseObject(row.PropertyValuesJson), property.Id).ToList();
+        if (isChecked)
+        {
+            if (!current.Contains(optionId)) current.Add(optionId);
+        }
+        else
+        {
+            current.Remove(optionId);
+        }
+
+        return SaveRowValueAsync(row, values => WikiPropertyValues.SetMultiSelect(values, property.Id, current));
+    }
+
+    private static string? GetText(WikiDatabaseRow row, WikiDatabaseProperty property) =>
+        WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), property.Id);
+
+    private static decimal? GetNumber(WikiDatabaseRow row, WikiDatabaseProperty property) =>
+        WikiPropertyValues.GetNumber(WikiPropertyValues.ParseObject(row.PropertyValuesJson), property.Id);
+
+    private static bool GetCheckbox(WikiDatabaseRow row, WikiDatabaseProperty property) =>
+        WikiPropertyValues.GetCheckbox(WikiPropertyValues.ParseObject(row.PropertyValuesJson), property.Id);
+
+    private static string GetDateInputValue(WikiDatabaseRow row, WikiDatabaseProperty property) =>
+        WikiPropertyValues.GetDate(WikiPropertyValues.ParseObject(row.PropertyValuesJson), property.Id)?.ToString("yyyy-MM-dd") ?? string.Empty;
+
+    private static IReadOnlyList<string> GetMultiSelect(WikiDatabaseRow row, WikiDatabaseProperty property) =>
+        WikiPropertyValues.GetMultiSelect(WikiPropertyValues.ParseObject(row.PropertyValuesJson), property.Id);
+}
