@@ -102,5 +102,6 @@
   and jump to a focused conversation/composer; reusable page templates now create independent
   pages with fresh block identities, and transactional page-tree duplication copies nested pages
   beside the source with independent revisions; distributed scale-out and CRDT/OT co-authoring
-  remain; database templates/duplication, permissions, and sharing; Sentinel AI/agents; and
+  remain; database templates (database duplication is delivered), permissions, and sharing;
+  Sentinel AI/agents; and
   current-API/two-way interoperability.

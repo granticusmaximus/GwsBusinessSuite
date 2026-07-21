@@ -27,7 +27,13 @@ public static class WikiDatabaseViewConfigJson
             return WikiDatabaseViewConfig.Empty;
         }
 
-        try { return JsonSerializer.Deserialize<WikiDatabaseViewConfig>(configJson, WikiPropertyValues.Options) ?? WikiDatabaseViewConfig.Empty; }
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<WikiDatabaseViewConfig>(configJson, WikiPropertyValues.Options);
+            return parsed is null
+                ? WikiDatabaseViewConfig.Empty
+                : new WikiDatabaseViewConfig(parsed.Filters ?? [], parsed.Sorts ?? [], parsed.GroupByPropertyId);
+        }
         catch (JsonException) { return WikiDatabaseViewConfig.Empty; }
     }
 

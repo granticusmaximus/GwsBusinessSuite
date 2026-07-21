@@ -231,7 +231,9 @@
     <main class="sentinel-main">
         @if (SelectedDatabaseId is { } openDatabaseId)
         {
-            <WikiDatabaseEditor WikiDatabaseId="openDatabaseId" OnChanged="() => LoadTreeAsync(selectFirstPage: false)" />
+            <WikiDatabaseEditor WikiDatabaseId="openDatabaseId"
+                                OnChanged="() => LoadTreeAsync(selectFirstPage: false)"
+                                OnDuplicated="OpenDuplicatedDatabaseAsync" />
         }
         else
         {
@@ -1047,6 +1049,13 @@
         ErrorMessage = string.Empty;
         await SentinelWorkspaceService.RecordOpenedAsync(CurrentUsername, wikiDatabaseId, true);
         await LoadWorkspaceNavigationAsync();
+    }
+
+    private async Task OpenDuplicatedDatabaseAsync(Guid wikiDatabaseId)
+    {
+        await LoadTreeAsync(selectFirstPage: false);
+        await OpenDatabaseAsync(wikiDatabaseId);
+        StatusMessage = "Database duplicated with independent properties, views, rows, and page content.";
     }
 
     private async Task DeactivateBlockEditorAsync()

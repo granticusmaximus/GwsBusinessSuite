@@ -24,6 +24,9 @@ else
             </div>
             <div class="d-flex gap-2 flex-shrink-0">
                 <SentinelSharePanel TargetId="Database.Id" IsDatabase="true" TargetName="Database.Title" />
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="DuplicateDatabaseAsync" disabled="@IsBusy">
+                    <i class="bi bi-copy me-1"></i>Duplicate
+                </button>
                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _showProperties = !_showProperties" disabled="@IsBusy">
                     <i class="bi bi-list-columns-reverse me-1"></i>Properties
                 </button>
@@ -393,6 +396,7 @@ else
 @code {
     [Parameter, EditorRequired] public Guid WikiDatabaseId { get; set; }
     [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback<Guid> OnDuplicated { get; set; }
 
     private static readonly IReadOnlyList<string> AddablePropertyTypes =
     [
@@ -510,6 +514,13 @@ else
             await OnChanged.InvokeAsync();
         });
     }
+
+    private async Task DuplicateDatabaseAsync() => await Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        var duplicate = await WikiDatabaseService.DuplicateDatabaseAsync(WikiDatabaseId, user);
+        await OnDuplicated.InvokeAsync(duplicate.Id);
+    });
 
     private async Task AddPropertyAsync()
     {

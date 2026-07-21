@@ -118,7 +118,9 @@ proprietary schemas; public Notion product and API documentation is behavioral r
    block identities. Page move/reorder and transactional subtree duplication are also delivered;
    duplicates receive fresh block identities and independent revision history. Database templates
    plus workspace roles, granular page/database permissions, and expiring or revocable public
-   shares. Database templates and teamspace administration remain future extensions.
+   shares. Full database duplication now creates an adjacent independent copy with fresh property,
+   row, view, and block identities while preserving remapped values and view configuration.
+   Database templates and teamspace administration remain future extensions.
 8. **Sentinel AI** (delivered foundation): Ollama-backed ask, summarize, rewrite, translate,
    research, meeting-notes, and database-autofill actions grounded in workspace pages and
    databases. Outputs are durable, reviewable runs and require approve/reject before insertion.
