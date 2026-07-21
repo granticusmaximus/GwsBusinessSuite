@@ -131,6 +131,65 @@ public sealed class WikiDatabaseServiceTests
     }
 
     [Fact]
+    public async Task GetInlineDatabaseAsync_ShouldReturnOrderedTypedCells()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Launch plan", null, "u");
+        var title = database.Properties.Single(property => property.Type == WikiDatabasePropertyTypes.Title);
+        var points = await service.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Points", Type = WikiDatabasePropertyTypes.Number }, "u");
+        var values = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(values, title.Id, "Ship inline tables");
+        WikiPropertyValues.SetNumber(values, points.Id, 8.5m);
+        await service.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = values.ToDictionary(item => item.Key, item => item.Value) }, "u");
+
+        var snapshot = await service.GetInlineDatabaseAsync(database.Id);
+
+        snapshot.Should().NotBeNull();
+        snapshot!.Properties.Select(property => property.Name).Should().Equal("Name", "Points");
+        snapshot.Rows.Should().ContainSingle();
+        snapshot.Rows[0].Cells.Single(cell => cell.PropertyId == title.Id).Value.Should().Be("Ship inline tables");
+        snapshot.Rows[0].Cells.Single(cell => cell.PropertyId == points.Id).Value.Should().Be("8.5");
+    }
+
+    [Fact]
+    public async Task SaveInlineCellAsync_ShouldPersistTypedValuesAndReturnRefreshedSnapshot()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var status = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Status",
+            Type = WikiDatabasePropertyTypes.Select,
+            Options = [new WikiDatabasePropertyOption("todo", "To do", "#aaa"), new WikiDatabasePropertyOption("done", "Done", "#0f0")]
+        }, "u");
+        var row = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        var snapshot = await service.SaveInlineCellAsync(database.Id, row.Id, status.Id, "done", "editor");
+
+        snapshot.Rows.Single().Cells.Single(cell => cell.PropertyId == status.Id).Value.Should().Be("done");
+        var reloaded = await service.GetDatabaseAsync(database.Id);
+        WikiPropertyValues.GetText(
+            WikiPropertyValues.ParseObject(reloaded!.Rows.Single().PropertyValuesJson), status.Id).Should().Be("done");
+    }
+
+    [Fact]
+    public async Task AddInlineRowAsync_ShouldCreateCanonicalDatabaseRow()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+
+        var snapshot = await service.AddInlineRowAsync(database.Id, "editor");
+
+        snapshot.Rows.Should().ContainSingle();
+        (await service.GetDatabaseAsync(database.Id))!.Rows.Should().ContainSingle();
+    }
+
+    [Fact]
     public async Task DeleteViewAsync_ShouldRejectDeletingTheLastView()
     {
         await using var db = await CreateDbAsync();

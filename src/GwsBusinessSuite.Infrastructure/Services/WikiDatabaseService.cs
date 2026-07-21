@@ -2,6 +2,7 @@ using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
@@ -264,6 +265,86 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<WikiInlineDatabaseSnapshot?> GetInlineDatabaseAsync(
+        Guid wikiDatabaseId,
+        CancellationToken cancellationToken = default)
+    {
+        var database = await GetDatabaseAsync(wikiDatabaseId, cancellationToken);
+        return database is null ? null : BuildInlineSnapshot(database);
+    }
+
+    public async Task<WikiInlineDatabaseSnapshot> AddInlineRowAsync(
+        Guid wikiDatabaseId,
+        string performedBy,
+        CancellationToken cancellationToken = default)
+    {
+        await SaveRowAsync(wikiDatabaseId, new WikiDatabaseRowEditor(), performedBy, cancellationToken);
+        return await GetInlineDatabaseAsync(wikiDatabaseId, cancellationToken)
+            ?? throw new KeyNotFoundException("The database no longer exists.");
+    }
+
+    public async Task<WikiInlineDatabaseSnapshot> SaveInlineCellAsync(
+        Guid wikiDatabaseId,
+        Guid rowId,
+        Guid propertyId,
+        string? value,
+        string performedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var database = await GetDatabaseAsync(wikiDatabaseId, cancellationToken)
+            ?? throw new KeyNotFoundException("The database no longer exists.");
+        var property = database.Properties.FirstOrDefault(item => item.Id == propertyId)
+            ?? throw new KeyNotFoundException("The database property no longer exists.");
+        var row = database.Rows.FirstOrDefault(item => item.Id == rowId)
+            ?? throw new KeyNotFoundException("The database row no longer exists.");
+        if (property.Type == WikiDatabasePropertyTypes.CreatedTime)
+        {
+            throw new InvalidOperationException("Created time is read-only.");
+        }
+
+        var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+        switch (property.Type)
+        {
+            case WikiDatabasePropertyTypes.Number:
+                WikiPropertyValues.SetNumber(values, property.Id,
+                    decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var number) ? number : null);
+                break;
+            case WikiDatabasePropertyTypes.Checkbox:
+                WikiPropertyValues.SetCheckbox(values, property.Id, bool.TryParse(value, out var isChecked) && isChecked);
+                break;
+            case WikiDatabasePropertyTypes.Date:
+                WikiPropertyValues.SetDate(values, property.Id,
+                    DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var date) ? date : null);
+                break;
+            case WikiDatabasePropertyTypes.MultiSelect:
+                var validOptionIds = WikiDatabasePropertyConfig.GetOptions(property).Select(option => option.Id).ToHashSet();
+                var selectedIds = (value ?? string.Empty)
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Where(validOptionIds.Contains)
+                    .Distinct()
+                    .ToList();
+                WikiPropertyValues.SetMultiSelect(values, property.Id, selectedIds);
+                break;
+            case WikiDatabasePropertyTypes.Select:
+                var selectedId = WikiDatabasePropertyConfig.GetOptions(property)
+                    .Any(option => option.Id == value) ? value : null;
+                WikiPropertyValues.SetText(values, property.Id, selectedId);
+                break;
+            default:
+                WikiPropertyValues.SetText(values, property.Id, value);
+                break;
+        }
+
+        await SaveRowAsync(wikiDatabaseId, new WikiDatabaseRowEditor
+        {
+            Id = rowId,
+            Values = values.ToDictionary(item => item.Key, item => item.Value)
+        }, performedBy, cancellationToken);
+
+        return await GetInlineDatabaseAsync(wikiDatabaseId, cancellationToken)
+            ?? throw new KeyNotFoundException("The database no longer exists.");
+    }
+
     public async Task MoveRowAsync(
         Guid wikiDatabaseId,
         Guid rowId,
@@ -370,6 +451,54 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
         var orders = await dbContext.WikiDatabaseRows.Where(item => item.WikiDatabaseId == wikiDatabaseId).Select(item => item.SortOrder).ToListAsync(cancellationToken);
         return orders.Count == 0 ? 0 : orders.Max() + 1;
     }
+
+    private static WikiInlineDatabaseSnapshot BuildInlineSnapshot(WikiDatabase database)
+    {
+        var properties = database.Properties
+            .OrderBy(property => property.SortOrder)
+            .Select(property => new WikiInlineDatabaseProperty(
+                property.Id,
+                property.Name,
+                property.Type,
+                property.Type == WikiDatabasePropertyTypes.CreatedTime,
+                WikiDatabasePropertyConfig.GetOptions(property)))
+            .ToList();
+
+        var rows = database.Rows
+            .OrderBy(row => row.SortOrder)
+            .Select(row =>
+            {
+                var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+                var cells = database.Properties
+                    .OrderBy(property => property.SortOrder)
+                    .Select(property => new WikiInlineDatabaseCell(
+                        property.Id,
+                        GetInlineValue(property, values, row.CreatedAt)))
+                    .ToList();
+                return new WikiInlineDatabaseRow(row.Id, cells);
+            })
+            .ToList();
+
+        return new WikiInlineDatabaseSnapshot(
+            database.Id,
+            database.Title,
+            string.IsNullOrWhiteSpace(database.Icon) ? "▦" : database.Icon,
+            properties,
+            rows);
+    }
+
+    private static string GetInlineValue(
+        WikiDatabaseProperty property,
+        System.Text.Json.Nodes.JsonObject values,
+        DateTimeOffset createdAt) => property.Type switch
+        {
+            WikiDatabasePropertyTypes.Number => WikiPropertyValues.GetNumber(values, property.Id)?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            WikiDatabasePropertyTypes.Checkbox => WikiPropertyValues.GetCheckbox(values, property.Id).ToString().ToLowerInvariant(),
+            WikiDatabasePropertyTypes.Date => WikiPropertyValues.GetDate(values, property.Id)?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty,
+            WikiDatabasePropertyTypes.MultiSelect => string.Join(',', WikiPropertyValues.GetMultiSelect(values, property.Id)),
+            WikiDatabasePropertyTypes.CreatedTime => createdAt.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            _ => WikiPropertyValues.GetText(values, property.Id) ?? string.Empty
+        };
 
     private async Task<int> NextViewSortOrderAsync(Guid wikiDatabaseId, CancellationToken cancellationToken)
     {

@@ -16,6 +16,9 @@ public interface IWikiDatabaseService
 
     Task<WikiDatabaseRow> SaveRowAsync(Guid wikiDatabaseId, WikiDatabaseRowEditor editor, string performedBy, CancellationToken cancellationToken = default);
     Task DeleteRowAsync(Guid wikiDatabaseId, Guid rowId, string performedBy, CancellationToken cancellationToken = default);
+    Task<WikiInlineDatabaseSnapshot?> GetInlineDatabaseAsync(Guid wikiDatabaseId, CancellationToken cancellationToken = default);
+    Task<WikiInlineDatabaseSnapshot> AddInlineRowAsync(Guid wikiDatabaseId, string performedBy, CancellationToken cancellationToken = default);
+    Task<WikiInlineDatabaseSnapshot> SaveInlineCellAsync(Guid wikiDatabaseId, Guid rowId, Guid propertyId, string? value, string performedBy, CancellationToken cancellationToken = default);
 
     // Board-drag move: reassigns the row's groupByProperty value and renumbers SortOrder
     // among the rows now sharing that value (mirrors WikiService.ReorderPageAsync's

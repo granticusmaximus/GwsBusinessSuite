@@ -25,9 +25,10 @@ const BLOCK_TYPES = [
     { type: 'divider', label: 'Divider', icon: '—' },
     { type: 'image', label: 'Image', icon: '🖼' },
     { type: 'embed', label: 'Embed link', icon: '🔗' },
-    { type: 'linked_database', label: 'Linked database', icon: '▦' }
+    { type: 'linked_database', label: 'Linked database', icon: '▦' },
+    { type: 'inline_database', label: 'Inline database', icon: '▤' }
 ];
-const TEXTLESS_TYPES = new Set(['divider', 'image', 'embed', 'linked_database']);
+const TEXTLESS_TYPES = new Set(['divider', 'image', 'embed', 'linked_database', 'inline_database']);
 
 export function initialize(container, dotNetRef, initialBlocksJson) {
     dispose(container);
@@ -107,7 +108,7 @@ function createBlockElement(block, state) {
     el.dataset.blockType = block.type;
     el.dataset.indent = String(block.indentLevel || 0);
     if (block.type === 'to_do' && block.props && block.props.checked === 'true') el.dataset.checked = 'true';
-    if (block.type === 'linked_database') {
+    if (block.type === 'linked_database' || block.type === 'inline_database') {
         el.dataset.databaseId = (block.props && block.props.databaseId) || '';
         el.dataset.databaseTitle = (block.props && block.props.databaseTitle) || '';
         el.dataset.databaseIcon = (block.props && block.props.databaseIcon) || '';
@@ -186,7 +187,7 @@ function createBlockBody(block, state) {
         return body;
     }
 
-    if (block.type === 'linked_database') {
+    if (block.type === 'linked_database' || block.type === 'inline_database') {
         body.appendChild(createLinkedDatabaseBody(block, state));
         return body;
     }
@@ -271,6 +272,8 @@ function renderMediaPreview(preview, type, url) {
 function createLinkedDatabaseBody(block, state) {
     const wrapper = document.createElement('div');
     wrapper.className = 'wiki-linked-database-editor';
+    const isInline = block.type === 'inline_database';
+    wrapper.classList.toggle('is-inline', isInline);
     let databaseId = (block.props && block.props.databaseId) || '';
     let databaseTitle = (block.props && block.props.databaseTitle) || '';
     let databaseIcon = (block.props && block.props.databaseIcon) || '';
@@ -288,6 +291,17 @@ function createLinkedDatabaseBody(block, state) {
         wrapper.innerHTML = '';
         if (databaseId) {
             wrapper.classList.add('has-database');
+            if (isInline) {
+                renderInlineDatabase(wrapper, state, databaseId, () => {
+                    databaseId = '';
+                    databaseTitle = '';
+                    databaseIcon = '';
+                    syncBlockDataset();
+                    render();
+                    notifyChanged(state);
+                });
+                return;
+            }
             const card = document.createElement('button');
             card.type = 'button';
             card.className = 'wiki-linked-database-card';
@@ -330,7 +344,7 @@ function createLinkedDatabaseBody(block, state) {
         const input = document.createElement('input');
         input.type = 'search';
         input.className = 'form-control form-control-sm';
-        input.placeholder = 'Search databases to link…';
+        input.placeholder = isInline ? 'Search databases to show inline…' : 'Search databases to link…';
         input.setAttribute('aria-label', 'Search Sentinel databases');
         const results = document.createElement('div');
         results.className = 'wiki-linked-database-results';
@@ -379,6 +393,155 @@ function createLinkedDatabaseBody(block, state) {
 
     render();
     return wrapper;
+}
+
+function renderInlineDatabase(wrapper, state, databaseId, resetDatabase) {
+    wrapper.innerHTML = '<div class="wiki-inline-database-loading">Loading database…</div>';
+    state.dotNetRef.invokeMethodAsync('GetInlineDatabase', databaseId).then(snapshot => {
+        if (!snapshot) {
+            wrapper.innerHTML = '<div class="wiki-inline-database-error">This database is no longer available.</div>';
+            return;
+        }
+        renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase);
+    }).catch(() => {
+        wrapper.innerHTML = '<div class="wiki-inline-database-error">Unable to load this database.</div>';
+    });
+}
+
+function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase) {
+    wrapper.innerHTML = '';
+    const header = document.createElement('div');
+    header.className = 'wiki-inline-database-header';
+    const identity = document.createElement('button');
+    identity.type = 'button';
+    identity.className = 'wiki-inline-database-identity';
+    const identityIcon = document.createElement('span');
+    identityIcon.textContent = snapshot.icon || '▤';
+    const identityTitle = document.createElement('strong');
+    identityTitle.textContent = snapshot.title;
+    identity.append(identityIcon, identityTitle);
+    identity.addEventListener('click', () => state.dotNetRef.invokeMethodAsync('OpenLinkedDatabase', snapshot.id));
+
+    const headerActions = document.createElement('div');
+    headerActions.className = 'wiki-inline-database-actions';
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.textContent = 'Open';
+    open.addEventListener('click', () => state.dotNetRef.invokeMethodAsync('OpenLinkedDatabase', snapshot.id));
+    const change = document.createElement('button');
+    change.type = 'button';
+    change.textContent = 'Change source';
+    change.addEventListener('click', resetDatabase);
+    headerActions.append(open, change);
+    header.append(identity, headerActions);
+
+    const scroller = document.createElement('div');
+    scroller.className = 'wiki-inline-database-scroller';
+    const table = document.createElement('table');
+    table.className = 'wiki-inline-database-table';
+    const thead = document.createElement('thead');
+    const headingRow = document.createElement('tr');
+    for (const property of snapshot.properties) {
+        const heading = document.createElement('th');
+        heading.textContent = property.name;
+        heading.title = property.type;
+        headingRow.appendChild(heading);
+    }
+    thead.appendChild(headingRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    for (const row of snapshot.rows) {
+        const tableRow = document.createElement('tr');
+        for (const property of snapshot.properties) {
+            const cell = document.createElement('td');
+            const value = row.cells.find(item => item.propertyId === property.id)?.value || '';
+            cell.appendChild(createInlineCellEditor(state, snapshot.id, row.id, property, value, updated => {
+                if (updated) renderInlineDatabaseSnapshot(wrapper, state, updated, resetDatabase);
+            }));
+            tableRow.appendChild(cell);
+        }
+        tbody.appendChild(tableRow);
+    }
+    table.appendChild(tbody);
+    scroller.appendChild(table);
+
+    const footer = document.createElement('div');
+    footer.className = 'wiki-inline-database-footer';
+    const addRow = document.createElement('button');
+    addRow.type = 'button';
+    addRow.innerHTML = '<span>+</span> New row';
+    addRow.addEventListener('click', async () => {
+        addRow.disabled = true;
+        try {
+            const updated = await state.dotNetRef.invokeMethodAsync('AddInlineDatabaseRow', snapshot.id);
+            if (updated) renderInlineDatabaseSnapshot(wrapper, state, updated, resetDatabase);
+        } finally {
+            addRow.disabled = false;
+        }
+    });
+    footer.appendChild(addRow);
+    wrapper.append(header, scroller, footer);
+}
+
+function createInlineCellEditor(state, databaseId, rowId, property, value, onSaved) {
+    const commit = async nextValue => {
+        try {
+            const updated = await state.dotNetRef.invokeMethodAsync(
+                'SaveInlineDatabaseCell', databaseId, rowId, property.id, nextValue);
+            onSaved(updated);
+        } catch { /* the Blazor circuit or mutation may have failed */ }
+    };
+
+    if (property.isReadOnly) {
+        const readOnly = document.createElement('span');
+        readOnly.className = 'wiki-inline-cell-readonly';
+        readOnly.textContent = value;
+        return readOnly;
+    }
+
+    if (property.type === 'checkbox') {
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = value === 'true';
+        checkbox.addEventListener('change', () => commit(String(checkbox.checked)));
+        return checkbox;
+    }
+
+    if (property.type === 'select' || property.type === 'multiSelect') {
+        const select = document.createElement('select');
+        select.className = 'wiki-inline-cell-control';
+        select.multiple = property.type === 'multiSelect';
+        if (!select.multiple) {
+            const empty = document.createElement('option');
+            empty.value = '';
+            empty.textContent = '—';
+            select.appendChild(empty);
+        }
+        const selected = new Set(value.split(',').filter(Boolean));
+        for (const option of property.options || []) {
+            const element = document.createElement('option');
+            element.value = option.id;
+            element.textContent = option.label;
+            element.selected = selected.has(option.id);
+            select.appendChild(element);
+        }
+        select.addEventListener('change', () => {
+            const next = select.multiple
+                ? [...select.selectedOptions].map(option => option.value).join(',')
+                : select.value;
+            commit(next);
+        });
+        return select;
+    }
+
+    const input = document.createElement('input');
+    input.className = 'wiki-inline-cell-control';
+    input.type = property.type === 'number' ? 'number' : property.type === 'date' ? 'date' : 'text';
+    input.value = value;
+    input.placeholder = property.type === 'title' ? 'Untitled' : '';
+    input.addEventListener('change', () => commit(input.value));
+    return input;
 }
 
 function createContentEditable(block, state) {
@@ -780,7 +943,7 @@ function serializeBlock(blockEl) {
     const props = {};
     if (type === 'to_do') props.checked = blockEl.dataset.checked === 'true' ? 'true' : 'false';
     if (type === 'image' || type === 'embed') props.url = blockEl.dataset.url || '';
-    if (type === 'linked_database') {
+    if (type === 'linked_database' || type === 'inline_database') {
         props.databaseId = blockEl.dataset.databaseId || '';
         props.databaseTitle = blockEl.dataset.databaseTitle || '';
         props.databaseIcon = blockEl.dataset.databaseIcon || '';

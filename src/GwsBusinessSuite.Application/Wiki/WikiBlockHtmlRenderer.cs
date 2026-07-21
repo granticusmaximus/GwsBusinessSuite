@@ -70,6 +70,7 @@ public static class WikiBlockHtmlRenderer
                 ? string.Empty
                 : $"<a href=\"{WebUtility.HtmlEncode(block.Props["url"])}\" target=\"_blank\" rel=\"noopener noreferrer\">{WebUtility.HtmlEncode(block.Props["url"])}</a>",
             WikiBlockTypes.LinkedDatabase => RenderLinkedDatabase(block, indentStyle),
+            WikiBlockTypes.InlineDatabase => RenderLinkedDatabase(block, indentStyle, isInline: true),
             // Legacy content from the pre-block-editor wiki still uses [[Page Title]] syntax,
             // so it's routed through the same resolver the old single-Markdown-string editor
             // used - new blocks link via RichTextSpan.Link instead and never hit this path.
@@ -94,17 +95,19 @@ public static class WikiBlockHtmlRenderer
             WikiBlockTypes.Image => block.Props.GetValueOrDefault("url", "[image]"),
             WikiBlockTypes.Embed => block.Props.GetValueOrDefault("url", "[embed]"),
             WikiBlockTypes.LinkedDatabase => block.Props.GetValueOrDefault("databaseTitle", "[linked database]"),
+            WikiBlockTypes.InlineDatabase => block.Props.GetValueOrDefault("databaseTitle", "[inline database]"),
             _ => block.PlainText
         };
         text = text.Replace('\n', ' ').Trim();
         return text.Length > maxLength ? text[..maxLength] + "…" : text;
     }
 
-    private static string RenderLinkedDatabase(WikiBlock block, string indentStyle)
+    private static string RenderLinkedDatabase(WikiBlock block, string indentStyle, bool isInline = false)
     {
         var databaseId = block.Props.GetValueOrDefault("databaseId", string.Empty);
         var title = block.Props.GetValueOrDefault("databaseTitle", "Linked database");
-        return $"<div class=\"wiki-linked-database\" data-database-id=\"{WebUtility.HtmlEncode(databaseId)}\"{indentStyle}>"
+        var cssClass = isInline ? "wiki-linked-database wiki-inline-database" : "wiki-linked-database";
+        return $"<div class=\"{cssClass}\" data-database-id=\"{WebUtility.HtmlEncode(databaseId)}\"{indentStyle}>"
             + $"<span aria-hidden=\"true\">▦</span><span>{WebUtility.HtmlEncode(title)}</span></div>";
     }
 }

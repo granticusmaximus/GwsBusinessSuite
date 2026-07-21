@@ -274,3 +274,21 @@ public static class WikiDatabaseViewLogic
 }
 
 public sealed record WikiDatabaseBoardGroup(string OptionId, string Label, IReadOnlyList<WikiDatabaseRow> Rows);
+
+public sealed record WikiInlineDatabaseProperty(
+    Guid Id,
+    string Name,
+    string Type,
+    bool IsReadOnly,
+    IReadOnlyList<WikiDatabasePropertyOption> Options);
+
+public sealed record WikiInlineDatabaseCell(Guid PropertyId, string Value);
+
+public sealed record WikiInlineDatabaseRow(Guid Id, IReadOnlyList<WikiInlineDatabaseCell> Cells);
+
+public sealed record WikiInlineDatabaseSnapshot(
+    Guid Id,
+    string Title,
+    string Icon,
+    IReadOnlyList<WikiInlineDatabaseProperty> Properties,
+    IReadOnlyList<WikiInlineDatabaseRow> Rows);

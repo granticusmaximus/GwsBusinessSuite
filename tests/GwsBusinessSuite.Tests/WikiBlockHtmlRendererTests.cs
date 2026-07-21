@@ -42,4 +42,25 @@ public sealed class WikiBlockHtmlRendererTests
         WikiBlockHtmlRenderer.PlainTextPreview(block).Should().Be("Launch calendar");
         WikiBlockTypes.All.Should().Contain(WikiBlockTypes.LinkedDatabase);
     }
+
+    [Fact]
+    public void RenderBlock_ShouldDistinguishInlineDatabaseReferences()
+    {
+        var block = new WikiBlock(
+            Guid.NewGuid(),
+            WikiBlockTypes.InlineDatabase,
+            0,
+            [],
+            new Dictionary<string, string>
+            {
+                ["databaseId"] = Guid.NewGuid().ToString(),
+                ["databaseTitle"] = "Tasks"
+            });
+
+        var html = WikiBlockHtmlRenderer.RenderBlock(block);
+
+        html.Should().Contain("wiki-inline-database");
+        WikiBlockHtmlRenderer.PlainTextPreview(block).Should().Be("Tasks");
+        WikiBlockTypes.All.Should().Contain(WikiBlockTypes.InlineDatabase);
+    }
 }

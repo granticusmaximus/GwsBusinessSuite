@@ -781,6 +781,45 @@
     }
 
     [JSInvokable]
+    public Task<WikiInlineDatabaseSnapshot?> GetInlineDatabase(string databaseId) =>
+        Guid.TryParse(databaseId, out var id)
+            ? WikiDatabaseService.GetInlineDatabaseAsync(id)
+            : Task.FromResult<WikiInlineDatabaseSnapshot?>(null);
+
+    [JSInvokable]
+    public async Task<WikiInlineDatabaseSnapshot?> AddInlineDatabaseRow(string databaseId)
+    {
+        if (!Guid.TryParse(databaseId, out var id))
+        {
+            return null;
+        }
+
+        return await WikiDatabaseService.AddInlineRowAsync(id, await CurrentUserNameAsync());
+    }
+
+    [JSInvokable]
+    public async Task<WikiInlineDatabaseSnapshot?> SaveInlineDatabaseCell(
+        string databaseId,
+        string rowId,
+        string propertyId,
+        string? value)
+    {
+        if (!Guid.TryParse(databaseId, out var parsedDatabaseId)
+            || !Guid.TryParse(rowId, out var parsedRowId)
+            || !Guid.TryParse(propertyId, out var parsedPropertyId))
+        {
+            return null;
+        }
+
+        return await WikiDatabaseService.SaveInlineCellAsync(
+            parsedDatabaseId,
+            parsedRowId,
+            parsedPropertyId,
+            value,
+            await CurrentUserNameAsync());
+    }
+
+    [JSInvokable]
     public async Task OnBlocksChanged(string blocksJson)
     {
         Editor.BlocksJson = blocksJson;

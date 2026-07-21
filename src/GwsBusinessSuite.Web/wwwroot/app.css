@@ -2208,6 +2208,98 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .sentinel-workspace .wiki-linked-database-option:focus-visible { outline: 0; background: var(--sentinel-hover); }
 .sentinel-workspace .wiki-linked-database-empty { display: block; padding: .65rem; color: var(--sentinel-faint); font-size: .7rem; }
 
+.sentinel-workspace .wiki-linked-database-editor.is-inline {
+    overflow: hidden;
+    border: 1px solid var(--sentinel-border);
+    border-radius: 8px;
+    background: var(--sentinel-canvas-raised);
+}
+
+.sentinel-workspace .wiki-inline-database-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    min-height: 3.1rem;
+    padding: .55rem .7rem;
+    border-bottom: 1px solid var(--sentinel-border);
+}
+
+.sentinel-workspace .wiki-inline-database-identity {
+    display: flex;
+    align-items: center;
+    gap: .55rem;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    color: #e7e5e4;
+    font-size: .8rem;
+    text-align: left;
+}
+
+.sentinel-workspace .wiki-inline-database-identity strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sentinel-workspace .wiki-inline-database-actions { display: flex; gap: .25rem; opacity: 0; transition: opacity .12s ease; }
+.sentinel-workspace .wiki-linked-database-editor.is-inline:hover .wiki-inline-database-actions,
+.sentinel-workspace .wiki-inline-database-actions:focus-within { opacity: 1; }
+.sentinel-workspace .wiki-inline-database-actions button,
+.sentinel-workspace .wiki-inline-database-footer button {
+    min-height: 1.75rem;
+    padding: .2rem .45rem;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--sentinel-muted);
+    font-size: .66rem;
+}
+.sentinel-workspace .wiki-inline-database-actions button:hover,
+.sentinel-workspace .wiki-inline-database-footer button:hover { background: var(--sentinel-hover); color: #f5f5f4; }
+
+.sentinel-workspace .wiki-inline-database-scroller { overflow-x: auto; }
+.sentinel-workspace .wiki-inline-database-table { width: 100%; min-width: 34rem; border-collapse: collapse; table-layout: fixed; }
+.sentinel-workspace .wiki-inline-database-table th,
+.sentinel-workspace .wiki-inline-database-table td {
+    min-width: 8.5rem;
+    height: 2.35rem;
+    padding: 0;
+    border-right: 1px solid var(--sentinel-border);
+    border-bottom: 1px solid var(--sentinel-border);
+}
+.sentinel-workspace .wiki-inline-database-table th:last-child,
+.sentinel-workspace .wiki-inline-database-table td:last-child { border-right: 0; }
+.sentinel-workspace .wiki-inline-database-table th {
+    padding: .4rem .55rem;
+    color: var(--sentinel-muted);
+    font-size: .66rem;
+    font-weight: 650;
+    text-align: left;
+}
+
+.sentinel-workspace .wiki-inline-cell-control {
+    width: 100%;
+    min-height: 2.3rem;
+    padding: .35rem .5rem;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: #d6d3d1;
+    font-size: .72rem;
+}
+.sentinel-workspace .wiki-inline-cell-control:hover,
+.sentinel-workspace .wiki-inline-cell-control:focus { background: var(--sentinel-hover); }
+.sentinel-workspace .wiki-inline-cell-control option { background: var(--sentinel-canvas-raised); }
+.sentinel-workspace select.wiki-inline-cell-control[multiple] { min-height: 3.4rem; padding: .2rem; }
+.sentinel-workspace .wiki-inline-database-table input[type="checkbox"] { margin-left: .55rem; accent-color: #f59e0b; }
+.sentinel-workspace .wiki-inline-cell-readonly { display: block; padding: .5rem; color: var(--sentinel-faint); font-size: .7rem; }
+.sentinel-workspace .wiki-inline-database-footer { min-height: 2.25rem; padding: .25rem .45rem; }
+.sentinel-workspace .wiki-inline-database-loading,
+.sentinel-workspace .wiki-inline-database-error { padding: 1rem; color: var(--sentinel-muted); font-size: .72rem; }
+.sentinel-workspace .wiki-inline-database-error { color: #fca5a5; }
+
 /* Read-only renderer counterpart for linked-database blocks. */
 .wiki-linked-database {
     display: flex;
