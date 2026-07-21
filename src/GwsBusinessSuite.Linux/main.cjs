@@ -33,7 +33,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 640,
     title: 'GWS Business Suite',
-    backgroundColor: '#f7f6f3',
+    backgroundColor: '#141210',
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,

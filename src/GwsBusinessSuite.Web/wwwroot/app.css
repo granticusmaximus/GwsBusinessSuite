@@ -1700,7 +1700,7 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     display: grid;
     grid-template-columns: minmax(250px, 286px) minmax(0, 1fr);
     align-items: start;
-    min-height: calc(100vh - var(--gws-admin-bar-height) - 8.5rem);
+    min-height: calc(100dvh - var(--gws-admin-bar-height) - 8.5rem);
     overflow: hidden;
     border: 1px solid var(--sentinel-border);
     border-radius: 12px;
@@ -1714,7 +1714,7 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     display: flex;
     flex-direction: column;
     min-width: 0;
-    height: calc(100vh - var(--gws-admin-bar-height) - 4rem);
+    height: calc(100dvh - var(--gws-admin-bar-height) - 4rem);
     overflow-y: auto;
     background: var(--sentinel-sidebar);
     border-right: 1px solid var(--sentinel-border);
@@ -2540,12 +2540,27 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     .sentinel-local-sidebar {
         position: static;
         height: auto;
-        max-height: 32rem;
+        max-height: min(42dvh, 32rem);
         border-right: 0;
         border-bottom: 1px solid var(--sentinel-border);
     }
-    .sentinel-nav-panel { min-height: 18rem; }
+    .sentinel-nav-panel { min-height: 0; }
+    .sentinel-tree-scroll { max-height: min(25dvh, 18rem); }
     .sentinel-document-toolbar { position: static; }
+}
+
+@media (hover: none), (pointer: coarse) {
+    .sentinel-page-affordances,
+    .sentinel-page-cover-actions,
+    .sentinel-workspace .wiki-tree-actions { opacity: 1; transform: none; }
+
+    .sentinel-workspace button,
+    .sentinel-workspace .btn,
+    .sentinel-workspace .form-control,
+    .sentinel-workspace .form-select { min-height: 2.75rem; }
+
+    .sentinel-workspace .wiki-tree-row,
+    .sentinel-workspace .sentinel-nav-item { min-height: 2.75rem; }
 }
 
 @media (max-width: 575.98px) {
@@ -2553,9 +2568,13 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     .sentinel-workspace-actions { align-items: flex-start; }
     .sentinel-workspace-header { flex-direction: column; }
     .sentinel-workspace-actions { width: 100%; justify-content: space-between; }
-    .sentinel-document-toolbar { align-items: flex-start; flex-direction: column; }
+    .sentinel-workspace { padding-bottom: env(safe-area-inset-bottom); }
+    .sentinel-layout { border-right: 0; border-left: 0; border-radius: 0; }
+    .sentinel-local-sidebar { max-height: min(46dvh, 27rem); }
+    .sentinel-document-toolbar { align-items: flex-start; flex-direction: column; padding-right: max(1rem, env(safe-area-inset-right)); padding-left: max(1rem, env(safe-area-inset-left)); }
     .sentinel-document-toolbar > .d-flex { width: 100%; justify-content: space-between; }
-    .sentinel-document-canvas { padding: 2rem 1rem; }
+    .sentinel-document-context { width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .sentinel-document-canvas { padding: 2rem max(1rem, env(safe-area-inset-right)) calc(2rem + env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left)); }
     .sentinel-page-cover { height: 11rem; }
     .sentinel-page-cover-actions { right: .5rem; bottom: .5rem; opacity: 1; }
     .sentinel-page-heading { gap: .45rem; }
@@ -2565,6 +2584,8 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     .sentinel-db-calendar-toolbar > :last-child { display: none; }
     .sentinel-property-row { grid-template-columns: 5.5rem minmax(0, 1fr); }
     .sentinel-workspace .wiki-block-gutter { position: static; }
+    .sentinel-workspace .wiki-block-gutter .btn { min-width: 2.75rem; }
+    .sentinel-editor-actions { padding-bottom: max(.65rem, env(safe-area-inset-bottom)); }
     .sentinel-support-panel,
     .sentinel-main > .card { width: calc(100% - 1rem); }
 }

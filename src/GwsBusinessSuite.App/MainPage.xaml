@@ -1,39 +1,90 @@
-﻿<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             xmlns:local="clr-namespace:GwsBusinessSuite.App"
              x:Class="GwsBusinessSuite.App.MainPage"
-             BackgroundColor="#F7F6F3">
+             BackgroundColor="#141210"
+             Shell.NavBarIsVisible="False">
 
-    <Grid RowDefinitions="Auto,Auto,*">
-        <Grid Grid.Row="0" Padding="12,8" ColumnDefinitions="Auto,Auto,*,Auto,Auto"
-              BackgroundColor="#191919" ColumnSpacing="8">
-            <Button x:Name="BackButton" Grid.Column="0" Text="‹" WidthRequest="38" HeightRequest="38"
-                    FontSize="24" Padding="0" Clicked="OnBackClicked" IsEnabled="False"
-                    SemanticProperties.Description="Go back" />
-            <Button Grid.Column="1" Text="⌂" WidthRequest="38" HeightRequest="38"
-                    FontSize="18" Padding="0" Clicked="OnHomeClicked"
-                    SemanticProperties.Description="Open Sentinel home" />
-            <VerticalStackLayout Grid.Column="2" VerticalOptions="Center" Spacing="0">
-                <Label Text="GWS Business Suite" TextColor="White" FontAttributes="Bold" FontSize="14" />
-                <Label Text="Sentinel workspace" TextColor="#B5B3AE" FontSize="11" />
-            </VerticalStackLayout>
-            <ActivityIndicator x:Name="LoadingIndicator" Grid.Column="3" Color="#2EAADC"
-                               IsRunning="True" IsVisible="True" WidthRequest="28" />
-            <Button Grid.Column="4" Text="↻" WidthRequest="38" HeightRequest="38"
-                    FontSize="19" Padding="0" Clicked="OnRefreshClicked"
-                    SemanticProperties.Description="Refresh workspace" />
-        </Grid>
-
-        <Grid x:Name="StatusBanner" Grid.Row="1" Padding="12,8" BackgroundColor="#FFF3CD" IsVisible="False"
-              ColumnDefinitions="*,Auto">
-            <Label x:Name="StatusMessage" TextColor="#664D03" VerticalOptions="Center" />
-            <Button Grid.Column="1" Text="Reconnect" Padding="12,4" Clicked="OnRefreshClicked" />
-        </Grid>
-
-        <WebView x:Name="WorkspaceView" Grid.Row="2"
+    <Grid>
+        <!-- The hosted Blazor UI is the product UI on every platform. -->
+        <WebView x:Name="WorkspaceView"
                  Navigating="OnWorkspaceNavigating"
                  Navigated="OnWorkspaceNavigated" />
+
+        <Grid x:Name="LoadingOverlay"
+              BackgroundColor="#141210"
+              InputTransparent="False">
+            <VerticalStackLayout HorizontalOptions="Center"
+                                 VerticalOptions="Center"
+                                 Spacing="14">
+                <Border WidthRequest="48"
+                        HeightRequest="48"
+                        Padding="0"
+                        BackgroundColor="#231F1D"
+                        Stroke="#66501F"
+                        StrokeShape="RoundRectangle 12">
+                    <Label Text="S"
+                           HorizontalTextAlignment="Center"
+                           VerticalTextAlignment="Center"
+                           TextColor="#FBBF24"
+                           FontAttributes="Bold"
+                           FontSize="21" />
+                </Border>
+                <ActivityIndicator Color="#F59E0B" IsRunning="True" />
+                <Label Text="Opening GWS Business Suite"
+                       TextColor="#A8A29E"
+                       FontSize="13" />
+            </VerticalStackLayout>
+        </Grid>
+
+        <Grid x:Name="StatusOverlay"
+              Padding="24"
+              BackgroundColor="#141210"
+              IsVisible="False"
+              InputTransparent="False">
+            <Border MaximumWidthRequest="480"
+                    HorizontalOptions="Center"
+                    VerticalOptions="Center"
+                    Padding="28"
+                    BackgroundColor="#1C1917"
+                    Stroke="#292524"
+                    StrokeShape="RoundRectangle 12">
+                <VerticalStackLayout Spacing="14">
+                    <Border WidthRequest="42"
+                            HeightRequest="42"
+                            Padding="0"
+                            HorizontalOptions="Start"
+                            BackgroundColor="#2B2215"
+                            Stroke="#66501F"
+                            StrokeShape="RoundRectangle 10">
+                        <Label Text="S"
+                               HorizontalTextAlignment="Center"
+                               VerticalTextAlignment="Center"
+                               TextColor="#FBBF24"
+                               FontAttributes="Bold"
+                               FontSize="18" />
+                    </Border>
+                    <Label Text="Sentinel is temporarily unavailable"
+                           TextColor="#FAFAF9"
+                           FontAttributes="Bold"
+                           FontSize="22" />
+                    <Label x:Name="StatusMessage"
+                           Text="Check your internet connection and confirm that the GWS server is running."
+                           TextColor="#A8A29E"
+                           FontSize="14"
+                           LineHeight="1.45" />
+                    <Button Text="Reconnect"
+                            Margin="0,6,0,0"
+                            Padding="18,11"
+                            HorizontalOptions="Start"
+                            BackgroundColor="#F59E0B"
+                            TextColor="#1C1917"
+                            CornerRadius="8"
+                            FontAttributes="Bold"
+                            Clicked="OnRefreshClicked" />
+                </VerticalStackLayout>
+            </Border>
+        </Grid>
     </Grid>
 
 </ContentPage>

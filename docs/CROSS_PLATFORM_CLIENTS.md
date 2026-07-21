@@ -4,6 +4,12 @@ The hosted ASP.NET Core application and its database remain the source of truth.
 MAUI, and Linux clients authenticate against and navigate the same HTTPS deployment, so no
 client owns a competing SQLite database.
 
+The hosted Blazor interface is also the visual source of truth. Native wrappers do not add a
+second toolbar or recreate pages: browser, MAUI, and Electron all render the same responsive
+admin and Sentinel components. Only loading, offline, and package-level operating-system states
+are native, and those states mirror the canonical web tokens in `wwwroot/app.css`. See
+[`UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md) for the cross-platform contract.
+
 ## Platform plan
 
 | Platform | Client | Current phase |
