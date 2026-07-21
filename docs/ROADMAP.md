@@ -4,7 +4,7 @@
 - Dashboard shell
 - SQLite persistence
 - CRM contacts
-- Wiki markdown pages
+- Sentinel workspace (originally Wiki markdown pages)
 
 ## Phase 2 ✅
 - SEO Article Generator powered by Ollama
@@ -88,21 +88,11 @@
   symmetric NAT: the server mints short-lived coturn REST credentials, both broadcaster
   and viewer receive the same configured ICE pool, and Docker provides an opt-in coturn
   override with automatic production activation when the required `.env` values exist.
-- Wiki history tracking ✅ — already fully shipped (commit `d514a56`): every save is a
-  real git commit via LibGit2Sharp (`WikiService.cs`), with a full History/Diff/Revert UI
-  already in `Wiki.razor`. The roadmap simply hadn't been updated. Page hierarchy (parent
-  page selector, ordered tree) and a title/slug search box have since shipped too
-  (`Wiki.razor`).
-- Wiki richer editing ✅ — three gaps closed in `WikiMarkdownHelper.cs` +
-  `Wiki.razor`/`markdownEditor.js`/`wikiLinks.js`: (1) wiki-links: typing `[[` in the
-  editor shows a live autocomplete dropdown of matching page titles (CodeMirror
-  `cursorActivity` hook), and a resolved `[[Page Title]]` renders as a real link in
-  preview that navigates within the page (no per-page URL route exists, so it's a
-  `wikilink:{id}` href intercepted client-side rather than a browser navigation); an
-  unmatched title renders as plain emphasized text instead of a dead link. (2) Image
-  embedding: an "Insert Image" button opens the same Media Library picker pattern already
-  used in `CmsBuilderEditor.razor`, inserting real markdown image syntax at the cursor.
-  (3) TOC generation: an "Insert TOC" button walks the live Markdig AST (the same
-  pipeline instance the preview renders from) to build a nested Markdown list linking to
-  each H2-H4's actual auto-generated anchor id, so links can't drift out of sync with the
-  real headings.
+- Sentinel (Notion-class connected workspace) 🚧 — renamed from Knowledge Base/Wiki with
+  `/admin/sentinel` as the canonical route. Delivered foundations include nested block pages,
+  DB-snapshot history/diff/restore, `[[Page]]` links, workspace-wide page/block/database-row
+  search, backlinks, editable Table/Board databases, and encrypted manual/hourly Notion
+  import. Full capability parity is now explicitly staged in `docs/WIKI_NOTION_CLONE.md`:
+  database rows-as-pages plus List/Gallery are now delivered; remaining views,
+  comments/mentions/collaboration; templates,
+  permissions, and sharing; Sentinel AI/agents; and current-API/two-way interoperability.

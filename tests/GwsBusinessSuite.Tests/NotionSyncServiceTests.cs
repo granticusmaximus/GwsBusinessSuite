@@ -80,6 +80,33 @@ public sealed class NotionSyncServiceTests
         (await fixture.Db.WikiPages.Select(p => p.NotionId).ToListAsync()).Should().Equal("standalone");
     }
 
+    [Fact]
+    public async Task SyncAsync_ShouldImportDatabaseRowPageBlocks()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.SearchResults = [Database("database-1", "Projects")];
+        fixture.Notion.DatabaseSchemas["database-1"] = Json("""
+            {"properties":{"Name":{"id":"title","type":"title","title":{}}}}
+            """);
+        fixture.Notion.DatabaseRows["database-1"] =
+        [
+            Json("""
+                {"object":"page","id":"row-1","parent":{"type":"database_id","database_id":"database-1"},"properties":{"Name":{"id":"title","type":"title","title":[{"plain_text":"First project"}]}}}
+                """)
+        ];
+        fixture.Notion.BlockChildren["row-1"] =
+        [
+            Json("""
+                {"object":"block","id":"block-1","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Project page notes"}]}}
+                """)
+        ];
+
+        await fixture.Service.SyncAsync();
+
+        var row = await fixture.Db.WikiDatabaseRows.SingleAsync(item => item.NotionId == "row-1");
+        WikiBlockJson.ParseBlocks(row.BlocksJson).Should().ContainSingle(block => block.PlainText == "Project page notes");
+    }
+
     private static JsonElement Page(string id, string title, string parent = "{\"type\":\"workspace\",\"workspace\":true}", bool archived = false) =>
         JsonSerializer.SerializeToElement(new Dictionary<string, object?>
         {
@@ -96,6 +123,18 @@ public sealed class NotionSyncServiceTests
                 }
             }
         });
+
+    private static JsonElement Database(string id, string title) =>
+        JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+        {
+            ["object"] = "database",
+            ["id"] = id,
+            ["archived"] = false,
+            ["parent"] = new Dictionary<string, object?> { ["type"] = "workspace", ["workspace"] = true },
+            ["title"] = new[] { new Dictionary<string, object?> { ["plain_text"] = title } }
+        });
+
+    private static JsonElement Json(string json) => JsonDocument.Parse(json).RootElement.Clone();
 
     private sealed class SyncFixture : IAsyncDisposable
     {
@@ -136,6 +175,8 @@ public sealed class NotionSyncServiceTests
     {
         public IReadOnlyList<JsonElement> SearchResults { get; set; } = [];
         public Dictionary<string, IReadOnlyList<JsonElement>> BlockChildren { get; } = new();
+        public Dictionary<string, JsonElement> DatabaseSchemas { get; } = new();
+        public Dictionary<string, IReadOnlyList<JsonElement>> DatabaseRows { get; } = new();
 
         public Task<NotionValidationResult> ValidateConnectionAsync(string integrationToken, CancellationToken cancellationToken = default) =>
             Task.FromResult(new NotionValidationResult(true, "Connected.", "Test Workspace"));
@@ -147,10 +188,10 @@ public sealed class NotionSyncServiceTests
             Task.FromResult(new NotionPage(BlockChildren.GetValueOrDefault(blockId) ?? [], false, null));
 
         public Task<JsonElement?> GetDatabaseAsync(string integrationToken, string databaseId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<JsonElement?>(null);
+            Task.FromResult(DatabaseSchemas.TryGetValue(databaseId, out var schema) ? (JsonElement?)schema : null);
 
         public Task<NotionPage> QueryDatabaseAsync(string integrationToken, string databaseId, string? cursor, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new NotionPage([], false, null));
+            Task.FromResult(new NotionPage(DatabaseRows.GetValueOrDefault(databaseId) ?? [], false, null));
     }
 
     private sealed class FakeSecretProtector : ISecretProtector

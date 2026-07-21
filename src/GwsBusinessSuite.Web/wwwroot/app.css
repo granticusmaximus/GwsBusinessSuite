@@ -1343,6 +1343,36 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .wiki-tree-row:hover .wiki-tree-actions {
     opacity: 1;
 }
+.sentinel-row-page-modal {
+    z-index: 1060;
+}
+.sentinel-row-block-editor {
+    min-height: 18rem;
+}
+.sentinel-db-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+    gap: 1rem;
+}
+.sentinel-db-gallery-card {
+    border: 1px solid #dee2e6;
+    border-radius: 0.65rem;
+    background: #fff;
+    padding: 0;
+    overflow: hidden;
+}
+.sentinel-db-gallery-card:hover {
+    border-color: #adb5bd;
+    box-shadow: 0 0.25rem 0.75rem rgba(15, 23, 42, 0.08);
+}
+.sentinel-db-gallery-cover {
+    height: 6rem;
+    display: grid;
+    place-items: center;
+    background: #f8f9fa;
+    color: #adb5bd;
+    font-size: 2rem;
+}
 .wiki-cover-preview {
     position: relative;
     margin-top: 0.4rem;

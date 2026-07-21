@@ -1,0 +1,138 @@
+@implements IAsyncDisposable
+@using System.Text.Json.Nodes
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+@inject IWikiDatabaseService WikiDatabaseService
+@inject IWikiService WikiService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject IJSRuntime JS
+@inject ILogger<SentinelDatabaseRowPage> Logger
+
+<div class="modal d-block sentinel-row-page-modal" tabindex="-1" role="dialog" aria-modal="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="min-w-0">
+                    <div class="small text-secondary text-truncate">@(Database.Icon ?? "🗄️") @Database.Title</div>
+                    <h5 class="modal-title text-truncate">@RowTitle</h5>
+                </div>
+                <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAsync"></button>
+            </div>
+            <div class="modal-body">
+                @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+                {
+                    <div class="alert alert-danger">@ErrorMessage</div>
+                }
+
+                <div class="row g-2 mb-4">
+                    @foreach (var property in Database.Properties.OrderBy(property => property.SortOrder))
+                    {
+                        var display = WikiPropertyValues.GetDisplayText(property, Values, Row.CreatedAt);
+                        <div class="col-md-6">
+                            <div class="border rounded-3 p-2 h-100">
+                                <div class="small text-secondary">@property.Name</div>
+                                <div class="text-truncate">@(string.IsNullOrWhiteSpace(display) ? "—" : display)</div>
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+                    <label class="form-label fw-semibold mb-0">Page content</label>
+                    <span class="small text-secondary">Type <code>/</code> for blocks and <code>[[</code> for page links</span>
+                </div>
+                <div class="wiki-block-editor sentinel-row-block-editor" @ref="_editorContainer"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" @onclick="CloseAsync" disabled="@IsBusy">Close</button>
+                <button type="button" class="btn btn-primary" @onclick="SaveAsync" disabled="@IsBusy">
+                    <i class="bi bi-floppy-fill me-1"></i>Save page
+                </button>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop show" style="z-index:-1"></div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public required WikiDatabase Database { get; set; }
+    [Parameter, EditorRequired] public required WikiDatabaseRow Row { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private ElementReference _editorContainer;
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<SentinelDatabaseRowPage>? _dotNetRef;
+    private bool _initialized;
+    private bool IsBusy;
+    private string ErrorMessage = string.Empty;
+    private string _blocksJson = "[]";
+
+    private JsonObject Values => WikiPropertyValues.ParseObject(Row.PropertyValuesJson);
+    private WikiDatabaseProperty? TitleProperty => Database.Properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Title);
+    private string RowTitle => TitleProperty is null
+        ? "Untitled"
+        : WikiPropertyValues.GetText(Values, TitleProperty.Id) is { Length: > 0 } title ? title : "Untitled";
+
+    protected override void OnParametersSet() => _blocksJson = Row.BlocksJson;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_initialized) return;
+
+        _dotNetRef = DotNetObjectReference.Create(this);
+        _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js");
+        await _module.InvokeVoidAsync("initialize", _editorContainer, _dotNetRef, _blocksJson);
+        _initialized = true;
+    }
+
+    [JSInvokable]
+    public Task OnBlocksChanged(string blocksJson)
+    {
+        _blocksJson = blocksJson;
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public async Task<IReadOnlyList<WikiLinkSuggestion>> SearchWikiLinkSuggestions(string query) =>
+        WikiMarkdownHelper.SearchLinkSuggestions(query, await WikiService.ListPagesAsync());
+
+    private async Task SaveAsync()
+    {
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await WikiDatabaseService.SaveRowAsync(Database.Id, new WikiDatabaseRowEditor
+            {
+                Id = Row.Id,
+                BlocksJson = _blocksJson,
+                Values = Values.ToDictionary(pair => pair.Key, pair => pair.Value)
+            }, user);
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to save Sentinel database row page {RowId}.", Row.Id);
+            ErrorMessage = $"Unable to save page. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private Task CloseAsync() => OnClose.InvokeAsync();
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_initialized && _module is not null)
+        {
+            try { await _module.InvokeVoidAsync("dispose", _editorContainer); }
+            catch (JSDisconnectedException) { }
+        }
+        if (_module is not null) await _module.DisposeAsync();
+        _dotNetRef?.Dispose();
+    }
+}

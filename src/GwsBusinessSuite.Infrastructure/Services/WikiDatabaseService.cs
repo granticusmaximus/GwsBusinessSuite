@@ -236,6 +236,10 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
             values[key] = value?.DeepClone();
         }
         row.PropertyValuesJson = WikiPropertyValues.Serialize(values);
+        if (editor.BlocksJson is not null)
+        {
+            row.BlocksJson = string.IsNullOrWhiteSpace(editor.BlocksJson) ? "[]" : editor.BlocksJson;
+        }
         row.UpdatedAt = now;
         row.UpdatedBy = performedBy;
 

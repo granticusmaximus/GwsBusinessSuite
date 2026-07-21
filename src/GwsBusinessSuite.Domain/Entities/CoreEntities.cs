@@ -150,6 +150,8 @@ public static class WikiDatabaseViewTypes
 {
     public const string Table = "table";
     public const string Board = "board";
+    public const string List = "list";
+    public const string Gallery = "gallery";
 }
 
 // Slots into the same sidebar tree as WikiPage (ParentWikiPageId) rather than being nested
@@ -194,6 +196,10 @@ public sealed class WikiDatabaseRow : AuditableEntity
     // option ids for multiSelect, ISO-8601 string for date. CreatedTime is never stored
     // here - it reads straight from CreatedAt.
     public string PropertyValuesJson { get; set; } = "{}";
+    // Like every Notion database item, a Sentinel row is also a page with its own blocks.
+    // PropertyValuesJson remains the view/schema data shown in tables and boards; BlocksJson
+    // is the document body opened from any database view.
+    public string BlocksJson { get; set; } = "[]";
     // See WikiPage.NotionId/NotionArchivedAt.
     public string? NotionId { get; set; }
     public DateTimeOffset? NotionArchivedAt { get; set; }

@@ -580,6 +580,9 @@ public sealed class NotionSyncService(
             }
 
             row.PropertyValuesJson = WikiPropertyValues.Serialize(values);
+            var rowBlocks = new List<WikiBlock>();
+            await AppendBlockChildrenAsync(rowNotionId, 0, token, rowBlocks, cancellationToken);
+            row.BlocksJson = WikiBlockJson.Serialize(rowBlocks);
             row.NotionArchivedAt = IsArchived(rowElement) ? (row.NotionArchivedAt ?? DateTimeOffset.UtcNow) : null;
             row.UpdatedAt = DateTimeOffset.UtcNow;
             row.UpdatedBy = "notion-sync";

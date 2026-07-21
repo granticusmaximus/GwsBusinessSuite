@@ -107,6 +107,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .WithMany(x => x.Rows)
             .HasForeignKey(x => x.WikiDatabaseId)
             .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<WikiDatabaseRow>()
+            .Property(x => x.BlocksJson)
+            .HasDefaultValue("[]");
         modelBuilder.Entity<WikiDatabaseView>()
             .HasOne(x => x.WikiDatabase)
             .WithMany(x => x.Views)

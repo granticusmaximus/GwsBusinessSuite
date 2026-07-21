@@ -86,6 +86,23 @@ public sealed class WikiDatabaseServiceTests
     }
 
     [Fact]
+    public async Task SaveRowAsync_ShouldPersistPageBlocksAndPreserveThemDuringPropertyOnlyEdits()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var blocksJson = WikiBlockJson.Serialize([
+            new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0,
+                [new WikiRichTextSpan("Full task notes")], new Dictionary<string, string>())]);
+
+        var row = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor { BlocksJson = blocksJson }, "u");
+        await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor { Id = row.Id }, "u");
+
+        var reloaded = await service.GetDatabaseAsync(database.Id);
+        reloaded!.Rows.Single(item => item.Id == row.Id).BlocksJson.Should().Be(blocksJson);
+    }
+
+    [Fact]
     public async Task MoveRowAsync_ShouldUpdateTheGroupingValueAndRenumberSiblingsInTheTargetGroup()
     {
         await using var db = await CreateDbAsync();

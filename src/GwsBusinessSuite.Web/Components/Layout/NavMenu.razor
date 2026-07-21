@@ -120,9 +120,9 @@
                     <span class="gws-nav-link-copy"><span>Approval Queue</span><small>Review generated plans</small></span>
                     @if (_pendingAppGenerationCount > 0) { <span class="gws-nav-count">@_pendingAppGenerationCount</span> }
                 </NavLink>
-                <NavLink class="gws-nav-link" href="admin/wiki" title="Knowledge Base">
+                <NavLink class="gws-nav-link" href="admin/sentinel" title="Sentinel">
                     <i class="bi bi-journal-bookmark-fill" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Knowledge Base</span><small>Operational reference</small></span>
+                    <span class="gws-nav-link-copy"><span>Sentinel</span><small>Connected workspace</small></span>
                 </NavLink>
                 <NavLink class="gws-nav-link" href="admin/cms-knowledge" title="Builder Reference">
                     <i class="bi bi-journal-richtext" aria-hidden="true"></i>
@@ -157,7 +157,7 @@
     private static readonly string[] PublishingPrefixes = ["admin/article", "admin/content-studio", "admin/app-generation", "admin/media", "admin/pages", "admin/appearance"];
     private static readonly string[] RelationshipPrefixes = ["admin/comments", "admin/crm", "admin/users"];
     private static readonly string[] IntelligencePrefixes = ["admin/news-intelligence", "admin/government-intelligence", "admin/podcasts"];
-    private static readonly string[] OperationsPrefixes = ["admin/automation", "admin/cj-ads", "admin/affiliate", "admin/app-generation-queue", "admin/wiki", "admin/cms-knowledge", "admin/live-show", "admin/ollama", "admin/docker"];
+    private static readonly string[] OperationsPrefixes = ["admin/automation", "admin/cj-ads", "admin/affiliate", "admin/app-generation-queue", "admin/sentinel", "admin/wiki", "admin/cms-knowledge", "admin/live-show", "admin/ollama", "admin/docker"];
 
     private string _role = string.Empty;
     private int _pendingCommentCount;

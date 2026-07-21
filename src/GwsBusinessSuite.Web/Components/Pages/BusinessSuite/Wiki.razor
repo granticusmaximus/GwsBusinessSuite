@@ -1,4 +1,5 @@
 @page "/admin/wiki"
+@page "/admin/sentinel"
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "AdminOnly")]
 @implements IAsyncDisposable
@@ -8,19 +9,19 @@
 @using GwsBusinessSuite.Infrastructure.Services
 @inject IWikiService WikiService
 @inject IWikiDatabaseService WikiDatabaseService
+@inject ISentinelWorkspaceService SentinelWorkspaceService
 @inject INotionSyncService NotionSyncService
 @inject IMediaLibraryService MediaLibraryService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
 @inject ILogger<Wiki> Logger
 
-<PageTitle>Knowledge Base</PageTitle>
+<PageTitle>Sentinel</PageTitle>
 
 <div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
     <div>
-        <h1><i class="bi bi-journal-bookmark-fill me-2 text-warning"></i>Knowledge Base</h1>
-        <p class="mb-0">Store internal documentation, SOPs, app notes, and business operating knowledge with a block-based editor.
-            Every save keeps a version snapshot you can inspect or revert to.</p>
+        <h1><i class="bi bi-journal-bookmark-fill me-2 text-warning"></i>Sentinel</h1>
+        <p class="mb-0">Your connected workspace for documents, databases, operational knowledge, and imported Notion content.</p>
     </div>
     <button type="button" class="btn btn-outline-dark" @onclick="OpenNotionModalAsync" disabled="@IsBusy">
         <i class="bi bi-arrow-repeat me-1"></i>Notion Sync
@@ -47,7 +48,7 @@
     <div class="col-lg-3">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
-                <span class="fw-semibold">Pages</span>
+                <span class="fw-semibold">Workspace</span>
                 <div class="d-flex gap-1">
                     <button class="btn btn-sm btn-outline-primary" @onclick="CreateNewPage" disabled="@IsBusy" title="New page">
                         <i class="bi bi-file-earmark-plus"></i>
@@ -58,8 +59,15 @@
                 </div>
             </div>
             <div class="card-body border-bottom py-2">
-                <input class="form-control form-control-sm" @bind="SearchQuery" @bind:event="oninput"
-                       placeholder="Search pages and databases..." />
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+                    <input class="form-control" @bind="SearchQuery" @bind:event="oninput" @bind:after="SearchWorkspaceAsync"
+                           placeholder="Search Sentinel..." />
+                    @if (IsSearchBusy)
+                    {
+                        <span class="input-group-text bg-white"><span class="spinner-border spinner-border-sm"></span></span>
+                    }
+                </div>
             </div>
             <div class="card-body p-0">
                 @if (AllTreeNodes().Count == 0)
@@ -68,11 +76,31 @@
                         <p class="mb-0">Nothing here yet. Create a page or database to get started.</p>
                     </div>
                 }
-                else if (FilteredAndOrderedNodes().Count == 0)
+                else if (!string.IsNullOrWhiteSpace(SearchQuery))
                 {
-                    <div class="p-4 text-secondary">
-                        <p class="mb-0">Nothing matches "@SearchQuery".</p>
-                    </div>
+                    @if (WorkspaceSearchResults.Count == 0 && !IsSearchBusy)
+                    {
+                        <div class="p-4 text-secondary">
+                            <p class="mb-0">Nothing in Sentinel matches "@SearchQuery".</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="list-group list-group-flush sentinel-search-results">
+                            @foreach (var result in WorkspaceSearchResults)
+                            {
+                                <button type="button" class="list-group-item list-group-item-action text-start"
+                                        @onclick="() => OpenSearchResultAsync(result)" disabled="@IsBusy">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <i class="bi @(result.IsDatabase ? "bi-grid-3x3-gap-fill" : "bi-file-earmark-text") text-secondary"></i>
+                                        <span class="fw-semibold text-truncate">@result.Title</span>
+                                        <span class="badge text-bg-light border ms-auto">@result.MatchKind</span>
+                                    </div>
+                                    <div class="small text-secondary text-truncate mt-1">@result.Preview</div>
+                                </button>
+                            }
+                        </div>
+                    }
                 }
                 else
                 {
@@ -239,6 +267,35 @@
             <div class="card border-0 shadow-sm mt-4">
                 <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
                     <div>
+                        <div class="fw-semibold"><i class="bi bi-arrow-left-right me-1"></i>Backlinks</div>
+                        <div class="small text-secondary">Pages in Sentinel that link to this page.</div>
+                    </div>
+                    <span class="badge text-bg-secondary">@Backlinks.Count</span>
+                </div>
+                <div class="card-body p-0">
+                    @if (Backlinks.Count == 0)
+                    {
+                        <div class="p-4 text-secondary small">No pages link here yet.</div>
+                    }
+                    else
+                    {
+                        <div class="list-group list-group-flush">
+                            @foreach (var backlink in Backlinks)
+                            {
+                                <button type="button" class="list-group-item list-group-item-action text-start"
+                                        @onclick="() => OpenPageAsync(backlink.SourcePageId)" disabled="@IsBusy">
+                                    <div class="fw-semibold small">@backlink.SourcePageTitle</div>
+                                    <div class="small text-secondary text-truncate mt-1">@backlink.Preview</div>
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="card border-0 shadow-sm mt-4">
+                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
+                    <div>
                         <div class="fw-semibold">History</div>
                         <div class="small text-secondary">Bounded version snapshots - the last @MaxHistoryDisplay are kept.</div>
                     </div>
@@ -332,7 +389,7 @@
                 <div class="modal-body">
                     <p class="text-secondary">
                         Paste a Notion internal-integration token. Sync is read-only: Notion remains the source of truth,
-                        and content shared with the integration is mirrored into this Wiki.
+                        and content shared with the integration is mirrored into Sentinel.
                     </p>
 
                     <label class="form-label fw-semibold small">Integration token</label>
@@ -407,6 +464,9 @@
     private Guid? SelectedDatabaseId { get; set; }
     private bool IsBusy { get; set; }
     private string SearchQuery { get; set; } = string.Empty;
+    private bool IsSearchBusy { get; set; }
+    private List<SentinelSearchResult> WorkspaceSearchResults { get; set; } = new();
+    private List<SentinelBacklink> Backlinks { get; set; } = new();
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
     private readonly HashSet<Guid> _expandedPageIds = new();
@@ -431,7 +491,7 @@
     private int _editorGeneration;
     private int _blockEditorSyncedGeneration = -1;
 
-    private string EditorHeader => SelectedPageId.HasValue ? "Edit Wiki Page" : "Create Wiki Page";
+    private string EditorHeader => SelectedPageId.HasValue ? "Edit Sentinel Page" : "Create Sentinel Page";
 
     private string RenderedHtml =>
         WikiBlockHtmlRenderer.RenderPage(WikiBlockJson.ParseBlocks(Editor.BlocksJson), WikiPages);
@@ -619,6 +679,47 @@
 
     private Task<string> CurrentUserNameAsync() => CurrentUserAccessor.GetCurrentUsernameAsync();
 
+    private async Task SearchWorkspaceAsync()
+    {
+        var query = SearchQuery.Trim();
+        if (query.Length == 0)
+        {
+            WorkspaceSearchResults = new();
+            return;
+        }
+
+        IsSearchBusy = true;
+        try
+        {
+            var results = (await SentinelWorkspaceService.SearchAsync(query)).ToList();
+            if (string.Equals(SearchQuery.Trim(), query, StringComparison.Ordinal))
+            {
+                WorkspaceSearchResults = results;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to search Sentinel.");
+            ErrorMessage = $"Unable to search Sentinel. {ex.Message}";
+        }
+        finally
+        {
+            IsSearchBusy = false;
+        }
+    }
+
+    private async Task OpenSearchResultAsync(SentinelSearchResult result)
+    {
+        if (result.IsDatabase)
+        {
+            await OpenDatabaseAsync(result.Id);
+        }
+        else
+        {
+            await OpenPageAsync(result.Id);
+        }
+    }
+
     private async Task LoadTreeAsync(bool selectFirstPage)
     {
         try
@@ -642,10 +743,11 @@
         SelectedPageId = null;
         SelectedDatabaseId = null;
         Editor = new WikiPageEditorModel();
+        Backlinks = new();
         History = new();
         DiffRevisionKey = null;
         _editorGeneration++;
-        StatusMessage = "Ready to create a new wiki page.";
+        StatusMessage = "Ready to create a new Sentinel page.";
         ErrorMessage = string.Empty;
     }
 
@@ -662,6 +764,7 @@
     {
         SelectedPageId = null;
         SelectedDatabaseId = wikiDatabaseId;
+        Backlinks = new();
         DiffRevisionKey = null;
         StatusMessage = string.Empty;
         ErrorMessage = string.Empty;
@@ -675,7 +778,7 @@
             var page = await WikiService.GetPageAsync(wikiPageId);
             if (page is null)
             {
-                StatusMessage = "The selected wiki page no longer exists.";
+                StatusMessage = "The selected Sentinel page no longer exists.";
                 return;
             }
 
@@ -693,14 +796,15 @@
             };
             _editorGeneration++;
             DiffRevisionKey = null;
-            StatusMessage = $"Opened wiki page '{page.Title}'.";
+            StatusMessage = $"Opened Sentinel page '{page.Title}'.";
             ErrorMessage = string.Empty;
             await LoadHistoryAsync(page.Id);
+            Backlinks = (await SentinelWorkspaceService.GetBacklinksAsync(page.Id)).ToList();
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Unable to open wiki page {WikiPageId}.", wikiPageId);
-            ErrorMessage = $"Unable to open wiki page. {ex.Message}";
+            ErrorMessage = $"Unable to open Sentinel page. {ex.Message}";
         }
     }
 
@@ -742,14 +846,15 @@
             // Deliberately not bumping _editorGeneration here - the block editor's DOM already
             // reflects exactly what was just saved (that's where BlocksJson came from), so
             // resetting it would only cost the user their cursor position for no benefit.
-            StatusMessage = $"Saved wiki page '{saved.Title}'.";
+            StatusMessage = $"Saved Sentinel page '{saved.Title}'.";
             await LoadTreeAsync(selectFirstPage: false);
             await LoadHistoryAsync(saved.Id);
+            Backlinks = (await SentinelWorkspaceService.GetBacklinksAsync(saved.Id)).ToList();
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Unable to save wiki page.");
-            ErrorMessage = $"Unable to save wiki page. {ex.Message}";
+            ErrorMessage = $"Unable to save Sentinel page. {ex.Message}";
         }
         finally
         {
@@ -772,14 +877,14 @@
         {
             var user = await CurrentUserNameAsync();
             await WikiService.DeletePageAsync(wikiPageId, user);
-            StatusMessage = "Wiki page deleted.";
+            StatusMessage = "Sentinel page deleted.";
             CreateNewPage();
             await LoadTreeAsync(selectFirstPage: false);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Unable to delete wiki page {WikiPageId}.", wikiPageId);
-            ErrorMessage = $"Unable to delete wiki page. {ex.Message}";
+            ErrorMessage = $"Unable to delete Sentinel page. {ex.Message}";
         }
         finally
         {
@@ -842,7 +947,7 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Wiki page move failed.");
-            ErrorMessage = $"Unable to move wiki page. {ex.Message}";
+            ErrorMessage = $"Unable to move Sentinel page. {ex.Message}";
         }
         finally
         {
@@ -906,6 +1011,7 @@
             StatusMessage = $"Reverted '{reverted.Title}' to an earlier version.";
             await LoadTreeAsync(selectFirstPage: false);
             await LoadHistoryAsync(wikiPageId);
+            Backlinks = (await SentinelWorkspaceService.GetBacklinksAsync(wikiPageId)).ToList();
         }
         catch (Exception ex)
         {

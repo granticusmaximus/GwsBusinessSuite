@@ -92,13 +92,23 @@ else
                 {
                     <li class="nav-item">
                         <button type="button" class="nav-link @(view.Id == _activeViewId ? "active" : "")" @onclick="() => _activeViewId = view.Id">
-                            <i class="bi @(view.Type == WikiDatabaseViewTypes.Board ? "bi-kanban" : "bi-table") me-1"></i>@view.Name
+                            <i class="bi @ViewIcon(view.Type) me-1"></i>@view.Name
                         </button>
                     </li>
                 }
                 <li class="nav-item">
                     <button type="button" class="nav-link text-secondary" @onclick="AddBoardViewAsync" disabled="@IsBusy" title="Add a Board view grouped by a Select property">
-                        <i class="bi bi-plus-lg me-1"></i>Board view
+                        <i class="bi bi-plus-lg me-1"></i>Board
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button type="button" class="nav-link text-secondary" @onclick="AddListViewAsync" disabled="@IsBusy">
+                        <i class="bi bi-plus-lg me-1"></i>List
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button type="button" class="nav-link text-secondary" @onclick="AddGalleryViewAsync" disabled="@IsBusy">
+                        <i class="bi bi-plus-lg me-1"></i>Gallery
                     </button>
                 </li>
             </ul>
@@ -124,7 +134,12 @@ else
                                 @foreach (var row in group.Rows)
                                 {
                                     <div class="wiki-db-board-card" draggable="true" @ondragstart="() => StartDragRow(row)" @ondragend="EndDragRow">
-                                        <div class="fw-semibold small">@(GetText(row, titleProperty) ?? "Untitled")</div>
+                                        <div class="d-flex align-items-center justify-content-between gap-2">
+                                            <div class="fw-semibold small text-truncate">@(GetText(row, titleProperty) ?? "Untitled")</div>
+                                            <button type="button" class="btn btn-xs btn-link p-0" @onclick="() => OpenRow(row)" title="Open as page">
+                                                Open
+                                            </button>
+                                        </div>
                                         @foreach (var property in Database.Properties.Where(p => p.Id != titleProperty.Id && p.Id != groupByProperty.Id).Take(3))
                                         {
                                             var text = WikiPropertyValues.GetDisplayText(property, WikiPropertyValues.ParseObject(row.PropertyValuesJson), row.CreatedAt);
@@ -142,6 +157,47 @@ else
                         }
                     </div>
                 }
+            }
+            else if (ActiveView is { Type: WikiDatabaseViewTypes.Gallery })
+            {
+                <div class="sentinel-db-gallery">
+                    @foreach (var row in WikiDatabaseViewLogic.ApplySort(Database.Rows.ToList(), Database.Properties.ToList(), ActiveViewConfig?.Sorts ?? []))
+                    {
+                        <button type="button" class="sentinel-db-gallery-card text-start" @onclick="() => OpenRow(row)">
+                            <div class="sentinel-db-gallery-cover"><i class="bi bi-file-earmark-text"></i></div>
+                            <div class="p-3">
+                                <div class="fw-semibold text-truncate">@(GetText(row, titleProperty) ?? "Untitled")</div>
+                                @foreach (var property in Database.Properties.Where(property => property.Id != titleProperty.Id).Take(3))
+                                {
+                                    var text = WikiPropertyValues.GetDisplayText(property, WikiPropertyValues.ParseObject(row.PropertyValuesJson), row.CreatedAt);
+                                    @if (!string.IsNullOrWhiteSpace(text))
+                                    {
+                                        <div class="small text-secondary text-truncate mt-1">@property.Name: @text</div>
+                                    }
+                                }
+                            </div>
+                        </button>
+                    }
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-primary mt-3" @onclick="AddRowAsync" disabled="@IsBusy">
+                    <i class="bi bi-plus-lg me-1"></i>New page
+                </button>
+            }
+            else if (ActiveView is { Type: WikiDatabaseViewTypes.List })
+            {
+                <div class="list-group list-group-flush border rounded-3">
+                    @foreach (var row in WikiDatabaseViewLogic.ApplySort(Database.Rows.ToList(), Database.Properties.ToList(), ActiveViewConfig?.Sorts ?? []))
+                    {
+                        <button type="button" class="list-group-item list-group-item-action d-flex align-items-center gap-3" @onclick="() => OpenRow(row)">
+                            <i class="bi bi-file-earmark-text text-secondary"></i>
+                            <span class="fw-semibold text-truncate">@(GetText(row, titleProperty) ?? "Untitled")</span>
+                            <span class="small text-secondary ms-auto">@row.UpdatedAt?.ToLocalTime().ToString("MMM d")</span>
+                        </button>
+                    }
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-primary mt-3" @onclick="AddRowAsync" disabled="@IsBusy">
+                    <i class="bi bi-plus-lg me-1"></i>New page
+                </button>
             }
             else
             {
@@ -210,9 +266,12 @@ else
                                         </td>
                                     }
                                     <td>
-                                        <button type="button" class="btn btn-xs btn-link text-danger p-0" @onclick="() => DeleteRowAsync(row)" disabled="@IsBusy">
-                                            <i class="bi bi-x-lg"></i>
-                                        </button>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <button type="button" class="btn btn-xs btn-link p-0" @onclick="() => OpenRow(row)" disabled="@IsBusy">Open</button>
+                                            <button type="button" class="btn btn-xs btn-link text-danger p-0" @onclick="() => DeleteRowAsync(row)" disabled="@IsBusy">
+                                                <i class="bi bi-x-lg"></i>
+                                            </button>
+                                        </div>
                                     </td>
                                 </tr>
                             }
@@ -225,6 +284,11 @@ else
             }
         </div>
     </div>
+}
+
+@if (Database is not null && _openRow is not null)
+{
+    <SentinelDatabaseRowPage Database="Database" Row="_openRow" OnSaved="RowPageSavedAsync" OnClose="CloseRow" />
 }
 
 @code {
@@ -245,6 +309,7 @@ else
     private bool _showProperties;
     private Guid? _activeViewId;
     private Guid? _draggedRowId;
+    private WikiDatabaseRow? _openRow;
     private string _title = string.Empty;
     private string _titleIcon = string.Empty;
     private string _newPropertyName = string.Empty;
@@ -399,6 +464,17 @@ else
         });
     }
 
+    private async Task AddSimpleViewAsync(string type, string name) => await Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        var view = await WikiDatabaseService.SaveViewAsync(WikiDatabaseId, null, name, type, WikiDatabaseViewConfig.Empty, user);
+        await ReloadAsync();
+        _activeViewId = view.Id;
+    });
+
+    private Task AddListViewAsync() => AddSimpleViewAsync(WikiDatabaseViewTypes.List, "List");
+    private Task AddGalleryViewAsync() => AddSimpleViewAsync(WikiDatabaseViewTypes.Gallery, "Gallery");
+
     private async Task AddRowAsync() => await Work(async () =>
     {
         var user = await CurrentUserNameAsync();
@@ -426,6 +502,17 @@ else
         await WikiDatabaseService.DeleteRowAsync(WikiDatabaseId, row.Id, user);
         await ReloadAsync();
     });
+
+    private void OpenRow(WikiDatabaseRow row) => _openRow = row;
+    private void CloseRow() => _openRow = null;
+
+    private async Task RowPageSavedAsync()
+    {
+        var rowId = _openRow?.Id;
+        await ReloadAsync();
+        _openRow = rowId is null ? null : Database?.Rows.FirstOrDefault(row => row.Id == rowId);
+        await OnChanged.InvokeAsync();
+    }
 
     private void StartDragRow(WikiDatabaseRow row) => _draggedRowId = row.Id;
     private void EndDragRow() => _draggedRowId = null;
@@ -500,4 +587,12 @@ else
 
     private static IReadOnlyList<string> GetMultiSelect(WikiDatabaseRow row, WikiDatabaseProperty property) =>
         WikiPropertyValues.GetMultiSelect(WikiPropertyValues.ParseObject(row.PropertyValuesJson), property.Id);
+
+    private static string ViewIcon(string type) => type switch
+    {
+        WikiDatabaseViewTypes.Board => "bi-kanban",
+        WikiDatabaseViewTypes.List => "bi-list-ul",
+        WikiDatabaseViewTypes.Gallery => "bi-grid",
+        _ => "bi-table"
+    };
 }
