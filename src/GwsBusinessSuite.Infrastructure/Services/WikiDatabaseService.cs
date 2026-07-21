@@ -3,6 +3,7 @@ using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using System.Globalization;
+using System.Text.Json.Nodes;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
@@ -168,6 +169,138 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
         Guid.TryParse(propertyId, out var parsed) && propertyIds.TryGetValue(parsed, out var remapped)
             ? remapped.ToString()
             : propertyId;
+
+    public async Task<WikiDatabaseTemplateSnapshot> CreateTemplateSnapshotAsync(
+        Guid wikiDatabaseId,
+        CancellationToken cancellationToken = default)
+    {
+        var source = await GetDatabaseAsync(wikiDatabaseId, cancellationToken)
+            ?? throw new KeyNotFoundException("The database no longer exists.");
+
+        return new WikiDatabaseTemplateSnapshot(
+            source.Title,
+            source.Icon,
+            source.Properties.OrderBy(item => item.SortOrder)
+                .Select(item => new WikiDatabaseTemplateProperty(
+                    item.Id, item.Name, item.Type, item.SortOrder, item.ConfigJson))
+                .ToList(),
+            source.Rows.OrderBy(item => item.SortOrder)
+                .Select(item => new WikiDatabaseTemplateRow(
+                    item.Id, item.SortOrder, item.PropertyValuesJson, item.BlocksJson))
+                .ToList(),
+            source.Views.OrderBy(item => item.SortOrder)
+                .Select(item => new WikiDatabaseTemplateView(
+                    item.Id, item.Name, item.Type, item.SortOrder, item.ConfigJson))
+                .ToList());
+    }
+
+    public async Task<WikiDatabase> CreateDatabaseFromTemplateAsync(
+        WikiDatabaseTemplateSnapshot snapshot,
+        Guid? parentWikiPageId,
+        string performedBy,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        if (snapshot.Properties.Count(property => property.Type == WikiDatabasePropertyTypes.Title) != 1)
+        {
+            throw new InvalidOperationException("A database template must contain exactly one title property.");
+        }
+        if (snapshot.Views.Count == 0)
+        {
+            throw new InvalidOperationException("A database template must contain at least one view.");
+        }
+
+        var siblingOrders = await dbContext.WikiDatabases
+            .Where(item => item.ParentWikiPageId == parentWikiPageId)
+            .Select(item => item.SortOrder)
+            .ToListAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        var propertyIds = snapshot.Properties.ToDictionary(property => property.Id, _ => Guid.NewGuid());
+        var rowIds = snapshot.Rows.ToDictionary(row => row.Id, _ => Guid.NewGuid());
+        var database = new WikiDatabase
+        {
+            Id = Guid.NewGuid(),
+            Title = string.IsNullOrWhiteSpace(snapshot.Title) ? "Untitled Database" : snapshot.Title.Trim(),
+            Icon = snapshot.Icon,
+            ParentWikiPageId = parentWikiPageId,
+            SortOrder = siblingOrders.Count == 0 ? 0 : siblingOrders.Max() + 1,
+            CreatedAt = now,
+            CreatedBy = performedBy
+        };
+
+        foreach (var property in snapshot.Properties.OrderBy(item => item.SortOrder))
+        {
+            database.Properties.Add(new WikiDatabaseProperty
+            {
+                Id = propertyIds[property.Id],
+                WikiDatabaseId = database.Id,
+                Name = property.Name,
+                Type = property.Type,
+                SortOrder = property.SortOrder,
+                ConfigJson = property.ConfigJson,
+                CreatedAt = now,
+                CreatedBy = performedBy
+            });
+        }
+
+        foreach (var row in snapshot.Rows.OrderBy(item => item.SortOrder))
+        {
+            var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+            var remappedValues = new JsonObject();
+            foreach (var (oldPropertyId, newPropertyId) in propertyIds)
+            {
+                if (values[oldPropertyId.ToString()] is { } value)
+                {
+                    remappedValues[newPropertyId.ToString()] = value.DeepClone();
+                }
+            }
+
+            var blocks = WikiBlockJson.ParseBlocks(row.BlocksJson)
+                .Select(block => block with { Id = Guid.NewGuid() })
+                .ToList();
+            database.Rows.Add(new WikiDatabaseRow
+            {
+                Id = rowIds[row.Id],
+                WikiDatabaseId = database.Id,
+                SortOrder = row.SortOrder,
+                PropertyValuesJson = WikiPropertyValues.Serialize(remappedValues),
+                BlocksJson = WikiBlockJson.Serialize(blocks),
+                CreatedAt = now,
+                CreatedBy = performedBy
+            });
+        }
+
+        foreach (var view in snapshot.Views.OrderBy(item => item.SortOrder))
+        {
+            var config = WikiDatabaseViewConfigJson.Parse(view.ConfigJson);
+            database.Views.Add(new WikiDatabaseView
+            {
+                Id = Guid.NewGuid(),
+                WikiDatabaseId = database.Id,
+                Name = view.Name,
+                Type = view.Type,
+                SortOrder = view.SortOrder,
+                ConfigJson = WikiDatabaseViewConfigJson.Serialize(new WikiDatabaseViewConfig(
+                    config.Filters.Select(filter => filter with
+                    {
+                        PropertyId = RemapPropertyId(filter.PropertyId, propertyIds)
+                    }).ToList(),
+                    config.Sorts.Select(sort => sort with
+                    {
+                        PropertyId = RemapPropertyId(sort.PropertyId, propertyIds)
+                    }).ToList(),
+                    config.GroupByPropertyId is null
+                        ? null
+                        : RemapPropertyId(config.GroupByPropertyId, propertyIds))),
+                CreatedAt = now,
+                CreatedBy = performedBy
+            });
+        }
+
+        await dbContext.WikiDatabases.AddAsync(database, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return database;
+    }
 
     public async Task<WikiDatabase> RenameDatabaseAsync(
         Guid wikiDatabaseId,

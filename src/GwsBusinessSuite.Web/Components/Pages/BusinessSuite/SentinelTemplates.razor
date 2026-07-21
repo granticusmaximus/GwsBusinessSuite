@@ -6,10 +6,29 @@
 
 <div class="card border-0 shadow-sm mt-3 sentinel-template-panel">
     <div class="card-header bg-white border-bottom py-2 d-flex align-items-center justify-content-between">
-        <span class="fw-semibold small"><i class="bi bi-copy me-1"></i>Page templates</span>
-        <span class="badge text-bg-secondary">@Templates.Count</span>
+        <span class="fw-semibold small"><i class="bi bi-copy me-1"></i>Templates</span>
+        <span class="badge text-bg-secondary">@(Templates.Count + DatabaseTemplates.Count)</span>
+    </div>
+
+    <div class="card-body p-2 border-bottom">
+        <div class="small fw-semibold mb-2"><i class="bi bi-grid-3x3-gap me-1"></i>Database templates</div>
+        @if (CurrentDatabaseId.HasValue)
+        {
+            <div class="input-group input-group-sm">
+                <input class="form-control" @bind="NewDatabaseTemplateName" placeholder="Template name" maxlength="120" />
+                <button type="button" class="btn btn-outline-primary" @onclick="SaveDatabaseTemplateAsync"
+                        disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewDatabaseTemplateName))" title="Save this database as a template">
+                    <i class="bi bi-bookmark-plus"></i>
+                </button>
+            </div>
+        }
+        else
+        {
+            <div class="small text-secondary">Open a database to turn it into a reusable template.</div>
+        }
     </div>
     <div class="card-body p-2 border-bottom">
+        <div class="small fw-semibold mb-2"><i class="bi bi-file-earmark-text me-1"></i>Page templates</div>
         @if (CurrentPageId.HasValue)
         {
             <div class="input-group input-group-sm">
@@ -64,29 +83,83 @@
             }
         </div>
     }
+
+    @if (DatabaseTemplates.Count == 0)
+    {
+        <div class="small text-secondary p-3 border-top">No database templates yet.</div>
+    }
+    else
+    {
+        <div class="small fw-semibold px-2 pt-3 pb-1 border-top">Database templates</div>
+        <div class="list-group list-group-flush">
+            @foreach (var template in DatabaseTemplates)
+            {
+                <div class="list-group-item p-2">
+                    <div class="d-flex align-items-center gap-2">
+                        <span>@(string.IsNullOrWhiteSpace(template.Icon) ? "🗄️" : template.Icon)</span>
+                        <div class="min-w-0 flex-grow-1">
+                            <div class="small fw-semibold text-truncate">@template.Name</div>
+                            <div class="small text-secondary text-truncate">
+                                @template.DatabaseTitle · @template.PropertyCount properties · @template.RowCount rows · @template.ViewCount views
+                            </div>
+                        </div>
+                        @if (PendingDatabaseDeleteId == template.Id)
+                        {
+                            <button type="button" class="btn btn-xs btn-danger" @onclick="() => DeleteDatabaseTemplateAsync(template.Id)" disabled="@IsBusy">Confirm</button>
+                            <button type="button" class="btn btn-xs btn-link" @onclick="CancelDatabaseDelete" disabled="@IsBusy">Cancel</button>
+                        }
+                        else
+                        {
+                            <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => UseDatabaseTemplateAsync(template.Id)" disabled="@IsBusy">Use</button>
+                            <button type="button" class="btn btn-xs btn-link text-danger" @onclick="() => PendingDatabaseDeleteId = template.Id" disabled="@IsBusy" title="Delete database template">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
 </div>
 
 @code {
     [Parameter] public Guid? CurrentPageId { get; set; }
     [Parameter] public string CurrentPageTitle { get; set; } = string.Empty;
+    [Parameter] public Guid? CurrentDatabaseId { get; set; }
+    [Parameter] public string CurrentDatabaseTitle { get; set; } = string.Empty;
     [Parameter] public EventCallback<Guid> OnPageCreated { get; set; }
+    [Parameter] public EventCallback<Guid> OnDatabaseCreated { get; set; }
 
     private List<SentinelPageTemplateView> Templates { get; set; } = new();
+    private List<SentinelDatabaseTemplateView> DatabaseTemplates { get; set; } = new();
     private string NewTemplateName { get; set; } = string.Empty;
+    private string NewDatabaseTemplateName { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
     private Guid? PendingDeleteId { get; set; }
+    private Guid? PendingDatabaseDeleteId { get; set; }
     private bool IsBusy { get; set; }
     private Guid? _previousPageId;
+    private Guid? _previousDatabaseId;
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
     protected override void OnParametersSet()
     {
-        if (_previousPageId == CurrentPageId) return;
-        _previousPageId = CurrentPageId;
-        NewTemplateName = CurrentPageId.HasValue && !string.IsNullOrWhiteSpace(CurrentPageTitle)
-            ? $"{CurrentPageTitle} template"
-            : string.Empty;
+        if (_previousPageId != CurrentPageId)
+        {
+            _previousPageId = CurrentPageId;
+            NewTemplateName = CurrentPageId.HasValue && !string.IsNullOrWhiteSpace(CurrentPageTitle)
+                ? $"{CurrentPageTitle} template"
+                : string.Empty;
+        }
+
+        if (_previousDatabaseId != CurrentDatabaseId)
+        {
+            _previousDatabaseId = CurrentDatabaseId;
+            NewDatabaseTemplateName = CurrentDatabaseId.HasValue && !string.IsNullOrWhiteSpace(CurrentDatabaseTitle)
+                ? $"{CurrentDatabaseTitle} template"
+                : string.Empty;
+        }
     }
 
     private async Task SaveTemplateAsync()
@@ -108,6 +181,25 @@
         await OnPageCreated.InvokeAsync(page.Id);
     });
 
+    private async Task SaveDatabaseTemplateAsync()
+    {
+        if (CurrentDatabaseId is not { } databaseId) return;
+        await RunAsync(async () =>
+        {
+            var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await TemplateService.CreateFromDatabaseAsync(databaseId, NewDatabaseTemplateName, user);
+            await LoadAsync();
+            NewDatabaseTemplateName = $"{CurrentDatabaseTitle} template";
+        });
+    }
+
+    private async Task UseDatabaseTemplateAsync(Guid templateId) => await RunAsync(async () =>
+    {
+        var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        var database = await TemplateService.CreateDatabaseAsync(templateId, null, user);
+        await OnDatabaseCreated.InvokeAsync(database.Id);
+    });
+
     private async Task DeleteAsync(Guid templateId) => await RunAsync(async () =>
     {
         await TemplateService.DeleteAsync(templateId);
@@ -117,7 +209,20 @@
 
     private void CancelDelete() => PendingDeleteId = null;
 
-    private async Task LoadAsync() => Templates = (await TemplateService.ListAsync()).ToList();
+    private async Task DeleteDatabaseTemplateAsync(Guid templateId) => await RunAsync(async () =>
+    {
+        await TemplateService.DeleteDatabaseTemplateAsync(templateId);
+        PendingDatabaseDeleteId = null;
+        await LoadAsync();
+    });
+
+    private void CancelDatabaseDelete() => PendingDatabaseDeleteId = null;
+
+    private async Task LoadAsync()
+    {
+        Templates = (await TemplateService.ListAsync()).ToList();
+        DatabaseTemplates = (await TemplateService.ListDatabaseTemplatesAsync()).ToList();
+    }
 
     private async Task RunAsync(Func<Task> action)
     {

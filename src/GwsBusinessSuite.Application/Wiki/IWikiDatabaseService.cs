@@ -8,6 +8,8 @@ public interface IWikiDatabaseService
     Task<WikiDatabase?> GetDatabaseAsync(Guid wikiDatabaseId, CancellationToken cancellationToken = default);
     Task<WikiDatabase> CreateDatabaseAsync(string title, Guid? parentWikiPageId, string performedBy, CancellationToken cancellationToken = default);
     Task<WikiDatabase> DuplicateDatabaseAsync(Guid wikiDatabaseId, string performedBy, CancellationToken cancellationToken = default);
+    Task<WikiDatabaseTemplateSnapshot> CreateTemplateSnapshotAsync(Guid wikiDatabaseId, CancellationToken cancellationToken = default);
+    Task<WikiDatabase> CreateDatabaseFromTemplateAsync(WikiDatabaseTemplateSnapshot snapshot, Guid? parentWikiPageId, string performedBy, CancellationToken cancellationToken = default);
     Task<WikiDatabase> RenameDatabaseAsync(Guid wikiDatabaseId, string title, string? icon, string performedBy, CancellationToken cancellationToken = default);
     Task DeleteDatabaseAsync(Guid wikiDatabaseId, string performedBy, CancellationToken cancellationToken = default);
     Task ReorderDatabaseAsync(Guid wikiDatabaseId, Guid? newParentWikiPageId, int newSortOrder, string performedBy, CancellationToken cancellationToken = default);
