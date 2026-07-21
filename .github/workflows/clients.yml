@@ -46,7 +46,7 @@ jobs:
           dotnet publish src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-android -c Release --no-restore -p:AndroidPackageFormats=aab -p:RunAOTCompilation=false
           find src/GwsBusinessSuite.App/bin/Release/net10.0-android -type f -name '*.aab' -exec cp -f {} artifacts/android/ \;
       - name: Upload Android artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gws-android-qa
           path: artifacts/android
@@ -80,14 +80,14 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "$mac_app_path" artifacts/apple/GWS-Business-Suite-macOS-arm64-unsigned.zip
           ditto -c -k --sequesterRsrc --keepParent "$ios_app_path" artifacts/apple/GWS-Business-Suite-iOS-simulator-arm64.zip
       - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gws-macos-arm64-unsigned
           path: artifacts/apple/GWS-Business-Suite-macOS-arm64-unsigned.zip
           if-no-files-found: error
           retention-days: 14
       - name: Upload iOS simulator artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gws-ios-simulator-arm64
           path: artifacts/apple/GWS-Business-Suite-iOS-simulator-arm64.zip
@@ -104,13 +104,17 @@ jobs:
           dotnet-version: "10.0.x"
       - run: dotnet workload install maui
       - run: dotnet restore src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj
-      - name: Publish portable Windows application
-        run: dotnet publish src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-windows10.0.19041.0 -c Release -r win-x64 --self-contained true -p:WindowsAppSDKSelfContained=true -o artifacts/windows-x64
+      - name: Build unpackaged Windows application
+        run: dotnet build src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-windows10.0.19041.0 -c Release --no-restore -p:WindowsAppSDKSelfContained=true
       - name: Archive Windows application
         shell: pwsh
-        run: Compress-Archive -Path artifacts/windows-x64/* -DestinationPath artifacts/GWS-Business-Suite-windows-x64-unsigned.zip
+        run: |
+          $windows_executable = Get-ChildItem src/GwsBusinessSuite.App/bin/Release -Recurse -Filter GwsBusinessSuite.App.exe | Select-Object -First 1
+          if ($null -eq $windows_executable) { throw "Windows application executable was not produced." }
+          New-Item -ItemType Directory -Force artifacts | Out-Null
+          Compress-Archive -Path "$($windows_executable.Directory.FullName)/*" -DestinationPath artifacts/GWS-Business-Suite-windows-x64-unsigned.zip
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gws-windows-x64-unsigned
           path: artifacts/GWS-Business-Suite-windows-x64-unsigned.zip
@@ -137,7 +141,7 @@ jobs:
       - name: Build Linux packages
         run: npm run dist:linux
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gws-linux-x64
           path: |

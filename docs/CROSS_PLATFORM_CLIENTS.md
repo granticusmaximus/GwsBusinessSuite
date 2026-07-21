@@ -35,7 +35,7 @@ run retains downloadable build artifacts for 14 days:
 | `gws-android-qa` | APK and Android App Bundle built without a production signing key |
 | `gws-macos-arm64-unsigned` | Zipped Mac Catalyst application bundle |
 | `gws-ios-simulator-arm64` | Zipped iOS Simulator application bundle |
-| `gws-windows-x64-unsigned` | Self-contained portable Windows application |
+| `gws-windows-x64-unsigned` | Unpackaged Windows x64 application directory |
 | `gws-linux-x64` | AppImage, DEB, and RPM packages |
 
 These are QA artifacts, not store-ready releases. Public distribution still requires platform
