@@ -17,8 +17,20 @@ public static class MauiProgram
 
 #if ANDROID
 		Microsoft.Maui.Handlers.WebViewHandler.Mapper.AppendToMapping(
-			"TrustedMediaPermissions",
-			(handler, _) => handler.PlatformView.SetWebChromeClient(new TrustedMediaWebChromeClient(handler)));
+			"TrustedAndroidCapabilities",
+			(handler, _) =>
+			{
+				handler.PlatformView.SetWebChromeClient(new TrustedMediaWebChromeClient(handler));
+				handler.PlatformView.SetDownloadListener(new TrustedDownloadListener());
+			});
+#elif IOS || MACCATALYST
+		Microsoft.Maui.Handlers.WebViewHandler.Mapper.AppendToMapping(
+			"TrustedAppleDownloads",
+			(handler, _) => handler.PlatformView.NavigationDelegate = new TrustedDownloadNavigationDelegate(handler));
+#elif WINDOWS
+		Microsoft.Maui.Handlers.WebViewHandler.Mapper.AppendToMapping(
+			"TrustedWindowsDownloads",
+			(handler, _) => TrustedWindowsDownloads.Configure(handler.PlatformView));
 #endif
 
 #if DEBUG
