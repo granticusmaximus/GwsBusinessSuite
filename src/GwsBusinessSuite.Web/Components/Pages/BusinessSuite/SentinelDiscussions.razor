@@ -1,6 +1,8 @@
 @using GwsBusinessSuite.Application.Abstractions
 @using GwsBusinessSuite.Application.Wiki
+@implements IDisposable
 @inject ISentinelCollaborationService CollaborationService
+@inject SentinelCollaborationNotifier CollaborationNotifier
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject ILogger<SentinelDiscussions> Logger
 
@@ -198,6 +200,32 @@
         await ReloadAsync();
     }
 
+    protected override void OnInitialized()
+    {
+        CollaborationNotifier.Changed += HandleCollaborationChanged;
+    }
+
+    private void HandleCollaborationChanged(SentinelCollaborationChange change)
+    {
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                if (change.WikiPageId == WikiPageId)
+                {
+                    Discussions = (await CollaborationService.ListDiscussionsAsync(
+                        WikiPageId, CurrentUsername, IncludeResolved)).ToList();
+                }
+                Notifications = (await CollaborationService.ListNotificationsAsync(CurrentUsername)).ToList();
+                StateHasChanged();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Sentinel realtime collaboration refresh was skipped.");
+            }
+        });
+    }
+
     private async Task ReloadAsync()
     {
         Discussions = (await CollaborationService.ListDiscussionsAsync(WikiPageId, CurrentUsername, IncludeResolved)).ToList();
@@ -293,4 +321,6 @@
         BlockOptions.FirstOrDefault(block => block.Id == blockId)?.Preview ?? "Deleted block";
 
     private sealed record BlockOption(Guid Id, string Preview);
+
+    public void Dispose() => CollaborationNotifier.Changed -= HandleCollaborationChanged;
 }

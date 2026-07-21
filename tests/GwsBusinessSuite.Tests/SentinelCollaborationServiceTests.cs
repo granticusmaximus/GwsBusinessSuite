@@ -22,6 +22,8 @@ public sealed class SentinelCollaborationServiceTests
 
         discussion.BlockId.Should().Be(blockId);
         discussion.Comments.Should().ContainSingle(comment => comment.Author == "member");
+        fixture.Changes.Should().ContainSingle(change =>
+            change.WikiPageId == page.Id && change.Kind == "discussion-created" && change.Actor == "member");
         (await fixture.Service.ListNotificationsAsync("Owner"))
             .Should().ContainSingle(notification => notification.Kind == "discussion-created");
         (await fixture.Service.ListNotificationsAsync("Reviewer"))
@@ -98,12 +100,15 @@ public sealed class SentinelCollaborationServiceTests
         private readonly SqliteConnection _connection;
         public ApplicationDbContext Db { get; }
         public SentinelCollaborationService Service { get; }
+        public List<SentinelCollaborationChange> Changes { get; } = new();
 
         private Fixture(SqliteConnection connection, ApplicationDbContext db)
         {
             _connection = connection;
             Db = db;
-            Service = new SentinelCollaborationService(db, TimeProvider.System);
+            var notifier = new SentinelCollaborationNotifier(TimeProvider.System);
+            notifier.Changed += Changes.Add;
+            Service = new SentinelCollaborationService(db, TimeProvider.System, notifier);
         }
 
         public static async Task<Fixture> CreateAsync()

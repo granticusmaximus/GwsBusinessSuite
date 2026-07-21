@@ -1,0 +1,103 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@implements IAsyncDisposable
+@inject SentinelPresenceTracker PresenceTracker
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject ILogger<SentinelPresence> Logger
+
+@if (Presence.Count > 0)
+{
+    <div class="sentinel-presence d-flex align-items-center" title="@PresenceTitle">
+        <div class="sentinel-presence-avatars">
+            @foreach (var person in Presence.Take(4))
+            {
+                <span class="sentinel-presence-avatar" title="@person.Username">
+                    @Initials(person.Username)
+                </span>
+            }
+        </div>
+        <span class="small text-secondary ms-2">
+            @(Presence.Count == 1 ? "1 person here" : $"{Presence.Count} people here")
+        </span>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid WikiPageId { get; set; }
+
+    private readonly Guid _sessionId = Guid.NewGuid();
+    private readonly CancellationTokenSource _lifetime = new();
+    private List<SentinelPresenceView> Presence { get; set; } = new();
+    private string CurrentUsername { get; set; } = "unknown";
+    private Guid _activePageId;
+    private Task? _heartbeatTask;
+
+    private string PresenceTitle => string.Join(", ", Presence.Select(person =>
+        person.SessionCount > 1 ? $"{person.Username} ({person.SessionCount} sessions)" : person.Username));
+
+    protected override async Task OnInitializedAsync()
+    {
+        CurrentUsername = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        PresenceTracker.PresenceChanged += HandlePresenceChanged;
+        _heartbeatTask = RunHeartbeatAsync(_lifetime.Token);
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (_activePageId != WikiPageId)
+        {
+            _activePageId = WikiPageId;
+            PresenceTracker.EnterPage(_sessionId, CurrentUsername, WikiPageId);
+        }
+        Presence = PresenceTracker.GetPagePresence(WikiPageId).ToList();
+    }
+
+    private async Task RunHeartbeatAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                PresenceTracker.Touch(_sessionId);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    private void HandlePresenceChanged(Guid wikiPageId)
+    {
+        if (wikiPageId != WikiPageId) return;
+        _ = InvokeAsync(() =>
+        {
+            Presence = PresenceTracker.GetPagePresence(WikiPageId).ToList();
+            StateHasChanged();
+        });
+    }
+
+    private static string Initials(string username)
+    {
+        var parts = username.Split([' ', '.', '_', '-'], StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length switch
+        {
+            0 => "?",
+            1 => parts[0][..Math.Min(2, parts[0].Length)].ToUpperInvariant(),
+            _ => string.Concat(parts.Take(2).Select(part => char.ToUpperInvariant(part[0])))
+        };
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        PresenceTracker.PresenceChanged -= HandlePresenceChanged;
+        PresenceTracker.Leave(_sessionId);
+        _lifetime.Cancel();
+        if (_heartbeatTask is not null)
+        {
+            try { await _heartbeatTask; }
+            catch (Exception ex) { Logger.LogDebug(ex, "Sentinel presence heartbeat stopped."); }
+        }
+        _lifetime.Dispose();
+    }
+}

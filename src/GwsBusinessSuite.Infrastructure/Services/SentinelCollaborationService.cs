@@ -6,7 +6,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
-public sealed class SentinelCollaborationService(IAppDbContext dbContext, TimeProvider timeProvider)
+public sealed class SentinelCollaborationService(
+    IAppDbContext dbContext,
+    TimeProvider timeProvider,
+    SentinelCollaborationNotifier notifier)
     : ISentinelCollaborationService
 {
     private const int MaxBodyLength = 5000;
@@ -85,6 +88,7 @@ public sealed class SentinelCollaborationService(IAppDbContext dbContext, TimePr
             $"{actor} started a discussion in {page.Title}: {Preview(normalizedBody)}",
             cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
+        notifier.Publish(page.Id, "discussion-created", actor);
         return (await ListDiscussionsAsync(wikiPageId, actor, includeResolved: true, cancellationToken))
             .Single(item => item.Id == discussion.Id);
     }
@@ -134,6 +138,7 @@ public sealed class SentinelCollaborationService(IAppDbContext dbContext, TimePr
             $"{actor} replied in {page.Title}: {Preview(normalizedBody)}",
             cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
+        notifier.Publish(page.Id, "discussion-reply", actor);
     }
 
     public async Task SetResolvedAsync(
@@ -165,6 +170,7 @@ public sealed class SentinelCollaborationService(IAppDbContext dbContext, TimePr
             $"{actor} {(resolved ? "resolved" : "reopened")} a discussion in {page.Title}.",
             cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
+        notifier.Publish(page.Id, resolved ? "discussion-resolved" : "discussion-reopened", actor);
     }
 
     public async Task ToggleReactionAsync(
@@ -210,6 +216,7 @@ public sealed class SentinelCollaborationService(IAppDbContext dbContext, TimePr
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        notifier.Publish(comment.Discussion!.WikiPageId, "discussion-reaction", actor);
     }
 
     public async Task<IReadOnlyList<SentinelNotificationView>> ListNotificationsAsync(
@@ -250,6 +257,7 @@ public sealed class SentinelCollaborationService(IAppDbContext dbContext, TimePr
         notification.UpdatedAt = notification.ReadAt;
         notification.UpdatedBy = normalizedUser;
         await dbContext.SaveChangesAsync(cancellationToken);
+        notifier.Publish(notification.WikiPageId, "notification-read", normalizedUser);
     }
 
     public async Task MarkAllNotificationsReadAsync(
@@ -269,6 +277,10 @@ public sealed class SentinelCollaborationService(IAppDbContext dbContext, TimePr
             notification.UpdatedBy = normalizedUser;
         }
         await dbContext.SaveChangesAsync(cancellationToken);
+        foreach (var pageId in unread.Select(notification => notification.WikiPageId).Distinct())
+        {
+            notifier.Publish(pageId, "notifications-read", normalizedUser);
+        }
     }
 
     private async Task AddNotificationsAsync(

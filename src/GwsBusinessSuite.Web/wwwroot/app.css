@@ -1418,6 +1418,24 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
+.sentinel-presence-avatars {
+    display: flex;
+    flex-direction: row-reverse;
+    justify-content: flex-end;
+}
+.sentinel-presence-avatar {
+    display: inline-grid;
+    place-items: center;
+    width: 1.8rem;
+    height: 1.8rem;
+    margin-left: -0.4rem;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    background: #4f46e5;
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 700;
+}
 .sentinel-row-page-modal {
     z-index: 1060;
 }

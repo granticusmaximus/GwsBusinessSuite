@@ -96,5 +96,6 @@
   import. Full capability parity is now explicitly staged in `docs/WIKI_NOTION_CLONE.md`:
   database rows-as-pages plus List/Gallery are now delivered; remaining views,
   persisted page/block discussions, replies, resolution, reactions, and collaboration
-  notifications are now delivered; live presence and concurrent-edit safety remain; templates,
+  notifications, live cross-circuit refresh, and heartbeat page presence are now delivered;
+  distributed scale-out and concurrent-edit safety remain; templates,
   permissions, and sharing; Sentinel AI/agents; and current-API/two-way interoperability.

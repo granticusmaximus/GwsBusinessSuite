@@ -206,6 +206,7 @@
                 <div class="d-flex align-items-center gap-2">
                     @if (SelectedPageId is { } selectedPageId)
                     {
+                        <SentinelPresence WikiPageId="selectedPageId" />
                         <button type="button" class="btn btn-sm @(IsFavorite(selectedPageId, false) ? "btn-warning" : "btn-outline-secondary")"
                                 @onclick="() => ToggleFavoriteAsync(selectedPageId, false)" title="Toggle favorite">
                             <i class="bi @(IsFavorite(selectedPageId, false) ? "bi-star-fill" : "bi-star")"></i>

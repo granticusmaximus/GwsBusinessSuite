@@ -136,6 +136,8 @@ public static class DependencyInjection
         services.AddScoped<IWikiDatabaseService, WikiDatabaseService>();
         services.AddScoped<ISentinelWorkspaceService, SentinelWorkspaceService>();
         services.AddScoped<ISentinelCollaborationService, SentinelCollaborationService>();
+        services.AddSingleton<SentinelCollaborationNotifier>();
+        services.AddSingleton<SentinelPresenceTracker>();
         services.AddHttpClient<INotionService, NotionService>(client =>
         {
             client.BaseAddress = new Uri("https://api.notion.com/v1/");
