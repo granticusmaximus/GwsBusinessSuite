@@ -3,9 +3,9 @@
 ## Cross-platform contract
 
 The ASP.NET Core/Blazor UI is the canonical presentation layer for the browser, Windows, macOS,
-iOS, Android, and Linux. MAUI and Electron are deliberately transparent hosts: they must not add
-navigation, page headers, editing controls, or alternate application layouts around the hosted
-UI. This keeps interaction behavior, accessibility, and responsive changes uniform everywhere.
+iOS, and Android. MAUI is a deliberately transparent host: it must not add navigation, page
+headers, editing controls, or an alternate application layout around the hosted UI. This keeps
+interaction behavior, accessibility, and responsive changes uniform everywhere.
 
 Platform-specific UI is limited to operating-system integration and states where the hosted app
 cannot render, such as splash, loading, offline, permissions, file pickers, notifications, and
@@ -30,8 +30,8 @@ The source of truth is `src/GwsBusinessSuite.Web/wwwroot/app.css`.
 | UI type | `Inter`, system sans-serif | Controls, navigation, body text |
 | Editorial type | `Playfair Display`, serif fallback | Deliberate brand moments only |
 
-If a visual token changes, update `app.css` first, then the MAUI resource dictionary, app/splash
-art, and Electron offline document in the same change.
+If a visual token changes, update `app.css` first, then the MAUI resource dictionary and
+app/splash art in the same change.
 
 ## Interaction rules
 
@@ -49,5 +49,5 @@ art, and Electron offline document in the same change.
 ## Review checklist
 
 Every interface change should be checked at phone, tablet, and desktop widths in the browser.
-Changes to the client shell must also build for Android and be syntax/package checked for Linux;
-Windows and Apple packaging are validated on their matching build hosts.
+Changes to the client shell must also build for Android; Windows and Apple packaging are
+validated on their matching build hosts.

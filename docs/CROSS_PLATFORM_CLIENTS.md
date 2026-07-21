@@ -1,13 +1,13 @@
 # GWS Business Suite cross-platform clients
 
-The hosted ASP.NET Core application and its database remain the source of truth. Browser,
-MAUI, and Linux clients authenticate against and navigate the same HTTPS deployment, so no
-client owns a competing SQLite database.
+The hosted ASP.NET Core application and its database remain the source of truth. Browser and
+MAUI clients authenticate against and navigate the same HTTPS deployment, so no client owns a
+competing SQLite database.
 
 The hosted Blazor interface is also the visual source of truth. Native wrappers do not add a
-second toolbar or recreate pages: browser, MAUI, and Electron all render the same responsive
-admin and Sentinel components. Only loading, offline, and package-level operating-system states
-are native, and those states mirror the canonical web tokens in `wwwroot/app.css`. See
+second toolbar or recreate pages: browser and MAUI render the same responsive admin and Sentinel
+components. Only loading, offline, and package-level operating-system states are native, and
+those states mirror the canonical web tokens in `wwwroot/app.css`. See
 [`UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md) for the cross-platform contract.
 
 ## Platform plan
@@ -18,11 +18,7 @@ are native, and those states mirror the canonical web tokens in `wwwroot/app.css
 | Windows | .NET MAUI / WinUI 3 | Online synchronized shell |
 | iOS | .NET MAUI | Online synchronized shell |
 | Android | .NET MAUI | Online synchronized shell |
-| Linux | Electron | Online synchronized shell |
 | Browser | Existing Blazor Server app | Canonical web client |
-
-.NET MAUI does not provide a Linux target. The deliberately thin Electron project supplies a
-Linux desktop package without copying business logic or creating a second persistence model.
 
 ## Continuous-integration artifacts
 
@@ -36,7 +32,6 @@ run retains downloadable build artifacts for 14 days:
 | `gws-macos-arm64-unsigned` | Zipped Mac Catalyst application bundle |
 | `gws-ios-simulator-arm64` | Zipped iOS Simulator application bundle |
 | `gws-windows-x64-unsigned` | Unpackaged Windows x64 application directory |
-| `gws-linux-x64` | AppImage, DEB, and RPM packages |
 
 These are QA artifacts, not store-ready releases. Public distribution still requires platform
 signing identities, Apple provisioning and notarization, Android/Windows signing keys, and the
@@ -63,19 +58,6 @@ dotnet build src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-mac
 Apple builds must use the Xcode version required by the installed iOS/Mac Catalyst workload.
 Windows packaging must run on a Windows build agent; signed iOS/macOS packages require an Apple
 developer identity and provisioning profile.
-
-## Linux client
-
-```bash
-cd src/GwsBusinessSuite.Linux
-npm install
-npm start
-npm run dist:linux
-```
-
-For local development only, set `GWS_SERVER_URL` to an HTTP or HTTPS server origin. Packaged
-applications always require HTTPS. Electron runs with Node integration disabled, context
-isolation and sandboxing enabled, an origin allowlist, and denied runtime permission requests.
 
 ## Migration beyond the online shell
 

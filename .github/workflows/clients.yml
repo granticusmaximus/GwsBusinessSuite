@@ -8,14 +8,12 @@ on:
       - "codex/**"
     paths:
       - "src/GwsBusinessSuite.App/**"
-      - "src/GwsBusinessSuite.Linux/**"
       - ".github/workflows/clients.yml"
   pull_request:
     branches:
       - main
     paths:
       - "src/GwsBusinessSuite.App/**"
-      - "src/GwsBusinessSuite.Linux/**"
       - ".github/workflows/clients.yml"
 
 permissions:
@@ -118,35 +116,5 @@ jobs:
         with:
           name: gws-windows-x64-unsigned
           path: artifacts/GWS-Business-Suite-windows-x64-unsigned.zip
-          if-no-files-found: error
-          retention-days: 14
-
-  linux:
-    name: Linux Electron
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: src/GwsBusinessSuite.Linux
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v5
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: src/GwsBusinessSuite.Linux/package-lock.json
-      - run: npm ci --no-audit --no-fund
-      - run: node --check main.cjs
-      - name: Install RPM packaging tools
-        run: sudo apt-get update && sudo apt-get install --yes rpm
-      - name: Build Linux packages
-        run: npm run dist:linux
-      - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: gws-linux-x64
-          path: |
-            src/GwsBusinessSuite.Linux/dist/*.AppImage
-            src/GwsBusinessSuite.Linux/dist/*.deb
-            src/GwsBusinessSuite.Linux/dist/*.rpm
           if-no-files-found: error
           retention-days: 14
