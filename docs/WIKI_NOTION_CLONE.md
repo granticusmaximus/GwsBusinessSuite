@@ -34,7 +34,7 @@ proprietary schemas; public Notion product and API documentation is behavioral r
   edited — it's an ES module following `automation-editor.js`'s interop shape
   (`initialize`/`dispose`, `DotNetObjectReference`, Pointer Events for drag), not the CMS
   Builder's iframe/postMessage bridge (that pattern exists specifically because the CMS
-  canvas previews the live public-render route in an iframe; the Wiki editor has no such
+  canvas previews the live public-render route in an iframe; the Sentinel editor has no such
   constraint). Blazor receives a serialized snapshot via a single `OnBlocksChanged`
   callback (mirroring the old `OnMarkdownChanged` shape) and persists it on explicit Save.
 - `IWikiService`/`WikiService` (`src/GwsBusinessSuite.Infrastructure/Services/WikiService.cs`)
@@ -91,7 +91,7 @@ proprietary schemas; public Notion product and API documentation is behavioral r
    interval/semaphore/scope-per-tick shape); maps Notion's ~30 block types onto
    `WikiBlock.Type` and its ~22 database property types onto the Phase 2 property model;
    upsert-by-Notion-id reconciliation with soft-flagging of upstream-archived content
-   (not a destructive replace-all). The Wiki UI provides connection settings, manual sync,
+   (not a destructive replace-all). The Sentinel UI provides connection settings, manual sync,
    hourly auto-sync control, last-sync counts, source badges, and dimmed-but-openable archived
    items. Sync-driven page changes deliberately do not create interactive revision snapshots,
    preventing hourly sync noise from evicting authored changes from the 20-revision history.
