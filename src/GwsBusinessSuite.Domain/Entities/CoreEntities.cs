@@ -102,6 +102,9 @@ public sealed class WikiPage : AuditableEntity
     // migration once every environment has actually run that backfill at least once.
     public string Markdown { get; set; } = string.Empty;
     public string BlocksJson { get; set; } = "[]";
+    // Application-managed optimistic concurrency token for authored page content. SQLite
+    // has no SQL Server-style rowversion, so every content writer increments this integer.
+    public long ContentVersion { get; set; } = 1;
     public string? Icon { get; set; }
     public string? CoverImageUrl { get; set; }
     public int SortOrder { get; set; }

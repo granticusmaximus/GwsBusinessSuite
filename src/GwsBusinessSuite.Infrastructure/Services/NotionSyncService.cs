@@ -300,10 +300,15 @@ public sealed class NotionSyncService(
             await dbContext.WikiPages.AddAsync(page, cancellationToken);
         }
 
+        var contentMetadataChanged = !isNew &&
+            (!string.Equals(page!.Title, title, StringComparison.Ordinal)
+             || wasArchived != isArchived);
+
         page!.Title = title;
         page.NotionArchivedAt = isArchived ? (page.NotionArchivedAt ?? DateTimeOffset.UtcNow) : null;
         page.UpdatedAt = DateTimeOffset.UtcNow;
         page.UpdatedBy = "notion-sync";
+        if (contentMetadataChanged) page.ContentVersion++;
         return (page.Id, isNew, isArchived && !wasArchived);
     }
 
@@ -391,7 +396,12 @@ public sealed class NotionSyncService(
             return;
         }
 
-        page.BlocksJson = WikiBlockJson.Serialize(blocks);
+        var blocksJson = WikiBlockJson.Serialize(blocks);
+        if (!string.Equals(page.BlocksJson, blocksJson, StringComparison.Ordinal))
+        {
+            page.BlocksJson = blocksJson;
+            page.ContentVersion++;
+        }
         page.UpdatedAt = DateTimeOffset.UtcNow;
         page.UpdatedBy = "notion-sync";
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -628,6 +638,7 @@ public sealed class NotionSyncService(
             if (page.NotionId is { } notionId && !seenTopLevelNotionIds.Contains(notionId) && page.NotionArchivedAt is null)
             {
                 page.NotionArchivedAt = DateTimeOffset.UtcNow;
+                page.ContentVersion++;
                 archived++;
             }
         }

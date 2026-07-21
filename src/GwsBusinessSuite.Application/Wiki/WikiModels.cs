@@ -6,6 +6,10 @@ public sealed class WikiPageEditorModel
 {
     public Guid? WikiPageId { get; set; }
 
+    // Required for updates and ignored for creates. A stale value produces
+    // WikiPageConcurrencyException instead of silently overwriting another editor.
+    public long ExpectedContentVersion { get; set; }
+
     [Required]
     public string Title { get; set; } = string.Empty;
 
@@ -18,6 +22,21 @@ public sealed class WikiPageEditorModel
     public string? CoverImageUrl { get; set; }
 
     public Guid? ParentWikiPageId { get; set; }
+}
+
+public sealed record WikiPageConflictSnapshot(
+    Guid WikiPageId,
+    long ExpectedContentVersion,
+    long CurrentContentVersion,
+    string CurrentTitle,
+    string CurrentBlocksJson,
+    DateTimeOffset? UpdatedAt,
+    string? UpdatedBy);
+
+public sealed class WikiPageConcurrencyException(WikiPageConflictSnapshot conflict)
+    : InvalidOperationException("This Sentinel page changed after you opened it. Your local draft has not been discarded.")
+{
+    public WikiPageConflictSnapshot Conflict { get; } = conflict;
 }
 
 // One row per save, bounded to WikiService.MaxRevisionsPerPage (oldest trimmed on write) -

@@ -107,7 +107,9 @@ proprietary schemas; public Notion product and API documentation is behavioral r
    reply targets, resolve/reopen, emoji reactions, `@username` notification fan-out, and a
    personal read/unread notification panel, live cross-circuit discussion/notification
    refresh, and heartbeat-expiring per-page presence are delivered. Inline comment placement
-   in the editor canvas and optimistic concurrent-edit protection remain. Realtime fan-out and
+   in the editor canvas remains. Atomic content-generation checks now reject stale saves and
+   preserve the local draft with explicit reload, overwrite, or save-as-copy recovery choices.
+   This prevents lost updates but is not CRDT/OT simultaneous co-authoring. Realtime fan-out and
    presence are process-local while the suite runs as one web instance; multi-instance scale-out
    will require a distributed backplane/presence store.
 7. **Templates, sharing, and workspace structure**: page/database templates, duplicate/move,
@@ -133,7 +135,7 @@ capabilities where they fit GWS Business Suite; they are no longer silently excl
 | Blocks | Core text/list/task/toggle/callout/code/media/embed blocks; tables import as Markdown; layout wrappers flatten | Complete supported block vocabulary, native tables/equations/columns/synced blocks, reusable templates, and richer embeds |
 | Databases | Editable Table/Board/List/Gallery, filters/sorts/groups, common property types, and rows with block page bodies | Remaining major view families, linked/inline sources, formulas/relations/rollups, layouts, charts, forms, and automations |
 | Knowledge graph | `[[Page]]` links, ranked/highlighted workspace search, backlinks, person/date mentions, favorites/recents | Graph navigation, database-row mention inbox entries, and saved searches |
-| Collaboration | Authenticated page/block discussions, replies, resolve/reopen, reactions, participant/mention notifications and read state, live cross-circuit refresh, and heartbeat page presence | Distributed realtime scale-out, editor-canvas comment pins, concurrent editing, workspace roles, granular permissions, and public sharing |
+| Collaboration | Authenticated page/block discussions, replies, resolve/reopen, reactions, participant/mention notifications and read state, live cross-circuit refresh, heartbeat page presence, and optimistic lost-update protection with draft recovery | Distributed realtime scale-out, editor-canvas comment pins, CRDT/OT simultaneous co-authoring, workspace roles, granular permissions, and public sharing |
 | Presentation | Emoji icon and cover URL | Custom icon/cover uploads, page width/fonts, database layouts, peek modes, and reusable style defaults |
 | Integration | Encrypted token, one-way manual/hourly reconciliation | Current Notion data-source/view/comment API, selective sync, durable file ingestion, and opt-in conflict-aware writes |
 | AI | Existing Ollama and workflow foundations elsewhere in the suite | Sentinel-grounded chat/search, writing, autofill, research, meeting notes, and reviewable workspace agents |

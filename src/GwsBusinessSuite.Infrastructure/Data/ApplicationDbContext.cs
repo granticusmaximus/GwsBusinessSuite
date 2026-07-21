@@ -96,6 +96,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<ContactActivity>().HasIndex(x => new { x.ContactId, x.CreatedAt });
 
         modelBuilder.Entity<WikiPage>().HasIndex(x => x.Slug).IsUnique();
+        modelBuilder.Entity<WikiPage>().Property(x => x.ContentVersion)
+            .HasDefaultValue(1L)
+            .IsConcurrencyToken();
         modelBuilder.Entity<WikiPageRevision>()
             .HasOne(x => x.WikiPage)
             .WithMany(x => x.Revisions)

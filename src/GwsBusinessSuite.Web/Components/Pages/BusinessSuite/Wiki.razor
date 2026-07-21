@@ -44,6 +44,27 @@
     </div>
 }
 
+@if (PageConflict is not null)
+{
+    <div class="alert alert-warning mb-4" role="alert">
+        <div class="d-flex align-items-start gap-2">
+            <i class="bi bi-exclamation-diamond-fill mt-1"></i>
+            <div class="flex-grow-1">
+                <div class="fw-semibold">This page changed while you were editing.</div>
+                <div class="small mt-1">
+                    Your local draft is still in the editor. The latest content generation is
+                    @PageConflict.CurrentContentVersion@(string.IsNullOrWhiteSpace(PageConflict.UpdatedBy) ? "." : $", saved by {PageConflict.UpdatedBy}.")
+                </div>
+                <div class="d-flex flex-wrap gap-2 mt-3">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ReloadLatestAfterConflictAsync">Reload latest</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="SaveConflictAsCopyAsync">Save my draft as a copy</button>
+                    <button type="button" class="btn btn-sm btn-warning" @onclick="OverwriteAfterConflictAsync">Overwrite latest</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 <div class="row g-4">
     <div class="col-lg-3">
         <div class="card border-0 shadow-sm h-100">
@@ -529,6 +550,7 @@
     private bool IsSearchBusy { get; set; }
     private List<SentinelSearchResult> WorkspaceSearchResults { get; set; } = new();
     private List<SentinelBacklink> Backlinks { get; set; } = new();
+    private WikiPageConflictSnapshot? PageConflict { get; set; }
     private SentinelNavigationState Navigation { get; set; } = new([], []);
     private List<SentinelMention> Mentions { get; set; } = new();
     private string CurrentUsername { get; set; } = "unknown";
@@ -826,6 +848,7 @@
         Backlinks = new();
         History = new();
         DiffRevisionKey = null;
+        PageConflict = null;
         _editorGeneration++;
         StatusMessage = "Ready to create a new Sentinel page.";
         ErrorMessage = string.Empty;
@@ -868,6 +891,7 @@
             Editor = new WikiPageEditorModel
             {
                 WikiPageId = page.Id,
+                ExpectedContentVersion = page.ContentVersion,
                 Title = page.Title,
                 Slug = page.Slug,
                 BlocksJson = page.BlocksJson,
@@ -876,6 +900,7 @@
                 ParentWikiPageId = page.ParentWikiPageId
             };
             _editorGeneration++;
+            PageConflict = null;
             DiffRevisionKey = null;
             StatusMessage = $"Opened Sentinel page '{page.Title}'.";
             ErrorMessage = string.Empty;
@@ -919,6 +944,7 @@
             Editor = new WikiPageEditorModel
             {
                 WikiPageId = saved.Id,
+                ExpectedContentVersion = saved.ContentVersion,
                 Title = saved.Title,
                 Slug = saved.Slug,
                 BlocksJson = saved.BlocksJson,
@@ -930,11 +956,18 @@
             // reflects exactly what was just saved (that's where BlocksJson came from), so
             // resetting it would only cost the user their cursor position for no benefit.
             StatusMessage = $"Saved Sentinel page '{saved.Title}'.";
+            PageConflict = null;
             await LoadTreeAsync(selectFirstPage: false);
             await LoadHistoryAsync(saved.Id);
             Backlinks = (await SentinelWorkspaceService.GetBacklinksAsync(saved.Id)).ToList();
             await SentinelWorkspaceService.RecordOpenedAsync(CurrentUsername, saved.Id, false);
             await LoadWorkspaceNavigationAsync();
+        }
+        catch (WikiPageConcurrencyException ex)
+        {
+            Logger.LogWarning(ex, "Sentinel page {WikiPageId} had a concurrent edit conflict.", Editor.WikiPageId);
+            PageConflict = ex.Conflict;
+            StatusMessage = string.Empty;
         }
         catch (Exception ex)
         {
@@ -945,6 +978,33 @@
         {
             IsBusy = false;
         }
+    }
+
+    private async Task ReloadLatestAfterConflictAsync()
+    {
+        if (PageConflict is not { } conflict) return;
+        await OpenPageAsync(conflict.WikiPageId);
+    }
+
+    private async Task OverwriteAfterConflictAsync()
+    {
+        if (PageConflict is not { } conflict) return;
+        Editor.ExpectedContentVersion = conflict.CurrentContentVersion;
+        PageConflict = null;
+        await SavePageAsync();
+    }
+
+    private async Task SaveConflictAsCopyAsync()
+    {
+        if (PageConflict is null) return;
+        Editor.WikiPageId = null;
+        Editor.ExpectedContentVersion = 0;
+        Editor.Title = string.IsNullOrWhiteSpace(Editor.Title)
+            ? "Recovered Sentinel draft"
+            : $"{Editor.Title} (conflicted copy)";
+        Editor.Slug = string.Empty;
+        PageConflict = null;
+        await SavePageAsync();
     }
 
     private async Task DeleteSelectedPageAsync()
@@ -1085,6 +1145,7 @@
             Editor = new WikiPageEditorModel
             {
                 WikiPageId = reverted.Id,
+                ExpectedContentVersion = reverted.ContentVersion,
                 Title = reverted.Title,
                 Slug = reverted.Slug,
                 BlocksJson = reverted.BlocksJson,
@@ -1095,6 +1156,7 @@
             _editorGeneration++;
             DiffRevisionKey = null;
             StatusMessage = $"Reverted '{reverted.Title}' to an earlier version.";
+            PageConflict = null;
             await LoadTreeAsync(selectFirstPage: false);
             await LoadHistoryAsync(wikiPageId);
             Backlinks = (await SentinelWorkspaceService.GetBacklinksAsync(wikiPageId)).ToList();

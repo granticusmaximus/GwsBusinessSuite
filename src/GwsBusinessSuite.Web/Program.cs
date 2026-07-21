@@ -2045,6 +2045,7 @@ static async Task EnsureWikiPagesHaveBlocksAsync(ApplicationDbContext dbContext,
     foreach (var page in pagesNeedingBackfill)
     {
         page.BlocksJson = WikiBlockJson.Serialize(WikiBlockJson.FromLegacyMarkdown(page.Markdown));
+        page.ContentVersion++;
         page.UpdatedAt = now;
         page.UpdatedBy = "system";
     }

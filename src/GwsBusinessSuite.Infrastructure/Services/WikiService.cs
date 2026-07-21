@@ -39,19 +39,38 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
         ArgumentNullException.ThrowIfNull(editor);
 
         var now = DateTimeOffset.UtcNow;
-        var page = editor.WikiPageId is { } wikiPageId
-            ? await dbContext.WikiPages.FirstOrDefaultAsync(item => item.Id == wikiPageId, cancellationToken)
-            : null;
-
-        var isNew = page is null;
-        page ??= new WikiPage
+        WikiPage page;
+        var isNew = !editor.WikiPageId.HasValue;
+        if (editor.WikiPageId is { } wikiPageId)
         {
-            Title = string.Empty,
-            Slug = string.Empty,
-            CreatedAt = now,
-            CreatedBy = performedBy,
-            SortOrder = await NextSortOrderAsync(editor.ParentWikiPageId, cancellationToken)
-        };
+            if (editor.ExpectedContentVersion <= 0)
+            {
+                throw new ArgumentException("An expected content version is required when updating a Sentinel page.", nameof(editor));
+            }
+
+            page = await dbContext.WikiPages.FirstOrDefaultAsync(item => item.Id == wikiPageId, cancellationToken)
+                ?? throw new InvalidOperationException("The Sentinel page no longer exists.");
+            // A Blazor circuit keeps one scoped DbContext for longer than a normal HTTP request.
+            // Reload before comparing so an entity tracked by an earlier save cannot conceal a
+            // change committed by another circuit.
+            await ReloadAsync(page, cancellationToken);
+            if (page.ContentVersion != editor.ExpectedContentVersion)
+            {
+                throw CreateConcurrencyException(page, editor.ExpectedContentVersion);
+            }
+        }
+        else
+        {
+            page = new WikiPage
+            {
+                Title = string.Empty,
+                Slug = string.Empty,
+                ContentVersion = 1,
+                CreatedAt = now,
+                CreatedBy = performedBy,
+                SortOrder = await NextSortOrderAsync(editor.ParentWikiPageId, cancellationToken)
+            };
+        }
 
         var requestedSlug = string.IsNullOrWhiteSpace(editor.Slug)
             ? CreateSlug(editor.Title)
@@ -75,8 +94,20 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
             page.ParentWikiPageId = editor.ParentWikiPageId;
             await dbContext.WikiPages.AddAsync(page, cancellationToken);
         }
+        else
+        {
+            page.ContentVersion++;
+        }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await ReloadAsync(page, cancellationToken);
+            throw CreateConcurrencyException(page, editor.ExpectedContentVersion);
+        }
         await CreateRevisionAsync(page, performedBy, cancellationToken);
 
         return page;
@@ -190,9 +221,29 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
             BlocksJson = revision.BlocksJson,
             Icon = page.Icon,
             CoverImageUrl = page.CoverImageUrl,
-            ParentWikiPageId = page.ParentWikiPageId
+            ParentWikiPageId = page.ParentWikiPageId,
+            ExpectedContentVersion = page.ContentVersion
         }, performedBy, cancellationToken);
     }
+
+    private async Task ReloadAsync(WikiPage page, CancellationToken cancellationToken)
+    {
+        if (dbContext is not DbContext efContext)
+        {
+            throw new InvalidOperationException("Sentinel concurrency requires an EF Core DbContext.");
+        }
+        await efContext.Entry(page).ReloadAsync(cancellationToken);
+    }
+
+    private static WikiPageConcurrencyException CreateConcurrencyException(WikiPage page, long expectedVersion) =>
+        new(new WikiPageConflictSnapshot(
+            page.Id,
+            expectedVersion,
+            page.ContentVersion,
+            page.Title,
+            page.BlocksJson,
+            page.UpdatedAt,
+            page.UpdatedBy));
 
     private async Task CreateRevisionAsync(WikiPage page, string performedBy, CancellationToken cancellationToken)
     {

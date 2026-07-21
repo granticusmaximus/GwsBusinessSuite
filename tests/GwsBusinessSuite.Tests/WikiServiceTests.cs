@@ -24,6 +24,7 @@ public sealed class WikiServiceTests
         created.Slug.Should().Be("internal-runbook");
         created.BlocksJson.Should().Contain("Steps go here.");
         created.CreatedBy.Should().Be("grantwatson");
+        created.ContentVersion.Should().Be(1);
 
         var listed = await service.ListPagesAsync();
         listed.Should().HaveCount(1);
@@ -35,6 +36,7 @@ public sealed class WikiServiceTests
         var updated = await service.SavePageAsync(new WikiPageEditorModel
         {
             WikiPageId = created.Id,
+            ExpectedContentVersion = created.ContentVersion,
             Title = "Internal Runbook",
             BlocksJson = ParagraphBlocks("Updated steps.")
         }, "grantwatson");
@@ -43,6 +45,7 @@ public sealed class WikiServiceTests
         updated.BlocksJson.Should().Contain("Updated steps.");
         updated.UpdatedAt.Should().NotBeNull();
         updated.UpdatedBy.Should().Be("grantwatson");
+        updated.ContentVersion.Should().Be(2);
 
         await service.DeletePageAsync(created.Id, "grantwatson");
 
@@ -86,6 +89,7 @@ public sealed class WikiServiceTests
         await service.SavePageAsync(new WikiPageEditorModel
         {
             WikiPageId = created.Id,
+            ExpectedContentVersion = created.ContentVersion,
             Title = "Deploy Steps",
             BlocksJson = ParagraphBlocks("Step two.")
         }, "grantwatson");
@@ -118,6 +122,7 @@ public sealed class WikiServiceTests
             await service.SavePageAsync(new WikiPageEditorModel
             {
                 WikiPageId = created.Id,
+                ExpectedContentVersion = created.ContentVersion,
                 Title = "Frequently Edited",
                 BlocksJson = ParagraphBlocks($"v{i}")
             }, "grantwatson");
@@ -144,6 +149,7 @@ public sealed class WikiServiceTests
         await service.SavePageAsync(new WikiPageEditorModel
         {
             WikiPageId = created.Id,
+            ExpectedContentVersion = created.ContentVersion,
             Title = "Onboarding",
             BlocksJson = ParagraphBlocks("Version two.")
         }, "grantwatson");
@@ -183,6 +189,7 @@ public sealed class WikiServiceTests
         var resaved = await service.SavePageAsync(new WikiPageEditorModel
         {
             WikiPageId = child.Id,
+            ExpectedContentVersion = child.ContentVersion,
             Title = "Child Page",
             BlocksJson = ParagraphBlocks("Child content, edited."),
             ParentWikiPageId = null
@@ -255,6 +262,77 @@ public sealed class WikiServiceTests
         await service.DeletePageAsync(created.Id, "grantwatson");
 
         (await db.WikiPageRevisions.Where(r => r.WikiPageId == created.Id).ToListAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SavePageAsync_ShouldRejectAStaleEditorAcrossTwoContexts_AndAllowExplicitOverwrite()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var firstDb = new ApplicationDbContext(options);
+        await firstDb.Database.EnsureCreatedAsync();
+        await using var secondDb = new ApplicationDbContext(options);
+        var firstService = new WikiService(firstDb);
+        var secondService = new WikiService(secondDb);
+
+        var created = await firstService.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Shared Runbook",
+            BlocksJson = ParagraphBlocks("Original")
+        }, "owner");
+        var firstEditorVersion = (await firstService.GetPageAsync(created.Id))!.ContentVersion;
+        var secondEditorVersion = (await secondService.GetPageAsync(created.Id))!.ContentVersion;
+
+        var firstSave = await firstService.SavePageAsync(new WikiPageEditorModel
+        {
+            WikiPageId = created.Id,
+            ExpectedContentVersion = firstEditorVersion,
+            Title = "Shared Runbook",
+            BlocksJson = ParagraphBlocks("First editor wins")
+        }, "first-editor");
+
+        var staleSave = () => secondService.SavePageAsync(new WikiPageEditorModel
+        {
+            WikiPageId = created.Id,
+            ExpectedContentVersion = secondEditorVersion,
+            Title = "Shared Runbook",
+            BlocksJson = ParagraphBlocks("Second editor draft")
+        }, "second-editor");
+
+        var conflict = await staleSave.Should().ThrowAsync<WikiPageConcurrencyException>();
+        conflict.Which.Conflict.ExpectedContentVersion.Should().Be(1);
+        conflict.Which.Conflict.CurrentContentVersion.Should().Be(2);
+        conflict.Which.Conflict.CurrentBlocksJson.Should().Contain("First editor wins");
+        (await firstService.GetPageAsync(created.Id))!.BlocksJson.Should().Contain("First editor wins");
+
+        var explicitOverwrite = await secondService.SavePageAsync(new WikiPageEditorModel
+        {
+            WikiPageId = created.Id,
+            ExpectedContentVersion = conflict.Which.Conflict.CurrentContentVersion,
+            Title = "Shared Runbook",
+            BlocksJson = ParagraphBlocks("Second editor draft")
+        }, "second-editor");
+
+        firstSave.ContentVersion.Should().Be(2);
+        explicitOverwrite.ContentVersion.Should().Be(3);
+        explicitOverwrite.BlocksJson.Should().Contain("Second editor draft");
+    }
+
+    [Fact]
+    public async Task SavePageAsync_ShouldRequireAnExpectedVersionForUpdates()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiService(db);
+        var created = await service.SavePageAsync(new WikiPageEditorModel { Title = "Page" }, "u");
+
+        var action = () => service.SavePageAsync(new WikiPageEditorModel
+        {
+            WikiPageId = created.Id,
+            Title = "Unsafe update"
+        }, "u");
+
+        await action.Should().ThrowAsync<ArgumentException>().WithMessage("*expected content version*");
     }
 
     private static string ParagraphBlocks(string text) => WikiBlockJson.Serialize(
