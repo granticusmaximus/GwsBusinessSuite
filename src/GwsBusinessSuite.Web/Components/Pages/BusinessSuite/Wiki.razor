@@ -238,8 +238,9 @@
         <div class="sentinel-document">
             <div class="sentinel-document-toolbar">
                 <div class="sentinel-document-context">
-                    <i class="bi bi-file-earmark-text"></i>
-                    <span>@EditorHeader</span>
+                    <span class="sentinel-document-breadcrumb-root">Sentinel</span>
+                    <i class="bi bi-chevron-right"></i>
+                    <span class="text-truncate">@(string.IsNullOrWhiteSpace(Editor.Title) ? "Untitled" : Editor.Title)</span>
                 </div>
                 <div class="d-flex align-items-center gap-2">
                     @if (SelectedPageId is { } selectedPageId)
@@ -251,14 +252,38 @@
                         </button>
                     }
                     <span class="sentinel-editing-state">
-                        @(SelectedPageId.HasValue ? "Saved page" : "New page")
+                        @(SelectedPageId.HasValue ? "Saved" : "New page")
                     </span>
                 </div>
             </div>
-            <div class="sentinel-document-canvas">
-                <EditForm Model="Editor" OnValidSubmit="SavePageAsync">
+            <EditForm Model="Editor" OnValidSubmit="SavePageAsync" class="sentinel-inline-document-form">
+                @if (!string.IsNullOrWhiteSpace(Editor.CoverImageUrl))
+                {
+                    <div class="sentinel-page-cover">
+                        <img src="@Editor.CoverImageUrl" alt="Page cover" loading="lazy" />
+                        <div class="sentinel-page-cover-actions">
+                            <button type="button" class="btn btn-sm btn-dark" @onclick="ToggleCoverPickerAsync">
+                                <i class="bi bi-image me-1"></i>Change cover
+                            </button>
+                            <button type="button" class="btn btn-sm btn-dark" @onclick="() => Editor.CoverImageUrl = null">
+                                <i class="bi bi-trash3 me-1"></i>Remove
+                            </button>
+                        </div>
+                    </div>
+                }
+
+                <div class="sentinel-document-canvas @(!string.IsNullOrWhiteSpace(Editor.CoverImageUrl) ? "has-cover" : string.Empty)">
                     <DataAnnotationsValidator />
                     <ValidationSummary />
+
+                    @if (string.IsNullOrWhiteSpace(Editor.CoverImageUrl))
+                    {
+                        <div class="sentinel-page-affordances">
+                            <button type="button" @onclick="ToggleCoverPickerAsync">
+                                <i class="bi bi-image"></i>Add cover
+                            </button>
+                        </div>
+                    }
 
                     <div class="sentinel-page-heading">
                         <input class="sentinel-icon-input" @bind="Editor.Icon" placeholder="📄" maxlength="4" aria-label="Page icon" />
@@ -283,22 +308,6 @@
                                 </select>
                             </div>
                         }
-                        <div class="sentinel-property-row sentinel-cover-property">
-                            <label><i class="bi bi-image"></i>Cover</label>
-                            <div class="sentinel-cover-actions">
-                                <span>@(string.IsNullOrWhiteSpace(Editor.CoverImageUrl) ? "None" : "Image selected")</span>
-                                <button type="button" class="btn btn-xs btn-link" @onclick="ToggleCoverPickerAsync">
-                                    @(string.IsNullOrWhiteSpace(Editor.CoverImageUrl) ? "Add" : "Change")
-                                </button>
-                            </div>
-                            @if (!string.IsNullOrWhiteSpace(Editor.CoverImageUrl))
-                            {
-                                <div class="wiki-cover-preview">
-                                    <img src="@Editor.CoverImageUrl" alt="Cover" loading="lazy" />
-                                    <button type="button" class="btn btn-xs btn-link text-danger" @onclick="() => Editor.CoverImageUrl = null">Remove</button>
-                                </div>
-                            }
-                        </div>
                     </div>
 
                     @if (_showCoverPicker)
@@ -335,7 +344,7 @@
 
                     <div class="sentinel-editor-actions">
                         <button type="submit" class="btn btn-primary" disabled="@IsBusy">
-                            <i class="bi bi-floppy-fill me-1"></i>Save Page
+                            <i class="bi bi-check2 me-1"></i>Save changes
                         </button>
                         <button type="button" class="btn btn-outline-secondary" @onclick="CreateNewPage" disabled="@IsBusy">
                             Reset
@@ -349,17 +358,8 @@
                             Delete
                         </button>
                     </div>
-                </EditForm>
-            </div>
-        </div>
-
-        <div class="card border-0 shadow-sm mt-4 sentinel-support-panel sentinel-preview-panel">
-            <div class="card-header bg-white border-bottom py-3">
-                <span class="fw-semibold">Preview</span>
-            </div>
-            <div class="card-body">
-                <div class="wiki-rendered-preview">@((MarkupString)RenderedHtml)</div>
-            </div>
+                </div>
+            </EditForm>
         </div>
 
         @if (SelectedPageId.HasValue)
@@ -603,11 +603,6 @@
     private int _blockEditorSyncedGeneration = -1;
     private SentinelDiscussions? _sentinelDiscussions;
     private IReadOnlyDictionary<Guid, int> _blockDiscussionCounts = new Dictionary<Guid, int>();
-
-    private string EditorHeader => SelectedPageId.HasValue ? "Edit Sentinel Page" : "Create Sentinel Page";
-
-    private string RenderedHtml =>
-        WikiBlockHtmlRenderer.RenderPage(WikiBlockJson.ParseBlocks(Editor.BlocksJson), WikiPages);
 
     private bool _showCoverPicker;
     private string _mediaPickerError = string.Empty;

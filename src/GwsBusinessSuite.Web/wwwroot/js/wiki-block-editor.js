@@ -38,6 +38,7 @@ export function initialize(container, dotNetRef, initialBlocksJson) {
         slashMenu: null,
         wikiLinkMenu: null,
         mentionMenu: null,
+        inlineToolbar: null,
         discussionCounts: new Map()
     };
     states.set(container, state);
@@ -47,6 +48,8 @@ export function initialize(container, dotNetRef, initialBlocksJson) {
     container.addEventListener('pointermove', event => onHandlePointerMove(state, event));
     container.addEventListener('pointerup', event => onHandlePointerUp(state, event));
     container.addEventListener('pointercancel', event => onHandlePointerUp(state, event));
+    container.addEventListener('mouseup', state.selectionHandler = () => showInlineToolbar(state));
+    container.addEventListener('keyup', state.selectionHandler);
     document.addEventListener('mousedown', state.outsideClickHandler = event => closeFloatingMenus(state, event));
 }
 
@@ -82,6 +85,10 @@ export function dispose(container) {
     if (!state) return;
     if (state.notifyTimer) clearTimeout(state.notifyTimer);
     closeFloatingMenus(state);
+    if (state.selectionHandler) {
+        container.removeEventListener('mouseup', state.selectionHandler);
+        container.removeEventListener('keyup', state.selectionHandler);
+    }
     if (state.outsideClickHandler) document.removeEventListener('mousedown', state.outsideClickHandler);
     states.delete(container);
 }
@@ -200,12 +207,14 @@ function createMediaBody(block, state) {
     const wrapper = document.createElement('div');
     wrapper.className = 'wiki-media-block';
     const url = (block.props && block.props.url) || '';
+    wrapper.classList.toggle('has-source', Boolean(url));
 
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'form-control form-control-sm';
     input.placeholder = block.type === 'image' ? 'Paste an image URL and press Enter' : 'Paste a link and press Enter';
     input.value = url;
+    input.setAttribute('aria-label', block.type === 'image' ? 'Image URL' : 'Embed URL');
 
     const preview = document.createElement('div');
     preview.className = 'wiki-media-preview';
@@ -214,6 +223,7 @@ function createMediaBody(block, state) {
     const commit = () => {
         const el = wrapper.closest('.wiki-block');
         el.dataset.url = input.value.trim();
+        wrapper.classList.toggle('has-source', Boolean(input.value.trim()));
         renderMediaPreview(preview, block.type, input.value.trim());
         notifyChanged(state);
     };
@@ -233,13 +243,15 @@ function renderMediaPreview(preview, type, url) {
         const img = document.createElement('img');
         img.src = url;
         img.loading = 'lazy';
-        img.style.maxWidth = '100%';
+        img.className = 'wiki-media-image';
+        img.alt = '';
         preview.appendChild(img);
     } else {
         const link = document.createElement('a');
         link.href = url;
         link.target = '_blank';
         link.rel = 'noopener noreferrer';
+        link.className = 'wiki-embed-link';
         link.textContent = url;
         preview.appendChild(link);
     }
@@ -573,10 +585,11 @@ function closeMentionMenu(state) {
 
 function closeFloatingMenus(state, event) {
     if (event && (state.slashMenu?.contains(event.target) || state.wikiLinkMenu?.contains(event.target)
-        || state.mentionMenu?.contains(event.target))) return;
+        || state.mentionMenu?.contains(event.target) || state.inlineToolbar?.contains(event.target))) return;
     closeSlashMenu(state);
     closeWikiLinkMenu(state);
     closeMentionMenu(state);
+    closeInlineToolbar(state);
 }
 
 function positionMenu(menu, anchorEl) {
@@ -718,6 +731,72 @@ function escapeHtml(text) {
 }
 
 // ---- Inline formatting -----------------------------------------------------
+
+function showInlineToolbar(state) {
+    closeInlineToolbar(state);
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
+
+    const range = selection.getRangeAt(0);
+    const anchor = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+        ? range.commonAncestorContainer
+        : range.commonAncestorContainer.parentElement;
+    const content = anchor?.closest?.('.wiki-block-content');
+    if (!content || !state.container.contains(content)) return;
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'wiki-inline-toolbar';
+    toolbar.setAttribute('role', 'toolbar');
+    toolbar.setAttribute('aria-label', 'Text formatting');
+
+    const actions = [
+        { label: 'B', title: 'Bold', tag: 'b', className: 'is-bold' },
+        { label: 'I', title: 'Italic', tag: 'i', className: 'is-italic' },
+        { label: 'S', title: 'Strikethrough', tag: 's', className: 'is-strike' },
+        { label: '<>', title: 'Inline code', tag: 'code', className: 'is-code' }
+    ];
+
+    for (const action of actions) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = action.className;
+        button.textContent = action.label;
+        button.title = action.title;
+        button.setAttribute('aria-label', action.title);
+        button.addEventListener('mousedown', event => event.preventDefault());
+        button.addEventListener('click', () => {
+            toggleInlineTag(action.tag);
+            scheduleNotify(state);
+        });
+        toolbar.appendChild(button);
+    }
+
+    const linkButton = document.createElement('button');
+    linkButton.type = 'button';
+    linkButton.innerHTML = '&#128279;';
+    linkButton.title = 'Link';
+    linkButton.setAttribute('aria-label', 'Link');
+    linkButton.addEventListener('mousedown', event => event.preventDefault());
+    linkButton.addEventListener('click', () => {
+        const url = window.prompt('Link URL');
+        if (url) {
+            toggleInlineTag('a', { href: url });
+            scheduleNotify(state);
+        }
+    });
+    toolbar.appendChild(linkButton);
+
+    document.body.appendChild(toolbar);
+    const rect = range.getBoundingClientRect();
+    const toolbarRect = toolbar.getBoundingClientRect();
+    toolbar.style.left = `${window.scrollX + rect.left + (rect.width - toolbarRect.width) / 2}px`;
+    toolbar.style.top = `${window.scrollY + rect.top - toolbarRect.height - 8}px`;
+    state.inlineToolbar = toolbar;
+}
+
+function closeInlineToolbar(state) {
+    if (state.inlineToolbar) { state.inlineToolbar.remove(); state.inlineToolbar = null; }
+}
 
 function toggleInlineTag(tagName, attributes) {
     const selection = window.getSelection();
