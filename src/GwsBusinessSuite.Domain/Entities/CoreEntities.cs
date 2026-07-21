@@ -220,9 +220,9 @@ public static class WikiDatabaseViewTypes
     public const string Gallery = "gallery";
 }
 
-// Slots into the same sidebar tree as WikiPage (ParentWikiPageId) rather than being nested
-// inside a page's block content - see docs/WIKI_NOTION_CLONE.md for why inline-embedded
-// databases and rows-as-full-pages are deferred past this phase.
+// Slots into the same sidebar tree as WikiPage (ParentWikiPageId). Page blocks may reference
+// a database by id, but the canonical schema/rows stay here rather than being duplicated in
+// block JSON; see docs/WIKI_NOTION_CLONE.md for the linked-vs-inline database distinction.
 public sealed class WikiDatabase : AuditableEntity
 {
     public required string Title { get; set; }

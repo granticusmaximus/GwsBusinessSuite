@@ -5,9 +5,9 @@ using GwsBusinessSuite.Domain.Entities;
 
 namespace GwsBusinessSuite.Application.Wiki;
 
-// Renders a WikiBlock list to read-only HTML (the editor's own contenteditable DOM is owned
-// and rendered client-side by wiki-block-editor.js - this is only for the static preview
-// pane and for seeding a block's initial innerHTML when the editor first mounts it).
+// Renders a WikiBlock list to read-only HTML for consumers outside the interactive editor.
+// The editor's own contenteditable DOM is owned and rendered client-side by
+// wiki-block-editor.js, so authored pages do not need a second preview surface.
 //
 // Deliberately flat: each block renders independently with a margin-left proportional to
 // IndentLevel rather than stitching runs of list-item/toggle blocks into real nested
@@ -69,6 +69,7 @@ public static class WikiBlockHtmlRenderer
             WikiBlockTypes.Embed => string.IsNullOrWhiteSpace(block.Props.GetValueOrDefault("url"))
                 ? string.Empty
                 : $"<a href=\"{WebUtility.HtmlEncode(block.Props["url"])}\" target=\"_blank\" rel=\"noopener noreferrer\">{WebUtility.HtmlEncode(block.Props["url"])}</a>",
+            WikiBlockTypes.LinkedDatabase => RenderLinkedDatabase(block, indentStyle),
             // Legacy content from the pre-block-editor wiki still uses [[Page Title]] syntax,
             // so it's routed through the same resolver the old single-Markdown-string editor
             // used - new blocks link via RichTextSpan.Link instead and never hit this path.
@@ -92,9 +93,18 @@ public static class WikiBlockHtmlRenderer
             WikiBlockTypes.Divider => "---",
             WikiBlockTypes.Image => block.Props.GetValueOrDefault("url", "[image]"),
             WikiBlockTypes.Embed => block.Props.GetValueOrDefault("url", "[embed]"),
+            WikiBlockTypes.LinkedDatabase => block.Props.GetValueOrDefault("databaseTitle", "[linked database]"),
             _ => block.PlainText
         };
         text = text.Replace('\n', ' ').Trim();
         return text.Length > maxLength ? text[..maxLength] + "…" : text;
+    }
+
+    private static string RenderLinkedDatabase(WikiBlock block, string indentStyle)
+    {
+        var databaseId = block.Props.GetValueOrDefault("databaseId", string.Empty);
+        var title = block.Props.GetValueOrDefault("databaseTitle", "Linked database");
+        return $"<div class=\"wiki-linked-database\" data-database-id=\"{WebUtility.HtmlEncode(databaseId)}\"{indentStyle}>"
+            + $"<span aria-hidden=\"true\">▦</span><span>{WebUtility.HtmlEncode(title)}</span></div>";
     }
 }

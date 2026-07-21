@@ -19,6 +19,10 @@ public static class WikiBlockTypes
     public const string Divider = "divider";
     public const string Image = "image";
     public const string Embed = "embed";
+    // A reference to an existing Sentinel database. The database remains the single source
+    // of truth; the block stores only its id and a display-title snapshot so pages can link
+    // to the same database without copying schema or rows.
+    public const string LinkedDatabase = "linked_database";
     // Legacy content carried over from the old single-Markdown-string wiki by the one-time
     // backfill (WikiMarkdownBackfillService) - rendered through the existing Markdig
     // pipeline unchanged, so pre-existing pages keep their content verbatim rather than
@@ -28,7 +32,7 @@ public static class WikiBlockTypes
     public static readonly IReadOnlyList<string> All =
     [
         Paragraph, Heading1, Heading2, Heading3, BulletedListItem, NumberedListItem,
-        ToDo, Toggle, Quote, Callout, Code, Divider, Image, Embed, Markdown
+        ToDo, Toggle, Quote, Callout, Code, Divider, Image, Embed, LinkedDatabase, Markdown
     ];
 
     public static bool IsListItem(string type) => type is BulletedListItem or NumberedListItem;

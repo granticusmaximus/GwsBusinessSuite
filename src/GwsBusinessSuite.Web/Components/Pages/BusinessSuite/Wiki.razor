@@ -740,6 +740,23 @@
         Task.FromResult(WikiMarkdownHelper.SearchLinkSuggestions(query, WikiPages));
 
     [JSInvokable]
+    public Task<IReadOnlyList<LinkedDatabaseSuggestion>> SearchLinkedDatabaseSuggestions(string query)
+    {
+        var normalized = query.Trim();
+        IReadOnlyList<LinkedDatabaseSuggestion> suggestions = WikiDatabases
+            .Where(database => database.NotionArchivedAt is null
+                && (normalized.Length == 0 || database.Title.Contains(normalized, StringComparison.OrdinalIgnoreCase)))
+            .OrderBy(database => database.Title, StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .Select(database => new LinkedDatabaseSuggestion(
+                database.Id,
+                database.Title,
+                string.IsNullOrWhiteSpace(database.Icon) ? "▦" : database.Icon))
+            .ToList();
+        return Task.FromResult(suggestions);
+    }
+
+    [JSInvokable]
     public Task<IReadOnlyList<SentinelMentionSuggestion>> SearchMentionSuggestions(string query) =>
         SentinelWorkspaceService.SearchMentionSuggestionsAsync(query);
 
@@ -749,6 +766,16 @@
         if (Guid.TryParse(pageId, out var id))
         {
             await OpenPageAsync(id);
+            StateHasChanged();
+        }
+    }
+
+    [JSInvokable]
+    public async Task OpenLinkedDatabase(string databaseId)
+    {
+        if (Guid.TryParse(databaseId, out var id) && WikiDatabases.Any(database => database.Id == id))
+        {
+            await OpenDatabaseAsync(id);
             StateHasChanged();
         }
     }
@@ -795,16 +822,16 @@
             _wikiLinksInitialized = true;
         }
 
-        if (!_blockEditorInitialized)
+        if (SelectedDatabaseId is null && !_blockEditorInitialized)
         {
-            _blockEditorRef = DotNetObjectReference.Create(this);
-            _blockEditorModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js");
+            _blockEditorRef ??= DotNetObjectReference.Create(this);
+            _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js");
             await _blockEditorModule.InvokeVoidAsync("initialize", _blockEditorContainer, _blockEditorRef, Editor.BlocksJson);
             await _blockEditorModule.InvokeVoidAsync("setDiscussionCounts", _blockEditorContainer, _blockDiscussionCounts);
             _blockEditorInitialized = true;
             _blockEditorSyncedGeneration = _editorGeneration;
         }
-        else if (_blockEditorSyncedGeneration != _editorGeneration)
+        else if (SelectedDatabaseId is null && _blockEditorSyncedGeneration != _editorGeneration)
         {
             var blockEditorModule = _blockEditorModule!;
             await blockEditorModule.InvokeVoidAsync("setBlocks", _blockEditorContainer, Editor.BlocksJson);
@@ -908,6 +935,7 @@
 
     private async Task OpenDatabaseAsync(Guid wikiDatabaseId)
     {
+        await DeactivateBlockEditorAsync();
         SelectedPageId = null;
         SelectedDatabaseId = wikiDatabaseId;
         Backlinks = new();
@@ -916,6 +944,28 @@
         ErrorMessage = string.Empty;
         await SentinelWorkspaceService.RecordOpenedAsync(CurrentUsername, wikiDatabaseId, true);
         await LoadWorkspaceNavigationAsync();
+    }
+
+    private async Task DeactivateBlockEditorAsync()
+    {
+        if (!_blockEditorInitialized || _blockEditorModule is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _blockEditorModule.InvokeVoidAsync("dispose", _blockEditorContainer);
+        }
+        catch (JSDisconnectedException)
+        {
+            // Navigation can race a disconnected circuit; the removed DOM will be collected.
+        }
+        finally
+        {
+            _blockEditorInitialized = false;
+            _blockEditorSyncedGeneration = -1;
+        }
     }
 
     private async Task OpenPageAsync(Guid wikiPageId)
@@ -1414,6 +1464,8 @@
         : line.StartsWith('-') ? "text-danger"
         : line.StartsWith('~') ? "text-warning"
         : "text-secondary";
+
+    public sealed record LinkedDatabaseSuggestion(Guid Id, string Title, string Icon);
 
     public async ValueTask DisposeAsync()
     {

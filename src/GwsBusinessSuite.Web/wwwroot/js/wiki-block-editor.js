@@ -24,9 +24,10 @@ const BLOCK_TYPES = [
     { type: 'code', label: 'Code', icon: '</>' },
     { type: 'divider', label: 'Divider', icon: '—' },
     { type: 'image', label: 'Image', icon: '🖼' },
-    { type: 'embed', label: 'Embed link', icon: '🔗' }
+    { type: 'embed', label: 'Embed link', icon: '🔗' },
+    { type: 'linked_database', label: 'Linked database', icon: '▦' }
 ];
-const TEXTLESS_TYPES = new Set(['divider', 'image', 'embed']);
+const TEXTLESS_TYPES = new Set(['divider', 'image', 'embed', 'linked_database']);
 
 export function initialize(container, dotNetRef, initialBlocksJson) {
     dispose(container);
@@ -106,6 +107,11 @@ function createBlockElement(block, state) {
     el.dataset.blockType = block.type;
     el.dataset.indent = String(block.indentLevel || 0);
     if (block.type === 'to_do' && block.props && block.props.checked === 'true') el.dataset.checked = 'true';
+    if (block.type === 'linked_database') {
+        el.dataset.databaseId = (block.props && block.props.databaseId) || '';
+        el.dataset.databaseTitle = (block.props && block.props.databaseTitle) || '';
+        el.dataset.databaseIcon = (block.props && block.props.databaseIcon) || '';
+    }
     applyIndentStyle(el);
 
     const gutter = document.createElement('div');
@@ -177,6 +183,11 @@ function createBlockBody(block, state) {
 
     if (block.type === 'image' || block.type === 'embed') {
         body.appendChild(createMediaBody(block, state));
+        return body;
+    }
+
+    if (block.type === 'linked_database') {
+        body.appendChild(createLinkedDatabaseBody(block, state));
         return body;
     }
 
@@ -255,6 +266,119 @@ function renderMediaPreview(preview, type, url) {
         link.textContent = url;
         preview.appendChild(link);
     }
+}
+
+function createLinkedDatabaseBody(block, state) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'wiki-linked-database-editor';
+    let databaseId = (block.props && block.props.databaseId) || '';
+    let databaseTitle = (block.props && block.props.databaseTitle) || '';
+    let databaseIcon = (block.props && block.props.databaseIcon) || '';
+    let searchGeneration = 0;
+
+    const syncBlockDataset = () => {
+        const blockEl = wrapper.closest('.wiki-block');
+        if (!blockEl) return;
+        blockEl.dataset.databaseId = databaseId;
+        blockEl.dataset.databaseTitle = databaseTitle;
+        blockEl.dataset.databaseIcon = databaseIcon;
+    };
+
+    const render = () => {
+        wrapper.innerHTML = '';
+        if (databaseId) {
+            wrapper.classList.add('has-database');
+            const card = document.createElement('button');
+            card.type = 'button';
+            card.className = 'wiki-linked-database-card';
+            card.title = `Open ${databaseTitle || 'linked database'}`;
+
+            const icon = document.createElement('span');
+            icon.className = 'wiki-linked-database-icon';
+            icon.textContent = databaseIcon || '▦';
+            const label = document.createElement('span');
+            label.className = 'wiki-linked-database-label';
+            label.textContent = databaseTitle || 'Linked database';
+            const arrow = document.createElement('span');
+            arrow.className = 'wiki-linked-database-arrow';
+            arrow.textContent = '↗';
+            card.append(icon, label, arrow);
+            card.addEventListener('click', () => {
+                try { state.dotNetRef.invokeMethodAsync('OpenLinkedDatabase', databaseId); }
+                catch { /* the Blazor circuit may have disconnected */ }
+            });
+
+            const change = document.createElement('button');
+            change.type = 'button';
+            change.className = 'wiki-linked-database-change';
+            change.textContent = 'Change';
+            change.addEventListener('click', () => {
+                databaseId = '';
+                databaseTitle = '';
+                databaseIcon = '';
+                syncBlockDataset();
+                render();
+                notifyChanged(state);
+            });
+            wrapper.append(card, change);
+            return;
+        }
+
+        wrapper.classList.remove('has-database');
+        const chooser = document.createElement('div');
+        chooser.className = 'wiki-linked-database-chooser';
+        const input = document.createElement('input');
+        input.type = 'search';
+        input.className = 'form-control form-control-sm';
+        input.placeholder = 'Search databases to link…';
+        input.setAttribute('aria-label', 'Search Sentinel databases');
+        const results = document.createElement('div');
+        results.className = 'wiki-linked-database-results';
+
+        const search = query => {
+            const generation = ++searchGeneration;
+            state.dotNetRef.invokeMethodAsync('SearchLinkedDatabaseSuggestions', query).then(suggestions => {
+                if (generation !== searchGeneration) return;
+                results.innerHTML = '';
+                for (const suggestion of suggestions || []) {
+                    const option = document.createElement('button');
+                    option.type = 'button';
+                    option.className = 'wiki-linked-database-option';
+                    const optionIcon = document.createElement('span');
+                    optionIcon.textContent = suggestion.icon || '▦';
+                    const optionTitle = document.createElement('span');
+                    optionTitle.textContent = suggestion.title;
+                    option.append(optionIcon, optionTitle);
+                    option.addEventListener('click', () => {
+                        databaseId = suggestion.id;
+                        databaseTitle = suggestion.title;
+                        databaseIcon = suggestion.icon || '';
+                        syncBlockDataset();
+                        render();
+                        notifyChanged(state);
+                    });
+                    results.appendChild(option);
+                }
+                if (!suggestions || suggestions.length === 0) {
+                    const empty = document.createElement('span');
+                    empty.className = 'wiki-linked-database-empty';
+                    empty.textContent = 'No databases found';
+                    results.appendChild(empty);
+                }
+            }).catch(() => { results.innerHTML = ''; });
+        };
+
+        input.addEventListener('input', () => search(input.value.trim()));
+        chooser.append(input, results);
+        wrapper.appendChild(chooser);
+        queueMicrotask(() => {
+            input.focus();
+            search('');
+        });
+    };
+
+    render();
+    return wrapper;
 }
 
 function createContentEditable(block, state) {
@@ -656,6 +780,11 @@ function serializeBlock(blockEl) {
     const props = {};
     if (type === 'to_do') props.checked = blockEl.dataset.checked === 'true' ? 'true' : 'false';
     if (type === 'image' || type === 'embed') props.url = blockEl.dataset.url || '';
+    if (type === 'linked_database') {
+        props.databaseId = blockEl.dataset.databaseId || '';
+        props.databaseTitle = blockEl.dataset.databaseTitle || '';
+        props.databaseIcon = blockEl.dataset.databaseIcon || '';
+    }
 
     const contentEl = blockEl.querySelector('.wiki-block-content');
     return {
