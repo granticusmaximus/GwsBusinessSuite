@@ -18,6 +18,33 @@ public sealed record WikiDatabaseViewConfig(
     public static WikiDatabaseViewConfig Empty { get; } = new([], [], null);
 }
 
+public sealed record WikiDatabaseTemplateProperty(
+    Guid Id,
+    string Name,
+    string Type,
+    int SortOrder,
+    string ConfigJson);
+
+public sealed record WikiDatabaseTemplateRow(
+    Guid Id,
+    int SortOrder,
+    string PropertyValuesJson,
+    string BlocksJson);
+
+public sealed record WikiDatabaseTemplateView(
+    Guid Id,
+    string Name,
+    string Type,
+    int SortOrder,
+    string ConfigJson);
+
+public sealed record WikiDatabaseTemplateSnapshot(
+    string Title,
+    string? Icon,
+    IReadOnlyList<WikiDatabaseTemplateProperty> Properties,
+    IReadOnlyList<WikiDatabaseTemplateRow> Rows,
+    IReadOnlyList<WikiDatabaseTemplateView> Views);
+
 public static class WikiDatabaseViewConfigJson
 {
     public static WikiDatabaseViewConfig Parse(string configJson)

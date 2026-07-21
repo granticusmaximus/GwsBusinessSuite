@@ -116,11 +116,12 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 7. **Templates, sharing, and workspace structure** (delivered foundation): reusable page templates are
    delivered as durable snapshots that survive source-page deletion and create pages with fresh
    block identities. Page move/reorder and transactional subtree duplication are also delivered;
-   duplicates receive fresh block identities and independent revision history. Database templates
-   plus workspace roles, granular page/database permissions, and expiring or revocable public
-   shares. Full database duplication now creates an adjacent independent copy with fresh property,
+   duplicates receive fresh block identities and independent revision history. Workspace roles,
+   granular page/database permissions, and expiring or revocable public shares are also delivered.
+   Full database duplication now creates an adjacent independent copy with fresh property,
    row, view, and block identities while preserving remapped values and view configuration.
-   Database templates and teamspace administration remain future extensions.
+   Database templates are durable, source-independent snapshots of properties, rows, row-page
+   blocks, and views; every use remaps internal identities. Teamspace administration remains.
 8. **Sentinel AI** (delivered foundation): Ollama-backed ask, summarize, rewrite, translate,
    research, meeting-notes, and database-autofill actions grounded in workspace pages and
    databases. Outputs are durable, reviewable runs and require approve/reject before insertion.
@@ -139,7 +140,7 @@ capabilities where they fit GWS Business Suite; they are no longer silently excl
 | Area | Delivered now | Required parity work |
 | --- | --- | --- |
 | Blocks | Core and advanced native block vocabulary, including tables/equations/columns/synced blocks/TOC/buttons | Richer embeds and reusable block-template management |
-| Databases | Eleven view families, expanded property vocabulary, filters/sorts/groups, row page bodies, and linked/inline databases | Formula computation, rich relation configuration, layouts, and automations |
+| Databases | Eleven view families, expanded property vocabulary, filters/sorts/groups, row page bodies, linked/inline databases, and reusable database templates | Formula computation, rich relation configuration, layouts, and automations |
 | Knowledge graph | `[[Page]]` links, ranked/highlighted workspace search, backlinks, person/date mentions, favorites/recents | Graph navigation, database-row mention inbox entries, and saved searches |
 | Collaboration | Discussions, replies, reactions, notifications, DB-backed cross-instance presence/polling, block-level three-way merge, roles, granular permissions, and public sharing | Character-level CRDT/OT cursors and richer guest/teamspace administration |
 | Presentation | Emoji icon and cover URL | Custom icon/cover uploads, page width/fonts, database layouts, peek modes, and reusable style defaults |

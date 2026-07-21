@@ -101,7 +101,8 @@
   draft recovery; block-level discussion pins now surface open threads directly in the editor
   and jump to a focused conversation/composer; reusable page templates now create independent
   pages with fresh block identities, and transactional page-tree duplication copies nested pages
-  beside the source with independent revisions; distributed scale-out and CRDT/OT co-authoring
-  remain; database templates (database duplication is delivered), permissions, and sharing;
+  beside the source with independent revisions; database duplication and reusable source-independent
+  database templates are delivered; distributed scale-out and CRDT/OT co-authoring remain;
+  permissions and public sharing are delivered, while richer guest/teamspace administration remains;
   Sentinel AI/agents; and
   current-API/two-way interoperability.

@@ -2,10 +2,14 @@ using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
-public sealed class SentinelTemplateService(IAppDbContext dbContext, IWikiService wikiService)
+public sealed class SentinelTemplateService(
+    IAppDbContext dbContext,
+    IWikiService wikiService,
+    IWikiDatabaseService wikiDatabaseService)
     : ISentinelTemplateService
 {
     public async Task<IReadOnlyList<SentinelPageTemplateView>> ListAsync(
@@ -88,6 +92,72 @@ public sealed class SentinelTemplateService(IAppDbContext dbContext, IWikiServic
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<SentinelDatabaseTemplateView>> ListDatabaseTemplatesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var templates = await dbContext.SentinelDatabaseTemplates
+            .AsNoTracking()
+            .OrderBy(template => template.Name)
+            .ToListAsync(cancellationToken);
+        return templates.Select(ToDatabaseView).ToList();
+    }
+
+    public async Task<SentinelDatabaseTemplateView> CreateFromDatabaseAsync(
+        Guid wikiDatabaseId,
+        string name,
+        string performedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedName = NormalizeName(name);
+        if (await dbContext.SentinelDatabaseTemplates.AnyAsync(
+                template => template.NormalizedName == normalizedName, cancellationToken))
+        {
+            throw new InvalidOperationException("A Sentinel database template with that name already exists.");
+        }
+
+        var snapshot = await wikiDatabaseService.CreateTemplateSnapshotAsync(wikiDatabaseId, cancellationToken);
+        var template = new SentinelDatabaseTemplate
+        {
+            Name = name.Trim(),
+            NormalizedName = normalizedName,
+            DatabaseTitle = snapshot.Title,
+            Icon = snapshot.Icon,
+            SnapshotJson = JsonSerializer.Serialize(snapshot, WikiPropertyValues.Options),
+            CreatedBy = NormalizeUser(performedBy)
+        };
+        await dbContext.SentinelDatabaseTemplates.AddAsync(template, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ToDatabaseView(template);
+    }
+
+    public async Task<WikiDatabase> CreateDatabaseAsync(
+        Guid templateId,
+        Guid? parentWikiPageId,
+        string performedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var template = await dbContext.SentinelDatabaseTemplates
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == templateId, cancellationToken)
+            ?? throw new InvalidOperationException("The Sentinel database template no longer exists.");
+        var snapshot = JsonSerializer.Deserialize<WikiDatabaseTemplateSnapshot>(
+                template.SnapshotJson, WikiPropertyValues.Options)
+            ?? throw new InvalidOperationException("The Sentinel database template snapshot is invalid.");
+        return await wikiDatabaseService.CreateDatabaseFromTemplateAsync(
+            snapshot, parentWikiPageId, NormalizeUser(performedBy), cancellationToken);
+    }
+
+    public async Task DeleteDatabaseTemplateAsync(
+        Guid templateId,
+        CancellationToken cancellationToken = default)
+    {
+        var template = await dbContext.SentinelDatabaseTemplates
+            .FirstOrDefaultAsync(item => item.Id == templateId, cancellationToken);
+        if (template is null) return;
+        dbContext.SentinelDatabaseTemplates.Remove(template);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     private static SentinelPageTemplateView ToView(SentinelPageTemplate template) => new(
         template.Id,
         template.Name,
@@ -96,6 +166,23 @@ public sealed class SentinelTemplateService(IAppDbContext dbContext, IWikiServic
         WikiBlockJson.ParseBlocks(template.BlocksJson).Count,
         template.CreatedAt,
         template.CreatedBy);
+
+    private static SentinelDatabaseTemplateView ToDatabaseView(SentinelDatabaseTemplate template)
+    {
+        var snapshot = JsonSerializer.Deserialize<WikiDatabaseTemplateSnapshot>(
+                template.SnapshotJson, WikiPropertyValues.Options)
+            ?? new WikiDatabaseTemplateSnapshot(template.DatabaseTitle, template.Icon, [], [], []);
+        return new SentinelDatabaseTemplateView(
+            template.Id,
+            template.Name,
+            template.DatabaseTitle,
+            template.Icon,
+            snapshot.Properties.Count,
+            snapshot.Rows.Count,
+            snapshot.Views.Count,
+            template.CreatedAt,
+            template.CreatedBy);
+    }
 
     private static string NormalizeName(string name)
     {

@@ -225,7 +225,10 @@
         </div>
         <SentinelTemplates CurrentPageId="SelectedPageId"
                            CurrentPageTitle="Editor.Title"
-                           OnPageCreated="OpenTemplatePageAsync" />
+                           CurrentDatabaseId="SelectedDatabaseId"
+                           CurrentDatabaseTitle="SelectedDatabaseTitle"
+                           OnPageCreated="OpenTemplatePageAsync"
+                           OnDatabaseCreated="OpenTemplateDatabaseAsync" />
     </aside>
 
     <main class="sentinel-main">
@@ -605,6 +608,9 @@
     private WikiPageEditorModel Editor { get; set; } = new();
     private Guid? SelectedPageId { get; set; }
     private Guid? SelectedDatabaseId { get; set; }
+    private string SelectedDatabaseTitle => SelectedDatabaseId is { } databaseId
+        ? WikiDatabases.FirstOrDefault(database => database.Id == databaseId)?.Title ?? string.Empty
+        : string.Empty;
     private bool IsBusy { get; set; }
     private string SearchQuery { get; set; } = string.Empty;
     private bool IsSearchBusy { get; set; }
@@ -1056,6 +1062,13 @@
         await LoadTreeAsync(selectFirstPage: false);
         await OpenDatabaseAsync(wikiDatabaseId);
         StatusMessage = "Database duplicated with independent properties, views, rows, and page content.";
+    }
+
+    private async Task OpenTemplateDatabaseAsync(Guid wikiDatabaseId)
+    {
+        await LoadTreeAsync(selectFirstPage: false);
+        await OpenDatabaseAsync(wikiDatabaseId);
+        StatusMessage = "Database created from a reusable template with independent content.";
     }
 
     private async Task DeactivateBlockEditorAsync()

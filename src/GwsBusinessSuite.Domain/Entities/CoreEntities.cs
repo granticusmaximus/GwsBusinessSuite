@@ -145,6 +145,18 @@ public sealed class SentinelPageTemplate : AuditableEntity
     public string? CoverImageUrl { get; set; }
 }
 
+// Durable, source-independent snapshot of an entire Sentinel database. The JSON contains
+// its properties, rows (including page blocks), and views; materialization always remaps
+// every internal identity so a template instance can evolve independently of its source.
+public sealed class SentinelDatabaseTemplate : AuditableEntity
+{
+    public required string Name { get; set; }
+    public required string NormalizedName { get; set; }
+    public required string DatabaseTitle { get; set; }
+    public string? Icon { get; set; }
+    public string SnapshotJson { get; set; } = "{}";
+}
+
 // Per-user workspace navigation state. TargetId is deliberately polymorphic (page or
 // database), so there is no database FK; stale entries are pruned when the state is read.
 public sealed class SentinelNavigationEntry : AuditableEntity
