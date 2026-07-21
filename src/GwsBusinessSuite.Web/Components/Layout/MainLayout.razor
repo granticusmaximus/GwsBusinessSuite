@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @inject NavigationManager Navigation
+@using System.Security.Claims
 
 <AuthorizeView>
     <Authorized Context="authState">
@@ -35,9 +36,12 @@
                             <div class="gws-account-popover">
                                 <div class="gws-account-popover-user">
                                     <strong>@authState.User.Identity?.Name</strong>
-                                    <span>Administrator</span>
+                                    <span>@UserRole(authState.User)</span>
                                 </div>
-                                <a href="/admin/settings"><i class="bi bi-gear" aria-hidden="true"></i> Settings</a>
+                                @if (authState.User.IsInRole(GwsBusinessSuite.Domain.Entities.AppRoles.Admin))
+                                {
+                                    <a href="/admin/settings"><i class="bi bi-gear" aria-hidden="true"></i> Settings</a>
+                                }
                                 <a href="/auth/logout"><i class="bi bi-box-arrow-right" aria-hidden="true"></i> Sign out</a>
                             </div>
                         </details>
@@ -110,4 +114,7 @@
 
     private static string UserInitial(string? username) =>
         string.IsNullOrWhiteSpace(username) ? "A" : username.Trim()[0].ToString().ToUpperInvariant();
+
+    private static string UserRole(ClaimsPrincipal user) =>
+        user.FindFirst(ClaimTypes.Role)?.Value ?? "Portal user";
 }

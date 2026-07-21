@@ -72,7 +72,7 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 | Databases — structure | Databases share the page sidebar tree; every row opens as a block-content page; linked and inline database blocks reference canonical data without duplication | Row covers/icons, page history, layouts and peek modes |
 | Search & graph | All-token ranked page/block/database-row search with highlighted matches; structured and legacy backlinks; per-user favorites/recents; structured page, person, and date mentions with a personal mention inbox | Graph visualization, saved searches, and database-row mention inbox entries |
 | Import/sync | Current `2026-03-11` Notion API, data sources, views, comments, selective import, encrypted token storage, soft archival, and explicitly enabled conflict-aware manual page pushes | Durable ingestion of expiring Notion-hosted files and broader bidirectional database writes |
-| Visibility | Workspace roles and per-resource view/comment/edit/full-access grants, plus expiring/revocable tokenized public page and database shares | Guest onboarding and teamspace administration UI |
+| Visibility | Authenticated portal-member roles and per-resource view/comment/edit/full-access grants, plus expiring/revocable tokenized public page and database shares | Richer public-share controls and auditing |
 
 ## Delivery sequence
 
@@ -142,7 +142,7 @@ capabilities where they fit GWS Business Suite; they are no longer silently excl
 | Blocks | Core and advanced native block vocabulary, including tables/equations/columns/synced blocks/TOC/buttons | Richer embeds and reusable block-template management |
 | Databases | Eleven view families, expanded property vocabulary, filters/sorts/groups, row page bodies, linked/inline databases, and reusable database templates | Formula computation, rich relation configuration, layouts, and automations |
 | Knowledge graph | `[[Page]]` links, ranked/highlighted workspace search, backlinks, person/date mentions, favorites/recents | Graph navigation, database-row mention inbox entries, and saved searches |
-| Collaboration | Discussions, replies, reactions, notifications, DB-backed cross-instance presence/polling, block-level three-way merge, roles, granular permissions, and public sharing | Character-level CRDT/OT cursors and richer guest/teamspace administration |
+| Collaboration | Discussions, replies, reactions, notifications, DB-backed cross-instance presence/polling, block-level three-way merge, authenticated portal-member roles, granular permissions, and tokenized public sharing | Character-level CRDT/OT cursors and richer public-share controls |
 | Presentation | Emoji icon and cover URL | Custom icon/cover uploads, page width/fonts, database layouts, peek modes, and reusable style defaults |
 | Integration | Encrypted token, current data-source/view/comment API, selective reconciliation, and opt-in conflict-aware manual page writes | Durable file ingestion and bidirectional database schema/row writes |
 | AI | Workspace-grounded ask/writing/translation/research/meeting notes/autofill with durable approve/reject runs | Streaming chat, citations, transcription capture, and autonomous agents |
