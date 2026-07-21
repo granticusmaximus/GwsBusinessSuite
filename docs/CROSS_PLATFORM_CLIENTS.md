@@ -47,6 +47,10 @@ browser, and reports connectivity/navigation failures.
 Camera and microphone access for Live Show is declared on every MAUI platform. Android's WebView
 grants capture requests only when they originate from the configured GWS server and contain only
 camera/microphone resources; other origins and permission types are denied.
+Native file selection remains available for media uploads, article images, and data imports.
+Authenticated exports and other downloads are accepted only from the configured GWS server:
+Android saves them to Downloads, Windows uses the standard WebView2 download UI, and Apple clients
+open the system save/share sheet after the transfer completes.
 The server URL can be overridden for development by setting the MAUI preference named `BaseUrl`;
 release builds reject non-HTTPS values.
 
