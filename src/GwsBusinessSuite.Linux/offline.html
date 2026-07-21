@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GWS Business Suite</title>
+  <style>
+    :root { color-scheme: light dark; font-family: Inter, system-ui, sans-serif; }
+    body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: #f7f6f3; color: #191919; }
+    main { width: min(32rem, calc(100% - 3rem)); padding: 2rem; border: 1px solid #deddd9; border-radius: 14px; background: white; box-shadow: 0 18px 50px #00000012; }
+    h1 { margin-top: 0; font-size: 1.45rem; }
+    p { color: #666; line-height: 1.5; }
+    button { border: 0; border-radius: 8px; padding: .7rem 1rem; background: #2383a8; color: white; font: inherit; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Sentinel is temporarily unavailable</h1>
+    <p id="message">Check your internet connection and confirm that the GWS server is running.</p>
+    <button id="retry" type="button">Reconnect</button>
+  </main>
+  <script>
+    const parameters = new URLSearchParams(location.search);
+    const message = parameters.get('message');
+    const retry = parameters.get('retry');
+    if (message) document.querySelector('#message').textContent = message;
+    document.querySelector('#retry').addEventListener('click', () => {
+      if (retry) location.href = retry;
+    });
+  </script>
+</body>
+</html>

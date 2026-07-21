@@ -1,0 +1,39 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:local="clr-namespace:GwsBusinessSuite.App"
+             x:Class="GwsBusinessSuite.App.MainPage"
+             BackgroundColor="#F7F6F3">
+
+    <Grid RowDefinitions="Auto,Auto,*">
+        <Grid Grid.Row="0" Padding="12,8" ColumnDefinitions="Auto,Auto,*,Auto,Auto"
+              BackgroundColor="#191919" ColumnSpacing="8">
+            <Button x:Name="BackButton" Grid.Column="0" Text="‹" WidthRequest="38" HeightRequest="38"
+                    FontSize="24" Padding="0" Clicked="OnBackClicked" IsEnabled="False"
+                    SemanticProperties.Description="Go back" />
+            <Button Grid.Column="1" Text="⌂" WidthRequest="38" HeightRequest="38"
+                    FontSize="18" Padding="0" Clicked="OnHomeClicked"
+                    SemanticProperties.Description="Open Sentinel home" />
+            <VerticalStackLayout Grid.Column="2" VerticalOptions="Center" Spacing="0">
+                <Label Text="GWS Business Suite" TextColor="White" FontAttributes="Bold" FontSize="14" />
+                <Label Text="Sentinel workspace" TextColor="#B5B3AE" FontSize="11" />
+            </VerticalStackLayout>
+            <ActivityIndicator x:Name="LoadingIndicator" Grid.Column="3" Color="#2EAADC"
+                               IsRunning="True" IsVisible="True" WidthRequest="28" />
+            <Button Grid.Column="4" Text="↻" WidthRequest="38" HeightRequest="38"
+                    FontSize="19" Padding="0" Clicked="OnRefreshClicked"
+                    SemanticProperties.Description="Refresh workspace" />
+        </Grid>
+
+        <Grid x:Name="StatusBanner" Grid.Row="1" Padding="12,8" BackgroundColor="#FFF3CD" IsVisible="False"
+              ColumnDefinitions="*,Auto">
+            <Label x:Name="StatusMessage" TextColor="#664D03" VerticalOptions="Center" />
+            <Button Grid.Column="1" Text="Reconnect" Padding="12,4" Clicked="OnRefreshClicked" />
+        </Grid>
+
+        <WebView x:Name="WorkspaceView" Grid.Row="2"
+                 Navigating="OnWorkspaceNavigating"
+                 Navigated="OnWorkspaceNavigated" />
+    </Grid>
+
+</ContentPage>

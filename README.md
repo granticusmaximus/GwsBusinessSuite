@@ -8,6 +8,8 @@ GWS Business Suite is a multi-project application for business operations and co
 - `src/GwsBusinessSuite.Application`: Use cases, orchestration, service contracts, and DTOs
 - `src/GwsBusinessSuite.Infrastructure`: Data access and external integration implementations
 - `src/GwsBusinessSuite.Web`: Blazor web application
+- `src/GwsBusinessSuite.App`: .NET MAUI client for macOS, Windows, iOS, and Android
+- `src/GwsBusinessSuite.Linux`: Linux desktop companion using the hosted application
 - `tests/GwsBusinessSuite.Tests`: Unit and service tests
 - `docs`: Architecture and product documentation
 
@@ -23,6 +25,8 @@ This repository follows Clean Architecture boundaries:
 ## Prerequisites
 
 - .NET SDK 10.x
+- .NET MAUI workload for native Apple, Windows, and Android clients
+- Node.js 22+ for Linux desktop packaging
 
 ## Build And Test
 
@@ -31,6 +35,13 @@ From the repository root:
 ```bash
 dotnet build GwsBusinessSuite.slnx
 dotnet test GwsBusinessSuite.slnx
+```
+
+Native clients are kept in a separate solution so server-only development and CI do not require
+the MAUI workloads:
+
+```bash
+dotnet build src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-android
 ```
 
 ## Run The Blazor App

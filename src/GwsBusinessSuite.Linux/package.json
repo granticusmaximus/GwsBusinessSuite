@@ -1,0 +1,31 @@
+{
+  "name": "gws-business-suite-linux",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Linux desktop companion for GWS Business Suite",
+  "author": "Grant Watson",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist:linux": "electron-builder --linux AppImage deb rpm"
+  },
+  "devDependencies": {
+    "electron": "43.1.1",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "net.gwsapp.businesssuite",
+    "productName": "GWS Business Suite",
+    "artifactName": "GWS-Business-Suite-${version}-${arch}.${ext}",
+    "files": [
+      "main.cjs",
+      "offline.html",
+      "package.json"
+    ],
+    "linux": {
+      "category": "Office",
+      "synopsis": "GWS Business Suite synchronized workspace",
+      "target": ["AppImage", "deb", "rpm"]
+    }
+  }
+}

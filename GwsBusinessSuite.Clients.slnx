@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/clients/">
+    <Project Path="src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj" />
+  </Folder>
+</Solution>

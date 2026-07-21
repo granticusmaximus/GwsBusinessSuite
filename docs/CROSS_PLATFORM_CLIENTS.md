@@ -1,0 +1,60 @@
+# GWS Business Suite cross-platform clients
+
+The hosted ASP.NET Core application and its database remain the source of truth. Browser,
+MAUI, and Linux clients authenticate against and navigate the same HTTPS deployment, so no
+client owns a competing SQLite database.
+
+## Platform plan
+
+| Platform | Client | Current phase |
+| --- | --- | --- |
+| macOS | .NET MAUI / Mac Catalyst | Online synchronized shell |
+| Windows | .NET MAUI / WinUI 3 | Online synchronized shell |
+| iOS | .NET MAUI | Online synchronized shell |
+| Android | .NET MAUI | Online synchronized shell |
+| Linux | Electron | Online synchronized shell |
+| Browser | Existing Blazor Server app | Canonical web client |
+
+.NET MAUI does not provide a Linux target. The deliberately thin Electron project supplies a
+Linux desktop package without copying business logic or creating a second persistence model.
+
+## MAUI client
+
+`src/GwsBusinessSuite.App` starts at `https://admin.gwsapp.net/admin/sentinel`. Its WebView
+retains the normal authenticated browser session, blocks in-app navigation to untrusted origins,
+opens external HTTPS links in the system browser, and reports connectivity/navigation failures.
+The server URL can be overridden for development by setting the MAUI preference named `BaseUrl`;
+release builds reject non-HTTPS values.
+
+Build examples from macOS:
+
+```bash
+dotnet workload install maui
+dotnet build src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-android
+dotnet build src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-maccatalyst
+```
+
+Apple builds must use the Xcode version required by the installed iOS/Mac Catalyst workload.
+Windows packaging must run on a Windows build agent; signed iOS/macOS packages require an Apple
+developer identity and provisioning profile.
+
+## Linux client
+
+```bash
+cd src/GwsBusinessSuite.Linux
+npm install
+npm start
+npm run dist:linux
+```
+
+For local development only, set `GWS_SERVER_URL` to an HTTP or HTTPS server origin. Packaged
+applications always require HTTPS. Electron runs with Node integration disabled, context
+isolation and sandboxing enabled, an origin allowlist, and denied runtime permission requests.
+
+## Migration beyond the online shell
+
+The shell phase delivers installable clients and synchronized data immediately. Reusing Razor UI
+locally is a separate migration: move portable components into a Razor Class Library, expose
+authenticated HTTP/SignalR endpoints for server-only services, and replace component-level EF
+access with API-backed client services. Offline editing would additionally require a local outbox,
+versioned records, deterministic conflict resolution, and replay/idempotency contracts.

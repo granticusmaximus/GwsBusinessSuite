@@ -39,3 +39,4 @@ secrets.json
 # Node / React
 node_modules/
 apps/public-site/dist/
+src/GwsBusinessSuite.Linux/dist/
