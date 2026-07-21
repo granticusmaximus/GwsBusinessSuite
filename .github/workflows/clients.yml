@@ -2,6 +2,14 @@ name: Native Clients
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - "codex/**"
+    paths:
+      - "src/GwsBusinessSuite.App/**"
+      - "src/GwsBusinessSuite.Linux/**"
+      - ".github/workflows/clients.yml"
   pull_request:
     branches:
       - main
@@ -9,6 +17,13 @@ on:
       - "src/GwsBusinessSuite.App/**"
       - "src/GwsBusinessSuite.Linux/**"
       - ".github/workflows/clients.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-clients-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   android:
@@ -21,7 +36,22 @@ jobs:
           dotnet-version: "10.0.x"
       - run: dotnet workload install maui
       - run: dotnet restore src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj
-      - run: dotnet build src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-android -c Release --no-restore
+      - name: Publish QA APK
+        run: |
+          dotnet publish src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-android -c Release --no-restore -p:AndroidPackageFormats=apk -p:RunAOTCompilation=false
+          mkdir -p artifacts/android
+          find src/GwsBusinessSuite.App/bin/Release/net10.0-android -type f -name '*.apk' -exec cp -f {} artifacts/android/ \;
+      - name: Publish QA Android App Bundle
+        run: |
+          dotnet publish src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-android -c Release --no-restore -p:AndroidPackageFormats=aab -p:RunAOTCompilation=false
+          find src/GwsBusinessSuite.App/bin/Release/net10.0-android -type f -name '*.aab' -exec cp -f {} artifacts/android/ \;
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gws-android-qa
+          path: artifacts/android
+          if-no-files-found: error
+          retention-days: 14
 
   apple:
     name: Apple MAUI
@@ -33,8 +63,34 @@ jobs:
           dotnet-version: "10.0.x"
       - run: dotnet workload install maui
       - run: dotnet restore src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj
-      - run: dotnet build src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-maccatalyst -c Release --no-restore
-      - run: dotnet build src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-ios -c Release --no-restore -p:RuntimeIdentifier=iossimulator-arm64
+      - name: Build unsigned macOS application
+        run: dotnet build src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-maccatalyst -c Release --no-restore -p:RuntimeIdentifier=maccatalyst-arm64 -p:EnableCodeSigning=false
+      - name: Build iOS simulator application
+        run: dotnet build src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-ios -c Release --no-restore -p:RuntimeIdentifier=iossimulator-arm64
+      - name: Archive Apple application bundles
+        shell: bash
+        run: |
+          mkdir -p artifacts/apple
+          mac_app_path="$(find src/GwsBusinessSuite.App/bin/Release/net10.0-maccatalyst -type d -name '*.app' -print -quit)"
+          ios_app_path="$(find src/GwsBusinessSuite.App/bin/Release/net10.0-ios -type d -name '*.app' -print -quit)"
+          test -n "$mac_app_path"
+          test -n "$ios_app_path"
+          ditto -c -k --sequesterRsrc --keepParent "$mac_app_path" artifacts/apple/GWS-Business-Suite-macOS-arm64-unsigned.zip
+          ditto -c -k --sequesterRsrc --keepParent "$ios_app_path" artifacts/apple/GWS-Business-Suite-iOS-simulator-arm64.zip
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gws-macos-arm64-unsigned
+          path: artifacts/apple/GWS-Business-Suite-macOS-arm64-unsigned.zip
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload iOS simulator artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gws-ios-simulator-arm64
+          path: artifacts/apple/GWS-Business-Suite-iOS-simulator-arm64.zip
+          if-no-files-found: error
+          retention-days: 14
 
   windows:
     name: Windows MAUI
@@ -46,7 +102,18 @@ jobs:
           dotnet-version: "10.0.x"
       - run: dotnet workload install maui
       - run: dotnet restore src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj
-      - run: dotnet build src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-windows10.0.19041.0 -c Release --no-restore
+      - name: Publish portable Windows application
+        run: dotnet publish src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-windows10.0.19041.0 -c Release -r win-x64 --self-contained true -p:WindowsAppSDKSelfContained=true -o artifacts/windows-x64
+      - name: Archive Windows application
+        shell: pwsh
+        run: Compress-Archive -Path artifacts/windows-x64/* -DestinationPath artifacts/GWS-Business-Suite-windows-x64-unsigned.zip
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gws-windows-x64-unsigned
+          path: artifacts/GWS-Business-Suite-windows-x64-unsigned.zip
+          if-no-files-found: error
+          retention-days: 14
 
   linux:
     name: Linux Electron
@@ -63,4 +130,17 @@ jobs:
           cache-dependency-path: src/GwsBusinessSuite.Linux/package-lock.json
       - run: npm ci --no-audit --no-fund
       - run: node --check main.cjs
-      - run: npm exec electron-builder -- --linux dir
+      - name: Install RPM packaging tools
+        run: sudo apt-get update && sudo apt-get install --yes rpm
+      - name: Build Linux packages
+        run: npm run dist:linux
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gws-linux-x64
+          path: |
+            src/GwsBusinessSuite.Linux/dist/*.AppImage
+            src/GwsBusinessSuite.Linux/dist/*.deb
+            src/GwsBusinessSuite.Linux/dist/*.rpm
+          if-no-files-found: error
+          retention-days: 14

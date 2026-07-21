@@ -24,6 +24,24 @@ are native, and those states mirror the canonical web tokens in `wwwroot/app.css
 .NET MAUI does not provide a Linux target. The deliberately thin Electron project supplies a
 Linux desktop package without copying business logic or creating a second persistence model.
 
+## Continuous-integration artifacts
+
+The `Native Clients` GitHub Actions workflow runs for client changes pushed to `main` or a
+`codex/**` feature branch, for matching pull requests, and by manual dispatch. Each successful
+run retains downloadable build artifacts for 14 days:
+
+| Artifact | Contents |
+| --- | --- |
+| `gws-android-qa` | APK and Android App Bundle built without a production signing key |
+| `gws-macos-arm64-unsigned` | Zipped Mac Catalyst application bundle |
+| `gws-ios-simulator-arm64` | Zipped iOS Simulator application bundle |
+| `gws-windows-x64-unsigned` | Self-contained portable Windows application |
+| `gws-linux-x64` | AppImage, DEB, and RPM packages |
+
+These are QA artifacts, not store-ready releases. Public distribution still requires platform
+signing identities, Apple provisioning and notarization, Android/Windows signing keys, and the
+corresponding release secrets.
+
 ## MAUI client
 
 `src/GwsBusinessSuite.App` starts at `https://admin.gwsapp.net/admin/sentinel`. Its WebView

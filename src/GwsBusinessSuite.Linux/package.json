@@ -3,7 +3,12 @@
   "version": "1.0.0",
   "private": true,
   "description": "Linux desktop companion for GWS Business Suite",
-  "author": "Grant Watson",
+  "author": {
+    "name": "Grant Watson",
+    "email": "grant@gwsapp.net"
+  },
+  "homepage": "https://github.com/granticusmaximus/GwsBusinessSuite",
+  "desktopName": "net.gwsapp.businesssuite.desktop",
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
@@ -25,6 +30,12 @@
     "linux": {
       "category": "Office",
       "synopsis": "GWS Business Suite synchronized workspace",
+      "description": "A synchronized Sentinel workspace for GWS Business Suite.",
+      "maintainer": "Grant Watson <grant@gwsapp.net>",
+      "vendor": "GWS Business Suite",
+      "executableName": "gws-business-suite",
+      "icon": "build/icons",
+      "syncDesktopName": true,
       "target": ["AppImage", "deb", "rpm"]
     }
   }
