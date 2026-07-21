@@ -134,6 +134,7 @@ public static class DependencyInjection
         services.AddHostedService<AutomationResumeBackgroundService>();
         services.AddScoped<IWikiService, WikiService>();
         services.AddScoped<IWikiDatabaseService, WikiDatabaseService>();
+        services.AddScoped<ISentinelTemplateService, SentinelTemplateService>();
         services.AddScoped<ISentinelWorkspaceService, SentinelWorkspaceService>();
         services.AddScoped<ISentinelCollaborationService, SentinelCollaborationService>();
         services.AddSingleton<SentinelCollaborationNotifier>();

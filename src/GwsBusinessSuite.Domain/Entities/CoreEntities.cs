@@ -132,6 +132,19 @@ public sealed class WikiPageRevision : AuditableEntity
     public WikiPage? WikiPage { get; set; }
 }
 
+// Durable page-content snapshot used to create new Sentinel pages. Templates deliberately
+// do not retain a foreign key to their source page so deleting or reorganizing that page
+// cannot invalidate a reusable workspace template.
+public sealed class SentinelPageTemplate : AuditableEntity
+{
+    public required string Name { get; set; }
+    public required string NormalizedName { get; set; }
+    public required string PageTitle { get; set; }
+    public string BlocksJson { get; set; } = "[]";
+    public string? Icon { get; set; }
+    public string? CoverImageUrl { get; set; }
+}
+
 // Per-user workspace navigation state. TargetId is deliberately polymorphic (page or
 // database), so there is no database FK; stale entries are pruned when the state is read.
 public sealed class SentinelNavigationEntry : AuditableEntity

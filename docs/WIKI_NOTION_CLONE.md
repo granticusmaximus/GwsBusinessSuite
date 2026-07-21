@@ -63,8 +63,8 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 
 | Capability family | Foundation status | Expansion target |
 | --- | --- | --- |
-| Page model | Nested pages (flat parent-id + explicit sibling `SortOrder`), icon, cover image | — |
-| Block editor | Slash-command insert, drag-reorder, Tab/Shift-Tab indent, inline bold/italic/link (Ctrl+B/I/K), `[[Page]]` autocomplete, paste-as-plain-text | Nested columns, synced/reusable blocks, native tables, equations, breadcrumbs, TOC, buttons, templates |
+| Page model | Nested pages (flat parent-id + explicit sibling `SortOrder`), icon, cover image, move/reorder, transactional subtree duplication | — |
+| Block editor | Slash-command insert, drag-reorder, Tab/Shift-Tab indent, inline bold/italic/link (Ctrl+B/I/K), `[[Page]]` autocomplete, paste-as-plain-text, reusable page templates | Nested columns, synced/reusable blocks, native tables, equations, breadcrumbs, TOC, buttons, block templates |
 | Core block types | paragraph, heading 1-3, bulleted/numbered list item, to-do, toggle, quote, callout, code, divider, image, embed, legacy markdown (pre-migration content) | table, richer embeds (oEmbed previews) |
 | History | Bounded DB snapshot revisions (20/page), structural diff (added/removed/changed blocks), revert-as-new-version | — |
 | Databases | Typed properties (title, text, number, select, multi-select, date, checkbox, url, created-time); editable Table and Board; List and Gallery views | Calendar, Timeline, Chart, Form, Map, Feed, and Dashboard views; formula/relation/rollup and person/files properties |
@@ -106,15 +106,18 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 6. **Collaboration** (in progress): authenticated page and block discussion threads, nested
    reply targets, resolve/reopen, emoji reactions, `@username` notification fan-out, and a
    personal read/unread notification panel, live cross-circuit discussion/notification
-   refresh, and heartbeat-expiring per-page presence are delivered. Inline comment placement
-   in the editor canvas remains. Atomic content-generation checks now reject stale saves and
+   refresh, heartbeat-expiring per-page presence, and editor-canvas block discussion pins are
+   delivered. Atomic content-generation checks now reject stale saves and
    preserve the local draft with explicit reload, overwrite, or save-as-copy recovery choices.
    This prevents lost updates but is not CRDT/OT simultaneous co-authoring. Realtime fan-out and
    presence are process-local while the suite runs as one web instance; multi-instance scale-out
    will require a distributed backplane/presence store.
-7. **Templates, sharing, and workspace structure**: page/database templates, duplicate/move,
-   favorites/recents, teamspaces, member/guest roles, granular page/database permissions,
-   and expiring public share links.
+7. **Templates, sharing, and workspace structure** (in progress): reusable page templates are
+   delivered as durable snapshots that survive source-page deletion and create pages with fresh
+   block identities. Page move/reorder and transactional subtree duplication are also delivered;
+   duplicates receive fresh block identities and independent revision history. Database templates
+   and duplication, teamspaces, member/guest roles, granular page/database permissions, and
+   expiring public share links remain; favorites/recents were delivered in Phase 4.
 8. **Sentinel AI and automation**: workspace-grounded search/chat, writing and translation,
    database autofill/formulas, research mode, meeting-note transcription/summaries, and
    reviewable agents/automations using the app's existing Ollama and workflow infrastructure.
@@ -135,7 +138,7 @@ capabilities where they fit GWS Business Suite; they are no longer silently excl
 | Blocks | Core text/list/task/toggle/callout/code/media/embed blocks; tables import as Markdown; layout wrappers flatten | Complete supported block vocabulary, native tables/equations/columns/synced blocks, reusable templates, and richer embeds |
 | Databases | Editable Table/Board/List/Gallery, filters/sorts/groups, common property types, and rows with block page bodies | Remaining major view families, linked/inline sources, formulas/relations/rollups, layouts, charts, forms, and automations |
 | Knowledge graph | `[[Page]]` links, ranked/highlighted workspace search, backlinks, person/date mentions, favorites/recents | Graph navigation, database-row mention inbox entries, and saved searches |
-| Collaboration | Authenticated page/block discussions, replies, resolve/reopen, reactions, participant/mention notifications and read state, live cross-circuit refresh, heartbeat page presence, and optimistic lost-update protection with draft recovery | Distributed realtime scale-out, editor-canvas comment pins, CRDT/OT simultaneous co-authoring, workspace roles, granular permissions, and public sharing |
+| Collaboration | Authenticated page/block discussions with editor-canvas pins, replies, resolve/reopen, reactions, participant/mention notifications and read state, live cross-circuit refresh, heartbeat page presence, and optimistic lost-update protection with draft recovery | Distributed realtime scale-out, CRDT/OT simultaneous co-authoring, workspace roles, granular permissions, and public sharing |
 | Presentation | Emoji icon and cover URL | Custom icon/cover uploads, page width/fonts, database layouts, peek modes, and reusable style defaults |
 | Integration | Encrypted token, one-way manual/hourly reconciliation | Current Notion data-source/view/comment API, selective sync, durable file ingestion, and opt-in conflict-aware writes |
 | AI | Existing Ollama and workflow foundations elsewhere in the suite | Sentinel-grounded chat/search, writing, autofill, research, meeting notes, and reviewable workspace agents |

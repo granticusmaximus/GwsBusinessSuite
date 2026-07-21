@@ -1,0 +1,140 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@inject ISentinelTemplateService TemplateService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject ILogger<SentinelTemplates> Logger
+
+<div class="card border-0 shadow-sm mt-3">
+    <div class="card-header bg-white border-bottom py-2 d-flex align-items-center justify-content-between">
+        <span class="fw-semibold small"><i class="bi bi-copy me-1"></i>Page templates</span>
+        <span class="badge text-bg-secondary">@Templates.Count</span>
+    </div>
+    <div class="card-body p-2 border-bottom">
+        @if (CurrentPageId.HasValue)
+        {
+            <div class="input-group input-group-sm">
+                <input class="form-control" @bind="NewTemplateName" placeholder="Template name" maxlength="120" />
+                <button type="button" class="btn btn-outline-primary" @onclick="SaveTemplateAsync"
+                        disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewTemplateName))" title="Save this page as a template">
+                    <i class="bi bi-bookmark-plus"></i>
+                </button>
+            </div>
+        }
+        else
+        {
+            <div class="small text-secondary">Open and save a page to turn it into a template.</div>
+        }
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+    {
+        <div class="small text-danger p-2 border-bottom">@ErrorMessage</div>
+    }
+
+    @if (Templates.Count == 0)
+    {
+        <div class="small text-secondary p-3">No page templates yet.</div>
+    }
+    else
+    {
+        <div class="list-group list-group-flush">
+            @foreach (var template in Templates)
+            {
+                <div class="list-group-item p-2">
+                    <div class="d-flex align-items-center gap-2">
+                        <span>@(string.IsNullOrWhiteSpace(template.Icon) ? "📄" : template.Icon)</span>
+                        <div class="min-w-0 flex-grow-1">
+                            <div class="small fw-semibold text-truncate">@template.Name</div>
+                            <div class="small text-secondary text-truncate">@template.PageTitle · @template.BlockCount blocks</div>
+                        </div>
+                        @if (PendingDeleteId == template.Id)
+                        {
+                            <button type="button" class="btn btn-xs btn-danger" @onclick="() => DeleteAsync(template.Id)" disabled="@IsBusy">Confirm</button>
+                            <button type="button" class="btn btn-xs btn-link" @onclick="CancelDelete" disabled="@IsBusy">Cancel</button>
+                        }
+                        else
+                        {
+                            <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => UseAsync(template.Id)" disabled="@IsBusy">Use</button>
+                            <button type="button" class="btn btn-xs btn-link text-danger" @onclick="() => PendingDeleteId = template.Id" disabled="@IsBusy" title="Delete template">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public Guid? CurrentPageId { get; set; }
+    [Parameter] public string CurrentPageTitle { get; set; } = string.Empty;
+    [Parameter] public EventCallback<Guid> OnPageCreated { get; set; }
+
+    private List<SentinelPageTemplateView> Templates { get; set; } = new();
+    private string NewTemplateName { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+    private Guid? PendingDeleteId { get; set; }
+    private bool IsBusy { get; set; }
+    private Guid? _previousPageId;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    protected override void OnParametersSet()
+    {
+        if (_previousPageId == CurrentPageId) return;
+        _previousPageId = CurrentPageId;
+        NewTemplateName = CurrentPageId.HasValue && !string.IsNullOrWhiteSpace(CurrentPageTitle)
+            ? $"{CurrentPageTitle} template"
+            : string.Empty;
+    }
+
+    private async Task SaveTemplateAsync()
+    {
+        if (CurrentPageId is not { } pageId) return;
+        await RunAsync(async () =>
+        {
+            var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await TemplateService.CreateFromPageAsync(pageId, NewTemplateName, user);
+            await LoadAsync();
+            NewTemplateName = $"{CurrentPageTitle} template";
+        });
+    }
+
+    private async Task UseAsync(Guid templateId) => await RunAsync(async () =>
+    {
+        var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        var page = await TemplateService.CreatePageAsync(templateId, null, user);
+        await OnPageCreated.InvokeAsync(page.Id);
+    });
+
+    private async Task DeleteAsync(Guid templateId) => await RunAsync(async () =>
+    {
+        await TemplateService.DeleteAsync(templateId);
+        PendingDeleteId = null;
+        await LoadAsync();
+    });
+
+    private void CancelDelete() => PendingDeleteId = null;
+
+    private async Task LoadAsync() => Templates = (await TemplateService.ListAsync()).ToList();
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Sentinel template action failed.");
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+}

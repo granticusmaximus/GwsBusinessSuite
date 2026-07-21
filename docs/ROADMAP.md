@@ -99,5 +99,8 @@
   notifications, live cross-circuit refresh, and heartbeat page presence are now delivered;
   optimistic content-version checks now prevent silent concurrent overwrites with explicit
   draft recovery; block-level discussion pins now surface open threads directly in the editor
-  and jump to a focused conversation/composer; distributed scale-out and CRDT/OT co-authoring remain; templates,
-  permissions, and sharing; Sentinel AI/agents; and current-API/two-way interoperability.
+  and jump to a focused conversation/composer; reusable page templates now create independent
+  pages with fresh block identities, and transactional page-tree duplication copies nested pages
+  beside the source with independent revisions; distributed scale-out and CRDT/OT co-authoring
+  remain; database templates/duplication, permissions, and sharing; Sentinel AI/agents; and
+  current-API/two-way interoperability.

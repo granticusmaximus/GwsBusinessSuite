@@ -7,6 +7,7 @@ public interface IWikiService
     Task<IReadOnlyList<WikiPage>> ListPagesAsync(CancellationToken cancellationToken = default);
     Task<WikiPage?> GetPageAsync(Guid wikiPageId, CancellationToken cancellationToken = default);
     Task<WikiPage> SavePageAsync(WikiPageEditorModel editor, string performedBy, CancellationToken cancellationToken = default);
+    Task<WikiPage> DuplicatePageAsync(Guid wikiPageId, string performedBy, CancellationToken cancellationToken = default);
     Task DeletePageAsync(Guid wikiPageId, string performedBy, CancellationToken cancellationToken = default);
     Task ReorderPageAsync(Guid wikiPageId, Guid? newParentWikiPageId, int newSortOrder, string performedBy, CancellationToken cancellationToken = default);
 

@@ -28,6 +28,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<ContactActivity> ContactActivities => Set<ContactActivity>();
     public DbSet<WikiPage> WikiPages => Set<WikiPage>();
     public DbSet<WikiPageRevision> WikiPageRevisions => Set<WikiPageRevision>();
+    public DbSet<SentinelPageTemplate> SentinelPageTemplates => Set<SentinelPageTemplate>();
     public DbSet<SentinelNavigationEntry> SentinelNavigationEntries => Set<SentinelNavigationEntry>();
     public DbSet<SentinelDiscussion> SentinelDiscussions => Set<SentinelDiscussion>();
     public DbSet<SentinelDiscussionComment> SentinelDiscussionComments => Set<SentinelDiscussionComment>();
@@ -105,6 +106,10 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .HasForeignKey(x => x.WikiPageId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<WikiPageRevision>().HasIndex(x => new { x.WikiPageId, x.RevisionNumber }).IsUnique();
+        modelBuilder.Entity<SentinelPageTemplate>().HasIndex(x => x.NormalizedName).IsUnique();
+        modelBuilder.Entity<SentinelPageTemplate>().Property(x => x.Name).HasMaxLength(120);
+        modelBuilder.Entity<SentinelPageTemplate>().Property(x => x.NormalizedName).HasMaxLength(120);
+        modelBuilder.Entity<SentinelPageTemplate>().Property(x => x.PageTitle).HasMaxLength(240);
         modelBuilder.Entity<SentinelNavigationEntry>()
             .HasIndex(x => new { x.Username, x.IsDatabase, x.TargetId })
             .IsUnique();

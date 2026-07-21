@@ -212,6 +212,9 @@
                 }
             </div>
         </div>
+        <SentinelTemplates CurrentPageId="SelectedPageId"
+                           CurrentPageTitle="Editor.Title"
+                           OnPageCreated="OpenTemplatePageAsync" />
     </div>
 
     <div class="col-lg-9">
@@ -324,6 +327,10 @@
                         </button>
                         <button type="button" class="btn btn-outline-secondary" @onclick="CreateNewPage" disabled="@IsBusy">
                             Reset
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" @onclick="DuplicateSelectedPageAsync"
+                                disabled="@(IsBusy || !SelectedPageId.HasValue)">
+                            <i class="bi bi-copy me-1"></i>Duplicate
                         </button>
                         <button type="button" class="btn btn-outline-danger" @onclick="DeleteSelectedPageAsync"
                                 disabled="@(IsBusy || !SelectedPageId.HasValue)">
@@ -944,6 +951,13 @@
         }
     }
 
+    private async Task OpenTemplatePageAsync(Guid wikiPageId)
+    {
+        await LoadTreeAsync(selectFirstPage: false);
+        await OpenPageAsync(wikiPageId);
+        StatusMessage = "Created a new Sentinel page from a template.";
+    }
+
     private async Task LoadHistoryAsync(Guid wikiPageId)
     {
         HistoryErrorMessage = string.Empty;
@@ -1059,6 +1073,32 @@
         {
             Logger.LogError(ex, "Unable to delete wiki page {WikiPageId}.", wikiPageId);
             ErrorMessage = $"Unable to delete Sentinel page. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task DuplicateSelectedPageAsync()
+    {
+        if (SelectedPageId is not { } wikiPageId) return;
+
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        try
+        {
+            var user = await CurrentUserNameAsync();
+            var duplicate = await WikiService.DuplicatePageAsync(wikiPageId, user);
+            await LoadTreeAsync(selectFirstPage: false);
+            await OpenPageAsync(duplicate.Id);
+            StatusMessage = $"Duplicated Sentinel page as '{duplicate.Title}'.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to duplicate Sentinel page {WikiPageId}.", wikiPageId);
+            ErrorMessage = $"Unable to duplicate Sentinel page. {ex.Message}";
         }
         finally
         {

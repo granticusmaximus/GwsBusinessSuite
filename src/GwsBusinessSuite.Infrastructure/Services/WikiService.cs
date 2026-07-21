@@ -113,6 +113,59 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
         return page;
     }
 
+    public async Task<WikiPage> DuplicatePageAsync(
+        Guid wikiPageId,
+        string performedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var pages = await dbContext.WikiPages
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        var source = pages.FirstOrDefault(page => page.Id == wikiPageId)
+            ?? throw new InvalidOperationException("The Sentinel page no longer exists.");
+        var childrenByParent = pages
+            .Where(page => page.ParentWikiPageId.HasValue)
+            .GroupBy(page => page.ParentWikiPageId!.Value)
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderBy(page => page.SortOrder).ThenBy(page => page.Title).ToList());
+
+        await using var transaction = await dbContext.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            var visited = new HashSet<Guid>();
+            var duplicated = await DuplicateBranchAsync(
+                source,
+                source.ParentWikiPageId,
+                $"{source.Title} (copy)",
+                childrenByParent,
+                visited,
+                performedBy,
+                depth: 0,
+                cancellationToken);
+            await ReorderPageAsync(
+                duplicated.Id,
+                source.ParentWikiPageId,
+                source.SortOrder + 1,
+                performedBy,
+                cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return duplicated;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            // A Blazor circuit can retain this scoped DbContext after the failed action. EF's
+            // entity states are not rewound by a database rollback, so discard the rolled-back
+            // clones and sibling-order values before any later circuit action reuses the scope.
+            if (dbContext is DbContext efContext)
+            {
+                efContext.ChangeTracker.Clear();
+            }
+            throw;
+        }
+    }
+
     public async Task DeletePageAsync(Guid wikiPageId, string performedBy, CancellationToken cancellationToken = default)
     {
         var page = await dbContext.WikiPages.FirstOrDefaultAsync(item => item.Id == wikiPageId, cancellationToken);
@@ -233,6 +286,52 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
             throw new InvalidOperationException("Sentinel concurrency requires an EF Core DbContext.");
         }
         await efContext.Entry(page).ReloadAsync(cancellationToken);
+    }
+
+    private async Task<WikiPage> DuplicateBranchAsync(
+        WikiPage source,
+        Guid? newParentWikiPageId,
+        string title,
+        IReadOnlyDictionary<Guid, List<WikiPage>> childrenByParent,
+        HashSet<Guid> visited,
+        string performedBy,
+        int depth,
+        CancellationToken cancellationToken)
+    {
+        if (depth > 128 || !visited.Add(source.Id))
+        {
+            throw new InvalidOperationException("The Sentinel page tree contains a cycle and cannot be duplicated.");
+        }
+
+        var clonedBlocks = WikiBlockJson.ParseBlocks(source.BlocksJson)
+            .Select(block => block with { Id = Guid.NewGuid() })
+            .ToList();
+        var duplicate = await SavePageAsync(new WikiPageEditorModel
+        {
+            Title = title,
+            BlocksJson = WikiBlockJson.Serialize(clonedBlocks),
+            Icon = source.Icon,
+            CoverImageUrl = source.CoverImageUrl,
+            ParentWikiPageId = newParentWikiPageId
+        }, performedBy, cancellationToken);
+
+        if (childrenByParent.TryGetValue(source.Id, out var children))
+        {
+            foreach (var child in children)
+            {
+                await DuplicateBranchAsync(
+                    child,
+                    duplicate.Id,
+                    child.Title,
+                    childrenByParent,
+                    visited,
+                    performedBy,
+                    depth + 1,
+                    cancellationToken);
+            }
+        }
+
+        return duplicate;
     }
 
     private static WikiPageConcurrencyException CreateConcurrencyException(WikiPage page, long expectedVersion) =>

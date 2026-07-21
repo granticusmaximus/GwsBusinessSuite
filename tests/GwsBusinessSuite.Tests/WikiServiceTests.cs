@@ -75,6 +75,85 @@ public sealed class WikiServiceTests
     }
 
     [Fact]
+    public async Task DuplicatePageAsync_ShouldCopyNestedPagesWithFreshBlockIdsAndAdjacentRootOrder()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiService(db);
+        var before = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Before",
+            BlocksJson = ParagraphBlocks("before")
+        }, "owner");
+        var source = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Launch Plan",
+            Icon = "🚀",
+            CoverImageUrl = "https://example.test/launch.jpg",
+            BlocksJson = ParagraphBlocks("source")
+        }, "owner");
+        var child = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Checklist",
+            BlocksJson = ParagraphBlocks("child"),
+            ParentWikiPageId = source.Id
+        }, "owner");
+        var after = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "After",
+            BlocksJson = ParagraphBlocks("after")
+        }, "owner");
+        var sourceBlockId = WikiBlockJson.ParseBlocks(source.BlocksJson).Single().Id;
+        var childBlockId = WikiBlockJson.ParseBlocks(child.BlocksJson).Single().Id;
+
+        var duplicate = await service.DuplicatePageAsync(source.Id, "member");
+        var pages = await service.ListPagesAsync();
+        var duplicatedChild = pages.Single(page => page.ParentWikiPageId == duplicate.Id);
+
+        duplicate.Title.Should().Be("Launch Plan (copy)");
+        duplicate.Icon.Should().Be("🚀");
+        duplicate.CoverImageUrl.Should().Be("https://example.test/launch.jpg");
+        duplicate.ParentWikiPageId.Should().BeNull();
+        duplicate.SortOrder.Should().Be(source.SortOrder + 1);
+        WikiBlockJson.ParseBlocks(duplicate.BlocksJson).Single().Id.Should().NotBe(sourceBlockId);
+        duplicatedChild.Title.Should().Be("Checklist");
+        WikiBlockJson.ParseBlocks(duplicatedChild.BlocksJson).Single().Id.Should().NotBe(childBlockId);
+        pages.Single(page => page.Id == before.Id).SortOrder.Should().Be(0);
+        pages.Single(page => page.Id == after.Id).SortOrder.Should().Be(3);
+        (await service.GetHistoryAsync(duplicate.Id)).Should().ContainSingle();
+        (await service.GetHistoryAsync(duplicatedChild.Id)).Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task DuplicatePageAsync_ShouldRollbackAndClearTrackedClonesWhenTheTreeContainsACycle()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiService(db);
+        var parent = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Parent",
+            BlocksJson = ParagraphBlocks("parent")
+        }, "owner");
+        var child = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Child",
+            BlocksJson = ParagraphBlocks("child"),
+            ParentWikiPageId = parent.Id
+        }, "owner");
+        parent.ParentWikiPageId = child.Id;
+        await db.SaveChangesAsync();
+
+        var action = () => service.DuplicatePageAsync(parent.Id, "member");
+
+        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*cycle*");
+        (await service.ListPagesAsync()).Should().HaveCount(2, "all partially-created clones were rolled back");
+        db.ChangeTracker.Entries().Should().BeEmpty("rolled-back entities must not leak into the long-lived context");
+
+        var recovery = await service.SavePageAsync(
+            new WikiPageEditorModel { Title = "Recovery" }, "member");
+        recovery.Title.Should().Be("Recovery", "the scoped context remains usable after rollback");
+    }
+
+    [Fact]
     public async Task SavePageAsync_ShouldCreateOneRevisionPerSave_AndDiffShouldShowTheChange()
     {
         await using var db = await CreateDbAsync();
