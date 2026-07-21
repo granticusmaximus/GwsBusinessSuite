@@ -1,0 +1,108 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+@inject ISentinelAccessService AccessService
+@inject ICurrentUserAccessor CurrentUserAccessor
+
+<div class="sentinel-share-panel">
+    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ToggleAsync">
+        <i class="bi bi-share me-1"></i>Share
+    </button>
+    @if (_open)
+    {
+        <div class="sentinel-share-popover shadow-lg">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+                <strong>Share @TargetName</strong>
+                <button type="button" class="btn-close btn-close-white" @onclick="() => _open = false"></button>
+            </div>
+            <label class="form-label small">Invite a user</label>
+            <div class="input-group input-group-sm mb-3">
+                <input class="form-control" @bind="_username" placeholder="username" />
+                <select class="form-select" @bind="_accessLevel">
+                    <option value="@SentinelAccessLevels.View">Can view</option>
+                    <option value="@SentinelAccessLevels.Comment">Can comment</option>
+                    <option value="@SentinelAccessLevels.Edit">Can edit</option>
+                    <option value="@SentinelAccessLevels.FullAccess">Full access</option>
+                </select>
+                <button type="button" class="btn btn-primary" @onclick="SavePermissionAsync" disabled="@string.IsNullOrWhiteSpace(_username)">Invite</button>
+            </div>
+            @foreach (var permission in _snapshot.Permissions)
+            {
+                <div class="sentinel-share-entry">
+                    <span><i class="bi bi-person-circle me-2"></i>@permission.Username</span>
+                    <small>@permission.AccessLevel</small>
+                    <button type="button" @onclick="() => RemovePermissionAsync(permission.Id)"><i class="bi bi-x"></i></button>
+                </div>
+            }
+            <hr />
+            <div class="d-flex align-items-center justify-content-between gap-2">
+                <div><strong class="small d-block">Public link</strong><span class="small text-secondary">Anyone with the link can view.</span></div>
+                <button type="button" class="btn btn-sm btn-outline-warning" @onclick="CreateShareAsync">Create link</button>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_newPublicUrl))
+            {
+                <input class="form-control form-control-sm mt-2" value="@_newPublicUrl" readonly @onclick="SelectInput" />
+                <div class="small text-warning mt-1">Copy this link now. The secret token is not stored in plaintext.</div>
+            }
+            @foreach (var share in _snapshot.Shares.Where(item => !item.IsRevoked))
+            {
+                <div class="sentinel-share-entry mt-2">
+                    <span><i class="bi bi-globe2 me-2"></i>Public link</span>
+                    <small>@(share.ExpiresAt?.ToLocalTime().ToString("g") ?? "No expiry")</small>
+                    <button type="button" @onclick="() => RevokeShareAsync(share.Id)"><i class="bi bi-slash-circle"></i></button>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid TargetId { get; set; }
+    [Parameter] public bool IsDatabase { get; set; }
+    [Parameter] public string TargetName { get; set; } = "content";
+
+    private SentinelAccessSnapshot _snapshot = new([], []);
+    private bool _open;
+    private string _username = string.Empty;
+    private string _accessLevel = SentinelAccessLevels.View;
+    private string? _newPublicUrl;
+
+    private async Task ToggleAsync()
+    {
+        _open = !_open;
+        if (_open) await LoadAsync();
+    }
+
+    private Task LoadAsync() => LoadCoreAsync();
+    private async Task LoadCoreAsync() => _snapshot = await AccessService.GetAccessAsync(TargetId, IsDatabase);
+
+    private async Task SavePermissionAsync()
+    {
+        await AccessService.SetPermissionAsync(TargetId, IsDatabase, _username, _accessLevel,
+            await CurrentUserAccessor.GetCurrentUsernameAsync());
+        _username = string.Empty;
+        await LoadAsync();
+    }
+
+    private async Task RemovePermissionAsync(Guid id)
+    {
+        await AccessService.RemovePermissionAsync(id, await CurrentUserAccessor.GetCurrentUsernameAsync());
+        await LoadAsync();
+    }
+
+    private async Task CreateShareAsync()
+    {
+        var share = await AccessService.CreatePublicShareAsync(TargetId, IsDatabase, null, false,
+            await CurrentUserAccessor.GetCurrentUsernameAsync());
+        _newPublicUrl = $"/sentinel/share/{share.PublicToken}";
+        await LoadAsync();
+    }
+
+    private async Task RevokeShareAsync(Guid id)
+    {
+        await AccessService.RevokePublicShareAsync(id, await CurrentUserAccessor.GetCurrentUsernameAsync());
+        await LoadAsync();
+    }
+
+    private static void SelectInput() { }
+}

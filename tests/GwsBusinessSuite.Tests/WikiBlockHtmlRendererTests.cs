@@ -63,4 +63,31 @@ public sealed class WikiBlockHtmlRendererTests
         WikiBlockHtmlRenderer.PlainTextPreview(block).Should().Be("Tasks");
         WikiBlockTypes.All.Should().Contain(WikiBlockTypes.InlineDatabase);
     }
+
+    [Fact]
+    public void RenderPage_ShouldBuildTableOfContentsWithHeadingAnchors()
+    {
+        var blocks = new[]
+        {
+            new WikiBlock(Guid.NewGuid(), WikiBlockTypes.TableOfContents, 0, [], new Dictionary<string, string>()),
+            new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Heading2, 0, [new WikiRichTextSpan("Release plan")], new Dictionary<string, string>())
+        };
+
+        var html = WikiBlockHtmlRenderer.RenderPage(blocks);
+
+        html.Should().Contain("wiki-table-of-contents").And.Contain("Release plan").And.Contain("href=\"#sentinel-heading-1");
+        html.Should().Contain("id=\"sentinel-heading-1");
+    }
+
+    [Theory]
+    [InlineData(WikiBlockTypes.Equation, "wiki-equation")]
+    [InlineData(WikiBlockTypes.Breadcrumb, "wiki-breadcrumb")]
+    [InlineData(WikiBlockTypes.Button, "wiki-button")]
+    [InlineData(WikiBlockTypes.SyncedBlock, "wiki-synced-block")]
+    public void RenderBlock_ShouldRenderAdvancedNativeBlocks(string type, string expectedClass)
+    {
+        var block = new WikiBlock(Guid.NewGuid(), type, 0, [new WikiRichTextSpan("Content")], new Dictionary<string, string>());
+
+        WikiBlockHtmlRenderer.RenderBlock(block).Should().Contain(expectedClass);
+    }
 }

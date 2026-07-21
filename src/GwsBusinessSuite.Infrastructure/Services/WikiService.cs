@@ -56,7 +56,19 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
             await ReloadAsync(page, cancellationToken);
             if (page.ContentVersion != editor.ExpectedContentVersion)
             {
-                throw CreateConcurrencyException(page, editor.ExpectedContentVersion);
+                var metadataStillCurrent = string.Equals(editor.Title.Trim(), page.Title, StringComparison.Ordinal)
+                    && string.Equals(CreateSlug(editor.Slug), page.Slug, StringComparison.Ordinal)
+                    && string.Equals(editor.Icon?.Trim(), page.Icon, StringComparison.Ordinal)
+                    && string.Equals(editor.CoverImageUrl?.Trim(), page.CoverImageUrl, StringComparison.Ordinal);
+                var merge = editor.BaseBlocksJson is null || !metadataStillCurrent
+                    ? new WikiBlockMergeResult(false, editor.BlocksJson, [])
+                    : WikiBlockMerge.ThreeWayMerge(editor.BaseBlocksJson, editor.BlocksJson, page.BlocksJson);
+                if (!merge.IsSuccess)
+                {
+                    throw CreateConcurrencyException(page, editor.ExpectedContentVersion);
+                }
+                editor.BlocksJson = merge.MergedBlocksJson;
+                editor.ExpectedContentVersion = page.ContentVersion;
             }
         }
         else

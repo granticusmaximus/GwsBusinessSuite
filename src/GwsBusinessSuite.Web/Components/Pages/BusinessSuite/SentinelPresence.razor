@@ -1,7 +1,7 @@
 @using GwsBusinessSuite.Application.Abstractions
 @using GwsBusinessSuite.Application.Wiki
 @implements IAsyncDisposable
-@inject SentinelPresenceTracker PresenceTracker
+@inject ISentinelPresenceService PresenceService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject ILogger<SentinelPresence> Logger
 
@@ -38,18 +38,17 @@
     protected override async Task OnInitializedAsync()
     {
         CurrentUsername = await CurrentUserAccessor.GetCurrentUsernameAsync();
-        PresenceTracker.PresenceChanged += HandlePresenceChanged;
         _heartbeatTask = RunHeartbeatAsync(_lifetime.Token);
     }
 
-    protected override void OnParametersSet()
+    protected override async Task OnParametersSetAsync()
     {
         if (_activePageId != WikiPageId)
         {
             _activePageId = WikiPageId;
-            PresenceTracker.EnterPage(_sessionId, CurrentUsername, WikiPageId);
+            await PresenceService.EnterAsync(_sessionId, CurrentUsername, WikiPageId);
         }
-        Presence = PresenceTracker.GetPagePresence(WikiPageId).ToList();
+        Presence = (await PresenceService.ListAsync(WikiPageId)).ToList();
     }
 
     private async Task RunHeartbeatAsync(CancellationToken cancellationToken)
@@ -59,22 +58,14 @@
         {
             while (await timer.WaitForNextTickAsync(cancellationToken))
             {
-                PresenceTracker.Touch(_sessionId);
+                await PresenceService.TouchAsync(_sessionId, cancellationToken);
+                Presence = (await PresenceService.ListAsync(WikiPageId, cancellationToken)).ToList();
+                await InvokeAsync(StateHasChanged);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
-    }
-
-    private void HandlePresenceChanged(Guid wikiPageId)
-    {
-        if (wikiPageId != WikiPageId) return;
-        _ = InvokeAsync(() =>
-        {
-            Presence = PresenceTracker.GetPagePresence(WikiPageId).ToList();
-            StateHasChanged();
-        });
     }
 
     private static string Initials(string username)
@@ -90,8 +81,8 @@
 
     public async ValueTask DisposeAsync()
     {
-        PresenceTracker.PresenceChanged -= HandlePresenceChanged;
-        PresenceTracker.Leave(_sessionId);
+        try { await PresenceService.LeaveAsync(_sessionId); }
+        catch (Exception ex) { Logger.LogDebug(ex, "Unable to remove Sentinel presence lease."); }
         _lifetime.Cancel();
         if (_heartbeatTask is not null)
         {

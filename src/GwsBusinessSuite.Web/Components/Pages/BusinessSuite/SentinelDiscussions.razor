@@ -1,6 +1,6 @@
 @using GwsBusinessSuite.Application.Abstractions
 @using GwsBusinessSuite.Application.Wiki
-@implements IDisposable
+@implements IAsyncDisposable
 @inject ISentinelCollaborationService CollaborationService
 @inject SentinelCollaborationNotifier CollaborationNotifier
 @inject ICurrentUserAccessor CurrentUserAccessor
@@ -186,6 +186,8 @@
     private Guid? FocusedBlockId { get; set; }
     private Guid _loadedPageId;
     private ElementReference _discussionRoot;
+    private readonly CancellationTokenSource _pollLifetime = new();
+    private Task? _pollTask;
 
     private IReadOnlyList<BlockOption> BlockOptions => WikiBlockJson.ParseBlocks(BlocksJson)
         .Select(block => new BlockOption(block.Id, BlockOptionPreview(block)))
@@ -206,6 +208,31 @@
     protected override void OnInitialized()
     {
         CollaborationNotifier.Changed += HandleCollaborationChanged;
+        _pollTask = PollForDistributedChangesAsync(_pollLifetime.Token);
+    }
+
+    private async Task PollForDistributedChangesAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                await InvokeAsync(async () =>
+                {
+                    try
+                    {
+                        await ReloadAsync();
+                        StateHasChanged();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogDebug(ex, "Sentinel distributed collaboration poll was skipped.");
+                    }
+                });
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
     }
 
     private void HandleCollaborationChanged(SentinelCollaborationChange change)
@@ -355,5 +382,15 @@
 
     private sealed record BlockOption(Guid Id, string Preview);
 
-    public void Dispose() => CollaborationNotifier.Changed -= HandleCollaborationChanged;
+    public async ValueTask DisposeAsync()
+    {
+        CollaborationNotifier.Changed -= HandleCollaborationChanged;
+        _pollLifetime.Cancel();
+        if (_pollTask is not null)
+        {
+            try { await _pollTask; }
+            catch (OperationCanceledException) { }
+        }
+        _pollLifetime.Dispose();
+    }
 }

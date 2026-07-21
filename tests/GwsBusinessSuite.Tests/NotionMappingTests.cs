@@ -70,7 +70,7 @@ public sealed class NotionMappingTests
     }
 
     [Fact]
-    public void MapTable_ShouldCollapseRowsIntoEscapedMarkdown()
+    public void MapTable_ShouldCreateNativeTableBlock()
     {
         var table = Json("""{"table":{"has_column_header":true}}""");
         var rows = new[]
@@ -81,9 +81,9 @@ public sealed class NotionMappingTests
 
         var mapped = NotionMapping.MapTable(table, rows, 1);
 
-        mapped.Type.Should().Be(WikiBlockTypes.Markdown);
+        mapped.Type.Should().Be(WikiBlockTypes.Table);
         mapped.IndentLevel.Should().Be(1);
-        mapped.Props["content"].Should().Be("| Name | Value |\n| --- | --- |\n| A\\|B | Line Two |\n");
+        mapped.PlainText.Should().Be("| Name | Value |\n| --- | --- |\n| A\\|B | Line Two |\n");
     }
 
     [Theory]

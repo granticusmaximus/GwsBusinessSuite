@@ -246,6 +246,7 @@
                     @if (SelectedPageId is { } selectedPageId)
                     {
                         <SentinelPresence WikiPageId="selectedPageId" />
+                        <SentinelSharePanel TargetId="selectedPageId" TargetName="@(Editor.Title ?? "page")" />
                         <button type="button" class="btn btn-sm @(IsFavorite(selectedPageId, false) ? "btn-warning" : "btn-outline-secondary")"
                                 @onclick="() => ToggleFavoriteAsync(selectedPageId, false)" title="Toggle favorite">
                             <i class="bi @(IsFavorite(selectedPageId, false) ? "bi-star-fill" : "bi-star")"></i>
@@ -340,6 +341,7 @@
                         <i class="bi bi-command"></i>
                         <span><code>/</code> commands · <code>[[</code> page links · <code>@@</code> mentions · Tab to indent</span>
                     </div>
+                    <SentinelAiPanel WikiPageId="SelectedPageId" OnInsert="InsertAiOutputAsync" />
                     <div class="wiki-block-editor" @ref="_blockEditorContainer"></div>
 
                     <div class="sentinel-editor-actions">
@@ -495,8 +497,8 @@
                 </div>
                 <div class="modal-body">
                     <p class="text-secondary">
-                        Paste a Notion internal-integration token. Sync is read-only: Notion remains the source of truth,
-                        and content shared with the integration is mirrored into Sentinel.
+                        Connect a Notion internal integration using the current API. Import is the safe default; optional
+                        page pushes require both two-way mode and an explicit write acknowledgement.
                     </p>
 
                     <label class="form-label fw-semibold small">Integration token</label>
@@ -520,6 +522,30 @@
                                @bind="NotionSettings.AutoSyncEnabled" />
                         <label class="form-check-label" for="notionAutoSync">Sync automatically every hour</label>
                     </div>
+
+                    <div class="row g-3 mt-1">
+                        <div class="col-md-5">
+                            <label class="form-label fw-semibold small" for="notionDirection">Sync direction</label>
+                            <select id="notionDirection" class="form-select" @bind="NotionSettings.SyncDirection">
+                                <option value="import">Import only</option>
+                                <option value="twoWay">Two-way (manual push)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-7">
+                            <label class="form-label fw-semibold small" for="notionSelectedIds">Selected page/data source IDs</label>
+                            <textarea id="notionSelectedIds" class="form-control" rows="2" @bind="NotionSettings.SelectedNotionIds"
+                                      placeholder="Leave empty for everything shared with the integration"></textarea>
+                        </div>
+                    </div>
+                    @if (NotionSettings.SyncDirection == "twoWay")
+                    {
+                        <div class="form-check mt-3 border rounded-3 p-3 ps-5 bg-warning-subtle">
+                            <input class="form-check-input" type="checkbox" id="notionAllowWrites" @bind="NotionSettings.AllowTwoWayWrites" />
+                            <label class="form-check-label" for="notionAllowWrites">
+                                I understand that manual pushes replace the remote page title and block content.
+                            </label>
+                        </div>
+                    }
 
                     @if (NotionSettings.LastSyncedAt is { } lastSyncedAt)
                     {
@@ -554,6 +580,14 @@
                         }
                         Sync now
                     </button>
+                    @if (SelectedPageId is { } notionPageId
+                        && WikiPages.Any(page => page.Id == notionPageId && !string.IsNullOrWhiteSpace(page.NotionId))
+                        && NotionSettings.SyncDirection == "twoWay" && NotionSettings.AllowTwoWayWrites)
+                    {
+                        <button type="button" class="btn btn-warning" @onclick="PushCurrentPageToNotionAsync" disabled="@IsNotionBusy">
+                            <i class="bi bi-cloud-arrow-up-fill me-1"></i>Push current page
+                        </button>
+                    }
                 </div>
             </div>
         </div>
@@ -731,6 +765,36 @@
             {
                 NotionSyncBackgroundService.SyncLock.Release();
             }
+            IsNotionBusy = false;
+        }
+    }
+
+    private async Task PushCurrentPageToNotionAsync()
+    {
+        if (SelectedPageId is not { } pageId) return;
+        IsNotionBusy = true;
+        NotionMessage = string.Empty;
+        try
+        {
+            var validation = await NotionSyncService.SaveSettingsAsync(NotionSettings);
+            if (!validation.IsSuccess)
+            {
+                NotionMessage = validation.Message;
+                NotionMessageIsError = true;
+                return;
+            }
+            var result = await NotionSyncService.PushPageAsync(pageId);
+            NotionMessage = result.Message;
+            NotionMessageIsError = !result.IsSuccess;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to push Sentinel page {PageId} to Notion.", pageId);
+            NotionMessage = $"Unable to push page. {ex.Message}";
+            NotionMessageIsError = true;
+        }
+        finally
+        {
             IsNotionBusy = false;
         }
     }
@@ -1027,6 +1091,7 @@
                 Title = page.Title,
                 Slug = page.Slug,
                 BlocksJson = page.BlocksJson,
+                BaseBlocksJson = page.BlocksJson,
                 Icon = page.Icon,
                 CoverImageUrl = page.CoverImageUrl,
                 ParentWikiPageId = page.ParentWikiPageId
@@ -1087,6 +1152,7 @@
                 Title = saved.Title,
                 Slug = saved.Slug,
                 BlocksJson = saved.BlocksJson,
+                BaseBlocksJson = saved.BlocksJson,
                 Icon = saved.Icon,
                 CoverImageUrl = saved.CoverImageUrl,
                 ParentWikiPageId = saved.ParentWikiPageId
@@ -1117,6 +1183,20 @@
         {
             IsBusy = false;
         }
+    }
+
+    private async Task InsertAiOutputAsync(string output)
+    {
+        var blocks = WikiBlockJson.ParseBlocks(Editor.BlocksJson).ToList();
+        foreach (var paragraph in output.Split("\n\n", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            blocks.Add(new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0,
+                [new WikiRichTextSpan(paragraph)], new Dictionary<string, string>()));
+        }
+        Editor.BlocksJson = WikiBlockJson.Serialize(blocks);
+        _editorGeneration++;
+        await InvokeAsync(StateHasChanged);
+        StatusMessage = "Inserted a reviewed Sentinel AI draft. Save the page to persist it.";
     }
 
     private async Task ReloadLatestAfterConflictAsync()
@@ -1314,6 +1394,7 @@
                 Title = reverted.Title,
                 Slug = reverted.Slug,
                 BlocksJson = reverted.BlocksJson,
+                BaseBlocksJson = reverted.BlocksJson,
                 Icon = reverted.Icon,
                 CoverImageUrl = reverted.CoverImageUrl,
                 ParentWikiPageId = reverted.ParentWikiPageId

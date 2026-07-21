@@ -1,0 +1,114 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+@inject ISentinelAiService SentinelAiService
+@inject ICurrentUserAccessor CurrentUserAccessor
+
+<div class="sentinel-ai-panel">
+    <button type="button" class="sentinel-ai-toggle" @onclick="ToggleAsync">
+        <span>✦</span><strong>Ask Sentinel AI</strong><small>Grounded in this workspace</small><i class="bi bi-chevron-down"></i>
+    </button>
+    @if (_open)
+    {
+        <div class="sentinel-ai-body">
+            <div class="sentinel-ai-actions">
+                @foreach (var option in Actions)
+                {
+                    <button type="button" class="@(_action == option.Action ? "active" : "")" @onclick="() => _action = option.Action">@option.Label</button>
+                }
+            </div>
+            <textarea rows="4" @bind="_instruction" placeholder="@InstructionPlaceholder"></textarea>
+            <div class="d-flex align-items-center gap-2">
+                <button type="button" class="btn btn-sm btn-warning" @onclick="RunAsync" disabled="@(_running || string.IsNullOrWhiteSpace(_instruction))">
+                    @if (_running) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                    Generate
+                </button>
+                <span class="small text-danger">@_error</span>
+            </div>
+            @if (_current is not null)
+            {
+                <div class="sentinel-ai-result">
+                    <div><span>Draft · @_current.Model</span><small>Review before inserting</small></div>
+                    <pre>@_current.Output</pre>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-sm btn-primary" @onclick="ApproveAndInsertAsync">Approve &amp; insert</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="RejectAsync">Reject</button>
+                    </div>
+                </div>
+            }
+            @if (_runs.Count > 0)
+            {
+                <details class="sentinel-ai-history">
+                    <summary>Recent AI runs (@_runs.Count)</summary>
+                    @foreach (var run in _runs.Take(8))
+                    {
+                        <div><span>@run.Action</span><small>@run.Status · @run.CreatedAt.ToLocalTime().ToString("g")</small></div>
+                    }
+                </details>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public Guid? WikiPageId { get; set; }
+    [Parameter] public EventCallback<string> OnInsert { get; set; }
+
+    private static readonly IReadOnlyList<(string Action, string Label)> Actions =
+    [
+        (SentinelAiActions.Ask, "Ask"), (SentinelAiActions.Summarize, "Summarize"),
+        (SentinelAiActions.Rewrite, "Rewrite"), (SentinelAiActions.Translate, "Translate"),
+        (SentinelAiActions.Research, "Research"), (SentinelAiActions.MeetingNotes, "Meeting notes")
+    ];
+    private bool _open;
+    private bool _running;
+    private string _action = SentinelAiActions.Ask;
+    private string _instruction = string.Empty;
+    private string _error = string.Empty;
+    private SentinelAiRunView? _current;
+    private List<SentinelAiRunView> _runs = [];
+
+    private string InstructionPlaceholder => _action switch
+    {
+        SentinelAiActions.MeetingNotes => "Paste a transcript or rough meeting notes…",
+        SentinelAiActions.Translate => "Paste text and specify the target language…",
+        SentinelAiActions.Rewrite => "Paste text and describe the desired tone…",
+        SentinelAiActions.Research => "What should Sentinel investigate across the workspace?",
+        _ => "Ask about this page or the wider workspace…"
+    };
+
+    private async Task ToggleAsync()
+    {
+        _open = !_open;
+        if (_open) _runs = (await SentinelAiService.ListRunsAsync(WikiPageId)).ToList();
+    }
+
+    private async Task RunAsync()
+    {
+        _running = true;
+        _error = string.Empty;
+        try
+        {
+            _current = await SentinelAiService.RunAsync(WikiPageId, _action, _instruction,
+                await CurrentUserAccessor.GetCurrentUsernameAsync());
+            _runs.Insert(0, _current);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _running = false; }
+    }
+
+    private async Task ApproveAndInsertAsync()
+    {
+        if (_current is null) return;
+        await SentinelAiService.ReviewAsync(_current.Id, true, await CurrentUserAccessor.GetCurrentUsernameAsync());
+        await OnInsert.InvokeAsync(_current.Output);
+        _current = null;
+    }
+
+    private async Task RejectAsync()
+    {
+        if (_current is null) return;
+        await SentinelAiService.ReviewAsync(_current.Id, false, await CurrentUserAccessor.GetCurrentUsernameAsync());
+        _current = null;
+    }
+}

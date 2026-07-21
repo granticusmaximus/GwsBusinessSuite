@@ -174,6 +174,7 @@ public sealed class SentinelDiscussionComment : AuditableEntity
     public SentinelDiscussion? Discussion { get; set; }
     public SentinelDiscussionComment? ParentComment { get; set; }
     public ICollection<SentinelDiscussionReaction> Reactions { get; set; } = new List<SentinelDiscussionReaction>();
+    public string? NotionId { get; set; }
 }
 
 public sealed class SentinelDiscussionReaction : AuditableEntity
@@ -195,6 +196,72 @@ public sealed class SentinelNotification : AuditableEntity
     public DateTimeOffset? ReadAt { get; set; }
 }
 
+public static class SentinelWorkspaceRoles
+{
+    public const string Owner = "owner";
+    public const string Member = "member";
+    public const string Guest = "guest";
+}
+
+public static class SentinelAccessLevels
+{
+    public const string View = "view";
+    public const string Comment = "comment";
+    public const string Edit = "edit";
+    public const string FullAccess = "fullAccess";
+}
+
+public sealed class SentinelWorkspaceMember : AuditableEntity
+{
+    public required string Username { get; set; }
+    public string Role { get; set; } = SentinelWorkspaceRoles.Member;
+}
+
+public sealed class SentinelResourcePermission : AuditableEntity
+{
+    public Guid TargetId { get; set; }
+    public bool IsDatabase { get; set; }
+    public required string Username { get; set; }
+    public string AccessLevel { get; set; } = SentinelAccessLevels.View;
+}
+
+public sealed class SentinelPublicShare : AuditableEntity
+{
+    public Guid TargetId { get; set; }
+    public bool IsDatabase { get; set; }
+    public required string TokenHash { get; set; }
+    public DateTimeOffset? ExpiresAt { get; set; }
+    public bool AllowSearchIndexing { get; set; }
+    public DateTimeOffset? RevokedAt { get; set; }
+}
+
+public sealed class SentinelPresenceLease : AuditableEntity
+{
+    public Guid WikiPageId { get; set; }
+    public required string Username { get; set; }
+    public DateTimeOffset LastSeenAt { get; set; }
+}
+
+public static class SentinelAiRunStatuses
+{
+    public const string Completed = "completed";
+    public const string Approved = "approved";
+    public const string Rejected = "rejected";
+    public const string Failed = "failed";
+}
+
+public sealed class SentinelAiRun : AuditableEntity
+{
+    public Guid? WikiPageId { get; set; }
+    public required string Action { get; set; }
+    public string Instruction { get; set; } = string.Empty;
+    public string Output { get; set; } = string.Empty;
+    public string Status { get; set; } = SentinelAiRunStatuses.Completed;
+    public string Model { get; set; } = string.Empty;
+    public DateTimeOffset? ReviewedAt { get; set; }
+    public string? ReviewedBy { get; set; }
+}
+
 public static class WikiDatabasePropertyTypes
 {
     // Exactly one Title property per database (required, primary label) - every other type
@@ -207,6 +274,12 @@ public static class WikiDatabasePropertyTypes
     public const string Date = "date";
     public const string Checkbox = "checkbox";
     public const string Url = "url";
+    public const string Person = "person";
+    public const string Files = "files";
+    public const string Place = "place";
+    public const string Formula = "formula";
+    public const string Relation = "relation";
+    public const string Rollup = "rollup";
     // Auto-populated, read-only, backed by the row's own CreatedAt - never stored in
     // PropertyValuesJson.
     public const string CreatedTime = "createdTime";
@@ -219,6 +292,12 @@ public static class WikiDatabaseViewTypes
     public const string List = "list";
     public const string Gallery = "gallery";
     public const string Calendar = "calendar";
+    public const string Timeline = "timeline";
+    public const string Chart = "chart";
+    public const string Form = "form";
+    public const string Map = "map";
+    public const string Feed = "feed";
+    public const string Dashboard = "dashboard";
 }
 
 // Slots into the same sidebar tree as WikiPage (ParentWikiPageId). Page blocks may reference
@@ -282,6 +361,7 @@ public sealed class WikiDatabaseView : AuditableEntity
     // {"filters":[{"propertyId","operator","value"}],"sorts":[{"propertyId","direction"}],
     //  "groupByPropertyId":"..."} (groupByPropertyId is board-only).
     public string ConfigJson { get; set; } = "{}";
+    public string? NotionId { get; set; }
     public WikiDatabase? WikiDatabase { get; set; }
 }
 
@@ -524,6 +604,9 @@ public sealed class NotionConnectorSettings : AuditableEntity
     // Cosmetic - fetched once via GET /v1/users/me when the token is saved.
     public string? WorkspaceName { get; set; }
     public bool AutoSyncEnabled { get; set; } = true;
+    public string SyncDirection { get; set; } = "import";
+    public string SelectedNotionIdsJson { get; set; } = "[]";
+    public bool AllowTwoWayWrites { get; set; }
     public DateTimeOffset? LastSyncedAt { get; set; }
     public int LastSyncImportedCount { get; set; }
     public int LastSyncUpdatedCount { get; set; }

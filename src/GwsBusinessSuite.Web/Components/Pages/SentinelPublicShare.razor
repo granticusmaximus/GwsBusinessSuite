@@ -1,0 +1,74 @@
+@page "/sentinel/share/{Token}"
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+@inject ISentinelAccessService AccessService
+@inject IWikiService WikiService
+@inject IWikiDatabaseService WikiDatabaseService
+
+<PageTitle>@(_title ?? "Shared Sentinel page")</PageTitle>
+
+<main class="sentinel-public-share">
+    @if (_loading)
+    {
+        <div class="spinner-border" role="status"></div>
+    }
+    else if (_share is null)
+    {
+        <div class="sentinel-public-share-error"><h1>Link unavailable</h1><p>This share link is invalid, expired, or revoked.</p></div>
+    }
+    else if (_page is not null)
+    {
+        @if (!string.IsNullOrWhiteSpace(_page.CoverImageUrl))
+        {
+            <img class="sentinel-public-cover" src="@_page.CoverImageUrl" alt="" />
+        }
+        <article>
+            <div class="sentinel-public-brand">SENTINEL</div>
+            <h1><span>@_page.Icon</span> @_page.Title</h1>
+            <div class="sentinel-public-content">@((MarkupString)WikiBlockHtmlRenderer.RenderPage(WikiBlockJson.ParseBlocks(_page.BlocksJson)))</div>
+        </article>
+    }
+    else if (_database is not null)
+    {
+        var titleProperty = _database.Properties.First(property => property.Type == WikiDatabasePropertyTypes.Title);
+        <article>
+            <div class="sentinel-public-brand">SENTINEL DATABASE</div>
+            <h1><span>@_database.Icon</span> @_database.Title</h1>
+            <div class="sentinel-public-database">
+                @foreach (var row in _database.Rows.OrderBy(row => row.SortOrder))
+                {
+                    <section>
+                        <strong>@(WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), titleProperty.Id) ?? "Untitled")</strong>
+                        @foreach (var property in _database.Properties.Where(property => property.Id != titleProperty.Id))
+                        {
+                            var value = WikiPropertyValues.GetDisplayText(property, WikiPropertyValues.ParseObject(row.PropertyValuesJson), row.CreatedAt);
+                            if (!string.IsNullOrWhiteSpace(value)) { <span>@property.Name: @value</span> }
+                        }
+                    </section>
+                }
+            </div>
+        </article>
+    }
+</main>
+
+@code {
+    [Parameter] public string Token { get; set; } = string.Empty;
+    private SentinelShareView? _share;
+    private WikiPage? _page;
+    private WikiDatabase? _database;
+    private bool _loading = true;
+    private string? _title;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _share = await AccessService.ResolvePublicShareAsync(Token);
+        if (_share is not null)
+        {
+            if (_share.IsDatabase) _database = await WikiDatabaseService.GetDatabaseAsync(_share.TargetId);
+            else _page = await WikiService.GetPageAsync(_share.TargetId);
+            _title = _database?.Title ?? _page?.Title;
+        }
+        _loading = false;
+    }
+}

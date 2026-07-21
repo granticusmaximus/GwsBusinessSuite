@@ -23,7 +23,7 @@ public static class NotionMapping
 
     // No first-class block type and no reasonable fallback - skipped with a logged warning
     // rather than guessed at.
-    private static readonly HashSet<string> UnsupportedBlockTypes = ["table_of_contents", "breadcrumb", "meeting_notes", "transcription"];
+    private static readonly HashSet<string> UnsupportedBlockTypes = ["meeting_notes", "transcription"];
 
     public static bool IsFlattenedWrapper(string notionBlockType) => FlattenedWrapperTypes.Contains(notionBlockType);
 
@@ -137,6 +137,17 @@ public static class NotionMapping
             case "link_preview":
                 var url = body.ValueKind == JsonValueKind.Object && body.TryGetProperty("url", out var urlElement) ? urlElement.GetString() ?? string.Empty : string.Empty;
                 return NewBlock(WikiBlockTypes.Embed, indentLevel, richText, new Dictionary<string, string> { ["url"] = url });
+            case "equation":
+                var expression = body.ValueKind == JsonValueKind.Object && body.TryGetProperty("expression", out var expressionElement)
+                    ? expressionElement.GetString() ?? string.Empty
+                    : string.Empty;
+                return NewBlock(WikiBlockTypes.Equation, indentLevel, [new WikiRichTextSpan(expression)]);
+            case "breadcrumb":
+                return NewBlock(WikiBlockTypes.Breadcrumb, indentLevel, []);
+            case "table_of_contents":
+                return NewBlock(WikiBlockTypes.TableOfContents, indentLevel, []);
+            case "synced_block":
+                return NewBlock(WikiBlockTypes.SyncedBlock, indentLevel, richText);
             default:
                 if (type.StartsWith("heading_", StringComparison.Ordinal))
                 {
@@ -147,8 +158,8 @@ public static class NotionMapping
         }
     }
 
-    // table + its table_row children collapse into a single markdown-type block holding a
-    // generated Markdown pipe table - table itself carries no rich text, so it can't map
+    // table + its table_row children collapse into a single native table block holding a
+    // pipe-delimited grid - table itself carries no rich text, so it can't map
     // through MapBlock alone. Cell rich text is flattened to plain text (no bold/italic
     // preserved inside table cells) - a documented simplification, not a bug.
     public static WikiBlock MapTable(JsonElement tableBlock, IReadOnlyList<JsonElement> rowBlocks, int indentLevel)
@@ -173,8 +184,8 @@ public static class NotionMapping
             }
         }
 
-        return new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Markdown, indentLevel, [],
-            new Dictionary<string, string> { ["content"] = markdown.ToString() });
+        return new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Table, indentLevel,
+            [new WikiRichTextSpan(markdown.ToString())], new Dictionary<string, string>());
     }
 
     private static string EscapePipeCell(string cell) => cell.Replace("|", "\\|").Replace("\n", " ");
@@ -203,6 +214,42 @@ public static class NotionMapping
 
     private static WikiBlock NewBlock(string type, int indentLevel, IReadOnlyList<WikiRichTextSpan> richText, IReadOnlyDictionary<string, string>? props = null) =>
         new(Guid.NewGuid(), type, indentLevel, richText, props ?? new Dictionary<string, string>());
+
+    public static IReadOnlyList<object> MapBlocksForWrite(IReadOnlyList<WikiBlock> blocks) =>
+        blocks.Select(MapBlockForWrite).Where(block => block is not null).Cast<object>().ToList();
+
+    private static object? MapBlockForWrite(WikiBlock block)
+    {
+        var richText = block.RichText.Select(span => (object)new
+        {
+            type = "text",
+            text = new { content = span.Text, link = string.IsNullOrWhiteSpace(span.Link) ? null : new { url = span.Link } },
+            annotations = new { bold = span.Bold, italic = span.Italic, strikethrough = span.Strikethrough, underline = false, code = span.Code, color = "default" }
+        }).ToList();
+
+        return block.Type switch
+        {
+            WikiBlockTypes.Paragraph => new { @object = "block", type = "paragraph", paragraph = new { rich_text = richText } },
+            WikiBlockTypes.Heading1 => new { @object = "block", type = "heading_1", heading_1 = new { rich_text = richText } },
+            WikiBlockTypes.Heading2 => new { @object = "block", type = "heading_2", heading_2 = new { rich_text = richText } },
+            WikiBlockTypes.Heading3 => new { @object = "block", type = "heading_3", heading_3 = new { rich_text = richText } },
+            WikiBlockTypes.BulletedListItem => new { @object = "block", type = "bulleted_list_item", bulleted_list_item = new { rich_text = richText } },
+            WikiBlockTypes.NumberedListItem => new { @object = "block", type = "numbered_list_item", numbered_list_item = new { rich_text = richText } },
+            WikiBlockTypes.ToDo => new { @object = "block", type = "to_do", to_do = new { rich_text = richText, @checked = block.Props.TryGetValue("checked", out var value) && value == "true" } },
+            WikiBlockTypes.Toggle => new { @object = "block", type = "toggle", toggle = new { rich_text = richText } },
+            WikiBlockTypes.Quote => new { @object = "block", type = "quote", quote = new { rich_text = richText } },
+            WikiBlockTypes.Callout => new { @object = "block", type = "callout", callout = new { rich_text = richText, icon = new { type = "emoji", emoji = block.Props.GetValueOrDefault("icon", "💡") } } },
+            WikiBlockTypes.Code => new { @object = "block", type = "code", code = new { rich_text = richText, language = block.Props.GetValueOrDefault("language", "plain text") } },
+            WikiBlockTypes.Divider => new { @object = "block", type = "divider", divider = new { } },
+            WikiBlockTypes.Image when block.Props.TryGetValue("url", out var imageUrl) => new { @object = "block", type = "image", image = new { type = "external", external = new { url = imageUrl } } },
+            WikiBlockTypes.Embed when block.Props.TryGetValue("url", out var embedUrl) => new { @object = "block", type = "bookmark", bookmark = new { url = embedUrl } },
+            WikiBlockTypes.Equation => new { @object = "block", type = "equation", equation = new { expression = block.PlainText } },
+            WikiBlockTypes.TableOfContents => new { @object = "block", type = "table_of_contents", table_of_contents = new { } },
+            WikiBlockTypes.Breadcrumb => new { @object = "block", type = "breadcrumb", breadcrumb = new { } },
+            _ when block.PlainText.Length > 0 => new { @object = "block", type = "paragraph", paragraph = new { rich_text = richText } },
+            _ => null
+        };
+    }
 
     // ---- Database property schema + values ----
 

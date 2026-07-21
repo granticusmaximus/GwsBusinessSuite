@@ -24,6 +24,13 @@ public static class WikiBlockTypes
     // to the same database without copying schema or rows.
     public const string LinkedDatabase = "linked_database";
     public const string InlineDatabase = "inline_database";
+    public const string Table = "table";
+    public const string Equation = "equation";
+    public const string Breadcrumb = "breadcrumb";
+    public const string TableOfContents = "table_of_contents";
+    public const string Button = "button";
+    public const string SyncedBlock = "synced_block";
+    public const string Columns = "columns";
     // Legacy content carried over from the old single-Markdown-string wiki by the one-time
     // backfill (WikiMarkdownBackfillService) - rendered through the existing Markdig
     // pipeline unchanged, so pre-existing pages keep their content verbatim rather than
@@ -33,7 +40,8 @@ public static class WikiBlockTypes
     public static readonly IReadOnlyList<string> All =
     [
         Paragraph, Heading1, Heading2, Heading3, BulletedListItem, NumberedListItem,
-        ToDo, Toggle, Quote, Callout, Code, Divider, Image, Embed, LinkedDatabase, InlineDatabase, Markdown
+        ToDo, Toggle, Quote, Callout, Code, Divider, Image, Embed, LinkedDatabase, InlineDatabase,
+        Table, Equation, Breadcrumb, TableOfContents, Button, SyncedBlock, Columns, Markdown
     ];
 
     public static bool IsListItem(string type) => type is BulletedListItem or NumberedListItem;

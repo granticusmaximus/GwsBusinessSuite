@@ -7,10 +7,9 @@ using Microsoft.Extensions.Logging;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
-// One-way, read-only mirror of a Notion workspace into the Wiki's pages/databases - Notion is
-// always the source of truth for Notion-imported content, and re-syncing overwrites local
-// edits to it. This app never calls a Notion write endpoint, so there's no risk to the user's
-// real Notion workspace either way - only of a local mirror drifting until the next sync.
+// Imports a selectable Notion workspace surface into Sentinel. Import remains the safe
+// default; an explicit two-way setting and a separate write acknowledgement are both
+// required before the user can push a Sentinel page back to Notion.
 //
 // A Notion "page" object whose parent is a database (parent.type == "database_id") is really
 // a database row, not a wiki page - IsDatabaseRow filters those out of the page/database tree
@@ -37,6 +36,9 @@ public sealed class NotionSyncService(
             IntegrationToken = token,
             WorkspaceName = row.WorkspaceName,
             AutoSyncEnabled = row.AutoSyncEnabled,
+            SyncDirection = row.SyncDirection,
+            SelectedNotionIds = string.Join(", ", DeserializeSelectedIds(row.SelectedNotionIdsJson)),
+            AllowTwoWayWrites = row.AllowTwoWayWrites,
             LastSyncedAt = row.LastSyncedAt,
             LastSyncImportedCount = row.LastSyncImportedCount,
             LastSyncUpdatedCount = row.LastSyncUpdatedCount,
@@ -70,6 +72,9 @@ public sealed class NotionSyncService(
             row.WorkspaceName = validation.WorkspaceName;
         }
         row.AutoSyncEnabled = settings.AutoSyncEnabled;
+        row.SyncDirection = string.Equals(settings.SyncDirection, "twoWay", StringComparison.OrdinalIgnoreCase) ? "twoWay" : "import";
+        row.SelectedNotionIdsJson = JsonSerializer.Serialize(ParseSelectedIds(settings.SelectedNotionIds));
+        row.AllowTwoWayWrites = settings.AllowTwoWayWrites && row.SyncDirection == "twoWay";
         row.UpdatedAt = DateTimeOffset.UtcNow;
         row.UpdatedBy = "user";
 
@@ -107,6 +112,12 @@ public sealed class NotionSyncService(
                 searchCursor = page.HasMore ? page.NextCursor : null;
             } while (searchCursor is not null);
 
+            var selectedIds = DeserializeSelectedIds(settingsRow.SelectedNotionIdsJson).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (selectedIds.Count > 0)
+            {
+                discovered = discovered.Where(item => item.TryGetProperty("id", out var id) && id.GetString() is { } value && selectedIds.Contains(value)).ToList();
+            }
+
             var seenTopLevelNotionIds = new HashSet<string>();
             var notionIdToLocalId = new Dictionary<string, Guid>();
             var notionIdToKind = new Dictionary<string, string>();
@@ -140,7 +151,7 @@ public sealed class NotionSyncService(
                 Guid localId;
                 bool wasNew;
                 bool becameArchived;
-                if (objectType == "database")
+                if (objectType is "database" or "data_source")
                 {
                     (localId, wasNew, becameArchived) = await UpsertDatabaseAsync(notionId, title, isArchived, cancellationToken);
                 }
@@ -160,7 +171,7 @@ public sealed class NotionSyncService(
             {
                 Guid? parentWikiPageId = ResolveParentWikiPageId(notionId, notionIdToParent, notionIdToLocalId);
 
-                if (notionIdToKind[notionId] == "database")
+                if (notionIdToKind[notionId] is "database" or "data_source")
                 {
                     var database = await dbContext.WikiDatabases.FirstOrDefaultAsync(d => d.Id == localId, cancellationToken);
                     if (database is not null)
@@ -182,16 +193,17 @@ public sealed class NotionSyncService(
             // 4. Per-page block sync.
             foreach (var (notionId, localId) in notionIdToLocalId)
             {
-                if (notionIdToKind[notionId] != "database")
+                if (notionIdToKind[notionId] is not ("database" or "data_source"))
                 {
                     await SyncPageBlocksAsync(notionId, localId, token, cancellationToken);
+                    await SyncPageCommentsAsync(notionId, localId, token, cancellationToken);
                 }
             }
 
             // 5. Per-database property/row sync.
             foreach (var (notionId, localId) in notionIdToLocalId)
             {
-                if (notionIdToKind[notionId] == "database")
+                if (notionIdToKind[notionId] is "database" or "data_source")
                 {
                     var (rowsImported, rowsUpdated, rowsArchived) = await SyncDatabaseSchemaAndRowsAsync(notionId, localId, token, cancellationToken);
                     imported += rowsImported;
@@ -201,7 +213,10 @@ public sealed class NotionSyncService(
             }
 
             // 6. Archival - anything from a previous sync no longer returned by this pass.
-            archived += await ArchiveMissingAsync(seenTopLevelNotionIds, cancellationToken);
+            if (selectedIds.Count == 0)
+            {
+                archived += await ArchiveMissingAsync(seenTopLevelNotionIds, cancellationToken);
+            }
 
             settingsRow.LastSyncedAt = DateTimeOffset.UtcNow;
             settingsRow.LastSyncImportedCount = imported;
@@ -224,7 +239,7 @@ public sealed class NotionSyncService(
         objectType == "page"
         && item.TryGetProperty("parent", out var parent)
         && parent.TryGetProperty("type", out var parentType)
-        && parentType.GetString() == "database_id";
+        && parentType.GetString() is "database_id" or "data_source_id";
 
     private static bool IsArchived(JsonElement item) =>
         (item.TryGetProperty("archived", out var archivedElement) && archivedElement.ValueKind == JsonValueKind.True)
@@ -232,7 +247,7 @@ public sealed class NotionSyncService(
 
     private static string ExtractTitle(JsonElement item, string? objectType)
     {
-        if (objectType == "database")
+        if (objectType is "database" or "data_source")
         {
             return item.TryGetProperty("title", out var titleArray)
                 ? NonEmptyOrDefault(string.Concat(NotionMapping.MapRichText(titleArray).Select(span => span.Text)))
@@ -272,6 +287,7 @@ public sealed class NotionSyncService(
         {
             "page_id" => parentDescriptor.TryGetProperty("page_id", out var pageIdElement) ? pageIdElement.GetString() : null,
             "database_id" => parentDescriptor.TryGetProperty("database_id", out var databaseIdElement) ? databaseIdElement.GetString() : null,
+            "data_source_id" => parentDescriptor.TryGetProperty("data_source_id", out var dataSourceIdElement) ? dataSourceIdElement.GetString() : null,
             _ => null
         };
 
@@ -479,6 +495,8 @@ public sealed class NotionSyncService(
             return (0, 0, 0);
         }
 
+        await SyncDatabaseViewsAsync(schema.Value, wikiDatabaseId, token, cancellationToken);
+
         var notionPropertyIdToLocal = new Dictionary<string, (Guid Id, string Type)>();
         if (schema.Value.TryGetProperty("properties", out var propertiesElement) && propertiesElement.ValueKind == JsonValueKind.Object)
         {
@@ -626,6 +644,142 @@ public sealed class NotionSyncService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return (imported, updated, archived);
+    }
+
+    private async Task SyncDatabaseViewsAsync(JsonElement schema, Guid wikiDatabaseId, string token, CancellationToken cancellationToken)
+    {
+        if (!schema.TryGetProperty("views", out var viewsElement) || viewsElement.ValueKind != JsonValueKind.Array) return;
+
+        var order = 0;
+        foreach (var viewElement in viewsElement.EnumerateArray())
+        {
+            var notionId = viewElement.TryGetProperty("id", out var id) ? id.GetString() : null;
+            if (string.IsNullOrWhiteSpace(notionId)) continue;
+            var remote = await notionService.GetViewAsync(token, notionId, cancellationToken)
+                ?? viewElement;
+            var name = remote.TryGetProperty("name", out var nameElement) ? nameElement.GetString() : null;
+            var type = remote.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : null;
+            var existing = await dbContext.WikiDatabaseViews.FirstOrDefaultAsync(v => v.WikiDatabaseId == wikiDatabaseId && v.NotionId == notionId, cancellationToken);
+            var isNew = existing is null;
+            existing ??= new WikiDatabaseView
+            {
+                WikiDatabaseId = wikiDatabaseId,
+                Name = name ?? "Notion view",
+                Type = MapViewType(type),
+                CreatedAt = DateTimeOffset.UtcNow,
+                CreatedBy = "notion-sync"
+            };
+            existing.NotionId = notionId;
+            existing.Name = string.IsNullOrWhiteSpace(name) ? "Notion view" : name;
+            existing.Type = MapViewType(type);
+            existing.SortOrder = order++;
+            existing.UpdatedAt = DateTimeOffset.UtcNow;
+            existing.UpdatedBy = "notion-sync";
+            if (isNew) dbContext.WikiDatabaseViews.Add(existing);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string MapViewType(string? type) => type switch
+    {
+        "board" => WikiDatabaseViewTypes.Board,
+        "timeline" => WikiDatabaseViewTypes.Timeline,
+        "calendar" => WikiDatabaseViewTypes.Calendar,
+        "list" => WikiDatabaseViewTypes.List,
+        "gallery" => WikiDatabaseViewTypes.Gallery,
+        "chart" => WikiDatabaseViewTypes.Chart,
+        "form" => WikiDatabaseViewTypes.Form,
+        "map" => WikiDatabaseViewTypes.Map,
+        "feed" => WikiDatabaseViewTypes.Feed,
+        "dashboard" => WikiDatabaseViewTypes.Dashboard,
+        _ => WikiDatabaseViewTypes.Table
+    };
+
+    private async Task SyncPageCommentsAsync(string notionPageId, Guid wikiPageId, string token, CancellationToken cancellationToken)
+    {
+        string? cursor = null;
+        do
+        {
+            var commentPage = await notionService.ListCommentsAsync(token, notionPageId, cursor, cancellationToken);
+            foreach (var item in commentPage.Results)
+            {
+                var notionId = item.TryGetProperty("id", out var id) ? id.GetString() : null;
+                if (string.IsNullOrWhiteSpace(notionId) || await dbContext.SentinelDiscussionComments.AnyAsync(c => c.NotionId == notionId, cancellationToken)) continue;
+                var body = item.TryGetProperty("rich_text", out var richText)
+                    ? string.Concat(NotionMapping.MapRichText(richText).Select(span => span.Text))
+                    : string.Empty;
+                if (string.IsNullOrWhiteSpace(body)) continue;
+                var discussion = new SentinelDiscussion
+                {
+                    WikiPageId = wikiPageId,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                    CreatedBy = "notion-sync"
+                };
+                discussion.Comments.Add(new SentinelDiscussionComment
+                {
+                    Body = body,
+                    NotionId = notionId,
+                    CreatedAt = item.TryGetProperty("created_time", out var created) && DateTimeOffset.TryParse(created.GetString(), out var createdAt) ? createdAt : DateTimeOffset.UtcNow,
+                    CreatedBy = "notion-sync"
+                });
+                dbContext.SentinelDiscussions.Add(discussion);
+            }
+            await dbContext.SaveChangesAsync(cancellationToken);
+            cursor = commentPage.HasMore ? commentPage.NextCursor : null;
+        } while (cursor is not null);
+    }
+
+    public async Task<NotionSyncResult> PushPageAsync(Guid wikiPageId, CancellationToken cancellationToken = default)
+    {
+        var settings = await dbContext.NotionConnectorSettings.FirstOrDefaultAsync(cancellationToken);
+        if (settings is null || settings.SyncDirection != "twoWay" || !settings.AllowTwoWayWrites)
+            return new(false, "Two-way sync and the write acknowledgement must both be enabled.", 0, 0, 0);
+        var page = await dbContext.WikiPages.AsNoTracking().FirstOrDefaultAsync(p => p.Id == wikiPageId, cancellationToken);
+        if (page?.NotionId is null) return new(false, "Only pages imported from Notion can be pushed.", 0, 0, 0);
+        var (token, unreadable) = UnprotectToken(settings.IntegrationToken);
+        if (unreadable || string.IsNullOrWhiteSpace(token)) return new(false, "The Notion token is unavailable. Reconnect first.", 0, 0, 0);
+
+        try
+        {
+            var remote = await notionService.GetPageAsync(token, page.NotionId, cancellationToken);
+            if (remote is null) return new(false, "The Notion page could not be retrieved.", 0, 0, 0);
+            if (settings.LastSyncedAt is { } lastSync && remote.Value.TryGetProperty("last_edited_time", out var edited)
+                && DateTimeOffset.TryParse(edited.GetString(), out var remoteEditedAt) && remoteEditedAt > lastSync)
+                return new(false, "Notion changed after the last import. Sync first to avoid overwriting remote work.", 0, 0, 0);
+
+            var titleProperty = remote.Value.GetProperty("properties").EnumerateObject()
+                .FirstOrDefault(property => property.Value.TryGetProperty("type", out var type) && type.GetString() == "title");
+            if (!string.IsNullOrWhiteSpace(titleProperty.Name))
+            {
+                var titlePayload = new Dictionary<string, object?>
+                {
+                    ["properties"] = new Dictionary<string, object?>
+                    {
+                        [titleProperty.Name] = new { title = new[] { new { type = "text", text = new { content = page.Title } } } }
+                    }
+                };
+                await notionService.UpdatePageAsync(token, page.NotionId, titlePayload, cancellationToken);
+            }
+            await notionService.ReplaceBlockChildrenAsync(token, page.NotionId, NotionMapping.MapBlocksForWrite(WikiBlockJson.ParseBlocks(page.BlocksJson)), cancellationToken);
+            return new(true, "Page pushed to Notion.", 0, 1, 0);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Unable to push Sentinel page {WikiPageId} to Notion", wikiPageId);
+            return new(false, $"Push failed: {ex.Message}", 0, 0, 0);
+        }
+    }
+
+    private static IReadOnlyList<string> ParseSelectedIds(string value) => value
+        .Split([',', '\n', '\r', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    private static IReadOnlyList<string> DeserializeSelectedIds(string json)
+    {
+        try { return JsonSerializer.Deserialize<List<string>>(json) ?? []; }
+        catch (JsonException) { return []; }
     }
 
     private async Task<int> ArchiveMissingAsync(HashSet<string> seenTopLevelNotionIds, CancellationToken cancellationToken)

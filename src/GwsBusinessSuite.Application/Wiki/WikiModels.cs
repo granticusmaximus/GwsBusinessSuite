@@ -17,6 +17,10 @@ public sealed class WikiPageEditorModel
 
     public string BlocksJson { get; set; } = "[]";
 
+    // Snapshot loaded when editing began. On a stale save the service uses it for a
+    // block-id three-way merge, allowing independent block edits to merge automatically.
+    public string? BaseBlocksJson { get; set; }
+
     public string? Icon { get; set; }
 
     public string? CoverImageUrl { get; set; }

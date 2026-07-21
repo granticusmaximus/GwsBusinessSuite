@@ -24,6 +24,14 @@ public sealed record SentinelPresenceView(
     int SessionCount,
     DateTimeOffset LastSeenAt);
 
+public interface ISentinelPresenceService
+{
+    Task EnterAsync(Guid sessionId, string username, Guid wikiPageId, CancellationToken cancellationToken = default);
+    Task TouchAsync(Guid sessionId, CancellationToken cancellationToken = default);
+    Task LeaveAsync(Guid sessionId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<SentinelPresenceView>> ListAsync(Guid wikiPageId, CancellationToken cancellationToken = default);
+}
+
 /// <summary>
 /// Process-local, heartbeat-expiring page presence. No identity is accepted from browser state;
 /// components obtain usernames through the server-side current-user accessor.

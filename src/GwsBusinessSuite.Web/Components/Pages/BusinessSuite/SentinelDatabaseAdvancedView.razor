@@ -1,0 +1,252 @@
+@using System.Text.Json.Nodes
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+@inject IWikiDatabaseService WikiDatabaseService
+@inject ICurrentUserAccessor CurrentUserAccessor
+
+@if (View.Type == WikiDatabaseViewTypes.Timeline)
+{
+    var dateProperty = ResolveProperty(WikiDatabasePropertyTypes.Date);
+    if (dateProperty is null)
+    {
+        <div class="alert alert-secondary py-2">Add a Date property to use Timeline.</div>
+    }
+    else
+    {
+        var groups = WikiDatabaseViewLogic.BuildTimeline(VisibleRows, dateProperty);
+        <div class="sentinel-db-timeline">
+            @foreach (var group in groups)
+            {
+                <section>
+                    <time>@(group.Date?.ToString("MMM d, yyyy") ?? "No date")</time>
+                    <div>
+                        @foreach (var row in group.Rows)
+                        {
+                            <button type="button" @onclick="() => OnOpenRow.InvokeAsync(row.Id)">@Title(row)</button>
+                        }
+                    </div>
+                </section>
+            }
+        </div>
+    }
+}
+else if (View.Type == WikiDatabaseViewTypes.Chart)
+{
+    var chartProperty = ResolveChartProperty();
+    if (chartProperty is null)
+    {
+        <div class="alert alert-secondary py-2">Add a Select, Multi-select, Checkbox, or text property to use Chart.</div>
+    }
+    else
+    {
+        var buckets = WikiDatabaseViewLogic.BuildChart(VisibleRows, chartProperty);
+        var maximum = Math.Max(1, buckets.Select(bucket => bucket.Count).DefaultIfEmpty().Max());
+        <div class="sentinel-db-chart" role="img" aria-label="Chart grouped by @chartProperty.Name">
+            @foreach (var bucket in buckets)
+            {
+                <div class="sentinel-db-chart-row">
+                    <span title="@bucket.Label">@bucket.Label</span>
+                    <div><i style="width:@((bucket.Count * 100d / maximum).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))%"></i></div>
+                    <strong>@bucket.Count</strong>
+                </div>
+            }
+        </div>
+    }
+}
+else if (View.Type == WikiDatabaseViewTypes.Form)
+{
+    <EditForm Model="_formValues" OnValidSubmit="SubmitFormAsync" class="sentinel-db-form">
+        <h5>New @Database.Title entry</h5>
+        @foreach (var property in Database.Properties.OrderBy(property => property.SortOrder)
+            .Where(property => property.Type is not (WikiDatabasePropertyTypes.CreatedTime or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup)))
+        {
+            <label>
+                <span>@property.Name</span>
+                @if (property.Type == WikiDatabasePropertyTypes.Checkbox)
+                {
+                    <input type="checkbox" checked="@FormBool(property.Id)" @onchange="eventArgs => SetFormCheckbox(property.Id, eventArgs.Value)" />
+                }
+                else if (property.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect)
+                {
+                    <select multiple="@(property.Type == WikiDatabasePropertyTypes.MultiSelect)" value="@FormValue(property.Id)"
+                            @onchange="eventArgs => _formValues[property.Id] = eventArgs.Value?.ToString() ?? string.Empty">
+                        <option value="">—</option>
+                        @foreach (var option in WikiDatabasePropertyConfig.GetOptions(property))
+                        {
+                            <option value="@option.Id">@option.Label</option>
+                        }
+                    </select>
+                }
+                else
+                {
+                    <input type="@(property.Type == WikiDatabasePropertyTypes.Number ? "number" : property.Type == WikiDatabasePropertyTypes.Date ? "date" : property.Type == WikiDatabasePropertyTypes.Url ? "url" : "text")"
+                           value="@FormValue(property.Id)" @onchange="eventArgs => _formValues[property.Id] = eventArgs.Value?.ToString() ?? string.Empty" />
+                }
+            </label>
+        }
+        <button type="submit" class="btn btn-primary" disabled="@_saving">Submit</button>
+        @if (!string.IsNullOrWhiteSpace(_formMessage))
+        {
+            <span class="small text-success">@_formMessage</span>
+        }
+    </EditForm>
+}
+else if (View.Type == WikiDatabaseViewTypes.Map)
+{
+    var placeProperty = ResolveProperty(WikiDatabasePropertyTypes.Place);
+    if (placeProperty is null)
+    {
+        <div class="alert alert-secondary py-2">Add a Place property to use Map.</div>
+    }
+    else
+    {
+        <div class="sentinel-db-map">
+            @foreach (var row in VisibleRows)
+            {
+                var place = WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), placeProperty.Id);
+                if (!string.IsNullOrWhiteSpace(place))
+                {
+                    <article>
+                        <i class="bi bi-geo-alt-fill"></i>
+                        <div><button type="button" @onclick="() => OnOpenRow.InvokeAsync(row.Id)">@Title(row)</button><span>@place</span></div>
+                        <a href="@OpenStreetMapUrl(place)" target="_blank" rel="noopener noreferrer">Map ↗</a>
+                    </article>
+                }
+            }
+        </div>
+    }
+}
+else if (View.Type == WikiDatabaseViewTypes.Feed)
+{
+    <div class="sentinel-db-feed">
+        @foreach (var row in VisibleRows.OrderByDescending(row => row.UpdatedAt ?? row.CreatedAt))
+        {
+            <article>
+                <div class="sentinel-db-feed-icon">@(Database.Icon ?? "◈")</div>
+                <div>
+                    <button type="button" @onclick="() => OnOpenRow.InvokeAsync(row.Id)">@Title(row)</button>
+                    <time>@(row.UpdatedAt ?? row.CreatedAt).ToLocalTime().ToString("g")</time>
+                    @foreach (var property in Database.Properties.Where(property => property.Type != WikiDatabasePropertyTypes.Title).Take(3))
+                    {
+                        var text = WikiPropertyValues.GetDisplayText(property, WikiPropertyValues.ParseObject(row.PropertyValuesJson), row.CreatedAt);
+                        if (!string.IsNullOrWhiteSpace(text))
+                        {
+                            <span>@property.Name: @text</span>
+                        }
+                    }
+                </div>
+            </article>
+        }
+    </div>
+}
+else if (View.Type == WikiDatabaseViewTypes.Dashboard)
+{
+    var numericProperties = Database.Properties.Where(property => property.Type == WikiDatabasePropertyTypes.Number).ToList();
+    var checkedCount = Database.Properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Checkbox) is { } checkbox
+        ? VisibleRows.Count(row => WikiPropertyValues.GetCheckbox(WikiPropertyValues.ParseObject(row.PropertyValuesJson), checkbox.Id))
+        : 0;
+    <div class="sentinel-db-dashboard">
+        <article><span>Total entries</span><strong>@VisibleRows.Count</strong></article>
+        <article><span>Updated this week</span><strong>@VisibleRows.Count(row => (row.UpdatedAt ?? row.CreatedAt) >= DateTimeOffset.UtcNow.AddDays(-7))</strong></article>
+        <article><span>Completed</span><strong>@checkedCount</strong></article>
+        @foreach (var property in numericProperties.Take(3))
+        {
+            var total = VisibleRows.Sum(row => WikiPropertyValues.GetNumber(WikiPropertyValues.ParseObject(row.PropertyValuesJson), property.Id) ?? 0);
+            <article><span>@property.Name total</span><strong>@total</strong></article>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public WikiDatabase Database { get; set; } = null!;
+    [Parameter, EditorRequired] public WikiDatabaseView View { get; set; } = null!;
+    [Parameter, EditorRequired] public WikiDatabaseViewConfig Config { get; set; } = WikiDatabaseViewConfig.Empty;
+    [Parameter] public EventCallback<Guid> OnOpenRow { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private readonly Dictionary<Guid, string> _formValues = [];
+    private bool _saving;
+    private string? _formMessage;
+
+    private IReadOnlyList<WikiDatabaseRow> VisibleRows
+    {
+        get
+        {
+            var filtered = WikiDatabaseViewLogic.ApplyFilters(Database.Rows.ToList(), Database.Properties.ToList(), Config.Filters);
+            return WikiDatabaseViewLogic.ApplySort(filtered, Database.Properties.ToList(), Config.Sorts);
+        }
+    }
+
+    private WikiDatabaseProperty? ResolveProperty(string type) =>
+        Database.Properties.FirstOrDefault(property => property.Type == type && property.Id.ToString() == Config.GroupByPropertyId)
+        ?? Database.Properties.FirstOrDefault(property => property.Type == type);
+
+    private WikiDatabaseProperty? ResolveChartProperty() =>
+        Database.Properties.FirstOrDefault(property => property.Id.ToString() == Config.GroupByPropertyId)
+        ?? Database.Properties.FirstOrDefault(property => property.Type is WikiDatabasePropertyTypes.Select
+            or WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Checkbox or WikiDatabasePropertyTypes.Text);
+
+    private string Title(WikiDatabaseRow row)
+    {
+        var property = Database.Properties.First(item => item.Type == WikiDatabasePropertyTypes.Title);
+        return WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), property.Id) ?? "Untitled";
+    }
+
+    private string FormValue(Guid propertyId) => _formValues.GetValueOrDefault(propertyId, string.Empty);
+    private bool FormBool(Guid propertyId) => string.Equals(FormValue(propertyId), "true", StringComparison.OrdinalIgnoreCase);
+    private void SetFormCheckbox(Guid propertyId, object? value) => _formValues[propertyId] = value is true ? "true" : "false";
+
+    private async Task SubmitFormAsync()
+    {
+        _saving = true;
+        _formMessage = null;
+        try
+        {
+            var values = new JsonObject();
+            foreach (var property in Database.Properties)
+            {
+                var value = FormValue(property.Id);
+                switch (property.Type)
+                {
+                    case WikiDatabasePropertyTypes.Number:
+                        WikiPropertyValues.SetNumber(values, property.Id, decimal.TryParse(value, out var number) ? number : null);
+                        break;
+                    case WikiDatabasePropertyTypes.Checkbox:
+                        WikiPropertyValues.SetCheckbox(values, property.Id, string.Equals(value, "true", StringComparison.OrdinalIgnoreCase));
+                        break;
+                    case WikiDatabasePropertyTypes.Date:
+                        WikiPropertyValues.SetDate(values, property.Id, DateTimeOffset.TryParse(value, out var date) ? date : null);
+                        break;
+                    case WikiDatabasePropertyTypes.MultiSelect:
+                    case WikiDatabasePropertyTypes.Person:
+                    case WikiDatabasePropertyTypes.Files:
+                    case WikiDatabasePropertyTypes.Relation:
+                        WikiPropertyValues.SetMultiSelect(values, property.Id, value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
+                        break;
+                    case WikiDatabasePropertyTypes.CreatedTime:
+                    case WikiDatabasePropertyTypes.Formula:
+                    case WikiDatabasePropertyTypes.Rollup:
+                        break;
+                    default:
+                        WikiPropertyValues.SetText(values, property.Id, value);
+                        break;
+                }
+            }
+
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await WikiDatabaseService.SaveRowAsync(Database.Id,
+                new WikiDatabaseRowEditor { Values = values.ToDictionary(item => item.Key, item => item.Value) }, username);
+            _formValues.Clear();
+            _formMessage = "Entry submitted.";
+            await OnChanged.InvokeAsync();
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private static string OpenStreetMapUrl(string place) =>
+        $"https://www.openstreetmap.org/search?query={Uri.EscapeDataString(place)}";
+}

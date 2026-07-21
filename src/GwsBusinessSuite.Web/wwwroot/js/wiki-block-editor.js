@@ -26,9 +26,16 @@ const BLOCK_TYPES = [
     { type: 'image', label: 'Image', icon: '🖼' },
     { type: 'embed', label: 'Embed link', icon: '🔗' },
     { type: 'linked_database', label: 'Linked database', icon: '▦' },
-    { type: 'inline_database', label: 'Inline database', icon: '▤' }
+    { type: 'inline_database', label: 'Inline database', icon: '▤' },
+    { type: 'table', label: 'Table', icon: '▦' },
+    { type: 'equation', label: 'Equation', icon: '∑' },
+    { type: 'breadcrumb', label: 'Breadcrumb', icon: '›' },
+    { type: 'table_of_contents', label: 'Table of contents', icon: '☷' },
+    { type: 'button', label: 'Button', icon: '▣' },
+    { type: 'synced_block', label: 'Synced block', icon: '↻' },
+    { type: 'columns', label: 'Columns', icon: '▥' }
 ];
-const TEXTLESS_TYPES = new Set(['divider', 'image', 'embed', 'linked_database', 'inline_database']);
+const TEXTLESS_TYPES = new Set(['divider', 'image', 'embed', 'linked_database', 'inline_database', 'breadcrumb', 'table_of_contents']);
 
 export function initialize(container, dotNetRef, initialBlocksJson) {
     dispose(container);
@@ -179,6 +186,14 @@ function createBlockBody(block, state) {
 
     if (block.type === 'divider') {
         body.appendChild(document.createElement('hr'));
+        return body;
+    }
+
+    if (block.type === 'breadcrumb' || block.type === 'table_of_contents') {
+        const placeholder = document.createElement('div');
+        placeholder.className = `wiki-${block.type.replaceAll('_', '-')}`;
+        placeholder.textContent = block.type === 'breadcrumb' ? 'Workspace / Parent page / Current page' : 'Table of contents';
+        body.appendChild(placeholder);
         return body;
     }
 
@@ -577,6 +592,11 @@ function placeholderFor(type) {
         case 'quote': return 'Quote';
         case 'callout': return 'Callout';
         case 'code': return 'Code';
+        case 'table': return 'Header 1 | Header 2\nCell 1 | Cell 2';
+        case 'equation': return 'Type an equation';
+        case 'button': return 'Button label';
+        case 'synced_block': return 'Synced content';
+        case 'columns': return 'Column one ||| Column two';
         default: return "Type '/' for commands";
     }
 }

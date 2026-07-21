@@ -143,6 +143,35 @@ public sealed class WikiDatabaseViewLogicTests
         action.Should().Throw<ArgumentException>().WithMessage("Calendar views require a Date property.*");
     }
 
+    [Fact]
+    public void BuildTimeline_ShouldGroupRowsChronologicallyAndRetainUndated()
+    {
+        var dateProperty = NewProperty(WikiDatabasePropertyTypes.Date);
+        var later = RowWithDate(dateProperty.Id, new DateOnly(2026, 7, 22));
+        var earlier = RowWithDate(dateProperty.Id, new DateOnly(2026, 7, 21));
+        var undated = RowWithDate(dateProperty.Id, null);
+
+        var timeline = WikiDatabaseViewLogic.BuildTimeline([later, undated, earlier], dateProperty);
+
+        timeline.Select(group => group.Date).Should().Equal(new DateOnly(2026, 7, 21), new DateOnly(2026, 7, 22), null);
+        timeline[^1].Rows.Should().ContainSingle().Which.Should().BeSameAs(undated);
+    }
+
+    [Fact]
+    public void BuildChart_ShouldCountSelectOptionsAndNoValue()
+    {
+        var status = NewProperty(WikiDatabasePropertyTypes.Select);
+        status.ConfigJson = WikiDatabasePropertyConfig.Serialize([
+            new WikiDatabasePropertyOption("todo", "To Do", "#ccc"),
+            new WikiDatabasePropertyOption("done", "Done", "#0f0")]);
+
+        var chart = WikiDatabaseViewLogic.BuildChart([
+            RowWithText(status.Id, "todo"), RowWithText(status.Id, "todo"),
+            RowWithText(status.Id, "done"), RowWithText(status.Id, "")], status);
+
+        chart.Select(bucket => (bucket.Label, bucket.Count)).Should().Equal(("To Do", 2), ("Done", 1), ("Empty", 1));
+    }
+
     private static WikiDatabaseProperty NewProperty(string type) => new()
     {
         Id = Guid.NewGuid(),

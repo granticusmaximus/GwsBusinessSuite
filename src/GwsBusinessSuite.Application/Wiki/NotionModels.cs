@@ -17,8 +17,13 @@ public interface INotionService
     Task<NotionValidationResult> ValidateConnectionAsync(string integrationToken, CancellationToken cancellationToken = default);
     Task<NotionPage> SearchAsync(string integrationToken, string? cursor, CancellationToken cancellationToken = default);
     Task<NotionPage> GetBlockChildrenAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default);
+    Task<JsonElement?> GetPageAsync(string integrationToken, string pageId, CancellationToken cancellationToken = default);
     Task<JsonElement?> GetDatabaseAsync(string integrationToken, string databaseId, CancellationToken cancellationToken = default);
     Task<NotionPage> QueryDatabaseAsync(string integrationToken, string databaseId, string? cursor, CancellationToken cancellationToken = default);
+    Task<JsonElement?> GetViewAsync(string integrationToken, string viewId, CancellationToken cancellationToken = default);
+    Task<NotionPage> ListCommentsAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default);
+    Task UpdatePageAsync(string integrationToken, string pageId, IReadOnlyDictionary<string, object?> payload, CancellationToken cancellationToken = default);
+    Task ReplaceBlockChildrenAsync(string integrationToken, string blockId, IReadOnlyList<object> children, CancellationToken cancellationToken = default);
 }
 
 public sealed class NotionConnectorSettingsView
@@ -26,6 +31,9 @@ public sealed class NotionConnectorSettingsView
     public string IntegrationToken { get; set; } = string.Empty;
     public string? WorkspaceName { get; set; }
     public bool AutoSyncEnabled { get; set; } = true;
+    public string SyncDirection { get; set; } = "import";
+    public string SelectedNotionIds { get; set; } = string.Empty;
+    public bool AllowTwoWayWrites { get; set; }
     public DateTimeOffset? LastSyncedAt { get; set; }
     public int LastSyncImportedCount { get; set; }
     public int LastSyncUpdatedCount { get; set; }
@@ -47,4 +55,5 @@ public interface INotionSyncService
     Task<NotionConnectorSettingsView?> GetSettingsAsync(CancellationToken cancellationToken = default);
     Task<NotionValidationResult> SaveSettingsAsync(NotionConnectorSettingsView settings, CancellationToken cancellationToken = default);
     Task<NotionSyncResult> SyncAsync(CancellationToken cancellationToken = default);
+    Task<NotionSyncResult> PushPageAsync(Guid wikiPageId, CancellationToken cancellationToken = default);
 }

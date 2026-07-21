@@ -187,11 +187,24 @@ public sealed class NotionSyncServiceTests
         public Task<NotionPage> GetBlockChildrenAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default) =>
             Task.FromResult(new NotionPage(BlockChildren.GetValueOrDefault(blockId) ?? [], false, null));
 
+        public Task<JsonElement?> GetPageAsync(string integrationToken, string pageId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<JsonElement?>(Page(pageId, "Remote"));
+
         public Task<JsonElement?> GetDatabaseAsync(string integrationToken, string databaseId, CancellationToken cancellationToken = default) =>
             Task.FromResult(DatabaseSchemas.TryGetValue(databaseId, out var schema) ? (JsonElement?)schema : null);
 
         public Task<NotionPage> QueryDatabaseAsync(string integrationToken, string databaseId, string? cursor, CancellationToken cancellationToken = default) =>
             Task.FromResult(new NotionPage(DatabaseRows.GetValueOrDefault(databaseId) ?? [], false, null));
+
+        public Task<JsonElement?> GetViewAsync(string integrationToken, string viewId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<JsonElement?>(null);
+
+        public Task<NotionPage> ListCommentsAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new NotionPage([], false, null));
+
+        public Task UpdatePageAsync(string integrationToken, string pageId, IReadOnlyDictionary<string, object?> payload, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task ReplaceBlockChildrenAsync(string integrationToken, string blockId, IReadOnlyList<object> children, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class FakeSecretProtector : ISecretProtector

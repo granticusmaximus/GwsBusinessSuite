@@ -13,7 +13,7 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 // probing is needed here.
 public sealed class NotionService(HttpClient httpClient) : INotionService
 {
-    private const string NotionVersion = "2022-06-28";
+    public const string NotionVersion = "2026-03-11";
 
     public async Task<NotionValidationResult> ValidateConnectionAsync(string integrationToken, CancellationToken cancellationToken = default)
     {
@@ -58,9 +58,18 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
         return ParsePage(body);
     }
 
+    public async Task<JsonElement?> GetPageAsync(string integrationToken, string pageId, CancellationToken cancellationToken = default)
+    {
+        using var request = CreateRequest(HttpMethod.Get, $"pages/{Uri.EscapeDataString(pageId)}", integrationToken);
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode) return null;
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+        return document.RootElement.Clone();
+    }
+
     public async Task<JsonElement?> GetDatabaseAsync(string integrationToken, string databaseId, CancellationToken cancellationToken = default)
     {
-        using var request = CreateRequest(HttpMethod.Get, $"databases/{Uri.EscapeDataString(databaseId)}", integrationToken);
+        using var request = CreateRequest(HttpMethod.Get, $"data_sources/{Uri.EscapeDataString(databaseId)}", integrationToken);
         using var response = await httpClient.SendAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
@@ -80,7 +89,43 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
             payload["start_cursor"] = cursor;
         }
 
-        return await PostPageAsync(integrationToken, $"databases/{Uri.EscapeDataString(databaseId)}/query", payload, cancellationToken);
+        return await PostPageAsync(integrationToken, $"data_sources/{Uri.EscapeDataString(databaseId)}/query", payload, cancellationToken);
+    }
+
+    public async Task<JsonElement?> GetViewAsync(string integrationToken, string viewId, CancellationToken cancellationToken = default)
+    {
+        using var request = CreateRequest(HttpMethod.Get, $"views/{Uri.EscapeDataString(viewId)}", integrationToken);
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode) return null;
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+        return document.RootElement.Clone();
+    }
+
+    public async Task<NotionPage> ListCommentsAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default)
+    {
+        var path = $"comments?block_id={Uri.EscapeDataString(blockId)}&page_size=100"
+            + (string.IsNullOrWhiteSpace(cursor) ? string.Empty : $"&start_cursor={Uri.EscapeDataString(cursor)}");
+        using var request = CreateRequest(HttpMethod.Get, path, integrationToken);
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return ParsePage(body);
+    }
+
+    public async Task UpdatePageAsync(string integrationToken, string pageId, IReadOnlyDictionary<string, object?> payload, CancellationToken cancellationToken = default)
+    {
+        using var request = CreateRequest(HttpMethod.Patch, $"pages/{Uri.EscapeDataString(pageId)}", integrationToken);
+        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+    }
+
+    public async Task ReplaceBlockChildrenAsync(string integrationToken, string blockId, IReadOnlyList<object> children, CancellationToken cancellationToken = default)
+    {
+        using var request = CreateRequest(HttpMethod.Patch, $"blocks/{Uri.EscapeDataString(blockId)}/children", integrationToken);
+        request.Content = new StringContent(JsonSerializer.Serialize(new { erase_content = true, children }), Encoding.UTF8, "application/json");
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
     }
 
     private async Task<NotionPage> PostPageAsync(string integrationToken, string path, Dictionary<string, object?> payload, CancellationToken cancellationToken)

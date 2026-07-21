@@ -115,7 +115,10 @@ public static class WikiPropertyValues
             WikiDatabasePropertyTypes.Checkbox => GetCheckbox(values, property.Id) ? "✓" : string.Empty,
             WikiDatabasePropertyTypes.Number => GetNumber(values, property.Id)?.ToString() ?? string.Empty,
             WikiDatabasePropertyTypes.Date => GetDate(values, property.Id)?.ToLocalTime().ToString("MMM d, yyyy") ?? string.Empty,
-            WikiDatabasePropertyTypes.MultiSelect => string.Join(", ", ResolveOptionLabels(property, GetMultiSelect(values, property.Id))),
+            WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Files or WikiDatabasePropertyTypes.Person or WikiDatabasePropertyTypes.Relation =>
+                string.Join(", ", WikiDatabasePropertyConfig.GetOptions(property).Count > 0
+                    ? ResolveOptionLabels(property, GetMultiSelect(values, property.Id))
+                    : GetMultiSelect(values, property.Id)),
             WikiDatabasePropertyTypes.Select => GetText(values, property.Id) is { } optionId
                 ? ResolveOptionLabels(property, [optionId]).FirstOrDefault() ?? string.Empty
                 : string.Empty,
@@ -310,6 +313,50 @@ public static class WikiDatabaseViewLogic
 
         return new WikiDatabaseCalendarMonth(firstOfMonth, days, undated);
     }
+
+    public static IReadOnlyList<WikiDatabaseTimelineGroup> BuildTimeline(
+        IReadOnlyList<WikiDatabaseRow> rows,
+        WikiDatabaseProperty dateProperty)
+    {
+        if (dateProperty.Type != WikiDatabasePropertyTypes.Date)
+        {
+            throw new ArgumentException("Timeline views require a Date property.", nameof(dateProperty));
+        }
+
+        return rows
+            .Select(row => (Row: row, Date: WikiPropertyValues.GetDate(
+                WikiPropertyValues.ParseObject(row.PropertyValuesJson), dateProperty.Id)))
+            .GroupBy(item => item.Date is { } date
+                ? new DateOnly?(DateOnly.FromDateTime(date.ToLocalTime().DateTime))
+                : null)
+            .OrderBy(group => group.Key is null)
+            .ThenBy(group => group.Key)
+            .Select(group => new WikiDatabaseTimelineGroup(
+                group.Key,
+                group.Select(item => item.Row).ToList()))
+            .ToList();
+    }
+
+    public static IReadOnlyList<WikiDatabaseChartBucket> BuildChart(
+        IReadOnlyList<WikiDatabaseRow> rows,
+        WikiDatabaseProperty property)
+    {
+        var configuredOptions = WikiDatabasePropertyConfig.GetOptions(property);
+        var labels = configuredOptions.ToDictionary(option => option.Id, option => option.Label);
+        var buckets = rows
+            .SelectMany(row => property.Type == WikiDatabasePropertyTypes.MultiSelect
+                ? WikiPropertyValues.GetMultiSelect(WikiPropertyValues.ParseObject(row.PropertyValuesJson), property.Id)
+                : [WikiPropertyValues.GetDisplayText(property, WikiPropertyValues.ParseObject(row.PropertyValuesJson), row.CreatedAt)])
+            .Select(value => labels.GetValueOrDefault(value, value))
+            .Select(value => string.IsNullOrWhiteSpace(value) ? "Empty" : value)
+            .GroupBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new WikiDatabaseChartBucket(group.Key, group.Count()))
+            .OrderByDescending(bucket => bucket.Count)
+            .ThenBy(bucket => bucket.Label, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return buckets;
+    }
 }
 
 public sealed record WikiDatabaseBoardGroup(string OptionId, string Label, IReadOnlyList<WikiDatabaseRow> Rows);
@@ -320,6 +367,10 @@ public sealed record WikiDatabaseCalendarMonth(
     DateOnly Month,
     IReadOnlyList<WikiDatabaseCalendarDay> Days,
     IReadOnlyList<WikiDatabaseRow> UndatedRows);
+
+public sealed record WikiDatabaseTimelineGroup(DateOnly? Date, IReadOnlyList<WikiDatabaseRow> Rows);
+
+public sealed record WikiDatabaseChartBucket(string Label, int Count);
 
 public sealed record WikiInlineDatabaseProperty(
     Guid Id,

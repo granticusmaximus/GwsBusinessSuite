@@ -34,6 +34,11 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SentinelDiscussionComment> SentinelDiscussionComments => Set<SentinelDiscussionComment>();
     public DbSet<SentinelDiscussionReaction> SentinelDiscussionReactions => Set<SentinelDiscussionReaction>();
     public DbSet<SentinelNotification> SentinelNotifications => Set<SentinelNotification>();
+    public DbSet<SentinelWorkspaceMember> SentinelWorkspaceMembers => Set<SentinelWorkspaceMember>();
+    public DbSet<SentinelResourcePermission> SentinelResourcePermissions => Set<SentinelResourcePermission>();
+    public DbSet<SentinelPublicShare> SentinelPublicShares => Set<SentinelPublicShare>();
+    public DbSet<SentinelPresenceLease> SentinelPresenceLeases => Set<SentinelPresenceLease>();
+    public DbSet<SentinelAiRun> SentinelAiRuns => Set<SentinelAiRun>();
     public DbSet<WikiDatabase> WikiDatabases => Set<WikiDatabase>();
     public DbSet<WikiDatabaseProperty> WikiDatabaseProperties => Set<WikiDatabaseProperty>();
     public DbSet<WikiDatabaseRow> WikiDatabaseRows => Set<WikiDatabaseRow>();
@@ -97,6 +102,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<ContactActivity>().HasIndex(x => new { x.ContactId, x.CreatedAt });
 
         modelBuilder.Entity<WikiPage>().HasIndex(x => x.Slug).IsUnique();
+        modelBuilder.Entity<NotionConnectorSettings>().Property(x => x.SyncDirection).HasDefaultValue("import");
+        modelBuilder.Entity<NotionConnectorSettings>().Property(x => x.SelectedNotionIdsJson).HasDefaultValue("[]");
         modelBuilder.Entity<WikiPage>().Property(x => x.ContentVersion)
             .HasDefaultValue(1L)
             .IsConcurrencyToken();
@@ -137,10 +144,20 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<SentinelDiscussion>().HasIndex(x => new { x.WikiPageId, x.ResolvedAt });
         modelBuilder.Entity<SentinelDiscussionComment>().HasIndex(x => new { x.SentinelDiscussionId, x.CreatedAt });
+        modelBuilder.Entity<SentinelDiscussionComment>().HasIndex(x => x.NotionId);
         modelBuilder.Entity<SentinelDiscussionReaction>()
             .HasIndex(x => new { x.SentinelDiscussionCommentId, x.Username, x.Emoji })
             .IsUnique();
         modelBuilder.Entity<SentinelNotification>().HasIndex(x => new { x.Username, x.ReadAt, x.CreatedAt });
+        modelBuilder.Entity<SentinelWorkspaceMember>().HasIndex(x => x.Username).IsUnique();
+        modelBuilder.Entity<SentinelResourcePermission>()
+            .HasIndex(x => new { x.TargetId, x.IsDatabase, x.Username })
+            .IsUnique();
+        modelBuilder.Entity<SentinelPublicShare>().HasIndex(x => x.TokenHash).IsUnique();
+        modelBuilder.Entity<SentinelPublicShare>().HasIndex(x => new { x.TargetId, x.IsDatabase, x.RevokedAt });
+        modelBuilder.Entity<SentinelPresenceLease>().HasIndex(x => new { x.WikiPageId, x.LastSeenAt });
+        modelBuilder.Entity<SentinelAiRun>().HasIndex(x => new { x.WikiPageId, x.CreatedAt });
+        modelBuilder.Entity<SentinelAiRun>().HasIndex(x => new { x.Status, x.CreatedAt });
         modelBuilder.Entity<WikiDatabaseProperty>()
             .HasOne(x => x.WikiDatabase)
             .WithMany(x => x.Properties)
@@ -162,6 +179,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<WikiDatabaseProperty>().HasIndex(x => new { x.WikiDatabaseId, x.SortOrder });
         modelBuilder.Entity<WikiDatabaseRow>().HasIndex(x => new { x.WikiDatabaseId, x.SortOrder });
         modelBuilder.Entity<WikiDatabaseView>().HasIndex(x => new { x.WikiDatabaseId, x.SortOrder });
+        modelBuilder.Entity<WikiDatabaseView>().HasIndex(x => x.NotionId);
         // Non-unique: manually authored pages/databases/rows/properties have a null NotionId.
         modelBuilder.Entity<WikiPage>().HasIndex(x => x.NotionId);
         modelBuilder.Entity<WikiDatabase>().HasIndex(x => x.NotionId);

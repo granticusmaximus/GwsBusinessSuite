@@ -71,6 +71,13 @@ public static class WikiBlockHtmlRenderer
                 : $"<a href=\"{WebUtility.HtmlEncode(block.Props["url"])}\" target=\"_blank\" rel=\"noopener noreferrer\">{WebUtility.HtmlEncode(block.Props["url"])}</a>",
             WikiBlockTypes.LinkedDatabase => RenderLinkedDatabase(block, indentStyle),
             WikiBlockTypes.InlineDatabase => RenderLinkedDatabase(block, indentStyle, isInline: true),
+            WikiBlockTypes.Table => RenderTable(block, indentStyle),
+            WikiBlockTypes.Equation => $"<div class=\"wiki-equation\"{indentStyle}>{WebUtility.HtmlEncode(block.PlainText)}</div>",
+            WikiBlockTypes.Breadcrumb => $"<nav class=\"wiki-breadcrumb\"{indentStyle} aria-label=\"Breadcrumb\">{content}</nav>",
+            WikiBlockTypes.TableOfContents => $"<nav class=\"wiki-table-of-contents\"{indentStyle}>Table of contents</nav>",
+            WikiBlockTypes.Button => $"<a class=\"wiki-button\" href=\"{WebUtility.HtmlEncode(block.Props.GetValueOrDefault("url", "#"))}\">{content}</a>",
+            WikiBlockTypes.SyncedBlock => $"<div class=\"wiki-synced-block\"{indentStyle}>{content}</div>",
+            WikiBlockTypes.Columns => RenderColumns(block, indentStyle),
             // Legacy content from the pre-block-editor wiki still uses [[Page Title]] syntax,
             // so it's routed through the same resolver the old single-Markdown-string editor
             // used - new blocks link via RichTextSpan.Link instead and never hit this path.
@@ -81,8 +88,29 @@ public static class WikiBlockHtmlRenderer
         };
     }
 
-    public static string RenderPage(IReadOnlyList<WikiBlock> blocks, IReadOnlyList<WikiPage>? pagesForWikiLinks = null) =>
-        string.Concat(blocks.Select(block => RenderBlock(block, pagesForWikiLinks)));
+    public static string RenderPage(IReadOnlyList<WikiBlock> blocks, IReadOnlyList<WikiPage>? pagesForWikiLinks = null)
+    {
+        var headings = blocks
+            .Where(block => block.Type is WikiBlockTypes.Heading1 or WikiBlockTypes.Heading2 or WikiBlockTypes.Heading3)
+            .Select((block, index) => (Block: block, Anchor: $"sentinel-heading-{index + 1}"))
+            .ToList();
+        var headingAnchors = headings.ToDictionary(item => item.Block.Id, item => item.Anchor);
+
+        return string.Concat(blocks.Select(block =>
+        {
+            if (block.Type == WikiBlockTypes.TableOfContents)
+            {
+                var links = string.Concat(headings.Select(item =>
+                    $"<a class=\"level-{item.Block.Type[^1]}\" href=\"#{item.Anchor}\">{RenderRichText(item.Block.RichText)}</a>"));
+                return $"<nav class=\"wiki-table-of-contents\">{links}</nav>";
+            }
+
+            var rendered = RenderBlock(block, pagesForWikiLinks);
+            if (!headingAnchors.TryGetValue(block.Id, out var anchor)) return rendered;
+            var openingTagEnd = rendered.IndexOf('>');
+            return openingTagEnd < 0 ? rendered : rendered.Insert(openingTagEnd, $" id=\"{anchor}\"");
+        }));
+    }
 
     // A short single-line preview of a block's content, used by the sidebar tree and by the
     // structural revision diff (WikiService.BuildStructuralDiff) - never HTML, just text.
@@ -109,5 +137,27 @@ public static class WikiBlockHtmlRenderer
         var cssClass = isInline ? "wiki-linked-database wiki-inline-database" : "wiki-linked-database";
         return $"<div class=\"{cssClass}\" data-database-id=\"{WebUtility.HtmlEncode(databaseId)}\"{indentStyle}>"
             + $"<span aria-hidden=\"true\">▦</span><span>{WebUtility.HtmlEncode(title)}</span></div>";
+    }
+
+    private static string RenderTable(WikiBlock block, string indentStyle)
+    {
+        var rows = block.PlainText.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Split('|', StringSplitOptions.TrimEntries).Where(cell => cell.Length > 0).ToList())
+            .Where(row => row.Count > 0)
+            .ToList();
+        if (rows.Count == 0) return $"<table class=\"wiki-native-table\"{indentStyle}></table>";
+
+        var head = "<thead><tr>" + string.Concat(rows[0].Select(cell => $"<th>{WebUtility.HtmlEncode(cell)}</th>")) + "</tr></thead>";
+        var body = "<tbody>" + string.Concat(rows.Skip(1).Select(row =>
+            "<tr>" + string.Concat(row.Select(cell => $"<td>{WebUtility.HtmlEncode(cell)}</td>")) + "</tr>")) + "</tbody>";
+        return $"<table class=\"wiki-native-table\"{indentStyle}>{head}{body}</table>";
+    }
+
+    private static string RenderColumns(WikiBlock block, string indentStyle)
+    {
+        var columns = block.PlainText.Split("|||", StringSplitOptions.TrimEntries);
+        return $"<div class=\"wiki-columns\"{indentStyle}>"
+            + string.Concat(columns.Select(column => $"<div>{WebUtility.HtmlEncode(column).Replace("\n", "<br />")}</div>"))
+            + "</div>";
     }
 }

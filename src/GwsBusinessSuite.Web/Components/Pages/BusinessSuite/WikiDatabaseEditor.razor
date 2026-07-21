@@ -23,6 +23,7 @@ else
                 <input class="form-control form-control-sm fw-semibold" @bind="_title" @bind:after="SaveMetadataAsync" />
             </div>
             <div class="d-flex gap-2 flex-shrink-0">
+                <SentinelSharePanel TargetId="Database.Id" IsDatabase="true" TargetName="Database.Title" />
                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _showProperties = !_showProperties" disabled="@IsBusy">
                     <i class="bi bi-list-columns-reverse me-1"></i>Properties
                 </button>
@@ -116,6 +117,14 @@ else
                         <i class="bi bi-plus-lg me-1"></i>Calendar
                     </button>
                 </li>
+                @foreach (var advancedView in AdvancedViewOptions)
+                {
+                    <li class="nav-item">
+                        <button type="button" class="nav-link text-secondary" @onclick="() => AddAdvancedViewAsync(advancedView.Type, advancedView.Name)" disabled="@IsBusy">
+                            <i class="bi bi-plus-lg me-1"></i>@advancedView.Name
+                        </button>
+                    </li>
+                }
             </ul>
 
             @{ var titleProperty = Database.Properties.First(p => p.Type == WikiDatabasePropertyTypes.Title); }
@@ -269,6 +278,12 @@ else
                     <i class="bi bi-plus-lg me-1"></i>New page
                 </button>
             }
+            else if (ActiveView is { } advancedView && IsAdvancedView(advancedView.Type))
+            {
+                <SentinelDatabaseAdvancedView Database="Database" View="advancedView"
+                                              Config="@(ActiveViewConfig ?? WikiDatabaseViewConfig.Empty)"
+                                              OnOpenRow="OpenRowById" OnChanged="AdvancedViewChangedAsync" />
+            }
             else
             {
                 <div class="table-responsive">
@@ -329,6 +344,20 @@ else
                                                         </div>
                                                     }
                                                     break;
+                                                case WikiDatabasePropertyTypes.Person:
+                                                case WikiDatabasePropertyTypes.Files:
+                                                case WikiDatabasePropertyTypes.Relation:
+                                                    <input class="form-control form-control-sm" value="@string.Join(", ", GetMultiSelect(row, property))" disabled="@IsBusy"
+                                                           @onchange="e => SetMultiValueAsync(row, property, e.Value?.ToString())" placeholder="Comma-separated values" />
+                                                    break;
+                                                case WikiDatabasePropertyTypes.Place:
+                                                    <input class="form-control form-control-sm" value="@GetText(row, property)" disabled="@IsBusy"
+                                                           @onchange="e => SetTextAsync(row, property, e.Value?.ToString())" placeholder="Address or place" />
+                                                    break;
+                                                case WikiDatabasePropertyTypes.Formula:
+                                                case WikiDatabasePropertyTypes.Rollup:
+                                                    <span class="small text-secondary">@WikiPropertyValues.GetDisplayText(property, WikiPropertyValues.ParseObject(row.PropertyValuesJson), row.CreatedAt)</span>
+                                                    break;
                                                 case WikiDatabasePropertyTypes.CreatedTime:
                                                     <span class="small text-secondary">@row.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")</span>
                                                     break;
@@ -369,7 +398,18 @@ else
     [
         WikiDatabasePropertyTypes.Text, WikiDatabasePropertyTypes.Number, WikiDatabasePropertyTypes.Select,
         WikiDatabasePropertyTypes.MultiSelect, WikiDatabasePropertyTypes.Date, WikiDatabasePropertyTypes.Checkbox,
-        WikiDatabasePropertyTypes.Url, WikiDatabasePropertyTypes.CreatedTime
+        WikiDatabasePropertyTypes.Url, WikiDatabasePropertyTypes.Person, WikiDatabasePropertyTypes.Files,
+        WikiDatabasePropertyTypes.Place, WikiDatabasePropertyTypes.Formula, WikiDatabasePropertyTypes.Relation,
+        WikiDatabasePropertyTypes.Rollup, WikiDatabasePropertyTypes.CreatedTime
+    ];
+    private static readonly IReadOnlyList<(string Type, string Name)> AdvancedViewOptions =
+    [
+        (WikiDatabaseViewTypes.Timeline, "Timeline"),
+        (WikiDatabaseViewTypes.Chart, "Chart"),
+        (WikiDatabaseViewTypes.Form, "Form"),
+        (WikiDatabaseViewTypes.Map, "Map"),
+        (WikiDatabaseViewTypes.Feed, "Feed"),
+        (WikiDatabaseViewTypes.Dashboard, "Dashboard")
     ];
     private static readonly IReadOnlyList<string> CalendarWeekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -547,6 +587,38 @@ else
     private Task AddListViewAsync() => AddSimpleViewAsync(WikiDatabaseViewTypes.List, "List");
     private Task AddGalleryViewAsync() => AddSimpleViewAsync(WikiDatabaseViewTypes.Gallery, "Gallery");
 
+    private async Task AddAdvancedViewAsync(string type, string name)
+    {
+        var preferredProperty = type switch
+        {
+            WikiDatabaseViewTypes.Timeline => Database?.Properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Date),
+            WikiDatabaseViewTypes.Chart => Database?.Properties.FirstOrDefault(property => property.Type is WikiDatabasePropertyTypes.Select
+                or WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Checkbox or WikiDatabasePropertyTypes.Text),
+            WikiDatabaseViewTypes.Map => Database?.Properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Place),
+            _ => null
+        };
+
+        if (type == WikiDatabaseViewTypes.Timeline && preferredProperty is null)
+        {
+            ErrorMessage = "Add a Date property before creating a Timeline view.";
+            return;
+        }
+        if (type == WikiDatabaseViewTypes.Map && preferredProperty is null)
+        {
+            ErrorMessage = "Add a Place property before creating a Map view.";
+            return;
+        }
+
+        await Work(async () =>
+        {
+            var user = await CurrentUserNameAsync();
+            var config = new WikiDatabaseViewConfig([], [], preferredProperty?.Id.ToString());
+            var view = await WikiDatabaseService.SaveViewAsync(WikiDatabaseId, null, name, type, config, user);
+            await ReloadAsync();
+            _activeViewId = view.Id;
+        });
+    }
+
     private async Task AddCalendarViewAsync()
     {
         var dateProperty = Database?.Properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Date);
@@ -613,7 +685,14 @@ else
     });
 
     private void OpenRow(WikiDatabaseRow row) => _openRow = row;
+    private void OpenRowById(Guid rowId) => _openRow = Database?.Rows.FirstOrDefault(row => row.Id == rowId);
     private void CloseRow() => _openRow = null;
+
+    private async Task AdvancedViewChangedAsync()
+    {
+        await ReloadAsync();
+        await OnChanged.InvokeAsync();
+    }
 
     private async Task RowPageSavedAsync()
     {
@@ -667,6 +746,10 @@ else
     private Task SetSelectAsync(WikiDatabaseRow row, WikiDatabaseProperty property, string? optionId) =>
         SaveRowValueAsync(row, values => WikiPropertyValues.SetText(values, property.Id, string.IsNullOrEmpty(optionId) ? null : optionId));
 
+    private Task SetMultiValueAsync(WikiDatabaseRow row, WikiDatabaseProperty property, string? raw) =>
+        SaveRowValueAsync(row, values => WikiPropertyValues.SetMultiSelect(values, property.Id,
+            (raw ?? string.Empty).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)));
+
     private Task ToggleMultiSelectAsync(WikiDatabaseRow row, WikiDatabaseProperty property, string optionId, bool isChecked)
     {
         var current = WikiPropertyValues.GetMultiSelect(WikiPropertyValues.ParseObject(row.PropertyValuesJson), property.Id).ToList();
@@ -703,6 +786,14 @@ else
         WikiDatabaseViewTypes.List => "bi-list-ul",
         WikiDatabaseViewTypes.Gallery => "bi-grid",
         WikiDatabaseViewTypes.Calendar => "bi-calendar3",
+        WikiDatabaseViewTypes.Timeline => "bi-calendar-range",
+        WikiDatabaseViewTypes.Chart => "bi-bar-chart",
+        WikiDatabaseViewTypes.Form => "bi-ui-checks",
+        WikiDatabaseViewTypes.Map => "bi-map",
+        WikiDatabaseViewTypes.Feed => "bi-view-list",
+        WikiDatabaseViewTypes.Dashboard => "bi-speedometer2",
         _ => "bi-table"
     };
+
+    private static bool IsAdvancedView(string type) => AdvancedViewOptions.Any(option => option.Type == type);
 }

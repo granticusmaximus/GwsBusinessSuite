@@ -65,14 +65,14 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 | Capability family | Foundation status | Expansion target |
 | --- | --- | --- |
 | Page model | Nested pages (flat parent-id + explicit sibling `SortOrder`), icon, cover image, move/reorder, transactional subtree duplication | — |
-| Block editor | Slash-command insert, drag-reorder, Tab/Shift-Tab indent, inline bold/italic/link (Ctrl+B/I/K), `[[Page]]` autocomplete, paste-as-plain-text, reusable page templates | Nested columns, synced/reusable blocks, native tables, equations, breadcrumbs, TOC, buttons, block templates |
-| Core block types | paragraph, heading 1-3, bulleted/numbered list item, to-do, toggle, quote, callout, code, divider, image, embed, legacy markdown (pre-migration content) | table, richer embeds (oEmbed previews) |
+| Block editor | Slash-command insert, drag-reorder, Tab/Shift-Tab indent, inline bold/italic/link, `[[Page]]` autocomplete, reusable templates, native tables, equations, breadcrumbs, TOC, buttons, synced blocks, and columns | Richer embeds and reusable block-template management |
+| Core block types | paragraph, heading 1-3, lists, to-do, toggle, quote, callout, code, divider, image, embed, table, equation, breadcrumb, TOC, button, synced block, columns, and legacy markdown | oEmbed previews and additional provider-specific media |
 | History | Bounded DB snapshot revisions (20/page), structural diff (added/removed/changed blocks), revert-as-new-version | — |
-| Databases | Typed properties (title, text, number, select, multi-select, date, checkbox, url, created-time); editable Table and Board; List, Gallery, and Calendar views | Timeline, Chart, Form, Map, Feed, and Dashboard views; formula/relation/rollup and person/files properties |
+| Databases | Typed properties including person, files, place, formula, relation and rollup; editable Table, Board, List, Gallery, Calendar, Timeline, Chart, Form, Map, Feed, and Dashboard views | Formula evaluation and richer relation/rollup configuration |
 | Databases — structure | Databases share the page sidebar tree; every row opens as a block-content page; linked and inline database blocks reference canonical data without duplication | Row covers/icons, page history, layouts and peek modes |
 | Search & graph | All-token ranked page/block/database-row search with highlighted matches; structured and legacy backlinks; per-user favorites/recents; structured page, person, and date mentions with a personal mention inbox | Graph visualization, saved searches, and database-row mention inbox entries |
-| Import/sync | Delivered: read-only live Notion API import via a pasted, encrypted internal-integration token; manual/hourly sync; upsert-by-Notion-id reconciliation; hierarchy, blocks, database schema/rows, and soft archival | Upgrade from the pinned 2022 API to the current data-source/view API; selective and two-way conflict-aware sync |
-| Visibility | Admin-only canonical route (`/admin/sentinel`), with `/admin/wiki` retained as an alias | Workspace/member/guest roles, page permissions, public share links |
+| Import/sync | Current `2026-03-11` Notion API, data sources, views, comments, selective import, encrypted token storage, soft archival, and explicitly enabled conflict-aware manual page pushes | Durable ingestion of expiring Notion-hosted files and broader bidirectional database writes |
+| Visibility | Workspace roles and per-resource view/comment/edit/full-access grants, plus expiring/revocable tokenized public page and database shares | Guest onboarding and teamspace administration UI |
 
 ## Delivery sequence
 
@@ -88,11 +88,11 @@ proprietary schemas; public Notion product and API documentation is behavioral r
    block content, and imported Notion database-row page bodies sync into those blocks.
 3. **Notion API import/sync** (delivered): a `NotionConnectorSettings` singleton
    (encrypted integration token via `ISecretProtector`, matching `CjConnectorSettings`) + a typed-HttpClient
-   `NotionService` + a `NotionSyncBackgroundService` (matching `CjAdsSyncBackgroundService`'s
+   `NotionService` pinned to `2026-03-11` + a `NotionSyncBackgroundService` (matching `CjAdsSyncBackgroundService`'s
    interval/semaphore/scope-per-tick shape); maps Notion's ~30 block types onto
    `WikiBlock.Type` and its ~22 database property types onto the Phase 2 property model;
-   upsert-by-Notion-id reconciliation with soft-flagging of upstream-archived content
-   (not a destructive replace-all). The Sentinel UI provides connection settings, manual sync,
+   upsert-by-Notion-id reconciliation with soft-flagging of upstream-archived content,
+   selected-id scopes, view and comment import, and guarded manual page writes. The Sentinel UI provides connection settings, manual sync,
    hourly auto-sync control, last-sync counts, source badges, and dimmed-but-openable archived
    items. Sync-driven page changes deliberately do not create interactive revision snapshots,
    preventing hourly sync noise from evicting authored changes from the 20-revision history.
@@ -100,31 +100,31 @@ proprietary schemas; public Notion product and API documentation is behavioral r
    and canonical route; all-token ranked page/block/database-row search with matched-term
    highlighting; page backlinks; durable per-user favorites and recents; `[[Page]]` page
    mentions; and `@` autocomplete for structured people/date mentions with a personal inbox.
-5. **Database pages and complete views** (in progress): row block-content pages, List and
-   Gallery and Calendar views, and linked plus typed inline-editable database page blocks are delivered. Remaining work is Timeline,
-   Chart, Form, Map, Feed, and Dashboard views; view-specific layout/open mode; formulas,
-   relations, rollups, people, and files.
-6. **Collaboration** (in progress): authenticated page and block discussion threads, nested
+5. **Database pages and complete views** (delivered): row block-content pages, linked and
+   inline databases, expanded property vocabulary, and Table, Board, List, Gallery, Calendar,
+   Timeline, Chart, Form, Map, Feed, and Dashboard views.
+6. **Collaboration** (delivered foundation): authenticated page and block discussion threads, nested
    reply targets, resolve/reopen, emoji reactions, `@username` notification fan-out, and a
    personal read/unread notification panel, live cross-circuit discussion/notification
    refresh, heartbeat-expiring per-page presence, and editor-canvas block discussion pins are
    delivered. Atomic content-generation checks now reject stale saves and
    preserve the local draft with explicit reload, overwrite, or save-as-copy recovery choices.
-   This prevents lost updates but is not CRDT/OT simultaneous co-authoring. Realtime fan-out and
-   presence are process-local while the suite runs as one web instance; multi-instance scale-out
-   will require a distributed backplane/presence store.
-7. **Templates, sharing, and workspace structure** (in progress): reusable page templates are
+   Concurrent saves now use block-identity three-way merge, automatically combining edits to
+   different blocks while surfacing genuine same-block conflicts. Presence leases and discussion
+   polling are database-backed, so they work across web instances. This is block-granular
+   simultaneous editing, not character-level CRDT/OT cursor co-authoring.
+7. **Templates, sharing, and workspace structure** (delivered foundation): reusable page templates are
    delivered as durable snapshots that survive source-page deletion and create pages with fresh
    block identities. Page move/reorder and transactional subtree duplication are also delivered;
    duplicates receive fresh block identities and independent revision history. Database templates
-   and duplication, teamspaces, member/guest roles, granular page/database permissions, and
-   expiring public share links remain; favorites/recents were delivered in Phase 4.
-8. **Sentinel AI and automation**: workspace-grounded search/chat, writing and translation,
-   database autofill/formulas, research mode, meeting-note transcription/summaries, and
-   reviewable agents/automations using the app's existing Ollama and workflow infrastructure.
-9. **Notion interoperability parity**: migrate the connector to the current API version and
-   data-source/view model, import comments/views/templates and richer blocks, add selective
-   sync, then add opt-in two-way writes with explicit conflict handling.
+   plus workspace roles, granular page/database permissions, and expiring or revocable public
+   shares. Database templates and teamspace administration remain future extensions.
+8. **Sentinel AI** (delivered foundation): Ollama-backed ask, summarize, rewrite, translate,
+   research, meeting-notes, and database-autofill actions grounded in workspace pages and
+   databases. Outputs are durable, reviewable runs and require approve/reject before insertion.
+9. **Notion interoperability parity** (delivered foundation): current versioned data-source API,
+   view and comment import, selective sync, and opt-in manual two-way page pushes with a
+   remote-last-edit conflict guard.
 
 ## Full-clone parity contract
 
@@ -136,25 +136,25 @@ capabilities where they fit GWS Business Suite; they are no longer silently excl
 
 | Area | Delivered now | Required parity work |
 | --- | --- | --- |
-| Blocks | Core text/list/task/toggle/callout/code/media/embed blocks; tables import as Markdown; layout wrappers flatten | Complete supported block vocabulary, native tables/equations/columns/synced blocks, reusable templates, and richer embeds |
-| Databases | Editable Table/Board/List/Gallery/Calendar, filters/sorts/groups, common property types, rows with block page bodies, and linked/inline database blocks | Remaining major view families, formulas/relations/rollups, layouts, charts, forms, and automations |
+| Blocks | Core and advanced native block vocabulary, including tables/equations/columns/synced blocks/TOC/buttons | Richer embeds and reusable block-template management |
+| Databases | Eleven view families, expanded property vocabulary, filters/sorts/groups, row page bodies, and linked/inline databases | Formula computation, rich relation configuration, layouts, and automations |
 | Knowledge graph | `[[Page]]` links, ranked/highlighted workspace search, backlinks, person/date mentions, favorites/recents | Graph navigation, database-row mention inbox entries, and saved searches |
-| Collaboration | Authenticated page/block discussions with editor-canvas pins, replies, resolve/reopen, reactions, participant/mention notifications and read state, live cross-circuit refresh, heartbeat page presence, and optimistic lost-update protection with draft recovery | Distributed realtime scale-out, CRDT/OT simultaneous co-authoring, workspace roles, granular permissions, and public sharing |
+| Collaboration | Discussions, replies, reactions, notifications, DB-backed cross-instance presence/polling, block-level three-way merge, roles, granular permissions, and public sharing | Character-level CRDT/OT cursors and richer guest/teamspace administration |
 | Presentation | Emoji icon and cover URL | Custom icon/cover uploads, page width/fonts, database layouts, peek modes, and reusable style defaults |
-| Integration | Encrypted token, one-way manual/hourly reconciliation | Current Notion data-source/view/comment API, selective sync, durable file ingestion, and opt-in conflict-aware writes |
-| AI | Existing Ollama and workflow foundations elsewhere in the suite | Sentinel-grounded chat/search, writing, autofill, research, meeting notes, and reviewable workspace agents |
+| Integration | Encrypted token, current data-source/view/comment API, selective reconciliation, and opt-in conflict-aware manual page writes | Durable file ingestion and bidirectional database schema/row writes |
+| AI | Workspace-grounded ask/writing/translation/research/meeting notes/autofill with durable approve/reject runs | Streaming chat, citations, transcription capture, and autonomous agents |
 
 Official research baseline: [Notion block API](https://developers.notion.com/reference/block),
 [Notion API introduction](https://developers.notion.com/reference/intro),
 [database views](https://www.notion.com/help/category/database-views/all),
 [database rows as pages](https://www.notion.com/help/intro-to-databases), and
-[comments](https://developers.notion.com/reference/comment-object). The connector remains on
-the older pinned API until the data-source migration is implemented and covered by fixtures;
-changing only the version header would break rather than improve interoperability.
+[comments](https://developers.notion.com/reference/comment-object). The connector pins
+`2026-03-11` and uses `/v1/data_sources`, `/v1/views`, and `/v1/comments` rather than the
+retired database-only contract.
 
 Known import limitations are explicit: Notion-hosted file image URLs can expire; relation
-values retain related-page ids rather than resolved titles; `equation`, `breadcrumb`,
-`table_of_contents`, `meeting_notes`, and `transcription` blocks are skipped; uncommon or
+values retain related-page ids rather than resolved titles; `meeting_notes` and
+`transcription` blocks are skipped; uncommon or
 computed property types are preserved as read-only best-effort text, with `place` limited by
 the upstream API as well.
 
@@ -164,8 +164,9 @@ the upstream API as well.
 - The Notion integration token follows this app's existing convention: pasted into a
   settings form, encrypted at rest via `ISecretProtector`, never an OAuth flow (this app
   has none).
-- Server-side authorization remains authoritative for `/admin/sentinel`; there is no public
-  route yet.
+- Server-side authorization remains authoritative for `/admin/sentinel`; public access is
+  isolated to random-token `/sentinel/share/{token}` routes. Only token hashes are stored,
+  and expiry/revocation is checked server-side on every resolution.
 - Block rich text only ever contains four inline tags (`b`/`strong`, `i`/`em`, `code`, `a`)
   produced by the editor's own formatting commands — pasted content is stripped to plain
   text, not sanitized-and-kept, to avoid needing an HTML allowlist sanitizer.

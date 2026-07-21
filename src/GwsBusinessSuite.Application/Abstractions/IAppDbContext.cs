@@ -16,6 +16,11 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<SentinelDiscussionComment> SentinelDiscussionComments { get; }
     DbSet<SentinelDiscussionReaction> SentinelDiscussionReactions { get; }
     DbSet<SentinelNotification> SentinelNotifications { get; }
+    DbSet<SentinelWorkspaceMember> SentinelWorkspaceMembers { get; }
+    DbSet<SentinelResourcePermission> SentinelResourcePermissions { get; }
+    DbSet<SentinelPublicShare> SentinelPublicShares { get; }
+    DbSet<SentinelPresenceLease> SentinelPresenceLeases { get; }
+    DbSet<SentinelAiRun> SentinelAiRuns { get; }
     DbSet<WikiDatabase> WikiDatabases { get; }
     DbSet<WikiDatabaseProperty> WikiDatabaseProperties { get; }
     DbSet<WikiDatabaseRow> WikiDatabaseRows { get; }
