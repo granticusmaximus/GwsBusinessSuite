@@ -18,19 +18,27 @@
 
 <PageTitle>Sentinel</PageTitle>
 
-<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-journal-bookmark-fill me-2 text-warning"></i>Sentinel</h1>
-        <p class="mb-0">Your connected workspace for documents, databases, operational knowledge, and imported Notion content.</p>
+<div class="sentinel-workspace">
+<div class="sentinel-workspace-header">
+    <div class="sentinel-workspace-identity">
+        <div class="sentinel-brand-mark" aria-hidden="true">S</div>
+        <div>
+            <div class="sentinel-eyebrow">GWS connected workspace</div>
+            <h1>Sentinel</h1>
+            <p>Your operational knowledge, documents, databases, and imported Notion content.</p>
+        </div>
     </div>
-    <button type="button" class="btn btn-outline-dark" @onclick="OpenNotionModalAsync" disabled="@IsBusy">
-        <i class="bi bi-arrow-repeat me-1"></i>Notion Sync
-    </button>
+    <div class="sentinel-workspace-actions">
+        <span class="sentinel-workspace-status"><span></span>Workspace online</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="OpenNotionModalAsync" disabled="@IsBusy">
+            <i class="bi bi-arrow-repeat me-1"></i>Notion sync
+        </button>
+    </div>
 </div>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
-    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+    <div class="alert alert-danger sentinel-notice d-flex align-items-start gap-2" role="alert">
         <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
         <div>@ErrorMessage</div>
     </div>
@@ -38,7 +46,7 @@
 
 @if (!string.IsNullOrWhiteSpace(StatusMessage))
 {
-    <div class="alert alert-info d-flex align-items-center gap-2 mb-4" role="alert">
+    <div class="alert alert-info sentinel-notice d-flex align-items-center gap-2" role="alert">
         <i class="bi bi-check-circle-fill flex-shrink-0"></i>
         <div>@StatusMessage</div>
     </div>
@@ -46,7 +54,7 @@
 
 @if (PageConflict is not null)
 {
-    <div class="alert alert-warning mb-4" role="alert">
+    <div class="alert alert-warning sentinel-notice" role="alert">
         <div class="d-flex align-items-start gap-2">
             <i class="bi bi-exclamation-diamond-fill mt-1"></i>
             <div class="flex-grow-1">
@@ -65,21 +73,24 @@
     </div>
 }
 
-<div class="row g-4">
-    <div class="col-lg-3">
-        <div class="card border-0 shadow-sm h-100">
-            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
-                <span class="fw-semibold">Workspace</span>
+<div class="sentinel-layout">
+    <aside class="sentinel-local-sidebar">
+        <div class="sentinel-nav-panel">
+            <div class="sentinel-nav-toolbar">
+                <div>
+                    <span class="fw-semibold">Private workspace</span>
+                    <small>Pages &amp; databases</small>
+                </div>
                 <div class="d-flex gap-1">
-                    <button class="btn btn-sm btn-outline-primary" @onclick="CreateNewPage" disabled="@IsBusy" title="New page">
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="CreateNewPage" disabled="@IsBusy" title="New page">
                         <i class="bi bi-file-earmark-plus"></i>
                     </button>
-                    <button class="btn btn-sm btn-outline-primary" @onclick="CreateNewDatabaseAsync" disabled="@IsBusy" title="New database">
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="CreateNewDatabaseAsync" disabled="@IsBusy" title="New database">
                         <i class="bi bi-grid-3x3-gap-fill"></i>
                     </button>
                 </div>
             </div>
-            <div class="card-body border-bottom py-2">
+            <div class="sentinel-nav-search">
                 <div class="input-group input-group-sm">
                     <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
                     <input class="form-control" @bind="SearchQuery" @bind:event="oninput" @bind:after="SearchWorkspaceAsync"
@@ -135,7 +146,7 @@
                     }
                 </div>
             }
-            <div class="card-body p-0">
+            <div class="sentinel-tree-scroll">
                 @if (AllTreeNodes().Count == 0)
                 {
                     <div class="p-4 text-secondary">
@@ -215,18 +226,21 @@
         <SentinelTemplates CurrentPageId="SelectedPageId"
                            CurrentPageTitle="Editor.Title"
                            OnPageCreated="OpenTemplatePageAsync" />
-    </div>
+    </aside>
 
-    <div class="col-lg-9">
+    <main class="sentinel-main">
         @if (SelectedDatabaseId is { } openDatabaseId)
         {
             <WikiDatabaseEditor WikiDatabaseId="openDatabaseId" OnChanged="() => LoadTreeAsync(selectFirstPage: false)" />
         }
         else
         {
-        <div class="card border-0 shadow-sm">
-            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
-                <span class="fw-semibold">@EditorHeader</span>
+        <div class="sentinel-document">
+            <div class="sentinel-document-toolbar">
+                <div class="sentinel-document-context">
+                    <i class="bi bi-file-earmark-text"></i>
+                    <span>@EditorHeader</span>
+                </div>
                 <div class="d-flex align-items-center gap-2">
                     @if (SelectedPageId is { } selectedPageId)
                     {
@@ -236,34 +250,31 @@
                             <i class="bi @(IsFavorite(selectedPageId, false) ? "bi-star-fill" : "bi-star")"></i>
                         </button>
                     }
-                    <span class="badge @(SelectedPageId.HasValue ? "text-bg-primary" : "text-bg-secondary")">
-                        @(SelectedPageId.HasValue ? "Editing Existing Page" : "New Page")
+                    <span class="sentinel-editing-state">
+                        @(SelectedPageId.HasValue ? "Saved page" : "New page")
                     </span>
                 </div>
             </div>
-            <div class="card-body">
+            <div class="sentinel-document-canvas">
                 <EditForm Model="Editor" OnValidSubmit="SavePageAsync">
                     <DataAnnotationsValidator />
                     <ValidationSummary />
 
-                    <div class="row g-3 mb-2">
-                        <div class="col-md-1">
-                            <label class="form-label fw-semibold small">Icon</label>
-                            <input class="form-control text-center" @bind="Editor.Icon" placeholder="📄" maxlength="4" />
-                        </div>
-                        <div class="col-md-7">
-                            <label class="form-label fw-semibold small">Title</label>
-                            <InputText class="form-control" @bind-Value="Editor.Title" placeholder="Page title" />
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label fw-semibold small">Slug</label>
-                            <InputText class="form-control" @bind-Value="Editor.Slug" placeholder="optional-slug" />
+                    <div class="sentinel-page-heading">
+                        <input class="sentinel-icon-input" @bind="Editor.Icon" placeholder="📄" maxlength="4" aria-label="Page icon" />
+                        <InputText class="sentinel-title-input" @bind-Value="Editor.Title" placeholder="Untitled" aria-label="Page title" />
+                    </div>
+
+                    <div class="sentinel-properties">
+                        <div class="sentinel-property-row">
+                            <label for="sentinelSlug"><i class="bi bi-link-45deg"></i>Slug</label>
+                            <InputText id="sentinelSlug" class="sentinel-property-control" @bind-Value="Editor.Slug" placeholder="Generated from title" />
                         </div>
                         @if (SelectedPageId.HasValue)
                         {
-                            <div class="col-md-6">
-                                <label class="form-label fw-semibold small">Parent Page</label>
-                                <select class="form-select" @bind="ParentWikiPageIdSelection" @bind:after="MoveToSelectedParentAsync">
+                            <div class="sentinel-property-row">
+                                <label for="sentinelParent"><i class="bi bi-diagram-2"></i>Parent</label>
+                                <select id="sentinelParent" class="sentinel-property-control" @bind="ParentWikiPageIdSelection" @bind:after="MoveToSelectedParentAsync">
                                     <option value="">— Top level —</option>
                                     @foreach (var candidate in WikiParentPageOptions())
                                     {
@@ -272,13 +283,14 @@
                                 </select>
                             </div>
                         }
-                        <div class="col-md-6">
-                            <label class="form-label fw-semibold small d-flex justify-content-between">
-                                <span>Cover image</span>
-                                <button type="button" class="btn btn-xs btn-outline-secondary" @onclick="ToggleCoverPickerAsync">
-                                    <i class="bi bi-image me-1"></i>@(string.IsNullOrWhiteSpace(Editor.CoverImageUrl) ? "Add" : "Change")
+                        <div class="sentinel-property-row sentinel-cover-property">
+                            <label><i class="bi bi-image"></i>Cover</label>
+                            <div class="sentinel-cover-actions">
+                                <span>@(string.IsNullOrWhiteSpace(Editor.CoverImageUrl) ? "None" : "Image selected")</span>
+                                <button type="button" class="btn btn-xs btn-link" @onclick="ToggleCoverPickerAsync">
+                                    @(string.IsNullOrWhiteSpace(Editor.CoverImageUrl) ? "Add" : "Change")
                                 </button>
-                            </label>
+                            </div>
                             @if (!string.IsNullOrWhiteSpace(Editor.CoverImageUrl))
                             {
                                 <div class="wiki-cover-preview">
@@ -315,13 +327,13 @@
                         </div>
                     }
 
-                    <label class="form-label fw-semibold small mb-1">Content</label>
-                    <div class="small text-secondary mb-2">
-                        Type <code>/</code> for block commands, <code>[[</code> to link a page, <code>@@</code> to mention a person or date, and Tab/Shift+Tab to indent.
+                    <div class="sentinel-editor-hint">
+                        <i class="bi bi-command"></i>
+                        <span><code>/</code> commands · <code>[[</code> page links · <code>@@</code> mentions · Tab to indent</span>
                     </div>
                     <div class="wiki-block-editor" @ref="_blockEditorContainer"></div>
 
-                    <div class="mt-3 d-flex flex-wrap gap-2">
+                    <div class="sentinel-editor-actions">
                         <button type="submit" class="btn btn-primary" disabled="@IsBusy">
                             <i class="bi bi-floppy-fill me-1"></i>Save Page
                         </button>
@@ -341,7 +353,7 @@
             </div>
         </div>
 
-        <div class="card border-0 shadow-sm mt-4">
+        <div class="card border-0 shadow-sm mt-4 sentinel-support-panel sentinel-preview-panel">
             <div class="card-header bg-white border-bottom py-3">
                 <span class="fw-semibold">Preview</span>
             </div>
@@ -358,7 +370,7 @@
                                  OnOpenPage="OpenPageAsync"
                                  OnDiscussionCountsChanged="UpdateDiscussionCountsAsync" />
 
-            <div class="card border-0 shadow-sm mt-4">
+            <div class="card border-0 shadow-sm mt-4 sentinel-support-panel">
                 <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
                     <div>
                         <div class="fw-semibold"><i class="bi bi-arrow-left-right me-1"></i>Backlinks</div>
@@ -387,7 +399,7 @@
                 </div>
             </div>
 
-            <div class="card border-0 shadow-sm mt-4">
+            <div class="card border-0 shadow-sm mt-4 sentinel-support-panel">
                 <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
                     <div>
                         <div class="fw-semibold">History</div>
@@ -462,7 +474,8 @@
             </div>
         }
         }
-    </div>
+    </main>
+</div>
 </div>
 
 @if (ShowNotionModal)
