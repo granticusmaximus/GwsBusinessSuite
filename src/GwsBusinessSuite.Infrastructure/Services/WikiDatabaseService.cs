@@ -67,6 +67,108 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
         return database;
     }
 
+    public async Task<WikiDatabase> DuplicateDatabaseAsync(
+        Guid wikiDatabaseId,
+        string performedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var source = await GetDatabaseAsync(wikiDatabaseId, cancellationToken)
+            ?? throw new KeyNotFoundException("The database no longer exists.");
+        var now = DateTimeOffset.UtcNow;
+        var propertyIds = source.Properties.ToDictionary(property => property.Id, _ => Guid.NewGuid());
+
+        var duplicate = new WikiDatabase
+        {
+            Id = Guid.NewGuid(),
+            Title = $"{source.Title} Copy",
+            Icon = source.Icon,
+            ParentWikiPageId = source.ParentWikiPageId,
+            SortOrder = source.SortOrder + 1,
+            CreatedAt = now,
+            CreatedBy = performedBy
+        };
+
+        foreach (var property in source.Properties.OrderBy(property => property.SortOrder))
+        {
+            duplicate.Properties.Add(new WikiDatabaseProperty
+            {
+                Id = propertyIds[property.Id],
+                WikiDatabaseId = duplicate.Id,
+                Name = property.Name,
+                Type = property.Type,
+                SortOrder = property.SortOrder,
+                ConfigJson = property.ConfigJson,
+                CreatedAt = now,
+                CreatedBy = performedBy
+            });
+        }
+
+        foreach (var row in source.Rows.OrderBy(row => row.SortOrder))
+        {
+            var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+            var remappedValues = new System.Text.Json.Nodes.JsonObject();
+            foreach (var (oldPropertyId, newPropertyId) in propertyIds)
+            {
+                if (values[oldPropertyId.ToString()] is { } value)
+                {
+                    remappedValues[newPropertyId.ToString()] = value.DeepClone();
+                }
+            }
+
+            var blocks = WikiBlockJson.ParseBlocks(row.BlocksJson)
+                .Select(block => block with { Id = Guid.NewGuid() })
+                .ToList();
+            duplicate.Rows.Add(new WikiDatabaseRow
+            {
+                Id = Guid.NewGuid(),
+                WikiDatabaseId = duplicate.Id,
+                SortOrder = row.SortOrder,
+                PropertyValuesJson = WikiPropertyValues.Serialize(remappedValues),
+                BlocksJson = WikiBlockJson.Serialize(blocks),
+                CreatedAt = now,
+                CreatedBy = performedBy
+            });
+        }
+
+        foreach (var view in source.Views.OrderBy(view => view.SortOrder))
+        {
+            var config = WikiDatabaseViewConfigJson.Parse(view.ConfigJson);
+            duplicate.Views.Add(new WikiDatabaseView
+            {
+                Id = Guid.NewGuid(),
+                WikiDatabaseId = duplicate.Id,
+                Name = view.Name,
+                Type = view.Type,
+                SortOrder = view.SortOrder,
+                ConfigJson = WikiDatabaseViewConfigJson.Serialize(new WikiDatabaseViewConfig(
+                    config.Filters.Select(filter => filter with { PropertyId = RemapPropertyId(filter.PropertyId, propertyIds) }).ToList(),
+                    config.Sorts.Select(sort => sort with { PropertyId = RemapPropertyId(sort.PropertyId, propertyIds) }).ToList(),
+                    config.GroupByPropertyId is null ? null : RemapPropertyId(config.GroupByPropertyId, propertyIds))),
+                CreatedAt = now,
+                CreatedBy = performedBy
+            });
+        }
+
+        var followingSiblings = await dbContext.WikiDatabases
+            .Where(database => database.ParentWikiPageId == source.ParentWikiPageId && database.SortOrder > source.SortOrder)
+            .ToListAsync(cancellationToken);
+        foreach (var sibling in followingSiblings)
+        {
+            sibling.SortOrder++;
+            sibling.UpdatedAt = now;
+            sibling.UpdatedBy = performedBy;
+        }
+
+        await dbContext.WikiDatabases.AddAsync(duplicate, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return duplicate;
+    }
+
+    private static string RemapPropertyId(string propertyId, IReadOnlyDictionary<Guid, Guid> propertyIds) =>
+        Guid.TryParse(propertyId, out var parsed) && propertyIds.TryGetValue(parsed, out var remapped)
+            ? remapped.ToString()
+            : propertyId;
+
     public async Task<WikiDatabase> RenameDatabaseAsync(
         Guid wikiDatabaseId,
         string title,

@@ -203,6 +203,64 @@ public sealed class WikiDatabaseServiceTests
     }
 
     [Fact]
+    public async Task DuplicateDatabaseAsync_ShouldCreateAnIndependentAdjacentCopyAndRemapPropertyReferences()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var source = await service.CreateDatabaseAsync("Projects", null, "owner");
+        var following = await service.CreateDatabaseAsync("Following", null, "owner");
+        var followingOriginalSortOrder = following.SortOrder;
+        var sourceTitle = source.Properties.Single(property => property.Type == WikiDatabasePropertyTypes.Title);
+        var status = await service.SavePropertyAsync(source.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Status",
+            Type = WikiDatabasePropertyTypes.Select,
+            Options = [new WikiDatabasePropertyOption("active", "Active", "#0f0")]
+        }, "owner");
+        var values = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(values, sourceTitle.Id, "Launch");
+        WikiPropertyValues.SetText(values, status.Id, "active");
+        var sourceBlockId = Guid.NewGuid();
+        await service.SaveRowAsync(source.Id, new WikiDatabaseRowEditor
+        {
+            Values = values.ToDictionary(item => item.Key, item => item.Value),
+            BlocksJson = WikiBlockJson.Serialize([
+                new WikiBlock(sourceBlockId, WikiBlockTypes.Paragraph, 0,
+                    [new WikiRichTextSpan("Independent notes")], new Dictionary<string, string>())])
+        }, "owner");
+        await service.SaveViewAsync(source.Id, null, "Board", WikiDatabaseViewTypes.Board,
+            new WikiDatabaseViewConfig(
+                [new WikiDatabaseFilter(status.Id.ToString(), "equals", "active")],
+                [new WikiDatabaseSort(sourceTitle.Id.ToString(), "ascending")],
+                status.Id.ToString()), "owner");
+
+        var duplicate = await service.DuplicateDatabaseAsync(source.Id, "member");
+        var reloaded = await service.GetDatabaseAsync(duplicate.Id);
+
+        reloaded.Should().NotBeNull();
+        reloaded!.Title.Should().Be("Projects Copy");
+        reloaded.SortOrder.Should().Be(source.SortOrder + 1);
+        (await service.GetDatabaseAsync(following.Id))!.SortOrder.Should().Be(followingOriginalSortOrder + 1);
+        reloaded.NotionId.Should().BeNull();
+
+        var copiedTitle = reloaded.Properties.Single(property => property.Type == WikiDatabasePropertyTypes.Title);
+        var copiedStatus = reloaded.Properties.Single(property => property.Name == "Status");
+        copiedTitle.Id.Should().NotBe(sourceTitle.Id);
+        copiedStatus.Id.Should().NotBe(status.Id);
+        var copiedRow = reloaded.Rows.Single();
+        var copiedValues = WikiPropertyValues.ParseObject(copiedRow.PropertyValuesJson);
+        WikiPropertyValues.GetText(copiedValues, copiedTitle.Id).Should().Be("Launch");
+        WikiPropertyValues.GetText(copiedValues, copiedStatus.Id).Should().Be("active");
+        WikiBlockJson.ParseBlocks(copiedRow.BlocksJson).Single().Id.Should().NotBe(sourceBlockId);
+
+        var copiedBoard = reloaded.Views.Single(view => view.Type == WikiDatabaseViewTypes.Board);
+        var copiedConfig = WikiDatabaseViewConfigJson.Parse(copiedBoard.ConfigJson);
+        copiedConfig.GroupByPropertyId.Should().Be(copiedStatus.Id.ToString());
+        copiedConfig.Filters.Single().PropertyId.Should().Be(copiedStatus.Id.ToString());
+        copiedConfig.Sorts.Single().PropertyId.Should().Be(copiedTitle.Id.ToString());
+    }
+
+    [Fact]
     public async Task DeleteDatabaseAsync_ShouldCascadeDeletePropertiesRowsAndViews()
     {
         await using var db = await CreateDbAsync();
