@@ -237,6 +237,7 @@ using (var scope = app.Services.CreateScope())
 {
     var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<ApplicationDbContext>>();
     await using var dbContext = await dbFactory.CreateDbContextAsync();
+    await MigrationHistoryCompatibility.NormalizeAsync(dbContext);
     await dbContext.Database.MigrateAsync();
 
     await EnsureGrantWatsonHomepageAsync(dbContext, app.Configuration, app.Logger);

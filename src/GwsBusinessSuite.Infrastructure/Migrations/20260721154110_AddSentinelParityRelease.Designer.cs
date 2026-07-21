@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GwsBusinessSuite.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260721154652_AddSentinelParityRelease")]
+    [Migration("20260721154110_AddSentinelParityRelease")]
     partial class AddSentinelParityRelease
     {
         /// <inheritdoc />
