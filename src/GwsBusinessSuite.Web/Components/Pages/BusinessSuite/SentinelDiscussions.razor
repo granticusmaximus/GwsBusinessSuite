@@ -4,9 +4,10 @@
 @inject ISentinelCollaborationService CollaborationService
 @inject SentinelCollaborationNotifier CollaborationNotifier
 @inject ICurrentUserAccessor CurrentUserAccessor
+@inject IJSRuntime JS
 @inject ILogger<SentinelDiscussions> Logger
 
-<div class="card border-0 shadow-sm mt-4">
+<div class="card border-0 shadow-sm mt-4" @ref="_discussionRoot">
     <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
         <div>
             <div class="fw-semibold"><i class="bi bi-chat-left-text me-1"></i>Discussions</div>
@@ -93,7 +94,7 @@
         <div class="list-group list-group-flush">
             @foreach (var discussion in Discussions)
             {
-                <div class="list-group-item sentinel-discussion-thread @(discussion.IsResolved ? "sentinel-discussion-resolved" : "")">
+                <div class="list-group-item sentinel-discussion-thread @(discussion.IsResolved ? "sentinel-discussion-resolved" : "") @(FocusedBlockId.HasValue && FocusedBlockId == discussion.BlockId ? "is-focused" : "")">
                     <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
                         <div class="small">
                             @if (discussion.BlockId is { } blockId)
@@ -166,6 +167,7 @@
     [Parameter, EditorRequired] public Guid WikiPageId { get; set; }
     [Parameter] public string BlocksJson { get; set; } = "[]";
     [Parameter] public EventCallback<Guid> OnOpenPage { get; set; }
+    [Parameter] public EventCallback<IReadOnlyDictionary<Guid, int>> OnDiscussionCountsChanged { get; set; }
 
     private static readonly string[] ReactionChoices = ["👍", "❤️", "🎉", "👀", "✅"];
     private List<SentinelDiscussionView> Discussions { get; set; } = new();
@@ -181,12 +183,12 @@
     private Guid? ReplyingToCommentId { get; set; }
     private string ReplyingToAuthor { get; set; } = string.Empty;
     private string ReplyBody { get; set; } = string.Empty;
+    private Guid? FocusedBlockId { get; set; }
     private Guid _loadedPageId;
+    private ElementReference _discussionRoot;
 
     private IReadOnlyList<BlockOption> BlockOptions => WikiBlockJson.ParseBlocks(BlocksJson)
-        .Where(block => block.Type != WikiBlockTypes.Divider)
-        .Select(block => new BlockOption(block.Id, WikiBlockHtmlRenderer.PlainTextPreview(block, 70)))
-        .Where(block => !string.IsNullOrWhiteSpace(block.Preview))
+        .Select(block => new BlockOption(block.Id, BlockOptionPreview(block)))
         .ToList();
 
     private int UnreadNotificationCount => Notifications.Count(notification => !notification.IsRead);
@@ -197,6 +199,7 @@
         _loadedPageId = WikiPageId;
         CurrentUsername = await CurrentUserAccessor.GetCurrentUsernameAsync();
         CancelReply();
+        FocusedBlockId = null;
         await ReloadAsync();
     }
 
@@ -215,6 +218,7 @@
                 {
                     Discussions = (await CollaborationService.ListDiscussionsAsync(
                         WikiPageId, CurrentUsername, IncludeResolved)).ToList();
+                    await NotifyDiscussionCountsAsync();
                 }
                 Notifications = (await CollaborationService.ListNotificationsAsync(CurrentUsername)).ToList();
                 StateHasChanged();
@@ -230,10 +234,25 @@
     {
         Discussions = (await CollaborationService.ListDiscussionsAsync(WikiPageId, CurrentUsername, IncludeResolved)).ToList();
         Notifications = (await CollaborationService.ListNotificationsAsync(CurrentUsername)).ToList();
+        await NotifyDiscussionCountsAsync();
     }
 
     private Task LoadDiscussionsAsync() => RunAsync(async () =>
-        Discussions = (await CollaborationService.ListDiscussionsAsync(WikiPageId, CurrentUsername, IncludeResolved)).ToList());
+    {
+        Discussions = (await CollaborationService.ListDiscussionsAsync(WikiPageId, CurrentUsername, IncludeResolved)).ToList();
+        await NotifyDiscussionCountsAsync();
+    });
+
+    public async Task FocusBlockAsync(Guid blockId)
+    {
+        FocusedBlockId = blockId;
+        NewAnchorSelection = blockId.ToString();
+        await InvokeAsync(StateHasChanged);
+        await JS.InvokeVoidAsync("gwsWikiLinks.scrollIntoView", _discussionRoot);
+    }
+
+    private Task NotifyDiscussionCountsAsync() =>
+        OnDiscussionCountsChanged.InvokeAsync(SentinelDiscussionSummary.OpenBlockCounts(Discussions));
 
     private async Task CreateDiscussionAsync() => await RunAsync(async () =>
     {
@@ -319,6 +338,20 @@
 
     private string BlockPreview(Guid blockId) =>
         BlockOptions.FirstOrDefault(block => block.Id == blockId)?.Preview ?? "Deleted block";
+
+    private static string BlockOptionPreview(WikiBlock block)
+    {
+        var preview = WikiBlockHtmlRenderer.PlainTextPreview(block, 70);
+        if (!string.IsNullOrWhiteSpace(preview)) return preview;
+
+        return block.Type switch
+        {
+            WikiBlockTypes.Divider => "Divider",
+            WikiBlockTypes.Image => "Image",
+            WikiBlockTypes.Embed => "Embed",
+            _ => "Empty block"
+        };
+    }
 
     private sealed record BlockOption(Guid Id, string Preview);
 

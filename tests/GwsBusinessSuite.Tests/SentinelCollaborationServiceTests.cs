@@ -11,6 +11,30 @@ namespace GwsBusinessSuite.Tests;
 public sealed class SentinelCollaborationServiceTests
 {
     [Fact]
+    public void OpenBlockCounts_ShouldGroupOpenBlockThreadsOnly()
+    {
+        var firstBlockId = Guid.NewGuid();
+        var secondBlockId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var discussions = new[]
+        {
+            new SentinelDiscussionView(Guid.NewGuid(), Guid.NewGuid(), firstBlockId, false, null, null, now, []),
+            new SentinelDiscussionView(Guid.NewGuid(), Guid.NewGuid(), firstBlockId, false, null, null, now, []),
+            new SentinelDiscussionView(Guid.NewGuid(), Guid.NewGuid(), firstBlockId, true, now, "owner", now, []),
+            new SentinelDiscussionView(Guid.NewGuid(), Guid.NewGuid(), secondBlockId, false, null, null, now, []),
+            new SentinelDiscussionView(Guid.NewGuid(), Guid.NewGuid(), null, false, null, null, now, [])
+        };
+
+        var counts = SentinelDiscussionSummary.OpenBlockCounts(discussions);
+
+        counts.Should().BeEquivalentTo(new Dictionary<Guid, int>
+        {
+            [firstBlockId] = 2,
+            [secondBlockId] = 1
+        });
+    }
+
+    [Fact]
     public async Task CreateDiscussionAsync_ShouldAttachToBlockAndNotifyOwnerAndMentionedUser()
     {
         await using var fixture = await Fixture.CreateAsync();

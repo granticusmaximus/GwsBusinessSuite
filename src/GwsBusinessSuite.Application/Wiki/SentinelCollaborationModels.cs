@@ -32,6 +32,15 @@ public sealed record SentinelNotificationView(
     DateTimeOffset CreatedAt,
     bool IsRead);
 
+public static class SentinelDiscussionSummary
+{
+    public static IReadOnlyDictionary<Guid, int> OpenBlockCounts(
+        IEnumerable<SentinelDiscussionView> discussions) => discussions
+        .Where(discussion => !discussion.IsResolved && discussion.BlockId.HasValue)
+        .GroupBy(discussion => discussion.BlockId!.Value)
+        .ToDictionary(group => group.Key, group => group.Count());
+}
+
 public interface ISentinelCollaborationService
 {
     Task<IReadOnlyList<SentinelDiscussionView>> ListDiscussionsAsync(

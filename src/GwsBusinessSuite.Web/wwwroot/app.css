@@ -1181,10 +1181,12 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     transition: opacity 0.1s ease-in;
     flex-shrink: 0;
 }
-.wiki-block:hover .wiki-block-gutter {
+.wiki-block:hover .wiki-block-gutter,
+.wiki-block-gutter.has-discussions {
     opacity: 1;
 }
 .wiki-block-add,
+.wiki-block-discussion,
 .wiki-block-handle {
     display: inline-flex;
     align-items: center;
@@ -1198,10 +1200,28 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     cursor: pointer;
     font-size: 0.85rem;
 }
+.wiki-block-discussion {
+    width: auto;
+    min-width: 1.25rem;
+    padding: 0 0.25rem;
+    opacity: 0;
+    white-space: nowrap;
+}
+.wiki-block:hover .wiki-block-discussion,
+.wiki-block-discussion.has-discussions {
+    opacity: 1;
+}
+.wiki-block-discussion.has-discussions {
+    background: #eef2ff;
+    color: #4f46e5;
+    font-size: 0.72rem;
+    font-weight: 600;
+}
 .wiki-block-handle {
     cursor: grab;
 }
 .wiki-block-add:hover,
+.wiki-block-discussion:hover,
 .wiki-block-handle:hover {
     background: #eef1f5;
     color: #495057;
@@ -1401,6 +1421,10 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 }
 .sentinel-discussion-thread {
     padding: 1rem;
+}
+.sentinel-discussion-thread.is-focused {
+    background: #eef2ff;
+    box-shadow: inset 3px 0 0 #4f46e5;
 }
 .sentinel-discussion-resolved {
     background: #f8f9fa;

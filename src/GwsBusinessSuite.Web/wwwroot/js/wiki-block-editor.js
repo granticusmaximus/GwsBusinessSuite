@@ -37,7 +37,8 @@ export function initialize(container, dotNetRef, initialBlocksJson) {
         notifyTimer: null,
         slashMenu: null,
         wikiLinkMenu: null,
-        mentionMenu: null
+        mentionMenu: null,
+        discussionCounts: new Map()
     };
     states.set(container, state);
     setBlocks(container, initialBlocksJson);
@@ -62,6 +63,17 @@ export function setBlocks(container, blocksJson) {
     container.innerHTML = '';
     for (const block of blocks) {
         container.appendChild(createBlockElement(block, state));
+    }
+}
+
+export function setDiscussionCounts(container, counts) {
+    const state = states.get(container);
+    if (!state) return;
+
+    state.discussionCounts = new Map(
+        Object.entries(counts || {}).map(([blockId, count]) => [blockId.toLowerCase(), Number(count) || 0]));
+    for (const blockEl of container.querySelectorAll(':scope > .wiki-block')) {
+        applyDiscussionCount(blockEl, state);
     }
 }
 
@@ -110,10 +122,36 @@ function createBlockElement(block, state) {
     handle.title = 'Drag to reorder';
     handle.textContent = '⠿';
 
-    gutter.append(addBtn, handle);
+    const discussionBtn = document.createElement('button');
+    discussionBtn.type = 'button';
+    discussionBtn.className = 'wiki-block-discussion';
+    discussionBtn.addEventListener('mousedown', event => event.preventDefault());
+    discussionBtn.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        try { state.dotNetRef.invokeMethodAsync('OpenBlockDiscussion', block.id); }
+        catch { /* the Blazor circuit may have disconnected */ }
+    });
+
+    gutter.append(addBtn, discussionBtn, handle);
     el.appendChild(gutter);
     el.appendChild(createBlockBody(block, state));
+    applyDiscussionCount(el, state);
     return el;
+}
+
+function applyDiscussionCount(blockEl, state) {
+    const button = blockEl.querySelector('.wiki-block-discussion');
+    if (!button) return;
+
+    const count = state.discussionCounts.get((blockEl.dataset.blockId || '').toLowerCase()) || 0;
+    blockEl.querySelector('.wiki-block-gutter')?.classList.toggle('has-discussions', count > 0);
+    button.classList.toggle('has-discussions', count > 0);
+    button.textContent = count > 0 ? `💬 ${count}` : '💬';
+    button.title = count > 0
+        ? `Open ${count} block discussion${count === 1 ? '' : 's'}`
+        : 'Start a discussion on this block';
+    button.setAttribute('aria-label', button.title);
 }
 
 function applyIndentStyle(el) {

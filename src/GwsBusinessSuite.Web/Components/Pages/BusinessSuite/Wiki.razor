@@ -345,7 +345,11 @@
 
         @if (SelectedPageId.HasValue)
         {
-            <SentinelDiscussions WikiPageId="SelectedPageId.Value" BlocksJson="Editor.BlocksJson" OnOpenPage="OpenPageAsync" />
+            <SentinelDiscussions @ref="_sentinelDiscussions"
+                                 WikiPageId="SelectedPageId.Value"
+                                 BlocksJson="Editor.BlocksJson"
+                                 OnOpenPage="OpenPageAsync"
+                                 OnDiscussionCountsChanged="UpdateDiscussionCountsAsync" />
 
             <div class="card border-0 shadow-sm mt-4">
                 <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
@@ -577,6 +581,8 @@
     private bool _blockEditorInitialized;
     private int _editorGeneration;
     private int _blockEditorSyncedGeneration = -1;
+    private SentinelDiscussions? _sentinelDiscussions;
+    private IReadOnlyDictionary<Guid, int> _blockDiscussionCounts = new Dictionary<Guid, int>();
 
     private string EditorHeader => SelectedPageId.HasValue ? "Edit Sentinel Page" : "Create Sentinel Page";
 
@@ -739,6 +745,25 @@
         await InvokeAsync(StateHasChanged);
     }
 
+    [JSInvokable]
+    public async Task OpenBlockDiscussion(string blockId)
+    {
+        if (Guid.TryParse(blockId, out var parsedBlockId) && _sentinelDiscussions is not null)
+        {
+            await _sentinelDiscussions.FocusBlockAsync(parsedBlockId);
+        }
+    }
+
+    private async Task UpdateDiscussionCountsAsync(IReadOnlyDictionary<Guid, int> counts)
+    {
+        _blockDiscussionCounts = counts;
+        if (_blockEditorInitialized && _blockEditorModule is not null)
+        {
+            await _blockEditorModule.InvokeVoidAsync(
+                "setDiscussionCounts", _blockEditorContainer, _blockDiscussionCounts);
+        }
+    }
+
     protected override async Task OnInitializedAsync()
     {
         CurrentUsername = await CurrentUserNameAsync();
@@ -760,12 +785,15 @@
             _blockEditorRef = DotNetObjectReference.Create(this);
             _blockEditorModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js");
             await _blockEditorModule.InvokeVoidAsync("initialize", _blockEditorContainer, _blockEditorRef, Editor.BlocksJson);
+            await _blockEditorModule.InvokeVoidAsync("setDiscussionCounts", _blockEditorContainer, _blockDiscussionCounts);
             _blockEditorInitialized = true;
             _blockEditorSyncedGeneration = _editorGeneration;
         }
         else if (_blockEditorSyncedGeneration != _editorGeneration)
         {
-            await _blockEditorModule!.InvokeVoidAsync("setBlocks", _blockEditorContainer, Editor.BlocksJson);
+            var blockEditorModule = _blockEditorModule!;
+            await blockEditorModule.InvokeVoidAsync("setBlocks", _blockEditorContainer, Editor.BlocksJson);
+            await blockEditorModule.InvokeVoidAsync("setDiscussionCounts", _blockEditorContainer, _blockDiscussionCounts);
             _blockEditorSyncedGeneration = _editorGeneration;
         }
     }

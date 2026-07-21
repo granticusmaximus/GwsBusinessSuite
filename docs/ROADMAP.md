@@ -98,5 +98,6 @@
   persisted page/block discussions, replies, resolution, reactions, and collaboration
   notifications, live cross-circuit refresh, and heartbeat page presence are now delivered;
   optimistic content-version checks now prevent silent concurrent overwrites with explicit
-  draft recovery; distributed scale-out and CRDT/OT co-authoring remain; templates,
+  draft recovery; block-level discussion pins now surface open threads directly in the editor
+  and jump to a focused conversation/composer; distributed scale-out and CRDT/OT co-authoring remain; templates,
   permissions, and sharing; Sentinel AI/agents; and current-API/two-way interoperability.

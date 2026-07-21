@@ -36,5 +36,11 @@ window.gwsWikiLinks = (function () {
         _dotNetRef = null;
     }
 
-    return { init, dispose };
+    function scrollIntoView(element) {
+        if (element) {
+            element.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+    }
+
+    return { init, dispose, scrollIntoView };
 })();
