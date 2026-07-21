@@ -129,6 +129,17 @@ public sealed class WikiPageRevision : AuditableEntity
     public WikiPage? WikiPage { get; set; }
 }
 
+// Per-user workspace navigation state. TargetId is deliberately polymorphic (page or
+// database), so there is no database FK; stale entries are pruned when the state is read.
+public sealed class SentinelNavigationEntry : AuditableEntity
+{
+    public required string Username { get; set; }
+    public Guid TargetId { get; set; }
+    public bool IsDatabase { get; set; }
+    public bool IsFavorite { get; set; }
+    public DateTimeOffset LastOpenedAt { get; set; }
+}
+
 public static class WikiDatabasePropertyTypes
 {
     // Exactly one Title property per database (required, primary label) - every other type

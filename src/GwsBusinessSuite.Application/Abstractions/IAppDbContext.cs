@@ -10,6 +10,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<ContactActivity> ContactActivities { get; }
     DbSet<WikiPage> WikiPages { get; }
     DbSet<WikiPageRevision> WikiPageRevisions { get; }
+    DbSet<SentinelNavigationEntry> SentinelNavigationEntries { get; }
     DbSet<WikiDatabase> WikiDatabases { get; }
     DbSet<WikiDatabaseProperty> WikiDatabaseProperties { get; }
     DbSet<WikiDatabaseRow> WikiDatabaseRows { get; }

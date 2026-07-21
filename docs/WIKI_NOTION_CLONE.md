@@ -51,8 +51,8 @@ proprietary schemas; public Notion product and API documentation is behavioral r
   `WikiDatabaseViewLogic` (filter/sort/`GroupForBoard`) is a pure, DB-free function set over
   an already-loaded row list — same split as `WikiBlockHtmlRenderer` vs. `WikiService`.
   Databases slot into the *same* sidebar tree as pages (`ParentWikiPageId`) rather than
-  living inside a page's block content — inline-embedded databases and "rows that open as
-  full pages" are both deferred (see Delivery sequence).
+  living inside a page's block content. Rows now open as full block pages; inline and linked
+  database blocks remain deferred (see Delivery sequence).
 - Board view's drag-and-drop is native HTML5 DnD wired directly in Blazor
   (`@ondragstart`/`@ondragover:preventDefault`/`@ondrop` in `WikiDatabaseEditor.razor`) plus
   the existing global `wwwroot/js/dragReorder.js` shim (12 lines; only job is
@@ -69,7 +69,7 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 | History | Bounded DB snapshot revisions (20/page), structural diff (added/removed/changed blocks), revert-as-new-version | — |
 | Databases | Typed properties (title, text, number, select, multi-select, date, checkbox, url, created-time); editable Table and Board; List and Gallery views | Calendar, Timeline, Chart, Form, Map, Feed, and Dashboard views; formula/relation/rollup and person/files properties |
 | Databases — structure | Databases share the page sidebar tree; every row opens as a block-content page | Inline/linked databases, row covers/icons, page history, layouts and peek modes |
-| Search & graph | Workspace-wide page/block/database-row search; structured and legacy backlinks | Ranked token search, recent/favorites, graph navigation, user/date/page mentions |
+| Search & graph | All-token ranked page/block/database-row search with highlighted matches; structured and legacy backlinks; per-user favorites/recents; structured page, person, and date mentions with a personal mention inbox | Graph visualization, saved searches, and database-row mention inbox entries |
 | Import/sync | Delivered: read-only live Notion API import via a pasted, encrypted internal-integration token; manual/hourly sync; upsert-by-Notion-id reconciliation; hierarchy, blocks, database schema/rows, and soft archival | Upgrade from the pinned 2022 API to the current data-source/view API; selective and two-way conflict-aware sync |
 | Visibility | Admin-only canonical route (`/admin/sentinel`), with `/admin/wiki` retained as an alias | Workspace/member/guest roles, page permissions, public share links |
 
@@ -95,9 +95,10 @@ proprietary schemas; public Notion product and API documentation is behavioral r
    hourly auto-sync control, last-sync counts, source badges, and dimmed-but-openable archived
    items. Sync-driven page changes deliberately do not create interactive revision snapshots,
    preventing hourly sync noise from evicting authored changes from the 20-revision history.
-4. **Sentinel identity, search, and knowledge graph** (in progress): Sentinel product naming
-   and canonical route, workspace-wide page/block/database-row search, and page backlinks are
-   delivered. Favorites, recents, stronger ranked/token search, and mentions remain.
+4. **Sentinel identity, search, and knowledge graph** (delivered): Sentinel product naming
+   and canonical route; all-token ranked page/block/database-row search with matched-term
+   highlighting; page backlinks; durable per-user favorites and recents; `[[Page]]` page
+   mentions; and `@` autocomplete for structured people/date mentions with a personal inbox.
 5. **Database pages and complete views** (in progress): row block-content pages plus List and
    Gallery are delivered. Remaining work is linked/inline databases; Calendar, Timeline,
    Chart, Form, Map, Feed, and Dashboard views; view-specific layout/open mode; formulas,

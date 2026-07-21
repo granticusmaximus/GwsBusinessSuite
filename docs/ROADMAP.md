@@ -90,9 +90,10 @@
   override with automatic production activation when the required `.env` values exist.
 - Sentinel (Notion-class connected workspace) 🚧 — renamed from Knowledge Base/Wiki with
   `/admin/sentinel` as the canonical route. Delivered foundations include nested block pages,
-  DB-snapshot history/diff/restore, `[[Page]]` links, workspace-wide page/block/database-row
-  search, backlinks, editable Table/Board databases, and encrypted manual/hourly Notion
+  DB-snapshot history/diff/restore, `[[Page]]` links, ranked and highlighted workspace search,
+  backlinks, per-user favorites/recents, structured person/date mentions with a personal
+  inbox, editable Table/Board databases, and encrypted manual/hourly Notion
   import. Full capability parity is now explicitly staged in `docs/WIKI_NOTION_CLONE.md`:
   database rows-as-pages plus List/Gallery are now delivered; remaining views,
-  comments/mentions/collaboration; templates,
+  comments/replies/reactions/presence and collaboration; templates,
   permissions, and sharing; Sentinel AI/agents; and current-API/two-way interoperability.

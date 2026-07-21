@@ -69,6 +69,51 @@
                     }
                 </div>
             </div>
+            @if (string.IsNullOrWhiteSpace(SearchQuery)
+                && (Navigation.Favorites.Count > 0 || Navigation.Recents.Count > 0 || Mentions.Count > 0))
+            {
+                <div class="sentinel-quick-navigation border-bottom">
+                    @if (Navigation.Favorites.Count > 0)
+                    {
+                        <div class="sentinel-nav-section">
+                            <div class="sentinel-nav-heading"><i class="bi bi-star-fill text-warning"></i> Favorites</div>
+                            @foreach (var item in Navigation.Favorites)
+                            {
+                                <button type="button" class="sentinel-nav-item" @onclick="() => OpenNavigationItemAsync(item)" disabled="@IsBusy">
+                                    <span>@(string.IsNullOrWhiteSpace(item.Icon) ? (item.IsDatabase ? "🗄️" : "📄") : item.Icon)</span>
+                                    <span class="text-truncate">@item.Title</span>
+                                </button>
+                            }
+                        </div>
+                    }
+                    @if (Navigation.Recents.Count > 0)
+                    {
+                        <div class="sentinel-nav-section">
+                            <div class="sentinel-nav-heading"><i class="bi bi-clock-history"></i> Recent</div>
+                            @foreach (var item in Navigation.Recents.Take(5))
+                            {
+                                <button type="button" class="sentinel-nav-item" @onclick="() => OpenNavigationItemAsync(item)" disabled="@IsBusy">
+                                    <span>@(string.IsNullOrWhiteSpace(item.Icon) ? (item.IsDatabase ? "🗄️" : "📄") : item.Icon)</span>
+                                    <span class="text-truncate">@item.Title</span>
+                                </button>
+                            }
+                        </div>
+                    }
+                    @if (Mentions.Count > 0)
+                    {
+                        <div class="sentinel-nav-section">
+                            <div class="sentinel-nav-heading"><i class="bi bi-at"></i> Mentions</div>
+                            @foreach (var mention in Mentions.Take(5))
+                            {
+                                <button type="button" class="sentinel-nav-item" @onclick="() => OpenPageAsync(mention.SourcePageId)" disabled="@IsBusy" title="@mention.Preview">
+                                    <i class="bi bi-file-earmark-text text-secondary"></i>
+                                    <span class="text-truncate">@mention.SourcePageTitle</span>
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+            }
             <div class="card-body p-0">
                 @if (AllTreeNodes().Count == 0)
                 {
@@ -93,10 +138,10 @@
                                         @onclick="() => OpenSearchResultAsync(result)" disabled="@IsBusy">
                                     <div class="d-flex align-items-center gap-2">
                                         <i class="bi @(result.IsDatabase ? "bi-grid-3x3-gap-fill" : "bi-file-earmark-text") text-secondary"></i>
-                                        <span class="fw-semibold text-truncate">@result.Title</span>
+                                        <span class="fw-semibold text-truncate">@HighlightMatches(result.Title, result.MatchedTerms)</span>
                                         <span class="badge text-bg-light border ms-auto">@result.MatchKind</span>
                                     </div>
-                                    <div class="small text-secondary text-truncate mt-1">@result.Preview</div>
+                                    <div class="small text-secondary text-truncate mt-1">@HighlightMatches(result.Preview, result.MatchedTerms)</div>
                                 </button>
                             }
                         </div>
@@ -128,6 +173,11 @@
                                     }
                                 </button>
                                 <div class="wiki-tree-actions">
+                                    <button type="button" class="btn btn-xs btn-link p-0 @(IsFavorite(node.Id, node.IsDatabase) ? "text-warning" : "text-secondary")"
+                                            title="@(IsFavorite(node.Id, node.IsDatabase) ? "Remove from favorites" : "Add to favorites")"
+                                            @onclick="() => ToggleFavoriteAsync(node.Id, node.IsDatabase)" disabled="@IsBusy">
+                                        <i class="bi @(IsFavorite(node.Id, node.IsDatabase) ? "bi-star-fill" : "bi-star")"></i>
+                                    </button>
                                     <button type="button" class="btn btn-xs btn-link p-0" title="Move up" @onclick="() => MoveNodeAsync(node, -1)" disabled="@IsBusy">
                                         <i class="bi bi-chevron-up"></i>
                                     </button>
@@ -153,9 +203,18 @@
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
                 <span class="fw-semibold">@EditorHeader</span>
-                <span class="badge @(SelectedPageId.HasValue ? "text-bg-primary" : "text-bg-secondary")">
-                    @(SelectedPageId.HasValue ? "Editing Existing Page" : "New Page")
-                </span>
+                <div class="d-flex align-items-center gap-2">
+                    @if (SelectedPageId is { } selectedPageId)
+                    {
+                        <button type="button" class="btn btn-sm @(IsFavorite(selectedPageId, false) ? "btn-warning" : "btn-outline-secondary")"
+                                @onclick="() => ToggleFavoriteAsync(selectedPageId, false)" title="Toggle favorite">
+                            <i class="bi @(IsFavorite(selectedPageId, false) ? "bi-star-fill" : "bi-star")"></i>
+                        </button>
+                    }
+                    <span class="badge @(SelectedPageId.HasValue ? "text-bg-primary" : "text-bg-secondary")">
+                        @(SelectedPageId.HasValue ? "Editing Existing Page" : "New Page")
+                    </span>
+                </div>
             </div>
             <div class="card-body">
                 <EditForm Model="Editor" OnValidSubmit="SavePageAsync">
@@ -233,7 +292,7 @@
 
                     <label class="form-label fw-semibold small mb-1">Content</label>
                     <div class="small text-secondary mb-2">
-                        Type <code>/</code> for block commands, <code>[[</code> to link to another page, Tab/Shift+Tab to indent.
+                        Type <code>/</code> for block commands, <code>[[</code> to link a page, <code>@@</code> to mention a person or date, and Tab/Shift+Tab to indent.
                     </div>
                     <div class="wiki-block-editor" @ref="_blockEditorContainer"></div>
 
@@ -467,6 +526,9 @@
     private bool IsSearchBusy { get; set; }
     private List<SentinelSearchResult> WorkspaceSearchResults { get; set; } = new();
     private List<SentinelBacklink> Backlinks { get; set; } = new();
+    private SentinelNavigationState Navigation { get; set; } = new([], []);
+    private List<SentinelMention> Mentions { get; set; } = new();
+    private string CurrentUsername { get; set; } = "unknown";
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
     private readonly HashSet<Guid> _expandedPageIds = new();
@@ -632,6 +694,10 @@
         Task.FromResult(WikiMarkdownHelper.SearchLinkSuggestions(query, WikiPages));
 
     [JSInvokable]
+    public Task<IReadOnlyList<SentinelMentionSuggestion>> SearchMentionSuggestions(string query) =>
+        SentinelWorkspaceService.SearchMentionSuggestionsAsync(query);
+
+    [JSInvokable]
     public async Task NavigateToWikiPageId(string pageId)
     {
         if (Guid.TryParse(pageId, out var id))
@@ -650,7 +716,9 @@
 
     protected override async Task OnInitializedAsync()
     {
+        CurrentUsername = await CurrentUserNameAsync();
         await LoadTreeAsync(selectFirstPage: false);
+        await LoadWorkspaceNavigationAsync();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -678,6 +746,12 @@
     }
 
     private Task<string> CurrentUserNameAsync() => CurrentUserAccessor.GetCurrentUsernameAsync();
+
+    private async Task LoadWorkspaceNavigationAsync()
+    {
+        Navigation = await SentinelWorkspaceService.GetNavigationAsync(CurrentUsername);
+        Mentions = (await SentinelWorkspaceService.GetMentionsAsync(CurrentUsername)).ToList();
+    }
 
     private async Task SearchWorkspaceAsync()
     {
@@ -720,6 +794,9 @@
         }
     }
 
+    private Task OpenNavigationItemAsync(SentinelNavigationItem item) =>
+        item.IsDatabase ? OpenDatabaseAsync(item.Id) : OpenPageAsync(item.Id);
+
     private async Task LoadTreeAsync(bool selectFirstPage)
     {
         try
@@ -760,7 +837,7 @@
         StatusMessage = $"Created database '{database.Title}'.";
     });
 
-    private Task OpenDatabaseAsync(Guid wikiDatabaseId)
+    private async Task OpenDatabaseAsync(Guid wikiDatabaseId)
     {
         SelectedPageId = null;
         SelectedDatabaseId = wikiDatabaseId;
@@ -768,7 +845,8 @@
         DiffRevisionKey = null;
         StatusMessage = string.Empty;
         ErrorMessage = string.Empty;
-        return Task.CompletedTask;
+        await SentinelWorkspaceService.RecordOpenedAsync(CurrentUsername, wikiDatabaseId, true);
+        await LoadWorkspaceNavigationAsync();
     }
 
     private async Task OpenPageAsync(Guid wikiPageId)
@@ -800,6 +878,8 @@
             ErrorMessage = string.Empty;
             await LoadHistoryAsync(page.Id);
             Backlinks = (await SentinelWorkspaceService.GetBacklinksAsync(page.Id)).ToList();
+            await SentinelWorkspaceService.RecordOpenedAsync(CurrentUsername, page.Id, false);
+            await LoadWorkspaceNavigationAsync();
         }
         catch (Exception ex)
         {
@@ -850,6 +930,8 @@
             await LoadTreeAsync(selectFirstPage: false);
             await LoadHistoryAsync(saved.Id);
             Backlinks = (await SentinelWorkspaceService.GetBacklinksAsync(saved.Id)).ToList();
+            await SentinelWorkspaceService.RecordOpenedAsync(CurrentUsername, saved.Id, false);
+            await LoadWorkspaceNavigationAsync();
         }
         catch (Exception ex)
         {
@@ -880,6 +962,7 @@
             StatusMessage = "Sentinel page deleted.";
             CreateNewPage();
             await LoadTreeAsync(selectFirstPage: false);
+            await LoadWorkspaceNavigationAsync();
         }
         catch (Exception ex)
         {
@@ -1012,6 +1095,7 @@
             await LoadTreeAsync(selectFirstPage: false);
             await LoadHistoryAsync(wikiPageId);
             Backlinks = (await SentinelWorkspaceService.GetBacklinksAsync(wikiPageId)).ToList();
+            await LoadWorkspaceNavigationAsync();
         }
         catch (Exception ex)
         {
@@ -1122,6 +1206,35 @@
         {
             await OpenPageAsync(node.Id);
         }
+    }
+
+    private bool IsFavorite(Guid targetId, bool isDatabase) =>
+        Navigation.Favorites.Any(item => item.Id == targetId && item.IsDatabase == isDatabase);
+
+    private async Task ToggleFavoriteAsync(Guid targetId, bool isDatabase)
+    {
+        try
+        {
+            await SentinelWorkspaceService.ToggleFavoriteAsync(CurrentUsername, targetId, isDatabase);
+            await LoadWorkspaceNavigationAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to toggle Sentinel favorite {TargetId}.", targetId);
+            ErrorMessage = $"Unable to update favorite. {ex.Message}";
+        }
+    }
+
+    private static MarkupString HighlightMatches(string text, IReadOnlyList<string> terms)
+    {
+        var encoded = System.Net.WebUtility.HtmlEncode(text);
+        if (terms.Count == 0) return new MarkupString(encoded);
+        var pattern = string.Join('|', terms.OrderByDescending(term => term.Length)
+            .Select(System.Text.RegularExpressions.Regex.Escape));
+        var highlighted = System.Text.RegularExpressions.Regex.Replace(encoded, pattern,
+            match => $"<mark class=\"sentinel-search-highlight\">{match.Value}</mark>",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return new MarkupString(highlighted);
     }
 
     // Mirrors EditPage.razor's ParentPageOptions() for CMS pages - a BFS from the open page

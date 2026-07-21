@@ -7,6 +7,11 @@ window.gwsWikiLinks = (function () {
     let _boundHandler = null;
 
     function handleClick(e) {
+        const mention = e.target.closest('a[href^="usermention:"], a[href^="datemention:"]');
+        if (mention) {
+            e.preventDefault();
+            return;
+        }
         const anchor = e.target.closest('a[href^="wikilink:"]');
         if (!anchor || !_dotNetRef) {
             return;

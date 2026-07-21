@@ -28,6 +28,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<ContactActivity> ContactActivities => Set<ContactActivity>();
     public DbSet<WikiPage> WikiPages => Set<WikiPage>();
     public DbSet<WikiPageRevision> WikiPageRevisions => Set<WikiPageRevision>();
+    public DbSet<SentinelNavigationEntry> SentinelNavigationEntries => Set<SentinelNavigationEntry>();
     public DbSet<WikiDatabase> WikiDatabases => Set<WikiDatabase>();
     public DbSet<WikiDatabaseProperty> WikiDatabaseProperties => Set<WikiDatabaseProperty>();
     public DbSet<WikiDatabaseRow> WikiDatabaseRows => Set<WikiDatabaseRow>();
@@ -97,6 +98,11 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .HasForeignKey(x => x.WikiPageId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<WikiPageRevision>().HasIndex(x => new { x.WikiPageId, x.RevisionNumber }).IsUnique();
+        modelBuilder.Entity<SentinelNavigationEntry>()
+            .HasIndex(x => new { x.Username, x.IsDatabase, x.TargetId })
+            .IsUnique();
+        modelBuilder.Entity<SentinelNavigationEntry>().HasIndex(x => new { x.Username, x.IsFavorite });
+        modelBuilder.Entity<SentinelNavigationEntry>().HasIndex(x => new { x.Username, x.LastOpenedAt });
         modelBuilder.Entity<WikiDatabaseProperty>()
             .HasOne(x => x.WikiDatabase)
             .WithMany(x => x.Properties)

@@ -36,7 +36,8 @@ export function initialize(container, dotNetRef, initialBlocksJson) {
         drag: null,
         notifyTimer: null,
         slashMenu: null,
-        wikiLinkMenu: null
+        wikiLinkMenu: null,
+        mentionMenu: null
     };
     states.set(container, state);
     setBlocks(container, initialBlocksJson);
@@ -217,6 +218,7 @@ function createContentEditable(block, state) {
     content.addEventListener('input', () => {
         checkSlashTrigger(state, content);
         checkWikiLinkTrigger(state, content);
+        checkMentionTrigger(state, content);
         scheduleNotify(state);
     });
     content.addEventListener('paste', event => {
@@ -468,10 +470,75 @@ function closeWikiLinkMenu(state) {
     if (state.wikiLinkMenu) { state.wikiLinkMenu.remove(); state.wikiLinkMenu = null; }
 }
 
+// ---- Structured @person and @date mentions --------------------------------
+
+function checkMentionTrigger(state, content) {
+    const range = getCaretRange(content);
+    closeMentionMenu(state);
+    if (!range) return;
+
+    const textBeforeCaret = textBefore(content, range);
+    const match = textBeforeCaret.match(/(?:^|\s)@([\w.-]*)$/);
+    if (!match) return;
+
+    const query = match[1];
+    state.dotNetRef.invokeMethodAsync('SearchMentionSuggestions', query).then(suggestions => {
+        closeMentionMenu(state);
+        if (!suggestions || suggestions.length === 0) return;
+
+        const menu = document.createElement('div');
+        menu.className = 'wiki-slash-menu list-group shadow-sm';
+        positionMenu(menu, content);
+        for (const suggestion of suggestions) {
+            const option = document.createElement('button');
+            option.type = 'button';
+            option.className = 'list-group-item list-group-item-action py-1 px-2 small';
+            option.innerHTML = `<span class="fw-semibold">${escapeHtml(suggestion.label)}</span>`
+                + `<span class="text-secondary ms-2">${escapeHtml(suggestion.description)}</span>`;
+            option.addEventListener('mousedown', event => {
+                event.preventDefault();
+                insertMention(state, content, query, suggestion);
+                closeMentionMenu(state);
+            });
+            menu.appendChild(option);
+        }
+
+        document.body.appendChild(menu);
+        state.mentionMenu = menu;
+    }).catch(() => { /* circuit may be gone */ });
+}
+
+function insertMention(state, content, query, suggestion) {
+    const range = getCaretRange(content);
+    if (!range) return;
+    const textBeforeCaret = textBefore(content, range);
+    const start = textBeforeCaret.length - (query.length + 1);
+    const deleteRange = document.createRange();
+    const position = resolveTextOffset(content, Math.max(0, start));
+    deleteRange.setStart(position.node, position.offset);
+    deleteRange.setEnd(range.endContainer, range.endOffset);
+    deleteRange.deleteContents();
+
+    const anchor = document.createElement('a');
+    anchor.href = `${suggestion.kind}mention:${suggestion.value}`;
+    anchor.className = 'wiki-mention';
+    anchor.textContent = suggestion.label;
+    deleteRange.insertNode(anchor);
+    anchor.after(document.createTextNode(' '));
+    placeCaretAtTextOffset(content, content.textContent.length);
+    scheduleNotify(state);
+}
+
+function closeMentionMenu(state) {
+    if (state.mentionMenu) { state.mentionMenu.remove(); state.mentionMenu = null; }
+}
+
 function closeFloatingMenus(state, event) {
-    if (event && (state.slashMenu?.contains(event.target) || state.wikiLinkMenu?.contains(event.target))) return;
+    if (event && (state.slashMenu?.contains(event.target) || state.wikiLinkMenu?.contains(event.target)
+        || state.mentionMenu?.contains(event.target))) return;
     closeSlashMenu(state);
     closeWikiLinkMenu(state);
+    closeMentionMenu(state);
 }
 
 function positionMenu(menu, anchorEl) {
@@ -598,7 +665,10 @@ function htmlFromRichText(spans) {
         if (span.bold) html = `<b>${html}</b>`;
         if (span.italic) html = `<i>${html}</i>`;
         if (span.strikethrough) html = `<s>${html}</s>`;
-        if (span.link) html = `<a href="${escapeHtml(span.link)}">${html}</a>`;
+        if (span.link) {
+            const mentionClass = /^(user|date)mention:/i.test(span.link) ? ' class="wiki-mention"' : '';
+            html = `<a${mentionClass} href="${escapeHtml(span.link)}">${html}</a>`;
+        }
         return html;
     }).join('');
 }
