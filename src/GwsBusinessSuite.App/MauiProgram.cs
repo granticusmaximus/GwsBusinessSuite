@@ -15,6 +15,12 @@ public static class MauiProgram
 				fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
 			});
 
+#if ANDROID
+		Microsoft.Maui.Handlers.WebViewHandler.Mapper.AppendToMapping(
+			"TrustedMediaPermissions",
+			(handler, _) => handler.PlatformView.SetWebChromeClient(new TrustedMediaWebChromeClient(handler)));
+#endif
+
 #if DEBUG
 		builder.Logging.AddDebug();
 #endif

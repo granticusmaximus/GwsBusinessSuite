@@ -64,7 +64,7 @@
                                FontAttributes="Bold"
                                FontSize="18" />
                     </Border>
-                    <Label Text="Sentinel is temporarily unavailable"
+                    <Label Text="GWS Business Suite is temporarily unavailable"
                            TextColor="#FAFAF9"
                            FontAttributes="Bold"
                            FontSize="22" />

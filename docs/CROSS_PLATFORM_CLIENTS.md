@@ -44,6 +44,9 @@ corresponding release secrets.
 through the shared admin navigation. Its WebView retains the normal authenticated browser
 session, blocks in-app navigation to untrusted origins, opens external HTTPS links in the system
 browser, and reports connectivity/navigation failures.
+Camera and microphone access for Live Show is declared on every MAUI platform. Android's WebView
+grants capture requests only when they originate from the configured GWS server and contain only
+camera/microphone resources; other origins and permission types are denied.
 The server URL can be overridden for development by setting the MAUI preference named `BaseUrl`;
 release builds reject non-HTTPS values.
 
