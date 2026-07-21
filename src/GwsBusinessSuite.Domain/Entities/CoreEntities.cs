@@ -212,7 +212,6 @@ public static class SentinelWorkspaceRoles
 {
     public const string Owner = "owner";
     public const string Member = "member";
-    public const string Guest = "guest";
 }
 
 public static class SentinelAccessLevels

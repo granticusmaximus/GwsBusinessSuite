@@ -2,7 +2,7 @@ namespace GwsBusinessSuite.Application.AdminPortal;
 
 public interface IAdminPortalSummaryService
 {
-    Task<AdminPortalSummary> GetAsync(bool includeApprovalQueue, CancellationToken cancellationToken = default);
+    Task<AdminPortalSummary> GetAsync(bool includeAdminMetrics, CancellationToken cancellationToken = default);
 }
 
 public sealed record AdminPortalSummary(

@@ -1,5 +1,7 @@
 using System.Reflection;
 using FluentAssertions;
+using GwsBusinessSuite.Domain.Entities;
+using GwsBusinessSuite.Web.Components.Pages;
 using GwsBusinessSuite.Web.Components.Pages.BusinessSuite;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components;
@@ -37,5 +39,20 @@ public class PageAuthorizationTests
         // Guards against the discovery query itself silently matching nothing (e.g. after a
         // namespace rename) and making the test above vacuously pass.
         AdminPageTypes().Should().HaveCountGreaterThanOrEqualTo(20);
+    }
+
+    [Fact]
+    public void Dashboard_ShouldAllowEveryPortalRoleThroughPortalAccessPolicy()
+    {
+        var authorize = typeof(Home).GetCustomAttribute<AuthorizeAttribute>();
+
+        authorize.Should().NotBeNull();
+        authorize!.Policy.Should().Be("PortalAccess");
+    }
+
+    [Fact]
+    public void PortalRoles_ShouldOnlyContainManagedPortalAccounts()
+    {
+        AppRoles.All.Should().Equal(AppRoles.Admin, AppRoles.Author, AppRoles.Contributor);
     }
 }

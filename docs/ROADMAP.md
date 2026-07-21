@@ -103,6 +103,8 @@
   pages with fresh block identities, and transactional page-tree duplication copies nested pages
   beside the source with independent revisions; database duplication and reusable source-independent
   database templates are delivered; distributed scale-out and CRDT/OT co-authoring remain;
-  permissions and public sharing are delivered, while richer guest/teamspace administration remains;
+  permissions and tokenized public sharing are delivered; Sentinel workspace membership is
+  limited to authenticated portal accounts, and external viewers use public shares rather than
+  guest portal accounts;
   Sentinel AI/agents; and
   current-API/two-way interoperability.

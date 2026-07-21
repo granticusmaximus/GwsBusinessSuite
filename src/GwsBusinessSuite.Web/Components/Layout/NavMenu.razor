@@ -7,13 +7,10 @@
 @inject IAdminPortalSummaryService SummaryService
 
 <nav class="gws-nav" aria-label="Primary">
-    @if (IsAdmin)
-    {
-        <NavLink class="gws-nav-link gws-nav-home" href="admin" Match="NavLinkMatch.All" title="Dashboard">
-            <i class="bi bi-grid-1x2-fill" aria-hidden="true"></i>
-            <span class="gws-nav-link-copy"><span>Home</span><small>Your work at a glance</small></span>
-        </NavLink>
-    }
+    <NavLink class="gws-nav-link gws-nav-home" href="admin" Match="NavLinkMatch.All" title="Dashboard">
+        <i class="bi bi-grid-1x2-fill" aria-hidden="true"></i>
+        <span class="gws-nav-link-copy"><span>Home</span><small>Your work at a glance</small></span>
+    </NavLink>
 
     <details class="gws-nav-group" open="@IsGroupOpen(PublishingPrefixes)">
         <summary><span>Publishing</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>

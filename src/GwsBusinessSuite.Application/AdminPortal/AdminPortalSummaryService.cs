@@ -15,16 +15,20 @@ public sealed class AdminPortalSummaryService(
 {
     private Task<AdminPortalSummary>? _summaryTask;
 
-    public Task<AdminPortalSummary> GetAsync(bool includeApprovalQueue, CancellationToken cancellationToken = default) =>
-        _summaryTask ??= LoadAsync(includeApprovalQueue, cancellationToken);
+    public Task<AdminPortalSummary> GetAsync(bool includeAdminMetrics, CancellationToken cancellationToken = default) =>
+        _summaryTask ??= LoadAsync(includeAdminMetrics, cancellationToken);
 
-    private async Task<AdminPortalSummary> LoadAsync(bool includeApprovalQueue, CancellationToken cancellationToken)
+    private async Task<AdminPortalSummary> LoadAsync(bool includeAdminMetrics, CancellationToken cancellationToken)
     {
         var draftsTask = contentStudioService.CountPendingReviewAsync(cancellationToken);
         var commentsTask = commentService.CountPendingAsync(cancellationToken);
-        var followUpsTask = crmService.CountDueFollowUpsAsync(cancellationToken);
-        var alertsTask = dockerHealthService.CountUnreadAlertsAsync(cancellationToken);
-        var approvalsTask = includeApprovalQueue
+        var followUpsTask = includeAdminMetrics
+            ? crmService.CountDueFollowUpsAsync(cancellationToken)
+            : Task.FromResult(0);
+        var alertsTask = includeAdminMetrics
+            ? dockerHealthService.CountUnreadAlertsAsync(cancellationToken)
+            : Task.FromResult(0);
+        var approvalsTask = includeAdminMetrics
             ? appGenerationService.CountPendingApprovalAsync(cancellationToken)
             : Task.FromResult(0);
 

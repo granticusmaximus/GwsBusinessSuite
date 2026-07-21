@@ -117,6 +117,9 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
 
 builder.Services.AddAuthorization(options =>
 {
+    options.AddPolicy("PortalAccess", policy =>
+        policy.RequireAuthenticatedUser().RequireRole(AppRoles.All));
+
     options.AddPolicy("AdminOnly", policy =>
         policy.RequireAuthenticatedUser().RequireRole(AppRoles.Admin));
 
@@ -375,7 +378,7 @@ app.MapPost("/auth/login", async (
     var username  = form["username"].ToString().Trim();
     var password  = form["password"].ToString();
     var returnUrl = form["returnUrl"].ToString();
-    var safeReturn = IsSafeLocalPath(returnUrl) ? returnUrl : "/admin";
+    var safeReturn = PortalNavigation.ResolvePostLoginPath(returnUrl);
 
     // Per-account lockout (LoginLockoutPolicy) lives behind AttemptLoginAsync, on top of
     // the "login" rate-limit policy's per-IP window - the global limiter alone doesn't
@@ -406,8 +409,7 @@ app.MapPost("/auth/login", async (
     var principal = new ClaimsPrincipal(identity);
     await httpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
 
-    var defaultUrl = user.Role == AppRoles.Admin ? "/admin" : "/admin/content-studio";
-    return Results.LocalRedirect(IsSafeLocalPath(returnUrl) ? returnUrl : defaultUrl);
+    return Results.LocalRedirect(PortalNavigation.ResolvePostLoginPath(returnUrl));
 }).AllowAnonymous().RequireRateLimiting("login");
 
 app.MapGet("/auth/logout", async (HttpContext httpContext) =>
@@ -2087,14 +2089,6 @@ static string NormalizePathBase(string? pathBase)
     return normalized.Length > 1
         ? normalized.TrimEnd('/')
         : normalized;
-}
-
-static bool IsSafeLocalPath(string? returnUrl)
-{
-    return !string.IsNullOrWhiteSpace(returnUrl)
-           && returnUrl.StartsWith("/", StringComparison.Ordinal)
-           && !returnUrl.StartsWith("//", StringComparison.Ordinal)
-           && !returnUrl.Contains("\\", StringComparison.Ordinal);
 }
 
 record ArticleUpsertRequest(
