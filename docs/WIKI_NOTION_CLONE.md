@@ -103,8 +103,11 @@ proprietary schemas; public Notion product and API documentation is behavioral r
    Gallery are delivered. Remaining work is linked/inline databases; Calendar, Timeline,
    Chart, Form, Map, Feed, and Dashboard views; view-specific layout/open mode; formulas,
    relations, rollups, people, and files.
-6. **Collaboration**: page and inline/block discussion threads, replies, resolution, emoji
-   reactions, user/page/date mentions, notifications, presence, and safe concurrent editing.
+6. **Collaboration** (in progress): authenticated page and block discussion threads, nested
+   reply targets, resolve/reopen, emoji reactions, `@username` notification fan-out, and a
+   personal read/unread notification panel are delivered. Live cross-circuit updates,
+   presence, inline comment placement in the editor canvas, and optimistic concurrent-edit
+   protection remain.
 7. **Templates, sharing, and workspace structure**: page/database templates, duplicate/move,
    favorites/recents, teamspaces, member/guest roles, granular page/database permissions,
    and expiring public share links.
@@ -127,8 +130,8 @@ capabilities where they fit GWS Business Suite; they are no longer silently excl
 | --- | --- | --- |
 | Blocks | Core text/list/task/toggle/callout/code/media/embed blocks; tables import as Markdown; layout wrappers flatten | Complete supported block vocabulary, native tables/equations/columns/synced blocks, reusable templates, and richer embeds |
 | Databases | Editable Table/Board/List/Gallery, filters/sorts/groups, common property types, and rows with block page bodies | Remaining major view families, linked/inline sources, formulas/relations/rollups, layouts, charts, forms, and automations |
-| Knowledge graph | `[[Page]]` links, workspace content search, backlinks | Mentions, favorites/recents, graph navigation, robust ranking/highlighting, and saved searches |
-| Collaboration | Existing app authentication and revision history | Comments/discussions, reactions, presence, notifications, concurrent editing, workspace roles, granular permissions, and public sharing |
+| Knowledge graph | `[[Page]]` links, ranked/highlighted workspace search, backlinks, person/date mentions, favorites/recents | Graph navigation, database-row mention inbox entries, and saved searches |
+| Collaboration | Authenticated page/block discussions, replies, resolve/reopen, reactions, participant/mention notifications, and read state | Live updates, presence, editor-canvas comment pins, concurrent editing, workspace roles, granular permissions, and public sharing |
 | Presentation | Emoji icon and cover URL | Custom icon/cover uploads, page width/fonts, database layouts, peek modes, and reusable style defaults |
 | Integration | Encrypted token, one-way manual/hourly reconciliation | Current Notion data-source/view/comment API, selective sync, durable file ingestion, and opt-in conflict-aware writes |
 | AI | Existing Ollama and workflow foundations elsewhere in the suite | Sentinel-grounded chat/search, writing, autofill, research, meeting notes, and reviewable workspace agents |

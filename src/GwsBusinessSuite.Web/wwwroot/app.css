@@ -1392,6 +1392,32 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     padding: 0 0.2rem;
     text-decoration: none;
 }
+.sentinel-discussion-notifications {
+    max-height: 20rem;
+    overflow-y: auto;
+}
+.sentinel-discussion-anchor {
+    width: min(100%, 24rem);
+}
+.sentinel-discussion-thread {
+    padding: 1rem;
+}
+.sentinel-discussion-resolved {
+    background: #f8f9fa;
+}
+.sentinel-discussion-comment {
+    border-left: 3px solid #dee2e6;
+    padding: 0.5rem 0.75rem;
+    margin-top: 0.5rem;
+}
+.sentinel-discussion-comment.is-reply {
+    border-left-color: #a5b4fc;
+    margin-left: 1.25rem;
+}
+.sentinel-discussion-body {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
 .sentinel-row-page-modal {
     z-index: 1060;
 }

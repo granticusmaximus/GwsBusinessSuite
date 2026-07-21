@@ -140,6 +140,45 @@ public sealed class SentinelNavigationEntry : AuditableEntity
     public DateTimeOffset LastOpenedAt { get; set; }
 }
 
+public sealed class SentinelDiscussion : AuditableEntity
+{
+    public Guid WikiPageId { get; set; }
+    public Guid? BlockId { get; set; }
+    public DateTimeOffset? ResolvedAt { get; set; }
+    public string? ResolvedBy { get; set; }
+    public WikiPage? WikiPage { get; set; }
+    public ICollection<SentinelDiscussionComment> Comments { get; set; } = new List<SentinelDiscussionComment>();
+}
+
+public sealed class SentinelDiscussionComment : AuditableEntity
+{
+    public Guid SentinelDiscussionId { get; set; }
+    public Guid? ParentCommentId { get; set; }
+    public string Body { get; set; } = string.Empty;
+    public SentinelDiscussion? Discussion { get; set; }
+    public SentinelDiscussionComment? ParentComment { get; set; }
+    public ICollection<SentinelDiscussionReaction> Reactions { get; set; } = new List<SentinelDiscussionReaction>();
+}
+
+public sealed class SentinelDiscussionReaction : AuditableEntity
+{
+    public Guid SentinelDiscussionCommentId { get; set; }
+    public required string Username { get; set; }
+    public required string Emoji { get; set; }
+    public SentinelDiscussionComment? Comment { get; set; }
+}
+
+public sealed class SentinelNotification : AuditableEntity
+{
+    public required string Username { get; set; }
+    public required string Kind { get; set; }
+    public Guid WikiPageId { get; set; }
+    public Guid? SentinelDiscussionId { get; set; }
+    public Guid? SentinelDiscussionCommentId { get; set; }
+    public required string Message { get; set; }
+    public DateTimeOffset? ReadAt { get; set; }
+}
+
 public static class WikiDatabasePropertyTypes
 {
     // Exactly one Title property per database (required, primary label) - every other type

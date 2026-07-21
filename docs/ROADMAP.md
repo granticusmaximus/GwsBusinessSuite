@@ -95,5 +95,6 @@
   inbox, editable Table/Board databases, and encrypted manual/hourly Notion
   import. Full capability parity is now explicitly staged in `docs/WIKI_NOTION_CLONE.md`:
   database rows-as-pages plus List/Gallery are now delivered; remaining views,
-  comments/replies/reactions/presence and collaboration; templates,
+  persisted page/block discussions, replies, resolution, reactions, and collaboration
+  notifications are now delivered; live presence and concurrent-edit safety remain; templates,
   permissions, and sharing; Sentinel AI/agents; and current-API/two-way interoperability.

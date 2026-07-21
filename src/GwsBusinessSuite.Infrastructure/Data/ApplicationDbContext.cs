@@ -29,6 +29,10 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<WikiPage> WikiPages => Set<WikiPage>();
     public DbSet<WikiPageRevision> WikiPageRevisions => Set<WikiPageRevision>();
     public DbSet<SentinelNavigationEntry> SentinelNavigationEntries => Set<SentinelNavigationEntry>();
+    public DbSet<SentinelDiscussion> SentinelDiscussions => Set<SentinelDiscussion>();
+    public DbSet<SentinelDiscussionComment> SentinelDiscussionComments => Set<SentinelDiscussionComment>();
+    public DbSet<SentinelDiscussionReaction> SentinelDiscussionReactions => Set<SentinelDiscussionReaction>();
+    public DbSet<SentinelNotification> SentinelNotifications => Set<SentinelNotification>();
     public DbSet<WikiDatabase> WikiDatabases => Set<WikiDatabase>();
     public DbSet<WikiDatabaseProperty> WikiDatabaseProperties => Set<WikiDatabaseProperty>();
     public DbSet<WikiDatabaseRow> WikiDatabaseRows => Set<WikiDatabaseRow>();
@@ -103,6 +107,32 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .IsUnique();
         modelBuilder.Entity<SentinelNavigationEntry>().HasIndex(x => new { x.Username, x.IsFavorite });
         modelBuilder.Entity<SentinelNavigationEntry>().HasIndex(x => new { x.Username, x.LastOpenedAt });
+        modelBuilder.Entity<SentinelDiscussion>()
+            .HasOne(x => x.WikiPage)
+            .WithMany()
+            .HasForeignKey(x => x.WikiPageId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<SentinelDiscussionComment>()
+            .HasOne(x => x.Discussion)
+            .WithMany(x => x.Comments)
+            .HasForeignKey(x => x.SentinelDiscussionId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<SentinelDiscussionComment>()
+            .HasOne(x => x.ParentComment)
+            .WithMany()
+            .HasForeignKey(x => x.ParentCommentId)
+            .OnDelete(DeleteBehavior.SetNull);
+        modelBuilder.Entity<SentinelDiscussionReaction>()
+            .HasOne(x => x.Comment)
+            .WithMany(x => x.Reactions)
+            .HasForeignKey(x => x.SentinelDiscussionCommentId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<SentinelDiscussion>().HasIndex(x => new { x.WikiPageId, x.ResolvedAt });
+        modelBuilder.Entity<SentinelDiscussionComment>().HasIndex(x => new { x.SentinelDiscussionId, x.CreatedAt });
+        modelBuilder.Entity<SentinelDiscussionReaction>()
+            .HasIndex(x => new { x.SentinelDiscussionCommentId, x.Username, x.Emoji })
+            .IsUnique();
+        modelBuilder.Entity<SentinelNotification>().HasIndex(x => new { x.Username, x.ReadAt, x.CreatedAt });
         modelBuilder.Entity<WikiDatabaseProperty>()
             .HasOne(x => x.WikiDatabase)
             .WithMany(x => x.Properties)

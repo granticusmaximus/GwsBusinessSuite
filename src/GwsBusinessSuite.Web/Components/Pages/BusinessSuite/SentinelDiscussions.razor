@@ -1,0 +1,296 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@inject ISentinelCollaborationService CollaborationService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject ILogger<SentinelDiscussions> Logger
+
+<div class="card border-0 shadow-sm mt-4">
+    <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
+        <div>
+            <div class="fw-semibold"><i class="bi bi-chat-left-text me-1"></i>Discussions</div>
+            <div class="small text-secondary">Page and block conversations with replies, resolution, and reactions.</div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary position-relative" @onclick="ToggleNotifications">
+                <i class="bi bi-bell"></i>
+                @if (UnreadNotificationCount > 0)
+                {
+                    <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill text-bg-danger">
+                        @(UnreadNotificationCount > 9 ? "9+" : UnreadNotificationCount)
+                    </span>
+                }
+            </button>
+            <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" id="sentinelResolvedThreads" @bind="IncludeResolved" @bind:after="LoadDiscussionsAsync" />
+                <label class="form-check-label small" for="sentinelResolvedThreads">Resolved</label>
+            </div>
+            <span class="badge text-bg-secondary">@Discussions.Count</span>
+        </div>
+    </div>
+
+    @if (ShowNotifications)
+    {
+        <div class="sentinel-discussion-notifications border-bottom">
+            <div class="d-flex justify-content-between align-items-center px-3 py-2">
+                <span class="small fw-semibold">Collaboration notifications</span>
+                @if (UnreadNotificationCount > 0)
+                {
+                    <button type="button" class="btn btn-xs btn-link" @onclick="MarkAllNotificationsReadAsync">Mark all read</button>
+                }
+            </div>
+            @if (Notifications.Count == 0)
+            {
+                <div class="small text-secondary px-3 pb-3">No collaboration notifications.</div>
+            }
+            else
+            {
+                <div class="list-group list-group-flush">
+                    @foreach (var notification in Notifications)
+                    {
+                        <button type="button" class="list-group-item list-group-item-action text-start @(notification.IsRead ? "" : "bg-primary-subtle")"
+                                @onclick="() => OpenNotificationAsync(notification)">
+                            <div class="small">@notification.Message</div>
+                            <div class="small text-secondary mt-1">@notification.CreatedAt.ToLocalTime().ToString("g")</div>
+                        </button>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    <div class="card-body border-bottom">
+        <label class="form-label small fw-semibold">Start a discussion</label>
+        <textarea class="form-control" rows="2" @bind="NewDiscussionBody"
+                  placeholder="Write a comment. Use @@username to notify someone."></textarea>
+        <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+            <select class="form-select form-select-sm sentinel-discussion-anchor" @bind="NewAnchorSelection">
+                <option value="">Entire page</option>
+                @foreach (var block in BlockOptions)
+                {
+                    <option value="@block.Id">Block: @block.Preview</option>
+                }
+            </select>
+            <button type="button" class="btn btn-sm btn-primary" @onclick="CreateDiscussionAsync"
+                    disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewDiscussionBody))">
+                Add discussion
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+    {
+        <div class="alert alert-danger rounded-0 border-0 border-bottom mb-0 py-2">@ErrorMessage</div>
+    }
+
+    @if (Discussions.Count == 0)
+    {
+        <div class="card-body text-secondary small">No @(IncludeResolved ? string.Empty : "open ")discussions yet.</div>
+    }
+    else
+    {
+        <div class="list-group list-group-flush">
+            @foreach (var discussion in Discussions)
+            {
+                <div class="list-group-item sentinel-discussion-thread @(discussion.IsResolved ? "sentinel-discussion-resolved" : "")">
+                    <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                        <div class="small">
+                            @if (discussion.BlockId is { } blockId)
+                            {
+                                <span class="badge text-bg-light border"><i class="bi bi-text-paragraph me-1"></i>@BlockPreview(blockId)</span>
+                            }
+                            else
+                            {
+                                <span class="badge text-bg-light border"><i class="bi bi-file-earmark me-1"></i>Page discussion</span>
+                            }
+                            @if (discussion.IsResolved)
+                            {
+                                <span class="badge text-bg-success ms-1">Resolved</span>
+                            }
+                        </div>
+                        <button type="button" class="btn btn-xs @(discussion.IsResolved ? "btn-outline-secondary" : "btn-outline-success")"
+                                @onclick="() => SetResolvedAsync(discussion)">
+                            @(discussion.IsResolved ? "Reopen" : "Resolve")
+                        </button>
+                    </div>
+
+                    @foreach (var comment in discussion.Comments)
+                    {
+                        <div class="sentinel-discussion-comment @(comment.ParentCommentId.HasValue ? "is-reply" : "")">
+                            <div class="d-flex justify-content-between gap-2">
+                                <span class="small fw-semibold">@comment.Author</span>
+                                <span class="small text-secondary">@comment.CreatedAt.ToLocalTime().ToString("g")</span>
+                            </div>
+                            <div class="small mt-1 sentinel-discussion-body">@comment.Body</div>
+                            <div class="d-flex flex-wrap align-items-center gap-1 mt-2">
+                                @foreach (var emoji in ReactionChoices)
+                                {
+                                    var reaction = comment.Reactions.FirstOrDefault(item => item.Emoji == emoji);
+                                    <button type="button" class="btn btn-xs @(reaction?.ReactedByCurrentUser == true ? "btn-primary" : "btn-outline-secondary")"
+                                            @onclick="() => ToggleReactionAsync(comment.Id, emoji)" title="React @emoji">
+                                        @emoji
+                                        @if (reaction is not null)
+                                        {
+                                            <span class="ms-1">@reaction.Count</span>
+                                        }
+                                    </button>
+                                }
+                                @if (!discussion.IsResolved)
+                                {
+                                    <button type="button" class="btn btn-xs btn-link ms-1" @onclick="() => BeginReply(discussion.Id, comment.Id, comment.Author)">Reply</button>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                    @if (ReplyingToDiscussionId == discussion.Id)
+                    {
+                        <div class="mt-3 p-2 rounded-3 bg-body-tertiary">
+                            <div class="small text-secondary mb-1">Replying to @ReplyingToAuthor</div>
+                            <textarea class="form-control form-control-sm" rows="2" @bind="ReplyBody" placeholder="Write a reply..."></textarea>
+                            <div class="d-flex gap-2 mt-2">
+                                <button type="button" class="btn btn-sm btn-primary" @onclick="SubmitReplyAsync"
+                                        disabled="@(IsBusy || string.IsNullOrWhiteSpace(ReplyBody))">Reply</button>
+                                <button type="button" class="btn btn-sm btn-link" @onclick="CancelReply">Cancel</button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid WikiPageId { get; set; }
+    [Parameter] public string BlocksJson { get; set; } = "[]";
+    [Parameter] public EventCallback<Guid> OnOpenPage { get; set; }
+
+    private static readonly string[] ReactionChoices = ["👍", "❤️", "🎉", "👀", "✅"];
+    private List<SentinelDiscussionView> Discussions { get; set; } = new();
+    private List<SentinelNotificationView> Notifications { get; set; } = new();
+    private string CurrentUsername { get; set; } = "unknown";
+    private string NewDiscussionBody { get; set; } = string.Empty;
+    private string NewAnchorSelection { get; set; } = string.Empty;
+    private bool IncludeResolved { get; set; }
+    private bool ShowNotifications { get; set; }
+    private bool IsBusy { get; set; }
+    private string ErrorMessage { get; set; } = string.Empty;
+    private Guid? ReplyingToDiscussionId { get; set; }
+    private Guid? ReplyingToCommentId { get; set; }
+    private string ReplyingToAuthor { get; set; } = string.Empty;
+    private string ReplyBody { get; set; } = string.Empty;
+    private Guid _loadedPageId;
+
+    private IReadOnlyList<BlockOption> BlockOptions => WikiBlockJson.ParseBlocks(BlocksJson)
+        .Where(block => block.Type != WikiBlockTypes.Divider)
+        .Select(block => new BlockOption(block.Id, WikiBlockHtmlRenderer.PlainTextPreview(block, 70)))
+        .Where(block => !string.IsNullOrWhiteSpace(block.Preview))
+        .ToList();
+
+    private int UnreadNotificationCount => Notifications.Count(notification => !notification.IsRead);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedPageId == WikiPageId) return;
+        _loadedPageId = WikiPageId;
+        CurrentUsername = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        CancelReply();
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        Discussions = (await CollaborationService.ListDiscussionsAsync(WikiPageId, CurrentUsername, IncludeResolved)).ToList();
+        Notifications = (await CollaborationService.ListNotificationsAsync(CurrentUsername)).ToList();
+    }
+
+    private Task LoadDiscussionsAsync() => RunAsync(async () =>
+        Discussions = (await CollaborationService.ListDiscussionsAsync(WikiPageId, CurrentUsername, IncludeResolved)).ToList());
+
+    private async Task CreateDiscussionAsync() => await RunAsync(async () =>
+    {
+        var blockId = Guid.TryParse(NewAnchorSelection, out var parsedBlockId) ? parsedBlockId : (Guid?)null;
+        await CollaborationService.CreateDiscussionAsync(WikiPageId, blockId, NewDiscussionBody, CurrentUsername);
+        NewDiscussionBody = string.Empty;
+        NewAnchorSelection = string.Empty;
+        await ReloadAsync();
+    });
+
+    private void BeginReply(Guid discussionId, Guid commentId, string author)
+    {
+        ReplyingToDiscussionId = discussionId;
+        ReplyingToCommentId = commentId;
+        ReplyingToAuthor = author;
+        ReplyBody = string.Empty;
+    }
+
+    private void CancelReply()
+    {
+        ReplyingToDiscussionId = null;
+        ReplyingToCommentId = null;
+        ReplyingToAuthor = string.Empty;
+        ReplyBody = string.Empty;
+    }
+
+    private async Task SubmitReplyAsync() => await RunAsync(async () =>
+    {
+        if (ReplyingToDiscussionId is not { } discussionId) return;
+        await CollaborationService.ReplyAsync(discussionId, ReplyingToCommentId, ReplyBody, CurrentUsername);
+        CancelReply();
+        await ReloadAsync();
+    });
+
+    private Task SetResolvedAsync(SentinelDiscussionView discussion) => RunAsync(async () =>
+    {
+        await CollaborationService.SetResolvedAsync(discussion.Id, !discussion.IsResolved, CurrentUsername);
+        await ReloadAsync();
+    });
+
+    private Task ToggleReactionAsync(Guid commentId, string emoji) => RunAsync(async () =>
+    {
+        await CollaborationService.ToggleReactionAsync(commentId, emoji, CurrentUsername);
+        await ReloadAsync();
+    });
+
+    private void ToggleNotifications() => ShowNotifications = !ShowNotifications;
+
+    private async Task OpenNotificationAsync(SentinelNotificationView notification) => await RunAsync(async () =>
+    {
+        await CollaborationService.MarkNotificationReadAsync(notification.Id, CurrentUsername);
+        await ReloadAsync();
+        if (notification.WikiPageId != WikiPageId)
+        {
+            await OnOpenPage.InvokeAsync(notification.WikiPageId);
+        }
+    });
+
+    private async Task MarkAllNotificationsReadAsync() => await RunAsync(async () =>
+    {
+        await CollaborationService.MarkAllNotificationsReadAsync(CurrentUsername);
+        await ReloadAsync();
+    });
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Sentinel collaboration action failed for page {WikiPageId}.", WikiPageId);
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private string BlockPreview(Guid blockId) =>
+        BlockOptions.FirstOrDefault(block => block.Id == blockId)?.Preview ?? "Deleted block";
+
+    private sealed record BlockOption(Guid Id, string Preview);
+}
