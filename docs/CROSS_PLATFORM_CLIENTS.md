@@ -44,9 +44,11 @@ corresponding release secrets.
 
 ## MAUI client
 
-`src/GwsBusinessSuite.App` starts at `https://admin.gwsapp.net/admin/sentinel`. Its WebView
-retains the normal authenticated browser session, blocks in-app navigation to untrusted origins,
-opens external HTTPS links in the system browser, and reports connectivity/navigation failures.
+`src/GwsBusinessSuite.App` starts at the complete admin portal at
+`https://admin.gwsapp.net/admin`. Sentinel and every other admin workspace remain available
+through the shared admin navigation. Its WebView retains the normal authenticated browser
+session, blocks in-app navigation to untrusted origins, opens external HTTPS links in the system
+browser, and reports connectivity/navigation failures.
 The server URL can be overridden for development by setting the MAUI preference named `BaseUrl`;
 release builds reject non-HTTPS values.
 

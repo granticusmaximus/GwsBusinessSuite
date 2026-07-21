@@ -4,7 +4,7 @@ const path = require('node:path');
 const productionBaseUrl = 'https://admin.gwsapp.net';
 const configuredBaseUrl = process.env.GWS_SERVER_URL || productionBaseUrl;
 const baseUrl = validateBaseUrl(configuredBaseUrl);
-const startUrl = new URL('/admin/sentinel', baseUrl).toString();
+const startUrl = new URL('/admin', baseUrl).toString();
 
 function validateBaseUrl(candidate) {
   try {

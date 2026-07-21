@@ -3,7 +3,7 @@ namespace GwsBusinessSuite.App;
 public static class AppEndpoints
 {
     public const string ProductionBaseUrl = "https://admin.gwsapp.net";
-    public const string SentinelPath = "/admin/sentinel";
+    public const string AdminPortalPath = "/admin";
 
     public static string BaseUrl
     {
@@ -16,7 +16,7 @@ public static class AppEndpoints
         }
     }
 
-    public static string StartUrl => $"{BaseUrl}{SentinelPath}";
+    public static string StartUrl => $"{BaseUrl}{AdminPortalPath}";
 
     public static bool IsTrusted(Uri uri)
     {
