@@ -134,6 +134,13 @@ public static class DependencyInjection
         services.AddHostedService<AutomationResumeBackgroundService>();
         services.AddScoped<IWikiService, WikiService>();
         services.AddScoped<IWikiDatabaseService, WikiDatabaseService>();
+        services.AddHttpClient<INotionService, NotionService>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.notion.com/v1/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddScoped<INotionSyncService, NotionSyncService>();
+        services.AddHostedService<NotionSyncBackgroundService>();
         var liveShowRecordingsPath = configuration["LiveShow:RecordingsPath"] ?? "/app/data/live-show-recordings";
         services.AddScoped<ILiveShowService>(sp => new LiveShowService(
             sp.GetRequiredService<IAppDbContext>(),

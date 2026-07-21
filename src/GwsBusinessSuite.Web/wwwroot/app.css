@@ -1298,6 +1298,9 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .wiki-tree-row.active {
     background: #eef2ff;
 }
+.wiki-tree-row.wiki-tree-archived {
+    opacity: 0.55;
+}
 .wiki-tree-toggle,
 .wiki-tree-spacer {
     width: 1rem;
@@ -1324,6 +1327,12 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+.wiki-notion-badge {
+    flex-shrink: 0;
+    font-size: 0.62rem;
+    line-height: 1;
+    padding: 0.2rem 0.32rem;
 }
 .wiki-tree-actions {
     display: flex;

@@ -5,8 +5,10 @@
 @using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Domain.Entities
+@using GwsBusinessSuite.Infrastructure.Services
 @inject IWikiService WikiService
 @inject IWikiDatabaseService WikiDatabaseService
+@inject INotionSyncService NotionSyncService
 @inject IMediaLibraryService MediaLibraryService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
@@ -14,10 +16,15 @@
 
 <PageTitle>Knowledge Base</PageTitle>
 
-<div class="page-header">
-    <h1><i class="bi bi-journal-bookmark-fill me-2 text-warning"></i>Knowledge Base</h1>
-    <p>Store internal documentation, SOPs, app notes, and business operating knowledge with a block-based editor.
-        Every save keeps a version snapshot you can inspect or revert to.</p>
+<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-journal-bookmark-fill me-2 text-warning"></i>Knowledge Base</h1>
+        <p class="mb-0">Store internal documentation, SOPs, app notes, and business operating knowledge with a block-based editor.
+            Every save keeps a version snapshot you can inspect or revert to.</p>
+    </div>
+    <button type="button" class="btn btn-outline-dark" @onclick="OpenNotionModalAsync" disabled="@IsBusy">
+        <i class="bi bi-arrow-repeat me-1"></i>Notion Sync
+    </button>
 </div>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
@@ -72,7 +79,7 @@
                     <div class="wiki-tree">
                         @foreach (var node in FilteredAndOrderedNodes())
                         {
-                            <div class="wiki-tree-row @((node.IsDatabase ? SelectedDatabaseId == node.Id : SelectedPageId == node.Id) ? "active" : "")"
+                            <div class="wiki-tree-row @((node.IsDatabase ? SelectedDatabaseId == node.Id : SelectedPageId == node.Id) ? "active" : "") @(node.IsArchived ? "wiki-tree-archived" : "")"
                                  style="padding-left:@(0.5 + GetNodeDepth(node) * 1.25)rem;">
                                 @if (HasChildren(node.Id) && string.IsNullOrWhiteSpace(SearchQuery))
                                 {
@@ -87,6 +94,10 @@
                                 <button type="button" class="wiki-tree-label" @onclick="() => OpenNodeAsync(node)" disabled="@IsBusy">
                                     <span class="wiki-tree-icon">@(string.IsNullOrWhiteSpace(node.Icon) ? (node.IsDatabase ? "🗄️" : "📄") : node.Icon)</span>
                                     <span class="wiki-tree-title">@node.Title</span>
+                                    @if (node.IsNotionSynced)
+                                    {
+                                        <span class="badge rounded-pill text-bg-light border wiki-notion-badge" title="Imported from Notion">N</span>
+                                    }
                                 </button>
                                 <div class="wiki-tree-actions">
                                     <button type="button" class="btn btn-xs btn-link p-0" title="Move up" @onclick="() => MoveNodeAsync(node, -1)" disabled="@IsBusy">
@@ -303,6 +314,89 @@
     </div>
 </div>
 
+@if (ShowNotionModal)
+{
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div>
+                        <h5 class="modal-title">Notion Import &amp; Sync</h5>
+                        @if (!string.IsNullOrWhiteSpace(NotionSettings.WorkspaceName))
+                        {
+                            <div class="small text-secondary mt-1">Connected to @NotionSettings.WorkspaceName</div>
+                        }
+                    </div>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseNotionModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-secondary">
+                        Paste a Notion internal-integration token. Sync is read-only: Notion remains the source of truth,
+                        and content shared with the integration is mirrored into this Wiki.
+                    </p>
+
+                    <label class="form-label fw-semibold small">Integration token</label>
+                    <div class="input-group">
+                        <input class="form-control" type="@(ShowNotionToken ? "text" : "password")"
+                               @bind="NotionSettings.IntegrationToken" autocomplete="off" />
+                        <button type="button" class="btn btn-outline-secondary" title="@(ShowNotionToken ? "Hide token" : "Show token")"
+                                @onclick="() => ShowNotionToken = !ShowNotionToken">
+                            <i class="bi @(ShowNotionToken ? "bi-eye-slash-fill" : "bi-eye-fill")"></i>
+                        </button>
+                    </div>
+                    @if (NotionSettings.IntegrationTokenUnreadable)
+                    {
+                        <div class="alert alert-warning py-2 mt-2 mb-0">
+                            The stored token can no longer be decrypted. Enter it again to reconnect.
+                        </div>
+                    }
+
+                    <div class="form-check form-switch mt-3">
+                        <input class="form-check-input" type="checkbox" role="switch" id="notionAutoSync"
+                               @bind="NotionSettings.AutoSyncEnabled" />
+                        <label class="form-check-label" for="notionAutoSync">Sync automatically every hour</label>
+                    </div>
+
+                    @if (NotionSettings.LastSyncedAt is { } lastSyncedAt)
+                    {
+                        <div class="border rounded-3 p-3 mt-3 bg-body-tertiary">
+                            <div class="small text-secondary">Last sync @lastSyncedAt.ToLocalTime().ToString("g")</div>
+                            <div class="d-flex flex-wrap gap-3 mt-1 small">
+                                <span><strong>@NotionSettings.LastSyncImportedCount</strong> imported</span>
+                                <span><strong>@NotionSettings.LastSyncUpdatedCount</strong> updated</span>
+                                <span><strong>@NotionSettings.LastSyncArchivedCount</strong> archived</span>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(NotionMessage))
+                    {
+                        <div class="alert @(NotionMessageIsError ? "alert-danger" : "alert-info") mt-3 mb-0">@NotionMessage</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CloseNotionModal" disabled="@IsNotionBusy">Close</button>
+                    <button type="button" class="btn btn-outline-primary" @onclick="SaveNotionSettingsAsync" disabled="@IsNotionBusy">
+                        <i class="bi bi-plug-fill me-1"></i>Save connection
+                    </button>
+                    <button type="button" class="btn btn-primary" @onclick="SyncNotionNowAsync" disabled="@IsNotionBusy">
+                        @if (IsNotionBusy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-arrow-repeat me-1"></i>
+                        }
+                        Sync now
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-backdrop show" style="z-index:-1"></div>
+    </div>
+}
+
 @code {
     private const int MaxHistoryDisplay = 20;
 
@@ -316,6 +410,13 @@
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
     private readonly HashSet<Guid> _expandedPageIds = new();
+
+    private bool ShowNotionModal { get; set; }
+    private bool ShowNotionToken { get; set; }
+    private bool IsNotionBusy { get; set; }
+    private bool NotionMessageIsError { get; set; }
+    private string NotionMessage { get; set; } = string.Empty;
+    private NotionConnectorSettingsView NotionSettings { get; set; } = new();
 
     private List<WikiRevisionView> History { get; set; } = new();
     private bool IsHistoryBusy { get; set; }
@@ -365,6 +466,105 @@
     {
         Editor.CoverImageUrl = asset.Url;
         _showCoverPicker = false;
+    }
+
+    private async Task OpenNotionModalAsync()
+    {
+        ShowNotionModal = true;
+        ShowNotionToken = false;
+        NotionMessage = string.Empty;
+        NotionMessageIsError = false;
+        try
+        {
+            NotionSettings = await NotionSyncService.GetSettingsAsync() ?? new NotionConnectorSettingsView();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load Notion connector settings.");
+            NotionMessage = $"Unable to load Notion settings. {ex.Message}";
+            NotionMessageIsError = true;
+        }
+    }
+
+    private void CloseNotionModal() => ShowNotionModal = false;
+
+    private async Task SaveNotionSettingsAsync()
+    {
+        IsNotionBusy = true;
+        NotionMessage = string.Empty;
+        try
+        {
+            var result = await NotionSyncService.SaveSettingsAsync(NotionSettings);
+            NotionMessage = result.Message;
+            NotionMessageIsError = !result.IsSuccess;
+            if (result.IsSuccess)
+            {
+                NotionSettings.WorkspaceName = result.WorkspaceName;
+                NotionSettings.IntegrationTokenUnreadable = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to save Notion connector settings.");
+            NotionMessage = $"Unable to save Notion settings. {ex.Message}";
+            NotionMessageIsError = true;
+        }
+        finally
+        {
+            IsNotionBusy = false;
+        }
+    }
+
+    private async Task SyncNotionNowAsync()
+    {
+        IsNotionBusy = true;
+        NotionMessage = string.Empty;
+        var acquired = false;
+        try
+        {
+            var validation = await NotionSyncService.SaveSettingsAsync(NotionSettings);
+            if (!validation.IsSuccess)
+            {
+                NotionMessage = validation.Message;
+                NotionMessageIsError = true;
+                return;
+            }
+            NotionSettings.WorkspaceName = validation.WorkspaceName;
+            NotionSettings.IntegrationTokenUnreadable = false;
+
+            acquired = await NotionSyncBackgroundService.SyncLock.WaitAsync(0);
+            if (!acquired)
+            {
+                NotionMessage = "A Notion sync is already running.";
+                NotionMessageIsError = true;
+                return;
+            }
+
+            var result = await NotionSyncService.SyncAsync();
+            NotionMessage = result.IsSuccess
+                ? $"{result.Message} {result.Imported} imported, {result.Updated} updated, {result.Archived} archived."
+                : result.Message;
+            NotionMessageIsError = !result.IsSuccess;
+            NotionSettings = await NotionSyncService.GetSettingsAsync() ?? NotionSettings;
+            if (result.IsSuccess)
+            {
+                await LoadTreeAsync(selectFirstPage: false);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to sync Notion workspace.");
+            NotionMessage = $"Unable to sync Notion. {ex.Message}";
+            NotionMessageIsError = true;
+        }
+        finally
+        {
+            if (acquired)
+            {
+                NotionSyncBackgroundService.SyncLock.Release();
+            }
+            IsNotionBusy = false;
+        }
     }
 
     [JSInvokable]
@@ -722,11 +922,23 @@
     // icon, parent, and sort order), so this is what tree rendering/reordering actually
     // operates over - WikiPage/WikiDatabase-specific behavior (opening, saving, deleting)
     // still dispatches through their own services once a node is selected.
-    private readonly record struct WikiTreeNode(Guid Id, string Title, string? Icon, Guid? ParentId, int SortOrder, bool IsDatabase);
+    private readonly record struct WikiTreeNode(
+        Guid Id,
+        string Title,
+        string? Icon,
+        Guid? ParentId,
+        int SortOrder,
+        bool IsDatabase,
+        string? NotionId,
+        DateTimeOffset? NotionArchivedAt)
+    {
+        public bool IsNotionSynced => !string.IsNullOrWhiteSpace(NotionId);
+        public bool IsArchived => NotionArchivedAt.HasValue;
+    }
 
     private List<WikiTreeNode> AllTreeNodes() =>
-        WikiPages.Select(p => new WikiTreeNode(p.Id, p.Title, p.Icon, p.ParentWikiPageId, p.SortOrder, false))
-            .Concat(WikiDatabases.Select(d => new WikiTreeNode(d.Id, d.Title, d.Icon, d.ParentWikiPageId, d.SortOrder, true)))
+        WikiPages.Select(p => new WikiTreeNode(p.Id, p.Title, p.Icon, p.ParentWikiPageId, p.SortOrder, false, p.NotionId, p.NotionArchivedAt))
+            .Concat(WikiDatabases.Select(d => new WikiTreeNode(d.Id, d.Title, d.Icon, d.ParentWikiPageId, d.SortOrder, true, d.NotionId, d.NotionArchivedAt)))
             .ToList();
 
     // Recursive depth-first flatten via ToLookup(ParentId), rendered as an indented flat

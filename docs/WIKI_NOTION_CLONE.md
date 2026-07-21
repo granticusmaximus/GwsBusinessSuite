@@ -69,7 +69,7 @@ research only.
 | History | Bounded DB snapshot revisions (20/page), structural diff (added/removed/changed blocks), revert-as-new-version | — |
 | Databases | Typed properties (title, text, number, select, multi-select, date, checkbox, url, created-time), Table view (inline-editable cells), Board view (grouped by a Select property, native-HTML5-DnD reordering across columns) | Calendar view, Gallery view, formula/relation/rollup properties, person/files properties |
 | Databases — structure | Databases share the page sidebar tree, move-up/down + reparent like pages | Inline-embedded databases within a page's blocks, rows that open as full sub-pages |
-| Import/sync | Not started | Live Notion API sync via a pasted internal integration token (matches every other integration in this app — CJ, Ollama, DigitalOcean all use pasted API keys, not OAuth), upsert-by-Notion-id reconciliation |
+| Import/sync | Delivered: read-only live Notion API import via a pasted, encrypted internal-integration token; manual/hourly sync; upsert-by-Notion-id reconciliation; hierarchy, blocks, database schema/rows, and soft archival | Two-way/conflict-aware sync and selective per-page sync are intentionally out of scope |
 | Visibility | Admin-only (`/admin/wiki`), same as before | Public-facing wiki view |
 
 ## Delivery sequence
@@ -86,20 +86,43 @@ research only.
    scoped out of this pass) and Gallery view (trivial once this data model exists — a
    near-copy of the Media Library's CSS-grid card list) are the next slice, along with
    inline-embedded databases and rows-as-full-pages.
-3. **Notion API import/sync**: a `NotionConnectorSettings` singleton (encrypted integration
-   token via `ISecretProtector`, matching `CjConnectorSettings`) + a typed-HttpClient
+3. **Notion API import/sync** (delivered): a `NotionConnectorSettings` singleton
+   (encrypted integration token via `ISecretProtector`, matching `CjConnectorSettings`) + a typed-HttpClient
    `NotionService` + a `NotionSyncBackgroundService` (matching `CjAdsSyncBackgroundService`'s
    interval/semaphore/scope-per-tick shape); maps Notion's ~30 block types onto
    `WikiBlock.Type` and its ~22 database property types onto the Phase 2 property model;
    upsert-by-Notion-id reconciliation with soft-flagging of upstream-archived content
-   (not a destructive replace-all).
+   (not a destructive replace-all). The Wiki UI provides connection settings, manual sync,
+   hourly auto-sync control, last-sync counts, source badges, and dimmed-but-openable archived
+   items. Sync-driven page changes deliberately do not create interactive revision snapshots,
+   preventing hourly sync noise from evicting authored changes from the 20-revision history.
 4. **Polish/parity**: backlinks/mentions, full-text search, page templates, comments,
    formula/relation/rollup database properties, a public-facing wiki view.
+
+## Phase 3 parity boundary
+
+Phase 3 is a practical read-only workspace mirror, not a claim of complete Notion product
+parity. The useful follow-ups are separated from features that do not fit this admin-only
+internal Wiki.
+
+| Area | Delivered now | Worth a focused follow-up | Permanently outside this clone's current scope |
+| --- | --- | --- | --- |
+| Blocks | Core text/list/task/toggle/callout/code/media/embed blocks; tables collapse to Markdown; layout wrappers flatten | Equation/KaTeX and a native table block if imported workspaces need them | AI meeting notes/transcription and unsupported placeholders |
+| Databases | Table/Board views; first-class common properties; other API values retained as best-effort text | Calendar/Gallery/List views, then formula/relation/rollup and person/files types where editing semantics are defined | Notion Projects, Calendar, and Mail as separate products |
+| Collaboration | Existing app-level admin authorization | Backlinks/mentions, comments, and possibly a public read-only Wiki | Reproducing Notion's workspace/teamspace/guest/share-link permission matrix or real-time collaboration |
+| Presentation | Emoji icon and cover URL | Custom uploads or richer icon selection | Notion's template marketplace and proprietary design assets |
+| Integration | One-way API import, encrypted pasted token, manual/hourly reconciliation | Optional per-page selection and durable re-hosting for expiring Notion-hosted images | Notion writes, two-way conflict merging, OAuth, marketplace connections, MCP/agent integrations, and Notion AI |
+
+Known import limitations are explicit: Notion-hosted file image URLs can expire; relation
+values retain related-page ids rather than resolved titles; `equation`, `breadcrumb`,
+`table_of_contents`, `meeting_notes`, and `transcription` blocks are skipped; uncommon or
+computed property types are preserved as read-only best-effort text, with `place` limited by
+the upstream API as well.
 
 ## Safety rules
 
 - Wiki content never stores plaintext secrets.
-- A future Notion integration token follows this app's existing convention: pasted into a
+- The Notion integration token follows this app's existing convention: pasted into a
   settings form, encrypted at rest via `ISecretProtector`, never an OAuth flow (this app
   has none).
 - Server-side authorization remains authoritative for `/admin/wiki`; there is no public
