@@ -111,6 +111,11 @@ else
                         <i class="bi bi-plus-lg me-1"></i>Gallery
                     </button>
                 </li>
+                <li class="nav-item">
+                    <button type="button" class="nav-link text-secondary" @onclick="AddCalendarViewAsync" disabled="@IsBusy" title="Add a Calendar view using a Date property">
+                        <i class="bi bi-plus-lg me-1"></i>Calendar
+                    </button>
+                </li>
             </ul>
 
             @{ var titleProperty = Database.Properties.First(p => p.Type == WikiDatabasePropertyTypes.Title); }
@@ -156,6 +161,71 @@ else
                             </div>
                         }
                     </div>
+                }
+            }
+            else if (ActiveView is { Type: WikiDatabaseViewTypes.Calendar })
+            {
+                var dateProperty = Database.Properties.FirstOrDefault(property =>
+                        property.Type == WikiDatabasePropertyTypes.Date
+                        && property.Id.ToString() == ActiveViewConfig?.GroupByPropertyId)
+                    ?? Database.Properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Date);
+                if (dateProperty is null)
+                {
+                    <div class="text-secondary small">This Calendar view's Date property was removed or changed. Add a Date property to use it again.</div>
+                }
+                else
+                {
+                    var calendarRows = WikiDatabaseViewLogic.ApplyFilters(
+                        Database.Rows.ToList(), Database.Properties.ToList(), ActiveViewConfig?.Filters ?? []);
+                    calendarRows = WikiDatabaseViewLogic.ApplySort(
+                        calendarRows, Database.Properties.ToList(), ActiveViewConfig?.Sorts ?? []);
+                    var calendar = WikiDatabaseViewLogic.BuildCalendarMonth(calendarRows, dateProperty, _calendarMonth);
+                    <div class="sentinel-db-calendar-toolbar">
+                        <div class="d-flex align-items-center gap-1">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="PreviousCalendarMonth" title="Previous month"><i class="bi bi-chevron-left"></i></button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ShowCurrentCalendarMonth">Today</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="NextCalendarMonth" title="Next month"><i class="bi bi-chevron-right"></i></button>
+                        </div>
+                        <strong>@calendar.Month.ToString("MMMM yyyy")</strong>
+                        <span class="small text-secondary">@dateProperty.Name</span>
+                    </div>
+                    <div class="sentinel-db-calendar-scroll">
+                        <div class="sentinel-db-calendar-weekdays" aria-hidden="true">
+                            @foreach (var weekday in CalendarWeekdays)
+                            {
+                                <span>@weekday</span>
+                            }
+                        </div>
+                        <div class="sentinel-db-calendar-grid">
+                            @foreach (var day in calendar.Days)
+                            {
+                                <div class="sentinel-db-calendar-day @(!day.IsCurrentMonth ? "is-outside" : "") @(day.Date == DateOnly.FromDateTime(DateTime.Today) ? "is-today" : "")">
+                                    <div class="sentinel-db-calendar-day-header">
+                                        <span>@day.Date.Day</span>
+                                        <button type="button" @onclick="() => AddRowOnDateAsync(dateProperty, day.Date)" disabled="@IsBusy" title="@($"Add row on {day.Date:MMM d}")">+</button>
+                                    </div>
+                                    <div class="sentinel-db-calendar-items">
+                                        @foreach (var row in day.Rows)
+                                        {
+                                            <button type="button" class="sentinel-db-calendar-item" @onclick="() => OpenRow(row)">
+                                                @(GetText(row, titleProperty) ?? "Untitled")
+                                            </button>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                    @if (calendar.UndatedRows.Count > 0)
+                    {
+                        <div class="sentinel-db-calendar-undated">
+                            <span class="small text-secondary">No date</span>
+                            @foreach (var row in calendar.UndatedRows)
+                            {
+                                <button type="button" @onclick="() => OpenRow(row)">@(GetText(row, titleProperty) ?? "Untitled")</button>
+                            }
+                        </div>
+                    }
                 }
             }
             else if (ActiveView is { Type: WikiDatabaseViewTypes.Gallery })
@@ -301,6 +371,7 @@ else
         WikiDatabasePropertyTypes.MultiSelect, WikiDatabasePropertyTypes.Date, WikiDatabasePropertyTypes.Checkbox,
         WikiDatabasePropertyTypes.Url, WikiDatabasePropertyTypes.CreatedTime
     ];
+    private static readonly IReadOnlyList<string> CalendarWeekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
     private WikiDatabase? Database;
     private bool _loading = true;
@@ -314,6 +385,7 @@ else
     private string _titleIcon = string.Empty;
     private string _newPropertyName = string.Empty;
     private string _newPropertyType = WikiDatabasePropertyTypes.Text;
+    private DateOnly _calendarMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
 
     private WikiDatabaseView? ActiveView =>
         Database?.Views.FirstOrDefault(v => v.Id == _activeViewId) ?? Database?.Views.OrderBy(v => v.SortOrder).FirstOrDefault();
@@ -475,12 +547,49 @@ else
     private Task AddListViewAsync() => AddSimpleViewAsync(WikiDatabaseViewTypes.List, "List");
     private Task AddGalleryViewAsync() => AddSimpleViewAsync(WikiDatabaseViewTypes.Gallery, "Gallery");
 
+    private async Task AddCalendarViewAsync()
+    {
+        var dateProperty = Database?.Properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Date);
+        if (dateProperty is null)
+        {
+            ErrorMessage = "Add a Date property before creating a Calendar view.";
+            return;
+        }
+
+        await Work(async () =>
+        {
+            var user = await CurrentUserNameAsync();
+            var config = new WikiDatabaseViewConfig([], [], dateProperty.Id.ToString());
+            var view = await WikiDatabaseService.SaveViewAsync(
+                WikiDatabaseId, null, "Calendar", WikiDatabaseViewTypes.Calendar, config, user);
+            await ReloadAsync();
+            _activeViewId = view.Id;
+            ShowCurrentCalendarMonth();
+        });
+    }
+
     private async Task AddRowAsync() => await Work(async () =>
     {
         var user = await CurrentUserNameAsync();
         await WikiDatabaseService.SaveRowAsync(WikiDatabaseId, new WikiDatabaseRowEditor(), user);
         await ReloadAsync();
     });
+
+    private async Task AddRowOnDateAsync(WikiDatabaseProperty dateProperty, DateOnly date) => await Work(async () =>
+    {
+        var values = new JsonObject();
+        var localDateTime = date.ToDateTime(TimeOnly.MinValue);
+        WikiPropertyValues.SetDate(values, dateProperty.Id,
+            new DateTimeOffset(localDateTime, TimeZoneInfo.Local.GetUtcOffset(localDateTime)));
+        var user = await CurrentUserNameAsync();
+        await WikiDatabaseService.SaveRowAsync(WikiDatabaseId,
+            new WikiDatabaseRowEditor { Values = values.ToDictionary(item => item.Key, item => item.Value) }, user);
+        await ReloadAsync();
+    });
+
+    private void PreviousCalendarMonth() => _calendarMonth = _calendarMonth.AddMonths(-1);
+    private void NextCalendarMonth() => _calendarMonth = _calendarMonth.AddMonths(1);
+    private void ShowCurrentCalendarMonth() => _calendarMonth = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1);
 
     private async Task AddRowToGroupAsync(WikiDatabaseProperty groupByProperty, string optionId) => await Work(async () =>
     {
@@ -593,6 +702,7 @@ else
         WikiDatabaseViewTypes.Board => "bi-kanban",
         WikiDatabaseViewTypes.List => "bi-list-ul",
         WikiDatabaseViewTypes.Gallery => "bi-grid",
+        WikiDatabaseViewTypes.Calendar => "bi-calendar3",
         _ => "bi-table"
     };
 }

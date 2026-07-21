@@ -218,6 +218,7 @@ public static class WikiDatabaseViewTypes
     public const string Board = "board";
     public const string List = "list";
     public const string Gallery = "gallery";
+    public const string Calendar = "calendar";
 }
 
 // Slots into the same sidebar tree as WikiPage (ParentWikiPageId). Page blocks may reference

@@ -97,6 +97,52 @@ public sealed class WikiDatabaseViewLogicTests
         groups[2].Rows.Should().HaveCount(1);
     }
 
+    [Fact]
+    public void BuildCalendarMonth_ShouldCreateSixWeekSundayFirstGrid()
+    {
+        var dateProperty = NewProperty(WikiDatabasePropertyTypes.Date);
+
+        var calendar = WikiDatabaseViewLogic.BuildCalendarMonth([], dateProperty, new DateOnly(2026, 5, 19));
+
+        calendar.Month.Should().Be(new DateOnly(2026, 5, 1));
+        calendar.Days.Should().HaveCount(42);
+        calendar.Days[0].Date.Should().Be(new DateOnly(2026, 4, 26));
+        calendar.Days[0].IsCurrentMonth.Should().BeFalse();
+        calendar.Days[5].Date.Should().Be(new DateOnly(2026, 5, 1));
+        calendar.Days[5].IsCurrentMonth.Should().BeTrue();
+        calendar.Days[^1].Date.Should().Be(new DateOnly(2026, 6, 6));
+    }
+
+    [Fact]
+    public void BuildCalendarMonth_ShouldGroupRowsAndPreserveInputOrder()
+    {
+        var dateProperty = NewProperty(WikiDatabasePropertyTypes.Date);
+        var later = RowWithDate(dateProperty.Id, new DateOnly(2026, 5, 15));
+        later.SortOrder = 2;
+        var earlier = RowWithDate(dateProperty.Id, new DateOnly(2026, 5, 15));
+        earlier.SortOrder = 1;
+        var undated = RowWithDate(dateProperty.Id, null);
+
+        var calendar = WikiDatabaseViewLogic.BuildCalendarMonth(
+            [later, undated, earlier],
+            dateProperty,
+            new DateOnly(2026, 5, 1));
+
+        calendar.Days.Single(day => day.Date == new DateOnly(2026, 5, 15)).Rows
+            .Should().BeEquivalentTo([later, earlier], options => options.WithStrictOrdering());
+        calendar.UndatedRows.Should().ContainSingle().Which.Should().BeSameAs(undated);
+    }
+
+    [Fact]
+    public void BuildCalendarMonth_NonDateProperty_ShouldThrow()
+    {
+        var textProperty = NewProperty(WikiDatabasePropertyTypes.Text);
+
+        var action = () => WikiDatabaseViewLogic.BuildCalendarMonth([], textProperty, new DateOnly(2026, 5, 1));
+
+        action.Should().Throw<ArgumentException>().WithMessage("Calendar views require a Date property.*");
+    }
+
     private static WikiDatabaseProperty NewProperty(string type) => new()
     {
         Id = Guid.NewGuid(),
@@ -123,6 +169,16 @@ public sealed class WikiDatabaseViewLogicTests
     {
         var values = System.Text.Json.Nodes.JsonNode.Parse("{}")!.AsObject();
         WikiPropertyValues.SetCheckbox(values, propertyId, value);
+        return new WikiDatabaseRow { Id = Guid.NewGuid(), PropertyValuesJson = WikiPropertyValues.Serialize(values) };
+    }
+
+    private static WikiDatabaseRow RowWithDate(Guid propertyId, DateOnly? value)
+    {
+        var values = System.Text.Json.Nodes.JsonNode.Parse("{}")!.AsObject();
+        var localDate = value is null
+            ? (DateTimeOffset?)null
+            : new DateTimeOffset(value.Value.ToDateTime(TimeOnly.FromTimeSpan(TimeSpan.FromHours(12)), DateTimeKind.Local));
+        WikiPropertyValues.SetDate(values, propertyId, localDate);
         return new WikiDatabaseRow { Id = Guid.NewGuid(), PropertyValuesJson = WikiPropertyValues.Serialize(values) };
     }
 }

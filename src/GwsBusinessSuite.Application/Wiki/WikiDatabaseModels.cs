@@ -271,9 +271,55 @@ public static class WikiDatabaseViewLogic
 
         return groups;
     }
+
+    public static WikiDatabaseCalendarMonth BuildCalendarMonth(
+        IReadOnlyList<WikiDatabaseRow> rows,
+        WikiDatabaseProperty dateProperty,
+        DateOnly month)
+    {
+        if (dateProperty.Type != WikiDatabasePropertyTypes.Date)
+        {
+            throw new ArgumentException("Calendar views require a Date property.", nameof(dateProperty));
+        }
+
+        var firstOfMonth = new DateOnly(month.Year, month.Month, 1);
+        var leadingDays = (int)firstOfMonth.DayOfWeek;
+        var gridStart = firstOfMonth.AddDays(-leadingDays);
+        var datedRows = rows
+            .Select(row => (
+                Row: row,
+                Date: WikiPropertyValues.GetDate(WikiPropertyValues.ParseObject(row.PropertyValuesJson), dateProperty.Id)))
+            .ToList();
+        var rowsByDate = datedRows
+            .Where(item => item.Date.HasValue)
+            .ToLookup(item => DateOnly.FromDateTime(item.Date!.Value.ToLocalTime().DateTime), item => item.Row);
+        var days = Enumerable.Range(0, 42)
+            .Select(offset =>
+            {
+                var date = gridStart.AddDays(offset);
+                return new WikiDatabaseCalendarDay(
+                    date,
+                    date.Month == firstOfMonth.Month,
+                    rowsByDate[date].ToList());
+            })
+            .ToList();
+        var undated = datedRows
+            .Where(item => !item.Date.HasValue)
+            .Select(item => item.Row)
+            .ToList();
+
+        return new WikiDatabaseCalendarMonth(firstOfMonth, days, undated);
+    }
 }
 
 public sealed record WikiDatabaseBoardGroup(string OptionId, string Label, IReadOnlyList<WikiDatabaseRow> Rows);
+
+public sealed record WikiDatabaseCalendarDay(DateOnly Date, bool IsCurrentMonth, IReadOnlyList<WikiDatabaseRow> Rows);
+
+public sealed record WikiDatabaseCalendarMonth(
+    DateOnly Month,
+    IReadOnlyList<WikiDatabaseCalendarDay> Days,
+    IReadOnlyList<WikiDatabaseRow> UndatedRows);
 
 public sealed record WikiInlineDatabaseProperty(
     Guid Id,

@@ -68,7 +68,7 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 | Block editor | Slash-command insert, drag-reorder, Tab/Shift-Tab indent, inline bold/italic/link (Ctrl+B/I/K), `[[Page]]` autocomplete, paste-as-plain-text, reusable page templates | Nested columns, synced/reusable blocks, native tables, equations, breadcrumbs, TOC, buttons, block templates |
 | Core block types | paragraph, heading 1-3, bulleted/numbered list item, to-do, toggle, quote, callout, code, divider, image, embed, legacy markdown (pre-migration content) | table, richer embeds (oEmbed previews) |
 | History | Bounded DB snapshot revisions (20/page), structural diff (added/removed/changed blocks), revert-as-new-version | — |
-| Databases | Typed properties (title, text, number, select, multi-select, date, checkbox, url, created-time); editable Table and Board; List and Gallery views | Calendar, Timeline, Chart, Form, Map, Feed, and Dashboard views; formula/relation/rollup and person/files properties |
+| Databases | Typed properties (title, text, number, select, multi-select, date, checkbox, url, created-time); editable Table and Board; List, Gallery, and Calendar views | Timeline, Chart, Form, Map, Feed, and Dashboard views; formula/relation/rollup and person/files properties |
 | Databases — structure | Databases share the page sidebar tree; every row opens as a block-content page; linked and inline database blocks reference canonical data without duplication | Row covers/icons, page history, layouts and peek modes |
 | Search & graph | All-token ranked page/block/database-row search with highlighted matches; structured and legacy backlinks; per-user favorites/recents; structured page, person, and date mentions with a personal mention inbox | Graph visualization, saved searches, and database-row mention inbox entries |
 | Import/sync | Delivered: read-only live Notion API import via a pasted, encrypted internal-integration token; manual/hourly sync; upsert-by-Notion-id reconciliation; hierarchy, blocks, database schema/rows, and soft archival | Upgrade from the pinned 2022 API to the current data-source/view API; selective and two-way conflict-aware sync |
@@ -84,7 +84,7 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 2. **Databases** (delivered foundation):
    typed-property records with a property editor, Table view with inline-editable cells,
    Board view grouped by a Select property with native-HTML5-DnD card reordering across
-   columns, plus List and Gallery views. Rows now open as pages with their own structured
+   columns, plus List, Gallery, and Calendar views. Rows now open as pages with their own structured
    block content, and imported Notion database-row page bodies sync into those blocks.
 3. **Notion API import/sync** (delivered): a `NotionConnectorSettings` singleton
    (encrypted integration token via `ISecretProtector`, matching `CjConnectorSettings`) + a typed-HttpClient
@@ -101,7 +101,7 @@ proprietary schemas; public Notion product and API documentation is behavioral r
    highlighting; page backlinks; durable per-user favorites and recents; `[[Page]]` page
    mentions; and `@` autocomplete for structured people/date mentions with a personal inbox.
 5. **Database pages and complete views** (in progress): row block-content pages, List and
-   Gallery views, and linked plus typed inline-editable database page blocks are delivered. Remaining work is Calendar, Timeline,
+   Gallery and Calendar views, and linked plus typed inline-editable database page blocks are delivered. Remaining work is Timeline,
    Chart, Form, Map, Feed, and Dashboard views; view-specific layout/open mode; formulas,
    relations, rollups, people, and files.
 6. **Collaboration** (in progress): authenticated page and block discussion threads, nested
@@ -137,7 +137,7 @@ capabilities where they fit GWS Business Suite; they are no longer silently excl
 | Area | Delivered now | Required parity work |
 | --- | --- | --- |
 | Blocks | Core text/list/task/toggle/callout/code/media/embed blocks; tables import as Markdown; layout wrappers flatten | Complete supported block vocabulary, native tables/equations/columns/synced blocks, reusable templates, and richer embeds |
-| Databases | Editable Table/Board/List/Gallery, filters/sorts/groups, common property types, rows with block page bodies, and linked/inline database blocks | Remaining major view families, formulas/relations/rollups, layouts, charts, forms, and automations |
+| Databases | Editable Table/Board/List/Gallery/Calendar, filters/sorts/groups, common property types, rows with block page bodies, and linked/inline database blocks | Remaining major view families, formulas/relations/rollups, layouts, charts, forms, and automations |
 | Knowledge graph | `[[Page]]` links, ranked/highlighted workspace search, backlinks, person/date mentions, favorites/recents | Graph navigation, database-row mention inbox entries, and saved searches |
 | Collaboration | Authenticated page/block discussions with editor-canvas pins, replies, resolve/reopen, reactions, participant/mention notifications and read state, live cross-circuit refresh, heartbeat page presence, and optimistic lost-update protection with draft recovery | Distributed realtime scale-out, CRDT/OT simultaneous co-authoring, workspace roles, granular permissions, and public sharing |
 | Presentation | Emoji icon and cover URL | Custom icon/cover uploads, page width/fonts, database layouts, peek modes, and reusable style defaults |
