@@ -346,7 +346,7 @@ public sealed class WikiDatabaseProperty : AuditableEntity
     public required string Type { get; set; }
     public int SortOrder { get; set; }
     // Per-type configuration: Select/MultiSelect options, Formula expression, Relation
-    // target database, or Rollup relation/target-property/aggregation identifiers.
+    // target/reciprocal-property identifiers, or Rollup relation/target/aggregation identifiers.
     public string ConfigJson { get; set; } = "{}";
     // See WikiPage.NotionId - lets NotionSyncService upsert this property by Notion's own
     // property id on re-sync instead of duplicating it.

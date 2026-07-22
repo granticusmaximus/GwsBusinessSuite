@@ -206,7 +206,12 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
             config = config with
             {
                 Options = [],
-                RelatedDatabaseId = config.RelatedDatabaseId == sourceDatabaseId ? targetDatabaseId : config.RelatedDatabaseId
+                RelatedDatabaseId = config.RelatedDatabaseId == sourceDatabaseId ? targetDatabaseId : config.RelatedDatabaseId,
+                ReciprocalPropertyId = config.RelatedDatabaseId == sourceDatabaseId
+                    && config.ReciprocalPropertyId is { } reciprocalId
+                    && propertyIds.TryGetValue(reciprocalId, out var remappedReciprocalId)
+                        ? remappedReciprocalId
+                        : null
             };
         }
         else if (propertyType == WikiDatabasePropertyTypes.Rollup)
@@ -435,6 +440,23 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
             return;
         }
 
+        var now = DateTimeOffset.UtcNow;
+        var relationProperties = await dbContext.WikiDatabaseProperties
+            .Where(property => property.WikiDatabaseId == wikiDatabaseId
+                && property.Type == WikiDatabasePropertyTypes.Relation)
+            .ToListAsync(cancellationToken);
+        foreach (var relationProperty in relationProperties)
+        {
+            var relationConfig = WikiDatabasePropertyConfig.Parse(relationProperty);
+            if (relationConfig.RelatedDatabaseId == wikiDatabaseId)
+            {
+                continue;
+            }
+            await RemoveReciprocalPropertyAsync(
+                relationConfig.ReciprocalPropertyId,
+                relationProperty.Id, now, performedBy, cancellationToken);
+        }
+
         // Properties/Rows/Views cascade-delete via the FKs configured in ApplicationDbContext.
         dbContext.WikiDatabases.Remove(database);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -525,17 +547,17 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
             editor.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect ? editor.Options : [],
             string.IsNullOrWhiteSpace(editor.FormulaExpression) ? null : editor.FormulaExpression.Trim(),
             editor.RelatedDatabaseId,
+            editor.ReciprocalPropertyId,
             editor.RelationPropertyId,
             editor.RollupPropertyId,
             string.IsNullOrWhiteSpace(editor.RollupAggregation) ? null : editor.RollupAggregation);
         await ValidatePropertyConfigurationAsync(wikiDatabaseId, property.Id, editor.Type, configuration, cancellationToken);
-        property.ConfigJson = editor.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect
-            or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Relation or WikiDatabasePropertyTypes.Rollup
-            ? WikiDatabasePropertyConfig.Serialize(configuration)
-            : "{}";
         if (!isNew && editor.Type == WikiDatabasePropertyTypes.Relation
             && previousConfiguration.RelatedDatabaseId != configuration.RelatedDatabaseId)
         {
+            await RemoveReciprocalPropertyAsync(
+                previousConfiguration.ReciprocalPropertyId, property.Id, now, performedBy, cancellationToken);
+            configuration = configuration with { ReciprocalPropertyId = null };
             var rows = await dbContext.WikiDatabaseRows.Where(row => row.WikiDatabaseId == wikiDatabaseId).ToListAsync(cancellationToken);
             foreach (var row in rows)
             {
@@ -576,8 +598,117 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
             await dbContext.WikiDatabaseProperties.AddAsync(property, cancellationToken);
         }
 
+        if (editor.Type == WikiDatabasePropertyTypes.Relation)
+        {
+            if (editor.ReciprocalRelationEnabled == false)
+            {
+                await RemoveReciprocalPropertyAsync(
+                    previousConfiguration.ReciprocalPropertyId ?? configuration.ReciprocalPropertyId,
+                    property.Id, now, performedBy, cancellationToken);
+                configuration = configuration with { ReciprocalPropertyId = null };
+            }
+            else if (editor.ReciprocalRelationEnabled == true)
+            {
+                var reciprocalId = await EnsureReciprocalPropertyAsync(
+                    wikiDatabaseId, property, configuration, editor.ReciprocalPropertyName,
+                    now, performedBy, cancellationToken);
+                configuration = configuration with { ReciprocalPropertyId = reciprocalId };
+            }
+        }
+
+        property.ConfigJson = editor.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect
+            or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Relation or WikiDatabasePropertyTypes.Rollup
+            ? WikiDatabasePropertyConfig.Serialize(configuration)
+            : "{}";
+
         await dbContext.SaveChangesAsync(cancellationToken);
         return property;
+    }
+
+    private async Task<Guid> EnsureReciprocalPropertyAsync(
+        Guid sourceDatabaseId,
+        WikiDatabaseProperty sourceProperty,
+        WikiDatabasePropertyConfiguration sourceConfiguration,
+        string? requestedName,
+        DateTimeOffset now,
+        string performedBy,
+        CancellationToken cancellationToken)
+    {
+        var targetDatabaseId = sourceConfiguration.RelatedDatabaseId
+            ?? throw new ArgumentException("A reciprocal relation requires a related database.");
+        var reciprocal = sourceConfiguration.ReciprocalPropertyId is { } reciprocalId
+            ? await dbContext.WikiDatabaseProperties.FirstOrDefaultAsync(item =>
+                item.Id == reciprocalId && item.WikiDatabaseId == targetDatabaseId
+                    && item.Type == WikiDatabasePropertyTypes.Relation, cancellationToken)
+            : null;
+
+        if (reciprocal is null)
+        {
+            var sourceDatabaseTitle = await dbContext.WikiDatabases
+                .Where(item => item.Id == sourceDatabaseId)
+                .Select(item => item.Title)
+                .SingleAsync(cancellationToken);
+            reciprocal = new WikiDatabaseProperty
+            {
+                WikiDatabaseId = targetDatabaseId,
+                Name = string.IsNullOrWhiteSpace(requestedName) ? sourceDatabaseTitle : requestedName.Trim(),
+                Type = WikiDatabasePropertyTypes.Relation,
+                SortOrder = targetDatabaseId == sourceDatabaseId
+                    ? sourceProperty.SortOrder + 1
+                    : await NextPropertySortOrderAsync(targetDatabaseId, cancellationToken),
+                CreatedAt = now,
+                CreatedBy = performedBy
+            };
+            await dbContext.WikiDatabaseProperties.AddAsync(reciprocal, cancellationToken);
+        }
+        else if (!string.IsNullOrWhiteSpace(requestedName))
+        {
+            reciprocal.Name = requestedName.Trim();
+            reciprocal.UpdatedAt = now;
+            reciprocal.UpdatedBy = performedBy;
+        }
+
+        reciprocal.ConfigJson = WikiDatabasePropertyConfig.Serialize(
+            WikiDatabasePropertyConfiguration.Empty with
+            {
+                RelatedDatabaseId = sourceDatabaseId,
+                ReciprocalPropertyId = sourceProperty.Id
+            });
+        return reciprocal.Id;
+    }
+
+    private async Task RemoveReciprocalPropertyAsync(
+        Guid? reciprocalPropertyId,
+        Guid sourcePropertyId,
+        DateTimeOffset now,
+        string performedBy,
+        CancellationToken cancellationToken)
+    {
+        if (reciprocalPropertyId is not { } reciprocalId)
+        {
+            return;
+        }
+
+        var reciprocal = await dbContext.WikiDatabaseProperties.FirstOrDefaultAsync(
+            item => item.Id == reciprocalId && item.Type == WikiDatabasePropertyTypes.Relation, cancellationToken);
+        if (reciprocal is null
+            || WikiDatabasePropertyConfig.Parse(reciprocal).ReciprocalPropertyId != sourcePropertyId)
+        {
+            return;
+        }
+
+        var rows = await dbContext.WikiDatabaseRows
+            .Where(row => row.WikiDatabaseId == reciprocal.WikiDatabaseId)
+            .ToListAsync(cancellationToken);
+        foreach (var row in rows)
+        {
+            var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+            if (!values.Remove(reciprocal.Id.ToString())) continue;
+            row.PropertyValuesJson = WikiPropertyValues.Serialize(values);
+            row.UpdatedAt = now;
+            row.UpdatedBy = performedBy;
+        }
+        dbContext.WikiDatabaseProperties.Remove(reciprocal);
     }
 
     public async Task DeletePropertyAsync(Guid wikiDatabaseId, Guid propertyId, string performedBy, CancellationToken cancellationToken = default)
@@ -594,6 +725,24 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
             throw new InvalidOperationException("The Title property can't be deleted.");
         }
 
+        var now = DateTimeOffset.UtcNow;
+        if (property.Type == WikiDatabasePropertyTypes.Relation)
+        {
+            await RemoveReciprocalPropertyAsync(
+                WikiDatabasePropertyConfig.Parse(property).ReciprocalPropertyId,
+                property.Id, now, performedBy, cancellationToken);
+        }
+        var rows = await dbContext.WikiDatabaseRows
+            .Where(row => row.WikiDatabaseId == wikiDatabaseId)
+            .ToListAsync(cancellationToken);
+        foreach (var row in rows)
+        {
+            var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+            if (!values.Remove(property.Id.ToString())) continue;
+            row.PropertyValuesJson = WikiPropertyValues.Serialize(values);
+            row.UpdatedAt = now;
+            row.UpdatedBy = performedBy;
+        }
         dbContext.WikiDatabaseProperties.Remove(property);
         await dbContext.SaveChangesAsync(cancellationToken);
     }
@@ -611,6 +760,9 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
             ? await dbContext.WikiDatabaseRows.FirstOrDefaultAsync(item => item.Id == rowId && item.WikiDatabaseId == wikiDatabaseId, cancellationToken)
                 ?? throw new KeyNotFoundException("The row no longer exists.")
             : null;
+        var previousValues = row is null
+            ? new JsonObject()
+            : WikiPropertyValues.ParseObject(row.PropertyValuesJson);
 
         var isNew = row is null;
         row ??= new WikiDatabaseRow
@@ -647,8 +799,83 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
             await dbContext.WikiDatabaseRows.AddAsync(row, cancellationToken);
         }
 
+        await SynchronizeReciprocalRelationsAsync(
+            wikiDatabaseId, row.Id, previousValues, values, now, performedBy, cancellationToken);
+
         await dbContext.SaveChangesAsync(cancellationToken);
         return row;
+    }
+
+    private async Task SynchronizeReciprocalRelationsAsync(
+        Guid sourceDatabaseId,
+        Guid sourceRowId,
+        JsonObject previousValues,
+        JsonObject currentValues,
+        DateTimeOffset now,
+        string performedBy,
+        CancellationToken cancellationToken)
+    {
+        var relationProperties = await dbContext.WikiDatabaseProperties.AsNoTracking()
+            .Where(property => property.WikiDatabaseId == sourceDatabaseId
+                && property.Type == WikiDatabasePropertyTypes.Relation)
+            .ToListAsync(cancellationToken);
+
+        foreach (var relationProperty in relationProperties)
+        {
+            var config = WikiDatabasePropertyConfig.Parse(relationProperty);
+            if (config.RelatedDatabaseId is not { } targetDatabaseId
+                || config.ReciprocalPropertyId is not { } reciprocalPropertyId)
+            {
+                continue;
+            }
+
+            var reciprocalProperty = await dbContext.WikiDatabaseProperties.AsNoTracking().FirstOrDefaultAsync(property =>
+                property.Id == reciprocalPropertyId
+                    && property.WikiDatabaseId == targetDatabaseId
+                    && property.Type == WikiDatabasePropertyTypes.Relation,
+                cancellationToken);
+            if (reciprocalProperty is null
+                || WikiDatabasePropertyConfig.Parse(reciprocalProperty).ReciprocalPropertyId != relationProperty.Id)
+            {
+                continue;
+            }
+
+            var previousIds = WikiPropertyValues.GetMultiSelect(previousValues, relationProperty.Id)
+                .Where(value => Guid.TryParse(value, out _))
+                .ToHashSet(StringComparer.Ordinal);
+            var currentIds = WikiPropertyValues.GetMultiSelect(currentValues, relationProperty.Id)
+                .Where(value => Guid.TryParse(value, out _))
+                .ToHashSet(StringComparer.Ordinal);
+            var affectedIds = previousIds.Union(currentIds)
+                .Select(Guid.Parse)
+                .ToList();
+            if (affectedIds.Count == 0)
+            {
+                continue;
+            }
+
+            var targetRows = await dbContext.WikiDatabaseRows
+                .Where(row => row.WikiDatabaseId == targetDatabaseId && affectedIds.Contains(row.Id))
+                .ToListAsync(cancellationToken);
+            foreach (var targetRow in targetRows)
+            {
+                var targetValues = WikiPropertyValues.ParseObject(targetRow.PropertyValuesJson);
+                var reverseIds = WikiPropertyValues.GetMultiSelect(targetValues, reciprocalPropertyId)
+                    .ToHashSet(StringComparer.Ordinal);
+                if (currentIds.Contains(targetRow.Id.ToString()))
+                {
+                    reverseIds.Add(sourceRowId.ToString());
+                }
+                else
+                {
+                    reverseIds.Remove(sourceRowId.ToString());
+                }
+                WikiPropertyValues.SetMultiSelect(targetValues, reciprocalPropertyId, reverseIds.ToList());
+                targetRow.PropertyValuesJson = WikiPropertyValues.Serialize(targetValues);
+                targetRow.UpdatedAt = now;
+                targetRow.UpdatedBy = performedBy;
+            }
+        }
     }
 
     private async Task ValidatePropertyConfigurationAsync(
@@ -718,6 +945,28 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
             return;
         }
 
+        var now = DateTimeOffset.UtcNow;
+        var inboundRelations = (await dbContext.WikiDatabaseProperties.AsNoTracking()
+                .Where(property => property.Type == WikiDatabasePropertyTypes.Relation)
+                .ToListAsync(cancellationToken))
+            .Where(property => WikiDatabasePropertyConfig.Parse(property).RelatedDatabaseId == wikiDatabaseId)
+            .ToList();
+        foreach (var relation in inboundRelations)
+        {
+            var sourceRows = await dbContext.WikiDatabaseRows
+                .Where(item => item.WikiDatabaseId == relation.WikiDatabaseId)
+                .ToListAsync(cancellationToken);
+            foreach (var sourceRow in sourceRows)
+            {
+                var values = WikiPropertyValues.ParseObject(sourceRow.PropertyValuesJson);
+                var selected = WikiPropertyValues.GetMultiSelect(values, relation.Id).ToList();
+                if (!selected.Remove(rowId.ToString())) continue;
+                WikiPropertyValues.SetMultiSelect(values, relation.Id, selected);
+                sourceRow.PropertyValuesJson = WikiPropertyValues.Serialize(values);
+                sourceRow.UpdatedAt = now;
+                sourceRow.UpdatedBy = performedBy;
+            }
+        }
         dbContext.WikiDatabaseRows.Remove(row);
         await dbContext.SaveChangesAsync(cancellationToken);
     }

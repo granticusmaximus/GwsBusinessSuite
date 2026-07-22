@@ -104,8 +104,9 @@
   beside the source with independent revisions; database duplication and reusable source-independent
   database templates are delivered; reusable block templates now capture live editor content and
   insert independent blocks with fresh identities; database formulas now evaluate typed expressions,
-  relations use canonical row selection, and rollups calculate count/numeric/unique aggregates without
-  persisting stale computed values; distributed scale-out and CRDT/OT co-authoring remain;
+  relations use canonical row selection with optional reciprocal properties synchronized from either side,
+  and rollups calculate count/numeric/unique aggregates without persisting stale computed values;
+  distributed scale-out and CRDT/OT co-authoring remain;
   permissions and tokenized public sharing are delivered; Sentinel workspace membership is
   limited to authenticated portal accounts, and external viewers use public shares rather than
   guest portal accounts;

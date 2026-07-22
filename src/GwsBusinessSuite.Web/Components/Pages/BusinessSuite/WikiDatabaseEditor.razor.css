@@ -57,3 +57,22 @@
     background: var(--gws-panel-bg, #fff);
     box-shadow: 0 .65rem 1.5rem rgba(0, 0, 0, .18);
 }
+
+.sentinel-reciprocal-editor {
+    display: grid;
+    grid-template-columns: auto minmax(10rem, 1fr) auto;
+    align-items: center;
+    gap: .5rem;
+}
+
+@media (max-width: 575.98px) {
+    .sentinel-reciprocal-editor {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .sentinel-reciprocal-editor .btn {
+        grid-column: 2;
+        justify-self: start;
+        padding-left: 0;
+    }
+}
