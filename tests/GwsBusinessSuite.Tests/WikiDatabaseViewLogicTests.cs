@@ -55,6 +55,34 @@ public sealed class WikiDatabaseViewLogicTests
     }
 
     [Fact]
+    public void ApplySort_ComputedNumber_ShouldUseNumericOrdering()
+    {
+        var formula = NewProperty(WikiDatabasePropertyTypes.Formula);
+        var rows = new[] { RowWithNumber(formula.Id, 10m), RowWithNumber(formula.Id, 2m), RowWithNumber(formula.Id, 30m) };
+
+        var sorted = WikiDatabaseViewLogic.ApplySort(rows, [formula],
+            [new WikiDatabaseSort(formula.Id.ToString(), "ascending")]);
+
+        sorted.Select(row => WikiPropertyValues.GetComputedValue(
+                WikiPropertyValues.ParseObject(row.PropertyValuesJson), formula.Id))
+            .Should().Equal(2m, 10m, 30m);
+    }
+
+    [Fact]
+    public void ApplyFilters_ComputedNumber_ShouldSupportNumericComparisons()
+    {
+        var rollup = NewProperty(WikiDatabasePropertyTypes.Rollup);
+        var rows = new[] { RowWithNumber(rollup.Id, 4m), RowWithNumber(rollup.Id, 12m) };
+
+        var filtered = WikiDatabaseViewLogic.ApplyFilters(rows, [rollup],
+            [new WikiDatabaseFilter(rollup.Id.ToString(), "greaterThan", "5")]);
+
+        filtered.Should().ContainSingle();
+        WikiPropertyValues.GetComputedValue(
+            WikiPropertyValues.ParseObject(filtered[0].PropertyValuesJson), rollup.Id).Should().Be(12m);
+    }
+
+    [Fact]
     public void ApplySort_NoSorts_ShouldFallBackToSortOrder()
     {
         var textProperty = NewProperty(WikiDatabasePropertyTypes.Text);

@@ -86,6 +86,129 @@ public sealed class WikiDatabaseServiceTests
     }
 
     [Fact]
+    public async Task GetDatabaseAsync_ShouldEvaluateFormulaPropertiesWithoutPersistingComputedValues()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Estimates", null, "u");
+        var hours = await service.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Hours", Type = WikiDatabasePropertyTypes.Number }, "u");
+        var rate = await service.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Rate", Type = WikiDatabasePropertyTypes.Number }, "u");
+        var total = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Total",
+            Type = WikiDatabasePropertyTypes.Formula,
+            FormulaExpression = "round([Hours] * [Rate], 2)"
+        }, "u");
+        var values = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetNumber(values, hours.Id, 2.5m);
+        WikiPropertyValues.SetNumber(values, rate.Id, 125.25m);
+        var row = await service.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = values.ToDictionary(item => item.Key, item => item.Value) }, "u");
+
+        var computed = await service.GetDatabaseAsync(database.Id);
+
+        WikiPropertyValues.GetComputedValue(
+            WikiPropertyValues.ParseObject(computed!.Rows.Single().PropertyValuesJson), total.Id).Should().Be(313.13m);
+        var stored = await db.WikiDatabaseRows.AsNoTracking().SingleAsync(item => item.Id == row.Id);
+        WikiPropertyValues.ParseObject(stored.PropertyValuesJson).ContainsKey(total.Id.ToString()).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SavePropertyAsync_ShouldRejectInvalidFormulaSyntax()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Estimates", null, "u");
+        await service.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Hours", Type = WikiDatabasePropertyTypes.Number }, "u");
+
+        var action = () => service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Broken",
+            Type = WikiDatabasePropertyTypes.Formula,
+            FormulaExpression = "[Hours] * ("
+        }, "u");
+
+        await action.Should().ThrowAsync<Exception>().WithMessage("#ERROR!*");
+    }
+
+    [Fact]
+    public async Task RenamePropertyAsync_ShouldKeepFormulaReferencesValid()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Estimates", null, "u");
+        var hours = await service.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Hours", Type = WikiDatabasePropertyTypes.Number }, "u");
+        var total = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Double",
+            Type = WikiDatabasePropertyTypes.Formula,
+            FormulaExpression = "[Hours] * 2"
+        }, "u");
+
+        await service.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Id = hours.Id, Name = "Effort", Type = hours.Type }, "u");
+
+        var reloaded = await service.GetDatabaseAsync(database.Id);
+        WikiDatabasePropertyConfig.Parse(reloaded!.Properties.Single(property => property.Id == total.Id))
+            .FormulaExpression.Should().Be("[Effort] * 2");
+    }
+
+    [Fact]
+    public async Task GetDatabaseAsync_ShouldResolveRelationsAndCalculateRollups()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var invoices = await service.CreateDatabaseAsync("Invoices", null, "u");
+        var invoiceTitle = invoices.Properties.Single(property => property.Type == WikiDatabasePropertyTypes.Title);
+        var amount = await service.SavePropertyAsync(invoices.Id,
+            new WikiDatabasePropertyEditor { Name = "Amount", Type = WikiDatabasePropertyTypes.Number }, "u");
+        var firstValues = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(firstValues, invoiceTitle.Id, "INV-001");
+        WikiPropertyValues.SetNumber(firstValues, amount.Id, 120m);
+        var first = await service.SaveRowAsync(invoices.Id,
+            new WikiDatabaseRowEditor { Values = firstValues.ToDictionary(item => item.Key, item => item.Value) }, "u");
+        var secondValues = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(secondValues, invoiceTitle.Id, "INV-002");
+        WikiPropertyValues.SetNumber(secondValues, amount.Id, 80m);
+        var second = await service.SaveRowAsync(invoices.Id,
+            new WikiDatabaseRowEditor { Values = secondValues.ToDictionary(item => item.Key, item => item.Value) }, "u");
+
+        var clients = await service.CreateDatabaseAsync("Clients", null, "u");
+        var relation = await service.SavePropertyAsync(clients.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Invoices",
+            Type = WikiDatabasePropertyTypes.Relation,
+            RelatedDatabaseId = invoices.Id
+        }, "u");
+        var rollup = await service.SavePropertyAsync(clients.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Revenue",
+            Type = WikiDatabasePropertyTypes.Rollup,
+            RelationPropertyId = relation.Id,
+            RollupPropertyId = amount.Id,
+            RollupAggregation = WikiDatabaseRollupAggregations.Sum
+        }, "u");
+        var clientValues = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetMultiSelect(clientValues, relation.Id, [first.Id.ToString(), second.Id.ToString()]);
+        await service.SaveRowAsync(clients.Id,
+            new WikiDatabaseRowEditor { Values = clientValues.ToDictionary(item => item.Key, item => item.Value) }, "u");
+
+        var computed = await service.GetDatabaseAsync(clients.Id);
+
+        var computedValues = WikiPropertyValues.ParseObject(computed!.Rows.Single().PropertyValuesJson);
+        WikiPropertyValues.GetMultiSelect(computedValues, relation.Id).Should().Equal(first.Id.ToString(), second.Id.ToString());
+        WikiPropertyValues.GetDisplayText(
+            computed.Properties.Single(property => property.Id == relation.Id),
+            computedValues,
+            computed.Rows.Single().CreatedAt).Should().Be("INV-001, INV-002");
+        WikiPropertyValues.GetComputedValue(computedValues, rollup.Id).Should().Be(200m);
+    }
+
+    [Fact]
     public async Task SaveRowAsync_ShouldPersistPageBlocksAndPreserveThemDuringPropertyOnlyEdits()
     {
         await using var db = await CreateDbAsync();
@@ -258,6 +381,56 @@ public sealed class WikiDatabaseServiceTests
         copiedConfig.GroupByPropertyId.Should().Be(copiedStatus.Id.ToString());
         copiedConfig.Filters.Single().PropertyId.Should().Be(copiedStatus.Id.ToString());
         copiedConfig.Sorts.Single().PropertyId.Should().Be(copiedTitle.Id.ToString());
+    }
+
+    [Fact]
+    public async Task DuplicateDatabaseAsync_ShouldRemapSelfRelationsAndRollupsToTheCopy()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var source = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var title = source.Properties.Single(property => property.Type == WikiDatabasePropertyTypes.Title);
+        var relation = await service.SavePropertyAsync(source.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Dependencies",
+            Type = WikiDatabasePropertyTypes.Relation,
+            RelatedDatabaseId = source.Id
+        }, "u");
+        var rollup = await service.SavePropertyAsync(source.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Dependency count",
+            Type = WikiDatabasePropertyTypes.Rollup,
+            RelationPropertyId = relation.Id,
+            RollupPropertyId = title.Id,
+            RollupAggregation = WikiDatabaseRollupAggregations.Count
+        }, "u");
+        var dependencyValues = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(dependencyValues, title.Id, "Foundation");
+        var dependency = await service.SaveRowAsync(source.Id,
+            new WikiDatabaseRowEditor { Values = dependencyValues.ToDictionary(item => item.Key, item => item.Value) }, "u");
+        var taskValues = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(taskValues, title.Id, "Launch");
+        WikiPropertyValues.SetMultiSelect(taskValues, relation.Id, [dependency.Id.ToString()]);
+        await service.SaveRowAsync(source.Id,
+            new WikiDatabaseRowEditor { Values = taskValues.ToDictionary(item => item.Key, item => item.Value) }, "u");
+
+        var duplicate = await service.DuplicateDatabaseAsync(source.Id, "u");
+        var reloaded = await service.GetDatabaseAsync(duplicate.Id);
+
+        var copiedTitle = reloaded!.Properties.Single(property => property.Type == WikiDatabasePropertyTypes.Title);
+        var copiedRelation = reloaded.Properties.Single(property => property.Type == WikiDatabasePropertyTypes.Relation);
+        var copiedRollup = reloaded.Properties.Single(property => property.Type == WikiDatabasePropertyTypes.Rollup);
+        WikiDatabasePropertyConfig.Parse(copiedRelation).RelatedDatabaseId.Should().Be(duplicate.Id);
+        var copiedRollupConfig = WikiDatabasePropertyConfig.Parse(copiedRollup);
+        copiedRollupConfig.RelationPropertyId.Should().Be(copiedRelation.Id);
+        copiedRollupConfig.RollupPropertyId.Should().Be(copiedTitle.Id);
+        var copiedDependency = reloaded.Rows.Single(row =>
+            WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), copiedTitle.Id) == "Foundation");
+        var copiedTask = reloaded.Rows.Single(row =>
+            WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), copiedTitle.Id) == "Launch");
+        var copiedValues = WikiPropertyValues.ParseObject(copiedTask.PropertyValuesJson);
+        WikiPropertyValues.GetMultiSelect(copiedValues, copiedRelation.Id).Should().Equal(copiedDependency.Id.ToString());
+        WikiPropertyValues.GetComputedValue(copiedValues, copiedRollup.Id).Should().Be(1m);
     }
 
     [Fact]

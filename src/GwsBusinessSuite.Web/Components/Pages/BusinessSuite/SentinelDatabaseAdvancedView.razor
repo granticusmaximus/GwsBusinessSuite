@@ -36,7 +36,7 @@ else if (View.Type == WikiDatabaseViewTypes.Chart)
     var chartProperty = ResolveChartProperty();
     if (chartProperty is null)
     {
-        <div class="alert alert-secondary py-2">Add a Select, Multi-select, Checkbox, or text property to use Chart.</div>
+        <div class="alert alert-secondary py-2">Add a Select, Multi-select, Checkbox, text, Formula, or Rollup property to use Chart.</div>
     }
     else
     {
@@ -67,9 +67,9 @@ else if (View.Type == WikiDatabaseViewTypes.Form)
                 {
                     <input type="checkbox" checked="@FormBool(property.Id)" @onchange="eventArgs => SetFormCheckbox(property.Id, eventArgs.Value)" />
                 }
-                else if (property.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect)
+                else if (property.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Relation)
                 {
-                    <select multiple="@(property.Type == WikiDatabasePropertyTypes.MultiSelect)" value="@FormValue(property.Id)"
+                    <select multiple="@(property.Type is WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Relation)" value="@FormValue(property.Id)"
                             @onchange="eventArgs => _formValues[property.Id] = eventArgs.Value?.ToString() ?? string.Empty">
                         <option value="">—</option>
                         @foreach (var option in WikiDatabasePropertyConfig.GetOptions(property))
@@ -142,7 +142,8 @@ else if (View.Type == WikiDatabaseViewTypes.Feed)
 }
 else if (View.Type == WikiDatabaseViewTypes.Dashboard)
 {
-    var numericProperties = Database.Properties.Where(property => property.Type == WikiDatabasePropertyTypes.Number).ToList();
+    var numericProperties = Database.Properties.Where(property => property.Type is WikiDatabasePropertyTypes.Number
+        or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup).ToList();
     var checkedCount = Database.Properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Checkbox) is { } checkbox
         ? VisibleRows.Count(row => WikiPropertyValues.GetCheckbox(WikiPropertyValues.ParseObject(row.PropertyValuesJson), checkbox.Id))
         : 0;
@@ -152,7 +153,9 @@ else if (View.Type == WikiDatabaseViewTypes.Dashboard)
         <article><span>Completed</span><strong>@checkedCount</strong></article>
         @foreach (var property in numericProperties.Take(3))
         {
-            var total = VisibleRows.Sum(row => WikiPropertyValues.GetNumber(WikiPropertyValues.ParseObject(row.PropertyValuesJson), property.Id) ?? 0);
+            var total = VisibleRows.Sum(row => property.Type == WikiDatabasePropertyTypes.Number
+                ? WikiPropertyValues.GetNumber(WikiPropertyValues.ParseObject(row.PropertyValuesJson), property.Id) ?? 0
+                : WikiPropertyValues.GetComputedValue(WikiPropertyValues.ParseObject(row.PropertyValuesJson), property.Id) is decimal computed ? computed : 0);
             <article><span>@property.Name total</span><strong>@total</strong></article>
         }
     </div>
@@ -185,7 +188,8 @@ else if (View.Type == WikiDatabaseViewTypes.Dashboard)
     private WikiDatabaseProperty? ResolveChartProperty() =>
         Database.Properties.FirstOrDefault(property => property.Id.ToString() == Config.GroupByPropertyId)
         ?? Database.Properties.FirstOrDefault(property => property.Type is WikiDatabasePropertyTypes.Select
-            or WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Checkbox or WikiDatabasePropertyTypes.Text);
+            or WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Checkbox or WikiDatabasePropertyTypes.Text
+            or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup);
 
     private string Title(WikiDatabaseRow row)
     {

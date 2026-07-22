@@ -6,6 +6,31 @@ namespace GwsBusinessSuite.Application.Wiki;
 
 public sealed record WikiDatabasePropertyOption(string Id, string Label, string Color);
 
+public sealed record WikiDatabasePropertyConfiguration(
+    IReadOnlyList<WikiDatabasePropertyOption> Options,
+    string? FormulaExpression,
+    Guid? RelatedDatabaseId,
+    Guid? RelationPropertyId,
+    Guid? RollupPropertyId,
+    string? RollupAggregation)
+{
+    public static WikiDatabasePropertyConfiguration Empty { get; } = new([], null, null, null, null, null);
+}
+
+public static class WikiDatabaseRollupAggregations
+{
+    public const string Count = "count";
+    public const string CountValues = "countValues";
+    public const string Sum = "sum";
+    public const string Average = "average";
+    public const string Minimum = "minimum";
+    public const string Maximum = "maximum";
+    public const string ShowUnique = "showUnique";
+
+    public static IReadOnlyList<string> All { get; } =
+        [Count, CountValues, Sum, Average, Minimum, Maximum, ShowUnique];
+}
+
 public sealed record WikiDatabaseFilter(string PropertyId, string Operator, string Value);
 
 public sealed record WikiDatabaseSort(string PropertyId, string Direction);
@@ -43,7 +68,10 @@ public sealed record WikiDatabaseTemplateSnapshot(
     string? Icon,
     IReadOnlyList<WikiDatabaseTemplateProperty> Properties,
     IReadOnlyList<WikiDatabaseTemplateRow> Rows,
-    IReadOnlyList<WikiDatabaseTemplateView> Views);
+    IReadOnlyList<WikiDatabaseTemplateView> Views)
+{
+    public Guid? SourceDatabaseId { get; init; }
+}
 
 public static class WikiDatabaseViewConfigJson
 {
@@ -73,6 +101,11 @@ public sealed class WikiDatabasePropertyEditor
     public string Name { get; set; } = string.Empty;
     public string Type { get; set; } = WikiDatabasePropertyTypes.Text;
     public IReadOnlyList<WikiDatabasePropertyOption> Options { get; set; } = [];
+    public string? FormulaExpression { get; set; }
+    public Guid? RelatedDatabaseId { get; set; }
+    public Guid? RelationPropertyId { get; set; }
+    public Guid? RollupPropertyId { get; set; }
+    public string? RollupAggregation { get; set; }
 }
 
 public sealed class WikiDatabaseRowEditor
@@ -155,7 +188,30 @@ public static class WikiPropertyValues
             WikiDatabasePropertyTypes.Select => GetText(values, property.Id) is { } optionId
                 ? ResolveOptionLabels(property, [optionId]).FirstOrDefault() ?? string.Empty
                 : string.Empty,
+            WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup => GetComputedDisplayText(values, property.Id),
             _ => GetText(values, property.Id) ?? string.Empty
+        };
+
+    public static object? GetComputedValue(JsonObject values, Guid propertyId)
+    {
+        if (!values.TryGetPropertyValue(propertyId.ToString(), out var node) || node is not JsonValue value)
+        {
+            return null;
+        }
+
+        if (value.TryGetValue<decimal>(out var number)) return number;
+        if (value.TryGetValue<bool>(out var boolean)) return boolean;
+        if (value.TryGetValue<string>(out var text)) return text;
+        return value.ToJsonString();
+    }
+
+    private static string GetComputedDisplayText(JsonObject values, Guid propertyId) =>
+        GetComputedValue(values, propertyId) switch
+        {
+            null => string.Empty,
+            bool boolean => boolean ? "True" : "False",
+            decimal number => number.ToString("0.############################", System.Globalization.CultureInfo.InvariantCulture),
+            object value => value.ToString() ?? string.Empty
         };
 
     private static IReadOnlyList<string> ResolveOptionLabels(WikiDatabaseProperty property, IReadOnlyList<string> optionIds)
@@ -167,21 +223,49 @@ public static class WikiPropertyValues
 
 public static class WikiDatabasePropertyConfig
 {
-    public static IReadOnlyList<WikiDatabasePropertyOption> GetOptions(WikiDatabaseProperty property)
+    public static WikiDatabasePropertyConfiguration Parse(WikiDatabaseProperty property) => Parse(property.ConfigJson);
+
+    public static WikiDatabasePropertyConfiguration Parse(string configJson)
     {
-        if (string.IsNullOrWhiteSpace(property.ConfigJson))
+        if (string.IsNullOrWhiteSpace(configJson))
         {
-            return [];
+            return WikiDatabasePropertyConfiguration.Empty;
         }
 
-        try { return JsonSerializer.Deserialize<PropertyConfigDto>(property.ConfigJson, WikiPropertyValues.Options)?.Options ?? []; }
-        catch (JsonException) { return []; }
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<PropertyConfigDto>(configJson, WikiPropertyValues.Options);
+            return parsed is null
+                ? WikiDatabasePropertyConfiguration.Empty
+                : new WikiDatabasePropertyConfiguration(
+                    parsed.Options ?? [], parsed.FormulaExpression, parsed.RelatedDatabaseId,
+                    parsed.RelationPropertyId, parsed.RollupPropertyId, parsed.RollupAggregation);
+        }
+        catch (JsonException) { return WikiDatabasePropertyConfiguration.Empty; }
     }
 
-    public static string Serialize(IReadOnlyList<WikiDatabasePropertyOption> options) =>
-        JsonSerializer.Serialize(new PropertyConfigDto(options), WikiPropertyValues.Options);
+    public static IReadOnlyList<WikiDatabasePropertyOption> GetOptions(WikiDatabaseProperty property)
+        => Parse(property).Options;
 
-    private sealed record PropertyConfigDto(IReadOnlyList<WikiDatabasePropertyOption> Options);
+    public static string Serialize(IReadOnlyList<WikiDatabasePropertyOption> options) =>
+        Serialize(new WikiDatabasePropertyConfiguration(options, null, null, null, null, null));
+
+    public static string Serialize(WikiDatabasePropertyConfiguration configuration) =>
+        JsonSerializer.Serialize(new PropertyConfigDto(
+            configuration.Options,
+            configuration.FormulaExpression,
+            configuration.RelatedDatabaseId,
+            configuration.RelationPropertyId,
+            configuration.RollupPropertyId,
+            configuration.RollupAggregation), WikiPropertyValues.Options);
+
+    private sealed record PropertyConfigDto(
+        IReadOnlyList<WikiDatabasePropertyOption>? Options,
+        string? FormulaExpression = null,
+        Guid? RelatedDatabaseId = null,
+        Guid? RelationPropertyId = null,
+        Guid? RollupPropertyId = null,
+        string? RollupAggregation = null);
 }
 
 // Pure, DB-free filter/sort/group logic over an already-loaded row list - same split as
@@ -239,9 +323,36 @@ public static class WikiDatabaseViewLogic
                     _ => true
                 }
                 : false,
+            WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup =>
+                MatchesComputedFilter(WikiPropertyValues.GetComputedValue(values, propertyId), filter),
             _ => true
         };
     }
+
+    private static bool MatchesComputedFilter(object? value, WikiDatabaseFilter filter) => value switch
+    {
+        decimal number when decimal.TryParse(filter.Value, out var target) => filter.Operator switch
+        {
+            "equals" => number == target,
+            "greaterThan" => number > target,
+            "lessThan" => number < target,
+            _ => true
+        },
+        bool boolean => filter.Operator switch
+        {
+            "isChecked" => boolean,
+            "isNotChecked" => !boolean,
+            "equals" => bool.TryParse(filter.Value, out var target) && boolean == target,
+            _ => true
+        },
+        string text => filter.Operator switch
+        {
+            "equals" => string.Equals(text, filter.Value, StringComparison.OrdinalIgnoreCase),
+            "contains" => text.Contains(filter.Value, StringComparison.OrdinalIgnoreCase),
+            _ => true
+        },
+        _ => false
+    };
 
     public static IReadOnlyList<WikiDatabaseRow> ApplySort(
         IReadOnlyList<WikiDatabaseRow> rows,
@@ -262,17 +373,19 @@ public static class WikiDatabaseViewLogic
                 continue;
             }
 
-            object? KeySelector(WikiDatabaseRow row)
+            WikiDatabaseSortValue KeySelector(WikiDatabaseRow row)
             {
                 var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
-                return property.Type switch
+                var value = property.Type switch
                 {
-                    WikiDatabasePropertyTypes.Number => WikiPropertyValues.GetNumber(values, propertyId),
+                    WikiDatabasePropertyTypes.Number => (object?)WikiPropertyValues.GetNumber(values, propertyId),
                     WikiDatabasePropertyTypes.Date => WikiPropertyValues.GetDate(values, propertyId),
                     WikiDatabasePropertyTypes.Checkbox => WikiPropertyValues.GetCheckbox(values, propertyId),
                     WikiDatabasePropertyTypes.CreatedTime => row.CreatedAt,
+                    WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup => WikiPropertyValues.GetComputedValue(values, propertyId),
                     _ => WikiPropertyValues.GetText(values, propertyId)
                 };
+                return WikiDatabaseSortValue.From(value);
             }
 
             var descending = sort.Direction == "descending";
@@ -282,6 +395,31 @@ public static class WikiDatabaseViewLogic
         }
 
         return ordered?.ToList() ?? rows.OrderBy(row => row.SortOrder).ToList();
+    }
+
+    private readonly record struct WikiDatabaseSortValue(int TypeOrder, decimal Number, long Ticks, string Text)
+        : IComparable<WikiDatabaseSortValue>
+    {
+        public static WikiDatabaseSortValue From(object? value) => value switch
+        {
+            decimal number => new(1, number, 0, string.Empty),
+            bool boolean => new(2, boolean ? 1 : 0, 0, string.Empty),
+            DateTimeOffset date => new(3, 0, date.UtcTicks, string.Empty),
+            null => new(0, 0, 0, string.Empty),
+            _ => new(4, 0, 0, value.ToString() ?? string.Empty)
+        };
+
+        public int CompareTo(WikiDatabaseSortValue other)
+        {
+            var typeComparison = TypeOrder.CompareTo(other.TypeOrder);
+            if (typeComparison != 0) return typeComparison;
+            return TypeOrder switch
+            {
+                1 or 2 => Number.CompareTo(other.Number),
+                3 => Ticks.CompareTo(other.Ticks),
+                _ => string.Compare(Text, other.Text, StringComparison.OrdinalIgnoreCase)
+            };
+        }
     }
 
     public static IReadOnlyList<WikiDatabaseBoardGroup> GroupForBoard(
