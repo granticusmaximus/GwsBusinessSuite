@@ -21,7 +21,7 @@ public static class WikiDatabaseComputation
                 throw new FormulaEvaluationException($"#REF! Unknown property [{propertyName}]");
             }
             return WikiComputedValue.Number(0);
-        }).Parse();
+        }, validationOnly: true).Parse();
     }
 
     public static void Materialize(
@@ -214,7 +214,9 @@ public static class WikiDatabaseComputation
             WikiDatabasePropertyTypes.Number => WikiPropertyValues.GetNumber(values, property.Id) is { } number
                 ? WikiComputedValue.Number(number) : WikiComputedValue.Empty,
             WikiDatabasePropertyTypes.Checkbox => WikiComputedValue.Boolean(WikiPropertyValues.GetCheckbox(values, property.Id)),
-            WikiDatabasePropertyTypes.CreatedTime => WikiComputedValue.Text(row.CreatedAt.ToString("O")),
+            WikiDatabasePropertyTypes.Date => WikiPropertyValues.GetDate(values, property.Id) is { } date
+                ? WikiComputedValue.Date(date) : WikiComputedValue.Empty,
+            WikiDatabasePropertyTypes.CreatedTime => WikiComputedValue.Date(row.CreatedAt),
             WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Person or WikiDatabasePropertyTypes.Files or WikiDatabasePropertyTypes.Relation =>
                 WikiComputedValue.Text(string.Join(", ", WikiPropertyValues.GetMultiSelect(values, property.Id))),
             _ => WikiComputedValue.Text(WikiPropertyValues.GetDisplayText(property, values, row.CreatedAt))
@@ -227,6 +229,7 @@ public static class WikiDatabaseComputation
         public static WikiComputedValue Number(decimal value) => new(value);
         public static WikiComputedValue Boolean(bool value) => new(value);
         public static WikiComputedValue Text(string? value) => new(value);
+        public static WikiComputedValue Date(DateTimeOffset value) => new(value);
         public bool IsEmpty => Value is null || Value is string text && string.IsNullOrWhiteSpace(text);
 
         public bool TryAsNumber(out decimal number)
@@ -243,15 +246,28 @@ public static class WikiDatabaseComputation
         {
             bool boolean => boolean,
             decimal number => number != 0,
+            DateTimeOffset => true,
             string text => !string.IsNullOrWhiteSpace(text) && !string.Equals(text, "false", StringComparison.OrdinalIgnoreCase),
             _ => false
         };
+
+        public bool TryAsDate(out DateTimeOffset date)
+        {
+            if (Value is DateTimeOffset dateValue)
+            {
+                date = dateValue;
+                return true;
+            }
+            return DateTimeOffset.TryParse(Value?.ToString(), CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.AssumeUniversal, out date);
+        }
 
         public string ToDisplayText() => Value switch
         {
             null => string.Empty,
             bool boolean => boolean ? "True" : "False",
             decimal number => number.ToString("0.############################", CultureInfo.InvariantCulture),
+            DateTimeOffset date => date.ToString("O", CultureInfo.InvariantCulture),
             _ => Value.ToString() ?? string.Empty
         };
 
@@ -260,6 +276,7 @@ public static class WikiDatabaseComputation
             null => null,
             decimal number => JsonValue.Create(number),
             bool boolean => JsonValue.Create(boolean),
+            DateTimeOffset date => JsonValue.Create(date.ToString("O", CultureInfo.InvariantCulture)),
             _ => JsonValue.Create(ToDisplayText())
         };
     }
@@ -268,24 +285,53 @@ public static class WikiDatabaseComputation
     {
         private readonly string expression;
         private readonly Func<string, WikiComputedValue> resolveProperty;
+        private readonly bool validationOnly;
         private int position;
         private Token current;
 
-        public FormulaParser(string expression, Func<string, WikiComputedValue> resolveProperty)
+        public FormulaParser(
+            string expression,
+            Func<string, WikiComputedValue> resolveProperty,
+            bool validationOnly = false)
         {
             this.expression = expression;
             this.resolveProperty = resolveProperty;
+            this.validationOnly = validationOnly;
             current = NextToken();
         }
 
         public WikiComputedValue Parse()
         {
-            var value = ParseComparison();
+            var value = ParseOr();
             if (current.Kind != TokenKind.End)
             {
                 throw Error($"Unexpected token '{current.Text}'");
             }
             return value;
+        }
+
+        private WikiComputedValue ParseOr()
+        {
+            var left = ParseAnd();
+            while (IsIdentifier("or"))
+            {
+                Advance();
+                var right = ParseAnd();
+                left = WikiComputedValue.Boolean(left.AsBoolean() || right.AsBoolean());
+            }
+            return left;
+        }
+
+        private WikiComputedValue ParseAnd()
+        {
+            var left = ParseComparison();
+            while (IsIdentifier("and"))
+            {
+                Advance();
+                var right = ParseComparison();
+                left = WikiComputedValue.Boolean(left.AsBoolean() && right.AsBoolean());
+            }
+            return left;
         }
 
         private WikiComputedValue ParseComparison()
@@ -335,17 +381,22 @@ public static class WikiDatabaseComputation
         private WikiComputedValue ParseMultiplicative()
         {
             var left = ParseUnary();
-            while (current.Kind is TokenKind.Star or TokenKind.Slash)
+            while (current.Kind is TokenKind.Star or TokenKind.Slash or TokenKind.Percent)
             {
                 var operation = current.Kind;
                 Advance();
                 var right = ParseUnary();
                 RequireNumbers(left, right, out var leftNumber, out var rightNumber);
-                if (operation == TokenKind.Slash && rightNumber == 0)
+                if (operation is TokenKind.Slash or TokenKind.Percent && rightNumber == 0)
                 {
                     throw new FormulaEvaluationException("#DIV/0!");
                 }
-                left = WikiComputedValue.Number(operation == TokenKind.Star ? leftNumber * rightNumber : leftNumber / rightNumber);
+                left = WikiComputedValue.Number(operation switch
+                {
+                    TokenKind.Star => leftNumber * rightNumber,
+                    TokenKind.Slash => leftNumber / rightNumber,
+                    _ => leftNumber % rightNumber
+                });
             }
             return left;
         }
@@ -359,7 +410,25 @@ public static class WikiDatabaseComputation
                 if (!value.TryAsNumber(out var number)) throw Error("Unary minus requires a number");
                 return WikiComputedValue.Number(-number);
             }
-            return ParsePrimary();
+            if (IsIdentifier("not"))
+            {
+                Advance();
+                return WikiComputedValue.Boolean(!ParseUnary().AsBoolean());
+            }
+            return ParsePower();
+        }
+
+        private WikiComputedValue ParsePower()
+        {
+            var left = ParsePrimary();
+            if (current.Kind != TokenKind.Caret) return left;
+
+            Advance();
+            var right = ParseUnary();
+            RequireNumbers(left, right, out var leftNumber, out var rightNumber);
+            var result = Math.Pow((double)leftNumber, (double)rightNumber);
+            if (double.IsNaN(result) || double.IsInfinity(result)) throw Error("Power result is outside the supported range");
+            return WikiComputedValue.Number((decimal)result);
         }
 
         private WikiComputedValue ParsePrimary()
@@ -393,7 +462,7 @@ public static class WikiDatabaseComputation
             if (current.Kind == TokenKind.LeftParen)
             {
                 Advance();
-                var value = ParseComparison();
+                var value = ParseOr();
                 Expect(TokenKind.RightParen);
                 return value;
             }
@@ -408,32 +477,151 @@ public static class WikiDatabaseComputation
             {
                 do
                 {
-                    arguments.Add(ParseComparison());
+                    arguments.Add(ParseOr());
                     if (current.Kind != TokenKind.Comma) break;
                     Advance();
                 } while (true);
             }
             Expect(TokenKind.RightParen);
 
-            return name.ToLowerInvariant() switch
+            var normalizedName = name.ToLowerInvariant();
+            ValidateFunctionSignature(normalizedName, arguments.Count);
+            // Syntax validation cannot know a referenced property's runtime type. A neutral
+            // numeric placeholder lets valid nested expressions such as abs([Hours]) * 2 parse
+            // without weakening function-name or argument-count validation.
+            if (validationOnly) return WikiComputedValue.Number(0);
+
+            try
             {
-                "if" when arguments.Count == 3 => arguments[0].AsBoolean() ? arguments[1] : arguments[2],
-                "round" when arguments.Count is 1 or 2 && arguments[0].TryAsNumber(out var number) =>
-                    WikiComputedValue.Number(decimal.Round(
-                        number,
-                        arguments.Count == 2 && arguments[1].TryAsNumber(out var places) ? (int)places : 0,
-                        MidpointRounding.AwayFromZero)),
-                "concat" => WikiComputedValue.Text(string.Concat(arguments.Select(argument => argument.ToDisplayText()))),
-                "coalesce" => arguments.FirstOrDefault(argument => !argument.IsEmpty),
-                _ => throw Error($"Unknown function or invalid arguments: {name}")
+                return normalizedName switch
+                {
+                    "if" => arguments[0].AsBoolean() ? arguments[1] : arguments[2],
+                    "and" => WikiComputedValue.Boolean(arguments.All(argument => argument.AsBoolean())),
+                    "or" => WikiComputedValue.Boolean(arguments.Any(argument => argument.AsBoolean())),
+                    "not" => WikiComputedValue.Boolean(!arguments[0].AsBoolean()),
+                    "empty" => WikiComputedValue.Boolean(arguments[0].IsEmpty),
+                    "round" =>
+                        WikiComputedValue.Number(decimal.Round(
+                            RequireNumber(arguments[0], name),
+                            arguments.Count == 2 ? (int)RequireNumber(arguments[1], name) : 0,
+                            MidpointRounding.AwayFromZero)),
+                    "abs" => WikiComputedValue.Number(decimal.Abs(RequireNumber(arguments[0], name))),
+                    "ceil" => WikiComputedValue.Number(decimal.Ceiling(RequireNumber(arguments[0], name))),
+                    "floor" => WikiComputedValue.Number(decimal.Floor(RequireNumber(arguments[0], name))),
+                    "min" => WikiComputedValue.Number(arguments.Select(argument => RequireNumber(argument, name)).Min()),
+                    "max" => WikiComputedValue.Number(arguments.Select(argument => RequireNumber(argument, name)).Max()),
+                    "pow" => EvaluatePower(arguments, name),
+                    "concat" => WikiComputedValue.Text(string.Concat(arguments.Select(argument => argument.ToDisplayText()))),
+                    "coalesce" => arguments.FirstOrDefault(argument => !argument.IsEmpty),
+                    "length" => WikiComputedValue.Number(arguments[0].ToDisplayText().Length),
+                    "lower" => WikiComputedValue.Text(arguments[0].ToDisplayText().ToLowerInvariant()),
+                    "upper" => WikiComputedValue.Text(arguments[0].ToDisplayText().ToUpperInvariant()),
+                    "trim" => WikiComputedValue.Text(arguments[0].ToDisplayText().Trim()),
+                    "contains" => WikiComputedValue.Boolean(arguments[0].ToDisplayText().Contains(
+                        arguments[1].ToDisplayText(), StringComparison.OrdinalIgnoreCase)),
+                    "startswith" => WikiComputedValue.Boolean(arguments[0].ToDisplayText().StartsWith(
+                        arguments[1].ToDisplayText(), StringComparison.OrdinalIgnoreCase)),
+                    "endswith" => WikiComputedValue.Boolean(arguments[0].ToDisplayText().EndsWith(
+                        arguments[1].ToDisplayText(), StringComparison.OrdinalIgnoreCase)),
+                    "replace" => WikiComputedValue.Text(arguments[0].ToDisplayText().Replace(
+                        arguments[1].ToDisplayText(), arguments[2].ToDisplayText(), StringComparison.OrdinalIgnoreCase)),
+                    "now" => WikiComputedValue.Date(DateTimeOffset.UtcNow),
+                    "today" => WikiComputedValue.Date(new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero)),
+                    "dateadd" => WikiComputedValue.Date(AddDate(
+                        RequireDate(arguments[0], name), RequireNumber(arguments[1], name), arguments[2].ToDisplayText())),
+                    "datebetween" => WikiComputedValue.Number(DateBetween(
+                        RequireDate(arguments[0], name), RequireDate(arguments[1], name), arguments[2].ToDisplayText())),
+                    "formatdate" => WikiComputedValue.Text(RequireDate(arguments[0], name).ToString(
+                        NormalizeDateFormat(arguments[1].ToDisplayText()), CultureInfo.InvariantCulture)),
+                    _ => throw Error($"Unknown function: {name}")
+                };
+            }
+            catch (FormulaEvaluationException)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception is ArgumentException or OverflowException or FormatException)
+            {
+                throw Error($"Invalid arguments for {name}");
+            }
+        }
+
+        private void ValidateFunctionSignature(string name, int count)
+        {
+            var valid = name switch
+            {
+                "if" or "replace" or "dateadd" or "datebetween" => count == 3,
+                "round" => count is 1 or 2,
+                "and" or "or" or "concat" or "coalesce" or "min" or "max" => count >= 1,
+                "not" or "empty" or "abs" or "ceil" or "floor" or "length" or "lower" or "upper" or "trim" => count == 1,
+                "pow" or "contains" or "startswith" or "endswith" or "formatdate" => count == 2,
+                "now" or "today" => count == 0,
+                _ => false
+            };
+            if (!valid) throw Error($"Unknown function or invalid arguments: {name}");
+        }
+
+        private WikiComputedValue EvaluatePower(IReadOnlyList<WikiComputedValue> arguments, string name)
+        {
+            var result = Math.Pow((double)RequireNumber(arguments[0], name), (double)RequireNumber(arguments[1], name));
+            if (double.IsNaN(result) || double.IsInfinity(result)) throw Error("Power result is outside the supported range");
+            return WikiComputedValue.Number((decimal)result);
+        }
+
+        private decimal RequireNumber(WikiComputedValue value, string functionName)
+        {
+            if (value.TryAsNumber(out var number)) return number;
+            throw Error($"{functionName} requires numeric values");
+        }
+
+        private DateTimeOffset RequireDate(WikiComputedValue value, string functionName)
+        {
+            if (value.TryAsDate(out var date)) return date;
+            throw Error($"{functionName} requires a date value");
+        }
+
+        private DateTimeOffset AddDate(DateTimeOffset date, decimal amount, string unit) => unit.Trim().ToLowerInvariant() switch
+        {
+            "year" or "years" => date.AddYears((int)amount),
+            "quarter" or "quarters" => date.AddMonths((int)amount * 3),
+            "month" or "months" => date.AddMonths((int)amount),
+            "week" or "weeks" => date.AddDays((double)amount * 7),
+            "day" or "days" => date.AddDays((double)amount),
+            "hour" or "hours" => date.AddHours((double)amount),
+            "minute" or "minutes" => date.AddMinutes((double)amount),
+            _ => throw Error($"Unsupported date unit: {unit}")
+        };
+
+        private decimal DateBetween(DateTimeOffset end, DateTimeOffset start, string unit)
+        {
+            var difference = end - start;
+            return unit.Trim().ToLowerInvariant() switch
+            {
+                "year" or "years" => decimal.Truncate((decimal)difference.TotalDays / 365.2425m),
+                "quarter" or "quarters" => decimal.Truncate((decimal)difference.TotalDays / 91.310625m),
+                "month" or "months" => decimal.Truncate((decimal)difference.TotalDays / 30.436875m),
+                "week" or "weeks" => decimal.Truncate((decimal)difference.TotalDays / 7m),
+                "day" or "days" => decimal.Truncate((decimal)difference.TotalDays),
+                "hour" or "hours" => decimal.Truncate((decimal)difference.TotalHours),
+                "minute" or "minutes" => decimal.Truncate((decimal)difference.TotalMinutes),
+                _ => throw Error($"Unsupported date unit: {unit}")
             };
         }
+
+        private static string NormalizeDateFormat(string format) => format
+            .Replace("YYYY", "yyyy", StringComparison.Ordinal)
+            .Replace("YY", "yy", StringComparison.Ordinal)
+            .Replace("DD", "dd", StringComparison.Ordinal);
 
         private static int Compare(WikiComputedValue left, WikiComputedValue right)
         {
             if (left.TryAsNumber(out var leftNumber) && right.TryAsNumber(out var rightNumber))
             {
                 return leftNumber.CompareTo(rightNumber);
+            }
+            if (left.TryAsDate(out var leftDate) && right.TryAsDate(out var rightDate))
+            {
+                return leftDate.CompareTo(rightDate);
             }
             return string.Compare(left.ToDisplayText(), right.ToDisplayText(), StringComparison.OrdinalIgnoreCase);
         }
@@ -453,6 +641,9 @@ public static class WikiDatabaseComputation
         }
 
         private void Advance() => current = NextToken();
+
+        private bool IsIdentifier(string value) => current.Kind == TokenKind.Identifier
+            && string.Equals(current.Text, value, StringComparison.OrdinalIgnoreCase);
 
         private Token NextToken()
         {
@@ -497,6 +688,8 @@ public static class WikiDatabaseComputation
                 '-' => new Token(TokenKind.Minus, "-"),
                 '*' => new Token(TokenKind.Star, "*"),
                 '/' => new Token(TokenKind.Slash, "/"),
+                '%' => new Token(TokenKind.Percent, "%"),
+                '^' => new Token(TokenKind.Caret, "^"),
                 '(' => new Token(TokenKind.LeftParen, "("),
                 ')' => new Token(TokenKind.RightParen, ")"),
                 ',' => new Token(TokenKind.Comma, ","),
@@ -523,7 +716,7 @@ public static class WikiDatabaseComputation
         private readonly record struct Token(TokenKind Kind, string Text);
         private enum TokenKind
         {
-            End, Number, String, Property, Identifier, Plus, Minus, Star, Slash,
+            End, Number, String, Property, Identifier, Plus, Minus, Star, Slash, Percent, Caret,
             LeftParen, RightParen, Comma, Equal, NotEqual, Greater, GreaterEqual, Less, LessEqual
         }
     }

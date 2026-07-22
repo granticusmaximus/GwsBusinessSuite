@@ -116,6 +116,93 @@ public sealed class WikiDatabaseServiceTests
     }
 
     [Fact]
+    public async Task GetDatabaseAsync_ShouldEvaluateAdvancedNumericLogicalAndTextFormulaFunctions()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Projects", null, "u");
+        var hours = await service.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Hours", Type = WikiDatabasePropertyTypes.Number }, "u");
+        var blocked = await service.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Blocked", Type = WikiDatabasePropertyTypes.Checkbox }, "u");
+        var client = await service.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Client", Type = WikiDatabasePropertyTypes.Text }, "u");
+        var score = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Score",
+            Type = WikiDatabasePropertyTypes.Formula,
+            FormulaExpression = "if([Hours] > 8 and not [Blocked], max([Hours] ^ 2 % 50, abs(-12)) * 2, 0)"
+        }, "u");
+        var label = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Label",
+            Type = WikiDatabasePropertyTypes.Formula,
+            FormulaExpression = "upper(trim([Client])) + \" · \" + length([Client])"
+        }, "u");
+        var values = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetNumber(values, hours.Id, 10m);
+        WikiPropertyValues.SetCheckbox(values, blocked.Id, false);
+        WikiPropertyValues.SetText(values, client.Id, " Acme ");
+        await service.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = values.ToDictionary(item => item.Key, item => item.Value) }, "u");
+
+        var computed = await service.GetDatabaseAsync(database.Id);
+        var computedValues = WikiPropertyValues.ParseObject(computed!.Rows.Single().PropertyValuesJson);
+
+        WikiPropertyValues.GetComputedValue(computedValues, score.Id).Should().Be(24m);
+        WikiPropertyValues.GetComputedValue(computedValues, label.Id).Should().Be("ACME · 6");
+    }
+
+    [Fact]
+    public async Task GetDatabaseAsync_ShouldEvaluateAdvancedDateFormulaFunctions()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Projects", null, "u");
+        var due = await service.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Due", Type = WikiDatabasePropertyTypes.Date }, "u");
+        var shifted = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Shifted",
+            Type = WikiDatabasePropertyTypes.Formula,
+            FormulaExpression = "formatDate(dateAdd([Due], 2, \"days\"), \"YYYY-MM-DD\")"
+        }, "u");
+        var duration = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Duration",
+            Type = WikiDatabasePropertyTypes.Formula,
+            FormulaExpression = "dateBetween(dateAdd([Due], 3, \"weeks\"), [Due], \"days\")"
+        }, "u");
+        var values = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetDate(values, due.Id, new DateTimeOffset(2026, 7, 21, 12, 0, 0, TimeSpan.Zero));
+        await service.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = values.ToDictionary(item => item.Key, item => item.Value) }, "u");
+
+        var computed = await service.GetDatabaseAsync(database.Id);
+        var computedValues = WikiPropertyValues.ParseObject(computed!.Rows.Single().PropertyValuesJson);
+
+        WikiPropertyValues.GetComputedValue(computedValues, shifted.Id).Should().Be("2026-07-23");
+        WikiPropertyValues.GetComputedValue(computedValues, duration.Id).Should().Be(21m);
+    }
+
+    [Fact]
+    public async Task SavePropertyAsync_ShouldRejectUnknownAdvancedFormulaFunction()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Projects", null, "u");
+
+        var action = () => service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Broken",
+            Type = WikiDatabasePropertyTypes.Formula,
+            FormulaExpression = "mystery(1)"
+        }, "u");
+
+        await action.Should().ThrowAsync<Exception>().WithMessage("#ERROR!*Unknown function*");
+    }
+
+    [Fact]
     public async Task SavePropertyAsync_ShouldRejectInvalidFormulaSyntax()
     {
         await using var db = await CreateDbAsync();

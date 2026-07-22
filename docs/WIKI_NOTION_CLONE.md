@@ -68,7 +68,7 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 | Block editor | Slash-command insert, drag-reorder, Tab/Shift-Tab indent, inline bold/italic/link, `[[Page]]` autocomplete, reusable page and block templates, native tables, equations, breadcrumbs, TOC, buttons, synced blocks, and columns | Richer embeds |
 | Core block types | paragraph, heading 1-3, lists, to-do, toggle, quote, callout, code, divider, image, embed, table, equation, breadcrumb, TOC, button, synced block, columns, and legacy markdown | oEmbed previews and additional provider-specific media |
 | History | Bounded DB snapshot revisions (20/page), structural diff (added/removed/changed blocks), revert-as-new-version | — |
-| Databases | Typed properties including person, files, place, evaluated formulas, one-way or reciprocal row-picker relations, and calculated rollups; editable Table, Board, List, Gallery, Calendar, Timeline, Chart, Form, Map, Feed, and Dashboard views | Additional formula functions and richer rollup formatting |
+| Databases | Typed properties including person, files, place, evaluated advanced formulas, one-way or reciprocal row-picker relations, and calculated rollups; editable Table, Board, List, Gallery, Calendar, Timeline, Chart, Form, Map, Feed, and Dashboard views | Richer rollup formatting |
 | Databases — structure | Databases share the page sidebar tree; every row opens as a block-content page; linked and inline database blocks reference canonical data without duplication | Row covers/icons, page history, layouts and peek modes |
 | Search & graph | All-token ranked page/block/database-row search with highlighted matches; structured and legacy backlinks; per-user favorites/recents; structured page, person, and date mentions with a personal mention inbox | Graph visualization, saved searches, and database-row mention inbox entries |
 | Import/sync | Current `2026-03-11` Notion API, data sources, views, comments, selective import, encrypted token storage, soft archival, and explicitly enabled conflict-aware manual page pushes | Durable ingestion of expiring Notion-hosted files and broader bidirectional database writes |
@@ -103,9 +103,10 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 5. **Database pages and complete views** (delivered): row block-content pages, linked and
    inline databases, expanded property vocabulary, and Table, Board, List, Gallery, Calendar,
    Timeline, Chart, Form, Map, Feed, and Dashboard views. Formula properties evaluate typed
-   expressions over row values with cycle/error handling; Relation properties select canonical
-   rows from another (or the same) database and can create a paired reciprocal property whose
-   values remain synchronized from either side; and Rollup properties calculate count, numeric,
+   expressions over row values with cycle/error handling, arithmetic and logical operators, and
+   numeric, text, conditional, and date functions exposed through an in-editor reference;
+   Relation properties select canonical rows from another (or the same) database and can create
+   a paired reciprocal property whose values remain synchronized from either side; and Rollup properties calculate count, numeric,
    and unique-value aggregates. Computed values remain derived rather than being persisted.
 6. **Collaboration** (delivered foundation): authenticated page and block discussion threads, nested
    reply targets, resolve/reopen, emoji reactions, `@username` notification fan-out, and a
@@ -145,7 +146,7 @@ capabilities where they fit GWS Business Suite; they are no longer silently excl
 | Area | Delivered now | Required parity work |
 | --- | --- | --- |
 | Blocks | Core and advanced native block vocabulary, including tables/equations/columns/synced blocks/TOC/buttons, plus reusable block templates | Richer embeds |
-| Databases | Eleven view families, expanded property vocabulary, computed formulas, canonical one-way/reciprocal row relations, configurable rollups, filters/sorts/groups, row page bodies, linked/inline databases, and reusable database templates | Advanced formulas, layouts, and automations |
+| Databases | Eleven view families, expanded property vocabulary, advanced typed formulas, canonical one-way/reciprocal row relations, configurable rollups, filters/sorts/groups, row page bodies, linked/inline databases, and reusable database templates | Layouts and automations |
 | Knowledge graph | `[[Page]]` links, ranked/highlighted workspace search, backlinks, person/date mentions, favorites/recents | Graph navigation, database-row mention inbox entries, and saved searches |
 | Collaboration | Discussions, replies, reactions, notifications, DB-backed cross-instance presence/polling, block-level three-way merge, authenticated portal-member roles, granular permissions, and tokenized public sharing | Character-level CRDT/OT cursors and richer public-share controls |
 | Presentation | Emoji icon and cover URL | Custom icon/cover uploads, page width/fonts, database layouts, peek modes, and reusable style defaults |

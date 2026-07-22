@@ -17,12 +17,12 @@ else if (Database is null)
 else
 {
     <div class="card border-0 shadow-sm">
-        <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
-            <div class="d-flex align-items-center gap-2 flex-grow-1 min-w-0">
+        <div class="wiki-db-header card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
+            <div class="wiki-db-title d-flex align-items-center gap-2 flex-grow-1 min-w-0">
                 <input class="form-control form-control-sm text-center" style="width:3rem;" @bind="_titleIcon" @bind:after="SaveMetadataAsync" maxlength="4" placeholder="🗄️" />
                 <input class="form-control form-control-sm fw-semibold" @bind="_title" @bind:after="SaveMetadataAsync" />
             </div>
-            <div class="d-flex gap-2 flex-shrink-0">
+            <div class="wiki-db-actions d-flex gap-2 flex-shrink-0">
                 <SentinelSharePanel TargetId="Database.Id" IsDatabase="true" TargetName="Database.Title" />
                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="DuplicateDatabaseAsync" disabled="@IsBusy">
                     <i class="bi bi-copy me-1"></i>Duplicate
@@ -78,7 +78,32 @@ else
                                            value="@WikiDatabasePropertyConfig.Parse(property).FormulaExpression"
                                            @onchange="e => SetFormulaAsync(property, e.Value?.ToString() ?? string.Empty)"
                                            disabled="@IsBusy" placeholder="[Hours] * [Rate]" />
-                                    <div class="form-text">Reference properties as <code>[Property name]</code>. Supports arithmetic, comparisons, <code>if</code>, <code>round</code>, <code>concat</code>, and <code>coalesce</code>.</div>
+                                    <div class="form-text">Reference properties as <code>[Property name]</code>. Function names are case-insensitive.</div>
+                                    <details class="sentinel-formula-reference mt-2">
+                                        <summary>Formula reference</summary>
+                                        <div class="sentinel-formula-reference-grid">
+                                            <div>
+                                                <strong>Logic</strong>
+                                                <code>if</code> <code>and</code> <code>or</code> <code>not</code> <code>empty</code> <code>coalesce</code>
+                                            </div>
+                                            <div>
+                                                <strong>Numbers</strong>
+                                                <code>+ - * / % ^</code> <code>round</code> <code>abs</code> <code>ceil</code> <code>floor</code> <code>min</code> <code>max</code> <code>pow</code>
+                                            </div>
+                                            <div>
+                                                <strong>Text</strong>
+                                                <code>concat</code> <code>length</code> <code>lower</code> <code>upper</code> <code>trim</code> <code>contains</code> <code>startsWith</code> <code>endsWith</code> <code>replace</code>
+                                            </div>
+                                            <div>
+                                                <strong>Dates</strong>
+                                                <code>now</code> <code>today</code> <code>dateAdd</code> <code>dateBetween</code> <code>formatDate</code>
+                                            </div>
+                                        </div>
+                                        <div class="sentinel-formula-example">
+                                            <code>if([Done], "Complete", upper([Status]))</code>
+                                            <code>dateBetween([Due], today(), "days")</code>
+                                        </div>
+                                    </details>
                                 </div>
                             }
                             else if (property.Type == WikiDatabasePropertyTypes.Relation)
@@ -173,6 +198,7 @@ else
                             @if (_newPropertyType == WikiDatabasePropertyTypes.Formula)
                             {
                                 <input class="form-control form-control-sm mb-2 font-monospace" placeholder="[Hours] * [Rate]" @bind="_newFormulaExpression" />
+                                <div class="form-text mb-2">Use <code>[Property name]</code> references with logic, number, text, or date functions. The full reference appears after creation.</div>
                             }
                             else if (_newPropertyType == WikiDatabasePropertyTypes.Relation)
                             {

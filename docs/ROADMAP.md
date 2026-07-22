@@ -103,7 +103,8 @@
   pages with fresh block identities, and transactional page-tree duplication copies nested pages
   beside the source with independent revisions; database duplication and reusable source-independent
   database templates are delivered; reusable block templates now capture live editor content and
-  insert independent blocks with fresh identities; database formulas now evaluate typed expressions,
+  insert independent blocks with fresh identities; database formulas now evaluate typed expressions
+  with logical operators plus numeric, text, and date functions discoverable from the property editor,
   relations use canonical row selection with optional reciprocal properties synchronized from either side,
   and rollups calculate count/numeric/unique aggregates without persisting stale computed values;
   distributed scale-out and CRDT/OT co-authoring remain;
