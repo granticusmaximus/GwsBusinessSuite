@@ -29,6 +29,11 @@
         </div>
     </div>
     <div class="sentinel-workspace-actions">
+        <button type="button" class="btn btn-sm btn-outline-secondary sentinel-mobile-nav-toggle"
+                @onclick="ToggleMobileWorkspaceNav" aria-controls="sentinel-workspace-browser"
+                aria-expanded="@_mobileWorkspaceNavOpen">
+            <i class="bi bi-layout-sidebar-inset me-1"></i>@(_mobileWorkspaceNavOpen ? "Close browser" : "Browse")
+        </button>
         <span class="sentinel-workspace-status"><span></span>Workspace online</span>
         <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="OpenNotionModalAsync" disabled="@IsBusy">
             <i class="bi bi-arrow-repeat me-1"></i>Notion sync
@@ -74,7 +79,7 @@
 }
 
 <div class="sentinel-layout">
-    <aside class="sentinel-local-sidebar">
+    <aside id="sentinel-workspace-browser" class="sentinel-local-sidebar @(_mobileWorkspaceNavOpen ? "is-mobile-open" : string.Empty)">
         <div class="sentinel-nav-panel">
             <div class="sentinel-nav-toolbar">
                 <div>
@@ -615,6 +620,7 @@
         ? WikiDatabases.FirstOrDefault(database => database.Id == databaseId)?.Title ?? string.Empty
         : string.Empty;
     private bool IsBusy { get; set; }
+    private bool _mobileWorkspaceNavOpen;
     private string SearchQuery { get; set; } = string.Empty;
     private bool IsSearchBusy { get; set; }
     private List<SentinelSearchResult> WorkspaceSearchResults { get; set; } = new();
@@ -1055,6 +1061,7 @@
 
     private void CreateNewPage()
     {
+        _mobileWorkspaceNavOpen = false;
         SelectedPageId = null;
         SelectedDatabaseId = null;
         Editor = new WikiPageEditorModel();
@@ -1078,6 +1085,7 @@
 
     private async Task OpenDatabaseAsync(Guid wikiDatabaseId)
     {
+        _mobileWorkspaceNavOpen = false;
         await DeactivateBlockEditorAsync();
         SelectedPageId = null;
         SelectedDatabaseId = wikiDatabaseId;
@@ -1136,6 +1144,7 @@
                 return;
             }
 
+            _mobileWorkspaceNavOpen = false;
             SelectedDatabaseId = null;
             SelectedPageId = page.Id;
             Editor = new WikiPageEditorModel
@@ -1166,6 +1175,9 @@
             ErrorMessage = $"Unable to open Sentinel page. {ex.Message}";
         }
     }
+
+    private void ToggleMobileWorkspaceNav() =>
+        _mobileWorkspaceNavOpen = !_mobileWorkspaceNavOpen;
 
     private async Task OpenTemplatePageAsync(Guid wikiPageId)
     {
