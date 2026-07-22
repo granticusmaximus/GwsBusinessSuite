@@ -4,6 +4,7 @@ using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using System.Globalization;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
@@ -12,12 +13,36 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
     public async Task<IReadOnlyList<WikiDatabase>> ListDatabasesAsync(CancellationToken cancellationToken = default) =>
         await dbContext.WikiDatabases.AsNoTracking().ToListAsync(cancellationToken);
 
-    public async Task<WikiDatabase?> GetDatabaseAsync(Guid wikiDatabaseId, CancellationToken cancellationToken = default) =>
-        await dbContext.WikiDatabases.AsNoTracking()
+    public async Task<WikiDatabase?> GetDatabaseAsync(Guid wikiDatabaseId, CancellationToken cancellationToken = default)
+    {
+        var database = await dbContext.WikiDatabases.AsNoTracking()
             .Include(item => item.Properties)
             .Include(item => item.Rows)
             .Include(item => item.Views)
             .FirstOrDefaultAsync(item => item.Id == wikiDatabaseId, cancellationToken);
+        if (database is null)
+        {
+            return null;
+        }
+
+        var relatedDatabaseIds = database.Properties
+            .Where(property => property.Type == WikiDatabasePropertyTypes.Relation)
+            .Select(property => WikiDatabasePropertyConfig.Parse(property).RelatedDatabaseId)
+            .Where(id => id.HasValue && id.Value != wikiDatabaseId)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToList();
+        var relatedDatabases = relatedDatabaseIds.Count == 0
+            ? []
+            : await dbContext.WikiDatabases.AsNoTracking()
+                .Where(item => relatedDatabaseIds.Contains(item.Id))
+                .Include(item => item.Properties)
+                .Include(item => item.Rows)
+                .ToListAsync(cancellationToken);
+
+        WikiDatabaseComputation.Materialize(database, relatedDatabases.ToDictionary(item => item.Id));
+        return database;
+    }
 
     public async Task<WikiDatabase> CreateDatabaseAsync(
         string title,
@@ -77,6 +102,7 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
             ?? throw new KeyNotFoundException("The database no longer exists.");
         var now = DateTimeOffset.UtcNow;
         var propertyIds = source.Properties.ToDictionary(property => property.Id, _ => Guid.NewGuid());
+        var rowIds = source.Rows.ToDictionary(row => row.Id, _ => Guid.NewGuid());
 
         var duplicate = new WikiDatabase
         {
@@ -98,7 +124,7 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
                 Name = property.Name,
                 Type = property.Type,
                 SortOrder = property.SortOrder,
-                ConfigJson = property.ConfigJson,
+                ConfigJson = RemapPropertyConfig(property.ConfigJson, property.Type, propertyIds, source.Id, duplicate.Id),
                 CreatedAt = now,
                 CreatedBy = performedBy
             });
@@ -106,22 +132,15 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
 
         foreach (var row in source.Rows.OrderBy(row => row.SortOrder))
         {
-            var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
-            var remappedValues = new System.Text.Json.Nodes.JsonObject();
-            foreach (var (oldPropertyId, newPropertyId) in propertyIds)
-            {
-                if (values[oldPropertyId.ToString()] is { } value)
-                {
-                    remappedValues[newPropertyId.ToString()] = value.DeepClone();
-                }
-            }
+            var remappedValues = RemapPropertyValues(
+                WikiPropertyValues.ParseObject(row.PropertyValuesJson), source.Properties, propertyIds, rowIds, source.Id);
 
             var blocks = WikiBlockJson.ParseBlocks(row.BlocksJson)
                 .Select(block => block with { Id = Guid.NewGuid() })
                 .ToList();
             duplicate.Rows.Add(new WikiDatabaseRow
             {
-                Id = Guid.NewGuid(),
+                Id = rowIds[row.Id],
                 WikiDatabaseId = duplicate.Id,
                 SortOrder = row.SortOrder,
                 PropertyValuesJson = WikiPropertyValues.Serialize(remappedValues),
@@ -170,6 +189,75 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
             ? remapped.ToString()
             : propertyId;
 
+    private static string RemapPropertyConfig(
+        string configJson,
+        string propertyType,
+        IReadOnlyDictionary<Guid, Guid> propertyIds,
+        Guid sourceDatabaseId,
+        Guid targetDatabaseId)
+    {
+        if (propertyType is not (WikiDatabasePropertyTypes.Relation or WikiDatabasePropertyTypes.Rollup))
+        {
+            return configJson;
+        }
+        var config = WikiDatabasePropertyConfig.Parse(configJson);
+        if (propertyType == WikiDatabasePropertyTypes.Relation)
+        {
+            config = config with
+            {
+                Options = [],
+                RelatedDatabaseId = config.RelatedDatabaseId == sourceDatabaseId ? targetDatabaseId : config.RelatedDatabaseId
+            };
+        }
+        else if (propertyType == WikiDatabasePropertyTypes.Rollup)
+        {
+            config = config with
+            {
+                RelationPropertyId = config.RelationPropertyId is { } relationId && propertyIds.TryGetValue(relationId, out var remappedRelationId)
+                    ? remappedRelationId : config.RelationPropertyId,
+                RollupPropertyId = config.RollupPropertyId is { } rollupId && propertyIds.TryGetValue(rollupId, out var remappedRollupId)
+                    ? remappedRollupId : config.RollupPropertyId
+            };
+        }
+        return WikiDatabasePropertyConfig.Serialize(config);
+    }
+
+    private static JsonObject RemapPropertyValues(
+        JsonObject values,
+        IEnumerable<WikiDatabaseProperty> properties,
+        IReadOnlyDictionary<Guid, Guid> propertyIds,
+        IReadOnlyDictionary<Guid, Guid> rowIds,
+        Guid sourceDatabaseId)
+    {
+        var remappedValues = new JsonObject();
+        foreach (var property in properties)
+        {
+            if (!propertyIds.TryGetValue(property.Id, out var newPropertyId)
+                || property.Type is WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup
+                || values[property.Id.ToString()] is not { } value)
+            {
+                continue;
+            }
+
+            if (property.Type == WikiDatabasePropertyTypes.Relation
+                && WikiDatabasePropertyConfig.Parse(property).RelatedDatabaseId == sourceDatabaseId
+                && value is JsonArray relationIds)
+            {
+                remappedValues[newPropertyId.ToString()] = new JsonArray(relationIds
+                    .Select(item => Guid.TryParse(item?.GetValue<string>(), out var rowId) && rowIds.TryGetValue(rowId, out var remappedRowId)
+                        ? (JsonNode)remappedRowId.ToString()
+                        : item?.DeepClone())
+                    .Where(item => item is not null)
+                    .ToArray());
+            }
+            else
+            {
+                remappedValues[newPropertyId.ToString()] = value.DeepClone();
+            }
+        }
+        return remappedValues;
+    }
+
     public async Task<WikiDatabaseTemplateSnapshot> CreateTemplateSnapshotAsync(
         Guid wikiDatabaseId,
         CancellationToken cancellationToken = default)
@@ -191,7 +279,10 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
             source.Views.OrderBy(item => item.SortOrder)
                 .Select(item => new WikiDatabaseTemplateView(
                     item.Id, item.Name, item.Type, item.SortOrder, item.ConfigJson))
-                .ToList());
+                .ToList())
+        {
+            SourceDatabaseId = source.Id
+        };
     }
 
     public async Task<WikiDatabase> CreateDatabaseFromTemplateAsync(
@@ -237,7 +328,8 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
                 Name = property.Name,
                 Type = property.Type,
                 SortOrder = property.SortOrder,
-                ConfigJson = property.ConfigJson,
+                ConfigJson = RemapPropertyConfig(
+                    property.ConfigJson, property.Type, propertyIds, snapshot.SourceDatabaseId ?? Guid.Empty, database.Id),
                 CreatedAt = now,
                 CreatedBy = performedBy
             });
@@ -245,11 +337,26 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
 
         foreach (var row in snapshot.Rows.OrderBy(item => item.SortOrder))
         {
-            var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
             var remappedValues = new JsonObject();
-            foreach (var (oldPropertyId, newPropertyId) in propertyIds)
+            var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+            foreach (var property in snapshot.Properties)
             {
-                if (values[oldPropertyId.ToString()] is { } value)
+                if (property.Type is WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup
+                    || values[property.Id.ToString()] is not { } value)
+                {
+                    continue;
+                }
+                var newPropertyId = propertyIds[property.Id];
+                var config = WikiDatabasePropertyConfig.Parse(property.ConfigJson);
+                if (property.Type == WikiDatabasePropertyTypes.Relation
+                    && value is JsonArray relationIds
+                    && config.RelatedDatabaseId == snapshot.SourceDatabaseId)
+                {
+                    remappedValues[newPropertyId.ToString()] = new JsonArray(relationIds
+                        .Select(item => (JsonNode)rowIds[Guid.Parse(item!.GetValue<string>())].ToString())
+                        .ToArray());
+                }
+                else
                 {
                     remappedValues[newPropertyId.ToString()] = value.DeepClone();
                 }
@@ -378,6 +485,10 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
             ? await dbContext.WikiDatabaseProperties.FirstOrDefaultAsync(item => item.Id == propertyId && item.WikiDatabaseId == wikiDatabaseId, cancellationToken)
                 ?? throw new KeyNotFoundException("The property no longer exists.")
             : null;
+        var previousConfiguration = property is null
+            ? WikiDatabasePropertyConfiguration.Empty
+            : WikiDatabasePropertyConfig.Parse(property);
+        var previousName = property?.Name;
 
         // Exactly one Title property per database - it's the primary label every row,
         // Board card, and Gallery card is keyed on.
@@ -410,11 +521,55 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
         {
             throw new InvalidOperationException("A property's type can't be changed after creation - delete and re-add it instead.");
         }
+        var configuration = new WikiDatabasePropertyConfiguration(
+            editor.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect ? editor.Options : [],
+            string.IsNullOrWhiteSpace(editor.FormulaExpression) ? null : editor.FormulaExpression.Trim(),
+            editor.RelatedDatabaseId,
+            editor.RelationPropertyId,
+            editor.RollupPropertyId,
+            string.IsNullOrWhiteSpace(editor.RollupAggregation) ? null : editor.RollupAggregation);
+        await ValidatePropertyConfigurationAsync(wikiDatabaseId, property.Id, editor.Type, configuration, cancellationToken);
         property.ConfigJson = editor.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect
-            ? WikiDatabasePropertyConfig.Serialize(editor.Options)
+            or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Relation or WikiDatabasePropertyTypes.Rollup
+            ? WikiDatabasePropertyConfig.Serialize(configuration)
             : "{}";
+        if (!isNew && editor.Type == WikiDatabasePropertyTypes.Relation
+            && previousConfiguration.RelatedDatabaseId != configuration.RelatedDatabaseId)
+        {
+            var rows = await dbContext.WikiDatabaseRows.Where(row => row.WikiDatabaseId == wikiDatabaseId).ToListAsync(cancellationToken);
+            foreach (var row in rows)
+            {
+                var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+                values.Remove(property.Id.ToString());
+                row.PropertyValuesJson = WikiPropertyValues.Serialize(values);
+                row.UpdatedAt = now;
+                row.UpdatedBy = performedBy;
+            }
+        }
         property.UpdatedAt = now;
         property.UpdatedBy = performedBy;
+
+        if (!isNew && !string.Equals(previousName, property.Name, StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(previousName))
+        {
+            var formulaProperties = await dbContext.WikiDatabaseProperties
+                .Where(item => item.WikiDatabaseId == wikiDatabaseId && item.Type == WikiDatabasePropertyTypes.Formula)
+                .ToListAsync(cancellationToken);
+            foreach (var formulaProperty in formulaProperties)
+            {
+                var formulaConfig = WikiDatabasePropertyConfig.Parse(formulaProperty);
+                if (string.IsNullOrWhiteSpace(formulaConfig.FormulaExpression)) continue;
+                var updatedExpression = Regex.Replace(
+                    formulaConfig.FormulaExpression,
+                    $@"\[{Regex.Escape(previousName)}\]",
+                    $"[{property.Name}]",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                if (updatedExpression == formulaConfig.FormulaExpression) continue;
+                formulaProperty.ConfigJson = WikiDatabasePropertyConfig.Serialize(formulaConfig with { FormulaExpression = updatedExpression });
+                formulaProperty.UpdatedAt = now;
+                formulaProperty.UpdatedBy = performedBy;
+            }
+        }
 
         if (isNew)
         {
@@ -466,10 +621,18 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
             SortOrder = await NextRowSortOrderAsync(wikiDatabaseId, cancellationToken)
         };
 
+        var computedPropertyIds = await dbContext.WikiDatabaseProperties
+            .Where(property => property.WikiDatabaseId == wikiDatabaseId
+                && (property.Type == WikiDatabasePropertyTypes.Formula || property.Type == WikiDatabasePropertyTypes.Rollup))
+            .Select(property => property.Id.ToString())
+            .ToListAsync(cancellationToken);
         var values = new System.Text.Json.Nodes.JsonObject();
         foreach (var (key, value) in editor.Values)
         {
-            values[key] = value?.DeepClone();
+            if (!computedPropertyIds.Contains(key))
+            {
+                values[key] = value?.DeepClone();
+            }
         }
         row.PropertyValuesJson = WikiPropertyValues.Serialize(values);
         if (editor.BlocksJson is not null)
@@ -486,6 +649,65 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return row;
+    }
+
+    private async Task ValidatePropertyConfigurationAsync(
+        Guid wikiDatabaseId,
+        Guid propertyId,
+        string propertyType,
+        WikiDatabasePropertyConfiguration configuration,
+        CancellationToken cancellationToken)
+    {
+        if (propertyType == WikiDatabasePropertyTypes.Formula)
+        {
+            var availablePropertyNames = await dbContext.WikiDatabaseProperties.AsNoTracking()
+                .Where(property => property.WikiDatabaseId == wikiDatabaseId && property.Id != propertyId)
+                .Select(property => property.Name)
+                .ToListAsync(cancellationToken);
+            WikiDatabaseComputation.ValidateFormula(configuration.FormulaExpression ?? string.Empty, availablePropertyNames);
+            return;
+        }
+
+        if (propertyType == WikiDatabasePropertyTypes.Relation)
+        {
+            if (configuration.RelatedDatabaseId is not { } relatedDatabaseId
+                || !await dbContext.WikiDatabases.AnyAsync(item => item.Id == relatedDatabaseId, cancellationToken))
+            {
+                throw new ArgumentException("A relation must target an existing Sentinel database.");
+            }
+            return;
+        }
+
+        if (propertyType != WikiDatabasePropertyTypes.Rollup)
+        {
+            return;
+        }
+
+        if (configuration.RelationPropertyId is not { } relationPropertyId)
+        {
+            throw new ArgumentException("A rollup requires a relation property.");
+        }
+        var relationProperty = await dbContext.WikiDatabaseProperties.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == relationPropertyId
+                && item.WikiDatabaseId == wikiDatabaseId
+                && item.Type == WikiDatabasePropertyTypes.Relation, cancellationToken)
+            ?? throw new ArgumentException("The selected relation property does not exist in this database.");
+        var relationConfig = WikiDatabasePropertyConfig.Parse(relationProperty);
+        if (relationConfig.RelatedDatabaseId is not { } rollupRelatedDatabaseId
+            || configuration.RollupPropertyId is not { } rollupPropertyId
+            || !await dbContext.WikiDatabaseProperties.AnyAsync(item =>
+                item.WikiDatabaseId == rollupRelatedDatabaseId && item.Id == rollupPropertyId, cancellationToken))
+        {
+            throw new ArgumentException("The selected rollup property does not exist in the related database.");
+        }
+        if (!WikiDatabaseRollupAggregations.All.Contains(configuration.RollupAggregation ?? string.Empty))
+        {
+            throw new ArgumentException("Choose a supported rollup calculation.");
+        }
+        if (relationProperty.Id == propertyId)
+        {
+            throw new ArgumentException("A rollup cannot use itself as its relation.");
+        }
     }
 
     public async Task DeleteRowAsync(Guid wikiDatabaseId, Guid rowId, string performedBy, CancellationToken cancellationToken = default)
@@ -532,9 +754,9 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
             ?? throw new KeyNotFoundException("The database property no longer exists.");
         var row = database.Rows.FirstOrDefault(item => item.Id == rowId)
             ?? throw new KeyNotFoundException("The database row no longer exists.");
-        if (property.Type == WikiDatabasePropertyTypes.CreatedTime)
+        if (property.Type is WikiDatabasePropertyTypes.CreatedTime or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup)
         {
-            throw new InvalidOperationException("Created time is read-only.");
+            throw new InvalidOperationException("Computed properties are read-only.");
         }
 
         var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
@@ -695,7 +917,7 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
                 property.Id,
                 property.Name,
                 property.Type,
-                property.Type == WikiDatabasePropertyTypes.CreatedTime,
+                property.Type is WikiDatabasePropertyTypes.CreatedTime or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup,
                 WikiDatabasePropertyConfig.GetOptions(property)))
             .ToList();
 
@@ -730,8 +952,11 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
             WikiDatabasePropertyTypes.Number => WikiPropertyValues.GetNumber(values, property.Id)?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
             WikiDatabasePropertyTypes.Checkbox => WikiPropertyValues.GetCheckbox(values, property.Id).ToString().ToLowerInvariant(),
             WikiDatabasePropertyTypes.Date => WikiPropertyValues.GetDate(values, property.Id)?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty,
-            WikiDatabasePropertyTypes.MultiSelect => string.Join(',', WikiPropertyValues.GetMultiSelect(values, property.Id)),
+            WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Person or WikiDatabasePropertyTypes.Files or WikiDatabasePropertyTypes.Relation =>
+                string.Join(',', WikiPropertyValues.GetMultiSelect(values, property.Id)),
             WikiDatabasePropertyTypes.CreatedTime => createdAt.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup =>
+                WikiPropertyValues.GetDisplayText(property, values, createdAt),
             _ => WikiPropertyValues.GetText(values, property.Id) ?? string.Empty
         };
 

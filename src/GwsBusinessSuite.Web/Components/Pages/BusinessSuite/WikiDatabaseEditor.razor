@@ -70,6 +70,70 @@ else
                                     </button>
                                 }
                             </div>
+                            @if (property.Type == WikiDatabasePropertyTypes.Formula)
+                            {
+                                <div class="col-12">
+                                    <label class="form-label small text-secondary mb-1">Formula</label>
+                                    <input class="form-control form-control-sm font-monospace"
+                                           value="@WikiDatabasePropertyConfig.Parse(property).FormulaExpression"
+                                           @onchange="e => SetFormulaAsync(property, e.Value?.ToString() ?? string.Empty)"
+                                           disabled="@IsBusy" placeholder="[Hours] * [Rate]" />
+                                    <div class="form-text">Reference properties as <code>[Property name]</code>. Supports arithmetic, comparisons, <code>if</code>, <code>round</code>, <code>concat</code>, and <code>coalesce</code>.</div>
+                                </div>
+                            }
+                            else if (property.Type == WikiDatabasePropertyTypes.Relation)
+                            {
+                                <div class="col-12">
+                                    <label class="form-label small text-secondary mb-1">Related database</label>
+                                    <select class="form-select form-select-sm" value="@WikiDatabasePropertyConfig.Parse(property).RelatedDatabaseId"
+                                            @onchange="e => SetRelationDatabaseAsync(property, e.Value?.ToString())" disabled="@IsBusy">
+                                        @foreach (var databaseChoice in _databaseChoices)
+                                        {
+                                            <option value="@databaseChoice.Id">@(databaseChoice.Icon ?? "🗄️") @databaseChoice.Title</option>
+                                        }
+                                    </select>
+                                </div>
+                            }
+                            else if (property.Type == WikiDatabasePropertyTypes.Rollup)
+                            {
+                                var rollupConfig = WikiDatabasePropertyConfig.Parse(property);
+                                var selectedRelation = Database.Properties.FirstOrDefault(candidate => candidate.Id == rollupConfig.RelationPropertyId);
+                                var relatedDatabase = selectedRelation is null ? null : GetRelatedDatabase(selectedRelation);
+                                <div class="col-12">
+                                    <div class="row g-2">
+                                        <div class="col-md-4">
+                                            <label class="form-label small text-secondary mb-1">Relation</label>
+                                            <select class="form-select form-select-sm" value="@rollupConfig.RelationPropertyId"
+                                                    @onchange="e => SetRollupRelationAsync(property, e.Value?.ToString())" disabled="@IsBusy">
+                                                @foreach (var relation in RelationProperties)
+                                                {
+                                                    <option value="@relation.Id">@relation.Name</option>
+                                                }
+                                            </select>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small text-secondary mb-1">Property</label>
+                                            <select class="form-select form-select-sm" value="@rollupConfig.RollupPropertyId"
+                                                    @onchange="e => SetRollupTargetAsync(property, e.Value?.ToString())" disabled="@(IsBusy || relatedDatabase is null)">
+                                                @foreach (var targetProperty in GetRollupTargetProperties(selectedRelation))
+                                                {
+                                                    <option value="@targetProperty.Id">@targetProperty.Name</option>
+                                                }
+                                            </select>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small text-secondary mb-1">Calculate</label>
+                                            <select class="form-select form-select-sm" value="@rollupConfig.RollupAggregation"
+                                                    @onchange="e => SetRollupAggregationAsync(property, e.Value?.ToString())" disabled="@IsBusy">
+                                                @foreach (var aggregation in WikiDatabaseRollupAggregations.All)
+                                                {
+                                                    <option value="@aggregation">@RollupAggregationLabel(aggregation)</option>
+                                                }
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
                         </div>
                     }
                     <div class="row g-2 align-items-center mt-2">
@@ -83,6 +147,23 @@ else
                             </select>
                         </div>
                         <div class="col-md-5">
+                            @if (_newPropertyType == WikiDatabasePropertyTypes.Formula)
+                            {
+                                <input class="form-control form-control-sm mb-2 font-monospace" placeholder="[Hours] * [Rate]" @bind="_newFormulaExpression" />
+                            }
+                            else if (_newPropertyType == WikiDatabasePropertyTypes.Relation)
+                            {
+                                <select class="form-select form-select-sm mb-2" @bind="_newRelatedDatabaseId">
+                                    @foreach (var databaseChoice in _databaseChoices)
+                                    {
+                                        <option value="@databaseChoice.Id">@(databaseChoice.Icon ?? "🗄️") @databaseChoice.Title</option>
+                                    }
+                                </select>
+                            }
+                            else if (_newPropertyType == WikiDatabasePropertyTypes.Rollup)
+                            {
+                                <div class="small text-secondary mb-2">A new rollup starts with the first available relation and target property; configure it above after creation.</div>
+                            }
                             <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddPropertyAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(_newPropertyName))">
                                 <i class="bi bi-plus-lg me-1"></i>Add property
                             </button>
@@ -349,9 +430,37 @@ else
                                                     break;
                                                 case WikiDatabasePropertyTypes.Person:
                                                 case WikiDatabasePropertyTypes.Files:
-                                                case WikiDatabasePropertyTypes.Relation:
                                                     <input class="form-control form-control-sm" value="@string.Join(", ", GetMultiSelect(row, property))" disabled="@IsBusy"
                                                            @onchange="e => SetMultiValueAsync(row, property, e.Value?.ToString())" placeholder="Comma-separated values" />
+                                                    break;
+                                                case WikiDatabasePropertyTypes.Relation:
+                                                    var relatedDatabase = GetRelatedDatabase(property);
+                                                    var selectedRowIds = GetMultiSelect(row, property);
+                                                    if (relatedDatabase is null)
+                                                    {
+                                                        <span class="small text-danger">Choose a related database</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <details class="sentinel-relation-picker">
+                                                            <summary>@RelationSummary(relatedDatabase, selectedRowIds)</summary>
+                                                            <div class="sentinel-relation-options">
+                                                                @foreach (var relatedRow in relatedDatabase.Rows.OrderBy(candidate => candidate.SortOrder))
+                                                                {
+                                                                    var relatedTitle = GetDatabaseRowTitle(relatedDatabase, relatedRow);
+                                                                    <label class="form-check mb-1">
+                                                                        <input class="form-check-input" type="checkbox" checked="@selectedRowIds.Contains(relatedRow.Id.ToString())"
+                                                                               @onchange="e => ToggleRelationAsync(row, property, relatedRow.Id, (bool)(e.Value ?? false))" disabled="@IsBusy" />
+                                                                        <span class="form-check-label small">@relatedTitle</span>
+                                                                    </label>
+                                                                }
+                                                                @if (relatedDatabase.Rows.Count == 0)
+                                                                {
+                                                                    <span class="small text-secondary">No rows are available in @relatedDatabase.Title.</span>
+                                                                }
+                                                            </div>
+                                                        </details>
+                                                    }
                                                     break;
                                                 case WikiDatabasePropertyTypes.Place:
                                                     <input class="form-control form-control-sm" value="@GetText(row, property)" disabled="@IsBusy"
@@ -429,11 +538,17 @@ else
     private string _titleIcon = string.Empty;
     private string _newPropertyName = string.Empty;
     private string _newPropertyType = WikiDatabasePropertyTypes.Text;
+    private string _newFormulaExpression = "0";
+    private Guid? _newRelatedDatabaseId;
+    private List<WikiDatabase> _databaseChoices = [];
+    private readonly Dictionary<Guid, WikiDatabase> _relatedDatabases = [];
     private DateOnly _calendarMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
 
     private WikiDatabaseView? ActiveView =>
         Database?.Views.FirstOrDefault(v => v.Id == _activeViewId) ?? Database?.Views.OrderBy(v => v.SortOrder).FirstOrDefault();
     private WikiDatabaseViewConfig? ActiveViewConfig => ActiveView is null ? null : WikiDatabaseViewConfigJson.Parse(ActiveView.ConfigJson);
+    private IReadOnlyList<WikiDatabaseProperty> RelationProperties =>
+        Database?.Properties.Where(property => property.Type == WikiDatabasePropertyTypes.Relation).OrderBy(property => property.SortOrder).ToList() ?? [];
 
     protected override async Task OnParametersSetAsync()
     {
@@ -451,6 +566,7 @@ else
         try
         {
             Database = await WikiDatabaseService.GetDatabaseAsync(WikiDatabaseId);
+            _databaseChoices = (await WikiDatabaseService.ListDatabasesAsync()).OrderBy(database => database.Title).ToList();
             if (Database is not null)
             {
                 _title = Database.Title;
@@ -459,6 +575,8 @@ else
                 {
                     _activeViewId = Database.Views.OrderBy(v => v.SortOrder).FirstOrDefault()?.Id;
                 }
+                await LoadRelatedDatabasesAsync();
+                _newRelatedDatabaseId ??= _databaseChoices.FirstOrDefault()?.Id;
             }
         }
         catch (Exception ex)
@@ -532,7 +650,25 @@ else
         await Work(async () =>
         {
             var user = await CurrentUserNameAsync();
-            var editor = new WikiDatabasePropertyEditor { Name = _newPropertyName, Type = _newPropertyType, Options = [] };
+            var editor = new WikiDatabasePropertyEditor
+            {
+                Name = _newPropertyName,
+                Type = _newPropertyType,
+                Options = [],
+                FormulaExpression = _newPropertyType == WikiDatabasePropertyTypes.Formula ? _newFormulaExpression : null,
+                RelatedDatabaseId = _newPropertyType == WikiDatabasePropertyTypes.Relation ? _newRelatedDatabaseId : null
+            };
+            if (_newPropertyType == WikiDatabasePropertyTypes.Rollup)
+            {
+                var relation = RelationProperties.FirstOrDefault()
+                    ?? throw new InvalidOperationException("Add a Relation property before creating a Rollup.");
+                var relatedDatabase = GetRelatedDatabase(relation)
+                    ?? throw new InvalidOperationException("The relation's target database is unavailable.");
+                editor.RelationPropertyId = relation.Id;
+                editor.RollupPropertyId = relatedDatabase.Properties.OrderBy(property => property.SortOrder).FirstOrDefault()?.Id
+                    ?? throw new InvalidOperationException("The related database has no properties to roll up.");
+                editor.RollupAggregation = WikiDatabaseRollupAggregations.Count;
+            }
             await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, user);
             _newPropertyName = string.Empty;
             await ReloadAsync();
@@ -542,7 +678,8 @@ else
     private async Task RenamePropertyAsync(WikiDatabaseProperty property, string newName) => await Work(async () =>
     {
         var user = await CurrentUserNameAsync();
-        var editor = new WikiDatabasePropertyEditor { Id = property.Id, Name = newName, Type = property.Type, Options = WikiDatabasePropertyConfig.GetOptions(property) };
+        var editor = CreatePropertyEditor(property);
+        editor.Name = newName;
         await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, user);
         await ReloadAsync();
     });
@@ -556,8 +693,54 @@ else
             .ToList();
 
         var user = await CurrentUserNameAsync();
-        var editor = new WikiDatabasePropertyEditor { Id = property.Id, Name = property.Name, Type = property.Type, Options = options };
+        var editor = CreatePropertyEditor(property);
+        editor.Options = options;
         await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, user);
+        await ReloadAsync();
+    });
+
+    private async Task SetFormulaAsync(WikiDatabaseProperty property, string expression) => await Work(async () =>
+    {
+        var editor = CreatePropertyEditor(property);
+        editor.FormulaExpression = expression;
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, await CurrentUserNameAsync());
+        await ReloadAsync();
+    });
+
+    private async Task SetRelationDatabaseAsync(WikiDatabaseProperty property, string? rawDatabaseId) => await Work(async () =>
+    {
+        var editor = CreatePropertyEditor(property);
+        editor.RelatedDatabaseId = Guid.TryParse(rawDatabaseId, out var databaseId) ? databaseId : null;
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, await CurrentUserNameAsync());
+        await ReloadAsync();
+    });
+
+    private async Task SetRollupRelationAsync(WikiDatabaseProperty property, string? rawRelationId) => await Work(async () =>
+    {
+        var relation = Guid.TryParse(rawRelationId, out var relationId)
+            ? RelationProperties.FirstOrDefault(candidate => candidate.Id == relationId)
+            : null;
+        var relatedDatabase = relation is null ? null : GetRelatedDatabase(relation);
+        var editor = CreatePropertyEditor(property);
+        editor.RelationPropertyId = relation?.Id;
+        editor.RollupPropertyId = relatedDatabase?.Properties.OrderBy(candidate => candidate.SortOrder).FirstOrDefault()?.Id;
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, await CurrentUserNameAsync());
+        await ReloadAsync();
+    });
+
+    private async Task SetRollupTargetAsync(WikiDatabaseProperty property, string? rawPropertyId) => await Work(async () =>
+    {
+        var editor = CreatePropertyEditor(property);
+        editor.RollupPropertyId = Guid.TryParse(rawPropertyId, out var propertyId) ? propertyId : null;
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, await CurrentUserNameAsync());
+        await ReloadAsync();
+    });
+
+    private async Task SetRollupAggregationAsync(WikiDatabaseProperty property, string? aggregation) => await Work(async () =>
+    {
+        var editor = CreatePropertyEditor(property);
+        editor.RollupAggregation = aggregation;
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, await CurrentUserNameAsync());
         await ReloadAsync();
     });
 
@@ -604,7 +787,8 @@ else
         {
             WikiDatabaseViewTypes.Timeline => Database?.Properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Date),
             WikiDatabaseViewTypes.Chart => Database?.Properties.FirstOrDefault(property => property.Type is WikiDatabasePropertyTypes.Select
-                or WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Checkbox or WikiDatabasePropertyTypes.Text),
+                or WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Checkbox or WikiDatabasePropertyTypes.Text
+                or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup),
             WikiDatabaseViewTypes.Map => Database?.Properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Place),
             _ => null
         };
@@ -775,6 +959,102 @@ else
 
         return SaveRowValueAsync(row, values => WikiPropertyValues.SetMultiSelect(values, property.Id, current));
     }
+
+    private Task ToggleRelationAsync(WikiDatabaseRow row, WikiDatabaseProperty property, Guid relatedRowId, bool isChecked)
+    {
+        var relationId = relatedRowId.ToString();
+        var current = GetMultiSelect(row, property).ToList();
+        if (isChecked)
+        {
+            if (!current.Contains(relationId)) current.Add(relationId);
+        }
+        else
+        {
+            current.Remove(relationId);
+        }
+
+        return SaveRowValueAsync(row, values => WikiPropertyValues.SetMultiSelect(values, property.Id, current));
+    }
+
+    private async Task LoadRelatedDatabasesAsync()
+    {
+        _relatedDatabases.Clear();
+        if (Database is null) return;
+
+        _relatedDatabases[Database.Id] = Database;
+        var targetIds = Database.Properties
+            .Where(property => property.Type == WikiDatabasePropertyTypes.Relation)
+            .Select(property => WikiDatabasePropertyConfig.Parse(property).RelatedDatabaseId)
+            .Where(id => id.HasValue && id.Value != Database.Id)
+            .Select(id => id!.Value)
+            .Distinct();
+        foreach (var targetId in targetIds)
+        {
+            if (await WikiDatabaseService.GetDatabaseAsync(targetId) is { } relatedDatabase)
+            {
+                _relatedDatabases[targetId] = relatedDatabase;
+            }
+        }
+    }
+
+    private WikiDatabase? GetRelatedDatabase(WikiDatabaseProperty relationProperty)
+    {
+        var relatedDatabaseId = WikiDatabasePropertyConfig.Parse(relationProperty).RelatedDatabaseId;
+        return relatedDatabaseId is { } id && _relatedDatabases.TryGetValue(id, out var database) ? database : null;
+    }
+
+    private IReadOnlyList<WikiDatabaseProperty> GetRollupTargetProperties(WikiDatabaseProperty? relationProperty) =>
+        relationProperty is null
+            ? []
+            : GetRelatedDatabase(relationProperty)?.Properties.OrderBy(property => property.SortOrder).ToList() ?? [];
+
+    private static WikiDatabasePropertyEditor CreatePropertyEditor(WikiDatabaseProperty property)
+    {
+        var config = WikiDatabasePropertyConfig.Parse(property);
+        return new WikiDatabasePropertyEditor
+        {
+            Id = property.Id,
+            Name = property.Name,
+            Type = property.Type,
+            Options = config.Options,
+            FormulaExpression = config.FormulaExpression,
+            RelatedDatabaseId = config.RelatedDatabaseId,
+            RelationPropertyId = config.RelationPropertyId,
+            RollupPropertyId = config.RollupPropertyId,
+            RollupAggregation = config.RollupAggregation
+        };
+    }
+
+    private static string GetDatabaseRowTitle(WikiDatabase database, WikiDatabaseRow row)
+    {
+        var titleProperty = database.Properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Title);
+        return titleProperty is null ? "Untitled" : GetText(row, titleProperty) ?? "Untitled";
+    }
+
+    private static string RelationSummary(WikiDatabase database, IReadOnlyList<string> selectedRowIds)
+    {
+        var selected = database.Rows.Where(row => selectedRowIds.Contains(row.Id.ToString()))
+            .Select(row => GetDatabaseRowTitle(database, row))
+            .ToList();
+        return selected.Count switch
+        {
+            0 => "Select related rows",
+            1 => selected[0],
+            _ => $"{selected.Count} related rows"
+        };
+    }
+
+    private static string RollupAggregationLabel(string aggregation) => aggregation switch
+    {
+        WikiDatabaseRollupAggregations.Count => "Count rows",
+        WikiDatabaseRollupAggregations.CountValues => "Count values",
+        WikiDatabaseRollupAggregations.Sum => "Sum",
+        WikiDatabaseRollupAggregations.Average => "Average",
+        WikiDatabaseRollupAggregations.Minimum => "Minimum",
+        WikiDatabaseRollupAggregations.Maximum => "Maximum",
+        WikiDatabaseRollupAggregations.ShowUnique => "Show unique",
+        _ => aggregation
+    };
 
     private static string? GetText(WikiDatabaseRow row, WikiDatabaseProperty property) =>
         WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), property.Id);
