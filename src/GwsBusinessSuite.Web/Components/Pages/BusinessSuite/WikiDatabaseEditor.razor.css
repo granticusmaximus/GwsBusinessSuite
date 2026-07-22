@@ -65,7 +65,78 @@
     gap: .5rem;
 }
 
+.sentinel-formula-reference {
+    padding: .55rem .65rem;
+    border: 1px solid var(--gws-panel-border, #d6d3d1);
+    border-radius: .5rem;
+    background: color-mix(in srgb, var(--gws-panel-bg, #fff) 94%, var(--gws-accent, #f59e0b));
+    font-size: .78rem;
+}
+
+.sentinel-formula-reference summary {
+    cursor: pointer;
+    font-weight: 600;
+    user-select: none;
+}
+
+.sentinel-formula-reference-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .65rem 1rem;
+    margin-top: .65rem;
+}
+
+.sentinel-formula-reference-grid > div {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .3rem;
+}
+
+.sentinel-formula-reference-grid strong {
+    flex-basis: 100%;
+}
+
+.sentinel-formula-reference code,
+.sentinel-formula-example code {
+    padding: .1rem .3rem;
+    border-radius: .25rem;
+    background: var(--gws-surface-muted, rgba(120, 113, 108, .12));
+    color: inherit;
+}
+
+.sentinel-formula-example {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem;
+    margin-top: .75rem;
+    padding-top: .65rem;
+    border-top: 1px solid var(--gws-panel-border, #d6d3d1);
+}
+
 @media (max-width: 575.98px) {
+    .wiki-db-header {
+        flex-wrap: wrap;
+    }
+
+    .wiki-db-title,
+    .wiki-db-actions {
+        flex-basis: 100%;
+        min-width: 0;
+    }
+
+    .wiki-db-actions {
+        flex-wrap: wrap;
+    }
+
+    .wiki-db-actions .btn {
+        flex: 1 1 auto;
+    }
+
+    .sentinel-formula-reference-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
     .sentinel-reciprocal-editor {
         grid-template-columns: auto minmax(0, 1fr);
     }
