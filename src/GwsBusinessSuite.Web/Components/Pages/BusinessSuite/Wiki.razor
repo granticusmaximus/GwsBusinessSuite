@@ -227,8 +227,11 @@
                            CurrentPageTitle="Editor.Title"
                            CurrentDatabaseId="SelectedDatabaseId"
                            CurrentDatabaseTitle="SelectedDatabaseTitle"
+                           IsPageEditorActive="@(SelectedDatabaseId is null)"
+                           CaptureBlocks="CaptureEditorBlocksAsync"
                            OnPageCreated="OpenTemplatePageAsync"
-                           OnDatabaseCreated="OpenTemplateDatabaseAsync" />
+                           OnDatabaseCreated="OpenTemplateDatabaseAsync"
+                           OnBlocksInserted="InsertBlockTemplateAsync" />
     </aside>
 
     <main class="sentinel-main">
@@ -895,6 +898,35 @@
     public async Task OnBlocksChanged(string blocksJson)
     {
         Editor.BlocksJson = blocksJson;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task<string> CaptureEditorBlocksAsync()
+    {
+        if (_blockEditorInitialized && _blockEditorModule is not null)
+        {
+            Editor.BlocksJson = await _blockEditorModule.InvokeAsync<string>(
+                "getBlocksJson", _blockEditorContainer);
+        }
+
+        return Editor.BlocksJson;
+    }
+
+    private async Task InsertBlockTemplateAsync(string templateBlocksJson)
+    {
+        var currentBlocks = WikiBlockJson.ParseBlocks(await CaptureEditorBlocksAsync()).ToList();
+        if (currentBlocks.Count == 1
+            && currentBlocks[0].Type == WikiBlockTypes.Paragraph
+            && currentBlocks[0].RichText.Count == 0
+            && currentBlocks[0].Props.Count == 0)
+        {
+            currentBlocks.Clear();
+        }
+
+        currentBlocks.AddRange(WikiBlockJson.ParseBlocks(templateBlocksJson));
+        Editor.BlocksJson = WikiBlockJson.Serialize(currentBlocks);
+        _editorGeneration++;
+        StatusMessage = "Inserted reusable blocks. Save the page to persist them.";
         await InvokeAsync(StateHasChanged);
     }
 

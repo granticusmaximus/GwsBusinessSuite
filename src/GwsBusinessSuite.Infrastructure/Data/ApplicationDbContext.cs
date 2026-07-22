@@ -29,6 +29,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<WikiPage> WikiPages => Set<WikiPage>();
     public DbSet<WikiPageRevision> WikiPageRevisions => Set<WikiPageRevision>();
     public DbSet<SentinelPageTemplate> SentinelPageTemplates => Set<SentinelPageTemplate>();
+    public DbSet<SentinelBlockTemplate> SentinelBlockTemplates => Set<SentinelBlockTemplate>();
     public DbSet<SentinelDatabaseTemplate> SentinelDatabaseTemplates => Set<SentinelDatabaseTemplate>();
     public DbSet<SentinelNavigationEntry> SentinelNavigationEntries => Set<SentinelNavigationEntry>();
     public DbSet<SentinelDiscussion> SentinelDiscussions => Set<SentinelDiscussion>();
@@ -118,6 +119,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<SentinelPageTemplate>().Property(x => x.Name).HasMaxLength(120);
         modelBuilder.Entity<SentinelPageTemplate>().Property(x => x.NormalizedName).HasMaxLength(120);
         modelBuilder.Entity<SentinelPageTemplate>().Property(x => x.PageTitle).HasMaxLength(240);
+        modelBuilder.Entity<SentinelBlockTemplate>().HasIndex(x => x.NormalizedName).IsUnique();
+        modelBuilder.Entity<SentinelBlockTemplate>().Property(x => x.Name).HasMaxLength(120);
+        modelBuilder.Entity<SentinelBlockTemplate>().Property(x => x.NormalizedName).HasMaxLength(120);
         modelBuilder.Entity<SentinelDatabaseTemplate>().HasIndex(x => x.NormalizedName).IsUnique();
         modelBuilder.Entity<SentinelDatabaseTemplate>().Property(x => x.Name).HasMaxLength(120);
         modelBuilder.Entity<SentinelDatabaseTemplate>().Property(x => x.NormalizedName).HasMaxLength(120);

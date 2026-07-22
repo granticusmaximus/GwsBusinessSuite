@@ -72,6 +72,60 @@ public sealed class SentinelTemplateServiceTests
     }
 
     [Fact]
+    public async Task BlockTemplates_ShouldMaterializeIndependentBlockIdentities()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var sourceBlockId = Guid.NewGuid();
+        var blocksJson = WikiBlockJson.Serialize([
+            new WikiBlock(sourceBlockId, WikiBlockTypes.Callout, 0,
+                [new WikiRichTextSpan("Review before publishing")],
+                new Dictionary<string, string>())
+        ]);
+
+        var template = await fixture.TemplateService.CreateBlockTemplateAsync(
+            "Editorial warning", blocksJson, "Owner");
+        var first = WikiBlockJson.ParseBlocks(
+            await fixture.TemplateService.MaterializeBlockTemplateAsync(template.Id)).Single();
+        var second = WikiBlockJson.ParseBlocks(
+            await fixture.TemplateService.MaterializeBlockTemplateAsync(template.Id)).Single();
+
+        first.Id.Should().NotBe(sourceBlockId);
+        second.Id.Should().NotBe(sourceBlockId);
+        second.Id.Should().NotBe(first.Id);
+        first.PlainText.Should().Be("Review before publishing");
+        (await fixture.TemplateService.ListBlockTemplatesAsync()).Should().ContainSingle(item =>
+            item.Id == template.Id
+            && item.BlockCount == 1
+            && item.Preview.Contains("Review before publishing")
+            && item.CreatedBy == "owner");
+    }
+
+    [Fact]
+    public async Task BlockTemplates_ShouldRejectEmptyOrDuplicateTemplatesAndDeleteSelectedTemplate()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var blocksJson = WikiBlockJson.Serialize([WikiBlockJson.CreateEmpty(WikiBlockTypes.Paragraph)]);
+        var first = await fixture.TemplateService.CreateBlockTemplateAsync(
+            " Standard intro ", blocksJson, "Owner");
+
+        var duplicate = () => fixture.TemplateService.CreateBlockTemplateAsync(
+            "standard intro", blocksJson, "Owner");
+        await duplicate.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*block template with that name already exists*");
+
+        var empty = () => fixture.TemplateService.CreateBlockTemplateAsync(
+            "Empty", "[]", "Owner");
+        await empty.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*at least one block*");
+
+        var second = await fixture.TemplateService.CreateBlockTemplateAsync(
+            "Checklist", blocksJson, "Owner");
+        await fixture.TemplateService.DeleteBlockTemplateAsync(first.Id);
+        (await fixture.TemplateService.ListBlockTemplatesAsync())
+            .Should().ContainSingle(item => item.Id == second.Id);
+    }
+
+    [Fact]
     public async Task CreateDatabaseAsync_ShouldRestoreIndependentSnapshotAfterSourceDeletion()
     {
         await using var fixture = await Fixture.CreateAsync();

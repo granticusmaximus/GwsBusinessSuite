@@ -65,7 +65,7 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 | Capability family | Foundation status | Expansion target |
 | --- | --- | --- |
 | Page model | Nested pages (flat parent-id + explicit sibling `SortOrder`), icon, cover image, move/reorder, transactional subtree duplication | — |
-| Block editor | Slash-command insert, drag-reorder, Tab/Shift-Tab indent, inline bold/italic/link, `[[Page]]` autocomplete, reusable templates, native tables, equations, breadcrumbs, TOC, buttons, synced blocks, and columns | Richer embeds and reusable block-template management |
+| Block editor | Slash-command insert, drag-reorder, Tab/Shift-Tab indent, inline bold/italic/link, `[[Page]]` autocomplete, reusable page and block templates, native tables, equations, breadcrumbs, TOC, buttons, synced blocks, and columns | Richer embeds |
 | Core block types | paragraph, heading 1-3, lists, to-do, toggle, quote, callout, code, divider, image, embed, table, equation, breadcrumb, TOC, button, synced block, columns, and legacy markdown | oEmbed previews and additional provider-specific media |
 | History | Bounded DB snapshot revisions (20/page), structural diff (added/removed/changed blocks), revert-as-new-version | — |
 | Databases | Typed properties including person, files, place, formula, relation and rollup; editable Table, Board, List, Gallery, Calendar, Timeline, Chart, Form, Map, Feed, and Dashboard views | Formula evaluation and richer relation/rollup configuration |
@@ -121,7 +121,8 @@ proprietary schemas; public Notion product and API documentation is behavioral r
    Full database duplication now creates an adjacent independent copy with fresh property,
    row, view, and block identities while preserving remapped values and view configuration.
    Database templates are durable, source-independent snapshots of properties, rows, row-page
-   blocks, and views; every use remaps internal identities. Teamspace administration remains.
+   blocks, and views; every use remaps internal identities. Reusable block templates capture the
+   live editor snapshot, survive source-page deletion, and remap every block identity on insertion.
 8. **Sentinel AI** (delivered foundation): Ollama-backed ask, summarize, rewrite, translate,
    research, meeting-notes, and database-autofill actions grounded in workspace pages and
    databases. Outputs are durable, reviewable runs and require approve/reject before insertion.
@@ -139,7 +140,7 @@ capabilities where they fit GWS Business Suite; they are no longer silently excl
 
 | Area | Delivered now | Required parity work |
 | --- | --- | --- |
-| Blocks | Core and advanced native block vocabulary, including tables/equations/columns/synced blocks/TOC/buttons | Richer embeds and reusable block-template management |
+| Blocks | Core and advanced native block vocabulary, including tables/equations/columns/synced blocks/TOC/buttons, plus reusable block templates | Richer embeds |
 | Databases | Eleven view families, expanded property vocabulary, filters/sorts/groups, row page bodies, linked/inline databases, and reusable database templates | Formula computation, rich relation configuration, layouts, and automations |
 | Knowledge graph | `[[Page]]` links, ranked/highlighted workspace search, backlinks, person/date mentions, favorites/recents | Graph navigation, database-row mention inbox entries, and saved searches |
 | Collaboration | Discussions, replies, reactions, notifications, DB-backed cross-instance presence/polling, block-level three-way merge, authenticated portal-member roles, granular permissions, and tokenized public sharing | Character-level CRDT/OT cursors and richer public-share controls |

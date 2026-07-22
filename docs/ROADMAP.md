@@ -102,7 +102,8 @@
   and jump to a focused conversation/composer; reusable page templates now create independent
   pages with fresh block identities, and transactional page-tree duplication copies nested pages
   beside the source with independent revisions; database duplication and reusable source-independent
-  database templates are delivered; distributed scale-out and CRDT/OT co-authoring remain;
+  database templates are delivered; reusable block templates now capture live editor content and
+  insert independent blocks with fresh identities; distributed scale-out and CRDT/OT co-authoring remain;
   permissions and tokenized public sharing are delivered; Sentinel workspace membership is
   limited to authenticated portal accounts, and external viewers use public shares rather than
   guest portal accounts;
