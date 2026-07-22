@@ -77,7 +77,8 @@ else
                     }
                     else
                     {
-                        <table class="table table-sm mb-0">
+                        <div class="table-responsive">
+                            <table class="table table-sm mb-0">
                             <thead><tr><th>Advertiser</th><th class="text-end">Clicks</th><th>Last Click</th></tr></thead>
                             <tbody>
                                 @foreach (var row in Dashboard.ClicksByAdvertiser)
@@ -89,7 +90,8 @@ else
                                     </tr>
                                 }
                             </tbody>
-                        </table>
+                            </table>
+                        </div>
                     }
                 </div>
             </div>
@@ -105,7 +107,8 @@ else
                     }
                     else
                     {
-                        <table class="table table-sm mb-0">
+                        <div class="table-responsive">
+                            <table class="table table-sm mb-0">
                             <thead><tr><th>Article</th><th class="text-end">Clicks</th></tr></thead>
                             <tbody>
                                 @foreach (var row in Dashboard.ClicksByArticle)
@@ -125,7 +128,8 @@ else
                                     </tr>
                                 }
                             </tbody>
-                        </table>
+                            </table>
+                        </div>
                     }
                 </div>
             </div>
@@ -143,7 +147,8 @@ else
                     }
                     else
                     {
-                        <table class="table table-sm mb-0">
+                        <div class="table-responsive">
+                            <table class="table table-sm mb-0">
                             <thead><tr><th>Advertiser</th><th class="text-end">Transactions</th><th class="text-end">Sales</th><th class="text-end">Commission</th></tr></thead>
                             <tbody>
                                 @foreach (var row in Dashboard.RevenueByAdvertiser)
@@ -156,7 +161,8 @@ else
                                     </tr>
                                 }
                             </tbody>
-                        </table>
+                            </table>
+                        </div>
                     }
                 </div>
             </div>

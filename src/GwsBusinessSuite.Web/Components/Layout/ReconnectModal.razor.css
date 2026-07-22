@@ -41,6 +41,14 @@
 
 }
 
+@media (max-width: 575.98px) {
+    #components-reconnect-modal {
+        width: calc(100% - 2rem);
+        margin: 12vh auto;
+        padding: 1.25rem;
+    }
+}
+
 #components-reconnect-modal::backdrop {
     background-color: rgba(0, 0, 0, 0.4);
     animation: components-reconnect-modal-fadeInOpacity 0.5s ease-in-out;

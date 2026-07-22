@@ -149,3 +149,14 @@
     color: var(--gws-text-soft, #a8a29e);
     margin-top: 0.2rem;
 }
+
+@media (max-width: 575.98px) {
+    .notif-bell-panel {
+        position: fixed;
+        top: calc(var(--gws-admin-bar-height, 3.25rem) + 0.5rem);
+        right: 0.5rem;
+        left: 0.5rem;
+        width: auto;
+        max-height: calc(100dvh - var(--gws-admin-bar-height, 3.25rem) - 1rem);
+    }
+}

@@ -304,9 +304,15 @@ h1:focus { outline: none; }
 
 .gws-content {
     flex: 1;
+    min-width: 0;
     overflow-y: auto;
     padding: 1.5rem 1.75rem 2rem;
 }
+
+.gws-content > *,
+.gws-content .card,
+.gws-content .card-body,
+.gws-content .table-responsive { min-width: 0; max-width: 100%; }
 
 /* ── Canvas fullscreen mode ──────────────────────────────────
    Mirrors how WordPress/Elementor/Squarespace take over the full
@@ -1105,8 +1111,15 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
         transition: opacity .2s ease;
     }
     .gws-layout.gws-mobile-nav-open .gws-sidebar-backdrop { opacity: 1; pointer-events: auto; }
-    .gws-layout .gws-body { margin-left: 0; }
-    .gws-content { padding: 1.25rem; }
+    .gws-layout:not(.gws-builder-mode) .gws-body,
+    .gws-layout.gws-sidebar-collapsed:not(.gws-builder-mode) .gws-body { margin-left: 0; }
+    .gws-content { max-width: 100vw; padding: 1rem; }
+    .gws-content .card-header.d-flex,
+    .gws-content .card-body.d-flex { flex-wrap: wrap; }
+    .gws-content .table-responsive { overscroll-behavior-inline: contain; scrollbar-width: thin; }
+    .gws-content .dropdown-menu { max-width: calc(100vw - 2rem); }
+    .modal-dialog { margin: .5rem; }
+    .modal-content { max-height: calc(100dvh - 1rem); overflow-y: auto; }
     .page-header { flex-wrap: wrap; align-items: flex-start !important; gap: 1rem !important; }
     .page-header > :last-child:not(:first-child) { width: 100%; flex-wrap: wrap; }
     .page-header > :last-child:not(:first-child) > .btn { flex: 1 1 auto; }
@@ -1637,6 +1650,7 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 
 .sentinel-workspace-identity { gap: .8rem; }
 .sentinel-workspace-actions { gap: .75rem; }
+.sentinel-mobile-nav-toggle { display: none; }
 
 .sentinel-brand-mark {
     display: grid;
@@ -2536,14 +2550,20 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 }
 
 @media (max-width: 991.98px) {
+    .sentinel-workspace-header { align-items: flex-start; flex-wrap: wrap; }
+    .sentinel-workspace-identity { flex: 1 1 22rem; min-width: 0; }
+    .sentinel-workspace-actions { flex: 1 1 auto; flex-wrap: wrap; justify-content: flex-end; }
+    .sentinel-mobile-nav-toggle { display: inline-flex; }
     .sentinel-layout { display: block; overflow: visible; }
     .sentinel-local-sidebar {
+        display: none;
         position: static;
         height: auto;
         max-height: min(42dvh, 32rem);
         border-right: 0;
         border-bottom: 1px solid var(--sentinel-border);
     }
+    .sentinel-local-sidebar.is-mobile-open { display: flex; }
     .sentinel-nav-panel { min-height: 0; }
     .sentinel-tree-scroll { max-height: min(25dvh, 18rem); }
     .sentinel-document-toolbar { position: static; }
@@ -2564,10 +2584,14 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 }
 
 @media (max-width: 575.98px) {
+    .gws-content { padding: .75rem; }
     .sentinel-workspace-header,
     .sentinel-workspace-actions { align-items: flex-start; }
     .sentinel-workspace-header { flex-direction: column; }
-    .sentinel-workspace-actions { width: 100%; justify-content: space-between; }
+    .sentinel-workspace-identity { flex: 0 1 auto; width: 100%; }
+    .sentinel-workspace-actions { width: 100%; justify-content: flex-start; }
+    .sentinel-workspace-actions .btn { flex: 1 1 auto; }
+    .sentinel-workspace-status { margin-left: auto; }
     .sentinel-workspace { padding-bottom: env(safe-area-inset-bottom); }
     .sentinel-layout { border-right: 0; border-left: 0; border-radius: 0; }
     .sentinel-local-sidebar { max-height: min(46dvh, 27rem); }
@@ -2583,6 +2607,12 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     .sentinel-db-calendar-toolbar { grid-template-columns: 1fr auto; }
     .sentinel-db-calendar-toolbar > :last-child { display: none; }
     .sentinel-property-row { grid-template-columns: 5.5rem minmax(0, 1fr); }
+    .sentinel-ai-toggle { grid-template-columns: auto 1fr auto; }
+    .sentinel-ai-toggle small { display: none; }
+    .sentinel-ai-result > div:first-child,
+    .sentinel-ai-history > div { align-items: flex-start; flex-direction: column; gap: .2rem; }
+    .sentinel-share-entry { grid-template-columns: minmax(0, 1fr) auto; }
+    .sentinel-share-entry > :nth-child(3) { grid-column: 2; }
     .sentinel-workspace .wiki-block-gutter { position: static; }
     .sentinel-workspace .wiki-block-gutter .btn { min-width: 2.75rem; }
     .sentinel-editor-actions { padding-bottom: max(.65rem, env(safe-area-inset-bottom)); }
