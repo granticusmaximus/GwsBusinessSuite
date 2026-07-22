@@ -92,6 +92,71 @@ public sealed class SentinelTemplateService(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<SentinelBlockTemplateView>> ListBlockTemplatesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var templates = await dbContext.SentinelBlockTemplates
+            .AsNoTracking()
+            .OrderBy(template => template.Name)
+            .ToListAsync(cancellationToken);
+        return templates.Select(ToBlockView).ToList();
+    }
+
+    public async Task<SentinelBlockTemplateView> CreateBlockTemplateAsync(
+        string name,
+        string blocksJson,
+        string performedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedName = NormalizeName(name);
+        var blocks = WikiBlockJson.ParseBlocks(blocksJson);
+        if (blocks.Count == 0)
+        {
+            throw new InvalidOperationException("A block template must contain at least one block.");
+        }
+        if (await dbContext.SentinelBlockTemplates.AnyAsync(
+                template => template.NormalizedName == normalizedName, cancellationToken))
+        {
+            throw new InvalidOperationException("A Sentinel block template with that name already exists.");
+        }
+
+        var template = new SentinelBlockTemplate
+        {
+            Name = name.Trim(),
+            NormalizedName = normalizedName,
+            BlocksJson = WikiBlockJson.Serialize(blocks),
+            CreatedBy = NormalizeUser(performedBy)
+        };
+        await dbContext.SentinelBlockTemplates.AddAsync(template, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ToBlockView(template);
+    }
+
+    public async Task<string> MaterializeBlockTemplateAsync(
+        Guid templateId,
+        CancellationToken cancellationToken = default)
+    {
+        var template = await dbContext.SentinelBlockTemplates
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == templateId, cancellationToken)
+            ?? throw new InvalidOperationException("The Sentinel block template no longer exists.");
+        var blocks = WikiBlockJson.ParseBlocks(template.BlocksJson)
+            .Select(block => block with { Id = Guid.NewGuid() })
+            .ToList();
+        return WikiBlockJson.Serialize(blocks);
+    }
+
+    public async Task DeleteBlockTemplateAsync(
+        Guid templateId,
+        CancellationToken cancellationToken = default)
+    {
+        var template = await dbContext.SentinelBlockTemplates
+            .FirstOrDefaultAsync(item => item.Id == templateId, cancellationToken);
+        if (template is null) return;
+        dbContext.SentinelBlockTemplates.Remove(template);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<SentinelDatabaseTemplateView>> ListDatabaseTemplatesAsync(
         CancellationToken cancellationToken = default)
     {
@@ -180,6 +245,22 @@ public sealed class SentinelTemplateService(
             snapshot.Properties.Count,
             snapshot.Rows.Count,
             snapshot.Views.Count,
+            template.CreatedAt,
+            template.CreatedBy);
+    }
+
+    private static SentinelBlockTemplateView ToBlockView(SentinelBlockTemplate template)
+    {
+        var blocks = WikiBlockJson.ParseBlocks(template.BlocksJson);
+        var preview = string.Join(" · ", blocks
+            .Select(block => WikiBlockHtmlRenderer.PlainTextPreview(block, 48))
+            .Where(text => !string.IsNullOrWhiteSpace(text))
+            .Take(2));
+        return new SentinelBlockTemplateView(
+            template.Id,
+            template.Name,
+            blocks.Count,
+            string.IsNullOrWhiteSpace(preview) ? "Structured blocks" : preview,
             template.CreatedAt,
             template.CreatedBy);
     }

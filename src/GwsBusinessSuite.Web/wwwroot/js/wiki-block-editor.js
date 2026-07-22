@@ -78,6 +78,11 @@ export function setBlocks(container, blocksJson) {
     }
 }
 
+export function getBlocksJson(container) {
+    return JSON.stringify(
+        [...container.querySelectorAll(':scope > .wiki-block')].map(serializeBlock));
+}
+
 export function setDiscussionCounts(container, counts) {
     const state = states.get(container);
     if (!state) return;
@@ -953,8 +958,7 @@ function scheduleNotify(state) {
 
 function notifyChanged(state) {
     if (state.notifyTimer) { clearTimeout(state.notifyTimer); state.notifyTimer = null; }
-    const blocks = [...state.container.querySelectorAll(':scope > .wiki-block')].map(serializeBlock);
-    try { state.dotNetRef.invokeMethodAsync('OnBlocksChanged', JSON.stringify(blocks)); }
+    try { state.dotNetRef.invokeMethodAsync('OnBlocksChanged', getBlocksJson(state.container)); }
     catch { /* the Blazor circuit may have disconnected */ }
 }
 

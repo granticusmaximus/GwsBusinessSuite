@@ -145,6 +145,16 @@ public sealed class SentinelPageTemplate : AuditableEntity
     public string? CoverImageUrl { get; set; }
 }
 
+// Durable snapshot of a reusable group of Sentinel blocks. Materializing a template always
+// assigns fresh block identities so discussions, revisions, and concurrent edits remain
+// isolated from both the source page and every other insertion.
+public sealed class SentinelBlockTemplate : AuditableEntity
+{
+    public required string Name { get; set; }
+    public required string NormalizedName { get; set; }
+    public string BlocksJson { get; set; } = "[]";
+}
+
 // Durable, source-independent snapshot of an entire Sentinel database. The JSON contains
 // its properties, rows (including page blocks), and views; materialization always remaps
 // every internal identity so a template instance can evolve independently of its source.

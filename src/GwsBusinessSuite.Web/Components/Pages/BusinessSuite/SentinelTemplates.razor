@@ -7,7 +7,26 @@
 <div class="card border-0 shadow-sm mt-3 sentinel-template-panel">
     <div class="card-header bg-white border-bottom py-2 d-flex align-items-center justify-content-between">
         <span class="fw-semibold small"><i class="bi bi-copy me-1"></i>Templates</span>
-        <span class="badge text-bg-secondary">@(Templates.Count + DatabaseTemplates.Count)</span>
+        <span class="badge text-bg-secondary">@(Templates.Count + BlockTemplates.Count + DatabaseTemplates.Count)</span>
+    </div>
+
+    <div class="card-body p-2 border-bottom">
+        <div class="small fw-semibold mb-2"><i class="bi bi-blockquote-left me-1"></i>Block templates</div>
+        @if (IsPageEditorActive)
+        {
+            <div class="input-group input-group-sm">
+                <input class="form-control" @bind="NewBlockTemplateName" placeholder="Template name" maxlength="120" />
+                <button type="button" class="btn btn-outline-primary" @onclick="SaveBlockTemplateAsync"
+                        disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewBlockTemplateName))" title="Save the current page blocks as a template">
+                    <i class="bi bi-bookmark-plus"></i>
+                </button>
+            </div>
+            <div class="small text-secondary mt-1">Saves the blocks currently in the editor, including unsaved changes.</div>
+        }
+        else
+        {
+            <div class="small text-secondary">Open a page to save or insert reusable blocks.</div>
+        }
     </div>
 
     <div class="card-body p-2 border-bottom">
@@ -48,6 +67,40 @@
     @if (!string.IsNullOrWhiteSpace(ErrorMessage))
     {
         <div class="small text-danger p-2 border-bottom">@ErrorMessage</div>
+    }
+
+    @if (BlockTemplates.Count == 0)
+    {
+        <div class="small text-secondary p-3">No block templates yet.</div>
+    }
+    else
+    {
+        <div class="list-group list-group-flush">
+            @foreach (var template in BlockTemplates)
+            {
+                <div class="list-group-item p-2">
+                    <div class="d-flex align-items-center gap-2">
+                        <span>▦</span>
+                        <div class="min-w-0 flex-grow-1">
+                            <div class="small fw-semibold text-truncate">@template.Name</div>
+                            <div class="small text-secondary text-truncate">@template.BlockCount blocks · @template.Preview</div>
+                        </div>
+                        @if (PendingBlockDeleteId == template.Id)
+                        {
+                            <button type="button" class="btn btn-xs btn-danger" @onclick="() => DeleteBlockTemplateAsync(template.Id)" disabled="@IsBusy">Confirm</button>
+                            <button type="button" class="btn btn-xs btn-link" @onclick="CancelBlockDelete" disabled="@IsBusy">Cancel</button>
+                        }
+                        else
+                        {
+                            <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => UseBlockTemplateAsync(template.Id)" disabled="@(IsBusy || !IsPageEditorActive)">Insert</button>
+                            <button type="button" class="btn btn-xs btn-link text-danger" @onclick="() => PendingBlockDeleteId = template.Id" disabled="@IsBusy" title="Delete block template">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
     }
 
     @if (Templates.Count == 0)
@@ -127,15 +180,21 @@
     [Parameter] public string CurrentPageTitle { get; set; } = string.Empty;
     [Parameter] public Guid? CurrentDatabaseId { get; set; }
     [Parameter] public string CurrentDatabaseTitle { get; set; } = string.Empty;
+    [Parameter] public bool IsPageEditorActive { get; set; }
+    [Parameter, EditorRequired] public Func<Task<string>> CaptureBlocks { get; set; } = default!;
     [Parameter] public EventCallback<Guid> OnPageCreated { get; set; }
     [Parameter] public EventCallback<Guid> OnDatabaseCreated { get; set; }
+    [Parameter] public EventCallback<string> OnBlocksInserted { get; set; }
 
     private List<SentinelPageTemplateView> Templates { get; set; } = new();
+    private List<SentinelBlockTemplateView> BlockTemplates { get; set; } = new();
     private List<SentinelDatabaseTemplateView> DatabaseTemplates { get; set; } = new();
     private string NewTemplateName { get; set; } = string.Empty;
+    private string NewBlockTemplateName { get; set; } = string.Empty;
     private string NewDatabaseTemplateName { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
     private Guid? PendingDeleteId { get; set; }
+    private Guid? PendingBlockDeleteId { get; set; }
     private Guid? PendingDatabaseDeleteId { get; set; }
     private bool IsBusy { get; set; }
     private Guid? _previousPageId;
@@ -151,6 +210,9 @@
             NewTemplateName = CurrentPageId.HasValue && !string.IsNullOrWhiteSpace(CurrentPageTitle)
                 ? $"{CurrentPageTitle} template"
                 : string.Empty;
+            NewBlockTemplateName = CurrentPageId.HasValue && !string.IsNullOrWhiteSpace(CurrentPageTitle)
+                ? $"{CurrentPageTitle} blocks"
+                : "Reusable blocks";
         }
 
         if (_previousDatabaseId != CurrentDatabaseId)
@@ -181,6 +243,21 @@
         await OnPageCreated.InvokeAsync(page.Id);
     });
 
+    private async Task SaveBlockTemplateAsync() => await RunAsync(async () =>
+    {
+        var blocksJson = await CaptureBlocks();
+        var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        await TemplateService.CreateBlockTemplateAsync(NewBlockTemplateName, blocksJson, user);
+        await LoadAsync();
+        NewBlockTemplateName = "Reusable blocks";
+    });
+
+    private async Task UseBlockTemplateAsync(Guid templateId) => await RunAsync(async () =>
+    {
+        var blocksJson = await TemplateService.MaterializeBlockTemplateAsync(templateId);
+        await OnBlocksInserted.InvokeAsync(blocksJson);
+    });
+
     private async Task SaveDatabaseTemplateAsync()
     {
         if (CurrentDatabaseId is not { } databaseId) return;
@@ -209,6 +286,15 @@
 
     private void CancelDelete() => PendingDeleteId = null;
 
+    private async Task DeleteBlockTemplateAsync(Guid templateId) => await RunAsync(async () =>
+    {
+        await TemplateService.DeleteBlockTemplateAsync(templateId);
+        PendingBlockDeleteId = null;
+        await LoadAsync();
+    });
+
+    private void CancelBlockDelete() => PendingBlockDeleteId = null;
+
     private async Task DeleteDatabaseTemplateAsync(Guid templateId) => await RunAsync(async () =>
     {
         await TemplateService.DeleteDatabaseTemplateAsync(templateId);
@@ -221,6 +307,7 @@
     private async Task LoadAsync()
     {
         Templates = (await TemplateService.ListAsync()).ToList();
+        BlockTemplates = (await TemplateService.ListBlockTemplatesAsync()).ToList();
         DatabaseTemplates = (await TemplateService.ListDatabaseTemplatesAsync()).ToList();
     }
 

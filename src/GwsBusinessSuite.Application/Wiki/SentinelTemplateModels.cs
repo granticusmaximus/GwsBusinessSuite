@@ -22,6 +22,14 @@ public sealed record SentinelDatabaseTemplateView(
     DateTimeOffset CreatedAt,
     string CreatedBy);
 
+public sealed record SentinelBlockTemplateView(
+    Guid Id,
+    string Name,
+    int BlockCount,
+    string Preview,
+    DateTimeOffset CreatedAt,
+    string CreatedBy);
+
 public interface ISentinelTemplateService
 {
     Task<IReadOnlyList<SentinelPageTemplateView>> ListAsync(
@@ -40,6 +48,23 @@ public interface ISentinelTemplateService
         CancellationToken cancellationToken = default);
 
     Task DeleteAsync(
+        Guid templateId,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<SentinelBlockTemplateView>> ListBlockTemplatesAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<SentinelBlockTemplateView> CreateBlockTemplateAsync(
+        string name,
+        string blocksJson,
+        string performedBy,
+        CancellationToken cancellationToken = default);
+
+    Task<string> MaterializeBlockTemplateAsync(
+        Guid templateId,
+        CancellationToken cancellationToken = default);
+
+    Task DeleteBlockTemplateAsync(
         Guid templateId,
         CancellationToken cancellationToken = default);
 

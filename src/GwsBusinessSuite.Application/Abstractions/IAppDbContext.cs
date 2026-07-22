@@ -11,6 +11,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<WikiPage> WikiPages { get; }
     DbSet<WikiPageRevision> WikiPageRevisions { get; }
     DbSet<SentinelPageTemplate> SentinelPageTemplates { get; }
+    DbSet<SentinelBlockTemplate> SentinelBlockTemplates { get; }
     DbSet<SentinelDatabaseTemplate> SentinelDatabaseTemplates { get; }
     DbSet<SentinelNavigationEntry> SentinelNavigationEntries { get; }
     DbSet<SentinelDiscussion> SentinelDiscussions { get; }
