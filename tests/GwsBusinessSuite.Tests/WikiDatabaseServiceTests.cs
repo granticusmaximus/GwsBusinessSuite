@@ -209,6 +209,142 @@ public sealed class WikiDatabaseServiceTests
     }
 
     [Fact]
+    public async Task SavePropertyAsync_ShouldCreateAPairedReciprocalRelation()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var projects = await service.CreateDatabaseAsync("Projects", null, "u");
+        var teams = await service.CreateDatabaseAsync("Teams", null, "u");
+
+        var teamRelation = await service.SavePropertyAsync(projects.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Team",
+            Type = WikiDatabasePropertyTypes.Relation,
+            RelatedDatabaseId = teams.Id,
+            ReciprocalRelationEnabled = true,
+            ReciprocalPropertyName = "Projects"
+        }, "u");
+
+        var sourceConfig = WikiDatabasePropertyConfig.Parse(teamRelation);
+        sourceConfig.ReciprocalPropertyId.Should().NotBeNull();
+        var reciprocal = await db.WikiDatabaseProperties.AsNoTracking()
+            .SingleAsync(property => property.Id == sourceConfig.ReciprocalPropertyId);
+        reciprocal.WikiDatabaseId.Should().Be(teams.Id);
+        reciprocal.Name.Should().Be("Projects");
+        var reciprocalConfig = WikiDatabasePropertyConfig.Parse(reciprocal);
+        reciprocalConfig.RelatedDatabaseId.Should().Be(projects.Id);
+        reciprocalConfig.ReciprocalPropertyId.Should().Be(teamRelation.Id);
+    }
+
+    [Fact]
+    public async Task SaveRowAsync_ShouldSynchronizeReciprocalRelationsFromEitherSide()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var projects = await service.CreateDatabaseAsync("Projects", null, "u");
+        var teams = await service.CreateDatabaseAsync("Teams", null, "u");
+        var teamRelation = await service.SavePropertyAsync(projects.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Team",
+            Type = WikiDatabasePropertyTypes.Relation,
+            RelatedDatabaseId = teams.Id,
+            ReciprocalRelationEnabled = true,
+            ReciprocalPropertyName = "Projects"
+        }, "u");
+        var reciprocalId = WikiDatabasePropertyConfig.Parse(teamRelation).ReciprocalPropertyId!.Value;
+        var project = await service.SaveRowAsync(projects.Id, new WikiDatabaseRowEditor(), "u");
+        var team = await service.SaveRowAsync(teams.Id, new WikiDatabaseRowEditor(), "u");
+
+        var projectValues = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetMultiSelect(projectValues, teamRelation.Id, [team.Id.ToString()]);
+        await service.SaveRowAsync(projects.Id, new WikiDatabaseRowEditor
+        {
+            Id = project.Id,
+            Values = projectValues.ToDictionary(item => item.Key, item => item.Value)
+        }, "u");
+
+        var reloadedTeam = (await service.GetDatabaseAsync(teams.Id))!.Rows.Single();
+        WikiPropertyValues.GetMultiSelect(
+            WikiPropertyValues.ParseObject(reloadedTeam.PropertyValuesJson), reciprocalId)
+            .Should().Equal(project.Id.ToString());
+
+        var reverseValues = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetMultiSelect(reverseValues, reciprocalId, []);
+        await service.SaveRowAsync(teams.Id, new WikiDatabaseRowEditor
+        {
+            Id = team.Id,
+            Values = reverseValues.ToDictionary(item => item.Key, item => item.Value)
+        }, "u");
+
+        var reloadedProject = (await service.GetDatabaseAsync(projects.Id))!.Rows.Single();
+        WikiPropertyValues.GetMultiSelect(
+            WikiPropertyValues.ParseObject(reloadedProject.PropertyValuesJson), teamRelation.Id)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SavePropertyAsync_ShouldRemoveThePairedPropertyWhenReciprocalIsDisabled()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var projects = await service.CreateDatabaseAsync("Projects", null, "u");
+        var teams = await service.CreateDatabaseAsync("Teams", null, "u");
+        var teamRelation = await service.SavePropertyAsync(projects.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Team",
+            Type = WikiDatabasePropertyTypes.Relation,
+            RelatedDatabaseId = teams.Id,
+            ReciprocalRelationEnabled = true
+        }, "u");
+        var reciprocalId = WikiDatabasePropertyConfig.Parse(teamRelation).ReciprocalPropertyId!.Value;
+
+        var updated = await service.SavePropertyAsync(projects.Id, new WikiDatabasePropertyEditor
+        {
+            Id = teamRelation.Id,
+            Name = teamRelation.Name,
+            Type = teamRelation.Type,
+            RelatedDatabaseId = teams.Id,
+            ReciprocalPropertyId = reciprocalId,
+            ReciprocalRelationEnabled = false
+        }, "u");
+
+        WikiDatabasePropertyConfig.Parse(updated).ReciprocalPropertyId.Should().BeNull();
+        (await db.WikiDatabaseProperties.AnyAsync(property => property.Id == reciprocalId)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DeleteRowAsync_ShouldRemoveReferencesToTheDeletedRow()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var projects = await service.CreateDatabaseAsync("Projects", null, "u");
+        var teams = await service.CreateDatabaseAsync("Teams", null, "u");
+        var relation = await service.SavePropertyAsync(projects.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Team",
+            Type = WikiDatabasePropertyTypes.Relation,
+            RelatedDatabaseId = teams.Id,
+            ReciprocalRelationEnabled = true
+        }, "u");
+        var project = await service.SaveRowAsync(projects.Id, new WikiDatabaseRowEditor(), "u");
+        var team = await service.SaveRowAsync(teams.Id, new WikiDatabaseRowEditor(), "u");
+        var values = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetMultiSelect(values, relation.Id, [team.Id.ToString()]);
+        await service.SaveRowAsync(projects.Id, new WikiDatabaseRowEditor
+        {
+            Id = project.Id,
+            Values = values.ToDictionary(item => item.Key, item => item.Value)
+        }, "u");
+
+        await service.DeleteRowAsync(teams.Id, team.Id, "u");
+
+        var reloadedProject = (await service.GetDatabaseAsync(projects.Id))!.Rows.Single();
+        WikiPropertyValues.GetMultiSelect(
+            WikiPropertyValues.ParseObject(reloadedProject.PropertyValuesJson), relation.Id)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task SaveRowAsync_ShouldPersistPageBlocksAndPreserveThemDuringPropertyOnlyEdits()
     {
         await using var db = await CreateDbAsync();
@@ -434,6 +570,34 @@ public sealed class WikiDatabaseServiceTests
     }
 
     [Fact]
+    public async Task DuplicateDatabaseAsync_ShouldKeepSelfReciprocalRelationsInsideTheCopy()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var source = await service.CreateDatabaseAsync("People", null, "u");
+        await service.SavePropertyAsync(source.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Manager",
+            Type = WikiDatabasePropertyTypes.Relation,
+            RelatedDatabaseId = source.Id,
+            ReciprocalRelationEnabled = true,
+            ReciprocalPropertyName = "Reports"
+        }, "u");
+
+        var duplicate = await service.DuplicateDatabaseAsync(source.Id, "u");
+        var reloaded = await service.GetDatabaseAsync(duplicate.Id);
+
+        var manager = reloaded!.Properties.Single(property => property.Name == "Manager");
+        var reports = reloaded.Properties.Single(property => property.Name == "Reports");
+        var managerConfig = WikiDatabasePropertyConfig.Parse(manager);
+        var reportsConfig = WikiDatabasePropertyConfig.Parse(reports);
+        managerConfig.RelatedDatabaseId.Should().Be(duplicate.Id);
+        reportsConfig.RelatedDatabaseId.Should().Be(duplicate.Id);
+        managerConfig.ReciprocalPropertyId.Should().Be(reports.Id);
+        reportsConfig.ReciprocalPropertyId.Should().Be(manager.Id);
+    }
+
+    [Fact]
     public async Task DeleteDatabaseAsync_ShouldCascadeDeletePropertiesRowsAndViews()
     {
         await using var db = await CreateDbAsync();
@@ -446,6 +610,27 @@ public sealed class WikiDatabaseServiceTests
         (await db.WikiDatabaseProperties.Where(p => p.WikiDatabaseId == database.Id).ToListAsync()).Should().BeEmpty();
         (await db.WikiDatabaseRows.Where(r => r.WikiDatabaseId == database.Id).ToListAsync()).Should().BeEmpty();
         (await db.WikiDatabaseViews.Where(v => v.WikiDatabaseId == database.Id).ToListAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DeleteDatabaseAsync_ShouldRemoveReciprocalPropertiesFromOtherDatabases()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var projects = await service.CreateDatabaseAsync("Projects", null, "u");
+        var teams = await service.CreateDatabaseAsync("Teams", null, "u");
+        var relation = await service.SavePropertyAsync(projects.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Team",
+            Type = WikiDatabasePropertyTypes.Relation,
+            RelatedDatabaseId = teams.Id,
+            ReciprocalRelationEnabled = true
+        }, "u");
+        var reciprocalId = WikiDatabasePropertyConfig.Parse(relation).ReciprocalPropertyId!.Value;
+
+        await service.DeleteDatabaseAsync(projects.Id, "u");
+
+        (await db.WikiDatabaseProperties.AnyAsync(property => property.Id == reciprocalId)).Should().BeFalse();
     }
 
     [Fact]

@@ -83,15 +83,38 @@ else
                             }
                             else if (property.Type == WikiDatabasePropertyTypes.Relation)
                             {
+                                var relationConfig = WikiDatabasePropertyConfig.Parse(property);
+                                var reciprocalProperty = GetReciprocalProperty(property);
                                 <div class="col-12">
                                     <label class="form-label small text-secondary mb-1">Related database</label>
-                                    <select class="form-select form-select-sm" value="@WikiDatabasePropertyConfig.Parse(property).RelatedDatabaseId"
+                                    <select class="form-select form-select-sm" value="@relationConfig.RelatedDatabaseId"
                                             @onchange="e => SetRelationDatabaseAsync(property, e.Value?.ToString())" disabled="@IsBusy">
                                         @foreach (var databaseChoice in _databaseChoices)
                                         {
                                             <option value="@databaseChoice.Id">@(databaseChoice.Icon ?? "🗄️") @databaseChoice.Title</option>
                                         }
                                     </select>
+                                    @if (reciprocalProperty is null)
+                                    {
+                                        <button type="button" class="btn btn-sm btn-link px-0 mt-1"
+                                                @onclick="() => EnableReciprocalRelationAsync(property)" disabled="@IsBusy">
+                                            <i class="bi bi-arrow-left-right me-1"></i>Add reciprocal property
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <div class="sentinel-reciprocal-editor mt-2">
+                                            <i class="bi bi-arrow-left-right text-success" title="Two-way relation"></i>
+                                            <input class="form-control form-control-sm" value="@reciprocalProperty.Name"
+                                                   @onchange="e => RenameReciprocalRelationAsync(property, e.Value?.ToString() ?? string.Empty)"
+                                                   disabled="@IsBusy" aria-label="Reciprocal property name" />
+                                            <button type="button" class="btn btn-sm btn-link text-danger"
+                                                    @onclick="() => DisableReciprocalRelationAsync(property)" disabled="@IsBusy"
+                                                    title="Make this relation one-way">
+                                                Remove reciprocal
+                                            </button>
+                                        </div>
+                                    }
                                 </div>
                             }
                             else if (property.Type == WikiDatabasePropertyTypes.Rollup)
@@ -159,6 +182,15 @@ else
                                         <option value="@databaseChoice.Id">@(databaseChoice.Icon ?? "🗄️") @databaseChoice.Title</option>
                                     }
                                 </select>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="new-reciprocal-relation" @bind="_newReciprocalRelationEnabled" />
+                                    <label class="form-check-label small" for="new-reciprocal-relation">Show on the related database</label>
+                                </div>
+                                @if (_newReciprocalRelationEnabled)
+                                {
+                                    <input class="form-control form-control-sm mb-2" placeholder="Reciprocal property name (defaults to this database)"
+                                           @bind="_newReciprocalPropertyName" />
+                                }
                             }
                             else if (_newPropertyType == WikiDatabasePropertyTypes.Rollup)
                             {
@@ -540,6 +572,8 @@ else
     private string _newPropertyType = WikiDatabasePropertyTypes.Text;
     private string _newFormulaExpression = "0";
     private Guid? _newRelatedDatabaseId;
+    private bool _newReciprocalRelationEnabled;
+    private string _newReciprocalPropertyName = string.Empty;
     private List<WikiDatabase> _databaseChoices = [];
     private readonly Dictionary<Guid, WikiDatabase> _relatedDatabases = [];
     private DateOnly _calendarMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
@@ -656,7 +690,13 @@ else
                 Type = _newPropertyType,
                 Options = [],
                 FormulaExpression = _newPropertyType == WikiDatabasePropertyTypes.Formula ? _newFormulaExpression : null,
-                RelatedDatabaseId = _newPropertyType == WikiDatabasePropertyTypes.Relation ? _newRelatedDatabaseId : null
+                RelatedDatabaseId = _newPropertyType == WikiDatabasePropertyTypes.Relation ? _newRelatedDatabaseId : null,
+                ReciprocalRelationEnabled = _newPropertyType == WikiDatabasePropertyTypes.Relation
+                    ? _newReciprocalRelationEnabled
+                    : null,
+                ReciprocalPropertyName = _newPropertyType == WikiDatabasePropertyTypes.Relation
+                    ? _newReciprocalPropertyName
+                    : null
             };
             if (_newPropertyType == WikiDatabasePropertyTypes.Rollup)
             {
@@ -671,6 +711,8 @@ else
             }
             await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, user);
             _newPropertyName = string.Empty;
+            _newReciprocalRelationEnabled = false;
+            _newReciprocalPropertyName = string.Empty;
             await ReloadAsync();
         });
     }
@@ -711,6 +753,32 @@ else
     {
         var editor = CreatePropertyEditor(property);
         editor.RelatedDatabaseId = Guid.TryParse(rawDatabaseId, out var databaseId) ? databaseId : null;
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, await CurrentUserNameAsync());
+        await ReloadAsync();
+    });
+
+    private async Task EnableReciprocalRelationAsync(WikiDatabaseProperty property) => await Work(async () =>
+    {
+        var editor = CreatePropertyEditor(property);
+        editor.ReciprocalRelationEnabled = true;
+        editor.ReciprocalPropertyName = Database?.Title;
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, await CurrentUserNameAsync());
+        await ReloadAsync();
+    });
+
+    private async Task RenameReciprocalRelationAsync(WikiDatabaseProperty property, string name) => await Work(async () =>
+    {
+        var editor = CreatePropertyEditor(property);
+        editor.ReciprocalRelationEnabled = true;
+        editor.ReciprocalPropertyName = name;
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, await CurrentUserNameAsync());
+        await ReloadAsync();
+    });
+
+    private async Task DisableReciprocalRelationAsync(WikiDatabaseProperty property) => await Work(async () =>
+    {
+        var editor = CreatePropertyEditor(property);
+        editor.ReciprocalRelationEnabled = false;
         await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, await CurrentUserNameAsync());
         await ReloadAsync();
     });
@@ -1019,10 +1087,19 @@ else
             Options = config.Options,
             FormulaExpression = config.FormulaExpression,
             RelatedDatabaseId = config.RelatedDatabaseId,
+            ReciprocalPropertyId = config.ReciprocalPropertyId,
             RelationPropertyId = config.RelationPropertyId,
             RollupPropertyId = config.RollupPropertyId,
             RollupAggregation = config.RollupAggregation
         };
+    }
+
+    private WikiDatabaseProperty? GetReciprocalProperty(WikiDatabaseProperty relationProperty)
+    {
+        var config = WikiDatabasePropertyConfig.Parse(relationProperty);
+        return config.ReciprocalPropertyId is { } reciprocalId
+            ? GetRelatedDatabase(relationProperty)?.Properties.FirstOrDefault(property => property.Id == reciprocalId)
+            : null;
     }
 
     private static string GetDatabaseRowTitle(WikiDatabase database, WikiDatabaseRow row)

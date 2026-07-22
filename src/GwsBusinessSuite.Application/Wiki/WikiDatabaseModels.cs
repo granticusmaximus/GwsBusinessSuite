@@ -10,11 +10,12 @@ public sealed record WikiDatabasePropertyConfiguration(
     IReadOnlyList<WikiDatabasePropertyOption> Options,
     string? FormulaExpression,
     Guid? RelatedDatabaseId,
+    Guid? ReciprocalPropertyId,
     Guid? RelationPropertyId,
     Guid? RollupPropertyId,
     string? RollupAggregation)
 {
-    public static WikiDatabasePropertyConfiguration Empty { get; } = new([], null, null, null, null, null);
+    public static WikiDatabasePropertyConfiguration Empty { get; } = new([], null, null, null, null, null, null);
 }
 
 public static class WikiDatabaseRollupAggregations
@@ -103,6 +104,11 @@ public sealed class WikiDatabasePropertyEditor
     public IReadOnlyList<WikiDatabasePropertyOption> Options { get; set; } = [];
     public string? FormulaExpression { get; set; }
     public Guid? RelatedDatabaseId { get; set; }
+    public Guid? ReciprocalPropertyId { get; set; }
+    // Null preserves the current reciprocal setting; true creates/updates the paired
+    // property; false removes both sides of the pairing. This command flag is not persisted.
+    public bool? ReciprocalRelationEnabled { get; set; }
+    public string? ReciprocalPropertyName { get; set; }
     public Guid? RelationPropertyId { get; set; }
     public Guid? RollupPropertyId { get; set; }
     public string? RollupAggregation { get; set; }
@@ -239,7 +245,8 @@ public static class WikiDatabasePropertyConfig
                 ? WikiDatabasePropertyConfiguration.Empty
                 : new WikiDatabasePropertyConfiguration(
                     parsed.Options ?? [], parsed.FormulaExpression, parsed.RelatedDatabaseId,
-                    parsed.RelationPropertyId, parsed.RollupPropertyId, parsed.RollupAggregation);
+                    parsed.ReciprocalPropertyId, parsed.RelationPropertyId,
+                    parsed.RollupPropertyId, parsed.RollupAggregation);
         }
         catch (JsonException) { return WikiDatabasePropertyConfiguration.Empty; }
     }
@@ -248,13 +255,14 @@ public static class WikiDatabasePropertyConfig
         => Parse(property).Options;
 
     public static string Serialize(IReadOnlyList<WikiDatabasePropertyOption> options) =>
-        Serialize(new WikiDatabasePropertyConfiguration(options, null, null, null, null, null));
+        Serialize(new WikiDatabasePropertyConfiguration(options, null, null, null, null, null, null));
 
     public static string Serialize(WikiDatabasePropertyConfiguration configuration) =>
         JsonSerializer.Serialize(new PropertyConfigDto(
             configuration.Options,
             configuration.FormulaExpression,
             configuration.RelatedDatabaseId,
+            configuration.ReciprocalPropertyId,
             configuration.RelationPropertyId,
             configuration.RollupPropertyId,
             configuration.RollupAggregation), WikiPropertyValues.Options);
@@ -263,6 +271,7 @@ public static class WikiDatabasePropertyConfig
         IReadOnlyList<WikiDatabasePropertyOption>? Options,
         string? FormulaExpression = null,
         Guid? RelatedDatabaseId = null,
+        Guid? ReciprocalPropertyId = null,
         Guid? RelationPropertyId = null,
         Guid? RollupPropertyId = null,
         string? RollupAggregation = null);
