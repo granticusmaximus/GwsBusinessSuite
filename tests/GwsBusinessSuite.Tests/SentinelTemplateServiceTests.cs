@@ -149,7 +149,12 @@ public sealed class SentinelTemplateServiceTests
                     [new WikiRichTextSpan("Launch checklist")], new Dictionary<string, string>())])
         }, "Owner");
         await fixture.DatabaseService.SaveViewAsync(source.Id, null, "Board", WikiDatabaseViewTypes.Board,
-            new WikiDatabaseViewConfig([], [], status.Id.ToString()), "Owner");
+            new WikiDatabaseViewConfig(
+                [],
+                [],
+                status.Id.ToString(),
+                WikiDatabaseOpenPageModes.CenterPeek),
+            "Owner");
 
         var template = await fixture.TemplateService.CreateFromDatabaseAsync(
             source.Id, "Launch database", "Owner");
@@ -172,8 +177,10 @@ public sealed class SentinelTemplateServiceTests
         var copiedValues = WikiPropertyValues.ParseObject(reloaded.Rows.Single().PropertyValuesJson);
         WikiPropertyValues.GetText(copiedValues, copiedTitle.Id).Should().Be("Public beta");
         WikiPropertyValues.GetText(copiedValues, copiedStatus.Id).Should().Be("active");
-        WikiDatabaseViewConfigJson.Parse(reloaded.Views.Single(view => view.Type == WikiDatabaseViewTypes.Board).ConfigJson)
-            .GroupByPropertyId.Should().Be(copiedStatus.Id.ToString());
+        var copiedBoardConfig = WikiDatabaseViewConfigJson.Parse(
+            reloaded.Views.Single(view => view.Type == WikiDatabaseViewTypes.Board).ConfigJson);
+        copiedBoardConfig.GroupByPropertyId.Should().Be(copiedStatus.Id.ToString());
+        copiedBoardConfig.OpenPageMode.Should().Be(WikiDatabaseOpenPageModes.CenterPeek);
         (await fixture.TemplateService.ListDatabaseTemplatesAsync()).Should().ContainSingle(item =>
             item.Id == template.Id && item.PropertyCount == 2 && item.RowCount == 1 && item.ViewCount == 2);
     }

@@ -8,55 +8,68 @@
 @inject IJSRuntime JS
 @inject ILogger<SentinelDatabaseRowPage> Logger
 
-<div class="modal d-block sentinel-row-page-modal" tabindex="-1" role="dialog" aria-modal="true">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <div class="min-w-0">
-                    <div class="small text-secondary text-truncate">@(Database.Icon ?? "🗄️") @Database.Title</div>
-                    <h5 class="modal-title text-truncate">@RowTitle</h5>
-                </div>
-                <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAsync"></button>
+<div class="@($"sentinel-row-page-host {OpenModeClass}")" role="dialog" aria-modal="true" aria-label="@($"{RowTitle} database page")">
+    @if (ResolvedOpenMode != WikiDatabaseOpenPageModes.FullPage)
+    {
+        <button type="button" class="sentinel-row-page-backdrop" aria-label="Close database page" @onclick="CloseAsync"></button>
+    }
+
+    <section class="sentinel-row-page-panel">
+        <header class="sentinel-row-page-header">
+            <div class="min-w-0">
+                <div class="small text-secondary text-truncate">@(Database.Icon ?? "🗄️") @Database.Title</div>
+                <h2 class="sentinel-row-page-title text-truncate">@RowTitle</h2>
             </div>
-            <div class="modal-body">
+            <div class="sentinel-row-page-header-actions">
+                <span class="sentinel-row-page-mode-label">@OpenModeLabel</span>
+                <button type="button" class="btn btn-sm btn-light sentinel-row-page-close" aria-label="Close" @onclick="CloseAsync">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+        </header>
+
+        <div class="sentinel-row-page-body">
+            <div class="sentinel-row-page-content">
                 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
                 {
                     <div class="alert alert-danger">@ErrorMessage</div>
                 }
 
-                <div class="row g-2 mb-4">
+                <div class="sentinel-row-page-properties">
                     @foreach (var property in Database.Properties.OrderBy(property => property.SortOrder))
                     {
                         var display = WikiPropertyValues.GetDisplayText(property, Values, Row.CreatedAt);
-                        <div class="col-md-6">
-                            <div class="border rounded-3 p-2 h-100">
-                                <div class="small text-secondary">@property.Name</div>
-                                <div class="text-truncate">@(string.IsNullOrWhiteSpace(display) ? "—" : display)</div>
-                            </div>
+                        <div class="sentinel-row-page-property">
+                            <div class="sentinel-row-page-property-name">@property.Name</div>
+                            <div class="sentinel-row-page-property-value" title="@display">@(string.IsNullOrWhiteSpace(display) ? "—" : display)</div>
                         </div>
                     }
                 </div>
 
-                <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+                <div class="sentinel-row-page-editor-heading">
                     <label class="form-label fw-semibold mb-0">Page content</label>
                     <span class="small text-secondary">Type <code>/</code> for blocks and <code>[[</code> for page links</span>
                 </div>
                 <div class="wiki-block-editor sentinel-row-block-editor" @ref="_editorContainer"></div>
             </div>
-            <div class="modal-footer">
+        </div>
+
+        <footer class="sentinel-row-page-footer">
+            <span class="small text-secondary">Changes are saved when you choose Save page.</span>
+            <div class="d-flex align-items-center gap-2">
                 <button type="button" class="btn btn-outline-secondary" @onclick="CloseAsync" disabled="@IsBusy">Close</button>
                 <button type="button" class="btn btn-primary" @onclick="SaveAsync" disabled="@IsBusy">
                     <i class="bi bi-floppy-fill me-1"></i>Save page
                 </button>
             </div>
-        </div>
-    </div>
-    <div class="modal-backdrop show" style="z-index:-1"></div>
+        </footer>
+    </section>
 </div>
 
 @code {
     [Parameter, EditorRequired] public required WikiDatabase Database { get; set; }
     [Parameter, EditorRequired] public required WikiDatabaseRow Row { get; set; }
+    [Parameter] public string OpenMode { get; set; } = WikiDatabaseOpenPageModes.SidePeek;
     [Parameter] public EventCallback OnSaved { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
 
@@ -73,6 +86,19 @@
     private string RowTitle => TitleProperty is null
         ? "Untitled"
         : WikiPropertyValues.GetText(Values, TitleProperty.Id) is { Length: > 0 } title ? title : "Untitled";
+    private string ResolvedOpenMode => WikiDatabaseOpenPageModes.Resolve(OpenMode, string.Empty);
+    private string OpenModeClass => ResolvedOpenMode switch
+    {
+        WikiDatabaseOpenPageModes.CenterPeek => "sentinel-row-page-center",
+        WikiDatabaseOpenPageModes.FullPage => "sentinel-row-page-full",
+        _ => "sentinel-row-page-side"
+    };
+    private string OpenModeLabel => ResolvedOpenMode switch
+    {
+        WikiDatabaseOpenPageModes.CenterPeek => "Center peek",
+        WikiDatabaseOpenPageModes.FullPage => "Full page",
+        _ => "Side peek"
+    };
 
     protected override void OnParametersSet() => _blocksJson = Row.BlocksJson;
 

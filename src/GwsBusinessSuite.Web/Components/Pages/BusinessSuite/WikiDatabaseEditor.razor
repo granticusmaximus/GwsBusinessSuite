@@ -269,6 +269,42 @@ else
                 }
             </ul>
 
+            @if (ActiveView is not null)
+            {
+                <div class="sentinel-view-layout-bar" aria-label="Database page layout">
+                    <span class="sentinel-view-layout-label">
+                        <i class="bi bi-layout-sidebar-inset-reverse"></i>
+                        Open pages in
+                    </span>
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Choose how database pages open">
+                        <button type="button"
+                                class="btn @(ActiveOpenPageMode == WikiDatabaseOpenPageModes.SidePeek ? "btn-secondary" : "btn-outline-secondary")"
+                                aria-pressed="@(ActiveOpenPageMode == WikiDatabaseOpenPageModes.SidePeek)"
+                                title="Open pages in a panel beside the database"
+                                disabled="@IsBusy"
+                                @onclick="() => SetOpenPageModeAsync(WikiDatabaseOpenPageModes.SidePeek)">
+                            <i class="bi bi-layout-sidebar-reverse me-1"></i>Side peek
+                        </button>
+                        <button type="button"
+                                class="btn @(ActiveOpenPageMode == WikiDatabaseOpenPageModes.CenterPeek ? "btn-secondary" : "btn-outline-secondary")"
+                                aria-pressed="@(ActiveOpenPageMode == WikiDatabaseOpenPageModes.CenterPeek)"
+                                title="Open pages in a centered overlay"
+                                disabled="@IsBusy"
+                                @onclick="() => SetOpenPageModeAsync(WikiDatabaseOpenPageModes.CenterPeek)">
+                            <i class="bi bi-window-stack me-1"></i>Center peek
+                        </button>
+                        <button type="button"
+                                class="btn @(ActiveOpenPageMode == WikiDatabaseOpenPageModes.FullPage ? "btn-secondary" : "btn-outline-secondary")"
+                                aria-pressed="@(ActiveOpenPageMode == WikiDatabaseOpenPageModes.FullPage)"
+                                title="Open pages in a focused full-page workspace"
+                                disabled="@IsBusy"
+                                @onclick="() => SetOpenPageModeAsync(WikiDatabaseOpenPageModes.FullPage)">
+                            <i class="bi bi-arrows-fullscreen me-1"></i>Full page
+                        </button>
+                    </div>
+                </div>
+            }
+
             @{ var titleProperty = Database.Properties.First(p => p.Type == WikiDatabasePropertyTypes.Title); }
 
             @if (ActiveView is { Type: WikiDatabaseViewTypes.Board })
@@ -557,7 +593,11 @@ else
 
 @if (Database is not null && _openRow is not null)
 {
-    <SentinelDatabaseRowPage Database="Database" Row="_openRow" OnSaved="RowPageSavedAsync" OnClose="CloseRow" />
+    <SentinelDatabaseRowPage Database="Database"
+                             Row="_openRow"
+                             OpenMode="@ActiveOpenPageMode"
+                             OnSaved="RowPageSavedAsync"
+                             OnClose="CloseRow" />
 }
 
 @code {
@@ -607,6 +647,9 @@ else
     private WikiDatabaseView? ActiveView =>
         Database?.Views.FirstOrDefault(v => v.Id == _activeViewId) ?? Database?.Views.OrderBy(v => v.SortOrder).FirstOrDefault();
     private WikiDatabaseViewConfig? ActiveViewConfig => ActiveView is null ? null : WikiDatabaseViewConfigJson.Parse(ActiveView.ConfigJson);
+    private string ActiveOpenPageMode => ActiveView is null
+        ? WikiDatabaseOpenPageModes.SidePeek
+        : WikiDatabaseOpenPageModes.Resolve(ActiveViewConfig?.OpenPageMode, ActiveView.Type);
     private IReadOnlyList<WikiDatabaseProperty> RelationProperties =>
         Database?.Properties.Where(property => property.Type == WikiDatabasePropertyTypes.Relation).OrderBy(property => property.SortOrder).ToList() ?? [];
 
@@ -981,6 +1024,38 @@ else
     {
         await ReloadAsync();
         await OnChanged.InvokeAsync();
+    }
+
+    private async Task SetOpenPageModeAsync(string openPageMode)
+    {
+        if (ActiveView is not { } activeView)
+        {
+            return;
+        }
+
+        var normalizedMode = WikiDatabaseOpenPageModes.Resolve(openPageMode, activeView.Type);
+        if (normalizedMode == ActiveOpenPageMode)
+        {
+            return;
+        }
+
+        await Work(async () =>
+        {
+            var config = WikiDatabaseViewConfigJson.Parse(activeView.ConfigJson) with
+            {
+                OpenPageMode = normalizedMode
+            };
+            await WikiDatabaseService.SaveViewAsync(
+                WikiDatabaseId,
+                activeView.Id,
+                activeView.Name,
+                activeView.Type,
+                config,
+                await CurrentUserNameAsync());
+            await ReloadAsync();
+            _activeViewId = activeView.Id;
+            await OnChanged.InvokeAsync();
+        });
     }
 
     private async Task RowPageSavedAsync()

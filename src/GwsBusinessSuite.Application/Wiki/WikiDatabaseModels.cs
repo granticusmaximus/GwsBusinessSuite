@@ -36,12 +36,34 @@ public sealed record WikiDatabaseFilter(string PropertyId, string Operator, stri
 
 public sealed record WikiDatabaseSort(string PropertyId, string Direction);
 
+public static class WikiDatabaseOpenPageModes
+{
+    public const string SidePeek = "sidePeek";
+    public const string CenterPeek = "centerPeek";
+    public const string FullPage = "fullPage";
+
+    public static IReadOnlyList<string> All { get; } = [SidePeek, CenterPeek, FullPage];
+
+    public static string Resolve(string? mode, string viewType)
+    {
+        if (All.Contains(mode, StringComparer.Ordinal))
+        {
+            return mode!;
+        }
+
+        return viewType is WikiDatabaseViewTypes.Gallery or WikiDatabaseViewTypes.Calendar
+            ? CenterPeek
+            : SidePeek;
+    }
+}
+
 public sealed record WikiDatabaseViewConfig(
     IReadOnlyList<WikiDatabaseFilter> Filters,
     IReadOnlyList<WikiDatabaseSort> Sorts,
-    string? GroupByPropertyId)
+    string? GroupByPropertyId,
+    string? OpenPageMode = null)
 {
-    public static WikiDatabaseViewConfig Empty { get; } = new([], [], null);
+    public static WikiDatabaseViewConfig Empty { get; } = new([], [], null, null);
 }
 
 public sealed record WikiDatabaseTemplateProperty(
@@ -88,7 +110,11 @@ public static class WikiDatabaseViewConfigJson
             var parsed = JsonSerializer.Deserialize<WikiDatabaseViewConfig>(configJson, WikiPropertyValues.Options);
             return parsed is null
                 ? WikiDatabaseViewConfig.Empty
-                : new WikiDatabaseViewConfig(parsed.Filters ?? [], parsed.Sorts ?? [], parsed.GroupByPropertyId);
+                : new WikiDatabaseViewConfig(
+                    parsed.Filters ?? [],
+                    parsed.Sorts ?? [],
+                    parsed.GroupByPropertyId,
+                    parsed.OpenPageMode);
         }
         catch (JsonException) { return WikiDatabaseViewConfig.Empty; }
     }

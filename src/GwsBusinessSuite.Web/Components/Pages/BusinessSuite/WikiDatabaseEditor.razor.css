@@ -27,6 +27,28 @@
     cursor: grabbing;
 }
 
+.sentinel-view-layout-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: .65rem;
+    margin: -.25rem 0 1rem;
+}
+
+.sentinel-view-layout-label {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    color: var(--bs-secondary-color);
+    font-size: .78rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.sentinel-view-layout-bar .btn {
+    min-height: 2rem;
+}
+
 .sentinel-relation-picker {
     position: relative;
     min-width: 11rem;
@@ -131,6 +153,24 @@
 
     .wiki-db-actions .btn {
         flex: 1 1 auto;
+    }
+
+    .sentinel-view-layout-bar {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .sentinel-view-layout-bar .btn-group {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        width: 100%;
+    }
+
+    .sentinel-view-layout-bar .btn {
+        overflow: hidden;
+        padding-inline: .35rem;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .sentinel-formula-reference-grid {
