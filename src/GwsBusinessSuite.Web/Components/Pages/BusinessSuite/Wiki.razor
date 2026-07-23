@@ -517,7 +517,10 @@
                     <label class="form-label fw-semibold small">Integration token</label>
                     <div class="input-group">
                         <input class="form-control" type="@(ShowNotionToken ? "text" : "password")"
-                               @bind="NotionSettings.IntegrationToken" autocomplete="off" />
+                               @bind="NotionSettings.IntegrationToken" autocomplete="new-password"
+                               placeholder="@(NotionSettings.HasStoredIntegrationToken
+                                   ? "Token saved securely — enter a replacement only to rotate it"
+                                   : "Paste a Notion internal integration token")" />
                         <button type="button" class="btn btn-outline-secondary" title="@(ShowNotionToken ? "Hide token" : "Show token")"
                                 @onclick="() => ShowNotionToken = !ShowNotionToken">
                             <i class="bi @(ShowNotionToken ? "bi-eye-slash-fill" : "bi-eye-fill")"></i>
@@ -529,6 +532,19 @@
                             The stored token can no longer be decrypted. Enter it again to reconnect.
                         </div>
                     }
+                    else if (NotionSettings.HasStoredIntegrationToken)
+                    {
+                        <div class="form-text">
+                            A token is stored encrypted on the server and is never returned to this browser.
+                        </div>
+                    }
+
+                    <div class="alert alert-info py-2 mt-3 mb-0">
+                        <strong>Notion access is page-based.</strong>
+                        In Notion, open each top-level page or database you want Sentinel to import, choose
+                        <strong>Connections</strong>, and add this integration. Sharing a parent page also exposes
+                        its accessible child content. Leave the selected IDs field empty to sync everything shared.
+                    </div>
 
                     <div class="form-check form-switch mt-3">
                         <input class="form-check-input" type="checkbox" role="switch" id="notionAutoSync"
@@ -720,6 +736,8 @@
             {
                 NotionSettings.WorkspaceName = result.WorkspaceName;
                 NotionSettings.IntegrationTokenUnreadable = false;
+                NotionSettings.HasStoredIntegrationToken = true;
+                NotionSettings.IntegrationToken = string.Empty;
             }
         }
         catch (Exception ex)
@@ -750,6 +768,8 @@
             }
             NotionSettings.WorkspaceName = validation.WorkspaceName;
             NotionSettings.IntegrationTokenUnreadable = false;
+            NotionSettings.HasStoredIntegrationToken = true;
+            NotionSettings.IntegrationToken = string.Empty;
 
             acquired = await NotionSyncBackgroundService.SyncLock.WaitAsync(0);
             if (!acquired)

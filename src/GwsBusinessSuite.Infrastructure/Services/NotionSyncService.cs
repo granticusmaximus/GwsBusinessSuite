@@ -30,10 +30,13 @@ public sealed class NotionSyncService(
             return null;
         }
 
-        var (token, isUnreadable) = UnprotectToken(row.IntegrationToken);
+        var (_, isUnreadable) = UnprotectToken(row.IntegrationToken);
         return new NotionConnectorSettingsView
         {
-            IntegrationToken = token,
+            // Never return the decrypted credential to the Blazor client. A blank input means
+            // "keep the stored token"; entering a value explicitly replaces it.
+            IntegrationToken = string.Empty,
+            HasStoredIntegrationToken = !string.IsNullOrWhiteSpace(row.IntegrationToken),
             WorkspaceName = row.WorkspaceName,
             AutoSyncEnabled = row.AutoSyncEnabled,
             SyncDirection = row.SyncDirection,
@@ -58,14 +61,28 @@ public sealed class NotionSyncService(
             dbContext.NotionConnectorSettings.Add(row);
         }
 
-        var trimmedToken = settings.IntegrationToken.Trim();
-        var validation = trimmedToken.Length == 0
-            ? new NotionValidationResult(false, "No integration token provided.", null)
-            : await notionService.ValidateConnectionAsync(trimmedToken, cancellationToken);
-
-        if (trimmedToken.Length > 0)
+        var suppliedToken = settings.IntegrationToken.Trim();
+        var validationToken = suppliedToken;
+        if (validationToken.Length == 0 && !string.IsNullOrWhiteSpace(row.IntegrationToken))
         {
-            row.IntegrationToken = secretProtector.Protect(trimmedToken);
+            var (storedToken, isUnreadable) = UnprotectToken(row.IntegrationToken);
+            if (isUnreadable)
+            {
+                return new NotionValidationResult(
+                    false,
+                    "The stored Notion token can no longer be decrypted. Enter a replacement token.",
+                    null);
+            }
+            validationToken = storedToken;
+        }
+
+        var validation = validationToken.Length == 0
+            ? new NotionValidationResult(false, "No integration token provided.", null)
+            : await notionService.ValidateConnectionAsync(validationToken, cancellationToken);
+
+        if (suppliedToken.Length > 0 && validation.IsSuccess)
+        {
+            row.IntegrationToken = secretProtector.Protect(suppliedToken);
         }
         if (validation.IsSuccess)
         {
@@ -113,9 +130,28 @@ public sealed class NotionSyncService(
             } while (searchCursor is not null);
 
             var selectedIds = DeserializeSelectedIds(settingsRow.SelectedNotionIdsJson).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (discovered.Count == 0)
+            {
+                return new NotionSyncResult(
+                    false,
+                    "Connected to Notion, but no shared pages or databases are accessible. In Notion, open a top-level page, choose Connections, add the Sentinel integration, then sync again.",
+                    0,
+                    0,
+                    0);
+            }
+
             if (selectedIds.Count > 0)
             {
                 discovered = discovered.Where(item => item.TryGetProperty("id", out var id) && id.GetString() is { } value && selectedIds.Contains(value)).ToList();
+                if (discovered.Count == 0)
+                {
+                    return new NotionSyncResult(
+                        false,
+                        "Notion content is accessible, but none matches the selected page/data source IDs. Clear the ID field to import everything shared, or verify those IDs.",
+                        0,
+                        0,
+                        0);
+                }
             }
 
             var seenTopLevelNotionIds = new HashSet<string>();
