@@ -56,6 +56,61 @@ public sealed class NotionServiceTests
         exception.Which.Message.Should().Contain("Could not find block");
     }
 
+    [Fact]
+    public async Task SearchAsync_ShouldRetryRateLimitedRequestsAndPreserveThePostBody()
+    {
+        var requests = new List<string>();
+        var attempts = 0;
+        var handler = new RecordingHandler(request =>
+        {
+            attempts++;
+            requests.Add(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            if (attempts == 1)
+            {
+                var limited = JsonResponse(
+                    """{"object":"error","code":"rate_limited","message":"Slow down."}""",
+                    HttpStatusCode.TooManyRequests);
+                limited.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.Zero);
+                return limited;
+            }
+
+            return JsonResponse(
+                """{"object":"list","results":[{"object":"page","id":"page-1"}],"has_more":false,"next_cursor":null}""");
+        });
+        var service = CreateService(handler);
+
+        var result = await service.SearchAsync("secret", null);
+
+        attempts.Should().Be(2);
+        requests.Should().HaveCount(2);
+        requests.Should().OnlyContain(body => body.Contains("\"page_size\":100", StringComparison.Ordinal));
+        result.Results.Should().ContainSingle();
+        result.Results[0].GetProperty("id").GetString().Should().Be("page-1");
+    }
+
+    [Fact]
+    public async Task SearchAsync_ShouldStopAfterBoundedRateLimitRetries()
+    {
+        var attempts = 0;
+        var handler = new RecordingHandler(_ =>
+        {
+            attempts++;
+            var limited = JsonResponse(
+                """{"object":"error","code":"rate_limited","message":"Still limited."}""",
+                HttpStatusCode.TooManyRequests);
+            limited.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.Zero);
+            return limited;
+        });
+        var service = CreateService(handler);
+
+        var action = () => service.SearchAsync("secret", null);
+
+        var exception = await action.Should().ThrowAsync<HttpRequestException>();
+        attempts.Should().Be(NotionService.MaxRateLimitAttempts);
+        exception.Which.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
+        exception.Which.Message.Should().Contain("Still limited");
+    }
+
     private static NotionService CreateService(HttpMessageHandler handler) =>
         new(new HttpClient(handler)
         {

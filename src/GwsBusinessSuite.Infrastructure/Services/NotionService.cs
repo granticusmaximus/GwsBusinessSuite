@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -14,12 +15,21 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 public sealed class NotionService(HttpClient httpClient) : INotionService
 {
     public const string NotionVersion = "2026-03-11";
+    public const int MaxRateLimitAttempts = 6;
     private const int MaxImportedFileBytes = 25 * 1024 * 1024;
+    private static readonly TimeSpan MinimumRequestInterval = TimeSpan.FromMilliseconds(350);
+    private static readonly TimeSpan MaximumRetryAfter = TimeSpan.FromMinutes(2);
+    private readonly SemaphoreSlim _requestPacingGate = new(1, 1);
+    private DateTimeOffset _nextRequestAt = DateTimeOffset.MinValue;
 
     public async Task<NotionValidationResult> ValidateConnectionAsync(string integrationToken, CancellationToken cancellationToken = default)
     {
-        using var request = CreateRequest(HttpMethod.Get, "users/me", integrationToken);
-        using var response = await httpClient.SendAsync(request, cancellationToken);
+        using var response = await SendNotionApiAsync(
+            HttpMethod.Get,
+            "users/me",
+            integrationToken,
+            null,
+            cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
         if (!response.IsSuccessStatusCode)
@@ -52,8 +62,12 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
     {
         var path = $"blocks/{Uri.EscapeDataString(blockId)}/children?page_size=100"
             + (string.IsNullOrWhiteSpace(cursor) ? string.Empty : $"&start_cursor={Uri.EscapeDataString(cursor)}");
-        using var request = CreateRequest(HttpMethod.Get, path, integrationToken);
-        using var response = await httpClient.SendAsync(request, cancellationToken);
+        using var response = await SendNotionApiAsync(
+            HttpMethod.Get,
+            path,
+            integrationToken,
+            null,
+            cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         EnsureSuccess(response, body, $"retrieving block children for {blockId}");
         return ParsePage(body);
@@ -61,8 +75,12 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
 
     public async Task<JsonElement?> GetPageAsync(string integrationToken, string pageId, CancellationToken cancellationToken = default)
     {
-        using var request = CreateRequest(HttpMethod.Get, $"pages/{Uri.EscapeDataString(pageId)}", integrationToken);
-        using var response = await httpClient.SendAsync(request, cancellationToken);
+        using var response = await SendNotionApiAsync(
+            HttpMethod.Get,
+            $"pages/{Uri.EscapeDataString(pageId)}",
+            integrationToken,
+            null,
+            cancellationToken);
         if (!response.IsSuccessStatusCode) return null;
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
         return document.RootElement.Clone();
@@ -73,11 +91,12 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
         string pageId,
         CancellationToken cancellationToken = default)
     {
-        using var request = CreateRequest(
+        using var response = await SendNotionApiAsync(
             HttpMethod.Get,
             $"pages/{Uri.EscapeDataString(pageId)}/markdown?include_transcript=true",
-            integrationToken);
-        using var response = await httpClient.SendAsync(request, cancellationToken);
+            integrationToken,
+            null,
+            cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             return null;
@@ -106,8 +125,12 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
 
     public async Task<JsonElement?> GetDatabaseAsync(string integrationToken, string databaseId, CancellationToken cancellationToken = default)
     {
-        using var request = CreateRequest(HttpMethod.Get, $"data_sources/{Uri.EscapeDataString(databaseId)}", integrationToken);
-        using var response = await httpClient.SendAsync(request, cancellationToken);
+        using var response = await SendNotionApiAsync(
+            HttpMethod.Get,
+            $"data_sources/{Uri.EscapeDataString(databaseId)}",
+            integrationToken,
+            null,
+            cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             return null;
@@ -131,8 +154,12 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
 
     public async Task<JsonElement?> GetViewAsync(string integrationToken, string viewId, CancellationToken cancellationToken = default)
     {
-        using var request = CreateRequest(HttpMethod.Get, $"views/{Uri.EscapeDataString(viewId)}", integrationToken);
-        using var response = await httpClient.SendAsync(request, cancellationToken);
+        using var response = await SendNotionApiAsync(
+            HttpMethod.Get,
+            $"views/{Uri.EscapeDataString(viewId)}",
+            integrationToken,
+            null,
+            cancellationToken);
         if (!response.IsSuccessStatusCode) return null;
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
         return document.RootElement.Clone();
@@ -142,8 +169,12 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
     {
         var path = $"comments?block_id={Uri.EscapeDataString(blockId)}&page_size=100"
             + (string.IsNullOrWhiteSpace(cursor) ? string.Empty : $"&start_cursor={Uri.EscapeDataString(cursor)}");
-        using var request = CreateRequest(HttpMethod.Get, path, integrationToken);
-        using var response = await httpClient.SendAsync(request, cancellationToken);
+        using var response = await SendNotionApiAsync(
+            HttpMethod.Get,
+            path,
+            integrationToken,
+            null,
+            cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         EnsureSuccess(response, body, $"retrieving comments for {blockId}");
         return ParsePage(body);
@@ -191,30 +222,117 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
 
     public async Task UpdatePageAsync(string integrationToken, string pageId, IReadOnlyDictionary<string, object?> payload, CancellationToken cancellationToken = default)
     {
-        using var request = CreateRequest(HttpMethod.Patch, $"pages/{Uri.EscapeDataString(pageId)}", integrationToken);
-        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-        using var response = await httpClient.SendAsync(request, cancellationToken);
+        using var response = await SendNotionApiAsync(
+            HttpMethod.Patch,
+            $"pages/{Uri.EscapeDataString(pageId)}",
+            integrationToken,
+            JsonSerializer.Serialize(payload),
+            cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         EnsureSuccess(response, body, $"updating page {pageId}");
     }
 
     public async Task ReplaceBlockChildrenAsync(string integrationToken, string blockId, IReadOnlyList<object> children, CancellationToken cancellationToken = default)
     {
-        using var request = CreateRequest(HttpMethod.Patch, $"blocks/{Uri.EscapeDataString(blockId)}/children", integrationToken);
-        request.Content = new StringContent(JsonSerializer.Serialize(new { erase_content = true, children }), Encoding.UTF8, "application/json");
-        using var response = await httpClient.SendAsync(request, cancellationToken);
+        using var response = await SendNotionApiAsync(
+            HttpMethod.Patch,
+            $"blocks/{Uri.EscapeDataString(blockId)}/children",
+            integrationToken,
+            JsonSerializer.Serialize(new { erase_content = true, children }),
+            cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         EnsureSuccess(response, body, $"replacing block children for {blockId}");
     }
 
     private async Task<NotionPage> PostPageAsync(string integrationToken, string path, Dictionary<string, object?> payload, CancellationToken cancellationToken)
     {
-        using var request = CreateRequest(HttpMethod.Post, path, integrationToken);
-        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-        using var response = await httpClient.SendAsync(request, cancellationToken);
+        using var response = await SendNotionApiAsync(
+            HttpMethod.Post,
+            path,
+            integrationToken,
+            JsonSerializer.Serialize(payload),
+            cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         EnsureSuccess(response, body, $"calling {path}");
         return ParsePage(body);
+    }
+
+    private async Task<HttpResponseMessage> SendNotionApiAsync(
+        HttpMethod method,
+        string path,
+        string integrationToken,
+        string? jsonBody,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; attempt <= MaxRateLimitAttempts; attempt++)
+        {
+            await WaitForRequestSlotAsync(cancellationToken);
+
+            using var request = CreateRequest(method, path, integrationToken);
+            if (jsonBody is not null)
+            {
+                request.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+            }
+
+            var response = await httpClient.SendAsync(request, cancellationToken);
+            if (response.StatusCode != HttpStatusCode.TooManyRequests
+                || attempt == MaxRateLimitAttempts)
+            {
+                return response;
+            }
+
+            var retryAfter = GetRetryAfter(response, attempt);
+            if (retryAfter > MaximumRetryAfter)
+            {
+                // Do not hold a sync worker indefinitely or retry earlier than Notion allows.
+                // Return the 429 so the normal error path reports the upstream message.
+                return response;
+            }
+
+            response.Dispose();
+            await Task.Delay(retryAfter, cancellationToken);
+        }
+
+        throw new InvalidOperationException("Notion rate-limit retry loop exited unexpectedly.");
+    }
+
+    private async Task WaitForRequestSlotAsync(CancellationToken cancellationToken)
+    {
+        await _requestPacingGate.WaitAsync(cancellationToken);
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            var delay = _nextRequestAt - now;
+            if (delay > TimeSpan.Zero)
+            {
+                await Task.Delay(delay, cancellationToken);
+            }
+
+            _nextRequestAt = DateTimeOffset.UtcNow + MinimumRequestInterval;
+        }
+        finally
+        {
+            _requestPacingGate.Release();
+        }
+    }
+
+    private static TimeSpan GetRetryAfter(HttpResponseMessage response, int attempt)
+    {
+        var retryAfter = response.Headers.RetryAfter;
+        if (retryAfter?.Delta is { } delta)
+        {
+            return delta < TimeSpan.Zero ? TimeSpan.Zero : delta;
+        }
+
+        if (retryAfter?.Date is { } date)
+        {
+            var delay = date - DateTimeOffset.UtcNow;
+            return delay < TimeSpan.Zero ? TimeSpan.Zero : delay;
+        }
+
+        // Retry-After is required by Notion for 429s, but retain a bounded exponential
+        // fallback for proxies that accidentally strip the header.
+        return TimeSpan.FromSeconds(1 << Math.Min(attempt - 1, 4));
     }
 
     private static NotionPage ParsePage(string body)
