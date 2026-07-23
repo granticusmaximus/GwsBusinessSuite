@@ -7,6 +7,31 @@ namespace GwsBusinessSuite.Tests;
 public sealed class WikiDatabaseViewLogicTests
 {
     [Fact]
+    public void ViewConfigJson_ShouldRoundTripOpenPageModeAndReadLegacyConfigs()
+    {
+        var serialized = WikiDatabaseViewConfigJson.Serialize(
+            new WikiDatabaseViewConfig([], [], null, WikiDatabaseOpenPageModes.FullPage));
+
+        WikiDatabaseViewConfigJson.Parse(serialized).OpenPageMode
+            .Should().Be(WikiDatabaseOpenPageModes.FullPage);
+        WikiDatabaseViewConfigJson.Parse("""{"filters":[],"sorts":[],"groupByPropertyId":null}""")
+            .OpenPageMode.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(WikiDatabaseViewTypes.Table, null, WikiDatabaseOpenPageModes.SidePeek)]
+    [InlineData(WikiDatabaseViewTypes.Gallery, null, WikiDatabaseOpenPageModes.CenterPeek)]
+    [InlineData(WikiDatabaseViewTypes.Calendar, "unknown", WikiDatabaseOpenPageModes.CenterPeek)]
+    [InlineData(WikiDatabaseViewTypes.Board, WikiDatabaseOpenPageModes.FullPage, WikiDatabaseOpenPageModes.FullPage)]
+    public void ResolveOpenPageMode_ShouldUseViewDefaultsAndPreserveSupportedModes(
+        string viewType,
+        string? configuredMode,
+        string expectedMode)
+    {
+        WikiDatabaseOpenPageModes.Resolve(configuredMode, viewType).Should().Be(expectedMode);
+    }
+
+    [Fact]
     public void ApplyFilters_TextContains_ShouldMatchCaseInsensitively()
     {
         var titleProperty = NewProperty(WikiDatabasePropertyTypes.Text);

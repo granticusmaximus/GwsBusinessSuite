@@ -163,7 +163,8 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
                 ConfigJson = WikiDatabaseViewConfigJson.Serialize(new WikiDatabaseViewConfig(
                     config.Filters.Select(filter => filter with { PropertyId = RemapPropertyId(filter.PropertyId, propertyIds) }).ToList(),
                     config.Sorts.Select(sort => sort with { PropertyId = RemapPropertyId(sort.PropertyId, propertyIds) }).ToList(),
-                    config.GroupByPropertyId is null ? null : RemapPropertyId(config.GroupByPropertyId, propertyIds))),
+                    config.GroupByPropertyId is null ? null : RemapPropertyId(config.GroupByPropertyId, propertyIds),
+                    config.OpenPageMode)),
                 CreatedAt = now,
                 CreatedBy = performedBy
             });
@@ -403,7 +404,8 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
                     }).ToList(),
                     config.GroupByPropertyId is null
                         ? null
-                        : RemapPropertyId(config.GroupByPropertyId, propertyIds))),
+                        : RemapPropertyId(config.GroupByPropertyId, propertyIds),
+                    config.OpenPageMode)),
                 CreatedAt = now,
                 CreatedBy = performedBy
             });
