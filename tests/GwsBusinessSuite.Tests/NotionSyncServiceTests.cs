@@ -144,6 +144,130 @@ public sealed class NotionSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_ShouldIncludeDescendantsOfSelectedTopLevelPages()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.SearchResults =
+        [
+            Page("parent", "Parent"),
+            Page("child", "Child", "{\"type\":\"page_id\",\"page_id\":\"parent\"}"),
+            Page("unselected", "Unselected")
+        ];
+        fixture.Notion.BlockChildren["child"] =
+        [
+            Json("""
+                {"object":"block","id":"child-paragraph","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Nested page content"}]}}
+                """)
+        ];
+        await fixture.Service.SaveSettingsAsync(new NotionConnectorSettingsView
+        {
+            SelectedNotionIds = "parent"
+        });
+
+        var result = await fixture.Service.SyncAsync();
+
+        result.IsSuccess.Should().BeTrue();
+        var pages = await fixture.Db.WikiPages.OrderBy(page => page.Title).ToListAsync();
+        pages.Select(page => page.Title).Should().Equal("Child", "Parent");
+        var child = pages.Single(page => page.NotionId == "child");
+        WikiBlockJson.ParseBlocks(child.BlocksJson)
+            .Should().ContainSingle(block => block.PlainText == "Nested page content");
+    }
+
+    [Fact]
+    public async Task SyncAsync_ShouldFlattenTemplateAndUnsupportedContainersWithoutDroppingTheirChildren()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.SearchResults = [Page("page-1", "Nested content")];
+        fixture.Notion.BlockChildren["page-1"] =
+        [
+            Json("""
+                {"object":"block","id":"template-1","type":"template","has_children":true,"template":{"rich_text":[{"plain_text":"Template"}]}}
+                """),
+            Json("""
+                {"object":"block","id":"unsupported-1","type":"unsupported","has_children":true,"unsupported":{"block_type":"form"}}
+                """)
+        ];
+        fixture.Notion.BlockChildren["template-1"] =
+        [
+            Json("""
+                {"object":"block","id":"template-copy","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Template body"}]}}
+                """)
+        ];
+        fixture.Notion.BlockChildren["unsupported-1"] =
+        [
+            Json("""
+                {"object":"block","id":"unsupported-copy","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Unsupported container body"}]}}
+                """)
+        ];
+
+        var result = await fixture.Service.SyncAsync();
+
+        result.IsSuccess.Should().BeTrue();
+        var page = await fixture.Db.WikiPages.SingleAsync(item => item.NotionId == "page-1");
+        WikiBlockJson.ParseBlocks(page.BlocksJson).Select(block => block.PlainText)
+            .Should().Equal("Template body", "Unsupported container body");
+    }
+
+    [Fact]
+    public async Task SyncAsync_ShouldImportMeetingNoteSummaryNotesAndTranscript()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.SearchResults = [Page("page-1", "Team sync")];
+        fixture.Notion.BlockChildren["page-1"] =
+        [
+            Json("""
+                {
+                  "object":"block",
+                  "id":"meeting-1",
+                  "type":"meeting_notes",
+                  "has_children":false,
+                  "meeting_notes":{
+                    "title":[{"plain_text":"Weekly team sync"}],
+                    "children":{
+                      "summary_block_id":"summary-1",
+                      "notes_block_id":"notes-1",
+                      "transcript_block_id":"transcript-1"
+                    }
+                  }
+                }
+                """)
+        ];
+        fixture.Notion.BlockChildren["summary-1"] =
+        [
+            Json("""
+                {"object":"block","id":"summary-copy","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Summary content"}]}}
+                """)
+        ];
+        fixture.Notion.BlockChildren["notes-1"] =
+        [
+            Json("""
+                {"object":"block","id":"notes-copy","type":"bulleted_list_item","has_children":false,"bulleted_list_item":{"rich_text":[{"plain_text":"Action item"}]}}
+                """)
+        ];
+        fixture.Notion.BlockChildren["transcript-1"] =
+        [
+            Json("""
+                {"object":"block","id":"transcript-copy","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Transcript content"}]}}
+                """)
+        ];
+
+        var result = await fixture.Service.SyncAsync();
+
+        result.IsSuccess.Should().BeTrue();
+        var page = await fixture.Db.WikiPages.SingleAsync(item => item.NotionId == "page-1");
+        WikiBlockJson.ParseBlocks(page.BlocksJson).Select(block => block.PlainText)
+            .Should().ContainInOrder(
+                "Weekly team sync",
+                "Summary",
+                "Summary content",
+                "Notes",
+                "Action item",
+                "Transcript",
+                "Transcript content");
+    }
+
+    [Fact]
     public async Task SyncAsync_ShouldSoftArchiveMissingAndUpstreamArchivedPagesAndRestoreReturningPages()
     {
         await using var fixture = await SyncFixture.CreateAsync();

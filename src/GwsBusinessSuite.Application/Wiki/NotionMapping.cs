@@ -15,15 +15,11 @@ public static class NotionMapping
     // Notion block types that are pure layout wrappers with no GWS equivalent - their own
     // node produces no WikiBlock, but the walk still recurses into their children (imported
     // in place, one after another, not side-by-side).
-    private static readonly HashSet<string> FlattenedWrapperTypes = ["column_list", "column", "synced_block", "tab"];
+    private static readonly HashSet<string> FlattenedWrapperTypes = ["column_list", "column", "synced_block", "tab", "template"];
 
     // Consumed by the page-tree walk (become their own WikiPage/WikiDatabase) - never
     // inlined as content when walking a page's blocks.
     private static readonly HashSet<string> PageTreeBlockTypes = ["child_page", "child_database"];
-
-    // No first-class block type and no reasonable fallback - skipped with a logged warning
-    // rather than guessed at.
-    private static readonly HashSet<string> UnsupportedBlockTypes = ["meeting_notes", "transcription"];
 
     public static bool IsFlattenedWrapper(string notionBlockType) => FlattenedWrapperTypes.Contains(notionBlockType);
 
@@ -138,6 +134,7 @@ public static class NotionMapping
             case "file":
             case "pdf":
                 return NewBlock(WikiBlockTypes.Embed, indentLevel, richText, FileProps(block, body));
+            case "embed":
             case "bookmark":
             case "link_preview":
                 var url = body.ValueKind == JsonValueKind.Object && body.TryGetProperty("url", out var urlElement) ? urlElement.GetString() ?? string.Empty : string.Empty;
