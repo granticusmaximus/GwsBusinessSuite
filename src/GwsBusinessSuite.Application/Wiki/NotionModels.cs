@@ -48,6 +48,36 @@ public sealed class NotionConnectorSettingsView
 
 public sealed record NotionSyncResult(bool IsSuccess, string Message, int Imported, int Updated, int Archived);
 
+public static class NotionSyncJobStates
+{
+    public const string Idle = "idle";
+    public const string Queued = "queued";
+    public const string Running = "running";
+    public const string Completed = "completed";
+}
+
+public sealed record NotionSyncJobStatus(
+    string State,
+    string Source,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? CompletedAt,
+    NotionSyncResult? Result)
+{
+    public bool IsActive => State is NotionSyncJobStates.Queued or NotionSyncJobStates.Running;
+
+    public static NotionSyncJobStatus Idle { get; } =
+        new(NotionSyncJobStates.Idle, "none", null, null, null);
+}
+
+// Manual sync is dispatched through the hosted worker rather than awaited on a Blazor
+// circuit. The import therefore survives a browser reconnect, navigation, or mobile app
+// suspension, while this status snapshot lets the UI observe the server-owned run.
+public interface INotionSyncCoordinator
+{
+    bool TryQueueManualSync();
+    NotionSyncJobStatus GetStatus();
+}
+
 // Reconciliation (search -> upsert pages/databases -> wire hierarchy -> sync blocks/rows) and
 // connector-settings CRUD, mirroring how ICjAdsService bundles both connector settings and
 // sync operations behind one interface rather than splitting settings into their own service.
