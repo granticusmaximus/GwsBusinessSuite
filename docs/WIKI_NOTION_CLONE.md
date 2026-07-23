@@ -71,7 +71,7 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 | Databases | Typed properties including person, files, place, evaluated advanced formulas, one-way or reciprocal row-picker relations, and calculated rollups; editable Table, Board, List, Gallery, Calendar, Timeline, Chart, Form, Map, Feed, and Dashboard views | Richer rollup formatting |
 | Databases — structure | Databases share the page sidebar tree; every row opens as a responsive block-content page with a per-view side-peek, center-peek, or full-page presentation and configurable property visibility/order; linked and inline database blocks reference canonical data without duplication | Row covers/icons and page history |
 | Search & graph | All-token ranked page/block/database-row search with highlighted matches; structured and legacy backlinks; per-user favorites/recents; structured page, person, and date mentions with a personal mention inbox | Graph visualization, saved searches, and database-row mention inbox entries |
-| Import/sync | Current `2026-03-11` Notion API, data sources, views, comments, selective import, encrypted token storage, soft archival, durable authenticated copies of Notion-hosted files, explicitly enabled conflict-aware manual page pushes, and reusable template import from connected free Notion templates or Markdown/CSV/HTML ZIP exports | Broader bidirectional database writes |
+| Import/sync | Current `2026-03-11` Notion API, data sources, views, comments, subtree-aware selective import, recursive template/unsupported-container content recovery, meeting-note summary/notes/transcript import, encrypted token storage, soft archival, durable authenticated copies of Notion-hosted files, explicitly enabled conflict-aware manual page pushes, and reusable template import from connected free Notion templates or Markdown/CSV/HTML ZIP exports | Broader bidirectional database writes |
 | Visibility | Authenticated portal-member roles and per-resource view/comment/edit/full-access grants, plus expiring/revocable tokenized public page and database shares | Richer public-share controls and auditing |
 
 ## Delivery sequence
@@ -164,10 +164,9 @@ Official research baseline: [Notion block API](https://developers.notion.com/ref
 retired database-only contract.
 
 Known import limitations are explicit: Notion-hosted files larger than 25 MB remain linked
-to their temporary upstream URL rather than copied into Sentinel; relation values retain related-page ids rather than resolved titles; `meeting_notes` and
-`transcription` blocks are skipped; uncommon or
-computed property types are preserved as read-only best-effort text, with `place` limited by
-the upstream API as well.
+to their temporary upstream URL rather than copied into Sentinel; relation values retain
+related-page ids rather than resolved titles; uncommon or computed property types are
+preserved as read-only best-effort text, with `place` limited by the upstream API as well.
 
 ## Remaining delivery plan
 

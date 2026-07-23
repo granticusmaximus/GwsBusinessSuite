@@ -142,7 +142,7 @@ public sealed class NotionSyncService(
 
             if (selectedIds.Count > 0)
             {
-                discovered = discovered.Where(item => item.TryGetProperty("id", out var id) && id.GetString() is { } value && selectedIds.Contains(value)).ToList();
+                discovered = IncludeSelectedContentAndDescendants(discovered, selectedIds);
                 if (discovered.Count == 0)
                 {
                     return new NotionSyncResult(
@@ -343,6 +343,64 @@ public sealed class NotionSyncService(
 
     private static string NonEmptyOrDefault(string value) => string.IsNullOrWhiteSpace(value) ? "Untitled Database" : value;
 
+    private static List<JsonElement> IncludeSelectedContentAndDescendants(
+        IReadOnlyList<JsonElement> discovered,
+        IReadOnlySet<string> selectedIds)
+    {
+        var includedIds = selectedIds
+            .Select(NormalizeNotionId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Search returns both parent and child pages shared with the integration. A selected
+        // top-level page therefore defines a subtree, not a single object. Expand that subtree
+        // before filtering so child_page references still resolve to real imported pages with
+        // their own block content.
+        bool added;
+        do
+        {
+            added = false;
+            foreach (var item in discovered)
+            {
+                var id = GetNotionId(item);
+                var parentId = GetParentNotionId(item);
+                if (id is null || parentId is null || !includedIds.Contains(NormalizeNotionId(parentId)))
+                {
+                    continue;
+                }
+
+                added |= includedIds.Add(NormalizeNotionId(id));
+            }
+        } while (added);
+
+        return discovered
+            .Where(item => GetNotionId(item) is { } id && includedIds.Contains(NormalizeNotionId(id)))
+            .ToList();
+    }
+
+    private static string? GetNotionId(JsonElement item) =>
+        item.TryGetProperty("id", out var idElement) ? idElement.GetString() : null;
+
+    private static string? GetParentNotionId(JsonElement item)
+    {
+        if (!item.TryGetProperty("parent", out var parent)
+            || !parent.TryGetProperty("type", out var parentTypeElement))
+        {
+            return null;
+        }
+
+        var parentType = parentTypeElement.GetString();
+        return parentType switch
+        {
+            "page_id" => parent.TryGetProperty("page_id", out var pageId) ? pageId.GetString() : null,
+            "database_id" => parent.TryGetProperty("database_id", out var databaseId) ? databaseId.GetString() : null,
+            "data_source_id" => parent.TryGetProperty("data_source_id", out var dataSourceId) ? dataSourceId.GetString() : null,
+            _ => null
+        };
+    }
+
+    private static string NormalizeNotionId(string value) =>
+        Guid.TryParse(value.Trim(), out var id) ? id.ToString("N") : value.Trim();
+
     private static Guid? ResolveParentWikiPageId(string notionId, IReadOnlyDictionary<string, JsonElement> notionIdToParent, IReadOnlyDictionary<string, Guid> notionIdToLocalId)
     {
         if (!notionIdToParent.TryGetValue(notionId, out var parentDescriptor) || !parentDescriptor.TryGetProperty("type", out var parentTypeElement))
@@ -530,6 +588,12 @@ public sealed class NotionSyncService(
                 continue;
             }
 
+            if (type is "meeting_notes" or "transcription")
+            {
+                await AppendMeetingNotesAsync(child, childId, hasChildren, indentLevel, token, blocks, cancellationToken);
+                continue;
+            }
+
             if (NotionMapping.IsFlattenedWrapper(type))
             {
                 if (hasChildren && childId.Length > 0)
@@ -545,6 +609,13 @@ public sealed class NotionSyncService(
                 logger.LogWarning("Notion sync: skipping unsupported block type {BlockType}", unsupportedType));
             if (mapped is null)
             {
+                // Notion can return unknown container types as "unsupported". The wrapper
+                // itself cannot be represented, but its ordinary paragraph/list children can
+                // still be retrieved and must not be discarded with it.
+                if (hasChildren && childId.Length > 0)
+                {
+                    await AppendBlockChildrenAsync(childId, indentLevel, token, blocks, cancellationToken);
+                }
                 continue;
             }
 
@@ -554,6 +625,83 @@ public sealed class NotionSyncService(
             {
                 await AppendBlockChildrenAsync(childId, indentLevel + 1, token, blocks, cancellationToken);
             }
+        }
+    }
+
+    private async Task AppendMeetingNotesAsync(
+        JsonElement block,
+        string blockId,
+        bool hasChildren,
+        int indentLevel,
+        string token,
+        List<WikiBlock> blocks,
+        CancellationToken cancellationToken)
+    {
+        var type = block.TryGetProperty("type", out var typeElement)
+            ? typeElement.GetString() ?? "meeting_notes"
+            : "meeting_notes";
+        var body = block.TryGetProperty(type, out var bodyElement) ? bodyElement : default;
+        var title = body.ValueKind == JsonValueKind.Object
+                    && body.TryGetProperty("title", out var titleElement)
+            ? NotionMapping.MapRichText(titleElement)
+            : [];
+
+        if (title.Count > 0)
+        {
+            blocks.Add(new WikiBlock(
+                Guid.NewGuid(),
+                WikiBlockTypes.Callout,
+                indentLevel,
+                title,
+                new Dictionary<string, string> { ["icon"] = "🎙️" }));
+        }
+
+        var sections = new List<(string Label, string BlockId)>();
+        if (body.ValueKind == JsonValueKind.Object
+            && body.TryGetProperty("children", out var children)
+            && children.ValueKind == JsonValueKind.Object)
+        {
+            AddMeetingNoteSection(sections, children, "summary_block_id", "Summary");
+            AddMeetingNoteSection(sections, children, "notes_block_id", "Notes");
+            AddMeetingNoteSection(sections, children, "transcript_block_id", "Transcript");
+        }
+
+        foreach (var (label, sectionBlockId) in sections
+                     .DistinctBy(section => section.BlockId, StringComparer.OrdinalIgnoreCase))
+        {
+            blocks.Add(new WikiBlock(
+                Guid.NewGuid(),
+                WikiBlockTypes.Heading3,
+                indentLevel + 1,
+                [new WikiRichTextSpan(label)],
+                new Dictionary<string, string>()));
+            await AppendBlockChildrenAsync(
+                sectionBlockId,
+                indentLevel + 1,
+                token,
+                blocks,
+                cancellationToken);
+        }
+
+        // Older API responses may expose the meeting-note content as ordinary children
+        // instead of the 2026-03-11 section pointers.
+        if (sections.Count == 0 && hasChildren && blockId.Length > 0)
+        {
+            await AppendBlockChildrenAsync(blockId, indentLevel + 1, token, blocks, cancellationToken);
+        }
+    }
+
+    private static void AddMeetingNoteSection(
+        ICollection<(string Label, string BlockId)> sections,
+        JsonElement children,
+        string propertyName,
+        string label)
+    {
+        if (children.TryGetProperty(propertyName, out var idElement)
+            && idElement.ValueKind == JsonValueKind.String
+            && idElement.GetString() is { Length: > 0 } blockId)
+        {
+            sections.Add((label, blockId));
         }
     }
 

@@ -43,6 +43,7 @@ public sealed class NotionMappingTests
     [InlineData("audio", WikiBlockTypes.Embed)]
     [InlineData("file", WikiBlockTypes.Embed)]
     [InlineData("pdf", WikiBlockTypes.Embed)]
+    [InlineData("embed", WikiBlockTypes.Embed)]
     [InlineData("bookmark", WikiBlockTypes.Embed)]
     [InlineData("link_preview", WikiBlockTypes.Embed)]
     public void MapBlock_ShouldMapSupportedTypes(string notionType, string expectedType)
@@ -54,7 +55,7 @@ public sealed class NotionMappingTests
             "callout" => "{\"rich_text\":[{\"plain_text\":\"Text\"}],\"icon\":{\"emoji\":\"⚡\"}}",
             "code" => "{\"rich_text\":[{\"plain_text\":\"Text\"}],\"language\":\"csharp\"}",
             "image" or "video" or "audio" or "file" or "pdf" => "{\"external\":{\"url\":\"https://example.com/a\"},\"rich_text\":[]}",
-            "bookmark" or "link_preview" => "{\"url\":\"https://example.com/a\"}",
+            "embed" or "bookmark" or "link_preview" => "{\"url\":\"https://example.com/a\"}",
             _ => "{\"rich_text\":[{\"plain_text\":\"Text\"}]}"
         };
         var block = Json($"{{\"type\":\"{notionType}\",\"{notionType}\":{body}}}");
@@ -91,6 +92,7 @@ public sealed class NotionMappingTests
     [InlineData("column", true, false)]
     [InlineData("synced_block", true, false)]
     [InlineData("tab", true, false)]
+    [InlineData("template", true, false)]
     [InlineData("child_page", false, true)]
     [InlineData("child_database", false, true)]
     public void WrapperAndTreeClassifications_ShouldBeExplicit(string type, bool isWrapper, bool isTree)
