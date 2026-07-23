@@ -170,14 +170,16 @@ public sealed class NotionSyncService(
             var notionDatabaseIdsNeedingSchema = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var newNotionDatabaseIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var databaseContainerToLocalIds = new Dictionary<string, List<Guid>>(StringComparer.OrdinalIgnoreCase);
-            var existingPageWatermarks = (await dbContext.WikiPages
+            var existingPageSyncStates = (await dbContext.WikiPages
                     .AsNoTracking()
                     .Where(page => page.NotionId != null)
-                    .Select(page => new { page.NotionId, page.NotionLastEditedAt })
+                    .Select(page => new { page.NotionId, page.NotionLastEditedAt, page.BlocksJson })
                     .ToListAsync(cancellationToken))
                 .ToDictionary(
                     page => page.NotionId!,
-                    page => page.NotionLastEditedAt,
+                    page => new ExistingPageSyncState(
+                        page.NotionLastEditedAt,
+                        WikiBlockJson.ParseBlocks(page.BlocksJson).Count > 0),
                     StringComparer.OrdinalIgnoreCase);
             var existingDatabaseWatermarks = (await dbContext.WikiDatabases
                     .AsNoTracking()
@@ -261,8 +263,14 @@ public sealed class NotionSyncService(
                         isArchived,
                         reservedPageSlugs,
                         cancellationToken);
-                    existingPageWatermarks.TryGetValue(notionId, out var priorWatermark);
-                    if (ShouldRefreshRemoteContent(wasNew, remoteEditedAt, priorWatermark, previousSuccessfulSyncAt))
+                    existingPageSyncStates.TryGetValue(notionId, out var priorSyncState);
+                    var priorWatermark = priorSyncState?.LastEditedAt;
+                    if (ShouldRefreshRemoteContent(
+                            wasNew,
+                            remoteEditedAt,
+                            priorWatermark,
+                            previousSuccessfulSyncAt,
+                            priorSyncState?.HasImportedContent ?? false))
                     {
                         notionPageIdsNeedingContent.Add(notionId);
                     }
@@ -457,7 +465,8 @@ public sealed class NotionSyncService(
         bool isNew,
         DateTimeOffset? remoteEditedAt,
         DateTimeOffset? importedRemoteEditedAt,
-        DateTimeOffset? previousSuccessfulSyncAt)
+        DateTimeOffset? previousSuccessfulSyncAt,
+        bool hasImportedContent = true)
     {
         if (isNew || remoteEditedAt is null)
         {
@@ -469,8 +478,18 @@ public sealed class NotionSyncService(
             return remoteEditedAt > itemWatermark;
         }
 
+        // The connector's global LastSyncedAt only proves that discovery completed. Older
+        // releases could create the page shell while its block import failed, so an empty
+        // page with no item-level watermark must be fetched instead of being bootstrapped
+        // as current and skipped forever.
+        if (!hasImportedContent)
+        {
+            return true;
+        }
+
         // Bootstrap existing installations when this column is first deployed. A successful
-        // connector sync already proves content at or before its global watermark was imported.
+        // connector sync plus persisted content proves data at or before its global watermark
+        // was imported.
         return previousSuccessfulSyncAt is null || remoteEditedAt > previousSuccessfulSyncAt;
     }
 
@@ -1594,6 +1613,7 @@ public sealed class NotionSyncService(
     }
 
     private sealed record NotionTreeChild(string NotionId, bool IsDatabase);
+    private sealed record ExistingPageSyncState(DateTimeOffset? LastEditedAt, bool HasImportedContent);
 
     private sealed record NotionTreeNodeState(
         Guid Id,
