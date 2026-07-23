@@ -76,6 +76,7 @@ export function setBlocks(container, blocksJson) {
     for (const block of blocks) {
         container.appendChild(createBlockElement(block, state));
     }
+    refreshBlockPresentation(container);
 }
 
 export function getBlocksJson(container) {
@@ -119,7 +120,10 @@ function createBlockElement(block, state) {
     el.dataset.blockId = block.id;
     el.dataset.blockType = block.type;
     el.dataset.indent = String(block.indentLevel || 0);
+    el.dataset.propsJson = JSON.stringify(block.props || {});
     if (block.type === 'to_do' && block.props && block.props.checked === 'true') el.dataset.checked = 'true';
+    if (block.type === 'numbered_list_item') el.dataset.number = (block.props && block.props.number) || '';
+    if (block.type === 'toggle') el.dataset.open = block.props && block.props.open === 'true' ? 'true' : 'false';
     if (block.type === 'image' || block.type === 'embed') {
         el.dataset.url = (block.props && block.props.url) || '';
         el.dataset.fileName = (block.props && block.props.fileName) || '';
@@ -144,6 +148,7 @@ function createBlockElement(block, state) {
         event.preventDefault();
         const created = createBlockElement(emptyBlock('paragraph'), state);
         el.after(created);
+        refreshBlockPresentation(state.container);
         focusBlock(created);
         notifyChanged(state);
     });
@@ -199,6 +204,11 @@ function createBlockBody(block, state) {
         return body;
     }
 
+    if (block.type === 'table') {
+        body.appendChild(createTableBody(block, state));
+        return body;
+    }
+
     if (block.type === 'breadcrumb' || block.type === 'table_of_contents') {
         const placeholder = document.createElement('div');
         placeholder.className = `wiki-${block.type.replaceAll('_', '-')}`;
@@ -229,15 +239,191 @@ function createBlockBody(block, state) {
         body.appendChild(checkbox);
     }
 
-    if (block.type === 'bulleted_list_item') {
+    if (block.type === 'bulleted_list_item' || block.type === 'numbered_list_item') {
         const bullet = document.createElement('span');
         bullet.className = 'wiki-list-marker';
-        bullet.textContent = '•';
+        bullet.textContent = block.type === 'bulleted_list_item' ? '•' : `${(block.props && block.props.number) || '1'}.`;
         body.appendChild(bullet);
+    }
+
+    if (block.type === 'toggle') {
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'wiki-toggle-button';
+        toggle.title = 'Expand or collapse';
+        toggle.setAttribute('aria-label', toggle.title);
+        toggle.addEventListener('click', () => {
+            const blockEl = toggle.closest('.wiki-block');
+            blockEl.dataset.open = blockEl.dataset.open === 'true' ? 'false' : 'true';
+            refreshBlockPresentation(state.container);
+            notifyChanged(state);
+        });
+        body.appendChild(toggle);
+    }
+
+    if (block.type === 'callout') {
+        const icon = document.createElement('span');
+        icon.className = 'wiki-callout-icon';
+        icon.textContent = (block.props && block.props.icon) || '💡';
+        body.appendChild(icon);
+    }
+
+    if (block.type === 'code' && block.props && block.props.language) {
+        const language = document.createElement('span');
+        language.className = 'wiki-code-language';
+        language.textContent = block.props.language;
+        body.appendChild(language);
     }
 
     body.appendChild(createContentEditable(block, state));
     return body;
+}
+
+function createTableBody(block, state) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'wiki-native-table-editor';
+    const rows = parseTableRows(block);
+    const columnCount = Math.max(1, ...rows.map(row => row.length));
+    if (rows.length === 0) rows.push(Array.from({ length: columnCount }, () => []));
+    for (const row of rows) {
+        while (row.length < columnCount) row.push([]);
+    }
+
+    const table = document.createElement('table');
+    table.className = 'wiki-native-table';
+    const hasColumnHeader = !block.props || block.props.hasColumnHeader !== 'false';
+    rows.forEach((row, rowIndex) => {
+        const tr = document.createElement('tr');
+        row.forEach(spans => {
+            const cell = document.createElement(hasColumnHeader && rowIndex === 0 ? 'th' : 'td');
+            cell.contentEditable = 'plaintext-only' in document.body ? 'plaintext-only' : 'true';
+            cell.innerHTML = htmlFromRichText(spans);
+            cell.addEventListener('keydown', event => {
+                if (event.key === 'Enter') event.preventDefault();
+            });
+            cell.addEventListener('input', () => scheduleNotify(state));
+            tr.appendChild(cell);
+        });
+        table.appendChild(tr);
+    });
+
+    const actions = document.createElement('div');
+    actions.className = 'wiki-native-table-actions';
+    const addRow = document.createElement('button');
+    addRow.type = 'button';
+    addRow.textContent = '+ row';
+    addRow.addEventListener('click', () => {
+        const tr = document.createElement('tr');
+        for (let index = 0; index < table.rows[0].cells.length; index++) {
+            const cell = document.createElement('td');
+            cell.contentEditable = 'plaintext-only' in document.body ? 'plaintext-only' : 'true';
+            cell.addEventListener('keydown', event => {
+                if (event.key === 'Enter') event.preventDefault();
+            });
+            cell.addEventListener('input', () => scheduleNotify(state));
+            tr.appendChild(cell);
+        }
+        table.appendChild(tr);
+        notifyChanged(state);
+    });
+    const addColumn = document.createElement('button');
+    addColumn.type = 'button';
+    addColumn.textContent = '+ column';
+    addColumn.addEventListener('click', () => {
+        [...table.rows].forEach((row, rowIndex) => {
+            const cell = document.createElement(hasColumnHeader && rowIndex === 0 ? 'th' : 'td');
+            cell.contentEditable = 'plaintext-only' in document.body ? 'plaintext-only' : 'true';
+            cell.addEventListener('keydown', event => {
+                if (event.key === 'Enter') event.preventDefault();
+            });
+            cell.addEventListener('input', () => scheduleNotify(state));
+            row.appendChild(cell);
+        });
+        notifyChanged(state);
+    });
+    actions.append(addRow, addColumn);
+    wrapper.append(table, actions);
+    return wrapper;
+}
+
+function parseTableRows(block) {
+    try {
+        const richRows = JSON.parse((block.props && block.props.tableJson) || '[]');
+        if (Array.isArray(richRows) && richRows.length > 0) return richRows;
+    } catch { /* use the text fallback written by earlier Sentinel versions */ }
+
+    const text = (block.richText || []).map(span => span.text || '').join('');
+    return (text || '').split('\n')
+        .map(line => line.split('|').map(cell => [{ text: cell.trim() }]))
+        .filter(row => row.some(cell => cell.some(span => span.text.length > 0)));
+}
+
+function serializeTable(blockEl) {
+    return [...blockEl.querySelectorAll('.wiki-native-table tr')]
+        .map(row => [...row.cells].map(cell => cell.textContent.trim()).join(' | '))
+        .join('\n');
+}
+
+function serializeTableRichText(blockEl) {
+    return [...blockEl.querySelectorAll('.wiki-native-table tr')]
+        .map(row => [...row.cells].map(cell => richTextFromNode(cell)));
+}
+
+function refreshBlockPresentation(container) {
+    refreshNumberedListMarkers(container);
+    refreshToggleVisibility(container);
+}
+
+function refreshNumberedListMarkers(container) {
+    const counters = new Map();
+    let previousType = '';
+    let previousIndent = -1;
+    for (const block of container.querySelectorAll(':scope > .wiki-block')) {
+        const type = block.dataset.blockType;
+        const indent = Number(block.dataset.indent || '0');
+        if (type !== 'numbered_list_item') {
+            counters.clear();
+            previousType = type;
+            previousIndent = indent;
+            continue;
+        }
+
+        if (previousType !== 'numbered_list_item' || indent > previousIndent) {
+            const requested = Number(block.dataset.number || '1');
+            counters.set(indent, Number.isFinite(requested) && requested > 0 ? requested : 1);
+        } else {
+            counters.set(indent, (counters.get(indent) || 0) + 1);
+        }
+        for (const key of [...counters.keys()]) {
+            if (key > indent) counters.delete(key);
+        }
+        const marker = block.querySelector('.wiki-list-marker');
+        if (marker) marker.textContent = `${counters.get(indent)}.`;
+        previousType = type;
+        previousIndent = indent;
+    }
+}
+
+function refreshToggleVisibility(container) {
+    const blocks = [...container.querySelectorAll(':scope > .wiki-block')];
+    blocks.forEach(block => block.classList.remove('is-toggle-hidden'));
+    blocks.forEach((block, index) => {
+        if (block.dataset.blockType !== 'toggle') return;
+        const isOpen = block.dataset.open === 'true';
+        const button = block.querySelector('.wiki-toggle-button');
+        if (button) {
+            button.textContent = isOpen ? '▾' : '▸';
+            button.setAttribute('aria-expanded', String(isOpen));
+        }
+        if (isOpen) return;
+
+        const indent = Number(block.dataset.indent || '0');
+        for (let childIndex = index + 1; childIndex < blocks.length; childIndex++) {
+            const childIndent = Number(blocks[childIndex].dataset.indent || '0');
+            if (childIndent <= indent) break;
+            blocks[childIndex].classList.add('is-toggle-hidden');
+        }
+    });
 }
 
 function createMediaBody(block, state) {
@@ -688,6 +874,7 @@ function splitBlock(state, blockEl, content) {
     if (newContent) newContent.innerHTML = afterHtml;
 
     focusBlock(newEl);
+    refreshBlockPresentation(state.container);
     notifyChanged(state);
 }
 
@@ -703,6 +890,7 @@ function mergeIntoPrevious(state, blockEl, previous) {
         blockEl.remove();
         focusBlock(previous);
     }
+    refreshBlockPresentation(state.container);
     notifyChanged(state);
 }
 
@@ -765,6 +953,7 @@ function convertBlockType(state, blockEl, newType) {
     block.props = {};
     const newEl = createBlockElement(block, state);
     blockEl.replaceWith(newEl);
+    refreshBlockPresentation(state.container);
     const focusable = newEl.querySelector('.wiki-block-content, input');
     if (focusable) focusable.focus();
     notifyChanged(state);
@@ -952,6 +1141,7 @@ function onHandlePointerUp(state, event) {
     if (!state.drag || state.drag.pointerId !== event.pointerId) return;
     state.drag.blockEl.classList.remove('is-dragging');
     state.drag = null;
+    refreshBlockPresentation(state.container);
     notifyChanged(state);
 }
 
@@ -970,8 +1160,15 @@ function notifyChanged(state) {
 
 function serializeBlock(blockEl) {
     const type = blockEl.dataset.blockType;
-    const props = {};
+    let props = {};
+    try { props = JSON.parse(blockEl.dataset.propsJson || '{}'); } catch { props = {}; }
     if (type === 'to_do') props.checked = blockEl.dataset.checked === 'true' ? 'true' : 'false';
+    if (type === 'numbered_list_item') {
+        const marker = blockEl.querySelector('.wiki-list-marker')?.textContent || '1.';
+        props.number = marker.replace(/\D/g, '') || '1';
+    }
+    if (type === 'toggle') props.open = blockEl.dataset.open === 'true' ? 'true' : 'false';
+    if (type === 'table') props.tableJson = JSON.stringify(serializeTableRichText(blockEl));
     if (type === 'image' || type === 'embed') {
         props.url = blockEl.dataset.url || '';
         if (blockEl.dataset.fileName) props.fileName = blockEl.dataset.fileName;
@@ -984,11 +1181,14 @@ function serializeBlock(blockEl) {
     }
 
     const contentEl = blockEl.querySelector('.wiki-block-content');
+    const richText = type === 'table'
+        ? [{ text: serializeTable(blockEl) }]
+        : contentEl ? richTextFromNode(contentEl) : [];
     return {
         id: blockEl.dataset.blockId,
         type,
         indentLevel: Number(blockEl.dataset.indent || '0'),
-        richText: contentEl ? richTextFromNode(contentEl) : [],
+        richText,
         props
     };
 }

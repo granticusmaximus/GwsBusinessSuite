@@ -322,25 +322,28 @@
                         <InputText class="sentinel-title-input" @bind-Value="Editor.Title" placeholder="Untitled" aria-label="Page title" />
                     </div>
 
-                    <div class="sentinel-properties">
-                        <div class="sentinel-property-row">
-                            <label for="sentinelSlug"><i class="bi bi-link-45deg"></i>Slug</label>
-                            <InputText id="sentinelSlug" class="sentinel-property-control" @bind-Value="Editor.Slug" placeholder="Generated from title" />
-                        </div>
-                        @if (SelectedPageId.HasValue)
-                        {
+                    <details class="sentinel-page-properties">
+                        <summary><i class="bi bi-sliders2"></i><span>Page properties</span><i class="bi bi-chevron-right"></i></summary>
+                        <div class="sentinel-properties">
                             <div class="sentinel-property-row">
-                                <label for="sentinelParent"><i class="bi bi-diagram-2"></i>Parent</label>
-                                <select id="sentinelParent" class="sentinel-property-control" @bind="ParentWikiPageIdSelection" @bind:after="MoveToSelectedParentAsync">
-                                    <option value="">— Top level —</option>
-                                    @foreach (var candidate in WikiParentPageOptions())
-                                    {
-                                        <option value="@candidate.Id">@candidate.Title</option>
-                                    }
-                                </select>
+                                <label for="sentinelSlug"><i class="bi bi-link-45deg"></i>Slug</label>
+                                <InputText id="sentinelSlug" class="sentinel-property-control" @bind-Value="Editor.Slug" placeholder="Generated from title" />
                             </div>
-                        }
-                    </div>
+                            @if (SelectedPageId.HasValue)
+                            {
+                                <div class="sentinel-property-row">
+                                    <label for="sentinelParent"><i class="bi bi-diagram-2"></i>Parent</label>
+                                    <select id="sentinelParent" class="sentinel-property-control" @bind="ParentWikiPageIdSelection" @bind:after="MoveToSelectedParentAsync">
+                                        <option value="">— Top level —</option>
+                                        @foreach (var candidate in WikiParentPageOptions())
+                                        {
+                                            <option value="@candidate.Id">@candidate.Title</option>
+                                        }
+                                    </select>
+                                </div>
+                            }
+                        </div>
+                    </details>
 
                     @if (_showCoverPicker)
                     {
