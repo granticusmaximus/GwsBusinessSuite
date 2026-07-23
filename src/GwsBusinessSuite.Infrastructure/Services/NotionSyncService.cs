@@ -548,12 +548,74 @@ public sealed class NotionSyncService(
                 continue;
             }
 
+            mapped = await PersistNotionFileAsync(mapped, cancellationToken);
             blocks.Add(mapped);
             if (hasChildren && childId.Length > 0)
             {
                 await AppendBlockChildrenAsync(childId, indentLevel + 1, token, blocks, cancellationToken);
             }
         }
+    }
+
+    private async Task<WikiBlock> PersistNotionFileAsync(
+        WikiBlock block,
+        CancellationToken cancellationToken)
+    {
+        if (!block.Props.TryGetValue("notionSourceType", out var sourceType)
+            || !string.Equals(sourceType, "file", StringComparison.OrdinalIgnoreCase)
+            || !block.Props.TryGetValue("notionBlockId", out var notionBlockId)
+            || string.IsNullOrWhiteSpace(notionBlockId)
+            || !block.Props.TryGetValue("url", out var sourceUrl)
+            || string.IsNullOrWhiteSpace(sourceUrl))
+        {
+            return block;
+        }
+
+        var importedFile = dbContext.SentinelImportedFiles.Local
+            .FirstOrDefault(file => file.NotionBlockId == notionBlockId)
+            ?? await dbContext.SentinelImportedFiles
+                .FirstOrDefaultAsync(file => file.NotionBlockId == notionBlockId, cancellationToken);
+
+        try
+        {
+            var download = await notionService.DownloadFileAsync(sourceUrl, cancellationToken);
+            if (importedFile is null)
+            {
+                importedFile = new SentinelImportedFile
+                {
+                    NotionBlockId = notionBlockId,
+                    FileName = download.FileName,
+                    ContentType = download.ContentType,
+                    Content = download.Content,
+                    SizeBytes = download.Content.LongLength,
+                    CreatedBy = "notion-sync"
+                };
+                await dbContext.SentinelImportedFiles.AddAsync(importedFile, cancellationToken);
+            }
+            else
+            {
+                importedFile.FileName = download.FileName;
+                importedFile.ContentType = download.ContentType;
+                importedFile.Content = download.Content;
+                importedFile.SizeBytes = download.Content.LongLength;
+                importedFile.UpdatedAt = DateTimeOffset.UtcNow;
+                importedFile.UpdatedBy = "notion-sync";
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Could not cache Notion file block {NotionBlockId}; retaining any existing durable copy.", notionBlockId);
+            if (importedFile is null)
+            {
+                return block;
+            }
+        }
+
+        var props = block.Props.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        props["url"] = $"/admin/sentinel/files/{importedFile.Id}";
+        props["fileName"] = importedFile.FileName;
+        props.Remove("notionSourceType");
+        return block with { Props = props };
     }
 
     private async Task<(int Imported, int Updated, int Archived)> SyncDatabaseSchemaAndRowsAsync(string notionDatabaseId, Guid wikiDatabaseId, string token, CancellationToken cancellationToken)

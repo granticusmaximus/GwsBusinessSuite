@@ -25,7 +25,13 @@ public sealed class SentinelWorkspaceServiceTests
             BlocksJson = WikiBlockJson.Serialize([
                 new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0,
                     [new WikiRichTextSpan("The launch sequence uses the blue switch.")],
-                    new Dictionary<string, string>())])
+                    new Dictionary<string, string>()),
+                new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Embed, 0, [],
+                    new Dictionary<string, string>
+                    {
+                        ["url"] = "/admin/sentinel/files/file-id",
+                        ["fileName"] = "Quarterly plan.pdf"
+                    })])
         }, "u");
 
         var database = await databases.CreateDatabaseAsync("Projects", null, "u");
@@ -44,10 +50,12 @@ public sealed class SentinelWorkspaceServiceTests
         var pageResults = await sentinel.SearchAsync("blue switch");
         var databaseResults = await sentinel.SearchAsync("Northstar");
         var databasePageResults = await sentinel.SearchAsync("Decision log");
+        var attachmentResults = await sentinel.SearchAsync("Quarterly plan");
 
         pageResults.Should().ContainSingle(result => !result.IsDatabase && result.Title == "Operations" && result.MatchKind == "Page content");
         databaseResults.Should().ContainSingle(result => result.IsDatabase && result.Title == "Projects" && result.MatchKind == "Database content");
         databasePageResults.Should().ContainSingle(result => result.IsDatabase && result.Title == "Projects" && result.MatchKind == "Database content");
+        attachmentResults.Should().ContainSingle(result => !result.IsDatabase && result.Title == "Operations" && result.MatchKind == "Page content");
     }
 
     [Fact]

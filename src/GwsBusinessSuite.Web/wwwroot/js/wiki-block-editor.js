@@ -120,6 +120,11 @@ function createBlockElement(block, state) {
     el.dataset.blockType = block.type;
     el.dataset.indent = String(block.indentLevel || 0);
     if (block.type === 'to_do' && block.props && block.props.checked === 'true') el.dataset.checked = 'true';
+    if (block.type === 'image' || block.type === 'embed') {
+        el.dataset.url = (block.props && block.props.url) || '';
+        el.dataset.fileName = (block.props && block.props.fileName) || '';
+        el.dataset.notionBlockId = (block.props && block.props.notionBlockId) || '';
+    }
     if (block.type === 'linked_database' || block.type === 'inline_database') {
         el.dataset.databaseId = (block.props && block.props.databaseId) || '';
         el.dataset.databaseTitle = (block.props && block.props.databaseTitle) || '';
@@ -250,13 +255,13 @@ function createMediaBody(block, state) {
 
     const preview = document.createElement('div');
     preview.className = 'wiki-media-preview';
-    renderMediaPreview(preview, block.type, url);
+    renderMediaPreview(preview, block.type, url, (block.props && block.props.fileName) || '');
 
     const commit = () => {
         const el = wrapper.closest('.wiki-block');
         el.dataset.url = input.value.trim();
         wrapper.classList.toggle('has-source', Boolean(input.value.trim()));
-        renderMediaPreview(preview, block.type, input.value.trim());
+        renderMediaPreview(preview, block.type, input.value.trim(), wrapper.closest('.wiki-block')?.dataset.fileName || '');
         notifyChanged(state);
     };
     input.addEventListener('keydown', event => {
@@ -268,7 +273,7 @@ function createMediaBody(block, state) {
     return wrapper;
 }
 
-function renderMediaPreview(preview, type, url) {
+function renderMediaPreview(preview, type, url, fileName = '') {
     preview.innerHTML = '';
     if (!url) return;
     if (type === 'image') {
@@ -284,7 +289,8 @@ function renderMediaPreview(preview, type, url) {
         link.target = '_blank';
         link.rel = 'noopener noreferrer';
         link.className = 'wiki-embed-link';
-        link.textContent = url;
+        link.textContent = fileName || url;
+        if (fileName) link.title = url;
         preview.appendChild(link);
     }
 }
@@ -966,7 +972,11 @@ function serializeBlock(blockEl) {
     const type = blockEl.dataset.blockType;
     const props = {};
     if (type === 'to_do') props.checked = blockEl.dataset.checked === 'true' ? 'true' : 'false';
-    if (type === 'image' || type === 'embed') props.url = blockEl.dataset.url || '';
+    if (type === 'image' || type === 'embed') {
+        props.url = blockEl.dataset.url || '';
+        if (blockEl.dataset.fileName) props.fileName = blockEl.dataset.fileName;
+        if (blockEl.dataset.notionBlockId) props.notionBlockId = blockEl.dataset.notionBlockId;
+    }
     if (type === 'linked_database' || type === 'inline_database') {
         props.databaseId = blockEl.dataset.databaseId || '';
         props.databaseTitle = blockEl.dataset.databaseTitle || '';

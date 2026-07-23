@@ -90,6 +90,11 @@ public static class NotionMapping
         var richText = body.ValueKind == JsonValueKind.Object && body.TryGetProperty("rich_text", out var rt)
             ? MapRichText(rt)
             : [];
+        if (richText.Count == 0 && body.ValueKind == JsonValueKind.Object
+            && body.TryGetProperty("caption", out var caption))
+        {
+            richText = MapRichText(caption);
+        }
 
         switch (type)
         {
@@ -127,12 +132,12 @@ public static class NotionMapping
             case "divider":
                 return NewBlock(WikiBlockTypes.Divider, indentLevel, []);
             case "image":
-                return NewBlock(WikiBlockTypes.Image, indentLevel, richText, new Dictionary<string, string> { ["url"] = ExtractFileUrl(body) });
+                return NewBlock(WikiBlockTypes.Image, indentLevel, richText, FileProps(block, body));
             case "video":
             case "audio":
             case "file":
             case "pdf":
-                return NewBlock(WikiBlockTypes.Embed, indentLevel, richText, new Dictionary<string, string> { ["url"] = ExtractFileUrl(body) });
+                return NewBlock(WikiBlockTypes.Embed, indentLevel, richText, FileProps(block, body));
             case "bookmark":
             case "link_preview":
                 var url = body.ValueKind == JsonValueKind.Object && body.TryGetProperty("url", out var urlElement) ? urlElement.GetString() ?? string.Empty : string.Empty;
@@ -210,6 +215,31 @@ public static class NotionMapping
         }
 
         return string.Empty;
+    }
+
+    private static IReadOnlyDictionary<string, string> FileProps(JsonElement block, JsonElement body)
+    {
+        var props = new Dictionary<string, string>
+        {
+            ["url"] = ExtractFileUrl(body)
+        };
+        if (block.TryGetProperty("id", out var id) && id.GetString() is { Length: > 0 } blockId)
+        {
+            props["notionBlockId"] = blockId;
+        }
+        if (body.ValueKind == JsonValueKind.Object
+            && body.TryGetProperty("type", out var sourceType)
+            && sourceType.GetString() is { Length: > 0 } type)
+        {
+            props["notionSourceType"] = type;
+        }
+        if (body.ValueKind == JsonValueKind.Object
+            && body.TryGetProperty("name", out var name)
+            && name.GetString() is { Length: > 0 } fileName)
+        {
+            props["fileName"] = fileName;
+        }
+        return props;
     }
 
     private static WikiBlock NewBlock(string type, int indentLevel, IReadOnlyList<WikiRichTextSpan> richText, IReadOnlyDictionary<string, string>? props = null) =>

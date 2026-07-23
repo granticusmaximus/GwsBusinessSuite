@@ -55,15 +55,19 @@ public sealed class SentinelPresenceService(
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var cutoff = timeProvider.GetUtcNow() - SentinelPresenceTracker.SessionTimeout;
-        var expired = await db.SentinelPresenceLeases.Where(item => item.LastSeenAt < cutoff).ToListAsync(cancellationToken);
+        // SQLite stores DateTimeOffset as TEXT and cannot translate ordering comparisons.
+        // Presence leases are bounded by active browser sessions, so materialize this small
+        // set once and apply the cutoff provider-independently in memory.
+        var allLeases = await db.SentinelPresenceLeases.ToListAsync(cancellationToken);
+        var expired = allLeases.Where(item => item.LastSeenAt < cutoff).ToList();
         if (expired.Count > 0)
         {
             db.SentinelPresenceLeases.RemoveRange(expired);
             await db.SaveChangesAsync(cancellationToken);
         }
-        var leases = await db.SentinelPresenceLeases.AsNoTracking()
+        var leases = allLeases
             .Where(item => item.WikiPageId == wikiPageId && item.LastSeenAt >= cutoff)
-            .ToListAsync(cancellationToken);
+            .ToList();
         return leases.GroupBy(item => item.Username, StringComparer.OrdinalIgnoreCase)
             .Select(group => new SentinelPresenceView(group.Key, group.Count(), group.Max(item => item.LastSeenAt)))
             .OrderBy(item => item.Username, StringComparer.OrdinalIgnoreCase)

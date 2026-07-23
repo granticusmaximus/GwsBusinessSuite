@@ -9,6 +9,8 @@ public sealed record NotionPage(IReadOnlyList<JsonElement> Results, bool HasMore
 
 public sealed record NotionValidationResult(bool IsSuccess, string Message, string? WorkspaceName);
 
+public sealed record NotionFileDownload(string FileName, string ContentType, byte[] Content);
+
 // Raw HTTP client over Notion's public API - Bearer token passed per-call (never held as
 // service state) since the token comes from a DB row the caller already loaded, same as
 // CjConnectionRequest.DeveloperKey being passed into ICjAffiliateService per-call.
@@ -22,6 +24,7 @@ public interface INotionService
     Task<NotionPage> QueryDatabaseAsync(string integrationToken, string databaseId, string? cursor, CancellationToken cancellationToken = default);
     Task<JsonElement?> GetViewAsync(string integrationToken, string viewId, CancellationToken cancellationToken = default);
     Task<NotionPage> ListCommentsAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default);
+    Task<NotionFileDownload> DownloadFileAsync(string fileUrl, CancellationToken cancellationToken = default);
     Task UpdatePageAsync(string integrationToken, string pageId, IReadOnlyDictionary<string, object?> payload, CancellationToken cancellationToken = default);
     Task ReplaceBlockChildrenAsync(string integrationToken, string blockId, IReadOnlyList<object> children, CancellationToken cancellationToken = default);
 }

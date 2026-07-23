@@ -343,6 +343,34 @@ app.UseRateLimiter();
 // pipeline's post-deploy smoke test and any external uptime monitor.
 app.MapHealthChecks("/health").AllowAnonymous();
 
+app.MapGet("/admin/sentinel/files/{id:guid}", async (
+    Guid id,
+    IAppDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var file = await dbContext.SentinelImportedFiles
+        .AsNoTracking()
+        .Where(item => item.Id == id)
+        .Select(item => new { item.FileName, item.ContentType, item.Content })
+        .FirstOrDefaultAsync(cancellationToken);
+    if (file is null)
+    {
+        return Results.NotFound();
+    }
+
+    var canRenderInline = file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(file.ContentType, "application/pdf", StringComparison.OrdinalIgnoreCase)
+        || file.ContentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase)
+        || file.ContentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase);
+    return Results.File(
+        file.Content,
+        file.ContentType,
+        fileDownloadName: canRenderInline ? null : file.FileName,
+        enableRangeProcessing: true);
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("public-read");
+
 app.MapGet("/admin/api/performance", (
     PerformanceTelemetry telemetry,
     GwsBusinessSuite.Application.NewsIntelligence.INewsIntelligenceService newsService) =>
