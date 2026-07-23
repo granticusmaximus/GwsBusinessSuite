@@ -6,11 +6,11 @@
 @using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Domain.Entities
-@using GwsBusinessSuite.Infrastructure.Services
 @inject IWikiService WikiService
 @inject IWikiDatabaseService WikiDatabaseService
 @inject ISentinelWorkspaceService SentinelWorkspaceService
 @inject INotionSyncService NotionSyncService
+@inject INotionSyncCoordinator NotionSyncCoordinator
 @inject IMediaLibraryService MediaLibraryService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
@@ -655,6 +655,8 @@
     private bool NotionMessageIsError { get; set; }
     private string NotionMessage { get; set; } = string.Empty;
     private NotionConnectorSettingsView NotionSettings { get; set; } = new();
+    private readonly CancellationTokenSource _disposeCts = new();
+    private bool _isObservingNotionSync;
 
     private List<WikiRevisionView> History { get; set; } = new();
     private bool IsHistoryBusy { get; set; }
@@ -712,6 +714,19 @@
         try
         {
             NotionSettings = await NotionSyncService.GetSettingsAsync() ?? new NotionConnectorSettingsView();
+            var syncStatus = NotionSyncCoordinator.GetStatus();
+            if (syncStatus.IsActive)
+            {
+                IsNotionBusy = true;
+                NotionMessage = syncStatus.State == NotionSyncJobStates.Queued
+                    ? "Notion sync is queued on the server."
+                    : "Notion sync is running on the server. You can close this dialog or reconnect without stopping it.";
+                _ = ObserveNotionSyncAsync();
+            }
+            else if (syncStatus.Source == "manual" && syncStatus.Result is { } completedResult)
+            {
+                SetNotionSyncMessage(completedResult);
+            }
         }
         catch (Exception ex)
         {
@@ -756,7 +771,6 @@
     {
         IsNotionBusy = true;
         NotionMessage = string.Empty;
-        var acquired = false;
         try
         {
             var validation = await NotionSyncService.SaveSettingsAsync(NotionSettings);
@@ -771,25 +785,18 @@
             NotionSettings.HasStoredIntegrationToken = true;
             NotionSettings.IntegrationToken = string.Empty;
 
-            acquired = await NotionSyncBackgroundService.SyncLock.WaitAsync(0);
-            if (!acquired)
+            if (!NotionSyncCoordinator.TryQueueManualSync())
             {
                 NotionMessage = "A Notion sync is already running.";
                 NotionMessageIsError = true;
                 return;
             }
 
-            var result = await NotionSyncService.SyncAsync();
-            NotionMessage = result.IsSuccess
-                ? $"{result.Message} {result.Imported} imported, {result.Updated} updated, {result.Archived} archived."
-                : result.Message;
-            NotionMessageIsError = !result.IsSuccess;
-            NotionSettings = await NotionSyncService.GetSettingsAsync() ?? NotionSettings;
-            if (result.IsSuccess)
-            {
-                await LoadTreeAsync(selectFirstPage: false);
-            }
+            NotionMessage = "Notion sync is queued on the server. It will continue if this browser disconnects.";
+            NotionMessageIsError = false;
+            await ObserveNotionSyncAsync();
         }
+        catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Unable to sync Notion workspace.");
@@ -798,12 +805,67 @@
         }
         finally
         {
-            if (acquired)
-            {
-                NotionSyncBackgroundService.SyncLock.Release();
-            }
             IsNotionBusy = false;
         }
+    }
+
+    private async Task ObserveNotionSyncAsync()
+    {
+        if (_isObservingNotionSync)
+        {
+            return;
+        }
+
+        _isObservingNotionSync = true;
+        try
+        {
+            while (!_disposeCts.IsCancellationRequested)
+            {
+                var status = NotionSyncCoordinator.GetStatus();
+                if (!status.IsActive)
+                {
+                    if (status.Result is { } result)
+                    {
+                        SetNotionSyncMessage(result);
+                        NotionSettings = await NotionSyncService.GetSettingsAsync() ?? NotionSettings;
+                        if (result.IsSuccess)
+                        {
+                            await LoadTreeAsync(selectFirstPage: false);
+                        }
+                    }
+                    return;
+                }
+
+                NotionMessage = status.State == NotionSyncJobStates.Queued
+                    ? "Notion sync is queued on the server."
+                    : "Notion sync is running on the server. You can close this dialog or reconnect without stopping it.";
+                await Task.Delay(TimeSpan.FromSeconds(1), _disposeCts.Token);
+            }
+        }
+        catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to observe the server-side Notion sync.");
+            NotionMessage = $"Unable to refresh Notion sync status. {ex.Message}";
+            NotionMessageIsError = true;
+        }
+        finally
+        {
+            _isObservingNotionSync = false;
+            IsNotionBusy = false;
+            if (!_disposeCts.IsCancellationRequested)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private void SetNotionSyncMessage(NotionSyncResult result)
+    {
+        NotionMessage = result.IsSuccess
+            ? $"{result.Message} {result.Imported} imported, {result.Updated} updated, {result.Archived} archived."
+            : result.Message;
+        NotionMessageIsError = !result.IsSuccess;
     }
 
     private async Task PushCurrentPageToNotionAsync()
@@ -1675,6 +1737,8 @@
 
     public async ValueTask DisposeAsync()
     {
+        await _disposeCts.CancelAsync();
+
         if (_blockEditorInitialized && _blockEditorModule is not null)
         {
             try
@@ -1703,5 +1767,6 @@
         }
 
         _wikiLinksRef?.Dispose();
+        _disposeCts.Dispose();
     }
 }

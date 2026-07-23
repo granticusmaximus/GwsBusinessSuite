@@ -148,7 +148,11 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(30);
         });
         services.AddScoped<INotionSyncService, NotionSyncService>();
-        services.AddHostedService<NotionSyncBackgroundService>();
+        services.AddSingleton<NotionSyncBackgroundService>();
+        services.AddSingleton<INotionSyncCoordinator>(provider =>
+            provider.GetRequiredService<NotionSyncBackgroundService>());
+        services.AddHostedService(provider =>
+            provider.GetRequiredService<NotionSyncBackgroundService>());
         var liveShowRecordingsPath = configuration["LiveShow:RecordingsPath"] ?? "/app/data/live-show-recordings";
         services.AddScoped<ILiveShowService>(sp => new LiveShowService(
             sp.GetRequiredService<IAppDbContext>(),

@@ -94,7 +94,9 @@ proprietary schemas; public Notion product and API documentation is behavioral r
    upsert-by-Notion-id reconciliation with soft-flagging of upstream-archived content,
    selected-id scopes, view and comment import, and guarded manual page writes. The Sentinel UI provides connection settings, manual sync,
    hourly auto-sync control, last-sync counts, source badges, and dimmed-but-openable archived
-   items. Sync-driven page changes deliberately do not create interactive revision snapshots,
+   items. Manual imports are queued on the server and expose observable run status, so a browser,
+   desktop WebView, or mobile connection interruption cannot cancel the workspace import.
+   Sync-driven page changes deliberately do not create interactive revision snapshots,
    preventing hourly sync noise from evicting authored changes from the 20-revision history.
 4. **Sentinel identity, search, and knowledge graph** (delivered): Sentinel product naming
    and canonical route; all-token ranked page/block/database-row search with matched-term
