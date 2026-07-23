@@ -143,6 +143,41 @@ public sealed class NotionSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_ShouldFetchContentForAnEmptyPageInsteadOfBootstrappingItAsCurrent()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        var lastSync = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var settings = await fixture.Db.NotionConnectorSettings.SingleAsync();
+        settings.LastSyncedAt = lastSync;
+        fixture.Db.WikiPages.Add(new GwsBusinessSuite.Domain.Entities.WikiPage
+        {
+            Title = "Page shell only",
+            Slug = "page-shell-only",
+            NotionId = "page-1",
+            BlocksJson = "[]",
+            CreatedBy = "notion-sync"
+        });
+        await fixture.Db.SaveChangesAsync();
+        var remoteEditedAt = lastSync.AddMinutes(-1);
+        fixture.Notion.SearchResults = [Page("page-1", "Page shell only", lastEditedAt: remoteEditedAt)];
+        fixture.Notion.BlockChildren["page-1"] =
+        [
+            Json("""
+                {"object":"block","id":"paragraph-1","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Recovered page content"}]}}
+                """)
+        ];
+
+        var result = await fixture.Service.SyncAsync();
+
+        result.IsSuccess.Should().BeTrue();
+        fixture.Notion.BlockChildrenRequests.Should().Contain("page-1");
+        var page = await fixture.Db.WikiPages.SingleAsync(item => item.NotionId == "page-1");
+        WikiBlockJson.ParseBlocks(page.BlocksJson)
+            .Should().ContainSingle(block => block.PlainText == "Recovered page content");
+        page.NotionLastEditedAt.Should().Be(remoteEditedAt);
+    }
+
+    [Fact]
     public async Task SyncAsync_ShouldAssignUniqueSlugsToNewPagesWithDuplicateTitles()
     {
         await using var fixture = await SyncFixture.CreateAsync();
