@@ -175,6 +175,90 @@ public sealed class NotionSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_ShouldRecoverNativeBlocksFromMarkdownWhenStructuredContentReturns404()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.SearchResults = [Page("page-1", "Recovered")];
+        fixture.Notion.MissingBlockChildren.Add("page-1");
+        fixture.Notion.MarkdownPages["page-1"] = new NotionMarkdownPage(
+            """
+            # Project plan
+
+            This content came from the full-page endpoint.
+
+            - [x] Recovery works
+
+            ```csharp
+            Console.WriteLine("Sentinel");
+            ```
+            """,
+            false,
+            []);
+
+        var result = await fixture.Service.SyncAsync();
+
+        result.IsSuccess.Should().BeTrue();
+        result.Message.Should().Contain("Imported 4 content blocks");
+        result.Message.Should().Contain("Recovered 1 page");
+        var page = await fixture.Db.WikiPages.SingleAsync(item => item.NotionId == "page-1");
+        var blocks = WikiBlockJson.ParseBlocks(page.BlocksJson);
+        blocks.Select(block => block.Type).Should().Equal(
+            WikiBlockTypes.Heading1,
+            WikiBlockTypes.Paragraph,
+            WikiBlockTypes.ToDo,
+            WikiBlockTypes.Code);
+        blocks.Select(block => block.PlainText).Should().ContainInOrder(
+            "Project plan",
+            "This content came from the full-page endpoint.",
+            "Recovery works",
+            "Console.WriteLine(\"Sentinel\");");
+    }
+
+    [Fact]
+    public async Task SyncAsync_ShouldKeepPageContentWhenOptionalCommentsReturn404()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.SearchResults = [Page("page-1", "No comments capability")];
+        fixture.Notion.BlockChildren["page-1"] =
+        [
+            Json("""
+                {"object":"block","id":"paragraph-1","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Page content survives"}]}}
+                """)
+        ];
+        fixture.Notion.MissingComments.Add("page-1");
+
+        var result = await fixture.Service.SyncAsync();
+
+        result.IsSuccess.Should().BeTrue();
+        var page = await fixture.Db.WikiPages.SingleAsync(item => item.NotionId == "page-1");
+        WikiBlockJson.ParseBlocks(page.BlocksJson)
+            .Should().ContainSingle(block => block.PlainText == "Page content survives");
+    }
+
+    [Fact]
+    public async Task SyncAsync_ShouldPreserveExistingContentWhenAllRemoteContentEndpointsReturn404()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.SearchResults = [Page("page-1", "Intermittently unavailable")];
+        fixture.Notion.BlockChildren["page-1"] =
+        [
+            Json("""
+                {"object":"block","id":"paragraph-1","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Previously imported content"}]}}
+                """)
+        ];
+        (await fixture.Service.SyncAsync()).IsSuccess.Should().BeTrue();
+
+        fixture.Notion.MissingBlockChildren.Add("page-1");
+        var result = await fixture.Service.SyncAsync();
+
+        result.IsSuccess.Should().BeTrue();
+        result.Message.Should().Contain("1 page returned no readable content");
+        var page = await fixture.Db.WikiPages.SingleAsync(item => item.NotionId == "page-1");
+        WikiBlockJson.ParseBlocks(page.BlocksJson)
+            .Should().ContainSingle(block => block.PlainText == "Previously imported content");
+    }
+
+    [Fact]
     public async Task SyncAsync_ShouldFlattenTemplateAndUnsupportedContainersWithoutDroppingTheirChildren()
     {
         await using var fixture = await SyncFixture.CreateAsync();
@@ -439,9 +523,12 @@ public sealed class NotionSyncServiceTests
         public bool ValidationSucceeds { get; set; } = true;
         public IReadOnlyList<JsonElement> SearchResults { get; set; } = [];
         public Dictionary<string, IReadOnlyList<JsonElement>> BlockChildren { get; } = new();
+        public HashSet<string> MissingBlockChildren { get; } = [];
+        public Dictionary<string, NotionMarkdownPage> MarkdownPages { get; } = new();
         public Dictionary<string, JsonElement> DatabaseSchemas { get; } = new();
         public Dictionary<string, IReadOnlyList<JsonElement>> DatabaseRows { get; } = new();
         public Dictionary<string, NotionFileDownload> FileDownloads { get; } = new();
+        public HashSet<string> MissingComments { get; } = [];
 
         public Task<NotionValidationResult> ValidateConnectionAsync(string integrationToken, CancellationToken cancellationToken = default)
         {
@@ -455,10 +542,20 @@ public sealed class NotionSyncServiceTests
             Task.FromResult(new NotionPage(SearchResults, false, null));
 
         public Task<NotionPage> GetBlockChildrenAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new NotionPage(BlockChildren.GetValueOrDefault(blockId) ?? [], false, null));
+            MissingBlockChildren.Contains(blockId)
+                ? Task.FromException<NotionPage>(new HttpRequestException(
+                    "Not found.",
+                    null,
+                    System.Net.HttpStatusCode.NotFound))
+                : Task.FromResult(new NotionPage(BlockChildren.GetValueOrDefault(blockId) ?? [], false, null));
 
         public Task<JsonElement?> GetPageAsync(string integrationToken, string pageId, CancellationToken cancellationToken = default) =>
             Task.FromResult<JsonElement?>(Page(pageId, "Remote"));
+
+        public Task<NotionMarkdownPage?> GetPageMarkdownAsync(string integrationToken, string pageId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(MarkdownPages.TryGetValue(pageId, out var markdown)
+                ? (NotionMarkdownPage?)markdown
+                : null);
 
         public Task<JsonElement?> GetDatabaseAsync(string integrationToken, string databaseId, CancellationToken cancellationToken = default) =>
             Task.FromResult(DatabaseSchemas.TryGetValue(databaseId, out var schema) ? (JsonElement?)schema : null);
@@ -470,7 +567,12 @@ public sealed class NotionSyncServiceTests
             Task.FromResult<JsonElement?>(null);
 
         public Task<NotionPage> ListCommentsAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new NotionPage([], false, null));
+            MissingComments.Contains(blockId)
+                ? Task.FromException<NotionPage>(new HttpRequestException(
+                    "Not found.",
+                    null,
+                    System.Net.HttpStatusCode.NotFound))
+                : Task.FromResult(new NotionPage([], false, null));
 
         public Task<NotionFileDownload> DownloadFileAsync(string fileUrl, CancellationToken cancellationToken = default) =>
             Task.FromResult(FileDownloads[fileUrl]);
