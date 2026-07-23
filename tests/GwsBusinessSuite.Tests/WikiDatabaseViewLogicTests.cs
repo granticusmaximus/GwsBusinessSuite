@@ -9,13 +9,52 @@ public sealed class WikiDatabaseViewLogicTests
     [Fact]
     public void ViewConfigJson_ShouldRoundTripOpenPageModeAndReadLegacyConfigs()
     {
+        var firstPropertyId = Guid.NewGuid().ToString();
+        var secondPropertyId = Guid.NewGuid().ToString();
         var serialized = WikiDatabaseViewConfigJson.Serialize(
-            new WikiDatabaseViewConfig([], [], null, WikiDatabaseOpenPageModes.FullPage));
+            new WikiDatabaseViewConfig(
+                [],
+                [],
+                null,
+                WikiDatabaseOpenPageModes.FullPage,
+                [secondPropertyId, firstPropertyId],
+                [firstPropertyId]));
 
-        WikiDatabaseViewConfigJson.Parse(serialized).OpenPageMode
-            .Should().Be(WikiDatabaseOpenPageModes.FullPage);
-        WikiDatabaseViewConfigJson.Parse("""{"filters":[],"sorts":[],"groupByPropertyId":null}""")
-            .OpenPageMode.Should().BeNull();
+        var parsed = WikiDatabaseViewConfigJson.Parse(serialized);
+        parsed.OpenPageMode.Should().Be(WikiDatabaseOpenPageModes.FullPage);
+        parsed.PagePropertyOrder.Should().Equal(secondPropertyId, firstPropertyId);
+        parsed.HiddenPagePropertyIds.Should().Equal(firstPropertyId);
+
+        var legacy = WikiDatabaseViewConfigJson.Parse(
+            """{"filters":[],"sorts":[],"groupByPropertyId":null}""");
+        legacy.OpenPageMode.Should().BeNull();
+        legacy.PagePropertyOrder.Should().BeEmpty();
+        legacy.HiddenPagePropertyIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void PagePresentation_ShouldExcludeTitleApplyExplicitOrderAndHideConfiguredProperties()
+    {
+        var title = NewProperty(WikiDatabasePropertyTypes.Title);
+        title.Name = "Name";
+        title.SortOrder = 0;
+        var status = NewProperty(WikiDatabasePropertyTypes.Select);
+        status.Name = "Status";
+        status.SortOrder = 1;
+        var owner = NewProperty(WikiDatabasePropertyTypes.Person);
+        owner.Name = "Owner";
+        owner.SortOrder = 2;
+        var config = new WikiDatabaseViewConfig(
+            [],
+            [],
+            null,
+            PagePropertyOrder: [owner.Id.ToString(), status.Id.ToString()],
+            HiddenPagePropertyIds: [status.Id.ToString()]);
+
+        WikiDatabasePagePresentation.OrderProperties([title, status, owner], config)
+            .Should().Equal(owner, status);
+        WikiDatabasePagePresentation.VisibleProperties([title, status, owner], config)
+            .Should().Equal(owner);
     }
 
     [Theory]

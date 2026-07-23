@@ -35,16 +35,19 @@
                     <div class="alert alert-danger">@ErrorMessage</div>
                 }
 
-                <div class="sentinel-row-page-properties">
-                    @foreach (var property in Database.Properties.OrderBy(property => property.SortOrder))
-                    {
-                        var display = WikiPropertyValues.GetDisplayText(property, Values, Row.CreatedAt);
-                        <div class="sentinel-row-page-property">
-                            <div class="sentinel-row-page-property-name">@property.Name</div>
-                            <div class="sentinel-row-page-property-value" title="@display">@(string.IsNullOrWhiteSpace(display) ? "—" : display)</div>
-                        </div>
-                    }
-                </div>
+                @if (PageProperties.Count > 0)
+                {
+                    <div class="sentinel-row-page-properties">
+                        @foreach (var property in PageProperties)
+                        {
+                            var display = WikiPropertyValues.GetDisplayText(property, Values, Row.CreatedAt);
+                            <div class="sentinel-row-page-property">
+                                <div class="sentinel-row-page-property-name">@property.Name</div>
+                                <div class="sentinel-row-page-property-value" title="@display">@(string.IsNullOrWhiteSpace(display) ? "—" : display)</div>
+                            </div>
+                        }
+                    </div>
+                }
 
                 <div class="sentinel-row-page-editor-heading">
                     <label class="form-label fw-semibold mb-0">Page content</label>
@@ -70,6 +73,7 @@
     [Parameter, EditorRequired] public required WikiDatabase Database { get; set; }
     [Parameter, EditorRequired] public required WikiDatabaseRow Row { get; set; }
     [Parameter] public string OpenMode { get; set; } = WikiDatabaseOpenPageModes.SidePeek;
+    [Parameter] public IReadOnlyList<WikiDatabaseProperty> PageProperties { get; set; } = [];
     [Parameter] public EventCallback OnSaved { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
 

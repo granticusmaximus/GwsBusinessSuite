@@ -276,31 +276,89 @@ else
                         <i class="bi bi-layout-sidebar-inset-reverse"></i>
                         Open pages in
                     </span>
-                    <div class="btn-group btn-group-sm" role="group" aria-label="Choose how database pages open">
-                        <button type="button"
-                                class="btn @(ActiveOpenPageMode == WikiDatabaseOpenPageModes.SidePeek ? "btn-secondary" : "btn-outline-secondary")"
-                                aria-pressed="@(ActiveOpenPageMode == WikiDatabaseOpenPageModes.SidePeek)"
-                                title="Open pages in a panel beside the database"
-                                disabled="@IsBusy"
-                                @onclick="() => SetOpenPageModeAsync(WikiDatabaseOpenPageModes.SidePeek)">
-                            <i class="bi bi-layout-sidebar-reverse me-1"></i>Side peek
-                        </button>
-                        <button type="button"
-                                class="btn @(ActiveOpenPageMode == WikiDatabaseOpenPageModes.CenterPeek ? "btn-secondary" : "btn-outline-secondary")"
-                                aria-pressed="@(ActiveOpenPageMode == WikiDatabaseOpenPageModes.CenterPeek)"
-                                title="Open pages in a centered overlay"
-                                disabled="@IsBusy"
-                                @onclick="() => SetOpenPageModeAsync(WikiDatabaseOpenPageModes.CenterPeek)">
-                            <i class="bi bi-window-stack me-1"></i>Center peek
-                        </button>
-                        <button type="button"
-                                class="btn @(ActiveOpenPageMode == WikiDatabaseOpenPageModes.FullPage ? "btn-secondary" : "btn-outline-secondary")"
-                                aria-pressed="@(ActiveOpenPageMode == WikiDatabaseOpenPageModes.FullPage)"
-                                title="Open pages in a focused full-page workspace"
-                                disabled="@IsBusy"
-                                @onclick="() => SetOpenPageModeAsync(WikiDatabaseOpenPageModes.FullPage)">
-                            <i class="bi bi-arrows-fullscreen me-1"></i>Full page
-                        </button>
+                    <div class="sentinel-view-layout-controls">
+                        <div class="btn-group btn-group-sm sentinel-open-mode-group" role="group" aria-label="Choose how database pages open">
+                            <button type="button"
+                                    class="btn @(ActiveOpenPageMode == WikiDatabaseOpenPageModes.SidePeek ? "btn-secondary" : "btn-outline-secondary")"
+                                    aria-pressed="@(ActiveOpenPageMode == WikiDatabaseOpenPageModes.SidePeek)"
+                                    title="Open pages in a panel beside the database"
+                                    disabled="@IsBusy"
+                                    @onclick="() => SetOpenPageModeAsync(WikiDatabaseOpenPageModes.SidePeek)">
+                                <i class="bi bi-layout-sidebar-reverse me-1"></i>Side peek
+                            </button>
+                            <button type="button"
+                                    class="btn @(ActiveOpenPageMode == WikiDatabaseOpenPageModes.CenterPeek ? "btn-secondary" : "btn-outline-secondary")"
+                                    aria-pressed="@(ActiveOpenPageMode == WikiDatabaseOpenPageModes.CenterPeek)"
+                                    title="Open pages in a centered overlay"
+                                    disabled="@IsBusy"
+                                    @onclick="() => SetOpenPageModeAsync(WikiDatabaseOpenPageModes.CenterPeek)">
+                                <i class="bi bi-window-stack me-1"></i>Center peek
+                            </button>
+                            <button type="button"
+                                    class="btn @(ActiveOpenPageMode == WikiDatabaseOpenPageModes.FullPage ? "btn-secondary" : "btn-outline-secondary")"
+                                    aria-pressed="@(ActiveOpenPageMode == WikiDatabaseOpenPageModes.FullPage)"
+                                    title="Open pages in a focused full-page workspace"
+                                    disabled="@IsBusy"
+                                    @onclick="() => SetOpenPageModeAsync(WikiDatabaseOpenPageModes.FullPage)">
+                                <i class="bi bi-arrows-fullscreen me-1"></i>Full page
+                            </button>
+                        </div>
+
+                        <details class="sentinel-page-properties-menu">
+                            <summary class="btn btn-sm btn-outline-secondary">
+                                <i class="bi bi-sliders2 me-1"></i>
+                                Page properties
+                                <span class="badge text-bg-secondary ms-1">@VisiblePageProperties.Count/@PageProperties.Count</span>
+                            </summary>
+                            <div class="sentinel-page-properties-popover">
+                                <div class="sentinel-page-properties-heading">
+                                    <strong>Property presentation</strong>
+                                    <span>Choose what appears beneath a row title and in what order.</span>
+                                </div>
+                                @if (PageProperties.Count == 0)
+                                {
+                                    <div class="small text-secondary p-2">Add a property to configure the row page layout.</div>
+                                }
+                                else
+                                {
+                                    @for (var index = 0; index < PageProperties.Count; index++)
+                                    {
+                                        var property = PageProperties[index];
+                                        var propertyInputId = $"page-property-{ActiveView.Id:N}-{property.Id:N}";
+                                        <div class="sentinel-page-property-option">
+                                            <input id="@propertyInputId"
+                                                   class="form-check-input"
+                                                   type="checkbox"
+                                                   checked="@IsPagePropertyVisible(property)"
+                                                   disabled="@IsBusy"
+                                                   @onchange="e => SetPagePropertyVisibilityAsync(property, (bool)(e.Value ?? false))" />
+                                            <label for="@propertyInputId" class="sentinel-page-property-option-name" title="@property.Name">
+                                                <span>@property.Name</span>
+                                                <small>@PropertyTypeLabel(property.Type)</small>
+                                            </label>
+                                            <div class="btn-group btn-group-sm" role="group" aria-label="@($"Move {property.Name}")">
+                                                <button type="button"
+                                                        class="btn btn-link"
+                                                        title="Move up"
+                                                        aria-label="@($"Move {property.Name} up")"
+                                                        disabled="@(IsBusy || index == 0)"
+                                                        @onclick="() => MovePagePropertyAsync(property, -1)">
+                                                    <i class="bi bi-chevron-up"></i>
+                                                </button>
+                                                <button type="button"
+                                                        class="btn btn-link"
+                                                        title="Move down"
+                                                        aria-label="@($"Move {property.Name} down")"
+                                                        disabled="@(IsBusy || index == PageProperties.Count - 1)"
+                                                        @onclick="() => MovePagePropertyAsync(property, 1)">
+                                                    <i class="bi bi-chevron-down"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            </div>
+                        </details>
                     </div>
                 </div>
             }
@@ -596,6 +654,7 @@ else
     <SentinelDatabaseRowPage Database="Database"
                              Row="_openRow"
                              OpenMode="@ActiveOpenPageMode"
+                             PageProperties="@VisiblePageProperties"
                              OnSaved="RowPageSavedAsync"
                              OnClose="CloseRow" />
 }
@@ -650,6 +709,16 @@ else
     private string ActiveOpenPageMode => ActiveView is null
         ? WikiDatabaseOpenPageModes.SidePeek
         : WikiDatabaseOpenPageModes.Resolve(ActiveViewConfig?.OpenPageMode, ActiveView.Type);
+    private IReadOnlyList<WikiDatabaseProperty> PageProperties => Database is null
+        ? []
+        : WikiDatabasePagePresentation.OrderProperties(
+            Database.Properties.ToList(),
+            ActiveViewConfig ?? WikiDatabaseViewConfig.Empty);
+    private IReadOnlyList<WikiDatabaseProperty> VisiblePageProperties => Database is null
+        ? []
+        : WikiDatabasePagePresentation.VisibleProperties(
+            Database.Properties.ToList(),
+            ActiveViewConfig ?? WikiDatabaseViewConfig.Empty);
     private IReadOnlyList<WikiDatabaseProperty> RelationProperties =>
         Database?.Properties.Where(property => property.Type == WikiDatabasePropertyTypes.Relation).OrderBy(property => property.SortOrder).ToList() ?? [];
 
@@ -1039,21 +1108,68 @@ else
             return;
         }
 
+        await UpdateActiveViewConfigAsync(config => config with
+        {
+            OpenPageMode = normalizedMode
+        });
+    }
+
+    private bool IsPagePropertyVisible(WikiDatabaseProperty property) =>
+        !(ActiveViewConfig?.HiddenPagePropertyIds ?? []).Contains(property.Id.ToString(), StringComparer.Ordinal);
+
+    private Task SetPagePropertyVisibilityAsync(WikiDatabaseProperty property, bool visible) =>
+        UpdateActiveViewConfigAsync(config =>
+        {
+            var hidden = (config.HiddenPagePropertyIds ?? []).ToHashSet(StringComparer.Ordinal);
+            if (visible)
+            {
+                hidden.Remove(property.Id.ToString());
+            }
+            else
+            {
+                hidden.Add(property.Id.ToString());
+            }
+
+            var knownIds = PageProperties.Select(item => item.Id.ToString()).ToList();
+            var orderedHidden = knownIds.Where(hidden.Contains)
+                .Concat(hidden.Where(propertyId => !knownIds.Contains(propertyId, StringComparer.Ordinal)))
+                .ToList();
+            return config with { HiddenPagePropertyIds = orderedHidden };
+        });
+
+    private Task MovePagePropertyAsync(WikiDatabaseProperty property, int offset) =>
+        UpdateActiveViewConfigAsync(config =>
+        {
+            var order = PageProperties.Select(item => item.Id.ToString()).ToList();
+            var index = order.IndexOf(property.Id.ToString());
+            var targetIndex = index + offset;
+            if (index < 0 || targetIndex < 0 || targetIndex >= order.Count)
+            {
+                return config;
+            }
+
+            (order[index], order[targetIndex]) = (order[targetIndex], order[index]);
+            return config with { PagePropertyOrder = order };
+        });
+
+    private async Task UpdateActiveViewConfigAsync(Func<WikiDatabaseViewConfig, WikiDatabaseViewConfig> update)
+    {
+        if (ActiveView is not { } activeView)
+        {
+            return;
+        }
+
         await Work(async () =>
         {
-            var config = WikiDatabaseViewConfigJson.Parse(activeView.ConfigJson) with
-            {
-                OpenPageMode = normalizedMode
-            };
-            await WikiDatabaseService.SaveViewAsync(
+            var updatedConfig = update(WikiDatabaseViewConfigJson.Parse(activeView.ConfigJson));
+            var savedView = await WikiDatabaseService.SaveViewAsync(
                 WikiDatabaseId,
                 activeView.Id,
                 activeView.Name,
                 activeView.Type,
-                config,
+                updatedConfig,
                 await CurrentUserNameAsync());
-            await ReloadAsync();
-            _activeViewId = activeView.Id;
+            activeView.ConfigJson = savedView.ConfigJson;
             await OnChanged.InvokeAsync();
         });
     }
@@ -1232,6 +1348,14 @@ else
         WikiDatabaseRollupAggregations.Maximum => "Maximum",
         WikiDatabaseRollupAggregations.ShowUnique => "Show unique",
         _ => aggregation
+    };
+
+    private static string PropertyTypeLabel(string type) => type switch
+    {
+        WikiDatabasePropertyTypes.MultiSelect => "Multi-select",
+        WikiDatabasePropertyTypes.CreatedTime => "Created time",
+        WikiDatabasePropertyTypes.Rollup => "Rollup",
+        _ => type
     };
 
     private static string? GetText(WikiDatabaseRow row, WikiDatabaseProperty property) =>

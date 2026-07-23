@@ -164,7 +164,9 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
                     config.Filters.Select(filter => filter with { PropertyId = RemapPropertyId(filter.PropertyId, propertyIds) }).ToList(),
                     config.Sorts.Select(sort => sort with { PropertyId = RemapPropertyId(sort.PropertyId, propertyIds) }).ToList(),
                     config.GroupByPropertyId is null ? null : RemapPropertyId(config.GroupByPropertyId, propertyIds),
-                    config.OpenPageMode)),
+                    config.OpenPageMode,
+                    (config.PagePropertyOrder ?? []).Select(propertyId => RemapPropertyId(propertyId, propertyIds)).ToList(),
+                    (config.HiddenPagePropertyIds ?? []).Select(propertyId => RemapPropertyId(propertyId, propertyIds)).ToList())),
                 CreatedAt = now,
                 CreatedBy = performedBy
             });
@@ -405,7 +407,9 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
                     config.GroupByPropertyId is null
                         ? null
                         : RemapPropertyId(config.GroupByPropertyId, propertyIds),
-                    config.OpenPageMode)),
+                    config.OpenPageMode,
+                    (config.PagePropertyOrder ?? []).Select(propertyId => RemapPropertyId(propertyId, propertyIds)).ToList(),
+                    (config.HiddenPagePropertyIds ?? []).Select(propertyId => RemapPropertyId(propertyId, propertyIds)).ToList())),
                 CreatedAt = now,
                 CreatedBy = performedBy
             });
