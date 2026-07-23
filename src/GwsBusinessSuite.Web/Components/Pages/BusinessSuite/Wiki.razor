@@ -203,14 +203,34 @@
                 }
                 else
                 {
+                    var branchNodeIds = BranchNodeIds();
+                    var allBranchesExpanded = AreAllBranchesExpanded(branchNodeIds);
                     <div class="wiki-tree">
+                        @if (branchNodeIds.Count > 0)
+                        {
+                            <div class="sentinel-tree-heading">
+                                <span>Private</span>
+                                <button type="button"
+                                        class="sentinel-tree-expand-all"
+                                        @onclick="ToggleAllBranches"
+                                        aria-label="@(allBranchesExpanded ? "Collapse all page branches" : "Expand all page branches")"
+                                        title="@(allBranchesExpanded ? "Collapse all" : "Expand all")">
+                                    <i class="bi @(allBranchesExpanded ? "bi-arrows-collapse" : "bi-arrows-expand")"></i>
+                                    <span>@(allBranchesExpanded ? "Collapse all" : "Expand all")</span>
+                                </button>
+                            </div>
+                        }
                         @foreach (var node in FilteredAndOrderedNodes())
                         {
-                            <div class="wiki-tree-row @((node.IsDatabase ? SelectedDatabaseId == node.Id : SelectedPageId == node.Id) ? "active" : "") @(node.IsArchived ? "wiki-tree-archived" : "")"
-                                 style="padding-left:@(0.5 + GetNodeDepth(node) * 1.25)rem;">
-                                @if (HasChildren(node.Id) && string.IsNullOrWhiteSpace(SearchQuery))
+                            var nodeDepth = GetNodeDepth(node);
+                            var hasChildren = HasChildren(node.Id);
+                            <div class="wiki-tree-row @(nodeDepth == 0 ? "is-top-level" : string.Empty) @(hasChildren ? "has-children" : string.Empty) @((node.IsDatabase ? SelectedDatabaseId == node.Id : SelectedPageId == node.Id) ? "active" : "") @(node.IsArchived ? "wiki-tree-archived" : "")"
+                                 style="padding-left:@(0.4 + nodeDepth * 1.15)rem;">
+                                @if (hasChildren && string.IsNullOrWhiteSpace(SearchQuery))
                                 {
-                                    <button type="button" class="wiki-tree-toggle" @onclick="() => ToggleExpanded(node.Id)">
+                                    <button type="button" class="wiki-tree-toggle" @onclick="() => ToggleExpanded(node.Id)"
+                                            aria-label="@(IsExpanded(node.Id) ? $"Collapse {node.Title}" : $"Expand {node.Title}")"
+                                            aria-expanded="@IsExpanded(node.Id)">
                                         <i class="bi @(IsExpanded(node.Id) ? "bi-caret-down-fill" : "bi-caret-right-fill")"></i>
                                     </button>
                                 }
@@ -1215,6 +1235,7 @@
     private async Task OpenDatabaseAsync(Guid wikiDatabaseId)
     {
         _mobileWorkspaceNavOpen = false;
+        ExpandAncestorPath(wikiDatabaseId);
         await DeactivateBlockEditorAsync();
         SelectedPageId = null;
         SelectedDatabaseId = wikiDatabaseId;
@@ -1278,6 +1299,7 @@
             WorkspaceSearchResults = new();
             SelectedDatabaseId = null;
             SelectedPageId = page.Id;
+            ExpandAncestorPath(page.Id);
             Editor = new WikiPageEditorModel
             {
                 WikiPageId = page.Id,
@@ -1663,23 +1685,14 @@
     // OrderedPagesByHierarchy()/GetPageDepth() for CMS pages.
     private List<WikiTreeNode> OrderedTreeNodes()
     {
-        var byParent = AllTreeNodes().ToLookup(n => n.ParentId);
-        var result = new List<WikiTreeNode>();
-
-        void Visit(Guid? parentId)
-        {
-            foreach (var node in byParent[parentId].OrderBy(n => n.SortOrder))
-            {
-                result.Add(node);
-                if (parentId is null || IsExpanded(parentId.Value))
-                {
-                    Visit(node.Id);
-                }
-            }
-        }
-
-        Visit(null);
-        return result;
+        var nodes = AllTreeNodes();
+        var byId = nodes.ToDictionary(node => node.Id);
+        return SentinelTreeNavigation.GetVisibleNodeIds(
+                nodes.Select(ToNavigationNode).ToList(),
+                _expandedPageIds)
+            .Where(byId.ContainsKey)
+            .Select(nodeId => byId[nodeId])
+            .ToList();
     }
 
     private bool HasChildren(Guid nodeId) => AllTreeNodes().Any(n => n.ParentId == nodeId);
@@ -1691,6 +1704,36 @@
             _expandedPageIds.Remove(nodeId);
         }
     }
+
+    private IReadOnlySet<Guid> BranchNodeIds() =>
+        SentinelTreeNavigation.GetBranchNodeIds(
+            AllTreeNodes().Select(ToNavigationNode).ToList());
+
+    private bool AreAllBranchesExpanded(IReadOnlySet<Guid> branchNodeIds) =>
+        branchNodeIds.Count > 0 && branchNodeIds.All(_expandedPageIds.Contains);
+
+    private void ToggleAllBranches()
+    {
+        var branchNodeIds = BranchNodeIds();
+        if (branchNodeIds.Count > 0 && branchNodeIds.All(_expandedPageIds.Contains))
+        {
+            _expandedPageIds.Clear();
+            return;
+        }
+
+        _expandedPageIds.UnionWith(branchNodeIds);
+    }
+
+    private void ExpandAncestorPath(Guid nodeId)
+    {
+        _expandedPageIds.UnionWith(
+            SentinelTreeNavigation.GetAncestorNodeIds(
+                nodeId,
+                AllTreeNodes().Select(ToNavigationNode).ToList()));
+    }
+
+    private static SentinelTreeNavigationNode ToNavigationNode(WikiTreeNode node) =>
+        new(node.Id, node.ParentId, node.SortOrder);
 
     private int GetNodeDepth(WikiTreeNode node)
     {
