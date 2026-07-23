@@ -55,7 +55,7 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
         using var request = CreateRequest(HttpMethod.Get, path, integrationToken);
         using var response = await httpClient.SendAsync(request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        response.EnsureSuccessStatusCode();
+        EnsureSuccess(response, body, $"retrieving block children for {blockId}");
         return ParsePage(body);
     }
 
@@ -66,6 +66,42 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
         if (!response.IsSuccessStatusCode) return null;
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
         return document.RootElement.Clone();
+    }
+
+    public async Task<NotionMarkdownPage?> GetPageMarkdownAsync(
+        string integrationToken,
+        string pageId,
+        CancellationToken cancellationToken = default)
+    {
+        using var request = CreateRequest(
+            HttpMethod.Get,
+            $"pages/{Uri.EscapeDataString(pageId)}/markdown?include_transcript=true",
+            integrationToken);
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+        var root = document.RootElement;
+        var markdown = root.TryGetProperty("markdown", out var markdownElement)
+            && markdownElement.ValueKind == JsonValueKind.String
+                ? markdownElement.GetString() ?? string.Empty
+                : string.Empty;
+        var truncated = root.TryGetProperty("truncated", out var truncatedElement)
+            && truncatedElement.ValueKind == JsonValueKind.True;
+        var unknownBlockIds = root.TryGetProperty("unknown_block_ids", out var unknownElement)
+            && unknownElement.ValueKind == JsonValueKind.Array
+                ? unknownElement.EnumerateArray()
+                    .Where(item => item.ValueKind == JsonValueKind.String)
+                    .Select(item => item.GetString())
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Cast<string>()
+                    .ToList()
+                : [];
+
+        return new NotionMarkdownPage(markdown, truncated, unknownBlockIds);
     }
 
     public async Task<JsonElement?> GetDatabaseAsync(string integrationToken, string databaseId, CancellationToken cancellationToken = default)
@@ -109,7 +145,7 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
         using var request = CreateRequest(HttpMethod.Get, path, integrationToken);
         using var response = await httpClient.SendAsync(request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        response.EnsureSuccessStatusCode();
+        EnsureSuccess(response, body, $"retrieving comments for {blockId}");
         return ParsePage(body);
     }
 
@@ -158,7 +194,8 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
         using var request = CreateRequest(HttpMethod.Patch, $"pages/{Uri.EscapeDataString(pageId)}", integrationToken);
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
         using var response = await httpClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        EnsureSuccess(response, body, $"updating page {pageId}");
     }
 
     public async Task ReplaceBlockChildrenAsync(string integrationToken, string blockId, IReadOnlyList<object> children, CancellationToken cancellationToken = default)
@@ -166,7 +203,8 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
         using var request = CreateRequest(HttpMethod.Patch, $"blocks/{Uri.EscapeDataString(blockId)}/children", integrationToken);
         request.Content = new StringContent(JsonSerializer.Serialize(new { erase_content = true, children }), Encoding.UTF8, "application/json");
         using var response = await httpClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        EnsureSuccess(response, body, $"replacing block children for {blockId}");
     }
 
     private async Task<NotionPage> PostPageAsync(string integrationToken, string path, Dictionary<string, object?> payload, CancellationToken cancellationToken)
@@ -175,7 +213,7 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
         using var response = await httpClient.SendAsync(request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        response.EnsureSuccessStatusCode();
+        EnsureSuccess(response, body, $"calling {path}");
         return ParsePage(body);
     }
 
@@ -210,6 +248,22 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
         }
 
         return $"Notion API request failed with status {(int)statusCode}.";
+    }
+
+    private static void EnsureSuccess(
+        HttpResponseMessage response,
+        string body,
+        string operation)
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        throw new HttpRequestException(
+            $"Notion API failed while {operation}: {ExtractErrorMessage(body, response.StatusCode)}",
+            null,
+            response.StatusCode);
     }
 
     private static string? SafeFileName(string? value)

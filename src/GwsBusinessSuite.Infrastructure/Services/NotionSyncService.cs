@@ -118,6 +118,9 @@ public sealed class NotionSyncService(
             var imported = 0;
             var updated = 0;
             var archived = 0;
+            var contentBlocks = 0;
+            var markdownFallbackPages = 0;
+            var emptyContentPages = 0;
 
             // 1. Flat discovery pass - every page/database the integration can see.
             var discovered = new List<JsonElement>();
@@ -244,7 +247,10 @@ public sealed class NotionSyncService(
             {
                 if (notionIdToKind[notionId] is not ("database" or "data_source"))
                 {
-                    await SyncPageBlocksAsync(notionId, localId, token, cancellationToken);
+                    var pageContent = await SyncPageBlocksAsync(notionId, localId, token, cancellationToken);
+                    contentBlocks += pageContent.BlockCount;
+                    if (pageContent.UsedMarkdownFallback) markdownFallbackPages++;
+                    if (pageContent.BlockCount == 0) emptyContentPages++;
                     await SyncPageCommentsAsync(notionId, localId, token, cancellationToken);
                 }
             }
@@ -254,10 +260,17 @@ public sealed class NotionSyncService(
             {
                 if (notionIdToKind[notionId] is "database" or "data_source")
                 {
-                    var (rowsImported, rowsUpdated, rowsArchived) = await SyncDatabaseSchemaAndRowsAsync(notionId, localId, token, cancellationToken);
-                    imported += rowsImported;
-                    updated += rowsUpdated;
-                    archived += rowsArchived;
+                    var databaseContent = await SyncDatabaseSchemaAndRowsAsync(
+                        notionId,
+                        localId,
+                        token,
+                        cancellationToken);
+                    imported += databaseContent.Imported;
+                    updated += databaseContent.Updated;
+                    archived += databaseContent.Archived;
+                    contentBlocks += databaseContent.ContentBlocks;
+                    markdownFallbackPages += databaseContent.MarkdownFallbackPages;
+                    emptyContentPages += databaseContent.EmptyContentPages;
                 }
             }
 
@@ -275,7 +288,17 @@ public sealed class NotionSyncService(
             settingsRow.UpdatedBy = "notion-sync";
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            return new NotionSyncResult(true, "Sync complete.", imported, updated, archived);
+            var message = $"Sync complete. Imported {contentBlocks} content block{(contentBlocks == 1 ? string.Empty : "s")}.";
+            if (markdownFallbackPages > 0)
+            {
+                message += $" Recovered {markdownFallbackPages} page{(markdownFallbackPages == 1 ? string.Empty : "s")} through Notion's full-page content endpoint.";
+            }
+            if (emptyContentPages > 0)
+            {
+                message += $" {emptyContentPages} page{(emptyContentPages == 1 ? string.Empty : "s")} returned no readable content; confirm the integration has Read content capability and access to those pages.";
+            }
+
+            return new NotionSyncResult(true, message, imported, updated, archived);
         }
         catch (DbUpdateException ex)
         {
@@ -528,26 +551,102 @@ public sealed class NotionSyncService(
     // Deliberately does not create a WikiPageRevision snapshot for sync-driven content changes
     // (only interactive Save does) - an hourly background sync would otherwise flood the
     // bounded 20-revision history with sync noise, crowding out actual authored edits.
-    private async Task SyncPageBlocksAsync(string notionPageId, Guid wikiPageId, string token, CancellationToken cancellationToken)
+    private async Task<PageContentSyncResult> SyncPageBlocksAsync(
+        string notionPageId,
+        Guid wikiPageId,
+        string token,
+        CancellationToken cancellationToken)
     {
-        var blocks = new List<WikiBlock>();
-        await AppendBlockChildrenAsync(notionPageId, 0, token, blocks, cancellationToken);
+        var pageContent = await LoadNotionPageBlocksAsync(notionPageId, token, cancellationToken);
 
         var page = await dbContext.WikiPages.FirstOrDefaultAsync(p => p.Id == wikiPageId, cancellationToken);
         if (page is null)
         {
-            return;
+            return pageContent;
         }
 
-        var blocksJson = WikiBlockJson.Serialize(blocks);
-        if (!string.Equals(page.BlocksJson, blocksJson, StringComparison.Ordinal))
+        if (!pageContent.ContentUnavailable)
         {
-            page.BlocksJson = blocksJson;
-            page.ContentVersion++;
+            var blocksJson = WikiBlockJson.Serialize(pageContent.Blocks);
+            if (!string.Equals(page.BlocksJson, blocksJson, StringComparison.Ordinal))
+            {
+                page.BlocksJson = blocksJson;
+                page.ContentVersion++;
+            }
         }
         page.UpdatedAt = DateTimeOffset.UtcNow;
         page.UpdatedBy = "notion-sync";
         await dbContext.SaveChangesAsync(cancellationToken);
+        return pageContent;
+    }
+
+    private async Task<PageContentSyncResult> LoadNotionPageBlocksAsync(
+        string notionPageId,
+        string token,
+        CancellationToken cancellationToken)
+    {
+        var blocks = new List<WikiBlock>();
+        var structuredContentUnavailable = false;
+        try
+        {
+            await AppendBlockChildrenAsync(notionPageId, 0, token, blocks, cancellationToken);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode is
+                                             System.Net.HttpStatusCode.NotFound or
+                                             System.Net.HttpStatusCode.Forbidden)
+        {
+            // Search can return page metadata even when a particular child-content endpoint
+            // is unavailable. Do not abort the remaining workspace; recover this page through
+            // Notion's full-page endpoint instead.
+            logger.LogWarning(
+                ex,
+                "Structured Notion content was unavailable for page {NotionPageId}; trying full-page Markdown.",
+                notionPageId);
+            blocks.Clear();
+            structuredContentUnavailable = true;
+        }
+
+        if (blocks.Count > 0)
+        {
+            return new PageContentSyncResult(blocks, false, false);
+        }
+
+        try
+        {
+            var markdownPage = await notionService.GetPageMarkdownAsync(
+                token,
+                notionPageId,
+                cancellationToken);
+            if (markdownPage is null || string.IsNullOrWhiteSpace(markdownPage.Markdown))
+            {
+                logger.LogWarning(
+                    "Notion page {NotionPageId} returned no structured blocks or full-page Markdown content.",
+                    notionPageId);
+                return new PageContentSyncResult(blocks, false, structuredContentUnavailable);
+            }
+
+            blocks.AddRange(WikiBlockJson.FromMarkdown(markdownPage.Markdown));
+            logger.LogInformation(
+                "Recovered {BlockCount} Sentinel blocks from full-page Markdown for Notion page {NotionPageId}.",
+                blocks.Count,
+                notionPageId);
+            if (markdownPage.Truncated || markdownPage.UnknownBlockIds.Count > 0)
+            {
+                logger.LogWarning(
+                    "Notion page {NotionPageId} returned truncated Markdown with {UnknownBlockCount} unknown blocks.",
+                    notionPageId,
+                    markdownPage.UnknownBlockIds.Count);
+            }
+            return new PageContentSyncResult(blocks, blocks.Count > 0, false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(
+                ex,
+                "Could not retrieve full-page Markdown fallback for Notion page {NotionPageId}.",
+                notionPageId);
+            return new PageContentSyncResult(blocks, false, structuredContentUnavailable);
+        }
     }
 
     private async Task AppendBlockChildrenAsync(string notionBlockId, int indentLevel, string token, List<WikiBlock> blocks, CancellationToken cancellationToken)
@@ -766,12 +865,16 @@ public sealed class NotionSyncService(
         return block with { Props = props };
     }
 
-    private async Task<(int Imported, int Updated, int Archived)> SyncDatabaseSchemaAndRowsAsync(string notionDatabaseId, Guid wikiDatabaseId, string token, CancellationToken cancellationToken)
+    private async Task<DatabaseContentSyncResult> SyncDatabaseSchemaAndRowsAsync(
+        string notionDatabaseId,
+        Guid wikiDatabaseId,
+        string token,
+        CancellationToken cancellationToken)
     {
         var schema = await notionService.GetDatabaseAsync(token, notionDatabaseId, cancellationToken);
         if (schema is null)
         {
-            return (0, 0, 0);
+            return new DatabaseContentSyncResult(0, 0, 0, 0, 0, 0);
         }
 
         await SyncDatabaseViewsAsync(schema.Value, wikiDatabaseId, token, cancellationToken);
@@ -852,6 +955,9 @@ public sealed class NotionSyncService(
         var imported = 0;
         var updated = 0;
         var archived = 0;
+        var contentBlocks = 0;
+        var markdownFallbackPages = 0;
+        var emptyContentPages = 0;
         var seenRowNotionIds = new HashSet<string>();
         foreach (var rowElement in rows)
         {
@@ -887,9 +993,14 @@ public sealed class NotionSyncService(
             }
 
             row.PropertyValuesJson = WikiPropertyValues.Serialize(values);
-            var rowBlocks = new List<WikiBlock>();
-            await AppendBlockChildrenAsync(rowNotionId, 0, token, rowBlocks, cancellationToken);
-            row.BlocksJson = WikiBlockJson.Serialize(rowBlocks);
+            var rowContent = await LoadNotionPageBlocksAsync(rowNotionId, token, cancellationToken);
+            if (!rowContent.ContentUnavailable)
+            {
+                row.BlocksJson = WikiBlockJson.Serialize(rowContent.Blocks);
+            }
+            contentBlocks += rowContent.BlockCount;
+            if (rowContent.UsedMarkdownFallback) markdownFallbackPages++;
+            if (rowContent.BlockCount == 0) emptyContentPages++;
             row.NotionArchivedAt = IsArchived(rowElement) ? (row.NotionArchivedAt ?? DateTimeOffset.UtcNow) : null;
             row.UpdatedAt = DateTimeOffset.UtcNow;
             row.UpdatedBy = "notion-sync";
@@ -922,7 +1033,13 @@ public sealed class NotionSyncService(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        return (imported, updated, archived);
+        return new DatabaseContentSyncResult(
+            imported,
+            updated,
+            archived,
+            contentBlocks,
+            markdownFallbackPages,
+            emptyContentPages);
     }
 
     private async Task SyncDatabaseViewsAsync(JsonElement schema, Guid wikiDatabaseId, string token, CancellationToken cancellationToken)
@@ -980,7 +1097,28 @@ public sealed class NotionSyncService(
         string? cursor = null;
         do
         {
-            var commentPage = await notionService.ListCommentsAsync(token, notionPageId, cursor, cancellationToken);
+            NotionPage commentPage;
+            try
+            {
+                commentPage = await notionService.ListCommentsAsync(
+                    token,
+                    notionPageId,
+                    cursor,
+                    cancellationToken);
+            }
+            catch (HttpRequestException ex) when (ex.StatusCode is
+                                                 System.Net.HttpStatusCode.NotFound or
+                                                 System.Net.HttpStatusCode.Forbidden)
+            {
+                // Comments are optional content and use a separate Notion capability. A page
+                // import must not fail because that endpoint is unavailable.
+                logger.LogWarning(
+                    ex,
+                    "Notion comments are unavailable for page {NotionPageId}; page content was still imported.",
+                    notionPageId);
+                return;
+            }
+
             foreach (var item in commentPage.Results)
             {
                 var notionId = item.TryGetProperty("id", out var id) ? id.GetString() : null;
@@ -1107,4 +1245,20 @@ public sealed class NotionSyncService(
             return (string.Empty, true);
         }
     }
+
+    private sealed record PageContentSyncResult(
+        IReadOnlyList<WikiBlock> Blocks,
+        bool UsedMarkdownFallback,
+        bool ContentUnavailable)
+    {
+        public int BlockCount => Blocks.Count;
+    }
+
+    private sealed record DatabaseContentSyncResult(
+        int Imported,
+        int Updated,
+        int Archived,
+        int ContentBlocks,
+        int MarkdownFallbackPages,
+        int EmptyContentPages);
 }
