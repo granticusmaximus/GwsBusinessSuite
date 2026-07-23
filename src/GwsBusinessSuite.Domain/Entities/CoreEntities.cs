@@ -115,6 +115,9 @@ public sealed class WikiPage : AuditableEntity
     // Set when a synced page is archived/trashed/no longer returned by Notion; a soft flag,
     // not a delete, so nothing locally derived from the page (links, revisions) is lost.
     public DateTimeOffset? NotionArchivedAt { get; set; }
+    // Remote edit watermark from the last successful content import. When Notion returns
+    // the same last_edited_time on a later search, the expensive block/comment walk is skipped.
+    public DateTimeOffset? NotionLastEditedAt { get; set; }
     public ICollection<WikiPageRevision> Revisions { get; set; } = new List<WikiPageRevision>();
 }
 
@@ -345,6 +348,7 @@ public sealed class WikiDatabase : AuditableEntity
     // reconciliation, applied to databases instead of pages.
     public string? NotionId { get; set; }
     public DateTimeOffset? NotionArchivedAt { get; set; }
+    public DateTimeOffset? NotionLastEditedAt { get; set; }
     public ICollection<WikiDatabaseProperty> Properties { get; set; } = new List<WikiDatabaseProperty>();
     public ICollection<WikiDatabaseRow> Rows { get; set; } = new List<WikiDatabaseRow>();
     public ICollection<WikiDatabaseView> Views { get; set; } = new List<WikiDatabaseView>();
@@ -381,6 +385,7 @@ public sealed class WikiDatabaseRow : AuditableEntity
     // See WikiPage.NotionId/NotionArchivedAt.
     public string? NotionId { get; set; }
     public DateTimeOffset? NotionArchivedAt { get; set; }
+    public DateTimeOffset? NotionLastEditedAt { get; set; }
     public WikiDatabase? WikiDatabase { get; set; }
 }
 

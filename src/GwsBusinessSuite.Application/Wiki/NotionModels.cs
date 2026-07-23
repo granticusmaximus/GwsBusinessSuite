@@ -24,7 +24,12 @@ public interface INotionService
     Task<JsonElement?> GetPageAsync(string integrationToken, string pageId, CancellationToken cancellationToken = default);
     Task<NotionMarkdownPage?> GetPageMarkdownAsync(string integrationToken, string pageId, CancellationToken cancellationToken = default);
     Task<JsonElement?> GetDatabaseAsync(string integrationToken, string databaseId, CancellationToken cancellationToken = default);
-    Task<NotionPage> QueryDatabaseAsync(string integrationToken, string databaseId, string? cursor, CancellationToken cancellationToken = default);
+    Task<NotionPage> QueryDatabaseAsync(
+        string integrationToken,
+        string databaseId,
+        string? cursor,
+        DateTimeOffset? editedAfter = null,
+        CancellationToken cancellationToken = default);
     Task<JsonElement?> GetViewAsync(string integrationToken, string viewId, CancellationToken cancellationToken = default);
     Task<NotionPage> ListCommentsAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default);
     Task<NotionFileDownload> DownloadFileAsync(string fileUrl, CancellationToken cancellationToken = default);

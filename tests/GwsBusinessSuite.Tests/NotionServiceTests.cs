@@ -111,6 +111,28 @@ public sealed class NotionServiceTests
         exception.Which.Message.Should().Contain("Still limited");
     }
 
+    [Fact]
+    public async Task QueryDatabaseAsync_ShouldFilterRowsEditedAfterTheWatermark()
+    {
+        string? requestBody = null;
+        var handler = new RecordingHandler(request =>
+        {
+            requestBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return JsonResponse("""{"object":"list","results":[],"has_more":false,"next_cursor":null}""");
+        });
+        var service = CreateService(handler);
+        var watermark = new DateTimeOffset(2026, 7, 23, 12, 0, 0, TimeSpan.Zero);
+
+        await service.QueryDatabaseAsync("secret", "database-1", null, watermark);
+
+        requestBody.Should().NotBeNull();
+        using var document = System.Text.Json.JsonDocument.Parse(requestBody!);
+        var filter = document.RootElement.GetProperty("filter");
+        filter.GetProperty("timestamp").GetString().Should().Be("last_edited_time");
+        filter.GetProperty("last_edited_time").GetProperty("after").GetString()
+            .Should().Be("2026-07-23T11:59:58.0000000Z");
+    }
+
     private static NotionService CreateService(HttpMessageHandler handler) =>
         new(new HttpClient(handler)
         {
