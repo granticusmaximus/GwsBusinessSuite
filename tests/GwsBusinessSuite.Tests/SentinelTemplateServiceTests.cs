@@ -5,12 +5,62 @@ using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using System.IO.Compression;
+using System.Text;
 using System.Text.Json.Nodes;
 
 namespace GwsBusinessSuite.Tests;
 
 public sealed class SentinelTemplateServiceTests
 {
+    [Fact]
+    public async Task ImportNotionExportAsync_ShouldCreatePageAndDatabaseTemplatesAndReportRestrictedContent()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var archive = CreateNotionExport(
+            ("Project Hub aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.md", "# Project Hub\n\nWelcome to the team."),
+            ("Projects bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.csv", "Name,Owner\nLaunch,Grant\nDocs,Avery"),
+            ("Private Page cccccccccccccccccccccccccccccccc.md", "No access"),
+            ("assets/cover.png", "not-an-image"));
+
+        var result = await fixture.TemplateService.ImportNotionExportAsync(archive, "Owner");
+
+        result.PageTemplatesImported.Should().Be(1);
+        result.DatabaseTemplatesImported.Should().Be(1);
+        result.FilesSkipped.Should().Be(2);
+        result.Warnings.Should().ContainSingle(message => message.Contains("restricted content"));
+
+        var pageTemplate = (await fixture.TemplateService.ListAsync()).Should().ContainSingle().Subject;
+        pageTemplate.Name.Should().Be("Project Hub");
+        pageTemplate.PageTitle.Should().Be("Project Hub");
+        pageTemplate.BlockCount.Should().Be(1);
+
+        var databaseTemplate = (await fixture.TemplateService.ListDatabaseTemplatesAsync())
+            .Should().ContainSingle().Subject;
+        databaseTemplate.Name.Should().Be("Projects");
+        databaseTemplate.PropertyCount.Should().Be(2);
+        databaseTemplate.RowCount.Should().Be(2);
+
+        var database = await fixture.TemplateService.CreateDatabaseAsync(databaseTemplate.Id, null, "Member");
+        var owner = database.Properties.Single(property => property.Name == "Owner");
+        WikiPropertyValues.GetText(
+            WikiPropertyValues.ParseObject(database.Rows.First().PropertyValuesJson), owner.Id).Should().Be("Grant");
+    }
+
+    [Fact]
+    public async Task ImportNotionExportAsync_ShouldGiveDuplicateFileNamesUniqueTemplateNames()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var archive = CreateNotionExport(
+            ("folder-one/Start Here.md", "First"),
+            ("folder-two/Start Here.md", "Second"));
+
+        await fixture.TemplateService.ImportNotionExportAsync(archive, "Owner");
+
+        (await fixture.TemplateService.ListAsync()).Select(template => template.Name)
+            .Should().BeEquivalentTo("Start Here", "Start Here (2)");
+    }
+
     [Fact]
     public async Task CreatePageAsync_ShouldCloneTemplateMetadataAndRegenerateBlockIds()
     {
@@ -243,5 +293,20 @@ public sealed class SentinelTemplateServiceTests
             await _db.DisposeAsync();
             await _connection.DisposeAsync();
         }
+    }
+
+    private static byte[] CreateNotionExport(params (string Name, string Content)[] files)
+    {
+        using var stream = new MemoryStream();
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var file in files)
+            {
+                var entry = archive.CreateEntry(file.Name);
+                using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false));
+                writer.Write(file.Content);
+            }
+        }
+        return stream.ToArray();
     }
 }

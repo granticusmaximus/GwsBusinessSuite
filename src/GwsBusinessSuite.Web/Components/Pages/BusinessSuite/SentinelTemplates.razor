@@ -10,6 +10,26 @@
         <span class="badge text-bg-secondary">@(Templates.Count + BlockTemplates.Count + DatabaseTemplates.Count)</span>
     </div>
 
+    <div class="card-body p-2 border-bottom sentinel-notion-template-import">
+        <div class="small fw-semibold mb-1"><i class="bi bi-box-arrow-in-down me-1"></i>Import a free Notion template</div>
+        <div class="small text-secondary mb-2">
+            Duplicate the free template into your connected Notion workspace, share it with the Sentinel integration,
+            and run <strong>Notion sync</strong>. You can then save the imported page or database as a template here.
+        </div>
+        <label class="btn btn-sm btn-outline-primary mb-0 @(IsBusy ? "disabled" : string.Empty)">
+            <i class="bi bi-file-earmark-zip me-1"></i>Import Notion ZIP
+            <InputFile class="visually-hidden"
+                       accept=".zip,application/zip"
+                       disabled="@IsBusy"
+                       OnChange="ImportNotionZipAsync" />
+        </label>
+        <div class="small text-secondary mt-1">Supports Notion Markdown &amp; CSV or HTML exports up to 25 MB.</div>
+        @if (!string.IsNullOrWhiteSpace(ImportMessage))
+        {
+            <div class="small @(ImportSucceeded ? "text-success" : "text-danger") mt-2">@ImportMessage</div>
+        }
+    </div>
+
     <div class="card-body p-2 border-bottom">
         <div class="small fw-semibold mb-2"><i class="bi bi-blockquote-left me-1"></i>Block templates</div>
         @if (IsPageEditorActive)
@@ -193,6 +213,8 @@
     private string NewBlockTemplateName { get; set; } = string.Empty;
     private string NewDatabaseTemplateName { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
+    private string ImportMessage { get; set; } = string.Empty;
+    private bool ImportSucceeded { get; set; }
     private Guid? PendingDeleteId { get; set; }
     private Guid? PendingBlockDeleteId { get; set; }
     private Guid? PendingDatabaseDeleteId { get; set; }
@@ -276,6 +298,38 @@
         var database = await TemplateService.CreateDatabaseAsync(templateId, null, user);
         await OnDatabaseCreated.InvokeAsync(database.Id);
     });
+
+    private async Task ImportNotionZipAsync(InputFileChangeEventArgs args)
+    {
+        ImportMessage = string.Empty;
+        ImportSucceeded = false;
+        await RunAsync(async () =>
+        {
+            var file = args.File;
+            if (!file.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Choose a .zip file exported from Notion.");
+            }
+
+            await using var source = file.OpenReadStream(25 * 1024 * 1024);
+            using var buffer = new MemoryStream();
+            await source.CopyToAsync(buffer);
+            var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var result = await TemplateService.ImportNotionExportAsync(buffer.ToArray(), user);
+            await LoadAsync();
+            ImportSucceeded = true;
+            ImportMessage =
+                $"Imported {result.PageTemplatesImported} page and {result.DatabaseTemplatesImported} database template(s)."
+                + (result.FilesSkipped > 0 ? $" Skipped {result.FilesSkipped} unsupported or restricted file(s)." : string.Empty)
+                + (result.Warnings.Count > 0 ? $" {string.Join(" ", result.Warnings.Take(3))}" : string.Empty);
+        });
+
+        if (!string.IsNullOrWhiteSpace(ErrorMessage))
+        {
+            ImportMessage = ErrorMessage;
+            ErrorMessage = string.Empty;
+        }
+    }
 
     private async Task DeleteAsync(Guid templateId) => await RunAsync(async () =>
     {
