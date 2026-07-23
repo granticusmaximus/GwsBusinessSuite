@@ -29,6 +29,11 @@
         </div>
     </div>
     <div class="sentinel-workspace-actions">
+        <button type="button" class="btn btn-sm btn-outline-secondary sentinel-global-search"
+                @onclick="FocusSearchAsync" title="Search every Sentinel page, block, database, and row">
+            <i class="bi bi-search me-1"></i>Search
+            <kbd>⌘/Ctrl ⇧F</kbd>
+        </button>
         <button type="button" class="btn btn-sm btn-outline-secondary sentinel-mobile-nav-toggle"
                 @onclick="ToggleMobileWorkspaceNav" aria-controls="sentinel-workspace-browser"
                 aria-expanded="@_mobileWorkspaceNavOpen">
@@ -98,12 +103,24 @@
             <div class="sentinel-nav-search">
                 <div class="input-group input-group-sm">
                     <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
-                    <input class="form-control" @bind="SearchQuery" @bind:event="oninput" @bind:after="SearchWorkspaceAsync"
-                           placeholder="Search Sentinel..." />
+                    <input id="sentinelWorkspaceSearch" @ref="_workspaceSearchInput" class="form-control"
+                           @bind="SearchQuery" @bind:event="oninput" @bind:after="SearchWorkspaceAsync"
+                           placeholder="Search pages, content, databases, and rows..."
+                           aria-label="Search every Sentinel page, block, database, and row" />
                     @if (IsSearchBusy)
                     {
                         <span class="input-group-text bg-white"><span class="spinner-border spinner-border-sm"></span></span>
                     }
+                    else if (!string.IsNullOrWhiteSpace(SearchQuery))
+                    {
+                        <button type="button" class="btn btn-outline-secondary" @onclick="ClearSearchAsync"
+                                aria-label="Clear Sentinel search" title="Clear search">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                    }
+                </div>
+                <div class="sentinel-search-scope">
+                    Searches titles and the contents of pages, attachments, databases, and rows.
                 </div>
             </div>
             @if (string.IsNullOrWhiteSpace(SearchQuery)
@@ -665,7 +682,9 @@
     private string? DiffText { get; set; }
 
     private ElementReference _blockEditorContainer;
+    private ElementReference _workspaceSearchInput;
     private IJSObjectReference? _blockEditorModule;
+    private IJSObjectReference? _workspaceModule;
     private DotNetObjectReference<Wiki>? _blockEditorRef;
     private bool _blockEditorInitialized;
     private int _editorGeneration;
@@ -1046,6 +1065,12 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            _workspaceModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/sentinel-workspace.js");
+            await _workspaceModule.InvokeVoidAsync("initialize", _workspaceSearchInput);
+        }
+
         if (!_wikiLinksInitialized)
         {
             _wikiLinksRef = DotNetObjectReference.Create(this);
@@ -1106,6 +1131,23 @@
         {
             IsSearchBusy = false;
         }
+    }
+
+    private async Task FocusSearchAsync()
+    {
+        _mobileWorkspaceNavOpen = true;
+        await InvokeAsync(StateHasChanged);
+        if (_workspaceModule is not null)
+        {
+            await _workspaceModule.InvokeVoidAsync("focusSearch", _workspaceSearchInput);
+        }
+    }
+
+    private async Task ClearSearchAsync()
+    {
+        SearchQuery = string.Empty;
+        WorkspaceSearchResults = new();
+        await FocusSearchAsync();
     }
 
     private async Task OpenSearchResultAsync(SentinelSearchResult result)
@@ -1227,6 +1269,8 @@
             }
 
             _mobileWorkspaceNavOpen = false;
+            SearchQuery = string.Empty;
+            WorkspaceSearchResults = new();
             SelectedDatabaseId = null;
             SelectedPageId = page.Id;
             Editor = new WikiPageEditorModel
@@ -1246,10 +1290,22 @@
             DiffRevisionKey = null;
             StatusMessage = $"Opened Sentinel page '{page.Title}'.";
             ErrorMessage = string.Empty;
-            await LoadHistoryAsync(page.Id);
-            Backlinks = (await SentinelWorkspaceService.GetBacklinksAsync(page.Id)).ToList();
-            await SentinelWorkspaceService.RecordOpenedAsync(CurrentUsername, page.Id, false);
-            await LoadWorkspaceNavigationAsync();
+            await InvokeAsync(StateHasChanged);
+
+            // Opening the document must not depend on recents, backlinks, or history. Those
+            // secondary panels are useful, but a failure in one of them should never make an
+            // imported Notion page appear unopenable.
+            try
+            {
+                await LoadHistoryAsync(page.Id);
+                Backlinks = (await SentinelWorkspaceService.GetBacklinksAsync(page.Id)).ToList();
+                await SentinelWorkspaceService.RecordOpenedAsync(CurrentUsername, page.Id, false);
+                await LoadWorkspaceNavigationAsync();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Opened Sentinel page {WikiPageId}, but secondary page data could not be loaded.", page.Id);
+            }
         }
         catch (Exception ex)
         {
@@ -1738,6 +1794,19 @@
     public async ValueTask DisposeAsync()
     {
         await _disposeCts.CancelAsync();
+
+        if (_workspaceModule is not null)
+        {
+            try
+            {
+                await _workspaceModule.InvokeVoidAsync("dispose");
+                await _workspaceModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // The circuit is already gone.
+            }
+        }
 
         if (_blockEditorInitialized && _blockEditorModule is not null)
         {

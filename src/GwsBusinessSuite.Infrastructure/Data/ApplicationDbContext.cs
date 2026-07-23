@@ -41,6 +41,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SentinelPublicShare> SentinelPublicShares => Set<SentinelPublicShare>();
     public DbSet<SentinelPresenceLease> SentinelPresenceLeases => Set<SentinelPresenceLease>();
     public DbSet<SentinelAiRun> SentinelAiRuns => Set<SentinelAiRun>();
+    public DbSet<SentinelImportedFile> SentinelImportedFiles => Set<SentinelImportedFile>();
     public DbSet<WikiDatabase> WikiDatabases => Set<WikiDatabase>();
     public DbSet<WikiDatabaseProperty> WikiDatabaseProperties => Set<WikiDatabaseProperty>();
     public DbSet<WikiDatabaseRow> WikiDatabaseRows => Set<WikiDatabaseRow>();
@@ -122,6 +123,10 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<SentinelBlockTemplate>().HasIndex(x => x.NormalizedName).IsUnique();
         modelBuilder.Entity<SentinelBlockTemplate>().Property(x => x.Name).HasMaxLength(120);
         modelBuilder.Entity<SentinelBlockTemplate>().Property(x => x.NormalizedName).HasMaxLength(120);
+        modelBuilder.Entity<SentinelImportedFile>().HasIndex(x => x.NotionBlockId).IsUnique();
+        modelBuilder.Entity<SentinelImportedFile>().Property(x => x.NotionBlockId).HasMaxLength(80);
+        modelBuilder.Entity<SentinelImportedFile>().Property(x => x.FileName).HasMaxLength(255);
+        modelBuilder.Entity<SentinelImportedFile>().Property(x => x.ContentType).HasMaxLength(120);
         modelBuilder.Entity<SentinelDatabaseTemplate>().HasIndex(x => x.NormalizedName).IsUnique();
         modelBuilder.Entity<SentinelDatabaseTemplate>().Property(x => x.Name).HasMaxLength(120);
         modelBuilder.Entity<SentinelDatabaseTemplate>().Property(x => x.NormalizedName).HasMaxLength(120);

@@ -14,6 +14,7 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 public sealed class NotionService(HttpClient httpClient) : INotionService
 {
     public const string NotionVersion = "2026-03-11";
+    private const int MaxImportedFileBytes = 25 * 1024 * 1024;
 
     public async Task<NotionValidationResult> ValidateConnectionAsync(string integrationToken, CancellationToken cancellationToken = default)
     {
@@ -112,6 +113,46 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
         return ParsePage(body);
     }
 
+    public async Task<NotionFileDownload> DownloadFileAsync(
+        string fileUrl,
+        CancellationToken cancellationToken = default)
+    {
+        if (!Uri.TryCreate(fileUrl, UriKind.Absolute, out var uri)
+            || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Notion returned an invalid file URL.");
+        }
+
+        // This request deliberately carries no Notion bearer token. The API returns a
+        // short-lived signed URL whose query string is the authorization; forwarding the
+        // integration secret to an object-storage host would disclose it.
+        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        using var response = await httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        if (response.Content.Headers.ContentLength is > MaxImportedFileBytes)
+        {
+            throw new InvalidOperationException("Notion file exceeds Sentinel's 25 MB import limit.");
+        }
+
+        var content = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+        if (content.Length > MaxImportedFileBytes)
+        {
+            throw new InvalidOperationException("Notion file exceeds Sentinel's 25 MB import limit.");
+        }
+
+        var headerName = response.Content.Headers.ContentDisposition?.FileNameStar
+            ?? response.Content.Headers.ContentDisposition?.FileName;
+        var fileName = SafeFileName(headerName)
+            ?? SafeFileName(Uri.UnescapeDataString(uri.AbsolutePath.Split('/').LastOrDefault() ?? string.Empty))
+            ?? "notion-file";
+        var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+        return new NotionFileDownload(fileName, contentType, content);
+    }
+
     public async Task UpdatePageAsync(string integrationToken, string pageId, IReadOnlyDictionary<string, object?> payload, CancellationToken cancellationToken = default)
     {
         using var request = CreateRequest(HttpMethod.Patch, $"pages/{Uri.EscapeDataString(pageId)}", integrationToken);
@@ -169,6 +210,12 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
         }
 
         return $"Notion API request failed with status {(int)statusCode}.";
+    }
+
+    private static string? SafeFileName(string? value)
+    {
+        var candidate = Path.GetFileName(value?.Trim().Trim('"'));
+        return string.IsNullOrWhiteSpace(candidate) ? null : candidate;
     }
 
     private static HttpRequestMessage CreateRequest(HttpMethod method, string path, string integrationToken)

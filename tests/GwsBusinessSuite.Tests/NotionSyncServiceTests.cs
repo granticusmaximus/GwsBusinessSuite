@@ -205,6 +205,46 @@ public sealed class NotionSyncServiceTests
         WikiBlockJson.ParseBlocks(row.BlocksJson).Should().ContainSingle(block => block.PlainText == "Project page notes");
     }
 
+    [Fact]
+    public async Task SyncAsync_ShouldCacheNotionHostedFilesBehindDurableSentinelUrls()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.SearchResults = [Page("page-1", "Files")];
+        fixture.Notion.BlockChildren["page-1"] =
+        [
+            Json("""
+                {
+                  "object":"block",
+                  "id":"file-block-1",
+                  "type":"file",
+                  "has_children":false,
+                  "file":{
+                    "type":"file",
+                    "name":"Quarterly plan.pdf",
+                    "file":{"url":"https://files.example.test/temporary.pdf"},
+                    "caption":[{"plain_text":"Quarterly plan"}]
+                  }
+                }
+                """)
+        ];
+        fixture.Notion.FileDownloads["https://files.example.test/temporary.pdf"] =
+            new NotionFileDownload("Quarterly plan.pdf", "application/pdf", [1, 2, 3, 4]);
+
+        var result = await fixture.Service.SyncAsync();
+
+        result.IsSuccess.Should().BeTrue();
+        var stored = await fixture.Db.SentinelImportedFiles.SingleAsync();
+        stored.NotionBlockId.Should().Be("file-block-1");
+        stored.FileName.Should().Be("Quarterly plan.pdf");
+        stored.Content.Should().Equal(1, 2, 3, 4);
+
+        var page = await fixture.Db.WikiPages.SingleAsync(item => item.NotionId == "page-1");
+        var block = WikiBlockJson.ParseBlocks(page.BlocksJson).Single();
+        block.Props["url"].Should().Be($"/admin/sentinel/files/{stored.Id}");
+        block.Props["fileName"].Should().Be("Quarterly plan.pdf");
+        block.PlainText.Should().Be("Quarterly plan");
+    }
+
     private static JsonElement Page(string id, string title, string parent = "{\"type\":\"workspace\",\"workspace\":true}", bool archived = false) =>
         JsonSerializer.SerializeToElement(new Dictionary<string, object?>
         {
@@ -277,6 +317,7 @@ public sealed class NotionSyncServiceTests
         public Dictionary<string, IReadOnlyList<JsonElement>> BlockChildren { get; } = new();
         public Dictionary<string, JsonElement> DatabaseSchemas { get; } = new();
         public Dictionary<string, IReadOnlyList<JsonElement>> DatabaseRows { get; } = new();
+        public Dictionary<string, NotionFileDownload> FileDownloads { get; } = new();
 
         public Task<NotionValidationResult> ValidateConnectionAsync(string integrationToken, CancellationToken cancellationToken = default)
         {
@@ -306,6 +347,9 @@ public sealed class NotionSyncServiceTests
 
         public Task<NotionPage> ListCommentsAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default) =>
             Task.FromResult(new NotionPage([], false, null));
+
+        public Task<NotionFileDownload> DownloadFileAsync(string fileUrl, CancellationToken cancellationToken = default) =>
+            Task.FromResult(FileDownloads[fileUrl]);
 
         public Task UpdatePageAsync(string integrationToken, string pageId, IReadOnlyDictionary<string, object?> payload, CancellationToken cancellationToken = default) => Task.CompletedTask;
 

@@ -283,6 +283,17 @@ public sealed class SentinelAiRun : AuditableEntity
     public string? ReviewedBy { get; set; }
 }
 
+// Durable copy of a Notion-hosted file. Notion API file URLs are signed and expire, so
+// imported page blocks point at this local record instead of retaining the temporary URL.
+public sealed class SentinelImportedFile : AuditableEntity
+{
+    public required string NotionBlockId { get; set; }
+    public required string FileName { get; set; }
+    public required string ContentType { get; set; }
+    public required byte[] Content { get; set; }
+    public long SizeBytes { get; set; }
+}
+
 public static class WikiDatabasePropertyTypes
 {
     // Exactly one Title property per database (required, primary label) - every other type
