@@ -141,12 +141,30 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
         return document.RootElement.Clone();
     }
 
-    public async Task<NotionPage> QueryDatabaseAsync(string integrationToken, string databaseId, string? cursor, CancellationToken cancellationToken = default)
+    public async Task<NotionPage> QueryDatabaseAsync(
+        string integrationToken,
+        string databaseId,
+        string? cursor,
+        DateTimeOffset? editedAfter = null,
+        CancellationToken cancellationToken = default)
     {
         var payload = new Dictionary<string, object?> { ["page_size"] = 100 };
         if (!string.IsNullOrWhiteSpace(cursor))
         {
             payload["start_cursor"] = cursor;
+        }
+        if (editedAfter is { } watermark)
+        {
+            payload["filter"] = new
+            {
+                timestamp = "last_edited_time",
+                last_edited_time = new
+                {
+                    // Small overlap protects edits whose timestamp lands at the exact same
+                    // boundary as the previous completed sync.
+                    after = watermark.Subtract(TimeSpan.FromSeconds(2)).UtcDateTime.ToString("O")
+                }
+            };
         }
 
         return await PostPageAsync(integrationToken, $"data_sources/{Uri.EscapeDataString(databaseId)}/query", payload, cancellationToken);

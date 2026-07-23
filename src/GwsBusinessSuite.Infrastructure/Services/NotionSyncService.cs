@@ -121,6 +121,9 @@ public sealed class NotionSyncService(
             var contentBlocks = 0;
             var markdownFallbackPages = 0;
             var emptyContentPages = 0;
+            var skippedUnchangedPages = 0;
+            var skippedUnchangedDatabaseRows = 0;
+            var previousSuccessfulSyncAt = settingsRow.LastSyncedAt;
 
             // 1. Flat discovery pass - every page/database the integration can see.
             var discovered = new List<JsonElement>();
@@ -162,7 +165,29 @@ public sealed class NotionSyncService(
             var notionIdToLocalId = new Dictionary<string, Guid>();
             var notionIdToKind = new Dictionary<string, string>();
             var notionIdToParent = new Dictionary<string, JsonElement>();
+            var notionIdToRemoteEditedAt = new Dictionary<string, DateTimeOffset?>();
+            var notionPageIdsNeedingContent = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var notionDatabaseIdsNeedingSchema = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var newNotionDatabaseIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var databaseContainerToLocalIds = new Dictionary<string, List<Guid>>(StringComparer.OrdinalIgnoreCase);
+            var existingPageWatermarks = (await dbContext.WikiPages
+                    .AsNoTracking()
+                    .Where(page => page.NotionId != null)
+                    .Select(page => new { page.NotionId, page.NotionLastEditedAt })
+                    .ToListAsync(cancellationToken))
+                .ToDictionary(
+                    page => page.NotionId!,
+                    page => page.NotionLastEditedAt,
+                    StringComparer.OrdinalIgnoreCase);
+            var existingDatabaseWatermarks = (await dbContext.WikiDatabases
+                    .AsNoTracking()
+                    .Where(database => database.NotionId != null)
+                    .Select(database => new { database.NotionId, database.NotionLastEditedAt })
+                    .ToListAsync(cancellationToken))
+                .ToDictionary(
+                    database => database.NotionId!,
+                    database => database.NotionLastEditedAt,
+                    StringComparer.OrdinalIgnoreCase);
             // Reserve slugs for both persisted and newly tracked pages. Querying the database
             // inside each upsert does not include Added entities, so duplicate Notion titles in
             // one discovery batch would otherwise violate WikiPages' unique slug index.
@@ -204,6 +229,8 @@ public sealed class NotionSyncService(
 
                 var isArchived = IsArchived(item);
                 var title = ExtractTitle(item, objectType);
+                var remoteEditedAt = GetLastEditedAt(item);
+                notionIdToRemoteEditedAt[notionId] = remoteEditedAt;
 
                 Guid localId;
                 bool wasNew;
@@ -211,6 +238,20 @@ public sealed class NotionSyncService(
                 if (objectType is "database" or "data_source")
                 {
                     (localId, wasNew, becameArchived) = await UpsertDatabaseAsync(notionId, title, isArchived, cancellationToken);
+                    existingDatabaseWatermarks.TryGetValue(notionId, out var priorWatermark);
+                    if (ShouldRefreshRemoteContent(wasNew, remoteEditedAt, priorWatermark, previousSuccessfulSyncAt))
+                    {
+                        notionDatabaseIdsNeedingSchema.Add(notionId);
+                    }
+                    else if (priorWatermark is null && remoteEditedAt is not null)
+                    {
+                        dbContext.WikiDatabases.Local.Single(database => database.Id == localId)
+                            .NotionLastEditedAt = remoteEditedAt;
+                    }
+                    if (wasNew)
+                    {
+                        newNotionDatabaseIds.Add(notionId);
+                    }
                 }
                 else
                 {
@@ -220,6 +261,16 @@ public sealed class NotionSyncService(
                         isArchived,
                         reservedPageSlugs,
                         cancellationToken);
+                    existingPageWatermarks.TryGetValue(notionId, out var priorWatermark);
+                    if (ShouldRefreshRemoteContent(wasNew, remoteEditedAt, priorWatermark, previousSuccessfulSyncAt))
+                    {
+                        notionPageIdsNeedingContent.Add(notionId);
+                    }
+                    else if (priorWatermark is null && remoteEditedAt is not null)
+                    {
+                        dbContext.WikiPages.Local.Single(page => page.Id == localId)
+                            .NotionLastEditedAt = remoteEditedAt;
+                    }
                 }
 
                 notionIdToLocalId[notionId] = localId;
@@ -274,7 +325,18 @@ public sealed class NotionSyncService(
             {
                 if (notionIdToKind[notionId] is not ("database" or "data_source"))
                 {
-                    var pageContent = await SyncPageBlocksAsync(notionId, localId, token, cancellationToken);
+                    if (!notionPageIdsNeedingContent.Contains(notionId))
+                    {
+                        skippedUnchangedPages++;
+                        continue;
+                    }
+
+                    var pageContent = await SyncPageBlocksAsync(
+                        notionId,
+                        localId,
+                        token,
+                        notionIdToRemoteEditedAt[notionId],
+                        cancellationToken);
                     childOrderByParentLocalId[localId] = pageContent.TreeChildren;
                     contentBlocks += pageContent.BlockCount;
                     if (pageContent.UsedMarkdownFallback) markdownFallbackPages++;
@@ -300,6 +362,9 @@ public sealed class NotionSyncService(
                         notionId,
                         localId,
                         token,
+                        notionDatabaseIdsNeedingSchema.Contains(notionId),
+                        notionIdToRemoteEditedAt[notionId],
+                        newNotionDatabaseIds.Contains(notionId) ? null : previousSuccessfulSyncAt,
                         cancellationToken);
                     imported += databaseContent.Imported;
                     updated += databaseContent.Updated;
@@ -307,6 +372,7 @@ public sealed class NotionSyncService(
                     contentBlocks += databaseContent.ContentBlocks;
                     markdownFallbackPages += databaseContent.MarkdownFallbackPages;
                     emptyContentPages += databaseContent.EmptyContentPages;
+                    skippedUnchangedDatabaseRows += databaseContent.SkippedRows;
                 }
             }
 
@@ -332,6 +398,14 @@ public sealed class NotionSyncService(
             if (emptyContentPages > 0)
             {
                 message += $" {emptyContentPages} page{(emptyContentPages == 1 ? string.Empty : "s")} returned no readable content; confirm the integration has Read content capability and access to those pages.";
+            }
+            if (skippedUnchangedPages > 0)
+            {
+                message += $" Skipped {skippedUnchangedPages} unchanged page{(skippedUnchangedPages == 1 ? string.Empty : "s")}.";
+            }
+            if (skippedUnchangedDatabaseRows > 0)
+            {
+                message += $" Skipped {skippedUnchangedDatabaseRows} unchanged database row{(skippedUnchangedDatabaseRows == 1 ? string.Empty : "s")}.";
             }
 
             return new NotionSyncResult(true, message, imported, updated, archived);
@@ -371,6 +445,34 @@ public sealed class NotionSyncService(
     private static bool IsArchived(JsonElement item) =>
         (item.TryGetProperty("archived", out var archivedElement) && archivedElement.ValueKind == JsonValueKind.True)
         || (item.TryGetProperty("in_trash", out var trashElement) && trashElement.ValueKind == JsonValueKind.True);
+
+    private static DateTimeOffset? GetLastEditedAt(JsonElement item) =>
+        item.TryGetProperty("last_edited_time", out var editedElement)
+        && editedElement.ValueKind == JsonValueKind.String
+        && DateTimeOffset.TryParse(editedElement.GetString(), out var editedAt)
+            ? editedAt
+            : null;
+
+    private static bool ShouldRefreshRemoteContent(
+        bool isNew,
+        DateTimeOffset? remoteEditedAt,
+        DateTimeOffset? importedRemoteEditedAt,
+        DateTimeOffset? previousSuccessfulSyncAt)
+    {
+        if (isNew || remoteEditedAt is null)
+        {
+            return true;
+        }
+
+        if (importedRemoteEditedAt is { } itemWatermark)
+        {
+            return remoteEditedAt > itemWatermark;
+        }
+
+        // Bootstrap existing installations when this column is first deployed. A successful
+        // connector sync already proves content at or before its global watermark was imported.
+        return previousSuccessfulSyncAt is null || remoteEditedAt > previousSuccessfulSyncAt;
+    }
 
     private static string ExtractTitle(JsonElement item, string? objectType)
     {
@@ -723,6 +825,7 @@ public sealed class NotionSyncService(
         string notionPageId,
         Guid wikiPageId,
         string token,
+        DateTimeOffset? remoteEditedAt,
         CancellationToken cancellationToken)
     {
         var pageContent = await LoadNotionPageBlocksAsync(notionPageId, token, cancellationToken);
@@ -741,6 +844,7 @@ public sealed class NotionSyncService(
                 page.BlocksJson = blocksJson;
                 page.ContentVersion++;
             }
+            page.NotionLastEditedAt = remoteEditedAt;
         }
         page.UpdatedAt = DateTimeOffset.UtcNow;
         page.UpdatedBy = "notion-sync";
@@ -1054,80 +1158,103 @@ public sealed class NotionSyncService(
         string notionDatabaseId,
         Guid wikiDatabaseId,
         string token,
+        bool syncSchema,
+        DateTimeOffset? remoteEditedAt,
+        DateTimeOffset? rowsEditedAfter,
         CancellationToken cancellationToken)
     {
-        var schema = await notionService.GetDatabaseAsync(token, notionDatabaseId, cancellationToken);
-        if (schema is null)
-        {
-            return new DatabaseContentSyncResult(0, 0, 0, 0, 0, 0);
-        }
-
-        await SyncDatabaseViewsAsync(schema.Value, wikiDatabaseId, token, cancellationToken);
-
         var notionPropertyIdToLocal = new Dictionary<string, (Guid Id, string Type)>();
-        if (schema.Value.TryGetProperty("properties", out var propertiesElement) && propertiesElement.ValueKind == JsonValueKind.Object)
+        if (syncSchema)
         {
-            var sortOrder = 0;
-            foreach (var propertyField in propertiesElement.EnumerateObject())
+            var schema = await notionService.GetDatabaseAsync(token, notionDatabaseId, cancellationToken);
+            if (schema is null)
             {
-                var propertySchema = propertyField.Value;
-                var notionPropertyId = propertySchema.TryGetProperty("id", out var idElement) ? idElement.GetString() ?? string.Empty : string.Empty;
-                var notionPropertyType = propertySchema.TryGetProperty("type", out var typeElement) ? typeElement.GetString() ?? string.Empty : string.Empty;
-                if (notionPropertyId.Length == 0)
-                {
-                    continue;
-                }
-
-                var localType = NotionMapping.MapPropertyType(notionPropertyType);
-                var existing = await dbContext.WikiDatabaseProperties.FirstOrDefaultAsync(
-                    p => p.WikiDatabaseId == wikiDatabaseId && p.NotionId == notionPropertyId, cancellationToken);
-
-                // A database always starts with a locally-seeded, NotionId-less Title property
-                // (see UpsertDatabaseAsync) - Notion's own title property claims that row
-                // instead of creating a second Title property, since exactly one is allowed.
-                if (existing is null && localType == WikiDatabasePropertyTypes.Title)
-                {
-                    existing = await dbContext.WikiDatabaseProperties.FirstOrDefaultAsync(
-                        p => p.WikiDatabaseId == wikiDatabaseId && p.Type == WikiDatabasePropertyTypes.Title && p.NotionId == null, cancellationToken);
-                }
-
-                var isNew = existing is null;
-                var property = existing ?? new WikiDatabaseProperty
-                {
-                    WikiDatabaseId = wikiDatabaseId,
-                    Name = propertyField.Name,
-                    Type = localType,
-                    SortOrder = sortOrder,
-                    CreatedAt = DateTimeOffset.UtcNow,
-                    CreatedBy = "notion-sync"
-                };
-
-                property.Name = propertyField.Name;
-                property.NotionId = notionPropertyId;
-                if (localType is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect)
-                {
-                    property.ConfigJson = WikiDatabasePropertyConfig.Serialize(NotionMapping.MapPropertyOptions(propertySchema, notionPropertyType));
-                }
-                property.UpdatedAt = DateTimeOffset.UtcNow;
-                property.UpdatedBy = "notion-sync";
-
-                if (isNew)
-                {
-                    await dbContext.WikiDatabaseProperties.AddAsync(property, cancellationToken);
-                }
-
-                notionPropertyIdToLocal[notionPropertyId] = (property.Id, property.Type);
-                sortOrder++;
+                return new DatabaseContentSyncResult(0, 0, 0, 0, 0, 0, 0);
             }
 
-            await dbContext.SaveChangesAsync(cancellationToken);
+            await SyncDatabaseViewsAsync(schema.Value, wikiDatabaseId, token, cancellationToken);
+
+            if (schema.Value.TryGetProperty("properties", out var propertiesElement) && propertiesElement.ValueKind == JsonValueKind.Object)
+            {
+                var sortOrder = 0;
+                foreach (var propertyField in propertiesElement.EnumerateObject())
+                {
+                    var propertySchema = propertyField.Value;
+                    var notionPropertyId = propertySchema.TryGetProperty("id", out var idElement) ? idElement.GetString() ?? string.Empty : string.Empty;
+                    var notionPropertyType = propertySchema.TryGetProperty("type", out var typeElement) ? typeElement.GetString() ?? string.Empty : string.Empty;
+                    if (notionPropertyId.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    var localType = NotionMapping.MapPropertyType(notionPropertyType);
+                    var existing = await dbContext.WikiDatabaseProperties.FirstOrDefaultAsync(
+                        p => p.WikiDatabaseId == wikiDatabaseId && p.NotionId == notionPropertyId, cancellationToken);
+
+                    // A database always starts with a locally-seeded, NotionId-less Title property
+                    // (see UpsertDatabaseAsync) - Notion's own title property claims that row
+                    // instead of creating a second Title property, since exactly one is allowed.
+                    if (existing is null && localType == WikiDatabasePropertyTypes.Title)
+                    {
+                        existing = await dbContext.WikiDatabaseProperties.FirstOrDefaultAsync(
+                            p => p.WikiDatabaseId == wikiDatabaseId && p.Type == WikiDatabasePropertyTypes.Title && p.NotionId == null, cancellationToken);
+                    }
+
+                    var isNew = existing is null;
+                    var property = existing ?? new WikiDatabaseProperty
+                    {
+                        WikiDatabaseId = wikiDatabaseId,
+                        Name = propertyField.Name,
+                        Type = localType,
+                        SortOrder = sortOrder,
+                        CreatedAt = DateTimeOffset.UtcNow,
+                        CreatedBy = "notion-sync"
+                    };
+
+                    property.Name = propertyField.Name;
+                    property.NotionId = notionPropertyId;
+                    if (localType is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect)
+                    {
+                        property.ConfigJson = WikiDatabasePropertyConfig.Serialize(NotionMapping.MapPropertyOptions(propertySchema, notionPropertyType));
+                    }
+                    property.UpdatedAt = DateTimeOffset.UtcNow;
+                    property.UpdatedBy = "notion-sync";
+
+                    if (isNew)
+                    {
+                        await dbContext.WikiDatabaseProperties.AddAsync(property, cancellationToken);
+                    }
+
+                    notionPropertyIdToLocal[notionPropertyId] = (property.Id, property.Type);
+                    sortOrder++;
+                }
+
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+        }
+        else
+        {
+            notionPropertyIdToLocal = (await dbContext.WikiDatabaseProperties
+                    .AsNoTracking()
+                    .Where(property => property.WikiDatabaseId == wikiDatabaseId && property.NotionId != null)
+                    .Select(property => new { property.NotionId, property.Id, property.Type })
+                    .ToListAsync(cancellationToken))
+                .ToDictionary(
+                    property => property.NotionId!,
+                    property => (property.Id, property.Type),
+                    StringComparer.Ordinal);
         }
 
         var rows = new List<JsonElement>();
         string? rowCursor = null;
         do
         {
-            var page = await notionService.QueryDatabaseAsync(token, notionDatabaseId, rowCursor, cancellationToken);
+            var page = await notionService.QueryDatabaseAsync(
+                token,
+                notionDatabaseId,
+                rowCursor,
+                rowsEditedAfter,
+                cancellationToken);
             rows.AddRange(page.Results);
             rowCursor = page.HasMore ? page.NextCursor : null;
         } while (rowCursor is not null);
@@ -1143,6 +1270,7 @@ public sealed class NotionSyncService(
         var contentBlocks = 0;
         var markdownFallbackPages = 0;
         var emptyContentPages = 0;
+        var skippedRows = 0;
         var seenRowNotionIds = new HashSet<string>();
         foreach (var rowElement in rows)
         {
@@ -1155,6 +1283,7 @@ public sealed class NotionSyncService(
             var row = await dbContext.WikiDatabaseRows.FirstOrDefaultAsync(r => r.WikiDatabaseId == wikiDatabaseId && r.NotionId == rowNotionId, cancellationToken);
             var isNew = row is null;
             var wasArchived = row?.NotionArchivedAt is not null;
+            var rowRemoteEditedAt = GetLastEditedAt(rowElement);
             row ??= new WikiDatabaseRow
             {
                 WikiDatabaseId = wikiDatabaseId,
@@ -1178,14 +1307,26 @@ public sealed class NotionSyncService(
             }
 
             row.PropertyValuesJson = WikiPropertyValues.Serialize(values);
-            var rowContent = await LoadNotionPageBlocksAsync(rowNotionId, token, cancellationToken);
-            if (!rowContent.ContentUnavailable)
+            if (ShouldRefreshRemoteContent(
+                    isNew,
+                    rowRemoteEditedAt,
+                    row.NotionLastEditedAt,
+                    rowsEditedAfter))
             {
-                row.BlocksJson = WikiBlockJson.Serialize(rowContent.Blocks);
+                var rowContent = await LoadNotionPageBlocksAsync(rowNotionId, token, cancellationToken);
+                if (!rowContent.ContentUnavailable)
+                {
+                    row.BlocksJson = WikiBlockJson.Serialize(rowContent.Blocks);
+                    row.NotionLastEditedAt = rowRemoteEditedAt;
+                }
+                contentBlocks += rowContent.BlockCount;
+                if (rowContent.UsedMarkdownFallback) markdownFallbackPages++;
+                if (rowContent.BlockCount == 0) emptyContentPages++;
             }
-            contentBlocks += rowContent.BlockCount;
-            if (rowContent.UsedMarkdownFallback) markdownFallbackPages++;
-            if (rowContent.BlockCount == 0) emptyContentPages++;
+            else
+            {
+                skippedRows++;
+            }
             row.NotionArchivedAt = IsArchived(rowElement) ? (row.NotionArchivedAt ?? DateTimeOffset.UtcNow) : null;
             row.UpdatedAt = DateTimeOffset.UtcNow;
             row.UpdatedBy = "notion-sync";
@@ -1205,16 +1346,27 @@ public sealed class NotionSyncService(
             }
         }
 
-        var existingRows = await dbContext.WikiDatabaseRows
-            .Where(r => r.WikiDatabaseId == wikiDatabaseId && r.NotionId != null)
-            .ToListAsync(cancellationToken);
-        foreach (var existingRow in existingRows)
+        if (rowsEditedAfter is null)
         {
-            if (existingRow.NotionId is { } notionId && !seenRowNotionIds.Contains(notionId) && existingRow.NotionArchivedAt is null)
+            var existingRows = await dbContext.WikiDatabaseRows
+                .Where(r => r.WikiDatabaseId == wikiDatabaseId && r.NotionId != null)
+                .ToListAsync(cancellationToken);
+            foreach (var existingRow in existingRows)
             {
-                existingRow.NotionArchivedAt = DateTimeOffset.UtcNow;
-                archived++;
+                if (existingRow.NotionId is { } notionId && !seenRowNotionIds.Contains(notionId) && existingRow.NotionArchivedAt is null)
+                {
+                    existingRow.NotionArchivedAt = DateTimeOffset.UtcNow;
+                    archived++;
+                }
             }
+        }
+
+        if (syncSchema)
+        {
+            var database = await dbContext.WikiDatabases.FirstAsync(
+                item => item.Id == wikiDatabaseId,
+                cancellationToken);
+            database.NotionLastEditedAt = remoteEditedAt;
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -1224,7 +1376,8 @@ public sealed class NotionSyncService(
             archived,
             contentBlocks,
             markdownFallbackPages,
-            emptyContentPages);
+            emptyContentPages,
+            skippedRows);
     }
 
     private async Task SyncDatabaseViewsAsync(JsonElement schema, Guid wikiDatabaseId, string token, CancellationToken cancellationToken)
@@ -1455,5 +1608,6 @@ public sealed class NotionSyncService(
         int Archived,
         int ContentBlocks,
         int MarkdownFallbackPages,
-        int EmptyContentPages);
+        int EmptyContentPages,
+        int SkippedRows);
 }

@@ -76,6 +76,73 @@ public sealed class NotionSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_ShouldSkipBlockAndCommentRequestsForUnchangedPages()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        var editedAt = DateTimeOffset.UtcNow.AddMinutes(-10);
+        fixture.Notion.SearchResults = [Page("page-1", "First", lastEditedAt: editedAt)];
+        fixture.Notion.BlockChildren["page-1"] =
+        [
+            Json("""
+                {"object":"block","id":"paragraph-1","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Original"}]}}
+                """)
+        ];
+        (await fixture.Service.SyncAsync()).IsSuccess.Should().BeTrue();
+        fixture.Notion.BlockChildrenRequests.Clear();
+        fixture.Notion.CommentRequests.Clear();
+
+        var unchanged = await fixture.Service.SyncAsync();
+
+        unchanged.IsSuccess.Should().BeTrue();
+        unchanged.Message.Should().Contain("Skipped 1 unchanged page");
+        fixture.Notion.BlockChildrenRequests.Should().BeEmpty();
+        fixture.Notion.CommentRequests.Should().BeEmpty();
+
+        fixture.Notion.SearchResults = [Page("page-1", "First", lastEditedAt: editedAt.AddMinutes(1))];
+        fixture.Notion.BlockChildren["page-1"] =
+        [
+            Json("""
+                {"object":"block","id":"paragraph-2","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Changed"}]}}
+                """)
+        ];
+
+        (await fixture.Service.SyncAsync()).IsSuccess.Should().BeTrue();
+        fixture.Notion.BlockChildrenRequests.Should().Contain("page-1");
+        fixture.Notion.CommentRequests.Should().Contain("page-1");
+        var page = await fixture.Db.WikiPages.SingleAsync(item => item.NotionId == "page-1");
+        WikiBlockJson.ParseBlocks(page.BlocksJson).Should().ContainSingle(block => block.PlainText == "Changed");
+    }
+
+    [Fact]
+    public async Task SyncAsync_ShouldBootstrapExistingPagesFromTheLastSuccessfulConnectorSync()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        var lastSync = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var settings = await fixture.Db.NotionConnectorSettings.SingleAsync();
+        settings.LastSyncedAt = lastSync;
+        fixture.Db.WikiPages.Add(new GwsBusinessSuite.Domain.Entities.WikiPage
+        {
+            Title = "Already imported",
+            Slug = "already-imported",
+            NotionId = "page-1",
+            BlocksJson = WikiBlockJson.Serialize(
+                [new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0, [new WikiRichTextSpan("Existing")], new Dictionary<string, string>())]),
+            CreatedBy = "notion-sync"
+        });
+        await fixture.Db.SaveChangesAsync();
+        var remoteEditedAt = lastSync.AddMinutes(-1);
+        fixture.Notion.SearchResults = [Page("page-1", "Already imported", lastEditedAt: remoteEditedAt)];
+
+        var result = await fixture.Service.SyncAsync();
+
+        result.IsSuccess.Should().BeTrue();
+        result.Message.Should().Contain("Skipped 1 unchanged page");
+        fixture.Notion.BlockChildrenRequests.Should().BeEmpty();
+        var page = await fixture.Db.WikiPages.SingleAsync(item => item.NotionId == "page-1");
+        page.NotionLastEditedAt.Should().Be(remoteEditedAt);
+    }
+
+    [Fact]
     public async Task SyncAsync_ShouldAssignUniqueSlugsToNewPagesWithDuplicateTitles()
     {
         await using var fixture = await SyncFixture.CreateAsync();
@@ -489,6 +556,50 @@ public sealed class NotionSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_ShouldQueryOnlyChangedDatabaseRowsAndSkipUnchangedRowContent()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        var editedAt = DateTimeOffset.UtcNow.AddMinutes(-10);
+        fixture.Notion.SearchResults =
+        [
+            DataSource(
+                "database-1",
+                "Projects",
+                "database-container-1",
+                """{"type":"workspace","workspace":true}""",
+                editedAt)
+        ];
+        fixture.Notion.DatabaseSchemas["database-1"] = Json("""
+            {"properties":{"Name":{"id":"title","type":"title","title":{}}}}
+            """);
+        fixture.Notion.DatabaseRows["database-1"] =
+        [
+            Json("""
+                {"object":"page","id":"row-1","last_edited_time":"__EDITED_AT__","parent":{"type":"data_source_id","data_source_id":"database-1"},"properties":{"Name":{"id":"title","type":"title","title":[{"plain_text":"First project"}]}}}
+                """.Replace("__EDITED_AT__", editedAt.UtcDateTime.ToString("O"), StringComparison.Ordinal))
+        ];
+        fixture.Notion.BlockChildren["row-1"] =
+        [
+            Json("""
+                {"object":"block","id":"block-1","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Project page notes"}]}}
+                """)
+        ];
+        (await fixture.Service.SyncAsync()).IsSuccess.Should().BeTrue();
+        fixture.Notion.BlockChildrenRequests.Clear();
+        fixture.Notion.DatabaseSchemaRequests.Clear();
+        fixture.Notion.DatabaseEditedAfterRequests.Clear();
+
+        var incremental = await fixture.Service.SyncAsync();
+
+        incremental.IsSuccess.Should().BeTrue();
+        incremental.Message.Should().Contain("Skipped 1 unchanged database row");
+        fixture.Notion.DatabaseSchemaRequests.Should().BeEmpty();
+        fixture.Notion.DatabaseEditedAfterRequests.Should().ContainSingle();
+        fixture.Notion.DatabaseEditedAfterRequests.Single().Should().NotBeNull();
+        fixture.Notion.BlockChildrenRequests.Should().NotContain("row-1");
+    }
+
+    [Fact]
     public async Task SyncAsync_ShouldCacheNotionHostedFilesBehindDurableSentinelUrls()
     {
         await using var fixture = await SyncFixture.CreateAsync();
@@ -528,8 +639,14 @@ public sealed class NotionSyncServiceTests
         block.PlainText.Should().Be("Quarterly plan");
     }
 
-    private static JsonElement Page(string id, string title, string parent = "{\"type\":\"workspace\",\"workspace\":true}", bool archived = false) =>
-        JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+    private static JsonElement Page(
+        string id,
+        string title,
+        string parent = "{\"type\":\"workspace\",\"workspace\":true}",
+        bool archived = false,
+        DateTimeOffset? lastEditedAt = null)
+    {
+        var page = new Dictionary<string, object?>
         {
             ["object"] = "page",
             ["id"] = id,
@@ -543,7 +660,13 @@ public sealed class NotionSyncServiceTests
                     ["title"] = new[] { new Dictionary<string, object?> { ["plain_text"] = title } }
                 }
             }
-        });
+        };
+        if (lastEditedAt is not null)
+        {
+            page["last_edited_time"] = lastEditedAt.Value.UtcDateTime.ToString("O");
+        }
+        return JsonSerializer.SerializeToElement(page);
+    }
 
     private static JsonElement Database(string id, string title) =>
         JsonSerializer.SerializeToElement(new Dictionary<string, object?>
@@ -555,8 +678,14 @@ public sealed class NotionSyncServiceTests
             ["title"] = new[] { new Dictionary<string, object?> { ["plain_text"] = title } }
         });
 
-    private static JsonElement DataSource(string id, string title, string databaseId, string databaseParent) =>
-        JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+    private static JsonElement DataSource(
+        string id,
+        string title,
+        string databaseId,
+        string databaseParent,
+        DateTimeOffset? lastEditedAt = null)
+    {
+        var dataSource = new Dictionary<string, object?>
         {
             ["object"] = "data_source",
             ["id"] = id,
@@ -568,7 +697,13 @@ public sealed class NotionSyncServiceTests
             },
             ["database_parent"] = JsonDocument.Parse(databaseParent).RootElement.Clone(),
             ["title"] = new[] { new Dictionary<string, object?> { ["plain_text"] = title } }
-        });
+        };
+        if (lastEditedAt is not null)
+        {
+            dataSource["last_edited_time"] = lastEditedAt.Value.UtcDateTime.ToString("O");
+        }
+        return JsonSerializer.SerializeToElement(dataSource);
+    }
 
     private static JsonElement Json(string json) => JsonDocument.Parse(json).RootElement.Clone();
 
@@ -619,6 +754,10 @@ public sealed class NotionSyncServiceTests
         public Dictionary<string, IReadOnlyList<JsonElement>> DatabaseRows { get; } = new();
         public Dictionary<string, NotionFileDownload> FileDownloads { get; } = new();
         public HashSet<string> MissingComments { get; } = [];
+        public List<string> BlockChildrenRequests { get; } = [];
+        public List<string> CommentRequests { get; } = [];
+        public List<DateTimeOffset?> DatabaseEditedAfterRequests { get; } = [];
+        public List<string> DatabaseSchemaRequests { get; } = [];
 
         public Task<NotionValidationResult> ValidateConnectionAsync(string integrationToken, CancellationToken cancellationToken = default)
         {
@@ -631,13 +770,16 @@ public sealed class NotionSyncServiceTests
         public Task<NotionPage> SearchAsync(string integrationToken, string? cursor, CancellationToken cancellationToken = default) =>
             Task.FromResult(new NotionPage(SearchResults, false, null));
 
-        public Task<NotionPage> GetBlockChildrenAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default) =>
-            MissingBlockChildren.Contains(blockId)
+        public Task<NotionPage> GetBlockChildrenAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default)
+        {
+            BlockChildrenRequests.Add(blockId);
+            return MissingBlockChildren.Contains(blockId)
                 ? Task.FromException<NotionPage>(new HttpRequestException(
                     "Not found.",
                     null,
                     System.Net.HttpStatusCode.NotFound))
                 : Task.FromResult(new NotionPage(BlockChildren.GetValueOrDefault(blockId) ?? [], false, null));
+        }
 
         public Task<JsonElement?> GetPageAsync(string integrationToken, string pageId, CancellationToken cancellationToken = default) =>
             Task.FromResult<JsonElement?>(Page(pageId, "Remote"));
@@ -647,22 +789,36 @@ public sealed class NotionSyncServiceTests
                 ? (NotionMarkdownPage?)markdown
                 : null);
 
-        public Task<JsonElement?> GetDatabaseAsync(string integrationToken, string databaseId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(DatabaseSchemas.TryGetValue(databaseId, out var schema) ? (JsonElement?)schema : null);
+        public Task<JsonElement?> GetDatabaseAsync(string integrationToken, string databaseId, CancellationToken cancellationToken = default)
+        {
+            DatabaseSchemaRequests.Add(databaseId);
+            return Task.FromResult(DatabaseSchemas.TryGetValue(databaseId, out var schema) ? (JsonElement?)schema : null);
+        }
 
-        public Task<NotionPage> QueryDatabaseAsync(string integrationToken, string databaseId, string? cursor, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new NotionPage(DatabaseRows.GetValueOrDefault(databaseId) ?? [], false, null));
+        public Task<NotionPage> QueryDatabaseAsync(
+            string integrationToken,
+            string databaseId,
+            string? cursor,
+            DateTimeOffset? editedAfter = null,
+            CancellationToken cancellationToken = default)
+        {
+            DatabaseEditedAfterRequests.Add(editedAfter);
+            return Task.FromResult(new NotionPage(DatabaseRows.GetValueOrDefault(databaseId) ?? [], false, null));
+        }
 
         public Task<JsonElement?> GetViewAsync(string integrationToken, string viewId, CancellationToken cancellationToken = default) =>
             Task.FromResult<JsonElement?>(null);
 
-        public Task<NotionPage> ListCommentsAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default) =>
-            MissingComments.Contains(blockId)
+        public Task<NotionPage> ListCommentsAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default)
+        {
+            CommentRequests.Add(blockId);
+            return MissingComments.Contains(blockId)
                 ? Task.FromException<NotionPage>(new HttpRequestException(
                     "Not found.",
                     null,
                     System.Net.HttpStatusCode.NotFound))
                 : Task.FromResult(new NotionPage([], false, null));
+        }
 
         public Task<NotionFileDownload> DownloadFileAsync(string fileUrl, CancellationToken cancellationToken = default) =>
             Task.FromResult(FileDownloads[fileUrl]);
