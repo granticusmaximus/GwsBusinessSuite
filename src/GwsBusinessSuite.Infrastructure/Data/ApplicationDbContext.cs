@@ -105,6 +105,12 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<ContactActivity>().HasIndex(x => new { x.ContactId, x.CreatedAt });
 
         modelBuilder.Entity<WikiPage>().HasIndex(x => x.Slug).IsUnique();
+        modelBuilder.Entity<WikiPage>().HasIndex(x => x.NotionExportId).IsUnique();
+        modelBuilder.Entity<WikiPage>().Property(x => x.NotionExportId).HasMaxLength(80);
+        modelBuilder.Entity<WikiDatabase>().HasIndex(x => x.NotionExportId).IsUnique();
+        modelBuilder.Entity<WikiDatabase>().Property(x => x.NotionExportId).HasMaxLength(80);
+        modelBuilder.Entity<WikiDatabaseRow>().HasIndex(x => x.NotionExportId).IsUnique();
+        modelBuilder.Entity<WikiDatabaseRow>().Property(x => x.NotionExportId).HasMaxLength(80);
         modelBuilder.Entity<NotionConnectorSettings>().Property(x => x.SyncDirection).HasDefaultValue("import");
         modelBuilder.Entity<NotionConnectorSettings>().Property(x => x.SelectedNotionIdsJson).HasDefaultValue("[]");
         modelBuilder.Entity<WikiPage>().Property(x => x.ContentVersion)

@@ -358,7 +358,10 @@ app.MapGet("/admin/sentinel/files/{id:guid}", async (
         return Results.NotFound();
     }
 
-    var canRenderInline = file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+    // SVG files can contain active script. Keep them downloadable instead of rendering
+    // user-controlled workspace-export markup in the authenticated admin origin.
+    var canRenderInline = (file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(file.ContentType, "image/svg+xml", StringComparison.OrdinalIgnoreCase))
         || string.Equals(file.ContentType, "application/pdf", StringComparison.OrdinalIgnoreCase)
         || file.ContentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase)
         || file.ContentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase);

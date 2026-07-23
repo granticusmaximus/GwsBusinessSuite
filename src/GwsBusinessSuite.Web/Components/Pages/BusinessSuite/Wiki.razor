@@ -253,7 +253,8 @@
                            CaptureBlocks="CaptureEditorBlocksAsync"
                            OnPageCreated="OpenTemplatePageAsync"
                            OnDatabaseCreated="OpenTemplateDatabaseAsync"
-                           OnBlocksInserted="InsertBlockTemplateAsync" />
+                           OnBlocksInserted="InsertBlockTemplateAsync"
+                           OnWorkspaceImported="HandleWorkspaceImportedAsync" />
     </aside>
 
     <main class="sentinel-main">
@@ -1323,6 +1324,13 @@
         await LoadTreeAsync(selectFirstPage: false);
         await OpenPageAsync(wikiPageId);
         StatusMessage = "Created a new Sentinel page from a template.";
+    }
+
+    private async Task HandleWorkspaceImportedAsync()
+    {
+        await LoadTreeAsync(selectFirstPage: false);
+        await LoadWorkspaceNavigationAsync();
+        StatusMessage = "Notion workspace restored into Sentinel.";
     }
 
     private async Task LoadHistoryAsync(Guid wikiPageId)
