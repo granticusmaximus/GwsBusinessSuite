@@ -579,7 +579,9 @@ public sealed class WikiDatabaseServiceTests
                 [new WikiDatabaseFilter(status.Id.ToString(), "equals", "active")],
                 [new WikiDatabaseSort(sourceTitle.Id.ToString(), "ascending")],
                 status.Id.ToString(),
-                WikiDatabaseOpenPageModes.FullPage), "owner");
+                WikiDatabaseOpenPageModes.FullPage,
+                [status.Id.ToString(), sourceTitle.Id.ToString()],
+                [status.Id.ToString()]), "owner");
 
         var duplicate = await service.DuplicateDatabaseAsync(source.Id, "member");
         var reloaded = await service.GetDatabaseAsync(duplicate.Id);
@@ -606,6 +608,10 @@ public sealed class WikiDatabaseServiceTests
         copiedConfig.Filters.Single().PropertyId.Should().Be(copiedStatus.Id.ToString());
         copiedConfig.Sorts.Single().PropertyId.Should().Be(copiedTitle.Id.ToString());
         copiedConfig.OpenPageMode.Should().Be(WikiDatabaseOpenPageModes.FullPage);
+        copiedConfig.PagePropertyOrder.Should().Equal(
+            copiedStatus.Id.ToString(),
+            copiedTitle.Id.ToString());
+        copiedConfig.HiddenPagePropertyIds.Should().Equal(copiedStatus.Id.ToString());
     }
 
     [Fact]

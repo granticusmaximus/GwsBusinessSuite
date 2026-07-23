@@ -61,9 +61,41 @@ public sealed record WikiDatabaseViewConfig(
     IReadOnlyList<WikiDatabaseFilter> Filters,
     IReadOnlyList<WikiDatabaseSort> Sorts,
     string? GroupByPropertyId,
-    string? OpenPageMode = null)
+    string? OpenPageMode = null,
+    IReadOnlyList<string>? PagePropertyOrder = null,
+    IReadOnlyList<string>? HiddenPagePropertyIds = null)
 {
-    public static WikiDatabaseViewConfig Empty { get; } = new([], [], null, null);
+    public static WikiDatabaseViewConfig Empty { get; } = new([], [], null, null, [], []);
+}
+
+public static class WikiDatabasePagePresentation
+{
+    public static IReadOnlyList<WikiDatabaseProperty> OrderProperties(
+        IReadOnlyList<WikiDatabaseProperty> properties,
+        WikiDatabaseViewConfig config)
+    {
+        var explicitOrder = (config.PagePropertyOrder ?? [])
+            .Select((propertyId, index) => (propertyId, index))
+            .GroupBy(item => item.propertyId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().index, StringComparer.Ordinal);
+
+        return properties
+            .Where(property => property.Type != WikiDatabasePropertyTypes.Title)
+            .OrderBy(property => explicitOrder.TryGetValue(property.Id.ToString(), out var index) ? index : int.MaxValue)
+            .ThenBy(property => property.SortOrder)
+            .ThenBy(property => property.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    public static IReadOnlyList<WikiDatabaseProperty> VisibleProperties(
+        IReadOnlyList<WikiDatabaseProperty> properties,
+        WikiDatabaseViewConfig config)
+    {
+        var hidden = (config.HiddenPagePropertyIds ?? []).ToHashSet(StringComparer.Ordinal);
+        return OrderProperties(properties, config)
+            .Where(property => !hidden.Contains(property.Id.ToString()))
+            .ToList();
+    }
 }
 
 public sealed record WikiDatabaseTemplateProperty(
@@ -114,7 +146,9 @@ public static class WikiDatabaseViewConfigJson
                     parsed.Filters ?? [],
                     parsed.Sorts ?? [],
                     parsed.GroupByPropertyId,
-                    parsed.OpenPageMode);
+                    parsed.OpenPageMode,
+                    parsed.PagePropertyOrder ?? [],
+                    parsed.HiddenPagePropertyIds ?? []);
         }
         catch (JsonException) { return WikiDatabaseViewConfig.Empty; }
     }

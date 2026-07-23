@@ -153,7 +153,9 @@ public sealed class SentinelTemplateServiceTests
                 [],
                 [],
                 status.Id.ToString(),
-                WikiDatabaseOpenPageModes.CenterPeek),
+                WikiDatabaseOpenPageModes.CenterPeek,
+                [status.Id.ToString(), title.Id.ToString()],
+                [status.Id.ToString()]),
             "Owner");
 
         var template = await fixture.TemplateService.CreateFromDatabaseAsync(
@@ -181,6 +183,10 @@ public sealed class SentinelTemplateServiceTests
             reloaded.Views.Single(view => view.Type == WikiDatabaseViewTypes.Board).ConfigJson);
         copiedBoardConfig.GroupByPropertyId.Should().Be(copiedStatus.Id.ToString());
         copiedBoardConfig.OpenPageMode.Should().Be(WikiDatabaseOpenPageModes.CenterPeek);
+        copiedBoardConfig.PagePropertyOrder.Should().Equal(
+            copiedStatus.Id.ToString(),
+            copiedTitle.Id.ToString());
+        copiedBoardConfig.HiddenPagePropertyIds.Should().Equal(copiedStatus.Id.ToString());
         (await fixture.TemplateService.ListDatabaseTemplatesAsync()).Should().ContainSingle(item =>
             item.Id == template.Id && item.PropertyCount == 2 && item.RowCount == 1 && item.ViewCount == 2);
     }
