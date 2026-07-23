@@ -36,6 +36,33 @@ public sealed record SentinelNotionTemplateImportResult(
     int FilesSkipped,
     IReadOnlyList<string> Warnings);
 
+public sealed record SentinelNotionWorkspaceImportResult(
+    int PagesCreated,
+    int PagesUpdated,
+    int DatabasesCreated,
+    int DatabasesUpdated,
+    int DatabaseRowsImported,
+    int FilesImported,
+    int FilesSkipped,
+    IReadOnlyList<string> Warnings)
+{
+    public int TotalDocumentsImported =>
+        PagesCreated + PagesUpdated + DatabasesCreated + DatabasesUpdated;
+}
+
+public static class SentinelNotionWorkspaceImportLimits
+{
+    public const long MaxArchiveBytes = 250L * 1024 * 1024;
+}
+
+public interface ISentinelWorkspaceImportService
+{
+    Task<SentinelNotionWorkspaceImportResult> ImportAsync(
+        byte[] zipArchive,
+        string performedBy,
+        CancellationToken cancellationToken = default);
+}
+
 public interface ISentinelTemplateService
 {
     Task<IReadOnlyList<SentinelPageTemplateView>> ListAsync(

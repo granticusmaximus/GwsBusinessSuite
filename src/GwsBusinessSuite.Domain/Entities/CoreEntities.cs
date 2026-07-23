@@ -118,6 +118,10 @@ public sealed class WikiPage : AuditableEntity
     // Remote edit watermark from the last successful content import. When Notion returns
     // the same last_edited_time on a later search, the expensive block/comment walk is skipped.
     public DateTimeOffset? NotionLastEditedAt { get; set; }
+    // Stable identity parsed from a Notion Markdown/CSV/HTML workspace export. Kept separate
+    // from NotionId so archive restores can reconcile records without being archived by the
+    // live API connector when an export-only page is not visible to that integration.
+    public string? NotionExportId { get; set; }
     public ICollection<WikiPageRevision> Revisions { get; set; } = new List<WikiPageRevision>();
 }
 
@@ -349,6 +353,7 @@ public sealed class WikiDatabase : AuditableEntity
     public string? NotionId { get; set; }
     public DateTimeOffset? NotionArchivedAt { get; set; }
     public DateTimeOffset? NotionLastEditedAt { get; set; }
+    public string? NotionExportId { get; set; }
     public ICollection<WikiDatabaseProperty> Properties { get; set; } = new List<WikiDatabaseProperty>();
     public ICollection<WikiDatabaseRow> Rows { get; set; } = new List<WikiDatabaseRow>();
     public ICollection<WikiDatabaseView> Views { get; set; } = new List<WikiDatabaseView>();
@@ -386,6 +391,7 @@ public sealed class WikiDatabaseRow : AuditableEntity
     public string? NotionId { get; set; }
     public DateTimeOffset? NotionArchivedAt { get; set; }
     public DateTimeOffset? NotionLastEditedAt { get; set; }
+    public string? NotionExportId { get; set; }
     public WikiDatabase? WikiDatabase { get; set; }
 }
 

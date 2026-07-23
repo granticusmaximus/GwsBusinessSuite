@@ -1,6 +1,7 @@
 @using GwsBusinessSuite.Application.Abstractions
 @using GwsBusinessSuite.Application.Wiki
 @inject ISentinelTemplateService TemplateService
+@inject ISentinelWorkspaceImportService WorkspaceImportService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject ILogger<SentinelTemplates> Logger
 
@@ -8,6 +9,32 @@
     <div class="card-header bg-white border-bottom py-2 d-flex align-items-center justify-content-between">
         <span class="fw-semibold small"><i class="bi bi-copy me-1"></i>Templates</span>
         <span class="badge text-bg-secondary">@(Templates.Count + BlockTemplates.Count + DatabaseTemplates.Count)</span>
+    </div>
+
+    <div class="card-body p-2 border-bottom sentinel-notion-workspace-import">
+        <div class="small fw-semibold mb-1">
+            <i class="bi bi-cloud-arrow-up me-1"></i>Restore a Notion workspace
+        </div>
+        <div class="small text-secondary mb-2">
+            Upload a Notion <strong>Markdown &amp; CSV</strong> or HTML workspace ZIP. Sentinel will create or update
+            real editable pages, databases, rows, files, and their exported hierarchy.
+        </div>
+        <label class="btn btn-sm btn-primary mb-0 @(IsBusy ? "disabled" : string.Empty)">
+            <i class="bi bi-file-earmark-zip me-1"></i>Restore workspace ZIP
+            <InputFile class="visually-hidden"
+                       accept=".zip,application/zip"
+                       disabled="@IsBusy"
+                       OnChange="ImportNotionWorkspaceAsync" />
+        </label>
+        <div class="small text-secondary mt-1">
+            Reimporting the same export updates matching documents. Maximum ZIP size: 250 MB.
+        </div>
+        @if (!string.IsNullOrWhiteSpace(WorkspaceImportMessage))
+        {
+            <div class="small @(WorkspaceImportSucceeded ? "text-success" : "text-danger") mt-2">
+                @WorkspaceImportMessage
+            </div>
+        }
     </div>
 
     <div class="card-body p-2 border-bottom sentinel-notion-template-import">
@@ -205,6 +232,7 @@
     [Parameter] public EventCallback<Guid> OnPageCreated { get; set; }
     [Parameter] public EventCallback<Guid> OnDatabaseCreated { get; set; }
     [Parameter] public EventCallback<string> OnBlocksInserted { get; set; }
+    [Parameter] public EventCallback OnWorkspaceImported { get; set; }
 
     private List<SentinelPageTemplateView> Templates { get; set; } = new();
     private List<SentinelBlockTemplateView> BlockTemplates { get; set; } = new();
@@ -215,6 +243,8 @@
     private string ErrorMessage { get; set; } = string.Empty;
     private string ImportMessage { get; set; } = string.Empty;
     private bool ImportSucceeded { get; set; }
+    private string WorkspaceImportMessage { get; set; } = string.Empty;
+    private bool WorkspaceImportSucceeded { get; set; }
     private Guid? PendingDeleteId { get; set; }
     private Guid? PendingBlockDeleteId { get; set; }
     private Guid? PendingDatabaseDeleteId { get; set; }
@@ -327,6 +357,41 @@
         if (!string.IsNullOrWhiteSpace(ErrorMessage))
         {
             ImportMessage = ErrorMessage;
+            ErrorMessage = string.Empty;
+        }
+    }
+
+    private async Task ImportNotionWorkspaceAsync(InputFileChangeEventArgs args)
+    {
+        WorkspaceImportMessage = string.Empty;
+        WorkspaceImportSucceeded = false;
+        await RunAsync(async () =>
+        {
+            var file = args.File;
+            if (!file.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Choose a .zip workspace exported from Notion.");
+            }
+
+            await using var source = file.OpenReadStream(
+                SentinelNotionWorkspaceImportLimits.MaxArchiveBytes);
+            using var buffer = new MemoryStream();
+            await source.CopyToAsync(buffer);
+            var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var result = await WorkspaceImportService.ImportAsync(buffer.ToArray(), user);
+            await OnWorkspaceImported.InvokeAsync();
+            WorkspaceImportSucceeded = true;
+            WorkspaceImportMessage =
+                $"Workspace restored: {result.PagesCreated} page(s) created, {result.PagesUpdated} updated, "
+                + $"{result.DatabasesCreated} database(s) created, {result.DatabasesUpdated} updated, "
+                + $"{result.DatabaseRowsImported} row(s), and {result.FilesImported} file(s) imported."
+                + (result.FilesSkipped > 0 ? $" {result.FilesSkipped} file(s) skipped." : string.Empty)
+                + (result.Warnings.Count > 0 ? $" {string.Join(" ", result.Warnings.Take(3))}" : string.Empty);
+        });
+
+        if (!string.IsNullOrWhiteSpace(ErrorMessage))
+        {
+            WorkspaceImportMessage = ErrorMessage;
             ErrorMessage = string.Empty;
         }
     }

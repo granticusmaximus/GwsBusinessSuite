@@ -135,6 +135,7 @@ public static class DependencyInjection
         services.AddScoped<IWikiService, WikiService>();
         services.AddScoped<IWikiDatabaseService, WikiDatabaseService>();
         services.AddScoped<ISentinelTemplateService, SentinelTemplateService>();
+        services.AddScoped<ISentinelWorkspaceImportService, SentinelWorkspaceImportService>();
         services.AddScoped<ISentinelWorkspaceService, SentinelWorkspaceService>();
         services.AddScoped<ISentinelCollaborationService, SentinelCollaborationService>();
         services.AddScoped<ISentinelAccessService, SentinelAccessService>();
