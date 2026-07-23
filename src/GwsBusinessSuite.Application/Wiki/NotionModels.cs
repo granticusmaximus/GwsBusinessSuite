@@ -29,6 +29,7 @@ public interface INotionService
 public sealed class NotionConnectorSettingsView
 {
     public string IntegrationToken { get; set; } = string.Empty;
+    public bool HasStoredIntegrationToken { get; set; }
     public string? WorkspaceName { get; set; }
     public bool AutoSyncEnabled { get; set; } = true;
     public string SyncDirection { get; set; } = "import";

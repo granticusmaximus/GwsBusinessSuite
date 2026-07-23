@@ -13,6 +13,53 @@ namespace GwsBusinessSuite.Tests;
 public sealed class NotionSyncServiceTests
 {
     [Fact]
+    public async Task GetSettingsAsync_ShouldNeverReturnTheDecryptedNotionToken()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+
+        var settings = await fixture.Service.GetSettingsAsync();
+
+        settings.Should().NotBeNull();
+        settings!.IntegrationToken.Should().BeEmpty();
+        settings.HasStoredIntegrationToken.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SaveSettingsAsync_ShouldKeepAndValidateStoredTokenWhenReplacementIsBlank()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.ValidatedTokens.Clear();
+
+        var result = await fixture.Service.SaveSettingsAsync(new NotionConnectorSettingsView
+        {
+            IntegrationToken = string.Empty,
+            AutoSyncEnabled = false
+        });
+
+        result.IsSuccess.Should().BeTrue();
+        fixture.Notion.ValidatedTokens.Should().Equal("secret");
+        (await fixture.Service.GetSettingsAsync())!.HasStoredIntegrationToken.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SaveSettingsAsync_ShouldNotReplaceStoredTokenWhenNewTokenFailsValidation()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.ValidationSucceeds = false;
+
+        var result = await fixture.Service.SaveSettingsAsync(new NotionConnectorSettingsView
+        {
+            IntegrationToken = "invalid-replacement"
+        });
+
+        result.IsSuccess.Should().BeFalse();
+        fixture.Notion.ValidationSucceeds = true;
+        fixture.Notion.ValidatedTokens.Clear();
+        (await fixture.Service.SaveSettingsAsync(new NotionConnectorSettingsView())).IsSuccess.Should().BeTrue();
+        fixture.Notion.ValidatedTokens.Should().Equal("secret");
+    }
+
+    [Fact]
     public async Task SyncAsync_ShouldCreateThenUpdateByNotionIdWithoutDuplicating()
     {
         await using var fixture = await SyncFixture.CreateAsync();
@@ -26,6 +73,39 @@ public sealed class NotionSyncServiceTests
         pages.Should().ContainSingle();
         pages[0].Title.Should().Be("Renamed");
         pages[0].NotionArchivedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SyncAsync_ShouldStopSafelyWhenNotionReturnsNoSharedContent()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.SearchResults = [Page("page-1", "Existing")];
+        (await fixture.Service.SyncAsync()).IsSuccess.Should().BeTrue();
+        fixture.Notion.SearchResults = [];
+
+        var result = await fixture.Service.SyncAsync();
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("no shared pages or databases");
+        (await fixture.Db.WikiPages.SingleAsync(page => page.NotionId == "page-1"))
+            .NotionArchivedAt.Should().BeNull("loss of integration access must not archive local content");
+    }
+
+    [Fact]
+    public async Task SyncAsync_ShouldExplainWhenSelectedIdsExcludeAllAccessibleContent()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.SearchResults = [Page("page-1", "Accessible")];
+        await fixture.Service.SaveSettingsAsync(new NotionConnectorSettingsView
+        {
+            SelectedNotionIds = "different-page",
+            IntegrationToken = string.Empty
+        });
+
+        var result = await fixture.Service.SyncAsync();
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("none matches the selected");
     }
 
     [Fact]
@@ -173,13 +253,20 @@ public sealed class NotionSyncServiceTests
 
     private sealed class FakeNotionService : INotionService
     {
+        public List<string> ValidatedTokens { get; } = new();
+        public bool ValidationSucceeds { get; set; } = true;
         public IReadOnlyList<JsonElement> SearchResults { get; set; } = [];
         public Dictionary<string, IReadOnlyList<JsonElement>> BlockChildren { get; } = new();
         public Dictionary<string, JsonElement> DatabaseSchemas { get; } = new();
         public Dictionary<string, IReadOnlyList<JsonElement>> DatabaseRows { get; } = new();
 
-        public Task<NotionValidationResult> ValidateConnectionAsync(string integrationToken, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new NotionValidationResult(true, "Connected.", "Test Workspace"));
+        public Task<NotionValidationResult> ValidateConnectionAsync(string integrationToken, CancellationToken cancellationToken = default)
+        {
+            ValidatedTokens.Add(integrationToken);
+            return Task.FromResult(ValidationSucceeds
+                ? new NotionValidationResult(true, "Connected.", "Test Workspace")
+                : new NotionValidationResult(false, "Invalid token.", null));
+        }
 
         public Task<NotionPage> SearchAsync(string integrationToken, string? cursor, CancellationToken cancellationToken = default) =>
             Task.FromResult(new NotionPage(SearchResults, false, null));
