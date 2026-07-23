@@ -30,6 +30,12 @@ public sealed record SentinelBlockTemplateView(
     DateTimeOffset CreatedAt,
     string CreatedBy);
 
+public sealed record SentinelNotionTemplateImportResult(
+    int PageTemplatesImported,
+    int DatabaseTemplatesImported,
+    int FilesSkipped,
+    IReadOnlyList<string> Warnings);
+
 public interface ISentinelTemplateService
 {
     Task<IReadOnlyList<SentinelPageTemplateView>> ListAsync(
@@ -85,5 +91,10 @@ public interface ISentinelTemplateService
 
     Task DeleteDatabaseTemplateAsync(
         Guid templateId,
+        CancellationToken cancellationToken = default);
+
+    Task<SentinelNotionTemplateImportResult> ImportNotionExportAsync(
+        byte[] zipArchive,
+        string performedBy,
         CancellationToken cancellationToken = default);
 }

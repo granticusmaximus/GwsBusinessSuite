@@ -71,7 +71,7 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 | Databases | Typed properties including person, files, place, evaluated advanced formulas, one-way or reciprocal row-picker relations, and calculated rollups; editable Table, Board, List, Gallery, Calendar, Timeline, Chart, Form, Map, Feed, and Dashboard views | Richer rollup formatting |
 | Databases — structure | Databases share the page sidebar tree; every row opens as a responsive block-content page with a per-view side-peek, center-peek, or full-page presentation and configurable property visibility/order; linked and inline database blocks reference canonical data without duplication | Row covers/icons and page history |
 | Search & graph | All-token ranked page/block/database-row search with highlighted matches; structured and legacy backlinks; per-user favorites/recents; structured page, person, and date mentions with a personal mention inbox | Graph visualization, saved searches, and database-row mention inbox entries |
-| Import/sync | Current `2026-03-11` Notion API, data sources, views, comments, selective import, encrypted token storage, soft archival, and explicitly enabled conflict-aware manual page pushes | Durable ingestion of expiring Notion-hosted files and broader bidirectional database writes |
+| Import/sync | Current `2026-03-11` Notion API, data sources, views, comments, selective import, encrypted token storage, soft archival, explicitly enabled conflict-aware manual page pushes, and reusable template import from connected free Notion templates or Markdown/CSV/HTML ZIP exports | Durable ingestion of expiring Notion-hosted files and broader bidirectional database writes |
 | Visibility | Authenticated portal-member roles and per-resource view/comment/edit/full-access grants, plus expiring/revocable tokenized public page and database shares | Richer public-share controls and auditing |
 
 ## Delivery sequence
@@ -150,7 +150,7 @@ capabilities where they fit GWS Business Suite; they are no longer silently excl
 | Knowledge graph | `[[Page]]` links, ranked/highlighted workspace search, backlinks, person/date mentions, favorites/recents | Graph navigation, database-row mention inbox entries, and saved searches |
 | Collaboration | Discussions, replies, reactions, notifications, DB-backed cross-instance presence/polling, block-level three-way merge, authenticated portal-member roles, granular permissions, and tokenized public sharing | Character-level CRDT/OT cursors and richer public-share controls |
 | Presentation | Emoji icon and cover URL plus responsive side-peek, center-peek, and full-page database rows with per-view property presentation | Custom icon/cover uploads, page width/fonts, and reusable style defaults |
-| Integration | Encrypted token, current data-source/view/comment API, selective reconciliation, and opt-in conflict-aware manual page writes | Durable file ingestion and bidirectional database schema/row writes |
+| Integration | Encrypted token, current data-source/view/comment API, selective reconciliation, opt-in conflict-aware manual page writes, and free-template interoperability through connected-workspace sync or bounded Notion ZIP imports | Durable file ingestion and bidirectional database schema/row writes |
 | AI | Workspace-grounded ask/writing/translation/research/meeting notes/autofill with durable approve/reject runs | Streaming chat, citations, transcription capture, and autonomous agents |
 
 Official research baseline: [Notion block API](https://developers.notion.com/reference/block),
@@ -176,27 +176,21 @@ screens.
 1. **Database page layouts and presentation** — configurable side peek, center peek, and
    full-page row opening; responsive row pages; property presentation controls; row icons,
    covers, and page history.
-2. **Free Notion template interoperability** — import any unlocked, duplicable free
-   Marketplace or public-page template after it is added to the connected Notion workspace
-   and shared with the Sentinel integration. Also accept Notion ZIP exports containing
-   Markdown, HTML, CSV, and supported files when API access is unavailable. Imported roots,
-   subpages, databases, rows, and supported blocks become reusable Sentinel templates;
-   restricted or `No access` content is reported rather than scraped or silently dropped.
-3. **Native editing polish** — database-page autosave, undo/redo, contextual actions, and
+2. **Native editing polish** — database-page autosave, undo/redo, contextual actions, and
    complete keyboard-first editing flows.
-4. **Media and presentation** — richer embeds, durable icon/cover uploads, page width and font
+3. **Media and presentation** — richer embeds, durable icon/cover uploads, page width and font
    controls, and reusable visual defaults.
-5. **Database automations** — trigger/action rules for property changes, schedules, and
+4. **Database automations** — trigger/action rules for property changes, schedules, and
    approved integrations, with visible execution history.
-6. **Real-time collaboration** — character-level concurrent editing, remote selections and
+5. **Real-time collaboration** — character-level concurrent editing, remote selections and
    cursors, reconnect recovery, and conflict-safe persistence.
-7. **Knowledge navigation** — graph navigation, saved searches, and database-row mentions in
+6. **Knowledge navigation** — graph navigation, saved searches, and database-row mentions in
    the personal inbox.
-8. **Sentinel AI depth** — streaming answers with citations, transcription capture, and
+7. **Sentinel AI depth** — streaming answers with citations, transcription capture, and
    reviewable autonomous workflows.
-9. **Sync and sharing hardening** — durable Notion-hosted file ingestion, bidirectional
+8. **Sync and sharing hardening** — durable Notion-hosted file ingestion, bidirectional
    database schema/row writes, and richer public-share controls.
-10. **Native platform integrations** — platform-appropriate desktop and mobile affordances.
+9. **Native platform integrations** — platform-appropriate desktop and mobile affordances.
    On macOS this includes an optional persistent Sentinel menu-bar companion with a dedicated
    original Sentinel logo, quick actions to open Sentinel or the main dashboard, refresh
    workspace data, and quit the desktop app. The normal Mac app continues to open the complete
