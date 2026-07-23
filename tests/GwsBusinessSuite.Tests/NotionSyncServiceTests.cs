@@ -76,6 +76,24 @@ public sealed class NotionSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_ShouldAssignUniqueSlugsToNewPagesWithDuplicateTitles()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.SearchResults =
+        [
+            Page("page-1", "Untitled"),
+            Page("page-2", "Untitled"),
+            Page("page-3", "Untitled")
+        ];
+
+        var result = await fixture.Service.SyncAsync();
+
+        result.IsSuccess.Should().BeTrue();
+        var pages = await fixture.Db.WikiPages.OrderBy(page => page.Slug).ToListAsync();
+        pages.Select(page => page.Slug).Should().Equal("untitled", "untitled-2", "untitled-3");
+    }
+
+    [Fact]
     public async Task SyncAsync_ShouldStopSafelyWhenNotionReturnsNoSharedContent()
     {
         await using var fixture = await SyncFixture.CreateAsync();

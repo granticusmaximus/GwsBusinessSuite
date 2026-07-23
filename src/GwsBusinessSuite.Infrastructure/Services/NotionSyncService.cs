@@ -158,6 +158,14 @@ public sealed class NotionSyncService(
             var notionIdToLocalId = new Dictionary<string, Guid>();
             var notionIdToKind = new Dictionary<string, string>();
             var notionIdToParent = new Dictionary<string, JsonElement>();
+            // Reserve slugs for both persisted and newly tracked pages. Querying the database
+            // inside each upsert does not include Added entities, so duplicate Notion titles in
+            // one discovery batch would otherwise violate WikiPages' unique slug index.
+            var reservedPageSlugs = (await dbContext.WikiPages
+                    .AsNoTracking()
+                    .Select(page => page.Slug)
+                    .ToListAsync(cancellationToken))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             // 2. Reconcile pages/databases by NotionId (upsert, never destructive delete-and-reinsert).
             foreach (var item in discovered)
@@ -193,7 +201,12 @@ public sealed class NotionSyncService(
                 }
                 else
                 {
-                    (localId, wasNew, becameArchived) = await UpsertPageAsync(notionId, title, isArchived, cancellationToken);
+                    (localId, wasNew, becameArchived) = await UpsertPageAsync(
+                        notionId,
+                        title,
+                        isArchived,
+                        reservedPageSlugs,
+                        cancellationToken);
                 }
 
                 notionIdToLocalId[notionId] = localId;
@@ -264,6 +277,25 @@ public sealed class NotionSyncService(
 
             return new NotionSyncResult(true, "Sync complete.", imported, updated, archived);
         }
+        catch (DbUpdateException ex)
+        {
+            logger.LogError(ex, "Notion sync failed while saving imported entities");
+            var entityTypes = ex.Entries
+                .Select(entry => entry.Metadata.ClrType.Name)
+                .Distinct(StringComparer.Ordinal)
+                .Order()
+                .ToArray();
+            var entityLabel = entityTypes.Length == 0
+                ? "imported content"
+                : string.Join(", ", entityTypes);
+            var providerMessage = ex.GetBaseException().Message;
+            return new NotionSyncResult(
+                false,
+                $"Sync failed while saving {entityLabel}: {providerMessage}",
+                0,
+                0,
+                0);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Notion sync failed");
@@ -332,7 +364,12 @@ public sealed class NotionSyncService(
             : null;
     }
 
-    private async Task<(Guid LocalId, bool IsNew, bool BecameArchived)> UpsertPageAsync(string notionId, string title, bool isArchived, CancellationToken cancellationToken)
+    private async Task<(Guid LocalId, bool IsNew, bool BecameArchived)> UpsertPageAsync(
+        string notionId,
+        string title,
+        bool isArchived,
+        HashSet<string> reservedSlugs,
+        CancellationToken cancellationToken)
     {
         var page = await dbContext.WikiPages.FirstOrDefaultAsync(p => p.NotionId == notionId, cancellationToken);
         var isNew = page is null;
@@ -342,7 +379,7 @@ public sealed class NotionSyncService(
             page = new WikiPage
             {
                 Title = title,
-                Slug = await GenerateUniqueSlugAsync(title, cancellationToken),
+                Slug = ReserveUniqueSlug(title, reservedSlugs),
                 NotionId = notionId,
                 BlocksJson = "[]",
                 SortOrder = 0,
@@ -411,25 +448,21 @@ public sealed class NotionSyncService(
         return (database.Id, isNew, isArchived && !wasArchived);
     }
 
-    private async Task<string> GenerateUniqueSlugAsync(string title, CancellationToken cancellationToken)
+    private static string ReserveUniqueSlug(string title, HashSet<string> reservedSlugs)
     {
         var baseSlug = WikiService.CreateSlug(title);
-        var existingSlugs = await dbContext.WikiPages.Select(p => p.Slug).ToListAsync(cancellationToken);
-        if (!existingSlugs.Contains(baseSlug, StringComparer.OrdinalIgnoreCase))
+        if (reservedSlugs.Add(baseSlug))
         {
             return baseSlug;
         }
 
-        var counter = 2;
-        while (true)
+        for (var counter = 2; ; counter++)
         {
             var candidate = $"{baseSlug}-{counter}";
-            if (!existingSlugs.Contains(candidate, StringComparer.OrdinalIgnoreCase))
+            if (reservedSlugs.Add(candidate))
             {
                 return candidate;
             }
-
-            counter++;
         }
     }
 
