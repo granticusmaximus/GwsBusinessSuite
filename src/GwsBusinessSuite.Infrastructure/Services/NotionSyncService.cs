@@ -132,7 +132,8 @@ public sealed class NotionSyncService(
                 searchCursor = page.HasMore ? page.NextCursor : null;
             } while (searchCursor is not null);
 
-            var selectedIds = DeserializeSelectedIds(settingsRow.SelectedNotionIdsJson).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var selectedNotionIds = DeserializeSelectedIds(settingsRow.SelectedNotionIdsJson);
+            var selectedIds = selectedNotionIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
             if (discovered.Count == 0)
             {
                 return new NotionSyncResult(
@@ -161,6 +162,7 @@ public sealed class NotionSyncService(
             var notionIdToLocalId = new Dictionary<string, Guid>();
             var notionIdToKind = new Dictionary<string, string>();
             var notionIdToParent = new Dictionary<string, JsonElement>();
+            var databaseContainerToLocalIds = new Dictionary<string, List<Guid>>(StringComparer.OrdinalIgnoreCase);
             // Reserve slugs for both persisted and newly tracked pages. Querying the database
             // inside each upsert does not include Added entities, so duplicate Notion titles in
             // one discovery batch would otherwise violate WikiPages' unique slug index.
@@ -187,7 +189,15 @@ public sealed class NotionSyncService(
 
                 seenTopLevelNotionIds.Add(notionId);
                 notionIdToKind[notionId] = objectType ?? "page";
-                if (item.TryGetProperty("parent", out var parentElement))
+                if (objectType == "data_source"
+                    && item.TryGetProperty("database_parent", out var databaseParentElement))
+                {
+                    // Since API version 2025-09-03 a data source's immediate parent is its
+                    // database container. Its database_parent is where that database actually
+                    // appears in Notion's page tree.
+                    notionIdToParent[notionId] = databaseParentElement.Clone();
+                }
+                else if (item.TryGetProperty("parent", out var parentElement))
                 {
                     notionIdToParent[notionId] = parentElement.Clone();
                 }
@@ -213,6 +223,21 @@ public sealed class NotionSyncService(
                 }
 
                 notionIdToLocalId[notionId] = localId;
+                if (objectType == "data_source"
+                    && item.TryGetProperty("parent", out var dataSourceParent)
+                    && dataSourceParent.TryGetProperty("type", out var dataSourceParentType)
+                    && dataSourceParentType.GetString() == "database_id"
+                    && dataSourceParent.TryGetProperty("database_id", out var databaseIdElement)
+                    && databaseIdElement.GetString() is { Length: > 0 } databaseId)
+                {
+                    var containerId = NormalizeNotionId(databaseId);
+                    if (!databaseContainerToLocalIds.TryGetValue(containerId, out var localIds))
+                    {
+                        localIds = [];
+                        databaseContainerToLocalIds[containerId] = localIds;
+                    }
+                    localIds.Add(localId);
+                }
                 if (wasNew) imported++; else updated++;
                 if (becameArchived) archived++;
             }
@@ -242,18 +267,29 @@ public sealed class NotionSyncService(
             }
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            // 4. Per-page block sync.
+            // 4. Per-page block sync. The first-level child_page/child_database blocks are
+            // also the authoritative sibling order for the Notion page tree.
+            var childOrderByParentLocalId = new Dictionary<Guid, IReadOnlyList<NotionTreeChild>>();
             foreach (var (notionId, localId) in notionIdToLocalId)
             {
                 if (notionIdToKind[notionId] is not ("database" or "data_source"))
                 {
                     var pageContent = await SyncPageBlocksAsync(notionId, localId, token, cancellationToken);
+                    childOrderByParentLocalId[localId] = pageContent.TreeChildren;
                     contentBlocks += pageContent.BlockCount;
                     if (pageContent.UsedMarkdownFallback) markdownFallbackPages++;
                     if (pageContent.BlockCount == 0) emptyContentPages++;
                     await SyncPageCommentsAsync(notionId, localId, token, cancellationToken);
                 }
             }
+
+            await ReconcileTreeOrderAsync(
+                discovered,
+                selectedNotionIds,
+                notionIdToLocalId,
+                databaseContainerToLocalIds,
+                childOrderByParentLocalId,
+                cancellationToken);
 
             // 5. Per-database property/row sync.
             foreach (var (notionId, localId) in notionIdToLocalId)
@@ -405,7 +441,22 @@ public sealed class NotionSyncService(
 
     private static string? GetParentNotionId(JsonElement item)
     {
-        if (!item.TryGetProperty("parent", out var parent)
+        // A current Notion data_source is parented by an internal database container, while
+        // database_parent identifies the page where users actually see that database.
+        JsonElement parent;
+        if (item.TryGetProperty("object", out var objectType)
+            && objectType.GetString() == "data_source"
+            && item.TryGetProperty("database_parent", out var databaseParent))
+        {
+            parent = databaseParent;
+        }
+        else
+        {
+            parent = item.TryGetProperty("parent", out var directParent)
+                ? directParent
+                : default;
+        }
+        if (parent.ValueKind != JsonValueKind.Object
             || !parent.TryGetProperty("type", out var parentTypeElement))
         {
             return null;
@@ -440,9 +491,126 @@ public sealed class NotionSyncService(
             _ => null
         };
 
-        return parentNotionId is not null && notionIdToLocalId.TryGetValue(parentNotionId, out var parentLocalId)
-            ? parentLocalId
-            : null;
+        if (parentNotionId is null)
+        {
+            return null;
+        }
+
+        if (notionIdToLocalId.TryGetValue(parentNotionId, out var parentLocalId))
+        {
+            return parentLocalId;
+        }
+
+        var normalizedParentId = NormalizeNotionId(parentNotionId);
+        foreach (var (candidateNotionId, candidateLocalId) in notionIdToLocalId)
+        {
+            if (string.Equals(
+                    NormalizeNotionId(candidateNotionId),
+                    normalizedParentId,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return candidateLocalId;
+            }
+        }
+
+        return null;
+    }
+
+    private async Task ReconcileTreeOrderAsync(
+        IReadOnlyList<JsonElement> discovered,
+        IReadOnlyList<string> selectedNotionIds,
+        IReadOnlyDictionary<string, Guid> notionIdToLocalId,
+        IReadOnlyDictionary<string, List<Guid>> databaseContainerToLocalIds,
+        IReadOnlyDictionary<Guid, IReadOnlyList<NotionTreeChild>> childOrderByParentLocalId,
+        CancellationToken cancellationToken)
+    {
+        var pages = await dbContext.WikiPages.ToListAsync(cancellationToken);
+        var databases = await dbContext.WikiDatabases.ToListAsync(cancellationToken);
+        var nodes = pages
+            .Select(page => new NotionTreeNodeState(
+                page.Id,
+                page.ParentWikiPageId,
+                page.NotionId,
+                page.SortOrder,
+                value => page.SortOrder = value))
+            .Concat(databases.Select(database => new NotionTreeNodeState(
+                database.Id,
+                database.ParentWikiPageId,
+                database.NotionId,
+                database.SortOrder,
+                value => database.SortOrder = value)))
+            .ToList();
+
+        var localIdByNormalizedNotionId = notionIdToLocalId
+            .GroupBy(pair => NormalizeNotionId(pair.Key), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().Value, StringComparer.OrdinalIgnoreCase);
+
+        void ReorderSiblings(Guid? parentId, IEnumerable<Guid> preferredIds)
+        {
+            var siblings = nodes
+                .Where(node => node.ParentId == parentId)
+                .ToDictionary(node => node.Id);
+            if (siblings.Count == 0)
+            {
+                return;
+            }
+
+            var ordered = new List<NotionTreeNodeState>();
+            foreach (var preferredId in preferredIds.Distinct())
+            {
+                if (siblings.Remove(preferredId, out var preferred))
+                {
+                    ordered.Add(preferred);
+                }
+            }
+
+            // Preserve local-only pages and any remote child omitted by a partial Notion
+            // response after the authoritative Notion-ordered items.
+            ordered.AddRange(siblings.Values
+                .OrderBy(node => node.SortOrder)
+                .ThenBy(node => node.Id));
+
+            for (var index = 0; index < ordered.Count; index++)
+            {
+                ordered[index].SetSortOrder(index);
+            }
+        }
+
+        var rootNotionIds = selectedNotionIds.Count > 0
+            ? selectedNotionIds
+            : discovered.Select(GetNotionId).Where(id => id is not null).Select(id => id!);
+        var preferredRootIds = rootNotionIds
+            .Select(NormalizeNotionId)
+            .Where(localIdByNormalizedNotionId.ContainsKey)
+            .Select(id => localIdByNormalizedNotionId[id]);
+        ReorderSiblings(null, preferredRootIds);
+
+        foreach (var (parentLocalId, remoteChildren) in childOrderByParentLocalId)
+        {
+            var preferredChildIds = new List<Guid>();
+            foreach (var child in remoteChildren)
+            {
+                var normalizedChildId = NormalizeNotionId(child.NotionId);
+                if (child.IsDatabase
+                    && databaseContainerToLocalIds.TryGetValue(normalizedChildId, out var dataSourceLocalIds))
+                {
+                    preferredChildIds.AddRange(dataSourceLocalIds);
+                    continue;
+                }
+
+                if (localIdByNormalizedNotionId.TryGetValue(normalizedChildId, out var localId))
+                {
+                    preferredChildIds.Add(localId);
+                }
+            }
+
+            if (preferredChildIds.Count > 0)
+            {
+                ReorderSiblings(parentLocalId, preferredChildIds);
+            }
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<(Guid LocalId, bool IsNew, bool BecameArchived)> UpsertPageAsync(
@@ -586,10 +754,17 @@ public sealed class NotionSyncService(
         CancellationToken cancellationToken)
     {
         var blocks = new List<WikiBlock>();
+        var treeChildren = new List<NotionTreeChild>();
         var structuredContentUnavailable = false;
         try
         {
-            await AppendBlockChildrenAsync(notionPageId, 0, token, blocks, cancellationToken);
+            await AppendBlockChildrenAsync(
+                notionPageId,
+                0,
+                token,
+                blocks,
+                cancellationToken,
+                treeChildren);
         }
         catch (HttpRequestException ex) when (ex.StatusCode is
                                              System.Net.HttpStatusCode.NotFound or
@@ -608,7 +783,7 @@ public sealed class NotionSyncService(
 
         if (blocks.Count > 0)
         {
-            return new PageContentSyncResult(blocks, false, false);
+            return new PageContentSyncResult(blocks, treeChildren, false, false);
         }
 
         try
@@ -622,7 +797,7 @@ public sealed class NotionSyncService(
                 logger.LogWarning(
                     "Notion page {NotionPageId} returned no structured blocks or full-page Markdown content.",
                     notionPageId);
-                return new PageContentSyncResult(blocks, false, structuredContentUnavailable);
+                return new PageContentSyncResult(blocks, treeChildren, false, structuredContentUnavailable);
             }
 
             blocks.AddRange(WikiBlockJson.FromMarkdown(markdownPage.Markdown));
@@ -637,7 +812,7 @@ public sealed class NotionSyncService(
                     notionPageId,
                     markdownPage.UnknownBlockIds.Count);
             }
-            return new PageContentSyncResult(blocks, blocks.Count > 0, false);
+            return new PageContentSyncResult(blocks, treeChildren, blocks.Count > 0, false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -645,11 +820,17 @@ public sealed class NotionSyncService(
                 ex,
                 "Could not retrieve full-page Markdown fallback for Notion page {NotionPageId}.",
                 notionPageId);
-            return new PageContentSyncResult(blocks, false, structuredContentUnavailable);
+            return new PageContentSyncResult(blocks, treeChildren, false, structuredContentUnavailable);
         }
     }
 
-    private async Task AppendBlockChildrenAsync(string notionBlockId, int indentLevel, string token, List<WikiBlock> blocks, CancellationToken cancellationToken)
+    private async Task AppendBlockChildrenAsync(
+        string notionBlockId,
+        int indentLevel,
+        string token,
+        List<WikiBlock> blocks,
+        CancellationToken cancellationToken,
+        List<NotionTreeChild>? directTreeChildren = null)
     {
         var children = new List<JsonElement>();
         string? cursor = null;
@@ -684,6 +865,10 @@ public sealed class NotionSyncService(
             if (NotionMapping.IsPageTreeBlock(type))
             {
                 // child_page/child_database - already synced as their own top-level page/database.
+                if (directTreeChildren is not null && childId.Length > 0)
+                {
+                    directTreeChildren.Add(new NotionTreeChild(childId, type == "child_database"));
+                }
                 continue;
             }
 
@@ -1248,11 +1433,21 @@ public sealed class NotionSyncService(
 
     private sealed record PageContentSyncResult(
         IReadOnlyList<WikiBlock> Blocks,
+        IReadOnlyList<NotionTreeChild> TreeChildren,
         bool UsedMarkdownFallback,
         bool ContentUnavailable)
     {
         public int BlockCount => Blocks.Count;
     }
+
+    private sealed record NotionTreeChild(string NotionId, bool IsDatabase);
+
+    private sealed record NotionTreeNodeState(
+        Guid Id,
+        Guid? ParentId,
+        string? NotionId,
+        int SortOrder,
+        Action<int> SetSortOrder);
 
     private sealed record DatabaseContentSyncResult(
         int Imported,
