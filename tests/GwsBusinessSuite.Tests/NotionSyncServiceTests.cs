@@ -144,6 +144,81 @@ public sealed class NotionSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_ShouldMirrorNotionChildOrderAcrossPagesAndDatabases()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.SearchResults =
+        [
+            Page("parent", "Parent"),
+            Page("first", "First", """{"type":"page_id","page_id":"parent"}"""),
+            Page("second", "Second", """{"type":"page_id","page_id":"parent"}"""),
+            DataSource(
+                "projects-source",
+                "Projects",
+                "projects-container",
+                """{"type":"page_id","page_id":"parent"}"""),
+            Page("unselected", "Unselected")
+        ];
+        fixture.Notion.BlockChildren["parent"] =
+        [
+            Json("""{"object":"block","id":"second","type":"child_page","has_children":false,"child_page":{"title":"Second"}}"""),
+            Json("""{"object":"block","id":"projects-container","type":"child_database","has_children":false,"child_database":{"title":"Projects"}}"""),
+            Json("""{"object":"block","id":"first","type":"child_page","has_children":false,"child_page":{"title":"First"}}""")
+        ];
+        await fixture.Service.SaveSettingsAsync(new NotionConnectorSettingsView
+        {
+            SelectedNotionIds = "parent"
+        });
+
+        var result = await fixture.Service.SyncAsync();
+
+        result.IsSuccess.Should().BeTrue();
+        (await fixture.Db.WikiPages.AnyAsync(page => page.NotionId == "unselected")).Should().BeFalse();
+        var parent = await fixture.Db.WikiPages.SingleAsync(page => page.NotionId == "parent");
+        var first = await fixture.Db.WikiPages.SingleAsync(page => page.NotionId == "first");
+        var second = await fixture.Db.WikiPages.SingleAsync(page => page.NotionId == "second");
+        var projects = await fixture.Db.WikiDatabases.SingleAsync(database => database.NotionId == "projects-source");
+
+        first.ParentWikiPageId.Should().Be(parent.Id);
+        second.ParentWikiPageId.Should().Be(parent.Id);
+        projects.ParentWikiPageId.Should().Be(parent.Id, "a data source uses database_parent for its position in the page tree");
+        new[]
+        {
+            (second.Title, second.SortOrder),
+            (projects.Title, projects.SortOrder),
+            (first.Title, first.SortOrder)
+        }.Should().Equal(
+            ("Second", 0),
+            ("Projects", 1),
+            ("First", 2));
+    }
+
+    [Fact]
+    public async Task SyncAsync_ShouldUseSelectedPageOrderForWorkspaceRoots()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.SearchResults =
+        [
+            Page("root-a", "Root A"),
+            Page("root-b", "Root B")
+        ];
+        await fixture.Service.SaveSettingsAsync(new NotionConnectorSettingsView
+        {
+            SelectedNotionIds = "root-b, root-a"
+        });
+
+        var result = await fixture.Service.SyncAsync();
+
+        result.IsSuccess.Should().BeTrue();
+        var roots = await fixture.Db.WikiPages
+            .Where(page => page.ParentWikiPageId == null)
+            .OrderBy(page => page.SortOrder)
+            .ToListAsync();
+        roots.Select(page => page.NotionId).Should().Equal("root-b", "root-a");
+        roots.Select(page => page.SortOrder).Should().Equal(0, 1);
+    }
+
+    [Fact]
     public async Task SyncAsync_ShouldIncludeDescendantsOfSelectedTopLevelPages()
     {
         await using var fixture = await SyncFixture.CreateAsync();
@@ -477,6 +552,21 @@ public sealed class NotionSyncServiceTests
             ["id"] = id,
             ["archived"] = false,
             ["parent"] = new Dictionary<string, object?> { ["type"] = "workspace", ["workspace"] = true },
+            ["title"] = new[] { new Dictionary<string, object?> { ["plain_text"] = title } }
+        });
+
+    private static JsonElement DataSource(string id, string title, string databaseId, string databaseParent) =>
+        JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+        {
+            ["object"] = "data_source",
+            ["id"] = id,
+            ["in_trash"] = false,
+            ["parent"] = new Dictionary<string, object?>
+            {
+                ["type"] = "database_id",
+                ["database_id"] = databaseId
+            },
+            ["database_parent"] = JsonDocument.Parse(databaseParent).RootElement.Clone(),
             ["title"] = new[] { new Dictionary<string, object?> { ["plain_text"] = title } }
         });
 
