@@ -90,4 +90,20 @@ public sealed class WikiBlockHtmlRendererTests
 
         WikiBlockHtmlRenderer.RenderBlock(block).Should().Contain(expectedClass);
     }
+
+    [Fact]
+    public void RenderBlock_ShouldPreserveRichTableCellsImportedFromNotion()
+    {
+        var table = NotionMarkdownBlockParser.Parse("""
+            | Name | Status |
+            | --- | --- |
+            | Sentinel | **Active** |
+            """).Single();
+
+        var html = WikiBlockHtmlRenderer.RenderBlock(table);
+
+        html.Should().Contain("<th>Name</th>");
+        html.Should().Contain("<td>Sentinel</td>");
+        html.Should().Contain("<td><b>Active</b></td>");
+    }
 }

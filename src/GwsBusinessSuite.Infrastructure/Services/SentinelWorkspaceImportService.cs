@@ -167,13 +167,6 @@ public sealed class SentinelWorkspaceImportService(IAppDbContext dbContext)
                 document.Kind = ArchiveDocumentKind.DatabaseRow;
             }
         }
-        var documentTitlesByPath = documents
-            .GroupBy(document => document.EntryPath, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(
-                group => group.Key,
-                group => group.First().Title,
-                StringComparer.OrdinalIgnoreCase);
-
         var transaction = await dbContext.BeginTransactionAsync(cancellationToken);
         try
         {
@@ -203,14 +196,10 @@ public sealed class SentinelWorkspaceImportService(IAppDbContext dbContext)
             var reservedSlugs = existingPages.Select(page => page.Slug)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             var pageByDocument = new Dictionary<ArchiveDocument, WikiPage>();
+            var createdPageIds = new HashSet<Guid>();
 
             foreach (var document in documents.Where(item => item.Kind == ArchiveDocumentKind.Page))
             {
-                var blocksJson = ConvertDocumentToBlocks(
-                    document,
-                    attachmentResult.UrlsByPath,
-                    documentTitlesByPath,
-                    warnings);
                 var page = FindExisting(document.ExportId, pagesByExportId, pagesByNotionId);
                 if (page is null)
                 {
@@ -218,7 +207,7 @@ public sealed class SentinelWorkspaceImportService(IAppDbContext dbContext)
                     {
                         Title = document.Title,
                         Slug = ReserveSlug(document.Title, reservedSlugs),
-                        BlocksJson = blocksJson,
+                        BlocksJson = "[]",
                         ContentVersion = 1,
                         NotionExportId = document.ExportId,
                         CreatedAt = now,
@@ -228,7 +217,29 @@ public sealed class SentinelWorkspaceImportService(IAppDbContext dbContext)
                     };
                     await dbContext.WikiPages.AddAsync(page, cancellationToken);
                     pagesByExportId[document.ExportId] = page;
+                    createdPageIds.Add(page.Id);
                     pagesCreated++;
+                }
+                pageByDocument[document] = page;
+            }
+
+            var documentLinksByPath = pageByDocument.ToDictionary(
+                pair => pair.Key.EntryPath,
+                pair => new ArchiveDocumentLink(
+                    pair.Key.Title,
+                    $"wikilink:{pair.Value.Id}"),
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (var (document, page) in pageByDocument)
+            {
+                var blocksJson = ConvertDocumentToBlocks(
+                    document,
+                    attachmentResult.UrlsByPath,
+                    documentLinksByPath,
+                    warnings);
+                if (createdPageIds.Contains(page.Id))
+                {
+                    page.BlocksJson = blocksJson;
                 }
                 else
                 {
@@ -246,7 +257,6 @@ public sealed class SentinelWorkspaceImportService(IAppDbContext dbContext)
                     page.UpdatedBy = actor;
                     pagesUpdated++;
                 }
-                pageByDocument[document] = page;
             }
 
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -301,7 +311,7 @@ public sealed class SentinelWorkspaceImportService(IAppDbContext dbContext)
                     documents.Where(item => item.Kind == ArchiveDocumentKind.DatabaseRow
                         && ReferenceEquals(item.Parent, document)).ToList(),
                     attachmentResult.UrlsByPath,
-                    documentTitlesByPath,
+                    documentLinksByPath,
                     actor,
                     now,
                     warnings);
@@ -414,7 +424,7 @@ public sealed class SentinelWorkspaceImportService(IAppDbContext dbContext)
         ArchiveDocument document,
         IReadOnlyList<ArchiveDocument> rowDocuments,
         IReadOnlyDictionary<string, string> attachmentUrls,
-        IReadOnlyDictionary<string, string> documentTitlesByPath,
+        IReadOnlyDictionary<string, ArchiveDocumentLink> documentLinksByPath,
         string actor,
         DateTimeOffset now,
         ICollection<string> warnings)
@@ -536,7 +546,7 @@ public sealed class SentinelWorkspaceImportService(IAppDbContext dbContext)
                 row.BlocksJson = ConvertDocumentToBlocks(
                     rowDocument,
                     attachmentUrls,
-                    documentTitlesByPath,
+                    documentLinksByPath,
                     warnings);
             }
             row.UpdatedAt = now;
@@ -631,7 +641,7 @@ public sealed class SentinelWorkspaceImportService(IAppDbContext dbContext)
     private static string ConvertDocumentToBlocks(
         ArchiveDocument document,
         IReadOnlyDictionary<string, string> attachmentUrls,
-        IReadOnlyDictionary<string, string> documentTitlesByPath,
+        IReadOnlyDictionary<string, ArchiveDocumentLink> documentLinksByPath,
         ICollection<string> warnings)
     {
         var source = document.Extension is ".html" or ".htm"
@@ -641,15 +651,15 @@ public sealed class SentinelWorkspaceImportService(IAppDbContext dbContext)
             source,
             document.DirectoryPath,
             attachmentUrls,
-            documentTitlesByPath);
-        return WikiBlockJson.Serialize(WikiBlockJson.FromMarkdown(source));
+            documentLinksByPath);
+        return WikiBlockJson.Serialize(WikiBlockJson.FromMarkdown(source, document.Title));
     }
 
     private static string RewriteArchiveLinks(
         string markdown,
         string documentDirectory,
         IReadOnlyDictionary<string, string> attachmentUrls,
-        IReadOnlyDictionary<string, string> documentTitlesByPath) =>
+        IReadOnlyDictionary<string, ArchiveDocumentLink> documentLinksByPath) =>
         MarkdownLinkPattern.Replace(markdown, match =>
         {
             var rawTarget = match.Groups["target"].Value.Trim();
@@ -667,9 +677,10 @@ public sealed class SentinelWorkspaceImportService(IAppDbContext dbContext)
                 return match.Value;
             }
             if (!match.Groups["image"].Success
-                && documentTitlesByPath.TryGetValue(resolved, out var documentTitle))
+                && documentLinksByPath.TryGetValue(resolved, out var documentLink))
             {
-                return $"[[{documentTitle}]]";
+                var label = match.Groups["label"].Value;
+                return $"[{(string.IsNullOrWhiteSpace(label) ? documentLink.Title : label)}]({documentLink.Url})";
             }
             if (!attachmentUrls.TryGetValue(resolved, out var localUrl))
             {
@@ -969,6 +980,8 @@ public sealed class SentinelWorkspaceImportService(IAppDbContext dbContext)
         int Imported,
         int Skipped,
         IReadOnlyDictionary<string, string> UrlsByPath);
+
+    private sealed record ArchiveDocumentLink(string Title, string Url);
 
     private sealed class ArchiveDocument(
         string entryPath,

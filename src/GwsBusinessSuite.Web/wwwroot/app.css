@@ -1357,6 +1357,8 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .wiki-list-marker {
     color: #495057;
     padding-top: 0.15rem;
+    min-width: 1.25rem;
+    text-align: right;
 }
 .wiki-todo-checkbox {
     margin-top: 0.35rem;
@@ -1980,9 +1982,9 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 }
 
 .sentinel-document-canvas {
-    width: min(100%, 1040px);
+    width: min(100%, 960px);
     margin: 0 auto;
-    padding: clamp(2.1rem, 5vw, 4.6rem) clamp(1.25rem, 6vw, 5.75rem) 3rem;
+    padding: clamp(2.1rem, 5vw, 4.6rem) clamp(1.25rem, 8vw, 6rem) 3rem;
 }
 
 .sentinel-document-canvas.has-cover { padding-top: 0; }
@@ -2049,14 +2051,36 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .sentinel-title-input {
     width: 100%;
     padding: .1rem 0;
-    font: 750 clamp(2rem, 4vw, 3.15rem)/1.08 var(--gws-font-sans);
-    letter-spacing: -.045em;
+    font: 750 clamp(2rem, 4vw, 2.7rem)/1.14 var(--gws-font-sans);
+    letter-spacing: -.035em;
 }
 
 .sentinel-title-input::placeholder { color: #57534e; }
 
+.sentinel-page-properties {
+    margin: -.75rem 0 1.35rem;
+}
+
+.sentinel-page-properties > summary {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    min-height: 1.75rem;
+    padding: .2rem .4rem;
+    border-radius: 4px;
+    color: var(--sentinel-faint);
+    font-size: .68rem;
+    cursor: pointer;
+    list-style: none;
+}
+
+.sentinel-page-properties > summary::-webkit-details-marker { display: none; }
+.sentinel-page-properties > summary:hover { background: var(--sentinel-hover); color: var(--sentinel-muted); }
+.sentinel-page-properties > summary i:last-child { font-size: .58rem; transition: transform .12s ease; }
+.sentinel-page-properties[open] > summary i:last-child { transform: rotate(90deg); }
+
 .sentinel-properties {
-    margin: 0 0 2rem;
+    margin: .35rem 0 .65rem;
     border-top: 1px solid var(--sentinel-border);
     border-bottom: 1px solid var(--sentinel-border);
 }
@@ -2106,7 +2130,12 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     padding: .3rem .15rem .7rem;
     color: var(--sentinel-faint);
     font-size: .68rem;
+    opacity: .35;
+    transition: opacity .12s ease;
 }
+
+.sentinel-document-canvas:hover .sentinel-editor-hint,
+.sentinel-editor-hint:focus-within { opacity: 1; }
 
 .sentinel-editor-hint code {
     color: #d6d3d1;
@@ -2136,7 +2165,7 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 }
 
 .sentinel-workspace .wiki-block-body { width: 100%; }
-.sentinel-workspace .wiki-block-content { min-height: 1.65rem; line-height: 1.65; caret-color: #f59e0b; }
+.sentinel-workspace .wiki-block-content { min-height: 1.55rem; line-height: 1.55; caret-color: #f59e0b; }
 .sentinel-workspace .wiki-block-content:focus { border-radius: 3px; background: rgba(255, 255, 255, .018); }
 .sentinel-workspace .wiki-block-content:empty::before { color: #57534e; }
 .sentinel-workspace .wiki-block-content a { color: #fbbf24; text-decoration-color: rgba(251, 191, 36, .45); text-underline-offset: 2px; }
@@ -2170,10 +2199,24 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 
 .sentinel-workspace .wiki-block[data-block-type="callout"] .wiki-block-body,
 .sentinel-workspace .wiki-block[data-block-type="code"] .wiki-block-content { background: var(--sentinel-canvas-raised); }
-.sentinel-workspace .wiki-block[data-block-type="callout"] .wiki-block-body { padding: .8rem .9rem; border: 1px solid var(--sentinel-border); }
-.sentinel-workspace .wiki-block[data-block-type="code"] .wiki-block-content { padding: .85rem 1rem; border: 1px solid rgba(214, 211, 209, .08); line-height: 1.55; }
+.sentinel-workspace .wiki-block[data-block-type="callout"] .wiki-block-body { align-items: flex-start; padding: .9rem 1rem; border: 1px solid var(--sentinel-border); }
+.sentinel-workspace .wiki-callout-icon { flex: 0 0 auto; padding-top: .15rem; font-size: 1.2rem; line-height: 1.35; }
+.sentinel-workspace .wiki-block[data-block-type="code"] .wiki-block-body { position: relative; }
+.sentinel-workspace .wiki-block[data-block-type="code"] .wiki-block-content { padding: 1.7rem 1rem .9rem; border: 1px solid rgba(214, 211, 209, .08); line-height: 1.55; }
+.sentinel-workspace .wiki-code-language { position: absolute; top: .35rem; right: .65rem; z-index: 1; color: var(--sentinel-faint); font: 600 .62rem/1 var(--gws-font-sans); text-transform: uppercase; }
 .sentinel-workspace .wiki-block[data-block-type="equation"] .wiki-block-content { padding: 1rem; text-align: center; font-family: Georgia,serif; font-size: 1.25rem; font-style: italic; background: rgba(15,23,42,.32); border-radius: .5rem; }
-.sentinel-workspace .wiki-block[data-block-type="table"] .wiki-block-content { min-height: 5rem; padding: .75rem; white-space: pre-wrap; font-family: var(--bs-font-monospace); border: 1px solid var(--sentinel-border); border-radius: .35rem; }
+.sentinel-workspace .wiki-native-table-editor { width: 100%; overflow-x: auto; padding: .2rem 0 .35rem; }
+.sentinel-workspace .wiki-native-table { min-width: 100%; width: max-content; border-collapse: collapse; }
+.sentinel-workspace .wiki-native-table th,
+.sentinel-workspace .wiki-native-table td { min-width: 8rem; max-width: 22rem; padding: .45rem .65rem; border: 1px solid rgba(214,211,209,.16); outline: 0; color: #e7e5e4; font-size: .78rem; font-weight: 400; vertical-align: top; }
+.sentinel-workspace .wiki-native-table th { background: rgba(255,255,255,.035); color: #fafaf9; font-weight: 650; }
+.sentinel-workspace .wiki-native-table td:focus,
+.sentinel-workspace .wiki-native-table th:focus { background: rgba(245,158,11,.06); box-shadow: inset 0 0 0 1px rgba(245,158,11,.55); }
+.sentinel-workspace .wiki-native-table-actions { display: flex; gap: .25rem; padding-top: .3rem; opacity: 0; transition: opacity .12s ease; }
+.sentinel-workspace .wiki-native-table-editor:hover .wiki-native-table-actions,
+.sentinel-workspace .wiki-native-table-editor:focus-within .wiki-native-table-actions { opacity: 1; }
+.sentinel-workspace .wiki-native-table-actions button { min-height: 1.65rem; padding: .15rem .4rem; border: 0; border-radius: 4px; background: transparent; color: var(--sentinel-muted); font-size: .65rem; }
+.sentinel-workspace .wiki-native-table-actions button:hover { background: var(--sentinel-hover); color: #e7e5e4; }
 .sentinel-workspace .wiki-block[data-block-type="button"] .wiki-block-content { display: inline-block; min-width: 7rem; width: auto; padding: .5rem .85rem; border-radius: .45rem; background: #f59e0b; color: #1c1917; font-weight: 700; text-align: center; }
 .sentinel-workspace .wiki-block[data-block-type="synced_block"] .wiki-block-body { padding: .7rem .85rem; border: 1px solid rgba(245,158,11,.36); border-left-width: 3px; background: rgba(245,158,11,.055); }
 .sentinel-workspace .wiki-block[data-block-type="columns"] .wiki-block-content { min-height: 4rem; padding: .75rem; white-space: pre-wrap; column-count: 2; column-gap: 2rem; border: 1px dashed var(--sentinel-border); border-radius: .4rem; }
@@ -2190,6 +2233,10 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .wiki-columns { display: grid; grid-template-columns: repeat(auto-fit,minmax(12rem,1fr)); gap: 1rem; }
 .wiki-columns > div { padding: .75rem; border: 1px solid rgba(148,163,184,.18); border-radius: .4rem; }
 .sentinel-workspace .wiki-list-marker { color: var(--sentinel-muted); }
+.sentinel-workspace .wiki-toggle-button { flex: 0 0 auto; width: 1.35rem; height: 1.35rem; margin-top: .18rem; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--sentinel-muted); line-height: 1; }
+.sentinel-workspace .wiki-toggle-button:hover { background: var(--sentinel-hover); color: #e7e5e4; }
+.sentinel-workspace .wiki-block[data-block-type="toggle"] > .wiki-block-body::before { content: none; }
+.sentinel-workspace .wiki-block.is-toggle-hidden { display: none; }
 
 .sentinel-workspace .wiki-media-block { position: relative; width: 100%; padding: .25rem 0; }
 .sentinel-workspace .wiki-media-block > .form-control { border-color: var(--sentinel-border); background: var(--sentinel-canvas-raised); color: #e7e5e4; }
@@ -2618,8 +2665,8 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     .sentinel-workspace { padding-bottom: env(safe-area-inset-bottom); }
     .sentinel-layout { border-right: 0; border-left: 0; border-radius: 0; }
     .sentinel-local-sidebar { max-height: min(46dvh, 27rem); }
-    .sentinel-document-toolbar { align-items: flex-start; flex-direction: column; padding-right: max(1rem, env(safe-area-inset-right)); padding-left: max(1rem, env(safe-area-inset-left)); }
-    .sentinel-document-toolbar > .d-flex { width: 100%; justify-content: space-between; }
+    .sentinel-document-toolbar { align-items: center; flex-direction: row; padding-right: max(1rem, env(safe-area-inset-right)); padding-left: max(1rem, env(safe-area-inset-left)); }
+    .sentinel-document-toolbar > .d-flex { width: auto; max-width: 48%; margin-left: auto; justify-content: flex-end; overflow-x: auto; }
     .sentinel-document-context { width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
     .sentinel-document-canvas { padding: 2rem max(1rem, env(safe-area-inset-right)) calc(2rem + env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left)); }
     .sentinel-page-cover { height: 11rem; }
@@ -2636,8 +2683,10 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     .sentinel-ai-history > div { align-items: flex-start; flex-direction: column; gap: .2rem; }
     .sentinel-share-entry { grid-template-columns: minmax(0, 1fr) auto; }
     .sentinel-share-entry > :nth-child(3) { grid-column: 2; }
-    .sentinel-workspace .wiki-block-gutter { position: static; }
-    .sentinel-workspace .wiki-block-gutter .btn { min-width: 2.75rem; }
+    /* Notion's compact editor does not reserve a permanent gutter on phones. New blocks
+       still come from Enter and slash commands; hiding drag/discussion chrome gives the
+       actual document the full viewport width. */
+    .sentinel-workspace .wiki-block-gutter { display: none; }
     .sentinel-editor-actions { padding-bottom: max(.65rem, env(safe-area-inset-bottom)); }
     .sentinel-support-panel,
     .sentinel-main > .card { width: calc(100% - 1rem); }

@@ -22,7 +22,7 @@ public sealed class SentinelWorkspaceImportServiceTests
         const string rowId = "dddddddddddddddddddddddddddddddd";
         var archive = CreateArchive(
             ($"Project Hub {rootId}.md",
-                "# Project Hub\n\nWelcome to the team.\n\n![Cover](Project%20Hub%20aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/cover.png)"),
+                "# Project Hub\n\nWelcome to the team.\n\n[Runbook](Project%20Hub%20aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/Runbook%20bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.md)\n\n![Cover](Project%20Hub%20aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/cover.png)"),
             ($"Project Hub {rootId}/Runbook {childId}.md",
                 "## Deployment\n\n- Verify health\n- Notify the team"),
             ($"Project Hub {rootId}/Projects {databaseId}.csv",
@@ -47,6 +47,9 @@ public sealed class SentinelWorkspaceImportServiceTests
 
         var image = WikiBlockJson.ParseBlocks(root.BlocksJson)
             .Single(block => block.Type == WikiBlockTypes.Image);
+        WikiBlockJson.ParseBlocks(root.BlocksJson)
+            .SelectMany(block => block.RichText)
+            .Should().Contain(span => span.Text == "Runbook" && span.Link == $"wikilink:{child.Id}");
         var importedFile = await fixture.Db.SentinelImportedFiles.SingleAsync();
         image.Props["url"].Should().Be($"/admin/sentinel/files/{importedFile.Id}");
         importedFile.Content.Should().Equal(1, 2, 3, 4);

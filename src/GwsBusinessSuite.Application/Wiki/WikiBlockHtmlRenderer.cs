@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Markdig;
 using GwsBusinessSuite.Domain.Entities;
 
@@ -60,8 +61,8 @@ public static class WikiBlockHtmlRenderer
             WikiBlockTypes.ToDo => $"<div class=\"wiki-todo\"{indentStyle}><input type=\"checkbox\" disabled {(block.Props.GetValueOrDefault("checked") == "true" ? "checked" : string.Empty)} /> <span>{content}</span></div>",
             WikiBlockTypes.Toggle => $"<details{indentStyle}><summary>{content}</summary></details>",
             WikiBlockTypes.Quote => $"<blockquote{indentStyle}>{content}</blockquote>",
-            WikiBlockTypes.Callout => $"<div class=\"wiki-callout\"{indentStyle}>{block.Props.GetValueOrDefault("icon", "💡")} {content}</div>",
-            WikiBlockTypes.Code => $"<pre{indentStyle}><code>{WebUtility.HtmlEncode(block.PlainText)}</code></pre>",
+            WikiBlockTypes.Callout => $"<div class=\"wiki-callout\"{indentStyle}>{WebUtility.HtmlEncode(block.Props.GetValueOrDefault("icon", "💡"))} {content}</div>",
+            WikiBlockTypes.Code => $"<pre class=\"wiki-code\" data-language=\"{WebUtility.HtmlEncode(block.Props.GetValueOrDefault("language", string.Empty))}\"{indentStyle}><code>{WebUtility.HtmlEncode(block.PlainText)}</code></pre>",
             WikiBlockTypes.Divider => "<hr />",
             WikiBlockTypes.Image => string.IsNullOrWhiteSpace(block.Props.GetValueOrDefault("url"))
                 ? string.Empty
@@ -141,6 +142,31 @@ public static class WikiBlockHtmlRenderer
 
     private static string RenderTable(WikiBlock block, string indentStyle)
     {
+        if (block.Props.TryGetValue("tableJson", out var tableJson))
+        {
+            try
+            {
+                var richRows = JsonSerializer.Deserialize<List<List<List<WikiRichTextSpan>>>>(
+                    tableJson,
+                    WikiBlockJson.Options);
+                if (richRows is { Count: > 0 })
+                {
+                    var hasHeader = block.Props.GetValueOrDefault("hasColumnHeader", "true") == "true";
+                    var richHead = hasHeader
+                        ? "<thead><tr>" + string.Concat(richRows[0].Select(cell => $"<th>{RenderRichText(cell)}</th>")) + "</tr></thead>"
+                        : string.Empty;
+                    var bodyRows = hasHeader ? richRows.Skip(1) : richRows;
+                    var richBody = "<tbody>" + string.Concat(bodyRows.Select(row =>
+                        "<tr>" + string.Concat(row.Select(cell => $"<td>{RenderRichText(cell)}</td>")) + "</tr>")) + "</tbody>";
+                    return $"<table class=\"wiki-native-table\"{indentStyle}>{richHead}{richBody}</table>";
+                }
+            }
+            catch (JsonException)
+            {
+                // Older table blocks use the pipe-delimited text fallback below.
+            }
+        }
+
         var rows = block.PlainText.Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Select(line => line.Split('|', StringSplitOptions.TrimEntries).Where(cell => cell.Length > 0).ToList())
             .Where(row => row.Count > 0)
