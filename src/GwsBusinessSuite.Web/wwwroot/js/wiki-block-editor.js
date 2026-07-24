@@ -56,7 +56,8 @@ export function initialize(container, dotNetRef, initialBlocksJson) {
         // since undoing past that boundary would fight the server's own source of truth.
         undoStack: [],
         redoStack: [],
-        lastSnapshot: undefined
+        lastSnapshot: undefined,
+        lastCursorBlockId: null
     };
     states.set(container, state);
     setBlocks(container, initialBlocksJson);
@@ -68,6 +69,17 @@ export function initialize(container, dotNetRef, initialBlocksJson) {
     container.addEventListener('mouseup', state.selectionHandler = () => showInlineToolbar(state));
     container.addEventListener('keyup', state.selectionHandler);
     document.addEventListener('mousedown', state.outsideClickHandler = event => closeFloatingMenus(state, event));
+    // Block-granular remote-cursor broadcast (see SentinelCursorTracker's doc comment for why
+    // this is block-level, not a character offset). focusin bubbles from the contenteditable
+    // the user actually clicked/tabbed into, so this fires on every real cursor move without
+    // needing a per-keystroke listener.
+    container.addEventListener('focusin', state.focusInHandler = event => {
+        const blockEl = event.target.closest('.wiki-block');
+        if (!blockEl || blockEl.dataset.blockId === state.lastCursorBlockId) return;
+        state.lastCursorBlockId = blockEl.dataset.blockId;
+        try { state.dotNetRef.invokeMethodAsync('OnCursorMoved', blockEl.dataset.blockId); }
+        catch { /* the Blazor circuit may have disconnected */ }
+    });
 }
 
 export function setBlocks(container, blocksJson) {
@@ -113,11 +125,35 @@ export function setDiscussionCounts(container, counts) {
     }
 }
 
+// Targeted per-block update, same shape as setDiscussionCounts - clears any previous remote
+// cursor markers and re-renders the current set. cursors: [{ blockId, username, color }].
+export function setRemoteCursors(container, cursors) {
+    const state = states.get(container);
+    if (!state) return;
+
+    container.querySelectorAll(':scope > .wiki-block > .wiki-remote-cursor').forEach(el => el.remove());
+    for (const cursor of cursors || []) {
+        const blockEl = container.querySelector(`:scope > .wiki-block[data-block-id="${cssEscape(cursor.blockId)}"]`);
+        if (!blockEl) continue;
+        const marker = document.createElement('span');
+        marker.className = 'wiki-remote-cursor';
+        marker.style.setProperty('--wiki-remote-cursor-color', cursor.color || '#f59e0b');
+        marker.textContent = cursor.username;
+        marker.title = `${cursor.username} is editing this block`;
+        blockEl.appendChild(marker);
+    }
+}
+
+function cssEscape(value) {
+    return typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(value) : String(value).replace(/["\\]/g, '\\$&');
+}
+
 export function dispose(container) {
     const state = states.get(container);
     if (!state) return;
     if (state.notifyTimer) clearTimeout(state.notifyTimer);
     closeFloatingMenus(state);
+    if (state.focusInHandler) container.removeEventListener('focusin', state.focusInHandler);
     if (state.selectionHandler) {
         container.removeEventListener('mouseup', state.selectionHandler);
         container.removeEventListener('keyup', state.selectionHandler);

@@ -142,6 +142,7 @@ public static class DependencyInjection
         services.AddScoped<ISentinelAiService, SentinelAiService>();
         services.AddSingleton<SentinelCollaborationNotifier>();
         services.AddSingleton<SentinelPresenceTracker>();
+        services.AddSingleton<SentinelCursorTracker>();
         services.AddScoped<ISentinelPresenceService, SentinelPresenceService>();
         services.AddHttpClient<INotionService, NotionService>(client =>
         {

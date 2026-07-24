@@ -13,6 +13,7 @@
 @inject INotionSyncCoordinator NotionSyncCoordinator
 @inject IMediaLibraryService MediaLibraryService
 @inject ICurrentUserAccessor CurrentUserAccessor
+@inject SentinelCursorTracker CursorTracker
 @inject IJSRuntime JS
 @inject ILogger<Wiki> Logger
 
@@ -712,6 +713,7 @@
     private string HistoryErrorMessage { get; set; } = string.Empty;
     private Guid? DiffRevisionKey { get; set; }
     private string? DiffText { get; set; }
+    private IReadOnlyList<SentinelCursorPosition> _remoteCursors = [];
 
     private ElementReference _blockEditorContainer;
     private ElementReference _workspaceSearchInput;
@@ -1121,8 +1123,53 @@
     protected override async Task OnInitializedAsync()
     {
         CurrentUsername = await CurrentUserNameAsync();
+        CursorTracker.Moved += HandleCursorsMoved;
         await LoadTreeAsync(selectFirstPage: false);
         await LoadWorkspaceNavigationAsync();
+    }
+
+    [JSInvokable]
+    public void OnCursorMoved(string blockId)
+    {
+        if (SelectedPageId is { } wikiPageId && Guid.TryParse(blockId, out var parsedBlockId))
+        {
+            CursorTracker.Move(wikiPageId, CurrentUsername, parsedBlockId);
+        }
+    }
+
+    private void HandleCursorsMoved(Guid wikiPageId)
+    {
+        if (SelectedPageId != wikiPageId) return;
+        _ = InvokeAsync(async () =>
+        {
+            _remoteCursors = CursorTracker.List(wikiPageId, CurrentUsername);
+            if (_blockEditorInitialized && _blockEditorModule is not null)
+            {
+                try { await _blockEditorModule.InvokeVoidAsync("setRemoteCursors", _blockEditorContainer, BuildRemoteCursorPayload()); }
+                catch (JSDisconnectedException) { /* the circuit is already gone */ }
+            }
+        });
+    }
+
+    // Not cryptographically stable across app restarts (string hashing is randomized per
+    // process for hash-flooding protection), which is fine here - a decorative cursor color
+    // only needs to stay consistent for the lifetime of one server process, not forever.
+    private static readonly string[] CursorColors = ["#f59e0b", "#ef4444", "#10b981", "#3b82f6", "#a855f7", "#ec4899"];
+
+    private static string ColorForUsername(string username) =>
+        CursorColors[(uint)username.GetHashCode() % (uint)CursorColors.Length];
+
+    private object BuildRemoteCursorPayload() => _remoteCursors
+        .Select(cursor => new { blockId = cursor.BlockId, username = cursor.Username, color = ColorForUsername(cursor.Username) })
+        .ToList();
+
+    private void LeaveCursorTracking()
+    {
+        if (SelectedPageId is { } previousPageId)
+        {
+            CursorTracker.Leave(previousPageId, CurrentUsername);
+        }
+        _remoteCursors = [];
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -1146,6 +1193,7 @@
             _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js");
             await _blockEditorModule.InvokeVoidAsync("initialize", _blockEditorContainer, _blockEditorRef, Editor.BlocksJson);
             await _blockEditorModule.InvokeVoidAsync("setDiscussionCounts", _blockEditorContainer, _blockDiscussionCounts);
+            await _blockEditorModule.InvokeVoidAsync("setRemoteCursors", _blockEditorContainer, BuildRemoteCursorPayload());
             _blockEditorInitialized = true;
             _blockEditorSyncedGeneration = _editorGeneration;
         }
@@ -1154,6 +1202,9 @@
             var blockEditorModule = _blockEditorModule!;
             await blockEditorModule.InvokeVoidAsync("setBlocks", _blockEditorContainer, Editor.BlocksJson);
             await blockEditorModule.InvokeVoidAsync("setDiscussionCounts", _blockEditorContainer, _blockDiscussionCounts);
+            // setBlocks just wiped the DOM (revert, or a fresh save reload) - any remote cursor
+            // markers it removed need to be redrawn against the new block elements.
+            await blockEditorModule.InvokeVoidAsync("setRemoteCursors", _blockEditorContainer, BuildRemoteCursorPayload());
             _blockEditorSyncedGeneration = _editorGeneration;
         }
     }
@@ -1274,6 +1325,7 @@
         _mobileWorkspaceNavOpen = false;
         ExpandAncestorPath(wikiDatabaseId);
         await DeactivateBlockEditorAsync();
+        LeaveCursorTracking();
         SelectedPageId = null;
         SelectedDatabaseId = wikiDatabaseId;
         Backlinks = new();
@@ -1335,6 +1387,7 @@
             SearchQuery = string.Empty;
             WorkspaceSearchResults = new();
             SelectedDatabaseId = null;
+            LeaveCursorTracking();
             SelectedPageId = page.Id;
             ExpandAncestorPath(page.Id);
             Editor = new WikiPageEditorModel
@@ -1885,6 +1938,8 @@
 
     public async ValueTask DisposeAsync()
     {
+        CursorTracker.Moved -= HandleCursorsMoved;
+        LeaveCursorTracking();
         await _disposeCts.CancelAsync();
 
         if (_workspaceModule is not null)

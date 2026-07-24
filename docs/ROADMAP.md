@@ -135,4 +135,11 @@
   per-workflow failure isolation so one broken automation can't block a row save or its
   sibling workflows. Schedules and credentialed integrations needed no new work since the
   automation engine already covers both generically. A write-back action node (a workflow
-  updating a database row) remains open.
+  updating a database row) remains open. "Real-time collaboration" now shows remote cursors:
+  an in-memory `SentinelCursorTracker` broadcasts which block each other connected viewer is
+  currently in (a colored name-pill, not a character caret), reusing the same process-local
+  fan-out pattern discussions/notifications already use rather than adding a SignalR hub.
+  True character-level CRDT/OT concurrent editing is deliberately not attempted - a subtly
+  wrong text-merge implementation risks corrupting user content, which is a materially
+  different risk profile than a missing feature, so it stays explicitly open in
+  `docs/WIKI_NOTION_CLONE.md` rather than being rushed.

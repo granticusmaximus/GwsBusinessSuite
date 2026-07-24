@@ -119,7 +119,11 @@ proprietary schemas; public Notion product and API documentation is behavioral r
    Concurrent saves now use block-identity three-way merge, automatically combining edits to
    different blocks while surfacing genuine same-block conflicts. Presence leases and discussion
    polling are database-backed, so they work across web instances. This is block-granular
-   simultaneous editing, not character-level CRDT/OT cursor co-authoring.
+   simultaneous editing, not character-level CRDT/OT cursor co-authoring. A lighter,
+   in-memory-only `SentinelCursorTracker` now shows which block each other connected viewer is
+   currently in (a colored name-pill, not a character-position caret) - see the "Real-time
+   collaboration" delivery-plan entry below for the deliberate scope line between that and true
+   concurrent text editing.
 7. **Templates, sharing, and workspace structure** (delivered foundation): reusable page templates are
    delivered as durable snapshots that survive source-page deletion and create pages with fresh
    block identities. Page move/reorder and transactional subtree duplication are also delivered;
@@ -150,7 +154,7 @@ capabilities where they fit GWS Business Suite; they are no longer silently excl
 | Blocks | Core and advanced native block vocabulary, including tables/equations/columns/synced blocks/TOC/buttons, plus reusable block templates, and provider-pattern embeds (YouTube/Vimeo/Spotify/Figma/CodePen/Loom render as iframes) | True oEmbed metadata and additional providers |
 | Databases | Eleven view families, expanded property vocabulary, advanced typed formulas, canonical one-way/reciprocal row relations, configurable rollups, filters/sorts/groups, row page bodies with per-view peek modes, linked/inline databases, reusable database templates, and a `database.rowChangedTrigger` node that starts a Workflow Automation when a database's row properties change | Property layouts and a write-back automation action node |
 | Knowledge graph | `[[Page]]` links, ranked/highlighted workspace search, backlinks, person/date mentions, favorites/recents | Graph navigation, database-row mention inbox entries, and saved searches |
-| Collaboration | Discussions, replies, reactions, notifications, DB-backed cross-instance presence/polling, block-level three-way merge, authenticated portal-member roles, granular permissions, and tokenized public sharing | Character-level CRDT/OT cursors and richer public-share controls |
+| Collaboration | Discussions, replies, reactions, notifications, DB-backed cross-instance presence/polling, in-memory block-granular remote cursor indicators, block-level three-way merge, authenticated portal-member roles, granular permissions, and tokenized public sharing | Character-level CRDT/OT concurrent editing and richer public-share controls |
 | Presentation | Emoji icon and cover image for pages and database rows alike (cover can be uploaded inline via the cover picker, not just picked from an already-uploaded asset), row-level bounded version history, plus responsive side-peek, center-peek, and full-page database rows with per-view property presentation | Custom icon *image* uploads (icons remain emoji-only), page width/fonts, and reusable style defaults |
 | Integration | Encrypted token, current data-source/view/comment API, selective reconciliation, durable authenticated Notion-hosted file ingestion, opt-in conflict-aware manual page writes, and free-template interoperability through connected-workspace sync or bounded Notion ZIP imports | Bidirectional database schema/row writes |
 | AI | Workspace-grounded ask/writing/translation/research/meeting notes/autofill with durable approve/reject runs | Streaming chat, citations, transcription capture, and autonomous agents |
@@ -257,8 +261,29 @@ screens.
    Deliberately NOT done: a write-back *action* node (e.g. "set a database row's property")
    for the other half of "trigger/action rules" - reacting to Sentinel is delivered, writing
    back to it from a workflow is not yet.
-5. **Real-time collaboration** — character-level concurrent editing, remote selections and
-   cursors, reconnect recovery, and conflict-safe persistence.
+5. **Real-time collaboration** ✅ (remote cursors) — `SentinelCursorTracker`
+   (`SentinelRealtimeCollaboration.cs`) is a new in-memory, process-local singleton tracking
+   "which block is each other viewer currently in" per page, keyed by username with a 10s TTL.
+   The block editor's `focusin` event (bubbling from whichever contenteditable the user
+   actually clicked/tabbed into) calls back to Blazor via a new `OnCursorMoved` JSInvokable;
+   `Wiki.razor` records it and re-broadcasts to every other circuit viewing that page through
+   the tracker's `Moved` event (the same process-local fan-out `SentinelCollaborationNotifier`
+   already uses for discussions/notifications - no SignalR hub exists or was added). Rendering
+   is a new `setRemoteCursors` export in `wiki-block-editor.js`, a small colored name-pill
+   pinned to a block's corner, following the exact same "look up state, targeted per-block DOM
+   update" shape as the existing `setDiscussionCounts`. This is deliberately block-granular,
+   not a character-offset caret - and it is deliberately the *entire* scope of what shipped
+   here. Character-level concurrent editing needs a real OT or CRDT text-merge algorithm; that
+   is a fundamentally different, much larger, and much riskier problem (a subtly wrong
+   implementation corrupts user content, which is worse than not having the feature) than
+   showing where people are, and remains explicitly NOT done. "Conflict-safe persistence" and
+   "reconnect recovery" are already substantially covered by existing pieces rather than new
+   ones: block-level three-way merge (`WikiBlockMerge.ThreeWayMerge`) already handles concurrent
+   saves at block granularity, Blazor Server's own circuit-resume already recovers a brief
+   disconnect with no data loss (the in-memory editor state was never lost), and a longer
+   disconnect that forces a full reload now loses at most the last ~1.5s of unsaved edits
+   thanks to Phase 2's row autosave - the equivalent for the main page editor (autosave, not
+   just revert-safe reload) remains open.
 6. **Knowledge navigation** — graph navigation, saved searches, and database-row mentions in
    the personal inbox.
 7. **Sentinel AI depth** — streaming answers with citations, transcription capture, and

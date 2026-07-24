@@ -2396,6 +2396,23 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .sentinel-workspace .wiki-block-content:empty::before { color: #57534e; }
 .sentinel-workspace .wiki-block-content a { color: #fbbf24; text-decoration-color: rgba(251, 191, 36, .45); text-underline-offset: 2px; }
 
+/* Block-granular remote cursor marker - see SentinelCursorTracker for why this is "which
+   block another viewer is in," not a character-position caret. */
+.wiki-remote-cursor {
+    position: absolute;
+    top: -.55rem;
+    right: .25rem;
+    z-index: 3;
+    padding: .05rem .4rem;
+    border-radius: 999px;
+    background: var(--wiki-remote-cursor-color, #f59e0b);
+    color: #1c1917;
+    font: 700 .6rem/1.4 var(--gws-font-sans, sans-serif);
+    white-space: nowrap;
+    pointer-events: none;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .35);
+}
+
 .sentinel-workspace .wiki-block[data-block-type="heading_1"] { margin-top: 1.45rem; }
 .sentinel-workspace .wiki-block[data-block-type="heading_2"] { margin-top: 1.15rem; }
 .sentinel-workspace .wiki-block[data-block-type="heading_3"] { margin-top: .8rem; }

@@ -140,3 +140,67 @@ public sealed class SentinelPresenceTracker(TimeProvider timeProvider)
         public DateTimeOffset LastSeenAt { get; set; } = lastSeenAt;
     }
 }
+
+public sealed record SentinelCursorPosition(string Username, Guid BlockId, DateTimeOffset UpdatedAt);
+
+/// <summary>
+/// Process-local, block-granular remote cursor tracking: "which block is each other viewer
+/// currently in," not a character offset. This is deliberately the full extent of Sentinel's
+/// "real-time collaboration" for now - true character-level concurrent editing needs an
+/// OT/CRDT text-merge algorithm, which is a different (and much larger/riskier) problem from
+/// showing where people are; see docs/WIKI_NOTION_CLONE.md for the explicit scope line.
+/// A cursor position is extremely perishable and purely a visual nicety, so unlike
+/// SentinelPresenceLease this is in-memory only (no DB backing, no cross-instance polling
+/// fallback) - on a multi-instance deployment a remote cursor simply won't be visible to a
+/// circuit on a different instance, an acceptable degradation matching the same reasoning
+/// SentinelCollaborationNotifier documents for itself.
+/// </summary>
+public sealed class SentinelCursorTracker(TimeProvider timeProvider)
+{
+    private static readonly TimeSpan Ttl = TimeSpan.FromSeconds(10);
+
+    private readonly object _gate = new();
+    private readonly Dictionary<Guid, Dictionary<string, SentinelCursorPosition>> _cursorsByPage = new();
+
+    public event Action<Guid>? Moved;
+
+    public void Move(Guid wikiPageId, string username, Guid blockId)
+    {
+        if (string.IsNullOrWhiteSpace(username)) return;
+        lock (_gate)
+        {
+            if (!_cursorsByPage.TryGetValue(wikiPageId, out var byUser))
+            {
+                byUser = new Dictionary<string, SentinelCursorPosition>(StringComparer.OrdinalIgnoreCase);
+                _cursorsByPage[wikiPageId] = byUser;
+            }
+            byUser[username] = new SentinelCursorPosition(username, blockId, timeProvider.GetUtcNow());
+        }
+        Moved?.Invoke(wikiPageId);
+    }
+
+    public void Leave(Guid wikiPageId, string username)
+    {
+        bool removed;
+        lock (_gate)
+        {
+            removed = _cursorsByPage.TryGetValue(wikiPageId, out var byUser) && byUser.Remove(username);
+        }
+        if (removed) Moved?.Invoke(wikiPageId);
+    }
+
+    public IReadOnlyList<SentinelCursorPosition> List(Guid wikiPageId, string excludingUsername)
+    {
+        var now = timeProvider.GetUtcNow();
+        lock (_gate)
+        {
+            if (!_cursorsByPage.TryGetValue(wikiPageId, out var byUser)) return [];
+            var cutoff = now - Ttl;
+            return byUser.Values
+                .Where(cursor => cursor.UpdatedAt >= cutoff
+                    && !string.Equals(cursor.Username, excludingUsername, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(cursor => cursor.Username, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+    }
+}
