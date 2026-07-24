@@ -1382,6 +1382,23 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     border-radius: 0.35rem;
     margin-top: 0.4rem;
 }
+.wiki-embed-frame {
+    position: relative;
+    width: 100%;
+    max-width: 32rem;
+    aspect-ratio: 16 / 9;
+    margin-top: 0.4rem;
+    border-radius: 0.4rem;
+    overflow: hidden;
+    background: #000;
+}
+.wiki-embed-frame iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+}
 
 .wiki-slash-menu {
     min-width: 200px;

@@ -65,8 +65,8 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 | Capability family | Foundation status | Expansion target |
 | --- | --- | --- |
 | Page model | Nested pages (flat parent-id + explicit sibling `SortOrder`), icon, cover image, move/reorder, transactional subtree duplication | — |
-| Block editor | Slash-command insert, drag-reorder, Tab/Shift-Tab indent, inline bold/italic/link, `[[Page]]` autocomplete, reusable page and block templates, native tables, equations, breadcrumbs, TOC, buttons, synced blocks, columns, a contextual block menu (duplicate/move/delete, mirrored by keyboard shortcuts), session-local undo/redo, and Arrow-key/Escape keyboard navigation between blocks and out of floating menus | Richer embeds; character-level undo/redo persisted across reloads; keyboard flows for table-cell editing |
-| Core block types | paragraph, heading 1-3, lists, to-do, toggle, quote, callout, code, divider, image, embed, table, equation, breadcrumb, TOC, button, synced block, columns, and legacy markdown | oEmbed previews and additional provider-specific media |
+| Block editor | Slash-command insert, drag-reorder, Tab/Shift-Tab indent, inline bold/italic/link, `[[Page]]` autocomplete, reusable page and block templates, native tables, equations, breadcrumbs, TOC, buttons, synced blocks, columns, a contextual block menu (duplicate/move/delete, mirrored by keyboard shortcuts), session-local undo/redo, and Arrow-key/Escape keyboard navigation between blocks and out of floating menus | Character-level undo/redo persisted across reloads; keyboard flows for table-cell editing |
+| Core block types | paragraph, heading 1-3, lists, to-do, toggle, quote, callout, code, divider, image, embed (YouTube/Vimeo/Spotify/Figma/CodePen/Loom render as a sandboxed iframe via URL-pattern detection, `WikiEmbedResolver.cs`; other URLs fall back to a plain link), table, equation, breadcrumb, TOC, button, synced block, columns, and legacy markdown | True oEmbed (title/thumbnail metadata, live provider discovery) and additional provider-specific media |
 | History | Bounded DB snapshot revisions (20/page), structural diff (added/removed/changed blocks), revert-as-new-version | — |
 | Databases | Typed properties including person, files, place, evaluated advanced formulas, one-way or reciprocal row-picker relations, and calculated rollups; editable Table, Board, List, Gallery, Calendar, Timeline, Chart, Form, Map, Feed, and Dashboard views | Richer rollup formatting |
 | Databases — structure | Databases share the page sidebar tree; every row opens as a responsive block-content page with a per-view side-peek, center-peek, or full-page presentation and configurable property visibility/order; row icon, cover image, and bounded version history (20/row, structural diff, revert-as-new-version) match page-level history; linked and inline database blocks reference canonical data without duplication | — |
@@ -147,11 +147,11 @@ capabilities where they fit GWS Business Suite; they are no longer silently excl
 
 | Area | Delivered now | Required parity work |
 | --- | --- | --- |
-| Blocks | Core and advanced native block vocabulary, including tables/equations/columns/synced blocks/TOC/buttons, plus reusable block templates | Richer embeds |
+| Blocks | Core and advanced native block vocabulary, including tables/equations/columns/synced blocks/TOC/buttons, plus reusable block templates, and provider-pattern embeds (YouTube/Vimeo/Spotify/Figma/CodePen/Loom render as iframes) | True oEmbed metadata and additional providers |
 | Databases | Eleven view families, expanded property vocabulary, advanced typed formulas, canonical one-way/reciprocal row relations, configurable rollups, filters/sorts/groups, row page bodies with per-view peek modes, linked/inline databases, and reusable database templates | Property layouts and automations |
 | Knowledge graph | `[[Page]]` links, ranked/highlighted workspace search, backlinks, person/date mentions, favorites/recents | Graph navigation, database-row mention inbox entries, and saved searches |
 | Collaboration | Discussions, replies, reactions, notifications, DB-backed cross-instance presence/polling, block-level three-way merge, authenticated portal-member roles, granular permissions, and tokenized public sharing | Character-level CRDT/OT cursors and richer public-share controls |
-| Presentation | Emoji icon and cover URL for pages and database rows alike, row-level bounded version history, plus responsive side-peek, center-peek, and full-page database rows with per-view property presentation | Custom icon/cover uploads, page width/fonts, and reusable style defaults |
+| Presentation | Emoji icon and cover image for pages and database rows alike (cover can be uploaded inline via the cover picker, not just picked from an already-uploaded asset), row-level bounded version history, plus responsive side-peek, center-peek, and full-page database rows with per-view property presentation | Custom icon *image* uploads (icons remain emoji-only), page width/fonts, and reusable style defaults |
 | Integration | Encrypted token, current data-source/view/comment API, selective reconciliation, durable authenticated Notion-hosted file ingestion, opt-in conflict-aware manual page writes, and free-template interoperability through connected-workspace sync or bounded Notion ZIP imports | Bidirectional database schema/row writes |
 | AI | Workspace-grounded ask/writing/translation/research/meeting notes/autofill with durable approve/reject runs | Streaming chat, citations, transcription capture, and autonomous agents |
 
@@ -219,10 +219,21 @@ screens.
    trying to merge with server-driven changes. Keyboard-first flows gained Arrow-key navigation
    between blocks and Escape-to-close-menus; NOT yet covered: keyboard flows inside table cells,
    and a full command-palette-style shortcut reference.
-3. **Media and presentation** — richer embeds, durable icon/cover uploads, page width and font
-   controls, and reusable visual defaults.
-3. **Media and presentation** — richer embeds, durable icon/cover uploads, page width and font
-   controls, and reusable visual defaults.
+3. **Media and presentation** ✅ (partial) — the "embed" block now recognizes YouTube, Vimeo,
+   Spotify, Figma, CodePen, and Loom URLs (`WikiEmbedResolver.cs`, mirrored in
+   `wiki-block-editor.js`'s `resolveEmbedUrl` for live-preview parity) and renders them as a
+   sandboxed iframe instead of a plain link; any other URL still falls back to the existing
+   link render. This is deliberately *not* full oEmbed - there is no server-side fetch of a
+   provider's oembed/metadata endpoint (no title, no thumbnail, no live provider discovery),
+   because that would mean fetching an arbitrary URL an editor pasted in, an SSRF surface this
+   app doesn't have anywhere else. Every provider pattern is anchored to a fixed hostname
+   instead. Cover images can now be uploaded inline from the page/row editor's cover picker
+   (`InputFile` → `IMediaLibraryService.UploadAsync`, the same path `Media.razor` already used)
+   rather than requiring a trip to the Media Library first. Deliberately NOT done: custom
+   *icon* image uploads (icons remain emoji-only text - turning them into images would touch
+   every place `Icon` is rendered as literal text, e.g. the sidebar tree and breadcrumbs, which
+   is a wider ripple than this pass scoped), page width/font controls, and reusable
+   workspace-level visual defaults (no settings entity for either exists yet).
 4. **Database automations** — trigger/action rules for property changes, schedules, and
    approved integrations, with visible execution history.
 5. **Real-time collaboration** — character-level concurrent editing, remote selections and

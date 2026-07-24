@@ -122,4 +122,10 @@
   The "native editing polish" phase's foundation is also delivered: database-page autosave
   (debounced, silent, and deliberately separate from version-history checkpoints), session-local
   undo/redo, and a contextual block actions menu (duplicate/move/delete) - the last two landed in
-  the shared block editor module, so the main Sentinel page editor gained them too.
+  the shared block editor module, so the main Sentinel page editor gained them too. The "media
+  and presentation" phase is now partially delivered: the embed block recognizes YouTube, Vimeo,
+  Spotify, Figma, CodePen, and Loom URLs and renders them as a sandboxed iframe (URL-pattern
+  detection only, not a live oEmbed metadata fetch, to avoid an SSRF surface), and cover images
+  can be uploaded directly from the page/row cover picker instead of requiring a trip through the
+  Media Library first. Custom icon-image uploads, page width/font controls, and reusable
+  workspace-level visual defaults remain open, tracked in `docs/WIKI_NOTION_CLONE.md`.

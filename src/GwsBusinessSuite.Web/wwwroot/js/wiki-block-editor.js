@@ -490,6 +490,34 @@ function createMediaBody(block, state) {
     return wrapper;
 }
 
+// Mirrors GwsBusinessSuite.Application.Wiki.WikiEmbedResolver so the live editor preview
+// matches the server-rendered page - keep both in sync when adding a provider. Every pattern
+// is anchored to a fixed hostname; an unrecognized URL always falls back to a plain link.
+const EMBED_PROVIDERS = [
+    { name: 'YouTube', pattern: /^https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtube\.com\/embed\/|youtu\.be\/)([\w-]{6,})/i,
+        embedUrl: match => `https://www.youtube.com/embed/${match[1]}` },
+    { name: 'Vimeo', pattern: /^https?:\/\/(?:www\.)?vimeo\.com\/(\d+)/i,
+        embedUrl: match => `https://player.vimeo.com/video/${match[1]}` },
+    { name: 'Spotify', pattern: /^https?:\/\/open\.spotify\.com\/(track|album|playlist|episode|show|artist)\/([\w]+)/i,
+        embedUrl: match => `https://open.spotify.com/embed/${match[1]}/${match[2]}` },
+    { name: 'Figma', pattern: /^https?:\/\/(?:www\.)?figma\.com\/(?:file|proto|design)\/[\w-]+\//i,
+        embedUrl: (match, url) => `https://www.figma.com/embed?embed_host=sentinel&url=${encodeURIComponent(url)}` },
+    { name: 'CodePen', pattern: /^https?:\/\/codepen\.io\/([\w-]+)\/pen\/([\w-]+)/i,
+        embedUrl: match => `https://codepen.io/${match[1]}/embed/${match[2]}?default-tab=result` },
+    { name: 'Loom', pattern: /^https?:\/\/(?:www\.)?loom\.com\/share\/([\w]+)/i,
+        embedUrl: match => `https://www.loom.com/embed/${match[1]}` }
+];
+
+function resolveEmbedUrl(url) {
+    if (!url) return null;
+    const trimmed = url.trim();
+    for (const provider of EMBED_PROVIDERS) {
+        const match = trimmed.match(provider.pattern);
+        if (match) return { embedUrl: provider.embedUrl(match, trimmed), name: provider.name };
+    }
+    return null;
+}
+
 function renderMediaPreview(preview, type, url, fileName = '') {
     preview.innerHTML = '';
     if (!url) return;
@@ -500,16 +528,33 @@ function renderMediaPreview(preview, type, url, fileName = '') {
         img.className = 'wiki-media-image';
         img.alt = '';
         preview.appendChild(img);
-    } else {
-        const link = document.createElement('a');
-        link.href = url;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        link.className = 'wiki-embed-link';
-        link.textContent = fileName || url;
-        if (fileName) link.title = url;
-        preview.appendChild(link);
+        return;
     }
+
+    const resolved = resolveEmbedUrl(url);
+    if (resolved) {
+        const frame = document.createElement('div');
+        frame.className = 'wiki-embed-frame';
+        frame.dataset.provider = resolved.name;
+        const iframe = document.createElement('iframe');
+        iframe.src = resolved.embedUrl;
+        iframe.loading = 'lazy';
+        iframe.allowFullscreen = true;
+        iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-presentation');
+        iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+        frame.appendChild(iframe);
+        preview.appendChild(frame);
+        return;
+    }
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.className = 'wiki-embed-link';
+    link.textContent = fileName || url;
+    if (fileName) link.title = url;
+    preview.appendChild(link);
 }
 
 function createLinkedDatabaseBody(block, state) {

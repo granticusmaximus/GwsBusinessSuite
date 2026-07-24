@@ -63,13 +63,20 @@
                 @if (_showCoverPicker)
                 {
                     <div class="wiki-media-picker border rounded-3 p-2 mb-3">
+                        <div class="d-flex align-items-center gap-2 mb-2">
+                            <InputFile OnChange="OnCoverFileSelectedAsync" disabled="@_isUploadingCover" class="form-control form-control-sm" accept="image/*" />
+                            @if (_isUploadingCover)
+                            {
+                                <span class="spinner-border spinner-border-sm text-secondary flex-shrink-0"></span>
+                            }
+                        </div>
                         @if (!string.IsNullOrEmpty(_mediaPickerError))
                         {
                             <div class="text-danger small mb-0">@_mediaPickerError</div>
                         }
                         else if (_mediaAssets.Count == 0)
                         {
-                            <p class="text-secondary small mb-0">No media uploaded yet. Upload images from the Media Library.</p>
+                            <p class="text-secondary small mb-0">No media uploaded yet. Upload an image above.</p>
                         }
                         else
                         {
@@ -222,6 +229,7 @@
     private CancellationTokenSource? _autosaveCts;
 
     private bool _showCoverPicker;
+    private bool _isUploadingCover;
     private string _mediaPickerError = string.Empty;
     private List<MediaAssetSummary> _mediaAssets = new();
 
@@ -379,6 +387,36 @@
         _coverImageUrl = asset.Url;
         _showCoverPicker = false;
         ScheduleAutosave();
+    }
+
+    // Same upload path as the standalone Media Library page (Media.razor.OnFileSelectedAsync)
+    // so a row cover no longer requires leaving the row page first.
+    private async Task OnCoverFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        _mediaPickerError = string.Empty;
+        _isUploadingCover = true;
+        try
+        {
+            const long maxBytes = 25 * 1024 * 1024;
+            using var stream = e.File.OpenReadStream(maxAllowedSize: maxBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+
+            var uploaded = await MediaLibraryService.UploadAsync(e.File.Name, ms.ToArray(), string.Empty);
+            _coverImageUrl = uploaded.Url;
+            _mediaAssets = (await MediaLibraryService.ListAsync()).ToList();
+            _showCoverPicker = false;
+            ScheduleAutosave();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Cover image upload failed for Sentinel row {RowId}.", Row.Id);
+            _mediaPickerError = $"Upload failed. {ex.Message}";
+        }
+        finally
+        {
+            _isUploadingCover = false;
+        }
     }
 
     private async Task LoadHistoryAsync()

@@ -368,13 +368,20 @@
                     @if (_showCoverPicker)
                     {
                         <div class="wiki-media-picker border rounded-3 p-2 mb-3">
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <InputFile OnChange="OnCoverFileSelectedAsync" disabled="@_isUploadingCover" class="form-control form-control-sm" accept="image/*" />
+                                @if (_isUploadingCover)
+                                {
+                                    <span class="spinner-border spinner-border-sm text-secondary flex-shrink-0"></span>
+                                }
+                            </div>
                             @if (!string.IsNullOrEmpty(_mediaPickerError))
                             {
                                 <div class="text-danger small mb-0">@_mediaPickerError</div>
                             }
                             else if (_mediaAssets.Count == 0)
                             {
-                                <p class="text-secondary small mb-0">No media uploaded yet. Upload images from the Media Library.</p>
+                                <p class="text-secondary small mb-0">No media uploaded yet. Upload an image above.</p>
                             }
                             else
                             {
@@ -718,6 +725,7 @@
     private IReadOnlyDictionary<Guid, int> _blockDiscussionCounts = new Dictionary<Guid, int>();
 
     private bool _showCoverPicker;
+    private bool _isUploadingCover;
     private string _mediaPickerError = string.Empty;
     private List<MediaAssetSummary> _mediaAssets = new();
     private DotNetObjectReference<Wiki>? _wikiLinksRef;
@@ -740,6 +748,35 @@
         {
             Logger.LogError(ex, "Unable to load media library for the wiki cover picker.");
             _mediaPickerError = $"Unable to load media library. {ex.Message}";
+        }
+    }
+
+    // Same upload path as the standalone Media Library page (Media.razor.OnFileSelectedAsync)
+    // so a cover image no longer requires leaving the page editor first.
+    private async Task OnCoverFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        _mediaPickerError = string.Empty;
+        _isUploadingCover = true;
+        try
+        {
+            const long maxBytes = 25 * 1024 * 1024;
+            using var stream = e.File.OpenReadStream(maxAllowedSize: maxBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+
+            var uploaded = await MediaLibraryService.UploadAsync(e.File.Name, ms.ToArray(), string.Empty);
+            Editor.CoverImageUrl = uploaded.Url;
+            _mediaAssets = (await MediaLibraryService.ListAsync()).ToList();
+            _showCoverPicker = false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Cover image upload failed for the wiki page editor.");
+            _mediaPickerError = $"Upload failed. {ex.Message}";
+        }
+        finally
+        {
+            _isUploadingCover = false;
         }
     }
 

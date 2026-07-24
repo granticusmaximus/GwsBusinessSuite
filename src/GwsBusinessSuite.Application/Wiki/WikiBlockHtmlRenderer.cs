@@ -67,9 +67,7 @@ public static class WikiBlockHtmlRenderer
             WikiBlockTypes.Image => string.IsNullOrWhiteSpace(block.Props.GetValueOrDefault("url"))
                 ? string.Empty
                 : $"<img src=\"{WebUtility.HtmlEncode(block.Props["url"])}\" alt=\"{WebUtility.HtmlEncode(block.PlainText)}\" loading=\"lazy\" style=\"max-width:100%\" />",
-            WikiBlockTypes.Embed => string.IsNullOrWhiteSpace(block.Props.GetValueOrDefault("url"))
-                ? string.Empty
-                : $"<a href=\"{WebUtility.HtmlEncode(block.Props["url"])}\" target=\"_blank\" rel=\"noopener noreferrer\">{WebUtility.HtmlEncode(block.Props["url"])}</a>",
+            WikiBlockTypes.Embed => RenderEmbed(block),
             WikiBlockTypes.LinkedDatabase => RenderLinkedDatabase(block, indentStyle),
             WikiBlockTypes.InlineDatabase => RenderLinkedDatabase(block, indentStyle, isInline: true),
             WikiBlockTypes.Table => RenderTable(block, indentStyle),
@@ -129,6 +127,29 @@ public static class WikiBlockHtmlRenderer
         };
         text = text.Replace('\n', ' ').Trim();
         return text.Length > maxLength ? text[..maxLength] + "…" : text;
+    }
+
+    private static string RenderEmbed(WikiBlock block)
+    {
+        var url = block.Props.GetValueOrDefault("url");
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return string.Empty;
+        }
+
+        if (WikiEmbedResolver.TryResolve(url, out var embedUrl, out var providerLabel))
+        {
+            // allow-same-origin is safe here despite the usual allow-scripts pairing caution:
+            // the src is always one of WikiEmbedResolver's hardcoded provider hostnames, never
+            // a same-origin (to this app) or editor-chosen origin, so there is nothing for the
+            // embedded frame to same-origin its way into beyond its own trusted player.
+            return $"<div class=\"wiki-embed-frame\" data-provider=\"{WebUtility.HtmlEncode(providerLabel)}\">"
+                + $"<iframe src=\"{WebUtility.HtmlEncode(embedUrl)}\" loading=\"lazy\" allowfullscreen "
+                + "sandbox=\"allow-scripts allow-same-origin allow-popups allow-presentation\" "
+                + "referrerpolicy=\"strict-origin-when-cross-origin\"></iframe></div>";
+        }
+
+        return $"<a href=\"{WebUtility.HtmlEncode(url)}\" target=\"_blank\" rel=\"noopener noreferrer\">{WebUtility.HtmlEncode(url)}</a>";
     }
 
     private static string RenderLinkedDatabase(WikiBlock block, string indentStyle, bool isInline = false)

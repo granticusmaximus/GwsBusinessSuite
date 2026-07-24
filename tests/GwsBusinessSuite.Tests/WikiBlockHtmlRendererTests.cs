@@ -65,6 +65,40 @@ public sealed class WikiBlockHtmlRendererTests
     }
 
     [Fact]
+    public void RenderBlock_ShouldRenderARecognizedEmbedProviderAsASandboxedIframe()
+    {
+        var block = new WikiBlock(
+            Guid.NewGuid(),
+            WikiBlockTypes.Embed,
+            0,
+            [],
+            new Dictionary<string, string> { ["url"] = "https://www.youtube.com/watch?v=dQw4w9WgXcQ" });
+
+        var html = WikiBlockHtmlRenderer.RenderBlock(block);
+
+        html.Should().Contain("wiki-embed-frame");
+        html.Should().Contain("data-provider=\"YouTube\"");
+        html.Should().Contain("src=\"https://www.youtube.com/embed/dQw4w9WgXcQ\"");
+        html.Should().Contain("sandbox=");
+    }
+
+    [Fact]
+    public void RenderBlock_ShouldFallBackToAPlainLinkForAnUnrecognizedEmbedUrl()
+    {
+        var block = new WikiBlock(
+            Guid.NewGuid(),
+            WikiBlockTypes.Embed,
+            0,
+            [],
+            new Dictionary<string, string> { ["url"] = "https://example.com/some-page" });
+
+        var html = WikiBlockHtmlRenderer.RenderBlock(block);
+
+        html.Should().NotContain("iframe");
+        html.Should().Contain("<a href=\"https://example.com/some-page\"");
+    }
+
+    [Fact]
     public void RenderPage_ShouldBuildTableOfContentsWithHeadingAnchors()
     {
         var blocks = new[]
