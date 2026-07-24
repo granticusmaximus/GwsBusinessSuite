@@ -803,6 +803,36 @@ public sealed class WikiDatabaseServiceTests
     }
 
     [Fact]
+    public async Task SaveRowAsync_WithCreateRevisionCheckpointFalse_ShouldPersistContentWithoutAddingAVersion()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Projects", null, "u");
+        var created = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor { BlocksJson = ParagraphBlocks("Checkpoint.") }, "u");
+        (await service.GetRowHistoryAsync(created.Id)).Should().ContainSingle();
+
+        // Mirrors a silent autosave tick: content changes, but no version-history entry.
+        var autosaved = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            Id = created.Id,
+            BlocksJson = ParagraphBlocks("Mid-edit, not yet saved by the user."),
+            CreateRevisionCheckpoint = false
+        }, "u");
+
+        autosaved.BlocksJson.Should().Contain("Mid-edit, not yet saved by the user.", "autosave must still persist the content");
+        (await service.GetRowHistoryAsync(created.Id)).Should().ContainSingle("an autosave tick must not mint a new version");
+
+        // A subsequent explicit save (checkpoint defaults true) still creates a version on
+        // top of whatever autosave already persisted.
+        await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            Id = created.Id,
+            BlocksJson = ParagraphBlocks("Explicitly saved.")
+        }, "u");
+        (await service.GetRowHistoryAsync(created.Id)).Should().HaveCount(2);
+    }
+
+    [Fact]
     public async Task SaveRowAsync_ShouldTrimOldRowRevisions_BeyondMaxRevisionsPerRow()
     {
         await using var db = await CreateDbAsync();

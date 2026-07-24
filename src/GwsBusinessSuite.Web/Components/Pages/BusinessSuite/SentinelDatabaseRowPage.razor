@@ -45,7 +45,7 @@
                             <button type="button" class="btn btn-sm btn-dark" @onclick="ToggleCoverPickerAsync">
                                 <i class="bi bi-image me-1"></i>Change cover
                             </button>
-                            <button type="button" class="btn btn-sm btn-dark" @onclick="() => _coverImageUrl = string.Empty">
+                            <button type="button" class="btn btn-sm btn-dark" @onclick="RemoveCover">
                                 <i class="bi bi-trash3 me-1"></i>Remove
                             </button>
                         </div>
@@ -87,7 +87,7 @@
                 }
 
                 <div class="sentinel-page-heading">
-                    <input class="sentinel-icon-input" @bind="_icon" placeholder="📄" maxlength="4" aria-label="Row icon" />
+                    <input class="sentinel-icon-input" @bind="_icon" @bind:after="ScheduleAutosave" placeholder="📄" maxlength="4" aria-label="Row icon" />
                     <span class="sentinel-row-page-title-static text-truncate">@RowTitle</span>
                 </div>
 
@@ -188,7 +188,7 @@
         </div>
 
         <footer class="sentinel-row-page-footer">
-            <span class="small text-secondary">Changes are saved when you choose Save page.</span>
+            <span class="small text-secondary">@(string.IsNullOrEmpty(_saveStatus) ? "Changes save automatically. Use Save page to record a named version." : _saveStatus)</span>
             <div class="d-flex align-items-center gap-2">
                 <button type="button" class="btn btn-outline-secondary" @onclick="CloseAsync" disabled="@IsBusy">Close</button>
                 <button type="button" class="btn btn-primary" @onclick="SaveAsync" disabled="@IsBusy">
@@ -218,6 +218,8 @@
     private string _blocksJson = "[]";
     private string _icon = string.Empty;
     private string _coverImageUrl = string.Empty;
+    private string _saveStatus = string.Empty;
+    private CancellationTokenSource? _autosaveCts;
 
     private bool _showCoverPicker;
     private string _mediaPickerError = string.Empty;
@@ -229,6 +231,7 @@
     private Guid? DiffRevisionKey { get; set; }
     private string? DiffText { get; set; }
     private Guid? _historyLoadedForRowId;
+    private Guid? _loadedRowId;
 
     private JsonObject Values => WikiPropertyValues.ParseObject(Row.PropertyValuesJson);
     private WikiDatabaseProperty? TitleProperty => Database.Properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Title);
@@ -251,9 +254,17 @@
 
     protected override void OnParametersSet()
     {
+        // Only re-sync local editing state when this parameter set is actually a different
+        // row. Now that autosave persists in the background without necessarily refreshing
+        // the parent's Row snapshot, blindly resyncing on every parameter set (e.g. a parent
+        // re-render triggered by something unrelated to this row) would silently revert
+        // whatever the user is mid-typing back to a stale copy.
+        if (_loadedRowId == Row.Id) return;
+        _loadedRowId = Row.Id;
         _blocksJson = Row.BlocksJson;
         _icon = Row.Icon ?? string.Empty;
         _coverImageUrl = Row.CoverImageUrl ?? string.Empty;
+        _saveStatus = string.Empty;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -277,7 +288,66 @@
     public Task OnBlocksChanged(string blocksJson)
     {
         _blocksJson = blocksJson;
+        ScheduleAutosave();
         return Task.CompletedTask;
+    }
+
+    // Silent background persistence, distinct from the explicit "Save page" button: debounced
+    // so a burst of keystrokes/undo-redo becomes one write, and passes
+    // CreateRevisionCheckpoint=false so it never mints a version-history entry on its own -
+    // only an explicit save (or a revert) does that. This means a browser refresh or a lost
+    // Blazor circuit loses at most ~1.5s of edits instead of everything since the page opened.
+    private void ScheduleAutosave()
+    {
+        _autosaveCts?.Cancel();
+        _autosaveCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _autosaveCts = cts;
+        _saveStatus = "Editing…";
+        _ = AutosaveAfterDelayAsync(cts.Token);
+    }
+
+    private async Task AutosaveAfterDelayAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1.5), cancellationToken);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+        if (cancellationToken.IsCancellationRequested) return;
+
+        try
+        {
+            var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await WikiDatabaseService.SaveRowAsync(Database.Id, new WikiDatabaseRowEditor
+            {
+                Id = Row.Id,
+                BlocksJson = _blocksJson,
+                Icon = _icon,
+                CoverImageUrl = _coverImageUrl,
+                Values = Values.ToDictionary(pair => pair.Key, pair => pair.Value),
+                CreateRevisionCheckpoint = false
+            }, user, cancellationToken);
+
+            if (cancellationToken.IsCancellationRequested) return;
+            _saveStatus = "Saved";
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            Logger.LogError(ex, "Autosave failed for Sentinel row {RowId}.", Row.Id);
+            _saveStatus = "Autosave failed - use Save page to retry";
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void RemoveCover()
+    {
+        _coverImageUrl = string.Empty;
+        ScheduleAutosave();
     }
 
     [JSInvokable]
@@ -308,6 +378,7 @@
     {
         _coverImageUrl = asset.Url;
         _showCoverPicker = false;
+        ScheduleAutosave();
     }
 
     private async Task LoadHistoryAsync()
@@ -350,6 +421,10 @@
         var confirmed = await JS.InvokeAsync<bool>("confirm", "Revert to this version? This creates a new version with the old content - nothing is lost.");
         if (!confirmed) return;
 
+        // A pending autosave racing this revert could silently resurrect the pre-revert
+        // content a moment later; cancel it first so the revert's result is the one that wins.
+        _autosaveCts?.Cancel();
+
         IsHistoryBusy = true;
         try
         {
@@ -361,6 +436,7 @@
                 await _module.InvokeVoidAsync("setBlocks", _editorContainer, _blocksJson);
             }
             DiffRevisionKey = null;
+            _saveStatus = "Saved";
             await LoadHistoryAsync();
             await OnSaved.InvokeAsync();
         }
@@ -383,6 +459,10 @@
 
     private async Task SaveAsync()
     {
+        // An explicit save is the meaningful checkpoint (default CreateRevisionCheckpoint =
+        // true) - cancel any in-flight silent autosave first so it can't race this and, e.g.,
+        // overwrite with a stale in-between snapshot after this call returns.
+        _autosaveCts?.Cancel();
         IsBusy = true;
         ErrorMessage = string.Empty;
         try
@@ -396,6 +476,7 @@
                 CoverImageUrl = _coverImageUrl,
                 Values = Values.ToDictionary(pair => pair.Key, pair => pair.Value)
             }, user);
+            _saveStatus = "Saved";
             await LoadHistoryAsync();
             await OnSaved.InvokeAsync();
         }
@@ -414,6 +495,8 @@
 
     public async ValueTask DisposeAsync()
     {
+        _autosaveCts?.Cancel();
+        _autosaveCts?.Dispose();
         if (_initialized && _module is not null)
         {
             try { await _module.InvokeVoidAsync("dispose", _editorContainer); }

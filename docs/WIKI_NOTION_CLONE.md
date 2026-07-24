@@ -65,7 +65,7 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 | Capability family | Foundation status | Expansion target |
 | --- | --- | --- |
 | Page model | Nested pages (flat parent-id + explicit sibling `SortOrder`), icon, cover image, move/reorder, transactional subtree duplication | — |
-| Block editor | Slash-command insert, drag-reorder, Tab/Shift-Tab indent, inline bold/italic/link, `[[Page]]` autocomplete, reusable page and block templates, native tables, equations, breadcrumbs, TOC, buttons, synced blocks, and columns | Richer embeds |
+| Block editor | Slash-command insert, drag-reorder, Tab/Shift-Tab indent, inline bold/italic/link, `[[Page]]` autocomplete, reusable page and block templates, native tables, equations, breadcrumbs, TOC, buttons, synced blocks, columns, a contextual block menu (duplicate/move/delete, mirrored by keyboard shortcuts), session-local undo/redo, and Arrow-key/Escape keyboard navigation between blocks and out of floating menus | Richer embeds; character-level undo/redo persisted across reloads; keyboard flows for table-cell editing |
 | Core block types | paragraph, heading 1-3, lists, to-do, toggle, quote, callout, code, divider, image, embed, table, equation, breadcrumb, TOC, button, synced block, columns, and legacy markdown | oEmbed previews and additional provider-specific media |
 | History | Bounded DB snapshot revisions (20/page), structural diff (added/removed/changed blocks), revert-as-new-version | — |
 | Databases | Typed properties including person, files, place, evaluated advanced formulas, one-way or reciprocal row-picker relations, and calculated rollups; editable Table, Board, List, Gallery, Calendar, Timeline, Chart, Form, Map, Feed, and Dashboard views | Richer rollup formatting |
@@ -203,8 +203,24 @@ screens.
    `GetRowStructuralDiffAsync`/`RevertRowToRevisionAsync`. A revision is only snapshotted when
    a save includes the page body (opened as a page), not on property-only cell edits or board
    drags, to avoid history noise - same rationale as Notion sync not creating page revisions.
-2. **Native editing polish** — database-page autosave, undo/redo, contextual actions, and
-   complete keyboard-first editing flows.
+2. **Native editing polish** ✅ (foundation) — database-page autosave is delivered:
+   `SentinelDatabaseRowPage.razor` debounces edits (1.5s) into a silent `SaveRowAsync` call with
+   the new `WikiDatabaseRowEditor.CreateRevisionCheckpoint = false`, so content, icon, and cover
+   changes persist continuously without minting a version-history entry per keystroke burst -
+   only the explicit "Save page" button (or a revert) still creates a checkpoint, matching how
+   Notion separates continuous saving from coarser version history. A visible status line
+   ("Editing…" / "Saved" / a retry prompt on failure) replaces the old static "saved on click"
+   text. Undo/redo (`Ctrl`/`Cmd+Z`, `Ctrl`/`Cmd+Shift+Z`) and a contextual block menu (⋮:
+   duplicate, move up/down, delete - each mirrored by a keyboard shortcut) were added to the
+   *shared* `wiki-block-editor.js` module, so both the row editor and the main Sentinel page
+   editor (`Wiki.razor`) gained them together rather than duplicating the feature. Undo history
+   is session-local (an in-memory stack per open editor instance, not persisted) and is reset
+   whenever the document is replaced wholesale (initial load, revert-to-revision) rather than
+   trying to merge with server-driven changes. Keyboard-first flows gained Arrow-key navigation
+   between blocks and Escape-to-close-menus; NOT yet covered: keyboard flows inside table cells,
+   and a full command-palette-style shortcut reference.
+3. **Media and presentation** — richer embeds, durable icon/cover uploads, page width and font
+   controls, and reusable visual defaults.
 3. **Media and presentation** — richer embeds, durable icon/cover uploads, page width and font
    controls, and reusable visual defaults.
 4. **Database automations** — trigger/action rules for property changes, schedules, and

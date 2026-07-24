@@ -119,3 +119,7 @@
   unstyled) - now fixed, and two smaller visual-polish gaps (`SentinelTemplates` leaning on raw
   Bootstrap chrome; `SentinelDiscussions`/`SentinelPresence` base colors only correct when nested
   under `.sentinel-workspace`) are tracked in that doc rather than silently left undocumented.
+  The "native editing polish" phase's foundation is also delivered: database-page autosave
+  (debounced, silent, and deliberately separate from version-history checkpoints), session-local
+  undo/redo, and a contextual block actions menu (duplicate/move/delete) - the last two landed in
+  the shared block editor module, so the main Sentinel page editor gained them too.

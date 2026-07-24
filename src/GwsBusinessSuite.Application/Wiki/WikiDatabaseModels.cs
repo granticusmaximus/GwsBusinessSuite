@@ -186,6 +186,11 @@ public sealed class WikiDatabaseRowEditor
     // Keyed by property id (as string) - value shape matches WikiPropertyValues' per-type
     // getters/setters (string/decimal/bool/string[]/ISO-8601 date string).
     public Dictionary<string, JsonNode?> Values { get; set; } = new();
+    // Silent background autosave (SentinelDatabaseRowPage) sets this false so a debounced
+    // save-per-keystroke-burst doesn't spam history the way an explicit "Save page" click
+    // should. Defaults true so every other caller (property-only edits, tests, the explicit
+    // save button) keeps today's "content save = new version" behavior unchanged.
+    public bool CreateRevisionCheckpoint { get; set; } = true;
 }
 
 // Reads/writes a WikiDatabaseRow.PropertyValuesJson object, one typed accessor pair per

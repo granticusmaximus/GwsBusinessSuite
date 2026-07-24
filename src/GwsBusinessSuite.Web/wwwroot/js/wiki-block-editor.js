@@ -48,7 +48,15 @@ export function initialize(container, dotNetRef, initialBlocksJson) {
         wikiLinkMenu: null,
         mentionMenu: null,
         inlineToolbar: null,
-        discussionCounts: new Map()
+        blockMenu: null,
+        discussionCounts: new Map(),
+        // In-memory only (not persisted) - one entry per debounced edit burst or structural
+        // op, same granularity as OnBlocksChanged. Cleared whenever setBlocks replaces the
+        // document wholesale (initial load, or a Blazor-driven external reload like revert),
+        // since undoing past that boundary would fight the server's own source of truth.
+        undoStack: [],
+        redoStack: [],
+        lastSnapshot: undefined
     };
     states.set(container, state);
     setBlocks(container, initialBlocksJson);
@@ -66,6 +74,16 @@ export function setBlocks(container, blocksJson) {
     const state = states.get(container);
     if (!state) return;
 
+    renderBlocks(container, state, blocksJson);
+    // An externally-driven document replacement (initial load, or a Blazor-triggered reload
+    // such as revert-to-revision) is a new baseline, not an edit - nothing before it should
+    // be undoable, and any pending redo would apply to a document that no longer exists.
+    state.lastSnapshot = getBlocksJson(container);
+    state.undoStack = [];
+    state.redoStack = [];
+}
+
+function renderBlocks(container, state, blocksJson) {
     let blocks;
     try { blocks = JSON.parse(blocksJson || '[]'); } catch { blocks = []; }
     if (!Array.isArray(blocks) || blocks.length === 0) {
@@ -158,6 +176,19 @@ function createBlockElement(block, state) {
     handle.title = 'Drag to reorder';
     handle.textContent = '⠿';
 
+    const menuBtn = document.createElement('button');
+    menuBtn.type = 'button';
+    menuBtn.className = 'wiki-block-menu-toggle';
+    menuBtn.title = 'Block actions';
+    menuBtn.setAttribute('aria-label', 'Block actions');
+    menuBtn.textContent = '⋮';
+    menuBtn.addEventListener('mousedown', event => event.preventDefault());
+    menuBtn.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        openBlockMenu(state, el, menuBtn);
+    });
+
     const discussionBtn = document.createElement('button');
     discussionBtn.type = 'button';
     discussionBtn.className = 'wiki-block-discussion';
@@ -169,7 +200,7 @@ function createBlockElement(block, state) {
         catch { /* the Blazor circuit may have disconnected */ }
     });
 
-    gutter.append(addBtn, discussionBtn, handle);
+    gutter.append(addBtn, discussionBtn, menuBtn, handle);
     el.appendChild(gutter);
     el.appendChild(createBlockBody(block, state));
     applyDiscussionCount(el, state);
@@ -803,6 +834,40 @@ function placeholderFor(type) {
 function onContentKeyDown(state, content, event) {
     const blockEl = content.closest('.wiki-block');
 
+    if (event.key === 'Escape') {
+        closeFloatingMenus(state);
+        return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        undo(state);
+        return;
+    }
+    if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'y'
+        || (event.shiftKey && event.key.toLowerCase() === 'z'))) {
+        event.preventDefault();
+        redo(state);
+        return;
+    }
+
+    if (event.altKey && event.shiftKey && event.key.toLowerCase() === 'd') {
+        event.preventDefault();
+        duplicateBlock(state, blockEl);
+        return;
+    }
+    if (event.altKey && event.shiftKey && event.key === 'Backspace') {
+        event.preventDefault();
+        deleteBlockAction(state, blockEl);
+        return;
+    }
+    if (event.altKey && !event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+        event.preventDefault();
+        moveBlock(state, blockEl, event.key === 'ArrowUp' ? -1 : 1);
+        focusBlock(blockEl);
+        return;
+    }
+
     if (event.key === 'Enter' && !event.shiftKey) {
         if (state.slashMenu) return; // Enter/selection is handled by the menu itself.
         event.preventDefault();
@@ -815,6 +880,23 @@ function onContentKeyDown(state, content, event) {
         if (previous) {
             event.preventDefault();
             mergeIntoPrevious(state, blockEl, previous);
+        }
+        return;
+    }
+
+    if (event.key === 'ArrowUp' && !event.shiftKey && isCaretAtStart(content)) {
+        const previous = blockEl.previousElementSibling;
+        if (previous) {
+            event.preventDefault();
+            focusBlockAtEnd(previous);
+        }
+        return;
+    }
+    if (event.key === 'ArrowDown' && !event.shiftKey && isCaretAtEnd(content)) {
+        const next = blockEl.nextElementSibling;
+        if (next) {
+            event.preventDefault();
+            focusBlockAtStart(next);
         }
         return;
     }
@@ -1092,11 +1174,13 @@ function closeMentionMenu(state) {
 
 function closeFloatingMenus(state, event) {
     if (event && (state.slashMenu?.contains(event.target) || state.wikiLinkMenu?.contains(event.target)
-        || state.mentionMenu?.contains(event.target) || state.inlineToolbar?.contains(event.target))) return;
+        || state.mentionMenu?.contains(event.target) || state.inlineToolbar?.contains(event.target)
+        || state.blockMenu?.contains(event.target))) return;
     closeSlashMenu(state);
     closeWikiLinkMenu(state);
     closeMentionMenu(state);
     closeInlineToolbar(state);
+    closeBlockMenu(state);
 }
 
 function positionMenu(menu, anchorEl) {
@@ -1145,6 +1229,78 @@ function onHandlePointerUp(state, event) {
     notifyChanged(state);
 }
 
+// ---- Contextual block actions (⋮ menu, mirrored by keyboard shortcuts) ---
+
+function openBlockMenu(state, blockEl, anchorEl) {
+    closeFloatingMenus(state);
+
+    const menu = document.createElement('div');
+    menu.className = 'wiki-slash-menu wiki-block-menu list-group shadow-sm';
+    positionMenu(menu, anchorEl);
+
+    const items = [
+        { label: 'Duplicate', icon: '⧉', action: () => duplicateBlock(state, blockEl) },
+        { label: 'Move up', icon: '↑', action: () => moveBlock(state, blockEl, -1), disabled: !blockEl.previousElementSibling },
+        { label: 'Move down', icon: '↓', action: () => moveBlock(state, blockEl, 1), disabled: !blockEl.nextElementSibling },
+        { label: 'Delete', icon: '🗑', action: () => deleteBlockAction(state, blockEl) }
+    ];
+
+    for (const item of items) {
+        const option = document.createElement('button');
+        option.type = 'button';
+        option.className = 'list-group-item list-group-item-action py-1 px-2 small d-flex align-items-center gap-2';
+        option.disabled = !!item.disabled;
+        option.innerHTML = `<span class="wiki-slash-icon">${item.icon}</span><span>${item.label}</span>`;
+        option.addEventListener('mousedown', event => {
+            event.preventDefault();
+            closeBlockMenu(state);
+            item.action();
+        });
+        menu.appendChild(option);
+    }
+
+    document.body.appendChild(menu);
+    state.blockMenu = menu;
+}
+
+function closeBlockMenu(state) {
+    if (state.blockMenu) { state.blockMenu.remove(); state.blockMenu = null; }
+}
+
+function duplicateBlock(state, blockEl) {
+    const block = serializeBlock(blockEl);
+    block.id = crypto.randomUUID();
+    const newEl = createBlockElement(block, state);
+    blockEl.after(newEl);
+    refreshBlockPresentation(state.container);
+    focusBlock(newEl);
+    notifyChanged(state);
+}
+
+function moveBlock(state, blockEl, direction) {
+    const sibling = direction < 0 ? blockEl.previousElementSibling : blockEl.nextElementSibling;
+    if (!sibling) return;
+    if (direction < 0) sibling.before(blockEl);
+    else sibling.after(blockEl);
+    refreshBlockPresentation(state.container);
+    notifyChanged(state);
+}
+
+function deleteBlockAction(state, blockEl) {
+    const next = blockEl.nextElementSibling || blockEl.previousElementSibling;
+    if (state.container.children.length <= 1) {
+        // Mirrors setBlocks' own invariant: the editor always shows at least one block.
+        const empty = createBlockElement(emptyBlock('paragraph'), state);
+        blockEl.replaceWith(empty);
+        focusBlock(empty);
+    } else {
+        blockEl.remove();
+        if (next) focusBlock(next);
+    }
+    refreshBlockPresentation(state.container);
+    notifyChanged(state);
+}
+
 // ---- Serialization ---------------------------------------------------------
 
 function scheduleNotify(state) {
@@ -1152,10 +1308,48 @@ function scheduleNotify(state) {
     state.notifyTimer = setTimeout(() => notifyChanged(state), 250);
 }
 
+// One undo entry per debounced edit burst (typing) or per structural op (add/delete/move/
+// indent/duplicate - all of which call this directly, bypassing the 250ms debounce). Bounded
+// so a long editing session can't grow the stack unboundedly.
+const MAX_UNDO_ENTRIES = 100;
+
 function notifyChanged(state) {
+    if (state.notifyTimer) { clearTimeout(state.notifyTimer); state.notifyTimer = null; }
+    const current = getBlocksJson(state.container);
+    if (state.lastSnapshot !== undefined && state.lastSnapshot !== current) {
+        state.undoStack.push(state.lastSnapshot);
+        if (state.undoStack.length > MAX_UNDO_ENTRIES) state.undoStack.shift();
+        state.redoStack = [];
+    }
+    state.lastSnapshot = current;
+    try { state.dotNetRef.invokeMethodAsync('OnBlocksChanged', current); }
+    catch { /* the Blazor circuit may have disconnected */ }
+}
+
+function notifyChangedSilently(state) {
     if (state.notifyTimer) { clearTimeout(state.notifyTimer); state.notifyTimer = null; }
     try { state.dotNetRef.invokeMethodAsync('OnBlocksChanged', getBlocksJson(state.container)); }
     catch { /* the Blazor circuit may have disconnected */ }
+}
+
+function undo(state) {
+    if (state.undoStack.length === 0) return;
+    const current = getBlocksJson(state.container);
+    const previous = state.undoStack.pop();
+    state.redoStack.push(current);
+    renderBlocks(state.container, state, previous);
+    state.lastSnapshot = previous;
+    notifyChangedSilently(state);
+}
+
+function redo(state) {
+    if (state.redoStack.length === 0) return;
+    const current = getBlocksJson(state.container);
+    const next = state.redoStack.pop();
+    state.undoStack.push(current);
+    renderBlocks(state.container, state, next);
+    state.lastSnapshot = next;
+    notifyChangedSilently(state);
 }
 
 function serializeBlock(blockEl) {
@@ -1384,6 +1578,15 @@ function isCaretAtStart(content) {
     return preRange.toString().length === 0;
 }
 
+function isCaretAtEnd(content) {
+    const range = getCaretRange(content);
+    if (!range) return false;
+    const postRange = range.cloneRange();
+    postRange.selectNodeContents(content);
+    postRange.setStart(range.endContainer, range.endOffset);
+    return postRange.toString().length === 0;
+}
+
 function textBefore(content, range) {
     const preRange = range.cloneRange();
     preRange.selectNodeContents(content);
@@ -1417,4 +1620,16 @@ function placeCaretAtTextOffset(content, offset) {
 function focusBlock(blockEl) {
     const target = blockEl.querySelector('.wiki-block-content, input');
     if (target) target.focus();
+}
+
+function focusBlockAtEnd(blockEl) {
+    const target = blockEl.querySelector('.wiki-block-content');
+    if (target) placeCaretAtTextOffset(target, target.textContent.length);
+    else focusBlock(blockEl);
+}
+
+function focusBlockAtStart(blockEl) {
+    const target = blockEl.querySelector('.wiki-block-content');
+    if (target) placeCaretAtTextOffset(target, 0);
+    else focusBlock(blockEl);
 }

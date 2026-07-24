@@ -829,7 +829,9 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
         // Snapshot history tracks the row's page body, not every property/cell edit - a
         // revision is only worth creating when the body itself was part of this save (i.e.
         // opened as a page and saved), same as why SaveInlineCellAsync never calls SaveRowAsync.
-        if (contentChanged)
+        // CreateRevisionCheckpoint additionally lets a silent background autosave persist
+        // content without minting a new version on every debounced keystroke burst.
+        if (contentChanged && editor.CreateRevisionCheckpoint)
         {
             await CreateRowRevisionAsync(row, performedBy, cancellationToken);
         }

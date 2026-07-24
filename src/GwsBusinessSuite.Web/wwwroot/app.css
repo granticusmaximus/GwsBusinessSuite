@@ -1269,6 +1269,7 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 }
 .wiki-block-add,
 .wiki-block-discussion,
+.wiki-block-menu-toggle,
 .wiki-block-handle {
     display: inline-flex;
     align-items: center;
@@ -1304,9 +1305,15 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 }
 .wiki-block-add:hover,
 .wiki-block-discussion:hover,
+.wiki-block-menu-toggle:hover,
 .wiki-block-handle:hover {
     background: #eef1f5;
     color: #495057;
+}
+.wiki-block-menu .list-group-item:disabled,
+.wiki-block-menu .list-group-item[disabled] {
+    opacity: .4;
+    pointer-events: none;
 }
 .wiki-block-body {
     flex: 1 1 auto;
@@ -2383,10 +2390,12 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .sentinel-workspace .wiki-block[data-block-type="divider"] hr { width: 100%; margin: 0; border-color: rgba(214, 211, 209, .2); opacity: 1; }
 .sentinel-workspace .wiki-block-add,
 .sentinel-workspace .wiki-block-discussion,
+.sentinel-workspace .wiki-block-menu-toggle,
 .sentinel-workspace .wiki-block-handle { color: var(--sentinel-faint); }
 
 .sentinel-workspace .wiki-block-add:hover,
 .sentinel-workspace .wiki-block-discussion:hover,
+.sentinel-workspace .wiki-block-menu-toggle:hover,
 .sentinel-workspace .wiki-block-handle:hover { background: var(--sentinel-hover); color: #e7e5e4; }
 
 .sentinel-workspace .wiki-block-discussion.has-discussions {
