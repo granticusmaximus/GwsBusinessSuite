@@ -25,11 +25,31 @@
                 </button>
                 <span class="small text-danger">@_error</span>
             </div>
-            @if (_current is not null)
+            @if (_running && _liveOutput.Length > 0)
+            {
+                <div class="sentinel-ai-result sentinel-ai-streaming">
+                    <div><span>Generating…</span></div>
+                    <pre>@_liveOutput</pre>
+                </div>
+            }
+            else if (_current is not null)
             {
                 <div class="sentinel-ai-result">
                     <div><span>Draft · @_current.Model</span><small>Review before inserting</small></div>
                     <pre>@_current.Output</pre>
+                    @if (_current.Citations.Count > 0)
+                    {
+                        <div class="sentinel-ai-citations">
+                            <small class="text-secondary">Sources:</small>
+                            @foreach (var citation in _current.Citations)
+                            {
+                                <span class="badge text-bg-light border">
+                                    <i class="bi @(citation.IsDatabase ? "bi-grid-3x3-gap-fill" : "bi-file-earmark-text")"></i>
+                                    @citation.Title
+                                </span>
+                            }
+                        </div>
+                    }
                     <div class="d-flex gap-2">
                         <button type="button" class="btn btn-sm btn-primary" @onclick="ApproveAndInsertAsync">Approve &amp; insert</button>
                         <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="RejectAsync">Reject</button>
@@ -65,6 +85,7 @@
     private string _action = SentinelAiActions.Ask;
     private string _instruction = string.Empty;
     private string _error = string.Empty;
+    private string _liveOutput = string.Empty;
     private SentinelAiRunView? _current;
     private List<SentinelAiRunView> _runs = [];
 
@@ -87,14 +108,31 @@
     {
         _running = true;
         _error = string.Empty;
+        _liveOutput = string.Empty;
+        _current = null;
         try
         {
-            _current = await SentinelAiService.RunAsync(WikiPageId, _action, _instruction,
-                await CurrentUserAccessor.GetCurrentUsernameAsync());
-            _runs.Insert(0, _current);
+            var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await foreach (var chunk in SentinelAiService.StreamAsync(WikiPageId, _action, _instruction, user))
+            {
+                if (chunk.CompletedRun is not null)
+                {
+                    _current = chunk.CompletedRun;
+                    _runs.Insert(0, _current);
+                }
+                else
+                {
+                    _liveOutput += chunk.Delta;
+                }
+                StateHasChanged();
+            }
         }
         catch (Exception ex) { _error = ex.Message; }
-        finally { _running = false; }
+        finally
+        {
+            _running = false;
+            _liveOutput = string.Empty;
+        }
     }
 
     private async Task ApproveAndInsertAsync()

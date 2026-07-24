@@ -296,6 +296,11 @@ public sealed class SentinelAiRun : AuditableEntity
     public string Model { get; set; } = string.Empty;
     public DateTimeOffset? ReviewedAt { get; set; }
     public string? ReviewedBy { get; set; }
+    // JSON array of SentinelAiCitation (TargetId, IsDatabase, Title) - the workspace search
+    // results actually folded into this run's grounding context, so a reviewer can see what
+    // the answer is (and isn't) backed by. A lightweight JSON column rather than a child
+    // table, same tier of complexity as AutomationNode.ParametersJson.
+    public string CitationsJson { get; set; } = "[]";
 }
 
 // Durable copy of a Notion-hosted file. Notion API file URLs are signed and expire, so

@@ -87,6 +87,51 @@ public sealed class NotionMappingTests
         mapped.PlainText.Should().Be("| Name | Value |\n| --- | --- |\n| A\\|B | Line Two |\n");
     }
 
+    [Fact]
+    public void MapTable_ShouldPreserveCellRichTextViaTableJson()
+    {
+        var table = Json("""{"table":{"has_column_header":false}}""");
+        var rows = new[]
+        {
+            Json("""{"table_row":{"cells":[[{"plain_text":"Bold","annotations":{"bold":true}}]]}}""")
+        };
+
+        var mapped = NotionMapping.MapTable(table, rows, 0);
+
+        mapped.Props.Should().ContainKey("tableJson");
+        var richRows = JsonSerializer.Deserialize<List<List<List<WikiRichTextSpan>>>>(mapped.Props["tableJson"], WikiBlockJson.Options);
+        richRows.Should().ContainSingle().Which.Should().ContainSingle()
+            .Which.Should().ContainSingle(span => span.Text == "Bold" && span.Bold);
+        mapped.Props["hasColumnHeader"].Should().Be("false");
+    }
+
+    [Theory]
+    [InlineData("video")]
+    [InlineData("audio")]
+    public void MapBlock_ShouldTagVideoAndAudioWithMediaKindForInlinePlayerRendering(string notionType)
+    {
+        var block = Json($"{{\"type\":\"{notionType}\",\"{notionType}\":{{\"external\":{{\"url\":\"https://example.com/a\"}},\"rich_text\":[]}}}}");
+
+        var mapped = NotionMapping.MapBlock(block, 0);
+
+        mapped.Should().NotBeNull();
+        mapped!.Type.Should().Be(WikiBlockTypes.Embed);
+        mapped.Props["mediaKind"].Should().Be(notionType);
+        mapped.Props["url"].Should().Be("https://example.com/a");
+    }
+
+    [Fact]
+    public void MapBlock_ShouldSurfaceLinkToPageAsVisibleTextInsteadOfSilentlyDropping()
+    {
+        var block = Json("""{"type":"link_to_page","link_to_page":{"type":"page_id","page_id":"target-page-id"}}""");
+
+        var mapped = NotionMapping.MapBlock(block, 0);
+
+        mapped.Should().NotBeNull();
+        mapped!.Type.Should().Be(WikiBlockTypes.Paragraph);
+        mapped.PlainText.Should().Contain("target-page-id");
+    }
+
     [Theory]
     [InlineData("column_list", true, false)]
     [InlineData("column", true, false)]
@@ -113,10 +158,18 @@ public sealed class NotionMappingTests
     [InlineData("checkbox", WikiDatabasePropertyTypes.Checkbox)]
     [InlineData("url", WikiDatabasePropertyTypes.Url)]
     [InlineData("created_time", WikiDatabasePropertyTypes.Date)]
+    [InlineData("last_edited_time", WikiDatabasePropertyTypes.Date)]
+    [InlineData("people", WikiDatabasePropertyTypes.Person)]
+    [InlineData("created_by", WikiDatabasePropertyTypes.Person)]
+    [InlineData("last_edited_by", WikiDatabasePropertyTypes.Person)]
+    [InlineData("files", WikiDatabasePropertyTypes.Files)]
+    [InlineData("relation", WikiDatabasePropertyTypes.Relation)]
     [InlineData("formula", WikiDatabasePropertyTypes.Text)]
     [InlineData("rollup", WikiDatabasePropertyTypes.Text)]
-    [InlineData("relation", WikiDatabasePropertyTypes.Text)]
     [InlineData("place", WikiDatabasePropertyTypes.Text)]
+    [InlineData("phone_number", WikiDatabasePropertyTypes.Text)]
+    [InlineData("email", WikiDatabasePropertyTypes.Text)]
+    [InlineData("unique_id", WikiDatabasePropertyTypes.Text)]
     public void MapPropertyType_ShouldUseSupportedTypesAndTextFallbacks(string notionType, string expectedType) =>
         NotionMapping.MapPropertyType(notionType).Should().Be(expectedType);
 
@@ -133,6 +186,57 @@ public sealed class NotionMappingTests
         NotionMapping.ApplyPropertyValue(values, propertyId, WikiDatabasePropertyTypes.Text, notionValue);
 
         WikiPropertyValues.GetText(values, propertyId).Should().Be(expected);
+    }
+
+    [Fact]
+    public void ApplyPropertyValue_ShouldStorePeopleAsMultiValueNames()
+    {
+        var propertyId = Guid.NewGuid();
+        var values = new JsonObject();
+        var notionValue = Json("""{"type":"people","people":[{"name":"Grant"},{"name":"Morgan"}]}""");
+
+        NotionMapping.ApplyPropertyValue(values, propertyId, WikiDatabasePropertyTypes.Person, notionValue);
+
+        WikiPropertyValues.GetMultiSelect(values, propertyId).Should().Equal("Grant", "Morgan");
+    }
+
+    [Fact]
+    public void ApplyPropertyValue_ShouldStoreCreatedByAsASinglePersonName()
+    {
+        var propertyId = Guid.NewGuid();
+        var values = new JsonObject();
+        var notionValue = Json("""{"type":"created_by","created_by":{"name":"Grant","id":"user-1"}}""");
+
+        NotionMapping.ApplyPropertyValue(values, propertyId, WikiDatabasePropertyTypes.Person, notionValue);
+
+        WikiPropertyValues.GetMultiSelect(values, propertyId).Should().Equal("Grant");
+    }
+
+    [Fact]
+    public void ApplyPropertyValue_ShouldStoreFilesAsMultiValueNames()
+    {
+        var propertyId = Guid.NewGuid();
+        var values = new JsonObject();
+        var notionValue = Json("""{"type":"files","files":[{"name":"spec.pdf"},{"name":"design.png"}]}""");
+
+        NotionMapping.ApplyPropertyValue(values, propertyId, WikiDatabasePropertyTypes.Files, notionValue);
+
+        WikiPropertyValues.GetMultiSelect(values, propertyId).Should().Equal("spec.pdf", "design.png");
+    }
+
+    [Fact]
+    public void ApplyPropertyValue_ShouldStoreRelationAsRawNotionPageIdsPendingLaterResolution()
+    {
+        var propertyId = Guid.NewGuid();
+        var values = new JsonObject();
+        var notionValue = Json("""{"type":"relation","relation":[{"id":"notion-page-a"},{"id":"notion-page-b"}]}""");
+
+        NotionMapping.ApplyPropertyValue(values, propertyId, WikiDatabasePropertyTypes.Relation, notionValue);
+
+        // Resolving these to local WikiDatabaseRow ids is NotionSyncService.ResolveRelationRowIdsAsync's
+        // job (it needs DB access this pure mapper doesn't have) - covered by
+        // NotionSyncServiceTests, not here.
+        WikiPropertyValues.GetMultiSelect(values, propertyId).Should().Equal("notion-page-a", "notion-page-b");
     }
 
     private static JsonElement Json(string json) => JsonDocument.Parse(json).RootElement.Clone();

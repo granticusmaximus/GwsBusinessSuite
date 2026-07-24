@@ -138,6 +138,19 @@ public static class WikiBlockHtmlRenderer
             return string.Empty;
         }
 
+        // Set only by NotionMapping.MapBlock for imported video/audio/file/pdf blocks -
+        // Sentinel has no dedicated block type for these, but an inline player reads far
+        // better than a bare link for the two kinds a <video>/<audio> tag can actually play.
+        var mediaKind = block.Props.GetValueOrDefault("mediaKind");
+        if (mediaKind is "video")
+        {
+            return $"<video class=\"wiki-embed-media\" src=\"{WebUtility.HtmlEncode(url)}\" controls preload=\"metadata\"></video>";
+        }
+        if (mediaKind is "audio")
+        {
+            return $"<audio class=\"wiki-embed-media\" src=\"{WebUtility.HtmlEncode(url)}\" controls preload=\"metadata\"></audio>";
+        }
+
         if (WikiEmbedResolver.TryResolve(url, out var embedUrl, out var providerLabel))
         {
             // allow-same-origin is safe here despite the usual allow-scripts pairing caution:

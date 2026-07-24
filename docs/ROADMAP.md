@@ -147,4 +147,22 @@
   row inline, reusing the exact same rich-text link scheme person/date mentions already use;
   a row's own page shows a "Mentioned in" panel mirroring the existing page Backlinks panel).
   Graph navigation (an interactive workspace visualization) remains open - it has no existing
-  code to extend and is a substantial feature of its own.
+  code to extend and is a substantial feature of its own. Sentinel AI now streams answers live
+  (new `IOllamaService.GenerateStreamAsync`, no streaming precedent existed in this app before)
+  and cites which pages/databases were actually folded into each run's grounding context,
+  replacing the old "dump 30 recent pages into every prompt" approach with the same ranked
+  search the sidebar uses. Transcription capture (needs a new self-hosted speech-to-text
+  dependency Ollama can't provide) and chained/reviewable multi-step AI workflows remain open.
+  The Notion connector's import fidelity is substantially improved per
+  `.claude/plans/generic-napping-axolotl.md`'s Track A: `people`/`files`/`relation`/
+  `created_by`/`last_edited_by`/`last_edited_time` properties now target Sentinel's real typed
+  properties instead of one flattened text string, with relation values resolved from raw
+  Notion page ids to local row ids (`NotionSyncService.ResolveRelationRowIdsAsync`, retried
+  every sync so a relation to not-yet-imported content still resolves later); `column_list`
+  imports as a single native Columns block instead of losing the side-by-side layout entirely;
+  Notion video/audio blocks render as inline players; table cells keep bold/italic formatting;
+  and `link_to_page` blocks are now visible (a placeholder referencing the Notion id) instead
+  of silently dropped. `formula`/`rollup` deliberately stay best-effort text - translating
+  Notion's own formula syntax into Sentinel's expression language is a separate project, not a
+  value-mapping fix. The plan's picker-UI (Track A4/A5) and visual-parity work (Track B) remain
+  open in that same plan file.

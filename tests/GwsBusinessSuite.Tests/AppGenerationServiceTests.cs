@@ -388,6 +388,12 @@ public sealed class AppGenerationServiceTests
             return Task.FromResult(GenerateTextResult);
         }
 
+        public async IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
+
         public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyCollection<string>>(Array.Empty<string>());
 

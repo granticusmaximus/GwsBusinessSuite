@@ -133,7 +133,12 @@ public static class NotionMapping
             case "audio":
             case "file":
             case "pdf":
-                return NewBlock(WikiBlockTypes.Embed, indentLevel, richText, FileProps(block, body));
+                // Sentinel has no dedicated Video/Audio/File/PDF block types, but the shared
+                // Embed renderer can pick an inline <video>/<audio> player instead of a bare
+                // link when it knows the media kind - see WikiBlockHtmlRenderer.RenderEmbed
+                // and wiki-block-editor.js's renderMediaPreview.
+                var mediaProps = new Dictionary<string, string>(FileProps(block, body)) { ["mediaKind"] = type };
+                return NewBlock(WikiBlockTypes.Embed, indentLevel, richText, mediaProps);
             case "embed":
             case "bookmark":
             case "link_preview":
@@ -150,6 +155,19 @@ public static class NotionMapping
                 return NewBlock(WikiBlockTypes.TableOfContents, indentLevel, []);
             case "synced_block":
                 return NewBlock(WikiBlockTypes.SyncedBlock, indentLevel, richText);
+            case "link_to_page":
+                // Previously silently dropped (fell to default -> onUnsupported -> null).
+                // MapBlock is a pure JSON mapper with no DB access, so it can't resolve the
+                // referenced Notion page/database id to a local Sentinel page and produce a
+                // real wikilink: the way [[Page]] mentions do - that would need a second
+                // resolution pass (like ApplyPropertyValue's Relation case gets from
+                // NotionSyncService.ResolveRelationRowIdsAsync), which isn't built for this
+                // narrower case. Surfacing the reference as visible text is still a real
+                // improvement over silent deletion.
+                var linkedPageId = ExtractLinkToPageId(body);
+                return linkedPageId is null
+                    ? null
+                    : NewBlock(WikiBlockTypes.Paragraph, indentLevel, [new WikiRichTextSpan($"Linked Notion page ({linkedPageId})")]);
             default:
                 if (type.StartsWith("heading_", StringComparison.Ordinal))
                 {
@@ -160,37 +178,65 @@ public static class NotionMapping
         }
     }
 
-    // table + its table_row children collapse into a single native table block holding a
-    // pipe-delimited grid - table itself carries no rich text, so it can't map
-    // through MapBlock alone. Cell rich text is flattened to plain text (no bold/italic
-    // preserved inside table cells) - a documented simplification, not a bug.
+    // table + its table_row children collapse into a single native table block - table
+    // itself carries no rich text, so it can't map through MapBlock alone. Cell rich text
+    // (bold/italic/etc) is preserved via the "tableJson" prop, the same rich-cell storage
+    // path natively-authored tables already use (WikiBlockHtmlRenderer.RenderTable's
+    // tableJson branch) - previously this flattened every cell to plain text. The pipe-
+    // markdown RichText/PlainText is still populated alongside it as a fallback for anything
+    // that only reads a table block's plain text (history diffs, search indexing) and
+    // pre-dates tableJson.
     public static WikiBlock MapTable(JsonElement tableBlock, IReadOnlyList<JsonElement> rowBlocks, int indentLevel)
     {
         var hasColumnHeader = tableBlock.TryGetProperty("table", out var tableBody)
             && tableBody.TryGetProperty("has_column_header", out var headerElement)
             && headerElement.ValueKind == JsonValueKind.True;
 
-        var rows = rowBlocks
+        var richRows = rowBlocks
             .Select(rowBlock => rowBlock.TryGetProperty("table_row", out var rowBody) && rowBody.TryGetProperty("cells", out var cellsElement) && cellsElement.ValueKind == JsonValueKind.Array
-                ? cellsElement.EnumerateArray().Select(cell => string.Concat(MapRichText(cell).Select(span => span.Text))).ToList()
-                : [])
+                ? cellsElement.EnumerateArray().Select(MapRichText).ToList()
+                : new List<IReadOnlyList<WikiRichTextSpan>>())
             .ToList();
 
+        var plainRows = richRows.Select(row => row.Select(cell => string.Concat(cell.Select(span => span.Text))).ToList()).ToList();
         var markdown = new StringBuilder();
-        for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+        for (var rowIndex = 0; rowIndex < plainRows.Count; rowIndex++)
         {
-            markdown.Append("| ").Append(string.Join(" | ", rows[rowIndex].Select(EscapePipeCell))).Append(" |\n");
+            markdown.Append("| ").Append(string.Join(" | ", plainRows[rowIndex].Select(EscapePipeCell))).Append(" |\n");
             if (rowIndex == 0 && hasColumnHeader)
             {
-                markdown.Append("| ").Append(string.Join(" | ", rows[rowIndex].Select(_ => "---"))).Append(" |\n");
+                markdown.Append("| ").Append(string.Join(" | ", plainRows[rowIndex].Select(_ => "---"))).Append(" |\n");
             }
         }
 
+        var props = new Dictionary<string, string>
+        {
+            ["tableJson"] = JsonSerializer.Serialize(richRows, WikiBlockJson.Options),
+            ["hasColumnHeader"] = hasColumnHeader ? "true" : "false"
+        };
+
         return new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Table, indentLevel,
-            [new WikiRichTextSpan(markdown.ToString())], new Dictionary<string, string>());
+            [new WikiRichTextSpan(markdown.ToString())], props);
     }
 
     private static string EscapePipeCell(string cell) => cell.Replace("|", "\\|").Replace("\n", " ");
+
+    private static string? ExtractLinkToPageId(JsonElement body)
+    {
+        if (body.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+        if (body.TryGetProperty("page_id", out var pageId) && pageId.ValueKind == JsonValueKind.String)
+        {
+            return pageId.GetString();
+        }
+        if (body.TryGetProperty("database_id", out var databaseId) && databaseId.ValueKind == JsonValueKind.String)
+        {
+            return databaseId.GetString();
+        }
+        return null;
+    }
 
     private static string ExtractFileUrl(JsonElement fileHolder)
     {
@@ -296,8 +342,27 @@ public static class NotionMapping
         // WikiDatabasePropertyTypes.CreatedTime, which is backed by the local row's own
         // CreatedAt and would show the wrong date if conflated with Notion's.
         "created_time" => WikiDatabasePropertyTypes.Date,
-        // Best-effort string rendering - see NotionSyncServiceTests for the exact per-type
-        // fallback text shape.
+        "last_edited_time" => WikiDatabasePropertyTypes.Date,
+        // WikiDatabasePropertyTypes.Person is a free-text list of display names (see its
+        // property-cell editor, WikiDatabaseEditor.razor) - not a portal-account reference -
+        // so mapping Notion collaborator names into it doesn't conflate identities.
+        "people" => WikiDatabasePropertyTypes.Person,
+        "created_by" => WikiDatabasePropertyTypes.Person,
+        "last_edited_by" => WikiDatabasePropertyTypes.Person,
+        "files" => WikiDatabasePropertyTypes.Files,
+        // Row values start as raw Notion page ids and are rewritten to local
+        // WikiDatabaseRow ids by NotionSyncService.ResolveRelationRowIdsAsync once every
+        // database in the sync run has been upserted - see ApplyPropertyValue below.
+        "relation" => WikiDatabasePropertyTypes.Relation,
+        // formula/rollup stay best-effort text: Sentinel's native Formula/Rollup types are
+        // *computed* (a typed expression re-evaluated from other properties, or a
+        // relation+aggregation), not stored values - faithfully importing one would mean
+        // translating Notion's own formula syntax into Sentinel's expression language (and,
+        // for rollup, an already-imported Relation property to aggregate over), which is a
+        // separate project, not a value-mapping fix. See docs/WIKI_NOTION_CLONE.md.
+        // Best-effort string rendering for everything else (phone_number, email, unique_id,
+        // verification, button, formula, rollup) - see NotionSyncServiceTests for the exact
+        // per-type fallback text shape.
         _ => WikiDatabasePropertyTypes.Text
     };
 
@@ -314,6 +379,27 @@ public static class NotionMapping
         ["pink"] = "#ec4899",
         ["red"] = "#ef4444"
     };
+
+    // Reads a relation property schema's target database/data source id (whichever field the
+    // pinned API version populates - checked in order). NotionSyncService resolves this
+    // Notion id to a local WikiDatabase.Id (every database is upserted before any property
+    // schema is synced, so a same-pass target is always already reconcilable by NotionId).
+    public static string? ExtractRelationTargetNotionId(JsonElement propertySchema)
+    {
+        if (!propertySchema.TryGetProperty("relation", out var relation) || relation.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+        if (relation.TryGetProperty("data_source_id", out var dataSourceId) && dataSourceId.ValueKind == JsonValueKind.String)
+        {
+            return dataSourceId.GetString();
+        }
+        if (relation.TryGetProperty("database_id", out var databaseId) && databaseId.ValueKind == JsonValueKind.String)
+        {
+            return databaseId.GetString();
+        }
+        return null;
+    }
 
     // Reads a select/status/multi_select schema's "options" array - the property id and each
     // option's own id are preserved verbatim, so row values (which reference option ids) keep
@@ -371,6 +457,15 @@ public static class NotionMapping
             case WikiDatabasePropertyTypes.MultiSelect:
                 WikiPropertyValues.SetMultiSelect(values, localPropertyId, ExtractOptionIds(body));
                 return;
+            case WikiDatabasePropertyTypes.Person:
+                WikiPropertyValues.SetMultiSelect(values, localPropertyId, ExtractPersonNames(notionType, body));
+                return;
+            case WikiDatabasePropertyTypes.Files:
+                WikiPropertyValues.SetMultiSelect(values, localPropertyId, ExtractFileNames(body));
+                return;
+            case WikiDatabasePropertyTypes.Relation:
+                WikiPropertyValues.SetMultiSelect(values, localPropertyId, ExtractRelationNotionIds(body));
+                return;
             default:
                 WikiPropertyValues.SetText(values, localPropertyId, ExtractTextValue(notionType, body));
                 return;
@@ -401,9 +496,36 @@ public static class NotionMapping
             ? body.EnumerateArray().Select(ExtractOptionId).Where(id => id is not null).Select(id => id!).ToList()
             : [];
 
-    // Best-effort plain-text rendering for every property type that maps to WikiDatabasePropertyTypes.Text
-    // (title/rich_text/url/email/phone_number/people/files/unique_id/created_by/last_edited_by/
-    // last_edited_time/place/formula/rollup/relation).
+    private static IReadOnlyList<string> ExtractPersonNames(string notionType, JsonElement body) => notionType switch
+    {
+        "people" => body.ValueKind == JsonValueKind.Array
+            ? body.EnumerateArray().Select(p => p.TryGetProperty("name", out var n) ? n.GetString() ?? string.Empty : string.Empty).Where(n => n.Length > 0).ToList()
+            : [],
+        "created_by" or "last_edited_by" => body.ValueKind == JsonValueKind.Object
+            && ((body.TryGetProperty("name", out var name) ? name.GetString() : null) ?? (body.TryGetProperty("id", out var id) ? id.GetString() : null)) is { Length: > 0 } value
+                ? [value]
+                : [],
+        _ => []
+    };
+
+    private static IReadOnlyList<string> ExtractFileNames(JsonElement body) =>
+        body.ValueKind == JsonValueKind.Array
+            ? body.EnumerateArray().Select(f => f.TryGetProperty("name", out var n) ? n.GetString() ?? string.Empty : string.Empty).Where(n => n.Length > 0).ToList()
+            : [];
+
+    // Raw Notion page ids, not yet resolved to local WikiDatabaseRow ids - see
+    // NotionSyncService.ResolveRelationRowIdsAsync, which runs once after every database in
+    // a sync pass has been upserted (a relation's target row may live in a database
+    // processed later in the same run, or not be imported yet at all).
+    private static IReadOnlyList<string> ExtractRelationNotionIds(JsonElement body) =>
+        body.ValueKind == JsonValueKind.Array
+            ? body.EnumerateArray().Select(r => r.TryGetProperty("id", out var id) ? id.GetString() : null).Where(id => id is { Length: > 0 }).Select(id => id!).ToList()
+            : [];
+
+    // Best-effort plain-text rendering for every property type that still maps to
+    // WikiDatabasePropertyTypes.Text (rich_text/url/email/phone_number/unique_id/
+    // verification/button/formula/rollup). people/files/relation/created_by/
+    // last_edited_by moved to their own typed cases above.
     private static string ExtractTextValue(string notionType, JsonElement body) => notionType switch
     {
         "title" or "rich_text" => string.Concat(MapRichText(body).Select(span => span.Text)),

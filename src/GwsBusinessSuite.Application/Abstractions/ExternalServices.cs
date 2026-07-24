@@ -16,6 +16,12 @@ public interface ICjAffiliateService
 public interface IOllamaService
 {
     Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default);
+
+    // Yields each response token/fragment as Ollama streams it (NDJSON, one JSON object per
+    // line), for callers that want to render partial output live rather than await the full
+    // response - see SentinelAiService.StreamAsync for the first caller.
+    IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default);
+
     Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default);
     Task PullModelAsync(string model, CancellationToken ct = default);
     Task DeleteModelAsync(string model, CancellationToken ct = default);

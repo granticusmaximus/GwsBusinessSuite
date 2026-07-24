@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Wiki;
+using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.Data.Sqlite;
@@ -588,6 +589,80 @@ public sealed class NotionSyncServiceTests
 
         var row = await fixture.Db.WikiDatabaseRows.SingleAsync(item => item.NotionId == "row-1");
         WikiBlockJson.ParseBlocks(row.BlocksJson).Should().ContainSingle(block => block.PlainText == "Project page notes");
+    }
+
+    [Fact]
+    public async Task SyncAsync_ShouldResolveRelationSchemaAndRowValuesToLocalIds()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.SearchResults = [Database("teams-db", "Teams"), Database("projects-db", "Projects")];
+        fixture.Notion.DatabaseSchemas["teams-db"] = Json("""
+            {"properties":{"Name":{"id":"title","type":"title","title":{}}}}
+            """);
+        fixture.Notion.DatabaseRows["teams-db"] =
+        [
+            Json("""
+                {"object":"page","id":"team-row-1","parent":{"type":"database_id","database_id":"teams-db"},"properties":{"Name":{"id":"title","type":"title","title":[{"plain_text":"Engineering"}]}}}
+                """)
+        ];
+        fixture.Notion.DatabaseSchemas["projects-db"] = Json("""
+            {"properties":{"Name":{"id":"title","type":"title","title":{}},"Team":{"id":"team-prop","type":"relation","relation":{"data_source_id":"teams-db"}}}}
+            """);
+        fixture.Notion.DatabaseRows["projects-db"] =
+        [
+            Json("""
+                {"object":"page","id":"project-row-1","parent":{"type":"database_id","database_id":"projects-db"},"properties":{"Name":{"id":"title","type":"title","title":[{"plain_text":"Website Relaunch"}]},"Team":{"id":"team-prop","type":"relation","relation":[{"id":"team-row-1"}]}}}
+                """)
+        ];
+
+        (await fixture.Service.SyncAsync()).IsSuccess.Should().BeTrue();
+
+        var teamsDatabase = await fixture.Db.WikiDatabases.SingleAsync(d => d.NotionId == "teams-db");
+        var teamRow = await fixture.Db.WikiDatabaseRows.SingleAsync(r => r.NotionId == "team-row-1");
+        var teamProperty = await fixture.Db.WikiDatabaseProperties.SingleAsync(p => p.NotionId == "team-prop");
+        teamProperty.Type.Should().Be(WikiDatabasePropertyTypes.Relation);
+        WikiDatabasePropertyConfig.Parse(teamProperty).RelatedDatabaseId.Should().Be(teamsDatabase.Id);
+
+        var projectRow = await fixture.Db.WikiDatabaseRows.SingleAsync(r => r.NotionId == "project-row-1");
+        var values = WikiPropertyValues.ParseObject(projectRow.PropertyValuesJson);
+        WikiPropertyValues.GetMultiSelect(values, teamProperty.Id).Should().Equal(teamRow.Id.ToString());
+    }
+
+    [Fact]
+    public async Task SyncAsync_ShouldMapColumnListToASingleNativeColumnsBlockInsteadOfLosingTheLayout()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.SearchResults = [Page("page-1", "Two-column page")];
+        fixture.Notion.BlockChildren["page-1"] =
+        [
+            Json("""
+                {"object":"block","id":"column-list-1","type":"column_list","has_children":true,"column_list":{}}
+                """)
+        ];
+        fixture.Notion.BlockChildren["column-list-1"] =
+        [
+            Json("""{"object":"block","id":"column-1","type":"column","has_children":true,"column":{}}"""),
+            Json("""{"object":"block","id":"column-2","type":"column","has_children":true,"column":{}}""")
+        ];
+        fixture.Notion.BlockChildren["column-1"] =
+        [
+            Json("""
+                {"object":"block","id":"c1-p1","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Left column text"}]}}
+                """)
+        ];
+        fixture.Notion.BlockChildren["column-2"] =
+        [
+            Json("""
+                {"object":"block","id":"c2-p1","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Right column text"}]}}
+                """)
+        ];
+
+        (await fixture.Service.SyncAsync()).IsSuccess.Should().BeTrue();
+
+        var page = await fixture.Db.WikiPages.SingleAsync(item => item.NotionId == "page-1");
+        var blocks = WikiBlockJson.ParseBlocks(page.BlocksJson);
+        var columnsBlock = blocks.Should().ContainSingle(block => block.Type == WikiBlockTypes.Columns).Subject;
+        columnsBlock.PlainText.Should().Be("Left column text|||Right column text");
     }
 
     [Fact]

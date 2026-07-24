@@ -66,12 +66,12 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 | --- | --- | --- |
 | Page model | Nested pages (flat parent-id + explicit sibling `SortOrder`), icon, cover image, move/reorder, transactional subtree duplication | — |
 | Block editor | Slash-command insert, drag-reorder, Tab/Shift-Tab indent, inline bold/italic/link, `[[Page]]` autocomplete, reusable page and block templates, native tables, equations, breadcrumbs, TOC, buttons, synced blocks, columns, a contextual block menu (duplicate/move/delete, mirrored by keyboard shortcuts), session-local undo/redo, and Arrow-key/Escape keyboard navigation between blocks and out of floating menus | Character-level undo/redo persisted across reloads; keyboard flows for table-cell editing |
-| Core block types | paragraph, heading 1-3, lists, to-do, toggle, quote, callout, code, divider, image, embed (YouTube/Vimeo/Spotify/Figma/CodePen/Loom render as a sandboxed iframe via URL-pattern detection, `WikiEmbedResolver.cs`; other URLs fall back to a plain link), table, equation, breadcrumb, TOC, button, synced block, columns, and legacy markdown | True oEmbed (title/thumbnail metadata, live provider discovery) and additional provider-specific media |
+| Core block types | paragraph, heading 1-3, lists, to-do, toggle, quote, callout, code, divider, image, embed (YouTube/Vimeo/Spotify/Figma/CodePen/Loom render as a sandboxed iframe via URL-pattern detection, `WikiEmbedResolver.cs`; a Notion-imported video/audio block renders an inline `<video>`/`<audio>` player instead, via the same block's `mediaKind` prop; other URLs fall back to a plain link), table (rich per-cell formatting via `tableJson`), equation, breadcrumb, TOC, button, synced block, columns, and legacy markdown | True oEmbed (title/thumbnail metadata, live provider discovery) and additional provider-specific media |
 | History | Bounded DB snapshot revisions (20/page), structural diff (added/removed/changed blocks), revert-as-new-version | — |
 | Databases | Typed properties including person, files, place, evaluated advanced formulas, one-way or reciprocal row-picker relations, and calculated rollups; editable Table, Board, List, Gallery, Calendar, Timeline, Chart, Form, Map, Feed, and Dashboard views | Richer rollup formatting |
 | Databases — structure | Databases share the page sidebar tree; every row opens as a responsive block-content page with a per-view side-peek, center-peek, or full-page presentation and configurable property visibility/order; row icon, cover image, and bounded version history (20/row, structural diff, revert-as-new-version) match page-level history; linked and inline database blocks reference canonical data without duplication | — |
 | Search & graph | All-token ranked page/block/database-row search with highlighted matches; per-user saved searches; structured and legacy backlinks; per-user favorites/recents; structured page, person, date, and database-row mentions, with a personal mention inbox for people and a "Mentioned in" backlinks panel for rows | Graph visualization |
-| Import/sync | Current `2026-03-11` Notion API, data sources, views, comments, subtree-aware selective import, recursive template/unsupported-container content recovery, full-page Markdown recovery for unavailable structured content, meeting-note summary/notes/transcript import, content-count diagnostics, encrypted token storage, soft archival, durable authenticated copies of Notion-hosted files, explicitly enabled conflict-aware manual page pushes, and reusable template import from connected free Notion templates or Markdown/CSV/HTML ZIP exports | Broader bidirectional database writes |
+| Import/sync | Current `2026-03-11` Notion API, data sources, views, comments, subtree-aware selective import, recursive template/unsupported-container content recovery, full-page Markdown recovery for unavailable structured content, meeting-note summary/notes/transcript import, content-count diagnostics, encrypted token storage, soft archival, durable authenticated copies of Notion-hosted files, explicitly enabled conflict-aware manual page pushes, reusable template import from connected free Notion templates or Markdown/CSV/HTML ZIP exports, full-fidelity property mapping (people/files/relation/created-by/last-edited-by/last-edited-time target Sentinel's real typed properties instead of degrading to text, with relation values resolved to local row ids), column layouts, inline video/audio players, and rich table cell formatting | A browse/picker UI instead of paste-ids-or-blank; broader bidirectional database writes |
 | Visibility | Authenticated portal-member roles and per-resource view/comment/edit/full-access grants, plus expiring/revocable tokenized public page and database shares | Richer public-share controls and auditing |
 
 ## Delivery sequence
@@ -157,7 +157,7 @@ capabilities where they fit GWS Business Suite; they are no longer silently excl
 | Collaboration | Discussions, replies, reactions, notifications, DB-backed cross-instance presence/polling, in-memory block-granular remote cursor indicators, block-level three-way merge, authenticated portal-member roles, granular permissions, and tokenized public sharing | Character-level CRDT/OT concurrent editing and richer public-share controls |
 | Presentation | Emoji icon and cover image for pages and database rows alike (cover can be uploaded inline via the cover picker, not just picked from an already-uploaded asset), row-level bounded version history, plus responsive side-peek, center-peek, and full-page database rows with per-view property presentation | Custom icon *image* uploads (icons remain emoji-only), page width/fonts, and reusable style defaults |
 | Integration | Encrypted token, current data-source/view/comment API, selective reconciliation, durable authenticated Notion-hosted file ingestion, opt-in conflict-aware manual page writes, and free-template interoperability through connected-workspace sync or bounded Notion ZIP imports | Bidirectional database schema/row writes |
-| AI | Workspace-grounded ask/writing/translation/research/meeting notes/autofill with durable approve/reject runs | Streaming chat, citations, transcription capture, and autonomous agents |
+| AI | Workspace-grounded ask/writing/translation/research/meeting notes/autofill with streamed live output, ranked-search citations, and durable approve/reject runs | Transcription capture and autonomous agents |
 
 Official research baseline: [Notion block API](https://developers.notion.com/reference/block),
 [Notion API introduction](https://developers.notion.com/reference/intro),
@@ -168,13 +168,30 @@ Official research baseline: [Notion block API](https://developers.notion.com/ref
 retired database-only contract.
 
 Known import limitations are explicit: Notion-hosted files larger than 25 MB remain linked
-to their temporary upstream URL rather than copied into Sentinel; relation values retain
-related-page ids rather than resolved titles; uncommon or computed property types are
-preserved as read-only best-effort text, with `place` limited by the upstream API as well.
-When structured block retrieval is unavailable, Sentinel requests Notion's full-page Markdown
-representation and converts its common headings, paragraphs, lists, tasks, quotes, images,
-dividers, and code fences into native editable blocks. The sync result reports imported block
-and still-empty page counts so metadata-only imports are visible rather than silent.
+to their temporary upstream URL rather than copied into Sentinel; `formula`/`rollup`
+properties stay read-only best-effort text rather than native computed properties, since
+faithfully importing one means translating Notion's own formula syntax into Sentinel's
+expression language (and, for rollup, an already-imported relation to aggregate over) - a
+separate project from a value-mapping fix; other uncommon property types (`phone_number`,
+`email`, `unique_id`, `verification`, `button`) are likewise preserved as read-only best-effort
+text, with `place` limited by the upstream API as well; `column_list`/`column` import into a
+single native Columns block whose per-column content is flattened to plain text (Sentinel's
+own Columns block only stores a flat string per column, not nested blocks, so a column with
+multiple or richly-formatted blocks loses some of that structure - still a real improvement
+over losing the side-by-side layout entirely, which prior versions did); and `link_to_page`
+blocks surface as visible placeholder text referencing the linked Notion id rather than a
+real Sentinel wikilink (unlike `[[Page]]` mentions, resolving this would need a second
+DB-aware resolution pass, which isn't built for this narrower case). Relation property
+*values*, `people`/`files`/`created_by`/`last_edited_by` property *values*, and
+`last_edited_time` all now target Sentinel's real typed properties (Person/Files/Relation/
+Date) instead of degrading to one flattened text string - relation values specifically
+resolve from raw Notion page ids to local `WikiDatabaseRow` ids once the target row has been
+imported (`NotionSyncService.ResolveRelationRowIdsAsync`, re-attempted every sync so a
+relation to content imported later still resolves on a subsequent pass). When structured
+block retrieval is unavailable, Sentinel requests Notion's full-page Markdown representation
+and converts its common headings, paragraphs, lists, tasks, quotes, images, dividers, and
+code fences into native editable blocks. The sync result reports imported block and
+still-empty page counts so metadata-only imports are visible rather than silent.
 
 Known UI/CSS gaps are also explicit, since a "delivered" line in this doc records the data
 model and service layer being complete, not a guarantee the Razor/CSS layer keeps pace - the
@@ -304,8 +321,25 @@ screens.
    workspace) is explicitly NOT attempted here - unlike the other two items, it has no existing
    code to reuse or extend and is a substantial visual/canvas feature in its own right, so it
    remains fully open as its own future unit of work.
-7. **Sentinel AI depth** — streaming answers with citations, transcription capture, and
-   reviewable autonomous workflows.
+7. **Sentinel AI depth** ✅ (streaming + citations) — `IOllamaService` gained
+   `GenerateStreamAsync` (Ollama's NDJSON `stream:true` mode; no streaming precedent existed
+   anywhere in this app before this), and `SentinelAiPanel.razor` now renders tokens live as
+   they arrive instead of a spinner-then-full-result. Grounding was rebuilt on top of
+   `SentinelWorkspaceService.SearchAsync` (ranked top-K, same search the sidebar box uses)
+   instead of dumping the 30 most-recent pages and 12 databases into every prompt regardless
+   of relevance; each run now persists a `CitationsJson` list of exactly which pages/databases
+   were folded into its context, shown as source chips under the answer. Known limitation
+   surfaced by this: `SearchAsync`'s matching is an AND over every instruction token including
+   stopwords, so a natural-language question ("what does the blue switch do?") often cites
+   nothing even when a clearly relevant page exists, while a keyword-style instruction ("blue
+   switch") does - citations are best-effort, not a guarantee of complete grounding coverage.
+   Deliberately NOT attempted: **transcription capture** (Ollama serves LLMs, not speech-to-
+   text; this needs an entirely separate self-hosted ASR tool such as whisper.cpp, which is a
+   new infrastructure/deployment dependency, not something to add unilaterally without that
+   being an explicit decision) and **reviewable autonomous workflows** (chaining multiple AI
+   steps with human checkpoints between them - every `SentinelAiRun` today is still strictly
+   one-shot; the automation engine's `core.wait`/`core.approval` pause-resume pattern is a
+   plausible template for this but was not built).
 8. **Sync and sharing hardening** — bidirectional database schema/row writes and richer
    public-share controls. Durable Notion-hosted file ingestion is delivered.
 9. **Native platform integrations** — platform-appropriate desktop and mobile affordances.

@@ -390,6 +390,15 @@ public sealed class NotionSyncService(
                 archived += await ArchiveMissingAsync(seenTopLevelNotionIds, cancellationToken);
             }
 
+            // 7. Resolve relation row references. NotionMapping.ApplyPropertyValue writes raw
+            // Notion page ids for a Relation property (it's a pure JSON mapper with no DB
+            // access to look up the local row a Notion id became); now that every database in
+            // this pass has been upserted, rewrite whatever became resolvable to local
+            // WikiDatabaseRow ids. Must run after every database sync, not per-database,
+            // since a relation's target row can live in a database processed later in the
+            // same pass.
+            await ResolveRelationRowIdsAsync(cancellationToken);
+
             settingsRow.LastSyncedAt = DateTimeOffset.UtcNow;
             settingsRow.LastSyncImportedCount = imported;
             settingsRow.LastSyncUpdatedCount = updated;
@@ -985,6 +994,44 @@ public sealed class NotionSyncService(
                 continue;
             }
 
+            // column_list/column special-cased the same way "table" is above, rather than
+            // going through IsFlattenedWrapper (which would import each column's content
+            // sequentially and lose the side-by-side layout entirely). Sentinel's own native
+            // Columns block only stores a flat "|||"-joined string per column (see
+            // WikiBlockHtmlRenderer.RenderColumns), not nested block content, so a column
+            // containing multiple/rich blocks is flattened to its plain text - a real
+            // simplification, but strictly better than losing the column grouping altogether.
+            if (type == "column_list" && childId.Length > 0)
+            {
+                var columnChildren = new List<JsonElement>();
+                string? columnListCursor = null;
+                do
+                {
+                    var columnListPage = await notionService.GetBlockChildrenAsync(token, childId, columnListCursor, cancellationToken);
+                    columnChildren.AddRange(columnListPage.Results);
+                    columnListCursor = columnListPage.HasMore ? columnListPage.NextCursor : null;
+                } while (columnListCursor is not null);
+
+                var columnTexts = new List<string>();
+                foreach (var columnChild in columnChildren)
+                {
+                    var columnChildId = columnChild.TryGetProperty("id", out var columnIdElement) ? columnIdElement.GetString() ?? string.Empty : string.Empty;
+                    var columnBlocks = new List<WikiBlock>();
+                    if (columnChildId.Length > 0)
+                    {
+                        await AppendBlockChildrenAsync(columnChildId, 0, token, columnBlocks, cancellationToken);
+                    }
+                    columnTexts.Add(string.Join(" ", columnBlocks.Select(columnBlock => columnBlock.PlainText)));
+                }
+
+                if (columnTexts.Count > 0)
+                {
+                    blocks.Add(new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Columns, indentLevel,
+                        [new WikiRichTextSpan(string.Join("|||", columnTexts))], new Dictionary<string, string>()));
+                }
+                continue;
+            }
+
             if (NotionMapping.IsPageTreeBlock(type))
             {
                 // child_page/child_database - already synced as their own top-level page/database.
@@ -1235,6 +1282,28 @@ public sealed class NotionSyncService(
                     if (localType is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect)
                     {
                         property.ConfigJson = WikiDatabasePropertyConfig.Serialize(NotionMapping.MapPropertyOptions(propertySchema, notionPropertyType));
+                    }
+                    else if (localType == WikiDatabasePropertyTypes.Relation)
+                    {
+                        // Preserve an already-resolved RelatedDatabaseId even if this run's
+                        // target lookup comes back empty (e.g. a transient miss, or the
+                        // property temporarily has no target in this schema payload) - only
+                        // ever move from unresolved to resolved, never resolved back to null.
+                        var existingConfig = WikiDatabasePropertyConfig.Parse(property.ConfigJson);
+                        var relatedDatabaseId = existingConfig.RelatedDatabaseId;
+                        var targetNotionDatabaseId = NotionMapping.ExtractRelationTargetNotionId(propertySchema);
+                        if (targetNotionDatabaseId is not null)
+                        {
+                            var resolvedId = await dbContext.WikiDatabases.AsNoTracking()
+                                .Where(database => database.NotionId == targetNotionDatabaseId)
+                                .Select(database => (Guid?)database.Id)
+                                .FirstOrDefaultAsync(cancellationToken);
+                            if (resolvedId is not null)
+                            {
+                                relatedDatabaseId = resolvedId;
+                            }
+                        }
+                        property.ConfigJson = WikiDatabasePropertyConfig.Serialize(existingConfig with { RelatedDatabaseId = relatedDatabaseId });
                     }
                     property.UpdatedAt = DateTimeOffset.UtcNow;
                     property.UpdatedBy = "notion-sync";
@@ -1583,6 +1652,76 @@ public sealed class NotionSyncService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return archived;
+    }
+
+    // Rewrites Relation property values from raw Notion page ids to local WikiDatabaseRow
+    // ids wherever the target row now exists locally (see ApplyPropertyValue's Relation
+    // case). Deliberately non-destructive for ids that still don't resolve - Notion itself
+    // shows an inaccessible/not-yet-synced relation as simply not resolving rather than
+    // dropping the link, and a later sync (once the target is imported) should still be able
+    // to pick it up. Runs every sync, not just when something changed, since it's a pure
+    // in-memory dictionary lookup with no further Notion API calls - cheap relative to the
+    // rate-limited parts of a sync.
+    private async Task ResolveRelationRowIdsAsync(CancellationToken cancellationToken)
+    {
+        var relationProperties = await dbContext.WikiDatabaseProperties
+            .Where(property => property.Type == WikiDatabasePropertyTypes.Relation)
+            .ToListAsync(cancellationToken);
+        if (relationProperties.Count == 0)
+        {
+            return;
+        }
+
+        var changed = false;
+        foreach (var property in relationProperties)
+        {
+            var relatedDatabaseId = WikiDatabasePropertyConfig.Parse(property).RelatedDatabaseId;
+            if (relatedDatabaseId is null)
+            {
+                continue;
+            }
+
+            var targetRowIdByNotionId = await dbContext.WikiDatabaseRows
+                .Where(row => row.WikiDatabaseId == relatedDatabaseId && row.NotionId != null)
+                .Select(row => new { row.NotionId, row.Id })
+                .ToDictionaryAsync(row => row.NotionId!, row => row.Id, StringComparer.OrdinalIgnoreCase, cancellationToken);
+            if (targetRowIdByNotionId.Count == 0)
+            {
+                continue;
+            }
+
+            var sourceRows = await dbContext.WikiDatabaseRows
+                .Where(row => row.WikiDatabaseId == property.WikiDatabaseId)
+                .ToListAsync(cancellationToken);
+            foreach (var row in sourceRows)
+            {
+                var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+                var currentIds = WikiPropertyValues.GetMultiSelect(values, property.Id);
+                if (currentIds.Count == 0)
+                {
+                    continue;
+                }
+
+                var resolvedIds = currentIds
+                    .Select(id => targetRowIdByNotionId.TryGetValue(id, out var localRowId) ? localRowId.ToString() : id)
+                    .ToList();
+                if (resolvedIds.SequenceEqual(currentIds, StringComparer.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                WikiPropertyValues.SetMultiSelect(values, property.Id, resolvedIds);
+                row.PropertyValuesJson = WikiPropertyValues.Serialize(values);
+                row.UpdatedAt = DateTimeOffset.UtcNow;
+                row.UpdatedBy = "notion-sync";
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
     }
 
     private (string Token, bool IsUnreadable) UnprotectToken(string storedValue)

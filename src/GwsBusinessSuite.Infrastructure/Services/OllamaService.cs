@@ -1,5 +1,6 @@
 using GwsBusinessSuite.Application.Abstractions;
 using System.Net.Http.Json;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
@@ -30,6 +31,49 @@ public sealed class OllamaService(HttpClient http, ILogger<OllamaService> logger
         {
             logger.LogWarning(ex, "Ollama generate request failed for model '{Model}'.", model);
             throw;
+        }
+    }
+
+    // NDJSON: Ollama writes one JSON object per line as generation progresses, with a final
+    // {"done":true} line. HttpCompletionOption.ResponseHeadersRead is required so the body is
+    // read incrementally rather than buffered whole before this method can start yielding.
+    public async IAsyncEnumerable<string> GenerateStreamAsync(
+        string model, string systemPrompt, string userPrompt, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var payload = new
+        {
+            model,
+            stream = true,
+            system = systemPrompt,
+            prompt = userPrompt
+        };
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/generate") { Content = JsonContent.Create(payload) };
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        response.EnsureSuccessStatusCode();
+
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var reader = new StreamReader(stream);
+        while (true)
+        {
+            var line = await reader.ReadLineAsync(ct);
+            if (line is null) yield break;
+            if (line.Length == 0) continue;
+
+            OllamaGenerateResponse? chunk;
+            try
+            {
+                chunk = JsonSerializer.Deserialize<OllamaGenerateResponse>(line);
+            }
+            catch (JsonException ex)
+            {
+                logger.LogWarning(ex, "Skipped an unparseable Ollama stream line for model '{Model}'.", model);
+                continue;
+            }
+
+            if (chunk is null) continue;
+            if (!string.IsNullOrEmpty(chunk.Response)) yield return chunk.Response;
+            if (chunk.Done) yield break;
         }
     }
 
@@ -130,7 +174,9 @@ public sealed class OllamaService(HttpClient http, ILogger<OllamaService> logger
 
     private sealed record OllamaImageGenerateResponse([property: JsonPropertyName("image")] string? Image);
 
-    private sealed record OllamaGenerateResponse(string Response);
+    private sealed record OllamaGenerateResponse(
+        [property: JsonPropertyName("response")] string Response,
+        [property: JsonPropertyName("done")] bool Done = false);
 
     private sealed record OllamaTagsResponse([property: JsonPropertyName("models")] OllamaTagModel[]? Models);
 

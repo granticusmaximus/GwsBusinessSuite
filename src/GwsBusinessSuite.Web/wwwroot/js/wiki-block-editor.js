@@ -182,6 +182,7 @@ function createBlockElement(block, state) {
         el.dataset.url = (block.props && block.props.url) || '';
         el.dataset.fileName = (block.props && block.props.fileName) || '';
         el.dataset.notionBlockId = (block.props && block.props.notionBlockId) || '';
+        el.dataset.mediaKind = (block.props && block.props.mediaKind) || '';
     }
     if (block.type === 'linked_database' || block.type === 'inline_database') {
         el.dataset.databaseId = (block.props && block.props.databaseId) || '';
@@ -508,13 +509,13 @@ function createMediaBody(block, state) {
 
     const preview = document.createElement('div');
     preview.className = 'wiki-media-preview';
-    renderMediaPreview(preview, block.type, url, (block.props && block.props.fileName) || '');
+    renderMediaPreview(preview, block.type, url, (block.props && block.props.fileName) || '', (block.props && block.props.mediaKind) || '');
 
     const commit = () => {
         const el = wrapper.closest('.wiki-block');
         el.dataset.url = input.value.trim();
         wrapper.classList.toggle('has-source', Boolean(input.value.trim()));
-        renderMediaPreview(preview, block.type, input.value.trim(), wrapper.closest('.wiki-block')?.dataset.fileName || '');
+        renderMediaPreview(preview, block.type, input.value.trim(), el?.dataset.fileName || '', el?.dataset.mediaKind || '');
         notifyChanged(state);
     };
     input.addEventListener('keydown', event => {
@@ -554,7 +555,7 @@ function resolveEmbedUrl(url) {
     return null;
 }
 
-function renderMediaPreview(preview, type, url, fileName = '') {
+function renderMediaPreview(preview, type, url, fileName = '', mediaKind = '') {
     preview.innerHTML = '';
     if (!url) return;
     if (type === 'image') {
@@ -564,6 +565,19 @@ function renderMediaPreview(preview, type, url, fileName = '') {
         img.className = 'wiki-media-image';
         img.alt = '';
         preview.appendChild(img);
+        return;
+    }
+
+    // Set only on blocks imported from Notion's video/audio types (NotionMapping.MapBlock) -
+    // Sentinel has no dedicated block type for these, but an inline player reads far better
+    // than a bare link for the two kinds a <video>/<audio> tag can actually play.
+    if (mediaKind === 'video' || mediaKind === 'audio') {
+        const player = document.createElement(mediaKind);
+        player.className = 'wiki-embed-media';
+        player.src = url;
+        player.controls = true;
+        player.preload = 'metadata';
+        preview.appendChild(player);
         return;
     }
 
@@ -1448,6 +1462,7 @@ function serializeBlock(blockEl) {
         props.url = blockEl.dataset.url || '';
         if (blockEl.dataset.fileName) props.fileName = blockEl.dataset.fileName;
         if (blockEl.dataset.notionBlockId) props.notionBlockId = blockEl.dataset.notionBlockId;
+        if (blockEl.dataset.mediaKind) props.mediaKind = blockEl.dataset.mediaKind;
     }
     if (type === 'linked_database' || type === 'inline_database') {
         props.databaseId = blockEl.dataset.databaseId || '';
