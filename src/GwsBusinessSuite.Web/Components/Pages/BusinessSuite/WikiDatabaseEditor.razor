@@ -656,13 +656,15 @@ else
                              OpenMode="@ActiveOpenPageMode"
                              PageProperties="@VisiblePageProperties"
                              OnSaved="RowPageSavedAsync"
-                             OnClose="CloseRow" />
+                             OnClose="CloseRow"
+                             OnOpenPage="OnOpenPage" />
 }
 
 @code {
     [Parameter, EditorRequired] public Guid WikiDatabaseId { get; set; }
     [Parameter] public EventCallback OnChanged { get; set; }
     [Parameter] public EventCallback<Guid> OnDuplicated { get; set; }
+    [Parameter] public EventCallback<Guid> OnOpenPage { get; set; }
 
     private static readonly IReadOnlyList<string> AddablePropertyTypes =
     [

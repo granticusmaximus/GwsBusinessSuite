@@ -142,4 +142,9 @@
   True character-level CRDT/OT concurrent editing is deliberately not attempted - a subtly
   wrong text-merge implementation risks corrupting user content, which is a materially
   different risk profile than a missing feature, so it stays explicitly open in
-  `docs/WIKI_NOTION_CLONE.md` rather than being rushed.
+  `docs/WIKI_NOTION_CLONE.md` rather than being rushed. "Knowledge navigation" gained saved
+  searches (bookmark and re-run a workspace search) and database-row mentions (`@`-mention a
+  row inline, reusing the exact same rich-text link scheme person/date mentions already use;
+  a row's own page shows a "Mentioned in" panel mirroring the existing page Backlinks panel).
+  Graph navigation (an interactive workspace visualization) remains open - it has no existing
+  code to extend and is a substantial feature of its own.

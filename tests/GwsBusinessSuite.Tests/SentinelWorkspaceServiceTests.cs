@@ -181,6 +181,90 @@ public sealed class SentinelWorkspaceServiceTests
         html.Should().NotContain("target=\"_blank\"");
     }
 
+    [Fact]
+    public void RenderRichText_ShouldRenderRowMentionsLikeOtherMentionKinds()
+    {
+        var databaseId = Guid.NewGuid();
+        var rowId = Guid.NewGuid();
+        var html = WikiBlockHtmlRenderer.RenderRichText([
+            new WikiRichTextSpan("Northstar migration", Link: $"rowmention:{databaseId}:{rowId}")
+        ]);
+
+        html.Should().Contain("class=\"wiki-mention\"");
+        html.Should().Contain($"href=\"rowmention:{databaseId}:{rowId}\"");
+        html.Should().NotContain("target=\"_blank\"");
+    }
+
+    [Fact]
+    public async Task SearchMentionSuggestionsAsync_ShouldSuggestMatchingDatabaseRowsByTitle()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = await CreateDbAsync(connection);
+        var databases = new WikiDatabaseService(db);
+        var sentinel = new SentinelWorkspaceService(db, TimeProvider.System);
+        var database = await databases.CreateDatabaseAsync("Projects", null, "u");
+        var titleProperty = database.Properties.Single(property => property.Type == GwsBusinessSuite.Domain.Entities.WikiDatabasePropertyTypes.Title);
+        var values = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(values, titleProperty.Id, "Northstar migration");
+        var row = await databases.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            Values = values.ToDictionary(pair => pair.Key, pair => pair.Value)
+        }, "u");
+
+        var suggestions = await sentinel.SearchMentionSuggestionsAsync("northstar");
+
+        suggestions.Should().ContainSingle(item =>
+            item.Kind == "row" && item.Value == $"{database.Id}:{row.Id}" && item.Label == "Northstar migration");
+    }
+
+    [Fact]
+    public async Task GetRowMentionsAsync_ShouldFindPagesThatReferenceARow()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = await CreateDbAsync(connection);
+        var wiki = new WikiService(db);
+        var databases = new WikiDatabaseService(db);
+        var sentinel = new SentinelWorkspaceService(db, TimeProvider.System);
+        var database = await databases.CreateDatabaseAsync("Projects", null, "u");
+        var row = await databases.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        await wiki.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Status update",
+            BlocksJson = WikiBlockJson.Serialize([
+                new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0,
+                    [new WikiRichTextSpan("See the row", Link: $"rowmention:{database.Id}:{row.Id}")],
+                    new Dictionary<string, string>())])
+        }, "u");
+        await wiki.SavePageAsync(new WikiPageEditorModel { Title = "Unrelated page" }, "u");
+
+        var mentions = await sentinel.GetRowMentionsAsync(database.Id, row.Id);
+
+        mentions.Should().ContainSingle(mention => mention.SourcePageTitle == "Status update");
+    }
+
+    [Fact]
+    public async Task SavedSearches_ShouldPersistPerUserDedupeAndSupportDeletion()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = await CreateDbAsync(connection);
+        var sentinel = new SentinelWorkspaceService(db, TimeProvider.System);
+
+        var first = await sentinel.SaveSearchAsync("Grant", "launch checklist");
+        var duplicate = await sentinel.SaveSearchAsync("GRANT", "launch checklist");
+        await sentinel.SaveSearchAsync("Grant", "onboarding");
+
+        duplicate.Id.Should().Be(first.Id, "saving the same query twice for the same user must not create a duplicate row");
+        (await sentinel.ListSavedSearchesAsync("grant")).Should().HaveCount(2);
+        (await sentinel.ListSavedSearchesAsync("someone-else")).Should().BeEmpty();
+
+        await sentinel.DeleteSavedSearchAsync("Grant", first.Id);
+        (await sentinel.ListSavedSearchesAsync("Grant")).Should().ContainSingle(saved => saved.Query == "onboarding");
+    }
+
     private static async Task<ApplicationDbContext> CreateDbAsync(SqliteConnection connection)
     {
         var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()

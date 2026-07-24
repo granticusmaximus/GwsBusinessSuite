@@ -185,6 +185,14 @@ public sealed class SentinelNavigationEntry : AuditableEntity
     public DateTimeOffset LastOpenedAt { get; set; }
 }
 
+// A saved search targets a query string, not a page/database id, so it doesn't fit
+// SentinelNavigationEntry's TargetId/IsDatabase shape above.
+public sealed class SentinelSavedSearch : AuditableEntity
+{
+    public required string Username { get; set; }
+    public required string Query { get; set; }
+}
+
 public sealed class SentinelDiscussion : AuditableEntity
 {
     public Guid WikiPageId { get; set; }

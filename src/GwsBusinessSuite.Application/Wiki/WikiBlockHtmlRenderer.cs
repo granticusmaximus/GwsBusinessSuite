@@ -35,7 +35,8 @@ public static class WikiBlockHtmlRenderer
             if (!string.IsNullOrWhiteSpace(span.Link))
             {
                 var isMention = span.Link.StartsWith("usermention:", StringComparison.OrdinalIgnoreCase)
-                    || span.Link.StartsWith("datemention:", StringComparison.OrdinalIgnoreCase);
+                    || span.Link.StartsWith("datemention:", StringComparison.OrdinalIgnoreCase)
+                    || span.Link.StartsWith("rowmention:", StringComparison.OrdinalIgnoreCase);
                 text = isMention
                     ? $"<a class=\"wiki-mention\" href=\"{WebUtility.HtmlEncode(span.Link)}\">{text}</a>"
                     : $"<a href=\"{WebUtility.HtmlEncode(span.Link)}\" target=\"_blank\" rel=\"noopener noreferrer\">{text}</a>";

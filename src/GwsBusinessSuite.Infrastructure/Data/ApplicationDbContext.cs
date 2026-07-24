@@ -32,6 +32,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SentinelBlockTemplate> SentinelBlockTemplates => Set<SentinelBlockTemplate>();
     public DbSet<SentinelDatabaseTemplate> SentinelDatabaseTemplates => Set<SentinelDatabaseTemplate>();
     public DbSet<SentinelNavigationEntry> SentinelNavigationEntries => Set<SentinelNavigationEntry>();
+    public DbSet<SentinelSavedSearch> SentinelSavedSearches => Set<SentinelSavedSearch>();
     public DbSet<SentinelDiscussion> SentinelDiscussions => Set<SentinelDiscussion>();
     public DbSet<SentinelDiscussionComment> SentinelDiscussionComments => Set<SentinelDiscussionComment>();
     public DbSet<SentinelDiscussionReaction> SentinelDiscussionReactions => Set<SentinelDiscussionReaction>();
@@ -143,6 +144,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .IsUnique();
         modelBuilder.Entity<SentinelNavigationEntry>().HasIndex(x => new { x.Username, x.IsFavorite });
         modelBuilder.Entity<SentinelNavigationEntry>().HasIndex(x => new { x.Username, x.LastOpenedAt });
+        modelBuilder.Entity<SentinelSavedSearch>().HasIndex(x => new { x.Username, x.CreatedAt });
         modelBuilder.Entity<SentinelDiscussion>()
             .HasOne(x => x.WikiPage)
             .WithMany()

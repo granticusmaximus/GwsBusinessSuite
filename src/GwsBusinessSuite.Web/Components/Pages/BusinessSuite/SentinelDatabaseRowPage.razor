@@ -5,6 +5,7 @@
 @using GwsBusinessSuite.Domain.Entities
 @inject IWikiDatabaseService WikiDatabaseService
 @inject IWikiService WikiService
+@inject ISentinelWorkspaceService SentinelWorkspaceService
 @inject IMediaLibraryService MediaLibraryService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
@@ -191,6 +192,21 @@
                         </div>
                     </div>
                 </details>
+
+                @if (RowMentions.Count > 0)
+                {
+                    <details class="sentinel-page-properties mt-3" open>
+                        <summary><i class="bi bi-link-45deg"></i><span>Mentioned in</span><i class="bi bi-chevron-right"></i></summary>
+                        <div class="list-group list-group-flush">
+                            @foreach (var mention in RowMentions)
+                            {
+                                <button type="button" class="list-group-item list-group-item-action py-1 px-2 small" @onclick="() => OpenMentioningPageAsync(mention.SourcePageId)" title="@mention.Preview">
+                                    <i class="bi bi-file-earmark-text text-secondary me-1"></i>@mention.SourcePageTitle
+                                </button>
+                            }
+                        </div>
+                    </details>
+                }
             </div>
         </div>
 
@@ -215,6 +231,7 @@
     [Parameter] public IReadOnlyList<WikiDatabaseProperty> PageProperties { get; set; } = [];
     [Parameter] public EventCallback OnSaved { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<Guid> OnOpenPage { get; set; }
 
     private ElementReference _editorContainer;
     private IJSObjectReference? _module;
@@ -240,6 +257,7 @@
     private string? DiffText { get; set; }
     private Guid? _historyLoadedForRowId;
     private Guid? _loadedRowId;
+    private List<SentinelBacklink> RowMentions { get; set; } = new();
 
     private JsonObject Values => WikiPropertyValues.ParseObject(Row.PropertyValuesJson);
     private WikiDatabaseProperty? TitleProperty => Database.Properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Title);
@@ -289,8 +307,19 @@
         {
             _historyLoadedForRowId = Row.Id;
             await LoadHistoryAsync();
+            try
+            {
+                RowMentions = (await SentinelWorkspaceService.GetRowMentionsAsync(Database.Id, Row.Id)).ToList();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Unable to load mentions for Sentinel row {RowId}.", Row.Id);
+            }
+            await InvokeAsync(StateHasChanged);
         }
     }
+
+    private Task OpenMentioningPageAsync(Guid wikiPageId) => OnOpenPage.InvokeAsync(wikiPageId);
 
     [JSInvokable]
     public Task OnBlocksChanged(string blocksJson)

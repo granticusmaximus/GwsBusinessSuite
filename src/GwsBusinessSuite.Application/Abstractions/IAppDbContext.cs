@@ -14,6 +14,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<SentinelBlockTemplate> SentinelBlockTemplates { get; }
     DbSet<SentinelDatabaseTemplate> SentinelDatabaseTemplates { get; }
     DbSet<SentinelNavigationEntry> SentinelNavigationEntries { get; }
+    DbSet<SentinelSavedSearch> SentinelSavedSearches { get; }
     DbSet<SentinelDiscussion> SentinelDiscussions { get; }
     DbSet<SentinelDiscussionComment> SentinelDiscussionComments { get; }
     DbSet<SentinelDiscussionReaction> SentinelDiscussionReactions { get; }

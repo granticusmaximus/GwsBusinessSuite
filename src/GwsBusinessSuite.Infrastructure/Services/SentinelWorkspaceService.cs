@@ -122,6 +122,89 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
         return backlinks.OrderBy(link => link.SourcePageTitle, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
+    public async Task<IReadOnlyList<SentinelBacklink>> GetRowMentionsAsync(
+        Guid wikiDatabaseId,
+        Guid rowId,
+        CancellationToken cancellationToken = default)
+    {
+        // Same scan scope as GetBacklinksAsync (WikiPages only, not other rows' bodies) -
+        // a page-mentions-page or page-mentions-row link is found; a row-mentions-row link
+        // written inside another row's page body is not, matching that existing limitation
+        // rather than quietly having two different backlink scan depths in the same app.
+        var expectedLink = $"rowmention:{wikiDatabaseId}:{rowId}";
+        var pages = await dbContext.WikiPages.AsNoTracking().ToListAsync(cancellationToken);
+        var mentions = new List<SentinelBacklink>();
+
+        foreach (var page in pages)
+        {
+            var matchingBlock = WikiBlockJson.ParseBlocks(page.BlocksJson).FirstOrDefault(block =>
+                block.RichText.Any(span => string.Equals(span.Link, expectedLink, StringComparison.OrdinalIgnoreCase)));
+            if (matchingBlock is null) continue;
+            mentions.Add(new SentinelBacklink(page.Id, page.Title, WikiBlockHtmlRenderer.PlainTextPreview(matchingBlock, 140)));
+        }
+
+        return mentions.OrderBy(mention => mention.SourcePageTitle, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    public async Task<IReadOnlyList<SentinelSavedSearchView>> ListSavedSearchesAsync(
+        string username,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedUser = NormalizeUsername(username);
+        var entries = await dbContext.SentinelSavedSearches.AsNoTracking()
+            .Where(item => item.Username == normalizedUser)
+            .ToListAsync(cancellationToken);
+        return entries
+            .OrderByDescending(item => item.CreatedAt)
+            .Select(item => new SentinelSavedSearchView(item.Id, item.Query, item.CreatedAt))
+            .ToList();
+    }
+
+    public async Task<SentinelSavedSearchView> SaveSearchAsync(
+        string username,
+        string query,
+        CancellationToken cancellationToken = default)
+    {
+        var trimmedQuery = query?.Trim() ?? string.Empty;
+        if (trimmedQuery.Length == 0)
+        {
+            throw new ArgumentException("A saved search needs a non-empty query.", nameof(query));
+        }
+
+        var normalizedUser = NormalizeUsername(username);
+        var existing = await dbContext.SentinelSavedSearches.FirstOrDefaultAsync(item =>
+            item.Username == normalizedUser && item.Query == trimmedQuery, cancellationToken);
+        if (existing is not null)
+        {
+            return new SentinelSavedSearchView(existing.Id, existing.Query, existing.CreatedAt);
+        }
+
+        var now = timeProvider.GetUtcNow();
+        var saved = new SentinelSavedSearch
+        {
+            Username = normalizedUser,
+            Query = trimmedQuery,
+            CreatedAt = now,
+            CreatedBy = normalizedUser
+        };
+        await dbContext.SentinelSavedSearches.AddAsync(saved, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new SentinelSavedSearchView(saved.Id, saved.Query, saved.CreatedAt);
+    }
+
+    public async Task DeleteSavedSearchAsync(
+        string username,
+        Guid savedSearchId,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedUser = NormalizeUsername(username);
+        var saved = await dbContext.SentinelSavedSearches.FirstOrDefaultAsync(item =>
+            item.Id == savedSearchId && item.Username == normalizedUser, cancellationToken);
+        if (saved is null) return;
+        dbContext.SentinelSavedSearches.Remove(saved);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<SentinelNavigationState> GetNavigationAsync(
         string username,
         int maxRecents = 8,
@@ -264,6 +347,30 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
             .Where(item => item.Token.Contains(normalized, StringComparison.OrdinalIgnoreCase))
             .Select(item => new SentinelMentionSuggestion(
                 "date", item.Date.ToString("yyyy-MM-dd"), $"@{item.Token}", item.Date.ToString("D"))));
+
+        if (normalized.Length > 0)
+        {
+            var databases = await dbContext.WikiDatabases.AsNoTracking()
+                .Include(database => database.Properties)
+                .Include(database => database.Rows)
+                .ToListAsync(cancellationToken);
+            foreach (var database in databases)
+            {
+                var titleProperty = database.Properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Title);
+                if (titleProperty is null) continue;
+
+                foreach (var row in database.Rows)
+                {
+                    var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+                    var title = WikiPropertyValues.GetText(values, titleProperty.Id);
+                    if (string.IsNullOrWhiteSpace(title) || !title.Contains(normalized, StringComparison.OrdinalIgnoreCase)) continue;
+                    // insertMention (wiki-block-editor.js) builds the anchor href as
+                    // `${kind}mention:${value}`, so "row" + ":" + this Value literally
+                    // produces "rowmention:{databaseId}:{rowId}" with no JS changes needed.
+                    suggestions.Add(new SentinelMentionSuggestion("row", $"{database.Id}:{row.Id}", title, $"Row in {database.Title}"));
+                }
+            }
+        }
 
         return suggestions.Take(maxResults).ToList();
     }

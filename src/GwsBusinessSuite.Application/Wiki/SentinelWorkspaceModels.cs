@@ -38,6 +38,11 @@ public sealed record SentinelMention(
     string Preview,
     DateTimeOffset MentionedAt);
 
+public sealed record SentinelSavedSearchView(
+    Guid Id,
+    string Query,
+    DateTimeOffset CreatedAt);
+
 public interface ISentinelWorkspaceService
 {
     Task<IReadOnlyList<SentinelSearchResult>> SearchAsync(
@@ -74,5 +79,26 @@ public interface ISentinelWorkspaceService
     Task<IReadOnlyList<SentinelMention>> GetMentionsAsync(
         string username,
         int maxResults = 20,
+        CancellationToken cancellationToken = default);
+
+    // Reuses SentinelBacklink's shape ("which page mentions this, and how") for a database
+    // row target instead of a page target - see GetBacklinksAsync's own scan for the pattern.
+    Task<IReadOnlyList<SentinelBacklink>> GetRowMentionsAsync(
+        Guid wikiDatabaseId,
+        Guid rowId,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<SentinelSavedSearchView>> ListSavedSearchesAsync(
+        string username,
+        CancellationToken cancellationToken = default);
+
+    Task<SentinelSavedSearchView> SaveSearchAsync(
+        string username,
+        string query,
+        CancellationToken cancellationToken = default);
+
+    Task DeleteSavedSearchAsync(
+        string username,
+        Guid savedSearchId,
         CancellationToken cancellationToken = default);
 }

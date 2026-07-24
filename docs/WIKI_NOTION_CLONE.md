@@ -70,7 +70,7 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 | History | Bounded DB snapshot revisions (20/page), structural diff (added/removed/changed blocks), revert-as-new-version | — |
 | Databases | Typed properties including person, files, place, evaluated advanced formulas, one-way or reciprocal row-picker relations, and calculated rollups; editable Table, Board, List, Gallery, Calendar, Timeline, Chart, Form, Map, Feed, and Dashboard views | Richer rollup formatting |
 | Databases — structure | Databases share the page sidebar tree; every row opens as a responsive block-content page with a per-view side-peek, center-peek, or full-page presentation and configurable property visibility/order; row icon, cover image, and bounded version history (20/row, structural diff, revert-as-new-version) match page-level history; linked and inline database blocks reference canonical data without duplication | — |
-| Search & graph | All-token ranked page/block/database-row search with highlighted matches; structured and legacy backlinks; per-user favorites/recents; structured page, person, and date mentions with a personal mention inbox | Graph visualization, saved searches, and database-row mention inbox entries |
+| Search & graph | All-token ranked page/block/database-row search with highlighted matches; per-user saved searches; structured and legacy backlinks; per-user favorites/recents; structured page, person, date, and database-row mentions, with a personal mention inbox for people and a "Mentioned in" backlinks panel for rows | Graph visualization |
 | Import/sync | Current `2026-03-11` Notion API, data sources, views, comments, subtree-aware selective import, recursive template/unsupported-container content recovery, full-page Markdown recovery for unavailable structured content, meeting-note summary/notes/transcript import, content-count diagnostics, encrypted token storage, soft archival, durable authenticated copies of Notion-hosted files, explicitly enabled conflict-aware manual page pushes, and reusable template import from connected free Notion templates or Markdown/CSV/HTML ZIP exports | Broader bidirectional database writes |
 | Visibility | Authenticated portal-member roles and per-resource view/comment/edit/full-access grants, plus expiring/revocable tokenized public page and database shares | Richer public-share controls and auditing |
 
@@ -153,7 +153,7 @@ capabilities where they fit GWS Business Suite; they are no longer silently excl
 | --- | --- | --- |
 | Blocks | Core and advanced native block vocabulary, including tables/equations/columns/synced blocks/TOC/buttons, plus reusable block templates, and provider-pattern embeds (YouTube/Vimeo/Spotify/Figma/CodePen/Loom render as iframes) | True oEmbed metadata and additional providers |
 | Databases | Eleven view families, expanded property vocabulary, advanced typed formulas, canonical one-way/reciprocal row relations, configurable rollups, filters/sorts/groups, row page bodies with per-view peek modes, linked/inline databases, reusable database templates, and a `database.rowChangedTrigger` node that starts a Workflow Automation when a database's row properties change | Property layouts and a write-back automation action node |
-| Knowledge graph | `[[Page]]` links, ranked/highlighted workspace search, backlinks, person/date mentions, favorites/recents | Graph navigation, database-row mention inbox entries, and saved searches |
+| Knowledge graph | `[[Page]]` links, ranked/highlighted workspace search, backlinks, person/date/database-row mentions, a row "Mentioned in" panel, favorites/recents, and per-user saved searches | Graph navigation |
 | Collaboration | Discussions, replies, reactions, notifications, DB-backed cross-instance presence/polling, in-memory block-granular remote cursor indicators, block-level three-way merge, authenticated portal-member roles, granular permissions, and tokenized public sharing | Character-level CRDT/OT concurrent editing and richer public-share controls |
 | Presentation | Emoji icon and cover image for pages and database rows alike (cover can be uploaded inline via the cover picker, not just picked from an already-uploaded asset), row-level bounded version history, plus responsive side-peek, center-peek, and full-page database rows with per-view property presentation | Custom icon *image* uploads (icons remain emoji-only), page width/fonts, and reusable style defaults |
 | Integration | Encrypted token, current data-source/view/comment API, selective reconciliation, durable authenticated Notion-hosted file ingestion, opt-in conflict-aware manual page writes, and free-template interoperability through connected-workspace sync or bounded Notion ZIP imports | Bidirectional database schema/row writes |
@@ -284,8 +284,26 @@ screens.
    disconnect that forces a full reload now loses at most the last ~1.5s of unsaved edits
    thanks to Phase 2's row autosave - the equivalent for the main page editor (autosave, not
    just revert-safe reload) remains open.
-6. **Knowledge navigation** — graph navigation, saved searches, and database-row mentions in
-   the personal inbox.
+6. **Knowledge navigation** ✅ (saved searches, database-row mentions) — **saved searches**: a
+   new `SentinelSavedSearch` entity (Username, Query) lets a user bookmark the current search
+   from a new button next to the search box; a "Saved searches" section in the sidebar
+   (alongside the existing Favorites/Recents/Mentions) re-runs or deletes one. Saving the same
+   query twice for the same user is a no-op rather than a duplicate row.
+   **Database-row mentions**: `@` autocomplete now also suggests database rows by their title
+   property (`SearchMentionSuggestionsAsync`'s new "row" branch), inserted as a
+   `rowmention:{databaseId}:{rowId}` link - reusing the *exact* rich-text link scheme and
+   `insertMention` JS logic `usermention:`/`datemention:` already use, so no new editor
+   infrastructure was needed, only a new `WikiBlockHtmlRenderer.RenderRichText` prefix check.
+   Interpreting "in the personal inbox" for a row (which, unlike a person, cannot receive a
+   notification): the row's own page (`SentinelDatabaseRowPage.razor`) gained a "Mentioned in"
+   panel listing every page that references it (`GetRowMentionsAsync`), mirroring the existing
+   page-to-page Backlinks panel exactly, including its same known scan-scope limit (a mention
+   written inside another row's body isn't picked up, only page bodies are scanned - matching
+   `GetBacklinksAsync`'s existing behavior rather than quietly giving rows deeper scanning than
+   pages get). **Graph navigation** (an interactive node/link visualization of the whole
+   workspace) is explicitly NOT attempted here - unlike the other two items, it has no existing
+   code to reuse or extend and is a substantial visual/canvas feature in its own right, so it
+   remains fully open as its own future unit of work.
 7. **Sentinel AI depth** — streaming answers with citations, transcription capture, and
    reviewable autonomous workflows.
 8. **Sync and sharing hardening** — bidirectional database schema/row writes and richer

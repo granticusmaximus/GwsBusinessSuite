@@ -114,6 +114,10 @@
                     }
                     else if (!string.IsNullOrWhiteSpace(SearchQuery))
                     {
+                        <button type="button" class="btn btn-outline-secondary" @onclick="SaveCurrentSearchAsync"
+                                disabled="@IsCurrentSearchSaved" aria-label="Save this search" title="@(IsCurrentSearchSaved ? "Already saved" : "Save this search")">
+                            <i class="bi @(IsCurrentSearchSaved ? "bi-bookmark-check-fill" : "bi-bookmark-plus")"></i>
+                        </button>
                         <button type="button" class="btn btn-outline-secondary" @onclick="ClearSearchAsync"
                                 aria-label="Clear Sentinel search" title="Clear search">
                             <i class="bi bi-x-lg"></i>
@@ -125,9 +129,29 @@
                 </div>
             </div>
             @if (string.IsNullOrWhiteSpace(SearchQuery)
-                && (Navigation.Favorites.Count > 0 || Navigation.Recents.Count > 0 || Mentions.Count > 0))
+                && (Navigation.Favorites.Count > 0 || Navigation.Recents.Count > 0 || Mentions.Count > 0 || SavedSearches.Count > 0))
             {
                 <div class="sentinel-quick-navigation border-bottom">
+                    @if (SavedSearches.Count > 0)
+                    {
+                        <div class="sentinel-nav-section">
+                            <div class="sentinel-nav-heading"><i class="bi bi-bookmark-fill"></i> Saved searches</div>
+                            @foreach (var saved in SavedSearches)
+                            {
+                                <div class="sentinel-nav-item d-flex align-items-center">
+                                    <button type="button" class="btn btn-sm p-0 border-0 bg-transparent text-start flex-grow-1 d-flex align-items-center gap-2"
+                                            @onclick="() => RunSavedSearchAsync(saved.Query)" disabled="@IsBusy">
+                                        <i class="bi bi-search text-secondary"></i>
+                                        <span class="text-truncate">@saved.Query</span>
+                                    </button>
+                                    <button type="button" class="btn btn-sm p-0 border-0 bg-transparent text-secondary" @onclick="() => DeleteSavedSearchAsync(saved.Id)"
+                                            disabled="@IsBusy" aria-label="Delete saved search" title="Delete saved search">
+                                        <i class="bi bi-x"></i>
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    }
                     @if (Navigation.Favorites.Count > 0)
                     {
                         <div class="sentinel-nav-section">
@@ -283,7 +307,8 @@
         {
             <WikiDatabaseEditor WikiDatabaseId="openDatabaseId"
                                 OnChanged="() => LoadTreeAsync(selectFirstPage: false)"
-                                OnDuplicated="OpenDuplicatedDatabaseAsync" />
+                                OnDuplicated="OpenDuplicatedDatabaseAsync"
+                                OnOpenPage="OpenPageAsync" />
         }
         else
         {
@@ -694,6 +719,9 @@
     private WikiPageConflictSnapshot? PageConflict { get; set; }
     private SentinelNavigationState Navigation { get; set; } = new([], []);
     private List<SentinelMention> Mentions { get; set; } = new();
+    private List<SentinelSavedSearchView> SavedSearches { get; set; } = new();
+    private bool IsCurrentSearchSaved => SavedSearches.Any(saved =>
+        string.Equals(saved.Query, SearchQuery.Trim(), StringComparison.Ordinal));
     private string CurrentUsername { get; set; } = "unknown";
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
@@ -1215,6 +1243,43 @@
     {
         Navigation = await SentinelWorkspaceService.GetNavigationAsync(CurrentUsername);
         Mentions = (await SentinelWorkspaceService.GetMentionsAsync(CurrentUsername)).ToList();
+        SavedSearches = (await SentinelWorkspaceService.ListSavedSearchesAsync(CurrentUsername)).ToList();
+    }
+
+    private async Task SaveCurrentSearchAsync()
+    {
+        var query = SearchQuery.Trim();
+        if (query.Length == 0) return;
+        try
+        {
+            await SentinelWorkspaceService.SaveSearchAsync(CurrentUsername, query);
+            SavedSearches = (await SentinelWorkspaceService.ListSavedSearchesAsync(CurrentUsername)).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to save Sentinel search '{Query}'.", query);
+            ErrorMessage = $"Unable to save this search. {ex.Message}";
+        }
+    }
+
+    private async Task RunSavedSearchAsync(string query)
+    {
+        SearchQuery = query;
+        await SearchWorkspaceAsync();
+    }
+
+    private async Task DeleteSavedSearchAsync(Guid savedSearchId)
+    {
+        try
+        {
+            await SentinelWorkspaceService.DeleteSavedSearchAsync(CurrentUsername, savedSearchId);
+            SavedSearches = SavedSearches.Where(saved => saved.Id != savedSearchId).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to delete saved Sentinel search {SavedSearchId}.", savedSearchId);
+            ErrorMessage = $"Unable to delete this saved search. {ex.Message}";
+        }
     }
 
     private async Task SearchWorkspaceAsync()
