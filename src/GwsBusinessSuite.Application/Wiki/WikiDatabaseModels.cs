@@ -179,6 +179,10 @@ public sealed class WikiDatabaseRowEditor
     public Guid? Id { get; set; }
     // Null means preserve the existing page body during a property-only edit.
     public string? BlocksJson { get; set; }
+    // Same null-preserves convention as BlocksJson above - a property-only save (e.g.
+    // AddInlineRowAsync's blank editor) should not clobber an already-set icon/cover.
+    public string? Icon { get; set; }
+    public string? CoverImageUrl { get; set; }
     // Keyed by property id (as string) - value shape matches WikiPropertyValues' per-type
     // getters/setters (string/decimal/bool/string[]/ISO-8601 date string).
     public Dictionary<string, JsonNode?> Values { get; set; } = new();

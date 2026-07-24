@@ -69,7 +69,7 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 | Core block types | paragraph, heading 1-3, lists, to-do, toggle, quote, callout, code, divider, image, embed, table, equation, breadcrumb, TOC, button, synced block, columns, and legacy markdown | oEmbed previews and additional provider-specific media |
 | History | Bounded DB snapshot revisions (20/page), structural diff (added/removed/changed blocks), revert-as-new-version | — |
 | Databases | Typed properties including person, files, place, evaluated advanced formulas, one-way or reciprocal row-picker relations, and calculated rollups; editable Table, Board, List, Gallery, Calendar, Timeline, Chart, Form, Map, Feed, and Dashboard views | Richer rollup formatting |
-| Databases — structure | Databases share the page sidebar tree; every row opens as a responsive block-content page with a per-view side-peek, center-peek, or full-page presentation and configurable property visibility/order; linked and inline database blocks reference canonical data without duplication | Row covers/icons and page history |
+| Databases — structure | Databases share the page sidebar tree; every row opens as a responsive block-content page with a per-view side-peek, center-peek, or full-page presentation and configurable property visibility/order; row icon, cover image, and bounded version history (20/row, structural diff, revert-as-new-version) match page-level history; linked and inline database blocks reference canonical data without duplication | — |
 | Search & graph | All-token ranked page/block/database-row search with highlighted matches; structured and legacy backlinks; per-user favorites/recents; structured page, person, and date mentions with a personal mention inbox | Graph visualization, saved searches, and database-row mention inbox entries |
 | Import/sync | Current `2026-03-11` Notion API, data sources, views, comments, subtree-aware selective import, recursive template/unsupported-container content recovery, full-page Markdown recovery for unavailable structured content, meeting-note summary/notes/transcript import, content-count diagnostics, encrypted token storage, soft archival, durable authenticated copies of Notion-hosted files, explicitly enabled conflict-aware manual page pushes, and reusable template import from connected free Notion templates or Markdown/CSV/HTML ZIP exports | Broader bidirectional database writes |
 | Visibility | Authenticated portal-member roles and per-resource view/comment/edit/full-access grants, plus expiring/revocable tokenized public page and database shares | Richer public-share controls and auditing |
@@ -151,7 +151,7 @@ capabilities where they fit GWS Business Suite; they are no longer silently excl
 | Databases | Eleven view families, expanded property vocabulary, advanced typed formulas, canonical one-way/reciprocal row relations, configurable rollups, filters/sorts/groups, row page bodies with per-view peek modes, linked/inline databases, and reusable database templates | Property layouts and automations |
 | Knowledge graph | `[[Page]]` links, ranked/highlighted workspace search, backlinks, person/date mentions, favorites/recents | Graph navigation, database-row mention inbox entries, and saved searches |
 | Collaboration | Discussions, replies, reactions, notifications, DB-backed cross-instance presence/polling, block-level three-way merge, authenticated portal-member roles, granular permissions, and tokenized public sharing | Character-level CRDT/OT cursors and richer public-share controls |
-| Presentation | Emoji icon and cover URL plus responsive side-peek, center-peek, and full-page database rows with per-view property presentation | Custom icon/cover uploads, page width/fonts, and reusable style defaults |
+| Presentation | Emoji icon and cover URL for pages and database rows alike, row-level bounded version history, plus responsive side-peek, center-peek, and full-page database rows with per-view property presentation | Custom icon/cover uploads, page width/fonts, and reusable style defaults |
 | Integration | Encrypted token, current data-source/view/comment API, selective reconciliation, durable authenticated Notion-hosted file ingestion, opt-in conflict-aware manual page writes, and free-template interoperability through connected-workspace sync or bounded Notion ZIP imports | Bidirectional database schema/row writes |
 | AI | Workspace-grounded ask/writing/translation/research/meeting notes/autofill with durable approve/reject runs | Streaming chat, citations, transcription capture, and autonomous agents |
 
@@ -172,15 +172,37 @@ representation and converts its common headings, paragraphs, lists, tasks, quote
 dividers, and code fences into native editable blocks. The sync result reports imported block
 and still-empty page counts so metadata-only imports are visible rather than silent.
 
+Known UI/CSS gaps are also explicit, since a "delivered" line in this doc records the data
+model and service layer being complete, not a guarantee the Razor/CSS layer keeps pace - the
+row-peek panel above shipped with *zero* matching CSS for its own markup for some time (a dead,
+unused `.sentinel-row-page-modal` rule was the only trace) until this pass added it. A 2026-07-24
+audit of every Sentinel/Wiki `.razor` file against `app.css` found this was largely isolated
+(Table/Board/List/Gallery/Calendar and the newer Timeline/Chart/Form/Map/Feed/Dashboard views are
+all fully themed), but two real gaps remain open: `SentinelTemplates.razor` (and to a lesser
+extent `SentinelDiscussions.razor`/`SentinelSharePanel.razor`) lean on raw Bootstrap
+card/list-group/badge markup with only reactive `!important` overrides rather than a purpose-built
+`sentinel-*` layout, so they read as generic admin chrome rather than the warm stone/amber
+low-chrome document workspace; and `SentinelDiscussions`/`SentinelPresence`'s *base* CSS rules
+(`app.css` ~1541-1566) are light-mode Bootstrap-indigo, only corrected by a `.sentinel-workspace`
+descendant override further down the file - safe today because every usage site is nested inside
+`.sentinel-workspace`, but silently wrong if either component is ever reused outside it (a share
+surface, an embed). Neither blocks functionality; both are visual-polish debt.
+
 ## Remaining delivery plan
 
 Sentinel's remaining Notion-class work is delivered in the following dependency order. Each
 phase is a complete, releasable feature iteration rather than a collection of unfinished
 screens.
 
-1. **Database page layouts and presentation** — configurable side peek, center peek, and
-   full-page row opening; responsive row pages; property presentation controls; row icons,
-   covers, and page history.
+1. **Database page layouts and presentation** ✅ — configurable side peek, center peek, and
+   full-page row opening; responsive row pages; property presentation controls; row icon,
+   cover image (picked from the existing Media Library, matching the page-cover picker), and
+   bounded version history (20/row, structural diff, revert-as-new-version, via a new
+   `WikiDatabaseRowRevision` table mirroring `WikiPageRevision`) are delivered - see
+   `SentinelDatabaseRowPage.razor` and `WikiDatabaseService.GetRowHistoryAsync`/
+   `GetRowStructuralDiffAsync`/`RevertRowToRevisionAsync`. A revision is only snapshotted when
+   a save includes the page body (opened as a page), not on property-only cell edits or board
+   drags, to avoid history noise - same rationale as Notion sync not creating page revisions.
 2. **Native editing polish** — database-page autosave, undo/redo, contextual actions, and
    complete keyboard-first editing flows.
 3. **Media and presentation** — richer embeds, durable icon/cover uploads, page width and font

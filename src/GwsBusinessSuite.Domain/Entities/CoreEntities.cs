@@ -387,12 +387,33 @@ public sealed class WikiDatabaseRow : AuditableEntity
     // PropertyValuesJson remains the view/schema data shown in tables and boards; BlocksJson
     // is the document body opened from any database view.
     public string BlocksJson { get; set; } = "[]";
+    // Same as WikiPage.Icon/CoverImageUrl - a row is a page too, so it gets the same
+    // presentation fields.
+    public string? Icon { get; set; }
+    public string? CoverImageUrl { get; set; }
     // See WikiPage.NotionId/NotionArchivedAt.
     public string? NotionId { get; set; }
     public DateTimeOffset? NotionArchivedAt { get; set; }
     public DateTimeOffset? NotionLastEditedAt { get; set; }
     public string? NotionExportId { get; set; }
     public WikiDatabase? WikiDatabase { get; set; }
+    public ICollection<WikiDatabaseRowRevision> Revisions { get; set; } = new List<WikiDatabaseRowRevision>();
+}
+
+// Bounded DB-snapshot history for a row's page body, mirroring WikiPageRevision exactly
+// (same MaxRevisionsPerPage trim-on-save pattern - see WikiDatabaseService). Kept as its
+// own table rather than reusing WikiPageRevision: that entity's WikiPageId FK and
+// (WikiPageId, RevisionNumber) unique index are non-nullable and single-owner, so sharing
+// it would mean relaxing both to support two different parent types.
+public sealed class WikiDatabaseRowRevision : AuditableEntity
+{
+    public Guid WikiDatabaseRowId { get; set; }
+    public int RevisionNumber { get; set; }
+    public string BlocksJson { get; set; } = "[]";
+    public string? Icon { get; set; }
+    public string? CoverImageUrl { get; set; }
+    public string Label { get; set; } = string.Empty;
+    public WikiDatabaseRow? WikiDatabaseRow { get; set; }
 }
 
 public sealed class WikiDatabaseView : AuditableEntity

@@ -745,6 +745,129 @@ public sealed class WikiDatabaseServiceTests
         moved.SortOrder.Should().Be(0);
     }
 
+    [Fact]
+    public async Task SaveRowAsync_ShouldPreserveIconAndCover_OnAPropertyOnlyEdit()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Projects", null, "u");
+        var titleProperty = database.Properties.Single(p => p.Type == WikiDatabasePropertyTypes.Title);
+        var created = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            BlocksJson = ParagraphBlocks("Body."),
+            Icon = "🚀",
+            CoverImageUrl = "https://example.com/cover.png"
+        }, "u");
+
+        var values = WikiPropertyValues.ParseObject(created.PropertyValuesJson);
+        WikiPropertyValues.SetText(values, titleProperty.Id, "Renamed");
+        var propertyOnlyEdit = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            Id = created.Id,
+            Values = values.ToDictionary(kv => kv.Key, kv => kv.Value)
+        }, "u");
+
+        propertyOnlyEdit.Icon.Should().Be("🚀", "a null Icon/CoverImageUrl on the editor means preserve, not clear");
+        propertyOnlyEdit.CoverImageUrl.Should().Be("https://example.com/cover.png");
+        propertyOnlyEdit.BlocksJson.Should().Contain("Body.", "a property-only save must not touch the page body either");
+    }
+
+    [Fact]
+    public async Task SaveRowAsync_ShouldOnlyCreateHistory_WhenBlocksJsonIsPartOfTheSave()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Projects", null, "u");
+        var titleProperty = database.Properties.Single(p => p.Type == WikiDatabasePropertyTypes.Title);
+
+        // AddInlineRowAsync-style blank-editor row creation should not create a revision -
+        // there is no page body yet.
+        var blank = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+        (await service.GetRowHistoryAsync(blank.Id)).Should().BeEmpty();
+
+        var opened = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            Id = blank.Id,
+            BlocksJson = ParagraphBlocks("First save.")
+        }, "u");
+        (await service.GetRowHistoryAsync(opened.Id)).Should().ContainSingle();
+
+        var values = WikiPropertyValues.ParseObject(opened.PropertyValuesJson);
+        WikiPropertyValues.SetText(values, titleProperty.Id, "Renamed");
+        await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            Id = blank.Id,
+            Values = values.ToDictionary(kv => kv.Key, kv => kv.Value)
+        }, "u");
+        (await service.GetRowHistoryAsync(blank.Id)).Should().ContainSingle("a property-only save must not add a noise revision");
+    }
+
+    [Fact]
+    public async Task SaveRowAsync_ShouldTrimOldRowRevisions_BeyondMaxRevisionsPerRow()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Projects", null, "u");
+        var created = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor { BlocksJson = ParagraphBlocks("v0") }, "u");
+
+        for (var i = 1; i <= 25; i++)
+        {
+            await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+            {
+                Id = created.Id,
+                BlocksJson = ParagraphBlocks($"v{i}")
+            }, "u");
+        }
+
+        var history = await service.GetRowHistoryAsync(created.Id);
+        history.Should().HaveCount(20, "revisions are trimmed to WikiDatabaseService.MaxRevisionsPerRow");
+        history[0].RevisionNumber.Should().Be(26, "the newest revisions are kept, not the oldest");
+    }
+
+    [Fact]
+    public async Task RevertRowToRevisionAsync_ShouldRestoreOldContent_AsANewVersion()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Projects", null, "u");
+        var created = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor { BlocksJson = ParagraphBlocks("Version one.") }, "u");
+        var firstRevisionId = (await service.GetRowHistoryAsync(created.Id))[0].Id;
+
+        await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            Id = created.Id,
+            BlocksJson = ParagraphBlocks("Version two.")
+        }, "u");
+
+        var reverted = await service.RevertRowToRevisionAsync(database.Id, created.Id, firstRevisionId, "u");
+
+        reverted.BlocksJson.Should().Contain("Version one.");
+
+        var history = await service.GetRowHistoryAsync(created.Id);
+        history.Should().HaveCount(3, "the revert itself is a new version, not a history rewrite");
+    }
+
+    [Fact]
+    public async Task GetRowStructuralDiffAsync_ShouldDescribeChangedBlocks()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Projects", null, "u");
+        var created = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor { BlocksJson = ParagraphBlocks("Step one.") }, "u");
+        await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor { Id = created.Id, BlocksJson = ParagraphBlocks("Step two.") }, "u");
+
+        var history = await service.GetRowHistoryAsync(created.Id);
+        var diff = await service.GetRowStructuralDiffAsync(created.Id, history[1].Id, history[0].Id);
+
+        diff.Should().NotBeNullOrEmpty();
+        diff.Should().Contain("Step two.");
+    }
+
+    private static string ParagraphBlocks(string text) => WikiBlockJson.Serialize(
+    [
+        new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0, [new WikiRichTextSpan(text)], new Dictionary<string, string>())
+    ]);
+
     private static WikiDatabaseRowEditor RowWithStatus(Guid statusPropertyId, string statusOptionId)
     {
         var values = new System.Text.Json.Nodes.JsonObject();

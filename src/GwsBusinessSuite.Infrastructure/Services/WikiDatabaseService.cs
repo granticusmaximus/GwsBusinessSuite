@@ -10,6 +10,10 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 
 public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabaseService
 {
+    // Same bound as WikiService.MaxRevisionsPerPage - kept as an independent constant rather
+    // than shared so each history table can be tuned separately later if needed.
+    private const int MaxRevisionsPerRow = 20;
+
     public async Task<IReadOnlyList<WikiDatabase>> ListDatabasesAsync(CancellationToken cancellationToken = default) =>
         await dbContext.WikiDatabases.AsNoTracking().ToListAsync(cancellationToken);
 
@@ -793,9 +797,21 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
             }
         }
         row.PropertyValuesJson = WikiPropertyValues.Serialize(values);
-        if (editor.BlocksJson is not null)
+        // Content-affecting fields, mirroring WikiPage's null-preserves convention: a
+        // property-only save (e.g. AddInlineRowAsync's blank editor, or a board drag) leaves
+        // the row's page body/icon/cover untouched rather than clearing them.
+        var contentChanged = editor.BlocksJson is not null;
+        if (contentChanged)
         {
             row.BlocksJson = string.IsNullOrWhiteSpace(editor.BlocksJson) ? "[]" : editor.BlocksJson;
+        }
+        if (editor.Icon is not null)
+        {
+            row.Icon = string.IsNullOrWhiteSpace(editor.Icon) ? null : editor.Icon.Trim();
+        }
+        if (editor.CoverImageUrl is not null)
+        {
+            row.CoverImageUrl = string.IsNullOrWhiteSpace(editor.CoverImageUrl) ? null : editor.CoverImageUrl.Trim();
         }
         row.UpdatedAt = now;
         row.UpdatedBy = performedBy;
@@ -809,6 +825,15 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
             wikiDatabaseId, row.Id, previousValues, values, now, performedBy, cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        // Snapshot history tracks the row's page body, not every property/cell edit - a
+        // revision is only worth creating when the body itself was part of this save (i.e.
+        // opened as a page and saved), same as why SaveInlineCellAsync never calls SaveRowAsync.
+        if (contentChanged)
+        {
+            await CreateRowRevisionAsync(row, performedBy, cancellationToken);
+        }
+
         return row;
     }
 
@@ -1219,5 +1244,137 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
     {
         var orders = await dbContext.WikiDatabaseViews.Where(item => item.WikiDatabaseId == wikiDatabaseId).Select(item => item.SortOrder).ToListAsync(cancellationToken);
         return orders.Count == 0 ? 0 : orders.Max() + 1;
+    }
+
+    public async Task<IReadOnlyList<WikiRevisionView>> GetRowHistoryAsync(Guid rowId, CancellationToken cancellationToken = default)
+    {
+        var revisions = await dbContext.WikiDatabaseRowRevisions
+            .AsNoTracking()
+            .Where(revision => revision.WikiDatabaseRowId == rowId)
+            .OrderByDescending(revision => revision.RevisionNumber)
+            .ToListAsync(cancellationToken);
+
+        return revisions
+            .Select(revision => new WikiRevisionView
+            {
+                Id = revision.Id,
+                RevisionNumber = revision.RevisionNumber,
+                Label = revision.Label,
+                AuthorName = revision.CreatedBy,
+                When = revision.CreatedAt
+            })
+            .ToList();
+    }
+
+    public async Task<string?> GetRowStructuralDiffAsync(
+        Guid rowId,
+        Guid fromRevisionId,
+        Guid toRevisionId,
+        CancellationToken cancellationToken = default)
+    {
+        var revisions = await dbContext.WikiDatabaseRowRevisions
+            .AsNoTracking()
+            .Where(revision => revision.WikiDatabaseRowId == rowId && (revision.Id == fromRevisionId || revision.Id == toRevisionId))
+            .ToListAsync(cancellationToken);
+
+        var from = revisions.FirstOrDefault(revision => revision.Id == fromRevisionId);
+        var to = revisions.FirstOrDefault(revision => revision.Id == toRevisionId);
+        if (from is null || to is null)
+        {
+            return null;
+        }
+
+        return BuildStructuralDiff(WikiBlockJson.ParseBlocks(from.BlocksJson), WikiBlockJson.ParseBlocks(to.BlocksJson));
+    }
+
+    public async Task<WikiDatabaseRow> RevertRowToRevisionAsync(
+        Guid wikiDatabaseId,
+        Guid rowId,
+        Guid revisionId,
+        string performedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var revision = await dbContext.WikiDatabaseRowRevisions.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == revisionId && item.WikiDatabaseRowId == rowId, cancellationToken)
+            ?? throw new InvalidOperationException("That revision no longer exists.");
+
+        // Revert only restores the page body, matching WikiService.RevertToRevisionAsync -
+        // icon/cover are left as null (preserve current) rather than pulled from the revision.
+        return await SaveRowAsync(wikiDatabaseId, new WikiDatabaseRowEditor
+        {
+            Id = rowId,
+            BlocksJson = revision.BlocksJson
+        }, performedBy, cancellationToken);
+    }
+
+    // Mirrors WikiService.BuildStructuralDiff exactly - a dictionary-by-block-id diff over
+    // two WikiBlock snapshots, independent of whether the page is a WikiPage or a row.
+    private static string BuildStructuralDiff(IReadOnlyList<WikiBlock> from, IReadOnlyList<WikiBlock> to)
+    {
+        var fromById = from.ToDictionary(block => block.Id);
+        var toById = to.ToDictionary(block => block.Id);
+        var lines = new List<string>();
+
+        foreach (var block in from)
+        {
+            if (!toById.ContainsKey(block.Id))
+            {
+                lines.Add($"- [{block.Type}] {WikiBlockHtmlRenderer.PlainTextPreview(block)}");
+            }
+        }
+
+        foreach (var block in to)
+        {
+            if (!fromById.TryGetValue(block.Id, out var previous))
+            {
+                lines.Add($"+ [{block.Type}] {WikiBlockHtmlRenderer.PlainTextPreview(block)}");
+            }
+            else if (!string.Equals(WikiBlockJson.Serialize([previous]), WikiBlockJson.Serialize([block]), StringComparison.Ordinal))
+            {
+                lines.Add($"~ [{block.Type}] {WikiBlockHtmlRenderer.PlainTextPreview(block)}");
+            }
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    private async Task CreateRowRevisionAsync(WikiDatabaseRow row, string performedBy, CancellationToken cancellationToken)
+    {
+        var nextNumber = await dbContext.WikiDatabaseRowRevisions
+            .Where(revision => revision.WikiDatabaseRowId == row.Id)
+            .Select(revision => revision.RevisionNumber)
+            .ToListAsync(cancellationToken) is { Count: > 0 } numbers
+                ? numbers.Max() + 1
+                : 1;
+
+        await dbContext.WikiDatabaseRowRevisions.AddAsync(new WikiDatabaseRowRevision
+        {
+            WikiDatabaseRowId = row.Id,
+            RevisionNumber = nextNumber,
+            BlocksJson = row.BlocksJson,
+            Icon = row.Icon,
+            CoverImageUrl = row.CoverImageUrl,
+            CreatedBy = performedBy
+        }, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        await TrimOldRowRevisionsAsync(row.Id, cancellationToken);
+    }
+
+    private async Task TrimOldRowRevisionsAsync(Guid rowId, CancellationToken cancellationToken)
+    {
+        var revisions = await dbContext.WikiDatabaseRowRevisions
+            .Where(revision => revision.WikiDatabaseRowId == rowId)
+            .OrderByDescending(revision => revision.RevisionNumber)
+            .ToListAsync(cancellationToken);
+
+        if (revisions.Count <= MaxRevisionsPerRow)
+        {
+            return;
+        }
+
+        var toDelete = revisions.Skip(MaxRevisionsPerRow).ToList();
+        dbContext.WikiDatabaseRowRevisions.RemoveRange(toDelete);
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 }

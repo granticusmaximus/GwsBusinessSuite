@@ -30,4 +30,10 @@ public interface IWikiDatabaseService
 
     Task<WikiDatabaseView> SaveViewAsync(Guid wikiDatabaseId, Guid? viewId, string name, string type, WikiDatabaseViewConfig config, string performedBy, CancellationToken cancellationToken = default);
     Task DeleteViewAsync(Guid wikiDatabaseId, Guid viewId, string performedBy, CancellationToken cancellationToken = default);
+
+    // Bounded DB-snapshot history for a row's page body (WikiDatabaseRowRevision), mirroring
+    // IWikiService's page history members exactly.
+    Task<IReadOnlyList<WikiRevisionView>> GetRowHistoryAsync(Guid rowId, CancellationToken cancellationToken = default);
+    Task<string?> GetRowStructuralDiffAsync(Guid rowId, Guid fromRevisionId, Guid toRevisionId, CancellationToken cancellationToken = default);
+    Task<WikiDatabaseRow> RevertRowToRevisionAsync(Guid wikiDatabaseId, Guid rowId, Guid revisionId, string performedBy, CancellationToken cancellationToken = default);
 }

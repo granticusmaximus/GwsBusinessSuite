@@ -112,4 +112,10 @@
   limited to authenticated portal accounts, and external viewers use public shares rather than
   guest portal accounts;
   Sentinel AI/agents; and
-  current-API/two-way interoperability.
+  current-API/two-way interoperability. Database rows now carry the same icon, cover image, and
+  bounded version history (20/row, diff, revert-as-new-version) as regular pages, closing the
+  "database page layouts and presentation" phase in `docs/WIKI_NOTION_CLONE.md`. A follow-up UI
+  audit found this area's CSS had lagged its own markup (the row-peek panel was effectively
+  unstyled) - now fixed, and two smaller visual-polish gaps (`SentinelTemplates` leaning on raw
+  Bootstrap chrome; `SentinelDiscussions`/`SentinelPresence` base colors only correct when nested
+  under `.sentinel-workspace`) are tracked in that doc rather than silently left undocumented.

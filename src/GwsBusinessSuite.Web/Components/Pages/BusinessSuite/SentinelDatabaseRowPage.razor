@@ -1,9 +1,11 @@
 @implements IAsyncDisposable
 @using System.Text.Json.Nodes
 @using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Domain.Entities
 @inject IWikiDatabaseService WikiDatabaseService
 @inject IWikiService WikiService
+@inject IMediaLibraryService MediaLibraryService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
 @inject ILogger<SentinelDatabaseRowPage> Logger
@@ -35,6 +37,60 @@
                     <div class="alert alert-danger">@ErrorMessage</div>
                 }
 
+                @if (!string.IsNullOrWhiteSpace(_coverImageUrl))
+                {
+                    <div class="sentinel-page-cover">
+                        <img src="@_coverImageUrl" alt="Row cover" loading="lazy" />
+                        <div class="sentinel-page-cover-actions">
+                            <button type="button" class="btn btn-sm btn-dark" @onclick="ToggleCoverPickerAsync">
+                                <i class="bi bi-image me-1"></i>Change cover
+                            </button>
+                            <button type="button" class="btn btn-sm btn-dark" @onclick="() => _coverImageUrl = string.Empty">
+                                <i class="bi bi-trash3 me-1"></i>Remove
+                            </button>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="sentinel-page-affordances">
+                        <button type="button" @onclick="ToggleCoverPickerAsync">
+                            <i class="bi bi-image"></i>Add cover
+                        </button>
+                    </div>
+                }
+
+                @if (_showCoverPicker)
+                {
+                    <div class="wiki-media-picker border rounded-3 p-2 mb-3">
+                        @if (!string.IsNullOrEmpty(_mediaPickerError))
+                        {
+                            <div class="text-danger small mb-0">@_mediaPickerError</div>
+                        }
+                        else if (_mediaAssets.Count == 0)
+                        {
+                            <p class="text-secondary small mb-0">No media uploaded yet. Upload images from the Media Library.</p>
+                        }
+                        else
+                        {
+                            <div class="d-flex flex-wrap gap-2">
+                                @foreach (var asset in _mediaAssets)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-secondary p-1" title="@asset.FileName"
+                                            @onclick="() => SelectCover(asset)">
+                                        <img src="@asset.ThumbnailUrl" alt="@asset.AltText" loading="lazy" style="width:64px;height:64px;object-fit:cover;" />
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+
+                <div class="sentinel-page-heading">
+                    <input class="sentinel-icon-input" @bind="_icon" placeholder="📄" maxlength="4" aria-label="Row icon" />
+                    <span class="sentinel-row-page-title-static text-truncate">@RowTitle</span>
+                </div>
+
                 @if (PageProperties.Count > 0)
                 {
                     <div class="sentinel-row-page-properties">
@@ -54,6 +110,80 @@
                     <span class="small text-secondary">Type <code>/</code> for blocks and <code>[[</code> for page links</span>
                 </div>
                 <div class="wiki-block-editor sentinel-row-block-editor" @ref="_editorContainer"></div>
+
+                <details class="sentinel-page-properties mt-3">
+                    <summary><i class="bi bi-clock-history"></i><span>History</span><i class="bi bi-chevron-right"></i></summary>
+                    <div class="card border-0 sentinel-support-panel">
+                        <div class="card-header bg-white border-bottom py-2 d-flex justify-content-between align-items-center gap-3">
+                            <div class="small text-secondary">Bounded version snapshots - the last @MaxHistoryDisplay are kept.</div>
+                            <span class="badge text-bg-secondary">@History.Count version@(History.Count == 1 ? "" : "s")</span>
+                        </div>
+                        <div class="card-body p-0">
+                            @if (!string.IsNullOrEmpty(HistoryErrorMessage))
+                            {
+                                <div class="alert alert-danger m-3 mb-0 py-2 small">@HistoryErrorMessage</div>
+                            }
+                            @if (History.Count == 0)
+                            {
+                                <div class="p-3">
+                                    <p class="text-secondary mb-0 small">No versions yet - saving this page will create the first one.</p>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="list-group list-group-flush">
+                                    @for (var i = 0; i < History.Count; i++)
+                                    {
+                                        var revision = History[i];
+                                        var previousRevision = i + 1 < History.Count ? History[i + 1] : null;
+                                        <div class="list-group-item">
+                                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                                <div>
+                                                    <div class="fw-semibold small">
+                                                        <code class="me-1">v@(revision.RevisionNumber)</code>@(string.IsNullOrWhiteSpace(revision.Label) ? "Saved" : revision.Label)
+                                                    </div>
+                                                    <div class="small text-secondary mt-1">
+                                                        @revision.AuthorName &middot; @revision.When.ToLocalTime().ToString("g")
+                                                    </div>
+                                                </div>
+                                                <div class="d-flex gap-1 flex-shrink-0">
+                                                    @if (previousRevision is not null)
+                                                    {
+                                                        <button class="btn btn-xs btn-outline-secondary" @onclick="() => ToggleDiffAsync(revision, previousRevision)">
+                                                            Diff
+                                                        </button>
+                                                    }
+                                                    <button class="btn btn-xs btn-outline-primary" @onclick="() => RevertToRevisionAsync(revision.Id)"
+                                                            disabled="@IsHistoryBusy">
+                                                        Revert
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            @if (DiffRevisionKey == revision.Id)
+                                            {
+                                                <div class="mt-3 border-top pt-3">
+                                                    @if (string.IsNullOrEmpty(DiffText))
+                                                    {
+                                                        <div class="small text-secondary">No block changes between these versions.</div>
+                                                    }
+                                                    else
+                                                    {
+                                                        <div class="p-2 rounded-3 border bg-body-tertiary">
+                                                            @foreach (var line in DiffText.Split('\n'))
+                                                            {
+                                                                <div class="@DiffLineClass(line)" style="white-space:pre-wrap;font-family:var(--bs-font-monospace, monospace);font-size:0.8125rem;">@line</div>
+                                                            }
+                                                        </div>
+                                                    }
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </details>
             </div>
         </div>
 
@@ -70,6 +200,8 @@
 </div>
 
 @code {
+    private const int MaxHistoryDisplay = 20;
+
     [Parameter, EditorRequired] public required WikiDatabase Database { get; set; }
     [Parameter, EditorRequired] public required WikiDatabaseRow Row { get; set; }
     [Parameter] public string OpenMode { get; set; } = WikiDatabaseOpenPageModes.SidePeek;
@@ -84,6 +216,19 @@
     private bool IsBusy;
     private string ErrorMessage = string.Empty;
     private string _blocksJson = "[]";
+    private string _icon = string.Empty;
+    private string _coverImageUrl = string.Empty;
+
+    private bool _showCoverPicker;
+    private string _mediaPickerError = string.Empty;
+    private List<MediaAssetSummary> _mediaAssets = new();
+
+    private List<WikiRevisionView> History { get; set; } = new();
+    private bool IsHistoryBusy { get; set; }
+    private string HistoryErrorMessage { get; set; } = string.Empty;
+    private Guid? DiffRevisionKey { get; set; }
+    private string? DiffText { get; set; }
+    private Guid? _historyLoadedForRowId;
 
     private JsonObject Values => WikiPropertyValues.ParseObject(Row.PropertyValuesJson);
     private WikiDatabaseProperty? TitleProperty => Database.Properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Title);
@@ -104,16 +249,28 @@
         _ => "Side peek"
     };
 
-    protected override void OnParametersSet() => _blocksJson = Row.BlocksJson;
+    protected override void OnParametersSet()
+    {
+        _blocksJson = Row.BlocksJson;
+        _icon = Row.Icon ?? string.Empty;
+        _coverImageUrl = Row.CoverImageUrl ?? string.Empty;
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (_initialized) return;
+        if (!_initialized)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js");
+            await _module.InvokeVoidAsync("initialize", _editorContainer, _dotNetRef, _blocksJson);
+            _initialized = true;
+        }
 
-        _dotNetRef = DotNetObjectReference.Create(this);
-        _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js");
-        await _module.InvokeVoidAsync("initialize", _editorContainer, _dotNetRef, _blocksJson);
-        _initialized = true;
+        if (_historyLoadedForRowId != Row.Id)
+        {
+            _historyLoadedForRowId = Row.Id;
+            await LoadHistoryAsync();
+        }
     }
 
     [JSInvokable]
@@ -127,6 +284,103 @@
     public async Task<IReadOnlyList<WikiLinkSuggestion>> SearchWikiLinkSuggestions(string query) =>
         WikiMarkdownHelper.SearchLinkSuggestions(query, await WikiService.ListPagesAsync());
 
+    private async Task ToggleCoverPickerAsync()
+    {
+        _showCoverPicker = !_showCoverPicker;
+        if (!_showCoverPicker)
+        {
+            return;
+        }
+
+        _mediaPickerError = string.Empty;
+        try
+        {
+            _mediaAssets = (await MediaLibraryService.ListAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load media library for the Sentinel row cover picker.");
+            _mediaPickerError = $"Unable to load media library. {ex.Message}";
+        }
+    }
+
+    private void SelectCover(MediaAssetSummary asset)
+    {
+        _coverImageUrl = asset.Url;
+        _showCoverPicker = false;
+    }
+
+    private async Task LoadHistoryAsync()
+    {
+        HistoryErrorMessage = string.Empty;
+        try
+        {
+            History = (await WikiDatabaseService.GetRowHistoryAsync(Row.Id)).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load Sentinel row history for {RowId}.", Row.Id);
+            HistoryErrorMessage = $"Unable to load history. {ex.Message}";
+        }
+    }
+
+    private async Task ToggleDiffAsync(WikiRevisionView revision, WikiRevisionView previousRevision)
+    {
+        if (DiffRevisionKey == revision.Id)
+        {
+            DiffRevisionKey = null;
+            DiffText = null;
+            return;
+        }
+
+        try
+        {
+            DiffText = await WikiDatabaseService.GetRowStructuralDiffAsync(Row.Id, previousRevision.Id, revision.Id);
+            DiffRevisionKey = revision.Id;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load diff for Sentinel row {RowId} between revisions.", Row.Id);
+            HistoryErrorMessage = $"Unable to load diff. {ex.Message}";
+        }
+    }
+
+    private async Task RevertToRevisionAsync(Guid revisionId)
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", "Revert to this version? This creates a new version with the old content - nothing is lost.");
+        if (!confirmed) return;
+
+        IsHistoryBusy = true;
+        try
+        {
+            var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var reverted = await WikiDatabaseService.RevertRowToRevisionAsync(Database.Id, Row.Id, revisionId, user);
+            _blocksJson = reverted.BlocksJson;
+            if (_module is not null)
+            {
+                await _module.InvokeVoidAsync("setBlocks", _editorContainer, _blocksJson);
+            }
+            DiffRevisionKey = null;
+            await LoadHistoryAsync();
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to revert Sentinel row {RowId} to revision {RevisionId}.", Row.Id, revisionId);
+            HistoryErrorMessage = $"Unable to revert. {ex.Message}";
+        }
+        finally
+        {
+            IsHistoryBusy = false;
+        }
+    }
+
+    private static string DiffLineClass(string line) =>
+        line.StartsWith('+') ? "text-success"
+        : line.StartsWith('-') ? "text-danger"
+        : line.StartsWith('~') ? "text-warning"
+        : "text-secondary";
+
     private async Task SaveAsync()
     {
         IsBusy = true;
@@ -138,8 +392,11 @@
             {
                 Id = Row.Id,
                 BlocksJson = _blocksJson,
+                Icon = _icon,
+                CoverImageUrl = _coverImageUrl,
                 Values = Values.ToDictionary(pair => pair.Key, pair => pair.Value)
             }, user);
+            await LoadHistoryAsync();
             await OnSaved.InvokeAsync();
         }
         catch (Exception ex)

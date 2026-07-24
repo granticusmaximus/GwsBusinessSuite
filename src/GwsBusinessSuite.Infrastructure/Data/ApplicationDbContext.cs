@@ -45,6 +45,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<WikiDatabase> WikiDatabases => Set<WikiDatabase>();
     public DbSet<WikiDatabaseProperty> WikiDatabaseProperties => Set<WikiDatabaseProperty>();
     public DbSet<WikiDatabaseRow> WikiDatabaseRows => Set<WikiDatabaseRow>();
+    public DbSet<WikiDatabaseRowRevision> WikiDatabaseRowRevisions => Set<WikiDatabaseRowRevision>();
     public DbSet<WikiDatabaseView> WikiDatabaseViews => Set<WikiDatabaseView>();
     public DbSet<CmsSite> CmsSites => Set<CmsSite>();
     public DbSet<CmsPage> CmsPages => Set<CmsPage>();
@@ -196,6 +197,12 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .WithMany(x => x.Views)
             .HasForeignKey(x => x.WikiDatabaseId)
             .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<WikiDatabaseRowRevision>()
+            .HasOne(x => x.WikiDatabaseRow)
+            .WithMany(x => x.Revisions)
+            .HasForeignKey(x => x.WikiDatabaseRowId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<WikiDatabaseRowRevision>().HasIndex(x => new { x.WikiDatabaseRowId, x.RevisionNumber }).IsUnique();
         modelBuilder.Entity<WikiDatabaseProperty>().HasIndex(x => new { x.WikiDatabaseId, x.SortOrder });
         modelBuilder.Entity<WikiDatabaseRow>().HasIndex(x => new { x.WikiDatabaseId, x.SortOrder });
         modelBuilder.Entity<WikiDatabaseView>().HasIndex(x => new { x.WikiDatabaseId, x.SortOrder });
