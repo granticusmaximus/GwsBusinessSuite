@@ -1,10 +1,12 @@
 using FluentAssertions;
+using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -891,6 +893,73 @@ public sealed class WikiDatabaseServiceTests
 
         diff.Should().NotBeNullOrEmpty();
         diff.Should().Contain("Step two.");
+    }
+
+    [Fact]
+    public async Task SaveRowAsync_ShouldFireASubscribedActiveAutomation_OnlyWhenPropertyValuesActuallyChange()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executions = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggers = new AutomationTriggerService(db, workflowService, executions, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+        var service = new WikiDatabaseService(db, triggers);
+
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var titleProperty = database.Properties.Single(p => p.Type == WikiDatabasePropertyTypes.Title);
+
+        var subscriber = await workflowService.CreateAsync("On task change");
+        var trigger = await workflowService.SaveNodeAsync(subscriber.Id, new AutomationNodeEditor
+        {
+            Name = "Row changed",
+            TypeKey = "database.rowChangedTrigger",
+            PositionX = 120,
+            PositionY = 420,
+            ParametersJson = $"{{\"wikiDatabaseId\":\"{database.Id}\"}}"
+        });
+        var setNode = await workflowService.SaveNodeAsync(subscriber.Id, new AutomationNodeEditor
+        {
+            Name = "Note",
+            TypeKey = "core.set",
+            PositionX = 400,
+            PositionY = 420,
+            ParametersJson = "{\"values\":{\"seen\":\"yes\"}}"
+        });
+        await workflowService.AddConnectionAsync(subscriber.Id, trigger.Id, "main", setNode.Id);
+        await workflowService.PublishAsync(subscriber.Id, "v1");
+        await workflowService.SetActiveAsync(subscriber.Id, true);
+
+        var row = await service.SaveRowAsync(database.Id, RowWithStatus(titleProperty.Id, "First task"), "u");
+        (await db.AutomationExecutions.AsNoTracking().Where(item => item.WorkflowId == subscriber.Id).ToListAsync())
+            .Should().ContainSingle("creating a row is a property change");
+
+        // Re-saving the exact same values (e.g. a body-only autosave that also resends the
+        // unchanged current property values) must not re-fire the automation.
+        var unchangedEditor = RowWithStatus(titleProperty.Id, "First task");
+        unchangedEditor.Id = row.Id;
+        await service.SaveRowAsync(database.Id, unchangedEditor, "u");
+        (await db.AutomationExecutions.AsNoTracking().CountAsync(item => item.WorkflowId == subscriber.Id))
+            .Should().Be(1, "no property value actually changed on this save");
+
+        // An actual property change fires it again.
+        var renameEditor = RowWithStatus(titleProperty.Id, "Renamed task");
+        renameEditor.Id = row.Id;
+        await service.SaveRowAsync(database.Id, renameEditor, "u");
+        (await db.AutomationExecutions.AsNoTracking().CountAsync(item => item.WorkflowId == subscriber.Id))
+            .Should().Be(2);
+    }
+
+    private sealed class FakeHttpClient : IAutomationHttpClient
+    {
+        public Task<AutomationHttpResponse> SendAsync(AutomationHttpRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new AutomationHttpResponse(200, "{}", new Dictionary<string, string>()));
+    }
+
+    private sealed class FakeSecretProtector : GwsBusinessSuite.Application.Abstractions.ISecretProtector
+    {
+        public string Protect(string plaintext) => $"protected::{Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(plaintext))}";
+        public string Unprotect(string protectedValue) => System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(protectedValue[11..]));
     }
 
     private static string ParagraphBlocks(string text) => WikiBlockJson.Serialize(

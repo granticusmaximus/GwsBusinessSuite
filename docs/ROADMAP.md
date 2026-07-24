@@ -129,3 +129,10 @@
   can be uploaded directly from the page/row cover picker instead of requiring a trip through the
   Media Library first. Custom icon-image uploads, page width/font controls, and reusable
   workspace-level visual defaults remain open, tracked in `docs/WIKI_NOTION_CLONE.md`.
+  "Database automations" now has its trigger half delivered - a database's rows can start a
+  Workflow Automation (the existing n8n-class engine in `docs/WORKFLOW_AUTOMATION.md`, reused
+  rather than duplicated) when a row's properties change, gated to active workflows only, with
+  per-workflow failure isolation so one broken automation can't block a row save or its
+  sibling workflows. Schedules and credentialed integrations needed no new work since the
+  automation engine already covers both generically. A write-back action node (a workflow
+  updating a database row) remains open.

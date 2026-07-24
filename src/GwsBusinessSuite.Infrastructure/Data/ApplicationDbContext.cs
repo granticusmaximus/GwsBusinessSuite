@@ -355,6 +355,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<AutomationWorkflow>().HasIndex(x => x.Name);
         modelBuilder.Entity<AutomationWorkflow>().HasIndex(x => x.WebhookPath).IsUnique();
         modelBuilder.Entity<AutomationWorkflow>().HasIndex(x => new { x.Status, x.NextScheduledAtUnixSeconds });
+        modelBuilder.Entity<AutomationWorkflow>().HasIndex(x => new { x.Status, x.TriggerWikiDatabaseId });
         modelBuilder.Entity<AutomationNode>()
             .HasOne(x => x.Workflow)
             .WithMany(x => x.Nodes)

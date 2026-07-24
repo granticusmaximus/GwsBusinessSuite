@@ -74,4 +74,11 @@ public interface IAutomationTriggerService
     Task<int> RunDueSchedulesAsync(CancellationToken cancellationToken = default);
     Task<int> ResumeDueWaitsAsync(CancellationToken cancellationToken = default);
     Task<AutomationExecutionView?> ResumeViaWebhookAsync(string token, string bodyJson, CancellationToken cancellationToken = default);
+
+    // Fires every active workflow whose enabled "database.rowChangedTrigger" node targets
+    // wikiDatabaseId. Returns the number of workflows triggered. Never throws for an
+    // individual workflow's own execution failure (recorded on that workflow's
+    // AutomationExecution instead) - a misconfigured or broken automation must not be able to
+    // block the Sentinel row save that triggered it.
+    Task<int> TriggerDatabaseRowChangedAsync(Guid wikiDatabaseId, string inputJson, CancellationToken cancellationToken = default);
 }

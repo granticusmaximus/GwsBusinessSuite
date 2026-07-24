@@ -148,7 +148,7 @@ capabilities where they fit GWS Business Suite; they are no longer silently excl
 | Area | Delivered now | Required parity work |
 | --- | --- | --- |
 | Blocks | Core and advanced native block vocabulary, including tables/equations/columns/synced blocks/TOC/buttons, plus reusable block templates, and provider-pattern embeds (YouTube/Vimeo/Spotify/Figma/CodePen/Loom render as iframes) | True oEmbed metadata and additional providers |
-| Databases | Eleven view families, expanded property vocabulary, advanced typed formulas, canonical one-way/reciprocal row relations, configurable rollups, filters/sorts/groups, row page bodies with per-view peek modes, linked/inline databases, and reusable database templates | Property layouts and automations |
+| Databases | Eleven view families, expanded property vocabulary, advanced typed formulas, canonical one-way/reciprocal row relations, configurable rollups, filters/sorts/groups, row page bodies with per-view peek modes, linked/inline databases, reusable database templates, and a `database.rowChangedTrigger` node that starts a Workflow Automation when a database's row properties change | Property layouts and a write-back automation action node |
 | Knowledge graph | `[[Page]]` links, ranked/highlighted workspace search, backlinks, person/date mentions, favorites/recents | Graph navigation, database-row mention inbox entries, and saved searches |
 | Collaboration | Discussions, replies, reactions, notifications, DB-backed cross-instance presence/polling, block-level three-way merge, authenticated portal-member roles, granular permissions, and tokenized public sharing | Character-level CRDT/OT cursors and richer public-share controls |
 | Presentation | Emoji icon and cover image for pages and database rows alike (cover can be uploaded inline via the cover picker, not just picked from an already-uploaded asset), row-level bounded version history, plus responsive side-peek, center-peek, and full-page database rows with per-view property presentation | Custom icon *image* uploads (icons remain emoji-only), page width/fonts, and reusable style defaults |
@@ -234,8 +234,29 @@ screens.
    every place `Icon` is rendered as literal text, e.g. the sidebar tree and breadcrumbs, which
    is a wider ripple than this pass scoped), page width/font controls, and reusable
    workspace-level visual defaults (no settings entity for either exists yet).
-4. **Database automations** — trigger/action rules for property changes, schedules, and
-   approved integrations, with visible execution history.
+4. **Database automations** ✅ (trigger foundation) — rather than building a second, parallel
+   automation system, this integrates with the existing n8n-class Workflow Automation engine
+   (`docs/WORKFLOW_AUTOMATION.md`), which already covers "schedules" (`core.scheduleTrigger`)
+   and "approved integrations" (credential-gated nodes like `core.httpRequest` via
+   `IAutomationCredentialService`) generically - neither needed anything Sentinel-specific. What
+   was missing was a way for a workflow to react to a Sentinel database at all: a new
+   `database.rowChangedTrigger` node (`AutomationNodeRegistry.cs`) whose `wikiDatabaseId`
+   parameter is synced onto a new `AutomationWorkflow.TriggerWikiDatabaseId` column on Publish
+   (`AutomationWorkflowService.PublishAsync`, mirroring exactly how `WebhookPath`/
+   `ScheduleIntervalMinutes` are already synced from their own trigger nodes). Saving a
+   Sentinel database row (`WikiDatabaseService.SaveRowAsync`) now calls
+   `IAutomationTriggerService.TriggerDatabaseRowChangedAsync`, which runs every *active*
+   workflow subscribed to that database - but only when a property value actually changed
+   (new row, or an inline cell/property edit), not on a body/icon/cover-only save, so autosave
+   ticks and content-only saves don't spuriously fire automations. A single subscribed
+   workflow's own failure is caught and logged per-workflow so it can never block the row save
+   that triggered it, nor stop sibling workflows from still running. Execution history needed
+   no new UI: because this reuses `IAutomationExecutionService.ExecuteAsync` under a new
+   `AutomationExecutionModes.DatabaseTrigger` mode, database-triggered runs already show up in
+   the automation editor's existing Executions tab alongside manual/webhook/schedule runs.
+   Deliberately NOT done: a write-back *action* node (e.g. "set a database row's property")
+   for the other half of "trigger/action rules" - reacting to Sentinel is delivered, writing
+   back to it from a workflow is not yet.
 5. **Real-time collaboration** — character-level concurrent editing, remote selections and
    cursors, reconnect recovery, and conflict-safe persistence.
 6. **Knowledge navigation** — graph navigation, saved searches, and database-row mentions in

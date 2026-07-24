@@ -5,6 +5,7 @@ using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -117,7 +118,7 @@ public sealed class AutomationWorkflowTests
         var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
         var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
         var executions = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
-        var triggers = new AutomationTriggerService(db, workflowService, executions, credentials, TimeProvider.System);
+        var triggers = new AutomationTriggerService(db, workflowService, executions, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
         var workflow = await workflowService.CreateAsync("Public webhook");
         var webhook = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
         {
@@ -146,6 +147,95 @@ public sealed class AutomationWorkflowTests
         execution!.Status.Should().Be("Succeeded");
         execution.OutputJson.Should().Contain("received");
         execution.Nodes.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task PublishAsync_ShouldSyncTriggerWikiDatabaseIdFromAnEnabledDatabaseTriggerNode()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var wikiDatabaseId = Guid.NewGuid();
+        var workflow = await workflowService.CreateAsync("Row watcher");
+        var dbTrigger = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Row changed",
+            TypeKey = "database.rowChangedTrigger",
+            PositionX = 120,
+            PositionY = 420,
+            ParametersJson = $"{{\"wikiDatabaseId\":\"{wikiDatabaseId}\"}}"
+        });
+        var setNode = await workflowService.SaveNodeAsync(workflow.Id, NewSetNode("Note", 400));
+        await workflowService.AddConnectionAsync(workflow.Id, dbTrigger.Id, "main", setNode.Id);
+
+        await workflowService.PublishAsync(workflow.Id, "v1");
+        var afterPublish = await workflowService.GetAsync(workflow.Id);
+        (await db.AutomationWorkflows.AsNoTracking().SingleAsync(item => item.Id == workflow.Id)).TriggerWikiDatabaseId
+            .Should().Be(wikiDatabaseId);
+
+        // Disabling the trigger node and republishing must clear the synced id, not leave it
+        // stale - a workflow with no enabled database trigger node has no subscription.
+        await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Id = dbTrigger.Id,
+            Name = dbTrigger.Name,
+            TypeKey = dbTrigger.TypeKey,
+            PositionX = dbTrigger.PositionX,
+            PositionY = dbTrigger.PositionY,
+            ParametersJson = dbTrigger.ParametersJson,
+            IsDisabled = true
+        });
+        await workflowService.PublishAsync(workflow.Id, "v2");
+        (await db.AutomationWorkflows.AsNoTracking().SingleAsync(item => item.Id == workflow.Id)).TriggerWikiDatabaseId
+            .Should().BeNull();
+        afterPublish.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task DatabaseRowChangedTrigger_ShouldRunOnlyActiveWorkflowsSubscribedToThatDatabase()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executions = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggers = new AutomationTriggerService(db, workflowService, executions, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+
+        var watchedDatabaseId = Guid.NewGuid();
+        var otherDatabaseId = Guid.NewGuid();
+
+        async Task<Guid> CreateSubscribedWorkflowAsync(string name, Guid wikiDatabaseId)
+        {
+            var workflow = await workflowService.CreateAsync(name);
+            var trigger = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+            {
+                Name = "Row changed",
+                TypeKey = "database.rowChangedTrigger",
+                PositionX = 120,
+                PositionY = 420,
+                ParametersJson = $"{{\"wikiDatabaseId\":\"{wikiDatabaseId}\"}}"
+            });
+            var setNode = await workflowService.SaveNodeAsync(workflow.Id, NewSetNode("Note", 400));
+            await workflowService.AddConnectionAsync(workflow.Id, trigger.Id, "main", setNode.Id);
+            await workflowService.PublishAsync(workflow.Id, "v1");
+            return workflow.Id;
+        }
+
+        var matchingActive = await CreateSubscribedWorkflowAsync("Matching + active", watchedDatabaseId);
+        var matchingInactive = await CreateSubscribedWorkflowAsync("Matching + inactive", watchedDatabaseId);
+        var otherDatabaseActive = await CreateSubscribedWorkflowAsync("Different database", otherDatabaseId);
+        await workflowService.SetActiveAsync(matchingActive, true);
+        await workflowService.SetActiveAsync(otherDatabaseActive, true);
+        // matchingInactive stays Inactive.
+
+        var triggeredCount = await triggers.TriggerDatabaseRowChangedAsync(watchedDatabaseId, "{\"rowId\":\"" + Guid.NewGuid() + "\"}");
+
+        triggeredCount.Should().Be(1, "only the active workflow subscribed to that exact database should run");
+        var matchingExecutions = await db.AutomationExecutions.AsNoTracking().Where(item => item.WorkflowId == matchingActive).ToListAsync();
+        matchingExecutions.Should().ContainSingle();
+        matchingExecutions[0].Mode.Should().Be(AutomationExecutionModes.DatabaseTrigger);
+        (await db.AutomationExecutions.AsNoTracking().AnyAsync(item => item.WorkflowId == matchingInactive)).Should().BeFalse();
+        (await db.AutomationExecutions.AsNoTracking().AnyAsync(item => item.WorkflowId == otherDatabaseActive)).Should().BeFalse();
     }
 
     [Fact]
@@ -460,7 +550,7 @@ public sealed class AutomationWorkflowTests
         var workflowService = new AutomationWorkflowService(db, registry, timeProvider);
         var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), timeProvider);
         var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, timeProvider);
-        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, timeProvider);
+        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, timeProvider, NullLogger<AutomationTriggerService>.Instance);
         var workflow = await workflowService.CreateAsync("Orphan recovery");
         var trigger = workflow.Nodes.Single();
         var setNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor

@@ -1,14 +1,21 @@
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
-public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabaseService
+// automationTriggerService is optional (defaults to null, treated as no-op below) purely so
+// the three dozen existing WikiDatabaseServiceTests/SentinelWorkspaceServiceTests/
+// SentinelTemplateServiceTests call sites that construct this service directly - none of
+// which exercise database automations - don't all need a fake automation dependency graph
+// wired through them. Production DI always resolves the real registered instance.
+public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTriggerService? automationTriggerService = null) : IWikiDatabaseService
 {
     // Same bound as WikiService.MaxRevisionsPerPage - kept as an independent constant rather
     // than shared so each history table can be tuned separately later if needed.
@@ -797,6 +804,7 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
             }
         }
         row.PropertyValuesJson = WikiPropertyValues.Serialize(values);
+        var propertyValuesChanged = isNew || !string.Equals(WikiPropertyValues.Serialize(previousValues), row.PropertyValuesJson, StringComparison.Ordinal);
         // Content-affecting fields, mirroring WikiPage's null-preserves convention: a
         // property-only save (e.g. AddInlineRowAsync's blank editor, or a board drag) leaves
         // the row's page body/icon/cover untouched rather than clearing them.
@@ -834,6 +842,15 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext) : IWikiDatabase
         if (contentChanged && editor.CreateRevisionCheckpoint)
         {
             await CreateRowRevisionAsync(row, performedBy, cancellationToken);
+        }
+
+        // Property-only edits (inline cell edits, board drags) and new rows both count as a
+        // "row changed" event; a save that only touched the page body/icon/cover does not,
+        // since nothing an automation could condition on (property values) actually moved.
+        if (propertyValuesChanged && automationTriggerService is not null)
+        {
+            var triggerPayload = JsonSerializer.Serialize(new { wikiDatabaseId, rowId = row.Id, isNew, values });
+            await automationTriggerService.TriggerDatabaseRowChangedAsync(wikiDatabaseId, triggerPayload, cancellationToken);
         }
 
         return row;

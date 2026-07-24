@@ -1126,6 +1126,7 @@ public static class AutomationExecutionModes
     public const string Webhook = "Webhook";
     public const string Schedule = "Schedule";
     public const string Retry = "Retry";
+    public const string DatabaseTrigger = "DatabaseTrigger";
 }
 
 public sealed class AutomationWorkflow : AuditableEntity
@@ -1141,6 +1142,11 @@ public sealed class AutomationWorkflow : AuditableEntity
     public int? ScheduleIntervalMinutes { get; set; }
     public DateTimeOffset? NextScheduledAt { get; set; }
     public long? NextScheduledAtUnixSeconds { get; set; }
+    // Synced from an enabled "database.rowChangedTrigger" node's ParametersJson on Publish,
+    // same pattern as WebhookPath/ScheduleIntervalMinutes being synced from their own trigger
+    // nodes - see AutomationWorkflowService.PublishAsync. Null means this workflow has no
+    // (enabled) database trigger.
+    public Guid? TriggerWikiDatabaseId { get; set; }
     public ICollection<AutomationNode> Nodes { get; set; } = new List<AutomationNode>();
     public ICollection<AutomationConnection> Connections { get; set; } = new List<AutomationConnection>();
     public ICollection<AutomationWorkflowVersion> Versions { get; set; } = new List<AutomationWorkflowVersion>();

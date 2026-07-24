@@ -317,6 +317,7 @@ public sealed class AutomationWorkflowService(
         var snapshot = BuildSnapshot(workflow, versionNumber);
         var webhookNode = workflow.Nodes.FirstOrDefault(node => node.TypeKey == "core.webhookTrigger" && !node.IsDisabled);
         var scheduleNode = workflow.Nodes.FirstOrDefault(node => node.TypeKey == "core.scheduleTrigger" && !node.IsDisabled);
+        var databaseTriggerNode = workflow.Nodes.FirstOrDefault(node => node.TypeKey == "database.rowChangedTrigger" && !node.IsDisabled);
         var webhookPath = webhookNode is null ? null : ReadStringParameter(webhookNode.ParametersJson, "path")?.Trim();
         if (!string.IsNullOrWhiteSpace(webhookPath))
         {
@@ -340,6 +341,10 @@ public sealed class AutomationWorkflowService(
             ? timeProvider.GetUtcNow().AddMinutes(workflow.ScheduleIntervalMinutes.Value)
             : null;
         workflow.NextScheduledAtUnixSeconds = workflow.NextScheduledAt?.ToUnixTimeSeconds();
+        workflow.TriggerWikiDatabaseId = databaseTriggerNode is not null
+            && Guid.TryParse(ReadStringParameter(databaseTriggerNode.ParametersJson, "wikiDatabaseId"), out var wikiDatabaseId)
+                ? wikiDatabaseId
+                : null;
         if (workflow.Status == AutomationWorkflowStatuses.Draft) workflow.Status = AutomationWorkflowStatuses.Inactive;
         Touch(workflow);
         await db.SaveChangesAsync(cancellationToken);

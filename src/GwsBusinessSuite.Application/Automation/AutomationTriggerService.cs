@@ -4,6 +4,7 @@ using System.Text.Json;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace GwsBusinessSuite.Application.Automation;
 
@@ -12,7 +13,8 @@ public sealed class AutomationTriggerService(
     IAutomationWorkflowService workflowService,
     IAutomationExecutionService executionService,
     IAutomationCredentialService credentialService,
-    TimeProvider timeProvider) : IAutomationTriggerService
+    TimeProvider timeProvider,
+    ILogger<AutomationTriggerService> logger) : IAutomationTriggerService
 {
     private static readonly SemaphoreSlim ScheduleLock = new(1, 1);
     private static readonly SemaphoreSlim ResumeLock = new(1, 1);
@@ -100,6 +102,32 @@ public sealed class AutomationTriggerService(
             return resumed;
         }
         finally { ResumeLock.Release(); }
+    }
+
+    public async Task<int> TriggerDatabaseRowChangedAsync(Guid wikiDatabaseId, string inputJson, CancellationToken cancellationToken = default)
+    {
+        var subscribers = await db.AutomationWorkflows.AsNoTracking().Where(item =>
+            item.Status == AutomationWorkflowStatuses.Active
+            && item.TriggerWikiDatabaseId == wikiDatabaseId).Select(item => item.Id).ToListAsync(cancellationToken);
+
+        var triggered = 0;
+        foreach (var workflowId in subscribers)
+        {
+            try
+            {
+                await executionService.ExecuteAsync(workflowId, inputJson, AutomationExecutionModes.DatabaseTrigger, cancellationToken: cancellationToken);
+                triggered++;
+            }
+            catch (Exception ex)
+            {
+                // A single workflow's own failure (missing published version, disabled
+                // trigger node removed after publish, etc.) is visible in that workflow's own
+                // Executions tab where relevant, but must not stop the row save that reached
+                // here, nor stop other subscribed workflows from still running.
+                logger.LogWarning(ex, "Database row-changed trigger failed for automation workflow {WorkflowId}.", workflowId);
+            }
+        }
+        return triggered;
     }
 
     public async Task<AutomationExecutionView?> ResumeViaWebhookAsync(string token, string bodyJson, CancellationToken cancellationToken = default)
