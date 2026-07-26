@@ -9,6 +9,36 @@ public sealed record NotionPage(IReadOnlyList<JsonElement> Results, bool HasMore
 
 public sealed record NotionValidationResult(bool IsSuccess, string Message, string? WorkspaceName);
 
+public sealed class NotionOAuthOptions
+{
+    public const string SectionName = "NotionOAuth";
+
+    public string ClientId { get; set; } = string.Empty;
+    public string ClientSecret { get; set; } = string.Empty;
+    public string RedirectUri { get; set; } = string.Empty;
+
+    public bool IsConfigured =>
+        !string.IsNullOrWhiteSpace(ClientId)
+        && !string.IsNullOrWhiteSpace(ClientSecret)
+        && Uri.TryCreate(RedirectUri, UriKind.Absolute, out _);
+}
+
+public sealed record NotionOAuthConnectionResult(
+    bool IsSuccess,
+    string Message,
+    string? WorkspaceName = null);
+
+public interface INotionOAuthService
+{
+    bool IsConfigured { get; }
+    string CreateAuthorizationUrl(string state);
+    Task<NotionOAuthConnectionResult> CompleteAuthorizationAsync(
+        string code,
+        CancellationToken cancellationToken = default);
+    Task<NotionOAuthConnectionResult> RefreshAsync(CancellationToken cancellationToken = default);
+    Task<NotionOAuthConnectionResult> DisconnectAsync(CancellationToken cancellationToken = default);
+}
+
 public sealed record NotionPickerItem(string Id, string Title, string ObjectType, string? ParentId);
 
 public sealed record NotionPickerResult(
@@ -48,6 +78,10 @@ public sealed class NotionConnectorSettingsView
 {
     public string IntegrationToken { get; set; } = string.Empty;
     public bool HasStoredIntegrationToken { get; set; }
+    public string AuthenticationMode { get; set; } = "internal";
+    public bool IsOAuthConnected { get; set; }
+    public string? WorkspaceId { get; set; }
+    public string? WorkspaceIconUrl { get; set; }
     public string? WorkspaceName { get; set; }
     public bool AutoSyncEnabled { get; set; } = true;
     public string SyncDirection { get; set; } = "import";

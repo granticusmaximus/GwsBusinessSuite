@@ -6,15 +6,18 @@
 @using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Domain.Entities
+@using Microsoft.AspNetCore.WebUtilities
 @inject IWikiService WikiService
 @inject IWikiDatabaseService WikiDatabaseService
 @inject ISentinelWorkspaceService SentinelWorkspaceService
 @inject INotionSyncService NotionSyncService
 @inject INotionSyncCoordinator NotionSyncCoordinator
+@inject INotionOAuthService NotionOAuthService
 @inject IMediaLibraryService MediaLibraryService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject SentinelCursorTracker CursorTracker
 @inject IJSRuntime JS
+@inject NavigationManager Navigator
 @inject ILogger<Wiki> Logger
 
 <PageTitle>Sentinel</PageTitle>
@@ -584,22 +587,85 @@
                 </div>
                 <div class="modal-body">
                     <p class="text-secondary">
-                        Connect a Notion internal integration using the current API. Import is the safe default; optional
-                        page pushes require both two-way mode and an explicit write acknowledgement.
+                        Authorize a Notion workspace with OAuth or use an advanced token. Import is the safe default;
+                        optional page pushes require both two-way mode and an explicit write acknowledgement.
                     </p>
 
-                    <label class="form-label fw-semibold small">Integration token</label>
-                    <div class="input-group">
-                        <input class="form-control" type="@(ShowNotionToken ? "text" : "password")"
-                               @bind="NotionSettings.IntegrationToken" autocomplete="new-password"
-                               placeholder="@(NotionSettings.HasStoredIntegrationToken
-                                   ? "Token saved securely — enter a replacement only to rotate it"
-                                   : "Paste a Notion internal integration token")" />
-                        <button type="button" class="btn btn-outline-secondary" title="@(ShowNotionToken ? "Hide token" : "Show token")"
-                                @onclick="() => ShowNotionToken = !ShowNotionToken">
-                            <i class="bi @(ShowNotionToken ? "bi-eye-slash-fill" : "bi-eye-fill")"></i>
-                        </button>
+                    <div class="border rounded-3 p-3">
+                        @if (NotionSettings.IsOAuthConnected)
+                        {
+                            <div class="d-flex flex-wrap align-items-center gap-3">
+                                @if (!string.IsNullOrWhiteSpace(NotionSettings.WorkspaceIconUrl))
+                                {
+                                    <img src="@NotionSettings.WorkspaceIconUrl" alt="" width="40" height="40"
+                                         class="rounded object-fit-cover" referrerpolicy="no-referrer" />
+                                }
+                                else
+                                {
+                                    <span class="d-inline-flex align-items-center justify-content-center rounded bg-body-tertiary"
+                                          style="width: 40px; height: 40px;" aria-hidden="true">
+                                        <i class="bi bi-check2-circle text-success"></i>
+                                    </span>
+                                }
+                                <div class="me-auto">
+                                    <div class="fw-semibold">Connected with Notion</div>
+                                    <div class="small text-secondary">
+                                        @(string.IsNullOrWhiteSpace(NotionSettings.WorkspaceName)
+                                            ? "Authorized workspace"
+                                            : NotionSettings.WorkspaceName)
+                                    </div>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        @onclick="RefreshNotionOAuthAsync" disabled="@IsNotionOperationBusy">
+                                    Refresh authorization
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-danger"
+                                        @onclick="DisconnectNotionOAuthAsync" disabled="@IsNotionOperationBusy">
+                                    Disconnect
+                                </button>
+                            </div>
+                        }
+                        else if (NotionOAuthService.IsConfigured)
+                        {
+                            <div class="d-flex flex-wrap align-items-center gap-3">
+                                <div class="me-auto">
+                                    <div class="fw-semibold">Connect your Notion workspace</div>
+                                    <div class="small text-secondary">
+                                        Sign in at Notion and choose the pages Sentinel may access.
+                                    </div>
+                                </div>
+                                <a class="btn btn-primary" href="/auth/notion/connect" data-enhance-nav="false">
+                                    <i class="bi bi-box-arrow-up-right me-1"></i>Connect Notion
+                                </a>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="alert alert-warning mb-0">
+                                Notion OAuth needs server configuration. Set
+                                <code>NotionOAuth__ClientId</code>, <code>NotionOAuth__ClientSecret</code>,
+                                and <code>NotionOAuth__RedirectUri</code>, then restart the app.
+                            </div>
+                        }
                     </div>
+
+                    <details class="mt-3">
+                        <summary class="small fw-semibold">Advanced: use an internal connection token or personal access token</summary>
+                        <div class="mt-2">
+                            <label class="form-label fw-semibold small">Integration token</label>
+                            <div class="input-group">
+                                <input class="form-control" type="@(ShowNotionToken ? "text" : "password")"
+                                       @bind="NotionSettings.IntegrationToken" autocomplete="new-password"
+                                       placeholder="@(NotionSettings.HasStoredIntegrationToken
+                                           ? "Token saved securely — enter a replacement only to rotate it"
+                                           : "Paste a Notion integration token")" />
+                                <button type="button" class="btn btn-outline-secondary" title="@(ShowNotionToken ? "Hide token" : "Show token")"
+                                        @onclick="() => ShowNotionToken = !ShowNotionToken">
+                                    <i class="bi @(ShowNotionToken ? "bi-eye-slash-fill" : "bi-eye-fill")"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </details>
                     @if (NotionSettings.IntegrationTokenUnreadable)
                     {
                         <div class="alert alert-warning py-2 mt-2 mb-0">
@@ -963,6 +1029,71 @@
         finally
         {
             IsNotionBrowseBusy = false;
+        }
+    }
+
+    private async Task RefreshNotionOAuthAsync()
+    {
+        IsNotionBusy = true;
+        NotionMessage = string.Empty;
+        try
+        {
+            var result = await NotionOAuthService.RefreshAsync(_disposeCts.Token);
+            NotionMessage = result.Message;
+            NotionMessageIsError = !result.IsSuccess;
+            if (result.IsSuccess)
+            {
+                NotionSettings = await NotionSyncService.GetSettingsAsync(_disposeCts.Token)
+                    ?? NotionSettings;
+            }
+        }
+        catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to refresh Notion OAuth authorization.");
+            NotionMessage = "Unable to refresh Notion authorization.";
+            NotionMessageIsError = true;
+        }
+        finally
+        {
+            IsNotionBusy = false;
+        }
+    }
+
+    private async Task DisconnectNotionOAuthAsync()
+    {
+        var confirmed = await JS.InvokeAsync<bool>(
+            "confirm",
+            "Disconnect this Notion workspace? Imported Sentinel content will be kept.");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        IsNotionBusy = true;
+        NotionMessage = string.Empty;
+        try
+        {
+            var result = await NotionOAuthService.DisconnectAsync(_disposeCts.Token);
+            NotionMessage = result.Message;
+            NotionMessageIsError = !result.IsSuccess;
+            if (result.IsSuccess)
+            {
+                NotionSettings = await NotionSyncService.GetSettingsAsync(_disposeCts.Token)
+                    ?? new NotionConnectorSettingsView();
+                ResetNotionPickerSelection();
+            }
+        }
+        catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to disconnect Notion OAuth authorization.");
+            NotionMessage = "Unable to disconnect Notion authorization.";
+            NotionMessageIsError = true;
+        }
+        finally
+        {
+            IsNotionBusy = false;
         }
     }
 
@@ -1377,6 +1508,20 @@
         CursorTracker.Moved += HandleCursorsMoved;
         await LoadTreeAsync(selectFirstPage: false);
         await LoadWorkspaceNavigationAsync();
+
+        var query = QueryHelpers.ParseQuery(Navigator.ToAbsoluteUri(Navigator.Uri).Query);
+        if (query.TryGetValue("notionOAuth", out var oauthResult))
+        {
+            await OpenNotionModalAsync();
+            (NotionMessage, NotionMessageIsError) = oauthResult.ToString() switch
+            {
+                "connected" => ("Notion workspace connected. Browse the authorized content, then sync.", false),
+                "denied" => ("Notion authorization was cancelled.", true),
+                "invalid-state" => ("Notion authorization expired or could not be verified. Try connecting again.", true),
+                "not-configured" => ("Notion OAuth is not configured on this server.", true),
+                _ => ("Notion authorization could not be completed. Try connecting again.", true)
+            };
+        }
     }
 
     [JSInvokable]

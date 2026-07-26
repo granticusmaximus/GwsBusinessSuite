@@ -61,6 +61,33 @@ public sealed class NotionSyncServiceTests
     }
 
     [Fact]
+    public async Task SaveSettingsAsync_ShouldReplaceOAuthMetadataWhenManualTokenIsSupplied()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        var settings = await fixture.Db.NotionConnectorSettings.SingleAsync();
+        settings.AuthenticationMode = "oauth";
+        settings.OAuthRefreshToken = "protected-refresh";
+        settings.OAuthBotId = "bot-1";
+        settings.WorkspaceId = "workspace-1";
+        settings.WorkspaceIconUrl = "https://example.test/icon.png";
+        settings.OAuthConnectedAt = DateTimeOffset.UtcNow;
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Service.SaveSettingsAsync(new NotionConnectorSettingsView
+        {
+            IntegrationToken = "manual-token"
+        });
+
+        result.IsSuccess.Should().BeTrue();
+        settings.AuthenticationMode.Should().Be("internal");
+        settings.OAuthRefreshToken.Should().BeEmpty();
+        settings.OAuthBotId.Should().BeNull();
+        settings.WorkspaceId.Should().BeNull();
+        settings.WorkspaceIconUrl.Should().BeNull();
+        settings.OAuthConnectedAt.Should().BeNull();
+    }
+
+    [Fact]
     public async Task BrowseAsync_ShouldReturnHierarchyMetadataAndExcludeDatabaseRows()
     {
         await using var fixture = await SyncFixture.CreateAsync();

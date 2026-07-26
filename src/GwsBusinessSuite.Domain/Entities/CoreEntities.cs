@@ -675,9 +675,17 @@ public sealed class NotionConnectorSettings : AuditableEntity
     // Singleton row — always upserted using WellKnownId.
     public static readonly Guid WellKnownId = new("00701104-0000-0000-0000-000000000001");
 
-    // Notion internal-integration token, encrypted at rest via ISecretProtector - same
-    // convention as CjConnectorSettings.DeveloperKey. No OAuth anywhere in this app.
+    // Internal-connection, PAT, or OAuth access token. Always encrypted at rest via
+    // ISecretProtector and never returned to the browser.
     public string IntegrationToken { get; set; } = string.Empty;
+    // OAuth rotates both access and refresh tokens together. Keeping this separate lets the
+    // existing internal-token connector remain a supported fallback.
+    public string OAuthRefreshToken { get; set; } = string.Empty;
+    public string AuthenticationMode { get; set; } = "internal";
+    public string? OAuthBotId { get; set; }
+    public string? WorkspaceId { get; set; }
+    public string? WorkspaceIconUrl { get; set; }
+    public DateTimeOffset? OAuthConnectedAt { get; set; }
     // Cosmetic - fetched once via GET /v1/users/me when the token is saved.
     public string? WorkspaceName { get; set; }
     public bool AutoSyncEnabled { get; set; } = true;

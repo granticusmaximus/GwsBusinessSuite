@@ -115,6 +115,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<WikiDatabaseRow>().Property(x => x.NotionExportId).HasMaxLength(80);
         modelBuilder.Entity<NotionConnectorSettings>().Property(x => x.SyncDirection).HasDefaultValue("import");
         modelBuilder.Entity<NotionConnectorSettings>().Property(x => x.SelectedNotionIdsJson).HasDefaultValue("[]");
+        modelBuilder.Entity<NotionConnectorSettings>().Property(x => x.AuthenticationMode).HasDefaultValue("internal");
+        modelBuilder.Entity<NotionConnectorSettings>().Property(x => x.OAuthRefreshToken).HasDefaultValue("");
         modelBuilder.Entity<WikiPage>().Property(x => x.ContentVersion)
             .HasDefaultValue(1L)
             .IsConcurrencyToken();

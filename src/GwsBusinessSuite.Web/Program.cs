@@ -20,6 +20,7 @@ using GwsBusinessSuite.Web.Hubs;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
@@ -448,6 +449,87 @@ app.MapGet("/auth/logout", async (HttpContext httpContext) =>
     await httpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     return Results.LocalRedirect("/admin/login");
 }).AllowAnonymous();
+
+app.MapGet("/auth/notion/connect", (
+    HttpContext httpContext,
+    INotionOAuthService notionOAuth,
+    IDataProtectionProvider dataProtectionProvider) =>
+{
+    if (!notionOAuth.IsConfigured)
+    {
+        return Results.LocalRedirect("/admin/sentinel?notionOAuth=not-configured");
+    }
+
+    var username = httpContext.User.Identity?.Name ?? string.Empty;
+    var statePayload = System.Text.Json.JsonSerializer.Serialize(new
+    {
+        username,
+        issuedAtUnixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+    });
+    var state = dataProtectionProvider
+        .CreateProtector("GwsBusinessSuite.NotionOAuth.State.v1")
+        .Protect(statePayload);
+    return Results.Redirect(notionOAuth.CreateAuthorizationUrl(state));
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("admin-mutation");
+
+app.MapGet("/auth/notion/callback", async (
+    HttpContext httpContext,
+    string? code,
+    string? state,
+    string? error,
+    INotionOAuthService notionOAuth,
+    IDataProtectionProvider dataProtectionProvider,
+    CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrWhiteSpace(state))
+    {
+        return Results.LocalRedirect("/admin/sentinel?notionOAuth=invalid-state");
+    }
+
+    try
+    {
+        var stateJson = dataProtectionProvider
+            .CreateProtector("GwsBusinessSuite.NotionOAuth.State.v1")
+            .Unprotect(state);
+        using var stateDocument = System.Text.Json.JsonDocument.Parse(stateJson);
+        var root = stateDocument.RootElement;
+        var stateUsername = root.TryGetProperty("username", out var usernameElement)
+            ? usernameElement.GetString()
+            : null;
+        var issuedAt = root.TryGetProperty("issuedAtUnixSeconds", out var issuedElement)
+            && issuedElement.TryGetInt64(out var issuedAtUnixSeconds)
+                ? DateTimeOffset.FromUnixTimeSeconds(issuedAtUnixSeconds)
+                : DateTimeOffset.MinValue;
+        var currentUsername = httpContext.User.Identity?.Name;
+        if (!string.Equals(stateUsername, currentUsername, StringComparison.Ordinal)
+            || issuedAt < DateTimeOffset.UtcNow.AddMinutes(-10)
+            || issuedAt > DateTimeOffset.UtcNow.AddMinutes(1))
+        {
+            return Results.LocalRedirect("/admin/sentinel?notionOAuth=invalid-state");
+        }
+    }
+    catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException
+                                   or System.Text.Json.JsonException
+                                   or ArgumentOutOfRangeException)
+    {
+        return Results.LocalRedirect("/admin/sentinel?notionOAuth=invalid-state");
+    }
+
+    if (!string.IsNullOrWhiteSpace(error))
+    {
+        return Results.LocalRedirect("/admin/sentinel?notionOAuth=denied");
+    }
+
+    var result = await notionOAuth.CompleteAuthorizationAsync(code ?? string.Empty, cancellationToken);
+    return Results.LocalRedirect(
+        result.IsSuccess
+            ? "/admin/sentinel?notionOAuth=connected"
+            : "/admin/sentinel?notionOAuth=failed");
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("admin-mutation");
 
 // Serve hero images stored as base64 data URIs as real image responses
 // so og:image tags have a cacheable URL that social crawlers can fetch.

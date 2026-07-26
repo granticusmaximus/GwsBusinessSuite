@@ -149,6 +149,13 @@ public static class DependencyInjection
             client.BaseAddress = new Uri("https://api.notion.com/v1/");
             client.Timeout = TimeSpan.FromSeconds(30);
         });
+        services.Configure<NotionOAuthOptions>(
+            configuration.GetSection(NotionOAuthOptions.SectionName));
+        services.AddHttpClient<INotionOAuthService, NotionOAuthService>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.notion.com/v1/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
         services.AddScoped<INotionSyncService, NotionSyncService>();
         services.AddSingleton<NotionSyncBackgroundService>();
         services.AddSingleton<INotionSyncCoordinator>(provider =>

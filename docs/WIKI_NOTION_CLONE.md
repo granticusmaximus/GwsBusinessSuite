@@ -71,7 +71,7 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 | Databases | Typed properties including person, files, place, evaluated advanced formulas, one-way or reciprocal row-picker relations, and calculated rollups; editable Table, Board, List, Gallery, Calendar, Timeline, Chart, Form, Map, Feed, and Dashboard views | Richer rollup formatting |
 | Databases — structure | Databases share the page sidebar tree; every row opens as a responsive block-content page with a per-view side-peek, center-peek, or full-page presentation and configurable property visibility/order; row icon, cover image, and bounded version history (20/row, structural diff, revert-as-new-version) match page-level history; linked and inline database blocks reference canonical data without duplication | — |
 | Search & graph | All-token ranked page/block/database-row search with highlighted matches; per-user saved searches; structured and legacy backlinks; per-user favorites/recents; structured page, person, date, and database-row mentions, with a personal mention inbox for people and a "Mentioned in" backlinks panel for rows | Graph visualization |
-| Import/sync | Current `2026-03-11` Notion API, data sources, views, comments, subtree-aware selective import with a browsable collapsible page/database picker, recursive template/unsupported-container content recovery, full-page Markdown recovery for unavailable structured content, meeting-note summary/notes/transcript import, content-count diagnostics, encrypted token storage, soft archival, durable authenticated copies of Notion-hosted files, explicitly enabled conflict-aware manual page pushes, reusable template import from connected free Notion templates or Markdown/CSV/HTML ZIP exports, full-fidelity property mapping (people/files/relation/created-by/last-edited-by/last-edited-time target Sentinel's real typed properties instead of degrading to text, with relation values resolved to local row ids), column layouts, inline video/audio players, and rich table cell formatting | Incremental progress reporting for large syncs; broader bidirectional database writes |
+| Import/sync | Current `2026-03-11` Notion API, public-connection OAuth with encrypted access/refresh tokens and revocation (plus internal/PAT fallback), data sources, views, comments, subtree-aware selective import with a browsable collapsible page/database picker, recursive template/unsupported-container content recovery, full-page Markdown recovery for unavailable structured content, meeting-note summary/notes/transcript import, content-count diagnostics, soft archival, durable authenticated copies of Notion-hosted files, explicitly enabled conflict-aware manual page pushes, reusable template import from connected free Notion templates or Markdown/CSV/HTML ZIP exports, full-fidelity property mapping (people/files/relation/created-by/last-edited-by/last-edited-time target Sentinel's real typed properties instead of degrading to text, with relation values resolved to local row ids), column layouts, inline video/audio players, and rich table cell formatting | Incremental progress and API-coverage reporting for large syncs; connection webhooks; broader bidirectional database writes |
 | Visibility | Authenticated portal-member roles and per-resource view/comment/edit/full-access grants, plus expiring/revocable tokenized public page and database shares | Richer public-share controls and auditing |
 
 ## Delivery sequence
@@ -87,7 +87,8 @@ proprietary schemas; public Notion product and API documentation is behavioral r
    columns, plus List, Gallery, and Calendar views. Rows now open as pages with their own structured
    block content, and imported Notion database-row page bodies sync into those blocks.
 3. **Notion API import/sync** (delivered): a `NotionConnectorSettings` singleton
-   (encrypted integration token via `ISecretProtector`, matching `CjConnectorSettings`) + a typed-HttpClient
+   (OAuth access/refresh tokens or a manual integration token encrypted via
+   `ISecretProtector`) + a typed-HttpClient
    `NotionService` pinned to `2026-03-11` + a `NotionSyncBackgroundService` (matching `CjAdsSyncBackgroundService`'s
    interval/semaphore/scope-per-tick shape); maps Notion's ~30 block types onto
    `WikiBlock.Type` and its ~22 database property types onto the Phase 2 property model;
@@ -353,9 +354,9 @@ screens.
 ## Safety rules
 
 - Sentinel content never stores plaintext secrets.
-- The Notion integration token follows this app's existing convention: pasted into a
-  settings form, encrypted at rest via `ISecretProtector`, never an OAuth flow (this app
-  has none).
+- Notion OAuth access and refresh tokens follow this app's encrypted-secret convention and are
+  never returned to the browser. Authorization state is protected, short-lived, and bound to
+  the signed-in admin. Manual internal/PAT tokens remain an advanced fallback.
 - Server-side authorization remains authoritative for `/admin/sentinel`; public access is
   isolated to random-token `/sentinel/share/{token}` routes. Only token hashes are stored,
   and expiry/revocation is checked server-side on every resolution.

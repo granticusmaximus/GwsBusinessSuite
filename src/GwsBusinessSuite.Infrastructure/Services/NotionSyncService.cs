@@ -37,6 +37,11 @@ public sealed class NotionSyncService(
             // "keep the stored token"; entering a value explicitly replaces it.
             IntegrationToken = string.Empty,
             HasStoredIntegrationToken = !string.IsNullOrWhiteSpace(row.IntegrationToken),
+            AuthenticationMode = row.AuthenticationMode,
+            IsOAuthConnected = string.Equals(row.AuthenticationMode, "oauth", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(row.IntegrationToken),
+            WorkspaceId = row.WorkspaceId,
+            WorkspaceIconUrl = row.WorkspaceIconUrl,
             WorkspaceName = row.WorkspaceName,
             AutoSyncEnabled = row.AutoSyncEnabled,
             SyncDirection = row.SyncDirection,
@@ -83,6 +88,12 @@ public sealed class NotionSyncService(
         if (suppliedToken.Length > 0 && validation.IsSuccess)
         {
             row.IntegrationToken = secretProtector.Protect(suppliedToken);
+            row.OAuthRefreshToken = string.Empty;
+            row.AuthenticationMode = "internal";
+            row.OAuthBotId = null;
+            row.WorkspaceId = null;
+            row.WorkspaceIconUrl = null;
+            row.OAuthConnectedAt = null;
         }
         if (validation.IsSuccess)
         {

@@ -167,5 +167,8 @@
   value-mapping fix. Track A4 is now delivered: the connector modal can browse all discoverable
   page/database metadata through the encrypted stored token or an unsaved replacement token,
   render it as a collapsible checkbox tree, and persist checked roots through the existing
-  subtree-aware selected-id scope. Track A5 progress reporting and visual-parity Track B remain
-  open in that same plan file.
+  subtree-aware selected-id scope. The connection foundation now also supports Notion OAuth:
+  short-lived admin-bound state, encrypted access/refresh tokens, token rotation,
+  revoke-before-disconnect, workspace identity, and manual internal/PAT fallback. The staged
+  ground-up workspace rebuild is specified in `docs/SENTINEL_REBUILD.md`; Track A5 progress and
+  coverage reporting and visual-parity Track B remain open.
