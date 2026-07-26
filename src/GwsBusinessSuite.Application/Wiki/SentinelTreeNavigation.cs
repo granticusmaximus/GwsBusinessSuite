@@ -70,4 +70,20 @@ public static class SentinelTreeNavigation
 
         return ancestors;
     }
+
+    public static IReadOnlyList<Guid> GetBreadcrumbNodeIds(
+        Guid nodeId,
+        IReadOnlyCollection<SentinelTreeNavigationNode> nodes)
+    {
+        var nodeIds = nodes.Select(node => node.Id).ToHashSet();
+        if (!nodeIds.Contains(nodeId))
+        {
+            return [];
+        }
+
+        return GetAncestorNodeIds(nodeId, nodes)
+            .Reverse()
+            .Append(nodeId)
+            .ToList();
+    }
 }

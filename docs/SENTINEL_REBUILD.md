@@ -37,9 +37,12 @@ is not guaranteed to exhaustively enumerate every accessible document. Sentinel 
 1. **Connection foundation — delivered.** OAuth authorize/callback, encrypted access and
    refresh tokens, rotation, revoke/disconnect, workspace identity, manual-token fallback, and
    additive migration.
-2. **Workspace shell.** Replace the current admin-shaped Sentinel surface with a focused
-   three-pane workspace, favorites/private/team sections, quick find, full breadcrumb, page
-   chrome, responsive sidebar, and keyboard-first navigation.
+2. **Workspace shell — delivered.** Focused three-pane workspace with collapsible private
+   browser and page-context rail, favorites/private/teamspace sections, quick find, full
+   ancestor breadcrumb, compact page chrome, responsive pane behavior, and keyboard navigation
+   (`Ctrl/Command+Shift+F` for quick find, `Ctrl/Command+\` for the browser, and `Escape` to
+   close the mobile browser). Existing page, database, collaboration, history, and Notion
+   workflows remain on their original identifiers and services.
 3. **Editor parity.** Rebuild rich-text selection, text/highlight colors, nested blocks,
    slash/mention/link menus, drag handles, column movement, comments, and persistent undo.
 4. **Database parity.** Unify inline/full-page databases, property menus, filters, sorts,

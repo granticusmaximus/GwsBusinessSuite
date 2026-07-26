@@ -25,25 +25,29 @@
 <div class="sentinel-workspace">
 <div class="sentinel-workspace-header">
     <div class="sentinel-workspace-identity">
+        <button type="button" class="sentinel-sidebar-shortcut" @onclick="ToggleWorkspaceBrowser"
+                aria-controls="sentinel-workspace-browser" aria-expanded="@(!_workspaceBrowserCollapsed)"
+                aria-label="@(_workspaceBrowserCollapsed ? "Open workspace browser" : "Close workspace browser")"
+                title="Toggle workspace browser (Ctrl/⌘ + \)">
+            <i class="bi bi-layout-sidebar-inset"></i>
+        </button>
         <div class="sentinel-brand-mark" aria-hidden="true">S</div>
         <div>
-            <div class="sentinel-eyebrow">GWS connected workspace</div>
-            <h1>Sentinel</h1>
-            <p>Your operational knowledge, documents, databases, and imported Notion content.</p>
+            <div class="sentinel-eyebrow">GWS workspace</div>
+            <h1>Sentinel <i class="bi bi-chevron-down" aria-hidden="true"></i></h1>
         </div>
     </div>
     <div class="sentinel-workspace-actions">
         <button type="button" class="btn btn-sm btn-outline-secondary sentinel-global-search"
                 @onclick="FocusSearchAsync" title="Search every Sentinel page, block, database, and row">
-            <i class="bi bi-search me-1"></i>Search
-            <kbd>⌘/Ctrl ⇧F</kbd>
+            <i class="bi bi-search me-1"></i>Quick find
+            <kbd>⌘⇧F</kbd>
         </button>
         <button type="button" class="btn btn-sm btn-outline-secondary sentinel-mobile-nav-toggle"
                 @onclick="ToggleMobileWorkspaceNav" aria-controls="sentinel-workspace-browser"
                 aria-expanded="@_mobileWorkspaceNavOpen">
             <i class="bi bi-layout-sidebar-inset me-1"></i>@(_mobileWorkspaceNavOpen ? "Close browser" : "Browse")
         </button>
-        <span class="sentinel-workspace-status"><span></span>Workspace online</span>
         <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="OpenNotionModalAsync" disabled="@IsBusy">
             <i class="bi bi-arrow-repeat me-1"></i>Notion sync
         </button>
@@ -87,13 +91,14 @@
     </div>
 }
 
-<div class="sentinel-layout">
-    <aside id="sentinel-workspace-browser" class="sentinel-local-sidebar @(_mobileWorkspaceNavOpen ? "is-mobile-open" : string.Empty)">
+<div class="sentinel-layout @(_workspaceBrowserCollapsed ? "is-browser-collapsed" : string.Empty) @(SelectedPageId.HasValue ? "has-context-sidebar" : string.Empty) @(!_contextSidebarOpen ? "is-context-collapsed" : string.Empty)">
+    <aside id="sentinel-workspace-browser" class="sentinel-local-sidebar @(_mobileWorkspaceNavOpen ? "is-mobile-open" : string.Empty)"
+           aria-label="Sentinel workspace browser">
         <div class="sentinel-nav-panel">
             <div class="sentinel-nav-toolbar">
                 <div>
-                    <span class="fw-semibold">Private workspace</span>
-                    <small>Pages &amp; databases</small>
+                    <span class="fw-semibold">@CurrentUsername</span>
+                    <small>Private workspace</small>
                 </div>
                 <div class="d-flex gap-1">
                     <button class="btn btn-sm btn-outline-secondary" @onclick="CreateNewPage" disabled="@IsBusy" title="New page">
@@ -293,6 +298,14 @@
                 }
             </div>
         </div>
+        <div class="sentinel-teamspaces">
+            <div class="sentinel-nav-heading"><i class="bi bi-people"></i> Teamspaces</div>
+            <button type="button" class="sentinel-nav-item" @onclick="OpenNotionModalAsync" disabled="@IsBusy">
+                <span class="sentinel-teamspace-icon">N</span>
+                <span class="text-truncate">@(string.IsNullOrWhiteSpace(NotionSettings.WorkspaceName) ? "Connect Notion workspace" : NotionSettings.WorkspaceName)</span>
+                <i class="bi bi-chevron-right ms-auto" aria-hidden="true"></i>
+            </button>
+        </div>
         <SentinelTemplates CurrentPageId="SelectedPageId"
                            CurrentPageTitle="Editor.Title"
                            CurrentDatabaseId="SelectedDatabaseId"
@@ -317,11 +330,29 @@
         {
         <div class="sentinel-document">
             <div class="sentinel-document-toolbar">
-                <div class="sentinel-document-context">
+                <nav class="sentinel-document-context" aria-label="Page breadcrumb">
                     <span class="sentinel-document-breadcrumb-root">Sentinel</span>
-                    <i class="bi bi-chevron-right"></i>
-                    <span class="text-truncate">@(string.IsNullOrWhiteSpace(Editor.Title) ? "Untitled" : Editor.Title)</span>
-                </div>
+                    @foreach (var breadcrumb in CurrentBreadcrumbNodes())
+                    {
+                        <i class="bi bi-chevron-right" aria-hidden="true"></i>
+                        @if (breadcrumb.Id == SelectedPageId || breadcrumb.Id == SelectedDatabaseId)
+                        {
+                            <span class="sentinel-breadcrumb-current text-truncate">@breadcrumb.Title</span>
+                        }
+                        else
+                        {
+                            <button type="button" @onclick="() => OpenNodeAsync(breadcrumb)" disabled="@IsBusy">
+                                <span aria-hidden="true">@(string.IsNullOrWhiteSpace(breadcrumb.Icon) ? (breadcrumb.IsDatabase ? "🗄️" : "📄") : breadcrumb.Icon)</span>
+                                <span class="text-truncate">@breadcrumb.Title</span>
+                            </button>
+                        }
+                    }
+                    @if (!SelectedPageId.HasValue && !SelectedDatabaseId.HasValue)
+                    {
+                        <i class="bi bi-chevron-right" aria-hidden="true"></i>
+                        <span class="sentinel-breadcrumb-current text-truncate">Untitled</span>
+                    }
+                </nav>
                 <div class="d-flex align-items-center gap-2">
                     @if (SelectedPageId is { } selectedPageId)
                     {
@@ -453,9 +484,23 @@
                 </div>
             </EditForm>
         </div>
+        }
+        </main>
 
         @if (SelectedPageId.HasValue)
         {
+            <aside class="sentinel-context-sidebar @(!_contextSidebarOpen ? "is-collapsed" : string.Empty)" aria-label="Page context">
+            @if (_contextSidebarOpen)
+            {
+            <div class="sentinel-context-heading">
+                <div>
+                    <strong>Page context</strong>
+                    <span>Discussions, links, and history</span>
+                </div>
+                <button type="button" @onclick="ToggleContextSidebar" title="Close page context" aria-label="Close page context">
+                    <i class="bi bi-layout-sidebar-reverse"></i>
+                </button>
+            </div>
             <SentinelDiscussions @ref="_sentinelDiscussions"
                                  WikiPageId="SelectedPageId.Value"
                                  BlocksJson="Editor.BlocksJson"
@@ -564,9 +609,17 @@
                     }
                 </div>
             </div>
+            }
+            else
+            {
+                <button type="button" class="sentinel-context-rail-button" @onclick="ToggleContextSidebar"
+                        title="Open page context" aria-label="Open page context">
+                    <i class="bi bi-chat-left-text"></i>
+                    <span>@Backlinks.Count</span>
+                </button>
+            }
+            </aside>
         }
-        }
-    </main>
 </div>
 </div>
 
@@ -852,6 +905,8 @@
         : string.Empty;
     private bool IsBusy { get; set; }
     private bool _mobileWorkspaceNavOpen;
+    private bool _workspaceBrowserCollapsed;
+    private bool _contextSidebarOpen = true;
     private string SearchQuery { get; set; } = string.Empty;
     private bool IsSearchBusy { get; set; }
     private List<SentinelSearchResult> WorkspaceSearchResults { get; set; } = new();
@@ -1681,6 +1736,7 @@
 
     private async Task FocusSearchAsync()
     {
+        _workspaceBrowserCollapsed = false;
         _mobileWorkspaceNavOpen = true;
         await InvokeAsync(StateHasChanged);
         if (_workspaceModule is not null)
@@ -1864,8 +1920,20 @@
         }
     }
 
-    private void ToggleMobileWorkspaceNav() =>
+    private void ToggleMobileWorkspaceNav()
+    {
         _mobileWorkspaceNavOpen = !_mobileWorkspaceNavOpen;
+        if (_mobileWorkspaceNavOpen)
+        {
+            _workspaceBrowserCollapsed = false;
+        }
+    }
+
+    private void ToggleWorkspaceBrowser() =>
+        _workspaceBrowserCollapsed = !_workspaceBrowserCollapsed;
+
+    private void ToggleContextSidebar() =>
+        _contextSidebarOpen = !_contextSidebarOpen;
 
     private async Task OpenTemplatePageAsync(Guid wikiPageId)
     {
@@ -2257,6 +2325,24 @@
 
     private static SentinelTreeNavigationNode ToNavigationNode(WikiTreeNode node) =>
         new(node.Id, node.ParentId, node.SortOrder);
+
+    private IReadOnlyList<WikiTreeNode> CurrentBreadcrumbNodes()
+    {
+        var selectedNodeId = SelectedPageId ?? SelectedDatabaseId;
+        if (selectedNodeId is null)
+        {
+            return [];
+        }
+
+        var nodes = AllTreeNodes();
+        var byId = nodes.ToDictionary(node => node.Id);
+        return SentinelTreeNavigation.GetBreadcrumbNodeIds(
+                selectedNodeId.Value,
+                nodes.Select(ToNavigationNode).ToList())
+            .Where(byId.ContainsKey)
+            .Select(nodeId => byId[nodeId])
+            .ToList();
+    }
 
     private int GetNodeDepth(WikiTreeNode node)
     {

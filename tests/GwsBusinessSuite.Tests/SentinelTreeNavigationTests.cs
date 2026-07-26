@@ -50,6 +50,35 @@ public sealed class SentinelTreeNavigationTests
             .Should().Equal(child.Id, root.Id);
     }
 
+    [Fact]
+    public void GetBreadcrumbNodeIds_ShouldReturnRootToSelectedNode()
+    {
+        var root = Node();
+        var child = Node(root.Id);
+        var grandchild = Node(child.Id);
+        var nodes = new[] { grandchild, root, child };
+
+        SentinelTreeNavigation.GetBreadcrumbNodeIds(grandchild.Id, nodes)
+            .Should().Equal(root.Id, child.Id, grandchild.Id);
+    }
+
+    [Fact]
+    public void GetBreadcrumbNodeIds_ShouldBeEmptyForUnknownNodeAndStopAtCycles()
+    {
+        var firstId = Guid.NewGuid();
+        var secondId = Guid.NewGuid();
+        var cyclicNodes = new[]
+        {
+            new SentinelTreeNavigationNode(firstId, secondId, 0),
+            new SentinelTreeNavigationNode(secondId, firstId, 0)
+        };
+
+        SentinelTreeNavigation.GetBreadcrumbNodeIds(Guid.NewGuid(), cyclicNodes)
+            .Should().BeEmpty();
+        SentinelTreeNavigation.GetBreadcrumbNodeIds(firstId, cyclicNodes)
+            .Should().Equal(secondId, firstId);
+    }
+
     private static SentinelTreeNavigationNode Node(
         Guid? parentId = null,
         int sortOrder = 0) =>
