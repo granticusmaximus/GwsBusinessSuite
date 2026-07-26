@@ -9,6 +9,13 @@ public sealed record NotionPage(IReadOnlyList<JsonElement> Results, bool HasMore
 
 public sealed record NotionValidationResult(bool IsSuccess, string Message, string? WorkspaceName);
 
+public sealed record NotionPickerItem(string Id, string Title, string ObjectType, string? ParentId);
+
+public sealed record NotionPickerResult(
+    bool IsSuccess,
+    string Message,
+    IReadOnlyList<NotionPickerItem> Items);
+
 public sealed record NotionFileDownload(string FileName, string ContentType, byte[] Content);
 
 public sealed record NotionMarkdownPage(string Markdown, bool Truncated, IReadOnlyList<string> UnknownBlockIds);
@@ -95,6 +102,7 @@ public interface INotionSyncCoordinator
 public interface INotionSyncService
 {
     Task<NotionConnectorSettingsView?> GetSettingsAsync(CancellationToken cancellationToken = default);
+    Task<NotionPickerResult> BrowseAsync(string integrationToken, CancellationToken cancellationToken = default);
     Task<NotionValidationResult> SaveSettingsAsync(NotionConnectorSettingsView settings, CancellationToken cancellationToken = default);
     Task<NotionSyncResult> SyncAsync(CancellationToken cancellationToken = default);
     Task<NotionSyncResult> PushPageAsync(Guid wikiPageId, CancellationToken cancellationToken = default);

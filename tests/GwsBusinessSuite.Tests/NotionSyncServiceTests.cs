@@ -61,6 +61,48 @@ public sealed class NotionSyncServiceTests
     }
 
     [Fact]
+    public async Task BrowseAsync_ShouldReturnHierarchyMetadataAndExcludeDatabaseRows()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.SearchResults =
+        [
+            Page("page-1", "Operations"),
+            Page("page-2", "Runbook", """{"type":"page_id","page_id":"page-1"}"""),
+            Page("row-1", "Database row", """{"type":"data_source_id","data_source_id":"source-1"}"""),
+            DataSource(
+                "source-1",
+                "Projects",
+                "database-container-1",
+                """{"type":"page_id","page_id":"page-1"}""")
+        ];
+
+        var result = await fixture.Service.BrowseAsync(string.Empty);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Items.Should().HaveCount(3);
+        result.Items.Should().ContainEquivalentOf(new NotionPickerItem("page-1", "Operations", "page", null));
+        result.Items.Should().ContainEquivalentOf(new NotionPickerItem("page-2", "Runbook", "page", "page-1"));
+        result.Items.Should().ContainEquivalentOf(new NotionPickerItem("source-1", "Projects", "data_source", "page-1"));
+        result.Items.Should().NotContain(item => item.Id == "row-1");
+        fixture.Notion.SearchedTokens.Should().Equal("secret");
+    }
+
+    [Fact]
+    public async Task BrowseAsync_ShouldUseAnUnsavedReplacementTokenWithoutPersistingIt()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.SearchResults = [Page("page-1", "Operations")];
+
+        var result = await fixture.Service.BrowseAsync("replacement");
+
+        result.IsSuccess.Should().BeTrue();
+        fixture.Notion.SearchedTokens.Should().Equal("replacement");
+        fixture.Notion.ValidatedTokens.Clear();
+        (await fixture.Service.SaveSettingsAsync(new NotionConnectorSettingsView())).IsSuccess.Should().BeTrue();
+        fixture.Notion.ValidatedTokens.Should().Equal("secret");
+    }
+
+    [Fact]
     public async Task SyncAsync_ShouldCreateThenUpdateByNotionIdWithoutDuplicating()
     {
         await using var fixture = await SyncFixture.CreateAsync();
@@ -855,6 +897,7 @@ public sealed class NotionSyncServiceTests
     private sealed class FakeNotionService : INotionService
     {
         public List<string> ValidatedTokens { get; } = new();
+        public List<string> SearchedTokens { get; } = new();
         public bool ValidationSucceeds { get; set; } = true;
         public IReadOnlyList<JsonElement> SearchResults { get; set; } = [];
         public Dictionary<string, IReadOnlyList<JsonElement>> BlockChildren { get; } = new();
@@ -877,8 +920,11 @@ public sealed class NotionSyncServiceTests
                 : new NotionValidationResult(false, "Invalid token.", null));
         }
 
-        public Task<NotionPage> SearchAsync(string integrationToken, string? cursor, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new NotionPage(SearchResults, false, null));
+        public Task<NotionPage> SearchAsync(string integrationToken, string? cursor, CancellationToken cancellationToken = default)
+        {
+            SearchedTokens.Add(integrationToken);
+            return Task.FromResult(new NotionPage(SearchResults, false, null));
+        }
 
         public Task<NotionPage> GetBlockChildrenAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default)
         {

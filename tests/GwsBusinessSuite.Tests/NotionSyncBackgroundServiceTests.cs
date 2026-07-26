@@ -82,6 +82,11 @@ public sealed class NotionSyncBackgroundServiceTests
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        public Task<NotionPickerResult> BrowseAsync(
+            string integrationToken,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public async Task<NotionSyncResult> SyncAsync(CancellationToken cancellationToken = default)
         {
             Syncs++;

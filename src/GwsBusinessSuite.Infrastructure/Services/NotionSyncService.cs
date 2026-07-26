@@ -99,6 +99,85 @@ public sealed class NotionSyncService(
         return validation;
     }
 
+    public async Task<NotionPickerResult> BrowseAsync(
+        string integrationToken,
+        CancellationToken cancellationToken = default)
+    {
+        var token = integrationToken.Trim();
+        if (token.Length == 0)
+        {
+            var settings = await dbContext.NotionConnectorSettings
+                .AsNoTracking()
+                .FirstOrDefaultAsync(cancellationToken);
+            if (settings is null || string.IsNullOrWhiteSpace(settings.IntegrationToken))
+            {
+                return new NotionPickerResult(
+                    false,
+                    "Enter an integration token or save a Notion connection before browsing.",
+                    []);
+            }
+
+            var (storedToken, isUnreadable) = UnprotectToken(settings.IntegrationToken);
+            if (isUnreadable)
+            {
+                return new NotionPickerResult(
+                    false,
+                    "The stored Notion token can no longer be decrypted. Enter a replacement token.",
+                    []);
+            }
+            token = storedToken;
+        }
+
+        try
+        {
+            var discovered = new List<JsonElement>();
+            string? cursor = null;
+            do
+            {
+                var page = await notionService.SearchAsync(token, cursor, cancellationToken);
+                discovered.AddRange(page.Results);
+                cursor = page.HasMore ? page.NextCursor : null;
+            } while (cursor is not null);
+
+            var items = discovered
+                .Where(item =>
+                {
+                    var objectType = item.TryGetProperty("object", out var objectElement)
+                        ? objectElement.GetString()
+                        : null;
+                    return GetNotionId(item) is not null && !IsDatabaseRow(item, objectType);
+                })
+                .Select(item =>
+                {
+                    var objectType = item.TryGetProperty("object", out var objectElement)
+                        ? objectElement.GetString() ?? "page"
+                        : "page";
+                    return new NotionPickerItem(
+                        GetNotionId(item)!,
+                        ExtractTitle(item, objectType),
+                        objectType,
+                        GetParentNotionId(item));
+                })
+                .DistinctBy(item => NormalizeNotionId(item.Id), StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            return items.Count == 0
+                ? new NotionPickerResult(
+                    false,
+                    "No shared pages or databases are discoverable. Share content with the integration in Notion, then browse again.",
+                    [])
+                : new NotionPickerResult(
+                    true,
+                    $"Found {items.Count} shared page{(items.Count == 1 ? string.Empty : "s")} and database{(items.Count == 1 ? string.Empty : "s")}.",
+                    items);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Unable to browse Notion content.");
+            return new NotionPickerResult(false, $"Unable to browse Notion content. {ex.Message}", []);
+        }
+    }
+
     public async Task<NotionSyncResult> SyncAsync(CancellationToken cancellationToken = default)
     {
         var settingsRow = await dbContext.NotionConnectorSettings.FirstOrDefaultAsync(cancellationToken);

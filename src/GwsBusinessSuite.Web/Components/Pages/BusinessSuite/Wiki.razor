@@ -618,7 +618,7 @@
                         In Notion, open each top-level page or database you want Sentinel to import, choose
                         <strong>Connections</strong>, and add this integration. Sharing a parent page also exposes
                         its accessible child content. In the Notion integration configuration, enable the
-                        <strong>Read content</strong> capability. Leave the selected IDs field empty to sync everything shared.
+                        <strong>Read content</strong> capability. Choose everything shared or browse to select specific roots.
                     </div>
 
                     <div class="form-check form-switch mt-3">
@@ -636,11 +636,83 @@
                             </select>
                         </div>
                         <div class="col-md-7">
-                            <label class="form-label fw-semibold small" for="notionSelectedIds">Selected top-level page/data source IDs</label>
-                            <textarea id="notionSelectedIds" class="form-control" rows="2" @bind="NotionSettings.SelectedNotionIds"
-                                      placeholder="Leave empty for everything shared with the integration"></textarea>
+                            <div class="d-flex align-items-center justify-content-between gap-2">
+                                <label class="form-label fw-semibold small mb-0">Content scope</label>
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        @onclick="BrowseNotionContentAsync" disabled="@IsNotionOperationBusy">
+                                    @if (IsNotionBrowseBusy)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                                    }
+                                    else
+                                    {
+                                        <i class="bi bi-folder2-open me-1"></i>
+                                    }
+                                    Browse shared content
+                                </button>
+                            </div>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="radio" name="notionScope" id="notionScopeAll"
+                                       checked="@SyncAllNotionContent" @onchange="() => SetNotionScope(true)" />
+                                <label class="form-check-label" for="notionScopeAll">Everything shared with the integration</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="notionScope" id="notionScopeSelected"
+                                       checked="@(!SyncAllNotionContent)" @onchange="() => SetNotionScope(false)" />
+                                <label class="form-check-label" for="notionScopeSelected">Only selected pages and databases</label>
+                            </div>
                         </div>
                     </div>
+                    @if (!SyncAllNotionContent)
+                    {
+                        <div class="border rounded-3 mt-3 overflow-hidden">
+                            @if (NotionPickerItems.Count == 0)
+                            {
+                                <div class="p-3 text-warning-emphasis small">
+                                    Browse shared content to choose pages and databases. Selecting a parent includes its discoverable descendants.
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="d-flex align-items-center justify-content-between gap-2 p-2 border-bottom bg-body-tertiary">
+                                    <span class="small fw-semibold">@SelectedNotionPickerIds.Count selected</span>
+                                    <button type="button" class="btn btn-sm btn-link py-0" @onclick="ClearNotionPickerSelection"
+                                            disabled="@(SelectedNotionPickerIds.Count == 0)">Clear selection</button>
+                                </div>
+                                <div class="p-2" style="max-height: 18rem; overflow-y: auto;">
+                                    @foreach (var row in VisibleNotionPickerRows())
+                                    {
+                                        <div class="d-flex align-items-center gap-1 py-1"
+                                             style="padding-left:@(row.Depth * 1.25)rem;">
+                                            @if (row.HasChildren)
+                                            {
+                                                <button type="button" class="btn btn-sm btn-link text-secondary p-0"
+                                                        style="width: 1.25rem;"
+                                                        aria-label="@(row.IsExpanded ? $"Collapse {row.Item.Title}" : $"Expand {row.Item.Title}")"
+                                                        aria-expanded="@row.IsExpanded"
+                                                        @onclick="() => ToggleNotionPickerExpanded(row.Item.Id)">
+                                                    <i class="bi @(row.IsExpanded ? "bi-caret-down-fill" : "bi-caret-right-fill")"></i>
+                                                </button>
+                                            }
+                                            else
+                                            {
+                                                <span style="width: 1.25rem;"></span>
+                                            }
+                                            <input class="form-check-input mt-0" type="checkbox"
+                                                   id="@($"notion-picker-{row.Item.Id}")"
+                                                   checked="@SelectedNotionPickerIds.Contains(NormalizeNotionPickerId(row.Item.Id))"
+                                                   @onchange="args => ToggleNotionPickerSelection(row.Item.Id, args)" />
+                                            <label class="form-check-label d-flex align-items-center gap-2 text-truncate"
+                                                   for="@($"notion-picker-{row.Item.Id}")">
+                                                <i class="bi @(row.Item.ObjectType is "database" or "data_source" ? "bi-table" : "bi-file-earmark-text") text-secondary"></i>
+                                                <span class="text-truncate">@row.Item.Title</span>
+                                            </label>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
                     @if (NotionSettings.SyncDirection == "twoWay")
                     {
                         <div class="form-check mt-3 border rounded-3 p-3 ps-5 bg-warning-subtle">
@@ -669,11 +741,13 @@
                     }
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" @onclick="CloseNotionModal" disabled="@IsNotionBusy">Close</button>
-                    <button type="button" class="btn btn-outline-primary" @onclick="SaveNotionSettingsAsync" disabled="@IsNotionBusy">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CloseNotionModal" disabled="@IsNotionOperationBusy">Close</button>
+                    <button type="button" class="btn btn-outline-primary" @onclick="SaveNotionSettingsAsync"
+                            disabled="@(IsNotionOperationBusy || HasInvalidNotionScope)">
                         <i class="bi bi-plug-fill me-1"></i>Save connection
                     </button>
-                    <button type="button" class="btn btn-primary" @onclick="SyncNotionNowAsync" disabled="@IsNotionBusy">
+                    <button type="button" class="btn btn-primary" @onclick="SyncNotionNowAsync"
+                            disabled="@(IsNotionOperationBusy || HasInvalidNotionScope)">
                         @if (IsNotionBusy)
                         {
                             <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
@@ -688,7 +762,7 @@
                         && WikiPages.Any(page => page.Id == notionPageId && !string.IsNullOrWhiteSpace(page.NotionId))
                         && NotionSettings.SyncDirection == "twoWay" && NotionSettings.AllowTwoWayWrites)
                     {
-                        <button type="button" class="btn btn-warning" @onclick="PushCurrentPageToNotionAsync" disabled="@IsNotionBusy">
+                        <button type="button" class="btn btn-warning" @onclick="PushCurrentPageToNotionAsync" disabled="@IsNotionOperationBusy">
                             <i class="bi bi-cloud-arrow-up-fill me-1"></i>Push current page
                         </button>
                     }
@@ -733,6 +807,13 @@
     private bool NotionMessageIsError { get; set; }
     private string NotionMessage { get; set; } = string.Empty;
     private NotionConnectorSettingsView NotionSettings { get; set; } = new();
+    private bool IsNotionBrowseBusy { get; set; }
+    private bool IsNotionOperationBusy => IsNotionBusy || IsNotionBrowseBusy;
+    private bool HasInvalidNotionScope => !SyncAllNotionContent && SelectedNotionPickerIds.Count == 0;
+    private bool SyncAllNotionContent { get; set; } = true;
+    private List<NotionPickerItem> NotionPickerItems { get; set; } = [];
+    private HashSet<string> SelectedNotionPickerIds { get; } = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> ExpandedNotionPickerIds { get; } = new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource _disposeCts = new();
     private bool _isObservingNotionSync;
 
@@ -825,6 +906,7 @@
         try
         {
             NotionSettings = await NotionSyncService.GetSettingsAsync() ?? new NotionConnectorSettingsView();
+            ResetNotionPickerSelection();
             var syncStatus = NotionSyncCoordinator.GetStatus();
             if (syncStatus.IsActive)
             {
@@ -848,6 +930,147 @@
     }
 
     private void CloseNotionModal() => ShowNotionModal = false;
+
+    private async Task BrowseNotionContentAsync()
+    {
+        IsNotionBrowseBusy = true;
+        NotionMessage = string.Empty;
+        try
+        {
+            var result = await NotionSyncService.BrowseAsync(NotionSettings.IntegrationToken);
+            NotionMessage = result.Message;
+            NotionMessageIsError = !result.IsSuccess;
+            if (!result.IsSuccess)
+            {
+                return;
+            }
+
+            NotionPickerItems = result.Items.ToList();
+            var parentIds = NotionPickerItems
+                .Select(item => item.ParentId)
+                .Where(parentId => parentId is not null)
+                .Select(parentId => parentId!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            ExpandedNotionPickerIds.Clear();
+            ExpandedNotionPickerIds.UnionWith(parentIds);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to browse Notion content.");
+            NotionMessage = $"Unable to browse Notion content. {ex.Message}";
+            NotionMessageIsError = true;
+        }
+        finally
+        {
+            IsNotionBrowseBusy = false;
+        }
+    }
+
+    private void ResetNotionPickerSelection()
+    {
+        SelectedNotionPickerIds.Clear();
+        SelectedNotionPickerIds.UnionWith(
+            ParseNotionSelectedIds(NotionSettings.SelectedNotionIds).Select(NormalizeNotionPickerId));
+        SyncAllNotionContent = SelectedNotionPickerIds.Count == 0;
+        NotionPickerItems.Clear();
+        ExpandedNotionPickerIds.Clear();
+    }
+
+    private void SetNotionScope(bool syncAll)
+    {
+        SyncAllNotionContent = syncAll;
+        if (syncAll)
+        {
+            SelectedNotionPickerIds.Clear();
+            NotionSettings.SelectedNotionIds = string.Empty;
+        }
+    }
+
+    private void ToggleNotionPickerSelection(string notionId, ChangeEventArgs args)
+    {
+        var normalizedId = NormalizeNotionPickerId(notionId);
+        if (args.Value is true)
+        {
+            SelectedNotionPickerIds.Add(normalizedId);
+        }
+        else
+        {
+            SelectedNotionPickerIds.Remove(normalizedId);
+        }
+        UpdateNotionSelectedIds();
+    }
+
+    private void ClearNotionPickerSelection()
+    {
+        SelectedNotionPickerIds.Clear();
+        UpdateNotionSelectedIds();
+    }
+
+    private void UpdateNotionSelectedIds() =>
+        NotionSettings.SelectedNotionIds = string.Join(", ", SelectedNotionPickerIds.Order(StringComparer.OrdinalIgnoreCase));
+
+    private void ToggleNotionPickerExpanded(string notionId)
+    {
+        if (!ExpandedNotionPickerIds.Add(notionId))
+        {
+            ExpandedNotionPickerIds.Remove(notionId);
+        }
+    }
+
+    private IReadOnlyList<NotionPickerRow> VisibleNotionPickerRows()
+    {
+        var byNormalizedId = NotionPickerItems.ToDictionary(
+            item => NormalizeNotionPickerId(item.Id),
+            StringComparer.OrdinalIgnoreCase);
+        var children = NotionPickerItems
+            .GroupBy(
+                item => item.ParentId is { } parentId && byNormalizedId.ContainsKey(NormalizeNotionPickerId(parentId))
+                    ? NormalizeNotionPickerId(parentId)
+                    : string.Empty,
+                StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderBy(item => item.Title, StringComparer.OrdinalIgnoreCase).ToList(),
+                StringComparer.OrdinalIgnoreCase);
+        var rows = new List<NotionPickerRow>();
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddChildren(string parentId, int depth)
+        {
+            if (!children.TryGetValue(parentId, out var childItems))
+            {
+                return;
+            }
+            foreach (var item in childItems)
+            {
+                var normalizedId = NormalizeNotionPickerId(item.Id);
+                if (!visited.Add(normalizedId))
+                {
+                    continue;
+                }
+                var hasChildren = children.ContainsKey(normalizedId);
+                var isExpanded = ExpandedNotionPickerIds.Contains(item.Id);
+                rows.Add(new NotionPickerRow(item, depth, hasChildren, isExpanded));
+                if (hasChildren && isExpanded)
+                {
+                    AddChildren(normalizedId, depth + 1);
+                }
+            }
+        }
+
+        AddChildren(string.Empty, 0);
+        return rows;
+    }
+
+    private static IReadOnlyList<string> ParseNotionSelectedIds(string value) => value
+        .Split([',', '\n', '\r', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    private static string NormalizeNotionPickerId(string value) =>
+        Guid.TryParse(value.Trim(), out var id) ? id.ToString("N") : value.Trim();
+
+    private sealed record NotionPickerRow(NotionPickerItem Item, int Depth, bool HasChildren, bool IsExpanded);
 
     private async Task SaveNotionSettingsAsync()
     {

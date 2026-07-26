@@ -164,5 +164,8 @@
   and `link_to_page` blocks are now visible (a placeholder referencing the Notion id) instead
   of silently dropped. `formula`/`rollup` deliberately stay best-effort text - translating
   Notion's own formula syntax into Sentinel's expression language is a separate project, not a
-  value-mapping fix. The plan's picker-UI (Track A4/A5) and visual-parity work (Track B) remain
+  value-mapping fix. Track A4 is now delivered: the connector modal can browse all discoverable
+  page/database metadata through the encrypted stored token or an unsaved replacement token,
+  render it as a collapsible checkbox tree, and persist checked roots through the existing
+  subtree-aware selected-id scope. Track A5 progress reporting and visual-parity Track B remain
   open in that same plan file.
