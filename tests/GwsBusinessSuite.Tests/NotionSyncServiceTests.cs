@@ -191,6 +191,41 @@ public sealed class NotionSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_ForcedRefresh_ShouldReloadUnchangedPageContent()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        var editedAt = DateTimeOffset.UtcNow.AddMinutes(-10);
+        fixture.Notion.SearchResults = [Page("page-1", "First", lastEditedAt: editedAt)];
+        fixture.Notion.BlockChildren["page-1"] =
+        [
+            Json("""
+                {"object":"block","id":"paragraph-1","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Original"}]}}
+                """)
+        ];
+        (await fixture.Service.SyncAsync()).IsSuccess.Should().BeTrue();
+        fixture.Notion.BlockChildrenRequests.Clear();
+        fixture.Notion.CommentRequests.Clear();
+        fixture.Notion.BlockChildren["page-1"] =
+        [
+            Json("""
+                {"object":"block","id":"paragraph-2","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Forced refresh"}]}}
+                """)
+        ];
+
+        var result = await fixture.Service.SyncAsync(forceRefresh: true);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Message.Should().StartWith("Full sync complete.");
+        result.Skipped.Should().Be(0);
+        result.ContentBlocks.Should().Be(1);
+        fixture.Notion.BlockChildrenRequests.Should().Contain("page-1");
+        fixture.Notion.CommentRequests.Should().Contain("page-1");
+        var page = await fixture.Db.WikiPages.SingleAsync(item => item.NotionId == "page-1");
+        WikiBlockJson.ParseBlocks(page.BlocksJson)
+            .Should().ContainSingle(block => block.PlainText == "Forced refresh");
+    }
+
+    [Fact]
     public async Task SyncAsync_ShouldBootstrapExistingPagesFromTheLastSuccessfulConnectorSync()
     {
         await using var fixture = await SyncFixture.CreateAsync();
@@ -939,6 +974,27 @@ public sealed class NotionSyncServiceTests
         fixture.Notion.DatabaseEditedAfterRequests.Should().ContainSingle();
         fixture.Notion.DatabaseEditedAfterRequests.Single().Should().NotBeNull();
         fixture.Notion.BlockChildrenRequests.Should().NotContain("row-1");
+
+        fixture.Notion.BlockChildrenRequests.Clear();
+        fixture.Notion.DatabaseSchemaRequests.Clear();
+        fixture.Notion.DatabaseEditedAfterRequests.Clear();
+        fixture.Notion.BlockChildren["row-1"] =
+        [
+            Json("""
+                {"object":"block","id":"block-2","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Forced project notes"}]}}
+                """)
+        ];
+
+        var forced = await fixture.Service.SyncAsync(forceRefresh: true);
+
+        forced.IsSuccess.Should().BeTrue();
+        forced.Message.Should().NotContain("unchanged database row");
+        fixture.Notion.DatabaseSchemaRequests.Should().ContainSingle().Which.Should().Be("database-1");
+        fixture.Notion.DatabaseEditedAfterRequests.Should().ContainSingle().Which.Should().BeNull();
+        fixture.Notion.BlockChildrenRequests.Should().Contain("row-1");
+        var row = await fixture.Db.WikiDatabaseRows.SingleAsync(item => item.NotionId == "row-1");
+        WikiBlockJson.ParseBlocks(row.BlocksJson)
+            .Should().ContainSingle(block => block.PlainText == "Forced project notes");
     }
 
     [Fact]

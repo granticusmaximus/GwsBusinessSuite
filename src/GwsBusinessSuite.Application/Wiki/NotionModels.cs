@@ -190,6 +190,7 @@ public interface INotionSyncService
     Task<NotionPickerResult> BrowseAsync(string integrationToken, CancellationToken cancellationToken = default);
     Task<NotionValidationResult> SaveSettingsAsync(NotionConnectorSettingsView settings, CancellationToken cancellationToken = default);
     Task<NotionSyncResult> SyncAsync(CancellationToken cancellationToken = default);
+    Task<NotionSyncResult> SyncAsync(bool forceRefresh, CancellationToken cancellationToken = default);
     Task<NotionSyncResult> PushPageAsync(Guid wikiPageId, CancellationToken cancellationToken = default);
     Task<NotionSyncResult> PushDatabaseRowAsync(Guid wikiDatabaseRowId, CancellationToken cancellationToken = default);
     Task ResetWebhookVerificationAsync(CancellationToken cancellationToken = default);

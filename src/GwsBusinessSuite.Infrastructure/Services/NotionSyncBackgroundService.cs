@@ -128,7 +128,12 @@ public sealed class NotionSyncBackgroundService(
                 return;
             }
 
-            var result = await notionSync.SyncAsync(cancellationToken);
+            // A user-triggered sync is an explicit request to reconcile the visible
+            // workspace, even when Notion timestamps and Sentinel's import watermark
+            // claim nothing changed. Scheduled and webhook runs remain incremental.
+            var result = await notionSync.SyncAsync(
+                forceRefresh: source == "manual",
+                cancellationToken);
             if (source is "manual" or "webhook")
             {
                 CompleteStatus(source, result);

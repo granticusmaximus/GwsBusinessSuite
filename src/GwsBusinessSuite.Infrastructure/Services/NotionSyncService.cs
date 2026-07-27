@@ -215,7 +215,12 @@ public sealed class NotionSyncService(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<NotionSyncResult> SyncAsync(CancellationToken cancellationToken = default)
+    public Task<NotionSyncResult> SyncAsync(CancellationToken cancellationToken = default) =>
+        SyncAsync(forceRefresh: false, cancellationToken);
+
+    public async Task<NotionSyncResult> SyncAsync(
+        bool forceRefresh,
+        CancellationToken cancellationToken = default)
     {
         var settingsRow = await dbContext.NotionConnectorSettings.FirstOrDefaultAsync(cancellationToken);
         if (settingsRow is null || string.IsNullOrWhiteSpace(settingsRow.IntegrationToken))
@@ -363,7 +368,8 @@ public sealed class NotionSyncService(
                 {
                     (localId, wasNew, becameArchived) = await UpsertDatabaseAsync(notionId, title, isArchived, cancellationToken);
                     existingDatabaseWatermarks.TryGetValue(notionId, out var priorWatermark);
-                    if (ShouldRefreshRemoteContent(wasNew, remoteEditedAt, priorWatermark, previousSuccessfulSyncAt))
+                    if (forceRefresh
+                        || ShouldRefreshRemoteContent(wasNew, remoteEditedAt, priorWatermark, previousSuccessfulSyncAt))
                     {
                         notionDatabaseIdsNeedingSchema.Add(notionId);
                     }
@@ -389,7 +395,8 @@ public sealed class NotionSyncService(
                         cancellationToken);
                     existingPageSyncStates.TryGetValue(notionId, out var priorSyncState);
                     var priorWatermark = priorSyncState?.LastEditedAt;
-                    if (!(priorSyncState?.HasCurrentMappingVersion ?? false)
+                    if (forceRefresh
+                        || !(priorSyncState?.HasCurrentMappingVersion ?? false)
                         || ShouldRefreshRemoteContent(
                             wasNew,
                             remoteEditedAt,
@@ -508,7 +515,10 @@ public sealed class NotionSyncService(
                         token,
                         notionDatabaseIdsNeedingSchema.Contains(notionId),
                         notionIdToRemoteEditedAt[notionId],
-                        newNotionDatabaseIds.Contains(notionId) ? null : previousSuccessfulSyncAt,
+                        forceRefresh || newNotionDatabaseIds.Contains(notionId)
+                            ? null
+                            : previousSuccessfulSyncAt,
+                        forceRefresh,
                         cancellationToken);
                     imported += databaseContent.Imported;
                     updated += databaseContent.Updated;
@@ -547,7 +557,9 @@ public sealed class NotionSyncService(
             settingsRow.UpdatedBy = "notion-sync";
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            var message = $"Sync complete. Imported {contentBlocks} content block{(contentBlocks == 1 ? string.Empty : "s")}.";
+            var message = forceRefresh
+                ? $"Full sync complete. Refreshed {contentBlocks} content block{(contentBlocks == 1 ? string.Empty : "s")}."
+                : $"Sync complete. Imported {contentBlocks} content block{(contentBlocks == 1 ? string.Empty : "s")}.";
             if (markdownFallbackPages > 0)
             {
                 message += $" Recovered {markdownFallbackPages} page{(markdownFallbackPages == 1 ? string.Empty : "s")} through Notion's full-page content endpoint.";
@@ -1769,6 +1781,7 @@ public sealed class NotionSyncService(
         bool syncSchema,
         DateTimeOffset? remoteEditedAt,
         DateTimeOffset? rowsEditedAfter,
+        bool forceRefresh,
         CancellationToken cancellationToken)
     {
         var notionPropertyIdToLocal = new Dictionary<string, (Guid Id, string Type)>();
@@ -1945,7 +1958,8 @@ public sealed class NotionSyncService(
             }
 
             row.PropertyValuesJson = WikiPropertyValues.Serialize(values);
-            if (ShouldRefreshRemoteContent(
+            if (forceRefresh
+                || ShouldRefreshRemoteContent(
                     isNew,
                     rowRemoteEditedAt,
                     row.NotionLastEditedAt,

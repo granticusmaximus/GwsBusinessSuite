@@ -719,7 +719,7 @@
                                         For an <strong>internal integration token</strong>, add that connection to each
                                         top-level page or database in Notion. A personal access token already acts as you.
                                     </li>
-                                    <li>Select <strong>Sync now</strong> to import everything the token can access.</li>
+                                    <li>Select <strong>Full resync</strong> to refresh everything the token can access.</li>
                                 </ol>
                             </div>
                         </div>
@@ -1053,7 +1053,7 @@
                         {
                             <i class="bi bi-arrow-repeat me-1"></i>
                         }
-                        @(NotionMessageIsError ? "Retry sync" : "Sync now")
+                        @(NotionMessageIsError ? "Retry full sync" : "Full resync")
                     </button>
                     @if (SelectedPageId is { } notionPageId
                         && WikiPages.Any(page => page.Id == notionPageId && !string.IsNullOrWhiteSpace(page.NotionId))
@@ -1497,7 +1497,7 @@
                 return;
             }
 
-            NotionMessage = "Notion sync is queued on the server. It will continue if this browser disconnects.";
+            NotionMessage = "Full Notion resync is queued on the server. It will refresh page blocks, database rows, and views even when Notion timestamps are unchanged, and will continue if this browser disconnects.";
             NotionMessageIsError = false;
             await ObserveNotionSyncAsync();
         }

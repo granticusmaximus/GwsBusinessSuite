@@ -37,6 +37,7 @@ public sealed class NotionSyncBackgroundServiceTests
             status.Result.Should().BeEquivalentTo(new NotionSyncResult(true, "complete", 2, 3, 0));
             notionSync.SettingsReads.Should().Be(1);
             notionSync.Syncs.Should().Be(1);
+            notionSync.ForceRefreshRequests.Should().Equal(true);
         }
         finally
         {
@@ -65,6 +66,7 @@ public sealed class NotionSyncBackgroundServiceTests
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int SettingsReads { get; private set; }
         public int Syncs { get; private set; }
+        public List<bool> ForceRefreshRequests { get; } = [];
 
         public Task<NotionConnectorSettingsView?> GetSettingsAsync(CancellationToken cancellationToken = default)
         {
@@ -89,7 +91,15 @@ public sealed class NotionSyncBackgroundServiceTests
 
         public async Task<NotionSyncResult> SyncAsync(CancellationToken cancellationToken = default)
         {
+            return await SyncAsync(false, cancellationToken);
+        }
+
+        public async Task<NotionSyncResult> SyncAsync(
+            bool forceRefresh,
+            CancellationToken cancellationToken = default)
+        {
             Syncs++;
+            ForceRefreshRequests.Add(forceRefresh);
             Started.TrySetResult();
             await Release.Task.WaitAsync(cancellationToken);
             return new NotionSyncResult(true, "complete", 2, 3, 0);
