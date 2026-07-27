@@ -3,6 +3,7 @@ using System;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GwsBusinessSuite.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260727194125_AddNotionWebhooks")]
+    partial class AddNotionWebhooks
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
@@ -2348,71 +2351,6 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.ToTable("NotionConnectorSettings");
                 });
 
-            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.NotionSyncConflict", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("CreatedBy")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("FieldName")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("LocalValueJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("NotionId")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("RemoteEditedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("RemoteValueJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Resolution")
-                        .HasMaxLength(24)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset?>("ResolvedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ResolvedBy")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(24)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset?>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("WikiPageId")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("WikiPageId", "FieldName", "Status");
-
-                    b.ToTable("NotionSyncConflicts");
-                });
-
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.NotionWebhookEvent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4273,17 +4211,6 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .HasForeignKey("SessionId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-                });
-
-            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.NotionSyncConflict", b =>
-                {
-                    b.HasOne("GwsBusinessSuite.Domain.Entities.WikiPage", "WikiPage")
-                        .WithMany()
-                        .HasForeignKey("WikiPageId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("WikiPage");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.PodcastEpisode", b =>

@@ -215,8 +215,12 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
             """,
             initialJson);
 
+        await page.EvaluateAsync("() => window.dispatchEvent(new Event('offline'))");
+        await Expect(page.Locator(".wiki-offline-banner")).ToContainTextAsync("edits are saved safely");
         await page.Locator(".wiki-block-content").FillAsync("Unsaved local draft");
         await page.WaitForTimeoutAsync(350);
+        await page.EvaluateAsync("() => window.dispatchEvent(new Event('online'))");
+        await Expect(page.Locator(".wiki-offline-banner")).ToHaveCountAsync(0);
         var draftJson = await page.EvaluateAsync<string>(
             "() => window.sentinelBlockEditor.getBlocksJson(document.querySelector('#editor'))");
 

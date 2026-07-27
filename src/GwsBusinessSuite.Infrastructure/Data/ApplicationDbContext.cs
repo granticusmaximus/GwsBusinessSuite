@@ -67,6 +67,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SeoArticleDraftRevision> SeoArticleDraftRevisions => Set<SeoArticleDraftRevision>();
     public DbSet<CjConnectorSettings> CjConnectorSettings => Set<CjConnectorSettings>();
     public DbSet<NotionConnectorSettings> NotionConnectorSettings => Set<NotionConnectorSettings>();
+    public DbSet<NotionWebhookEvent> NotionWebhookEvents => Set<NotionWebhookEvent>();
+    public DbSet<NotionSyncConflict> NotionSyncConflicts => Set<NotionSyncConflict>();
     public DbSet<SiteSettings> SiteSettings => Set<SiteSettings>();
     public DbSet<Article> Articles => Set<Article>();
     public DbSet<ArticleCategory> ArticleCategories => Set<ArticleCategory>();
@@ -117,6 +119,25 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<NotionConnectorSettings>().Property(x => x.SelectedNotionIdsJson).HasDefaultValue("[]");
         modelBuilder.Entity<NotionConnectorSettings>().Property(x => x.AuthenticationMode).HasDefaultValue("internal");
         modelBuilder.Entity<NotionConnectorSettings>().Property(x => x.OAuthRefreshToken).HasDefaultValue("");
+        modelBuilder.Entity<NotionConnectorSettings>().Property(x => x.WebhookVerificationToken).HasDefaultValue("");
+        modelBuilder.Entity<NotionWebhookEvent>().HasIndex(x => x.NotionEventId).IsUnique();
+        modelBuilder.Entity<NotionWebhookEvent>().HasIndex(x => x.EventTimestamp);
+        modelBuilder.Entity<NotionWebhookEvent>().Property(x => x.NotionEventId).HasMaxLength(80);
+        modelBuilder.Entity<NotionWebhookEvent>().Property(x => x.EventType).HasMaxLength(120);
+        modelBuilder.Entity<NotionWebhookEvent>().Property(x => x.WorkspaceId).HasMaxLength(80);
+        modelBuilder.Entity<NotionWebhookEvent>().Property(x => x.EntityType).HasMaxLength(40);
+        modelBuilder.Entity<NotionWebhookEvent>().Property(x => x.EntityId).HasMaxLength(80);
+        modelBuilder.Entity<NotionSyncConflict>()
+            .HasOne(x => x.WikiPage)
+            .WithMany()
+            .HasForeignKey(x => x.WikiPageId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<NotionSyncConflict>()
+            .HasIndex(x => new { x.WikiPageId, x.FieldName, x.Status });
+        modelBuilder.Entity<NotionSyncConflict>().Property(x => x.NotionId).HasMaxLength(80);
+        modelBuilder.Entity<NotionSyncConflict>().Property(x => x.FieldName).HasMaxLength(40);
+        modelBuilder.Entity<NotionSyncConflict>().Property(x => x.Status).HasMaxLength(24);
+        modelBuilder.Entity<NotionSyncConflict>().Property(x => x.Resolution).HasMaxLength(24);
         modelBuilder.Entity<WikiPage>().Property(x => x.ContentVersion)
             .HasDefaultValue(1L)
             .IsConcurrencyToken();

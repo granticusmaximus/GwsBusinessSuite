@@ -20,6 +20,9 @@ jobs:
       - name: Restore
         run: dotnet restore GwsBusinessSuite.slnx
 
+      - name: Audit dependencies
+        run: dotnet list GwsBusinessSuite.slnx package --vulnerable --include-transitive --no-restore
+
       - name: Build
         run: dotnet build GwsBusinessSuite.slnx --no-restore -c Release
 

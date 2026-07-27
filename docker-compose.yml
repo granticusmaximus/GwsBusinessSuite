@@ -18,9 +18,11 @@ services:
       LiveShow__Ice__Turn__Urls__0: ${TURN_URL_UDP:-}
       LiveShow__Ice__Turn__Urls__1: ${TURN_URL_TCP:-}
       LiveShow__Ice__Turn__SharedSecret: ${TURN_SHARED_SECRET:-}
+      Backups__Enabled: "true"
     restart: always
     volumes:
       - gwssuite-data:/app/data
+      - gwssuite-backups:/app/backups
       # Read-only: lets the Docker Health admin page inspect (never control) sibling
       # containers on this droplet. Only two containers run here, both part of this
       # app's own stack.
@@ -50,4 +52,5 @@ services:
 
 volumes:
   gwssuite-data:
+  gwssuite-backups:
   ollama-models:

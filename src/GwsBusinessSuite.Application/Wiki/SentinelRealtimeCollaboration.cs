@@ -141,14 +141,17 @@ public sealed class SentinelPresenceTracker(TimeProvider timeProvider)
     }
 }
 
-public sealed record SentinelCursorPosition(string Username, Guid BlockId, DateTimeOffset UpdatedAt);
+public sealed record SentinelCursorPosition(
+    string Username,
+    Guid BlockId,
+    DateTimeOffset UpdatedAt,
+    int? Start = null,
+    int? End = null);
 
 /// <summary>
-/// Process-local, block-granular remote cursor tracking: "which block is each other viewer
-/// currently in," not a character offset. This is deliberately the full extent of Sentinel's
-/// "real-time collaboration" for now - true character-level concurrent editing needs an
-/// OT/CRDT text-merge algorithm, which is a different (and much larger/riskier) problem from
-/// showing where people are; see docs/WIKI_NOTION_CLONE.md for the explicit scope line.
+/// Process-local remote cursor tracking, including character selection offsets within the
+/// active block. Content reconciliation remains block-identity three-way merge; these offsets
+/// are visual presence metadata and never mutate document content.
 /// A cursor position is extremely perishable and purely a visual nicety, so unlike
 /// SentinelPresenceLease this is in-memory only (no DB backing, no cross-instance polling
 /// fallback) - on a multi-instance deployment a remote cursor simply won't be visible to a
@@ -164,7 +167,7 @@ public sealed class SentinelCursorTracker(TimeProvider timeProvider)
 
     public event Action<Guid>? Moved;
 
-    public void Move(Guid wikiPageId, string username, Guid blockId)
+    public void Move(Guid wikiPageId, string username, Guid blockId, int? start = null, int? end = null)
     {
         if (string.IsNullOrWhiteSpace(username)) return;
         lock (_gate)
@@ -174,7 +177,14 @@ public sealed class SentinelCursorTracker(TimeProvider timeProvider)
                 byUser = new Dictionary<string, SentinelCursorPosition>(StringComparer.OrdinalIgnoreCase);
                 _cursorsByPage[wikiPageId] = byUser;
             }
-            byUser[username] = new SentinelCursorPosition(username, blockId, timeProvider.GetUtcNow());
+            int? normalizedStart = start is null ? null : Math.Max(0, start.Value);
+            var normalizedEnd = end is null ? normalizedStart : Math.Max(normalizedStart ?? 0, end.Value);
+            byUser[username] = new SentinelCursorPosition(
+                username,
+                blockId,
+                timeProvider.GetUtcNow(),
+                normalizedStart,
+                normalizedEnd);
         }
         Moved?.Invoke(wikiPageId);
     }

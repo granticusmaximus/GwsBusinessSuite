@@ -99,5 +99,24 @@ public sealed class NotionSyncBackgroundServiceTests
             Guid wikiPageId,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+
+        public Task<NotionSyncResult> PushDatabaseRowAsync(
+            Guid wikiDatabaseRowId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task ResetWebhookVerificationAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<NotionSyncConflictView>> GetPendingConflictsAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<NotionSyncConflictView>>([]);
+
+        public Task ResolveConflictAsync(
+            Guid conflictId,
+            string resolution,
+            string resolvedBy,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 }

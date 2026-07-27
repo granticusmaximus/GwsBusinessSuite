@@ -825,6 +825,137 @@ public sealed class NotionSyncServiceTests
         block.PlainText.Should().Be("Quarterly plan");
     }
 
+    [Fact]
+    public async Task PushDatabaseRowAsync_ShouldWriteEditablePropertiesAndPageContent()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        var settings = await fixture.Db.NotionConnectorSettings.SingleAsync();
+        settings.SyncDirection = "twoWay";
+        settings.AllowTwoWayWrites = true;
+        var database = new WikiDatabase
+        {
+            Title = "Projects",
+            NotionId = "source-1",
+            CreatedBy = "test"
+        };
+        var title = new WikiDatabaseProperty
+        {
+            WikiDatabaseId = database.Id,
+            Name = "Name",
+            Type = WikiDatabasePropertyTypes.Title,
+            NotionId = "title-property",
+            CreatedBy = "test"
+        };
+        var done = new WikiDatabaseProperty
+        {
+            WikiDatabaseId = database.Id,
+            Name = "Done",
+            Type = WikiDatabasePropertyTypes.Checkbox,
+            NotionId = "done-property",
+            SortOrder = 1,
+            CreatedBy = "test"
+        };
+        var values = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(values, title.Id, "Ship Sentinel");
+        WikiPropertyValues.SetCheckbox(values, done.Id, true);
+        var row = new WikiDatabaseRow
+        {
+            WikiDatabaseId = database.Id,
+            NotionId = "row-1",
+            NotionLastEditedAt = DateTimeOffset.Parse("2026-07-27T18:00:00Z"),
+            PropertyValuesJson = WikiPropertyValues.Serialize(values),
+            BlocksJson = WikiBlockJson.Serialize(
+            [
+                new WikiBlock(
+                    Guid.NewGuid(),
+                    WikiBlockTypes.Paragraph,
+                    0,
+                    [new WikiRichTextSpan("Ready to ship")],
+                    new Dictionary<string, string>())
+            ]),
+            CreatedBy = "test"
+        };
+        fixture.Db.WikiDatabases.Add(database);
+        fixture.Db.WikiDatabaseProperties.AddRange(title, done);
+        fixture.Db.WikiDatabaseRows.Add(row);
+        await fixture.Db.SaveChangesAsync();
+        fixture.Notion.RemotePages["row-1"] = Page(
+            "row-1",
+            "Remote",
+            """{"type":"data_source_id","data_source_id":"source-1"}""",
+            lastEditedAt: DateTimeOffset.Parse("2026-07-27T18:00:00Z"));
+
+        var result = await fixture.Service.PushDatabaseRowAsync(row.Id);
+
+        result.IsSuccess.Should().BeTrue();
+        fixture.Notion.UpdatedPages.Should().ContainSingle();
+        var payloadJson = JsonSerializer.Serialize(fixture.Notion.UpdatedPages.Single().Payload);
+        payloadJson.Should().Contain("title-property");
+        payloadJson.Should().Contain("Ship Sentinel");
+        payloadJson.Should().Contain("done-property");
+        payloadJson.Should().Contain("\"checkbox\":true");
+        fixture.Notion.ReplacedBlockChildren.Should().ContainSingle(item => item.BlockId == "row-1");
+    }
+
+    [Fact]
+    public async Task SyncAsync_ShouldPreserveConcurrentLocalFieldsUntilConflictIsResolved()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        var firstEdit = DateTimeOffset.Parse("2026-07-27T18:00:00Z");
+        fixture.Notion.SearchResults = [Page("page-1", "Remote baseline", lastEditedAt: firstEdit)];
+        fixture.Notion.BlockChildren["page-1"] =
+        [
+            Json("""{"id":"block-1","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Remote baseline"}]}}""")
+        ];
+        (await fixture.Service.SyncAsync()).IsSuccess.Should().BeTrue();
+
+        var page = await fixture.Db.WikiPages.SingleAsync(item => item.NotionId == "page-1");
+        page.Title = "Sentinel title";
+        page.BlocksJson = WikiBlockJson.Serialize(
+        [
+            new WikiBlock(
+                Guid.NewGuid(),
+                WikiBlockTypes.Paragraph,
+                0,
+                [new WikiRichTextSpan("Sentinel content")],
+                new Dictionary<string, string>())
+        ]);
+        page.UpdatedBy = "grant";
+        page.UpdatedAt = DateTimeOffset.UtcNow;
+        await fixture.Db.SaveChangesAsync();
+
+        var remoteEdit = firstEdit.AddMinutes(10);
+        fixture.Notion.SearchResults = [Page("page-1", "Notion title", lastEditedAt: remoteEdit)];
+        fixture.Notion.BlockChildren["page-1"] =
+        [
+            Json("""{"id":"block-1","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Notion content"}]}}""")
+        ];
+
+        (await fixture.Service.SyncAsync()).IsSuccess.Should().BeTrue();
+
+        await fixture.Db.Entry(page).ReloadAsync();
+        page.Title.Should().Be("Sentinel title");
+        WikiBlockJson.ParseBlocks(page.BlocksJson).Single().PlainText.Should().Be("Sentinel content");
+        var conflicts = await fixture.Service.GetPendingConflictsAsync();
+        conflicts.Select(conflict => conflict.FieldName).Should().BeEquivalentTo(["title", "content"]);
+
+        var titleConflict = conflicts.Single(conflict => conflict.FieldName == "title");
+        var contentConflict = conflicts.Single(conflict => conflict.FieldName == "content");
+        await fixture.Service.ResolveConflictAsync(
+            titleConflict.Id,
+            NotionConflictResolutions.KeepSentinel,
+            "grant");
+        await fixture.Service.ResolveConflictAsync(
+            contentConflict.Id,
+            NotionConflictResolutions.UseNotion,
+            "grant");
+
+        await fixture.Db.Entry(page).ReloadAsync();
+        page.Title.Should().Be("Sentinel title");
+        WikiBlockJson.ParseBlocks(page.BlocksJson).Single().PlainText.Should().Be("Notion content");
+        (await fixture.Service.GetPendingConflictsAsync()).Should().BeEmpty();
+    }
+
     private static JsonElement Page(
         string id,
         string title,
@@ -939,12 +1070,15 @@ public sealed class NotionSyncServiceTests
         public Dictionary<string, NotionMarkdownPage> MarkdownPages { get; } = new();
         public Dictionary<string, JsonElement> DatabaseSchemas { get; } = new();
         public Dictionary<string, IReadOnlyList<JsonElement>> DatabaseRows { get; } = new();
+        public Dictionary<string, JsonElement> RemotePages { get; } = new();
         public Dictionary<string, NotionFileDownload> FileDownloads { get; } = new();
         public HashSet<string> MissingComments { get; } = [];
         public List<string> BlockChildrenRequests { get; } = [];
         public List<string> CommentRequests { get; } = [];
         public List<DateTimeOffset?> DatabaseEditedAfterRequests { get; } = [];
         public List<string> DatabaseSchemaRequests { get; } = [];
+        public List<(string PageId, IReadOnlyDictionary<string, object?> Payload)> UpdatedPages { get; } = [];
+        public List<(string BlockId, IReadOnlyList<object> Children)> ReplacedBlockChildren { get; } = [];
 
         public Task<NotionValidationResult> ValidateConnectionAsync(string integrationToken, CancellationToken cancellationToken = default)
         {
@@ -972,7 +1106,9 @@ public sealed class NotionSyncServiceTests
         }
 
         public Task<JsonElement?> GetPageAsync(string integrationToken, string pageId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<JsonElement?>(Page(pageId, "Remote"));
+            Task.FromResult(RemotePages.TryGetValue(pageId, out var page)
+                ? (JsonElement?)page
+                : Page(pageId, "Remote"));
 
         public Task<NotionMarkdownPage?> GetPageMarkdownAsync(string integrationToken, string pageId, CancellationToken cancellationToken = default) =>
             Task.FromResult(MarkdownPages.TryGetValue(pageId, out var markdown)
@@ -1013,9 +1149,17 @@ public sealed class NotionSyncServiceTests
         public Task<NotionFileDownload> DownloadFileAsync(string fileUrl, CancellationToken cancellationToken = default) =>
             Task.FromResult(FileDownloads[fileUrl]);
 
-        public Task UpdatePageAsync(string integrationToken, string pageId, IReadOnlyDictionary<string, object?> payload, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task UpdatePageAsync(string integrationToken, string pageId, IReadOnlyDictionary<string, object?> payload, CancellationToken cancellationToken = default)
+        {
+            UpdatedPages.Add((pageId, payload));
+            return Task.CompletedTask;
+        }
 
-        public Task ReplaceBlockChildrenAsync(string integrationToken, string blockId, IReadOnlyList<object> children, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task ReplaceBlockChildrenAsync(string integrationToken, string blockId, IReadOnlyList<object> children, CancellationToken cancellationToken = default)
+        {
+            ReplacedBlockChildren.Add((blockId, children));
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakeSecretProtector : ISecretProtector

@@ -47,6 +47,17 @@ var configuredPathBase = builder.Configuration["Hosting:PathBase"];
 // Add services to the container.
 builder.Services.AddInfrastructure(builder.Configuration);
 
+builder.Services.AddOptions<DatabaseBackupOptions>()
+    .Bind(builder.Configuration.GetSection(DatabaseBackupOptions.SectionName));
+var dataProtectionKeysPath = builder.Configuration[
+    $"{DatabaseBackupOptions.SectionName}:DataProtectionKeysPath"]
+    ?? "/app/data/data-protection-keys";
+builder.Services.AddDataProtection()
+    .SetApplicationName("GwsBusinessSuite")
+    .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath));
+builder.Services.AddScoped<DatabaseBackupService>();
+builder.Services.AddHostedService<DatabaseBackupBackgroundService>();
+
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 // Compress server-rendered HTML, JSON/API responses, and static assets. Forwarded
@@ -134,8 +145,15 @@ builder.Services.AddAuthorization(options =>
 });
 
 builder.Services.AddHealthChecks()
-    .AddCheck<GwsBusinessSuite.Web.HealthChecks.DatabaseHealthCheck>("database")
-    .AddCheck<GwsBusinessSuite.Web.HealthChecks.OllamaHealthCheck>("ollama");
+    .AddCheck<GwsBusinessSuite.Web.HealthChecks.DatabaseHealthCheck>(
+        "database",
+        tags: ["ready"])
+    .AddCheck<GwsBusinessSuite.Web.HealthChecks.OllamaHealthCheck>(
+        "ollama",
+        tags: ["ready"])
+    .AddCheck<GwsBusinessSuite.Web.HealthChecks.DatabaseBackupHealthCheck>(
+        "backups",
+        tags: ["ready"]);
 
 // HeaderName enables validating JSON API requests (which can't carry a hidden form
 // field) via the X-CSRF-TOKEN header instead, for the /admin/api/articles endpoints.
@@ -343,6 +361,36 @@ app.UseRateLimiter();
 // Plain-text Healthy/Degraded/Unhealthy with no detail disclosure, intended for the deploy
 // pipeline's post-deploy smoke test and any external uptime monitor.
 app.MapHealthChecks("/health").AllowAnonymous();
+app.MapHealthChecks("/health/live", new()
+{
+    Predicate = _ => false
+}).AllowAnonymous();
+app.MapHealthChecks("/health/ready", new()
+{
+    Predicate = registration => registration.Tags.Contains("ready")
+}).AllowAnonymous();
+
+// Notion connection webhooks are intentionally anonymous: Notion is the caller. Event
+// requests are authenticated with X-Notion-Signature (HMAC-SHA256 over the exact raw body);
+// the one-time verification payload establishes and encrypts that signing secret.
+app.MapPost("/api/integrations/notion/webhook", async (
+    HttpRequest request,
+    INotionWebhookService webhookService,
+    CancellationToken cancellationToken) =>
+{
+    using var reader = new StreamReader(request.Body, Encoding.UTF8);
+    var rawBody = await reader.ReadToEndAsync(cancellationToken);
+    var result = await webhookService.HandleAsync(
+        rawBody,
+        request.Headers["X-Notion-Signature"].FirstOrDefault(),
+        cancellationToken);
+    return Results.Json(
+        new { message = result.Message },
+        statusCode: result.StatusCode);
+})
+    .AllowAnonymous()
+    .DisableAntiforgery()
+    .RequireRateLimiting("public-read");
 
 app.MapGet("/admin/sentinel/files/{id:guid}", async (
     Guid id,

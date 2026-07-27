@@ -41,6 +41,19 @@ public sealed class SentinelCursorTrackerTests
     }
 
     [Fact]
+    public void Move_ShouldRetainNormalizedCharacterSelectionOffsets()
+    {
+        var tracker = new SentinelCursorTracker(TimeProvider.System);
+        var pageId = Guid.NewGuid();
+        var blockId = Guid.NewGuid();
+
+        tracker.Move(pageId, "morgan", blockId, 12, 5);
+
+        tracker.List(pageId, "grant").Should().ContainSingle(cursor =>
+            cursor.Start == 12 && cursor.End == 12);
+    }
+
+    [Fact]
     public void List_ShouldDropCursorsOlderThanTheTtl()
     {
         var time = new ManualTimeProvider(new DateTimeOffset(2026, 7, 24, 12, 0, 0, TimeSpan.Zero));

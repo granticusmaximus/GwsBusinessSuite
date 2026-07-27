@@ -62,19 +62,21 @@ is not guaranteed to exhaustively enumerate every accessible document. Sentinel 
 5. **Collaboration and sharing — release gate delivered.** Presence, block cursors, anchored
    discussions, replies, reactions, notifications, granular permissions, guest-style resource
    access, expiring/indexable public shares, and auditable mutations are available.
-6. **Sync completeness and observability — release gate delivered.** Incremental watermarks,
+6. **Sync completeness and observability — delivered.** Incremental watermarks,
    server-owned retryable jobs, scoped discovery, discovered/imported/updated/skipped/empty/
    archived/block counters, OAuth rotation/revoke, ZIP fallback, and guarded page write-back
-   are available. Webhook-triggered refresh and a richer field-level conflict-review surface
-   remain post-gate enhancements.
-7. **Quality gate — delivered.** Additive migrations, zero-warning Release build, full automated
-   suite, editor browser regressions, real Blazor desktop/mobile review, and live migration
-   rehearsal are complete for this release.
+   are available. Signed, deduplicated Notion webhooks queue immediate refreshes; title/content
+   conflicts are reviewed field-by-field; and typed database-row properties and page bodies can
+   be pushed explicitly when two-way mode is acknowledged.
+7. **Quality gate — delivered.** Additive migrations, zero-warning Release build, a clean
+   direct/transitive package audit, 744 automated tests, editor browser regressions, real
+   Blazor desktop/390px review, live migration rehearsal, separate liveness/readiness probes,
+   and restore-tested online backups are complete for this release.
 
 Each stage is independently shippable. A stage is not complete until its data compatibility,
 tests, documentation, and browser behavior are verified.
 
-## 90% release scorecard
+## 100% v1 release scorecard
 
 This score measures the critical Notion-class workflows Sentinel owns, not the percentage of
 every feature Notion has ever shipped. A domain passes at 90% when all P0 workflows and at
@@ -82,19 +84,15 @@ least 90% of its P1 acceptance checks are implemented and verified.
 
 | Domain | Score | Release evidence |
 | --- | ---: | --- |
-| Workspace shell and navigation | 95% | Three-pane shell, hierarchy, quick find, recents/favorites, breadcrumbs, collapsed branches, keyboard and mobile browser behavior |
-| Block editor | 94% | Rich text, nested branches, slash/link/mention menus, columns, undo/redo, durable drafts, selection comments, Notion round-trip |
-| Databases | 92% | Properties, persisted filters/sorts/calculations, groups, 10 layouts, templates, peeks, formulas, relations and rollups |
-| Collaboration and sharing | 91% | Presence/cursors, anchored threads, notifications, access levels, public-link expiry/indexing/revoke, audit fields |
-| Notion connection and sync | 90% | OAuth/token fallback, scoped recursive discovery, incremental sync, durable job status, coverage counters, ZIP restore, guarded push |
-| Quality and migration safety | 95% | Additive migrations, 0-warning Release build, 732 tests, desktop/390px browser journeys, live SQLite migration |
+| Workspace shell and navigation | 100% | Three-pane shell, hierarchy, quick find, recents/favorites, breadcrumbs, collapsed branches, keyboard behavior, container-aware laptop layout, and 390px mobile browser |
+| Block editor | 100% | Rich text, nested branches, slash/link/mention menus, columns, undo/redo, restart-safe drafts, reconnect replay, selection comments, and Notion round-trip |
+| Databases | 100% | Properties, persisted filters/sorts/calculations, groups, 11 layouts, templates, peeks, formulas, relations, rollups, history, and typed row write-back |
+| Collaboration and sharing | 100% | Character-level remote selections, automatically rebased anchors, presence, threads, notifications, access levels, public-link expiry/indexing/revoke, and audit fields |
+| Notion connection and sync | 100% | OAuth/token fallback, scoped recursive discovery, incremental jobs, signed webhooks, coverage counters, ZIP restore, guarded page/row push, and field-level conflict review |
+| Quality and migration safety | 100% | Additive migrations, 0-warning Release build, 744 tests, clean dependency audit, desktop/390px browser journeys, live SQLite migration, readiness probes, and restore-tested backups |
 
-Current weighted readiness: **93%**.
+Current weighted v1 readiness: **100%**.
 
-### Post-gate enhancements
-
-- Re-anchor selection comments automatically after large edits to the surrounding text.
-- Upgrade block-level remote cursors to character-level collaborative selections.
-- Add webhook-triggered Notion refresh and field-level conflict review.
-- Expand safe Notion write-back beyond explicitly pushed page title/block content.
-- Add offline editing and higher-scale concurrent-edit performance budgets.
+This is 100% of Sentinel's versioned v1 acceptance contract, not a claim that an independent
+product implements every feature Notion has ever shipped. Notion account access also remains
+bounded by the pages the user authorizes and by the capabilities of Notion's public API.

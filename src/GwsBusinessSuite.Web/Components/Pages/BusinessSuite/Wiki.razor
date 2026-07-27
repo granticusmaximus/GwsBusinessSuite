@@ -6,6 +6,7 @@
 @using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Domain.Entities
+@using System.Text.Json
 @using Microsoft.AspNetCore.WebUtilities
 @inject IWikiService WikiService
 @inject IWikiDatabaseService WikiDatabaseService
@@ -307,7 +308,7 @@
             </button>
         </div>
         <SentinelTemplates CurrentPageId="SelectedPageId"
-                           CurrentPageTitle="Editor.Title"
+                           CurrentPageTitle="@Editor.Title"
                            CurrentDatabaseId="SelectedDatabaseId"
                            CurrentDatabaseTitle="SelectedDatabaseTitle"
                            IsPageEditorActive="@(SelectedDatabaseId is null)"
@@ -399,7 +400,8 @@
 
                     <div class="sentinel-page-heading">
                         <input class="sentinel-icon-input" @bind="Editor.Icon" placeholder="📄" maxlength="4" aria-label="Page icon" />
-                        <InputText class="sentinel-title-input" @bind-Value="Editor.Title" placeholder="Untitled" aria-label="Page title" />
+                        <InputTextArea class="sentinel-title-input" @bind-Value="Editor.Title"
+                                       rows="1" placeholder="Untitled" aria-label="Page title" />
                     </div>
 
                     <details class="sentinel-page-properties">
@@ -842,6 +844,114 @@
                         </div>
                     }
 
+                    <section class="border rounded-3 p-3 mt-3 bg-body-tertiary" aria-labelledby="notion-webhook-heading">
+                        <div class="d-flex justify-content-between align-items-start gap-3">
+                            <div>
+                                <h3 id="notion-webhook-heading" class="h6 mb-1">Instant refresh webhook</h3>
+                                <p class="small text-secondary mb-2">
+                                    Add this HTTPS endpoint to the connection's Webhooks tab in Notion and subscribe to
+                                    page, data source, view, and comment events.
+                                </p>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                    @onclick="RefreshNotionWebhookStatusAsync"
+                                    disabled="@IsNotionOperationBusy">
+                                Refresh status
+                            </button>
+                        </div>
+                        <label class="form-label small fw-semibold" for="notionWebhookUrl">Webhook URL</label>
+                        <input id="notionWebhookUrl" class="form-control form-control-sm font-monospace"
+                               value="@NotionWebhookUrl" readonly />
+                        @if (NotionSettings.HasWebhookVerificationToken)
+                        {
+                            <label class="form-label small fw-semibold mt-2" for="notionWebhookToken">
+                                Verification token to paste into Notion
+                            </label>
+                            <input id="notionWebhookToken" class="form-control form-control-sm font-monospace"
+                                   value="@NotionSettings.WebhookVerificationToken" readonly />
+                            <div class="small text-success mt-2">
+                                <i class="bi bi-shield-check me-1"></i>
+                                Signature verification configured
+                                @if (NotionSettings.WebhookVerificationReceivedAt is { } verifiedAt)
+                                {
+                                    <span>at @verifiedAt.ToLocalTime().ToString("g")</span>
+                                }
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-danger mt-2"
+                                    @onclick="ResetNotionWebhookAsync"
+                                    disabled="@IsNotionOperationBusy">
+                                Replace webhook subscription
+                            </button>
+                        }
+                        else
+                        {
+                            <div class="small text-warning mt-2">
+                                Waiting for Notion's verification request. Create the subscription, then refresh this status.
+                            </div>
+                        }
+                        @if (NotionSettings.LastWebhookReceivedAt is { } webhookAt)
+                        {
+                            <div class="small text-secondary mt-2">
+                                Last event: <strong>@(NotionSettings.LastWebhookEventType ?? "unknown")</strong>
+                                at @webhookAt.ToLocalTime().ToString("g").
+                            </div>
+                        }
+                    </section>
+
+                    @if (_notionConflicts.Count > 0)
+                    {
+                        <section class="border border-warning rounded-3 p-3 mt-3" aria-labelledby="notion-conflicts-heading">
+                            <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+                                <h3 id="notion-conflicts-heading" class="h6 mb-0">Changes requiring review</h3>
+                                <span class="badge text-bg-warning">@_notionConflicts.Count</span>
+                            </div>
+                            <p class="small text-secondary">
+                                Sentinel and Notion changed the same field. Nothing was overwritten; choose which version should remain.
+                            </p>
+                            <div class="d-grid gap-2">
+                                @foreach (var conflict in _notionConflicts)
+                                {
+                                    <article class="border rounded-3 p-2">
+                                        <div class="d-flex justify-content-between align-items-start gap-2">
+                                            <div>
+                                                <div class="fw-semibold">@conflict.PageTitle</div>
+                                                <div class="small text-secondary">
+                                                    @(conflict.FieldName == "title" ? "Page title" : "Page content")
+                                                    · Notion changed @conflict.RemoteEditedAt.ToLocalTime().ToString("g")
+                                                </div>
+                                            </div>
+                                            <button type="button" class="btn btn-sm btn-link"
+                                                    @onclick="() => OpenPageFromNotionConflictAsync(conflict.WikiPageId)">
+                                                Open page
+                                            </button>
+                                        </div>
+                                        @if (conflict.FieldName == "title")
+                                        {
+                                            <div class="row g-2 mt-1 small">
+                                                <div class="col-sm-6"><strong>Sentinel:</strong> @ConflictTitle(conflict.LocalValueJson)</div>
+                                                <div class="col-sm-6"><strong>Notion:</strong> @ConflictTitle(conflict.RemoteValueJson)</div>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div class="small text-secondary mt-2">Both content snapshots are preserved until you decide.</div>
+                                        }
+                                        <div class="d-flex flex-wrap gap-2 mt-2">
+                                            <button type="button" class="btn btn-sm btn-outline-primary"
+                                                    @onclick="() => ResolveNotionConflictAsync(conflict.Id, NotionConflictResolutions.KeepSentinel)">
+                                                Keep Sentinel
+                                            </button>
+                                            <button type="button" class="btn btn-sm btn-warning"
+                                                    @onclick="() => ResolveNotionConflictAsync(conflict.Id, NotionConflictResolutions.UseNotion)">
+                                                Use Notion
+                                            </button>
+                                        </div>
+                                    </article>
+                                }
+                            </div>
+                        </section>
+                    }
+
                     @if (NotionSettings.LastSyncedAt is { } lastSyncedAt)
                     {
                         <div class="border rounded-3 p-3 mt-3 bg-body-tertiary">
@@ -922,7 +1032,10 @@
     private bool IsBusy { get; set; }
     private bool _mobileWorkspaceNavOpen;
     private bool _workspaceBrowserCollapsed;
-    private bool _contextSidebarOpen = true;
+    // Keep the document canvas primary by default. The context rail remains one click away
+    // and opening it is comfortable on wide workspaces; forcing it open alongside both the
+    // portal and workspace navigation made common laptop widths unusably narrow.
+    private bool _contextSidebarOpen;
     private string SearchQuery { get; set; } = string.Empty;
     private bool IsSearchBusy { get; set; }
     private List<SentinelSearchResult> WorkspaceSearchResults { get; set; } = new();
@@ -953,6 +1066,9 @@
     private HashSet<string> ExpandedNotionPickerIds { get; } = new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource _disposeCts = new();
     private bool _isObservingNotionSync;
+    private string NotionWebhookUrl =>
+        Navigator.ToAbsoluteUri("api/integrations/notion/webhook").ToString();
+    private List<NotionSyncConflictView> _notionConflicts = [];
 
     private List<WikiRevisionView> History { get; set; } = new();
     private bool IsHistoryBusy { get; set; }
@@ -1043,6 +1159,7 @@
         try
         {
             NotionSettings = await NotionSyncService.GetSettingsAsync() ?? new NotionConnectorSettingsView();
+            _notionConflicts = (await NotionSyncService.GetPendingConflictsAsync()).ToList();
             ResetNotionPickerSelection();
             var syncStatus = NotionSyncCoordinator.GetStatus();
             if (syncStatus.IsActive)
@@ -1364,6 +1481,7 @@
                     {
                         SetNotionSyncMessage(result);
                         NotionSettings = await NotionSyncService.GetSettingsAsync() ?? NotionSettings;
+                        _notionConflicts = (await NotionSyncService.GetPendingConflictsAsync()).ToList();
                         if (result.IsSuccess)
                         {
                             await LoadTreeAsync(selectFirstPage: false);
@@ -1432,6 +1550,101 @@
         {
             IsNotionBusy = false;
         }
+    }
+
+    private async Task RefreshNotionWebhookStatusAsync()
+    {
+        IsNotionBusy = true;
+        try
+        {
+            NotionSettings = await NotionSyncService.GetSettingsAsync(_disposeCts.Token)
+                ?? new NotionConnectorSettingsView();
+            NotionMessage = NotionSettings.HasWebhookVerificationToken
+                ? "Notion webhook signature verification is configured."
+                : "No verification request has arrived yet.";
+            NotionMessageIsError = !NotionSettings.HasWebhookVerificationToken;
+        }
+        catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            IsNotionBusy = false;
+        }
+    }
+
+    private async Task ResetNotionWebhookAsync()
+    {
+        IsNotionBusy = true;
+        try
+        {
+            await NotionSyncService.ResetWebhookVerificationAsync(_disposeCts.Token);
+            NotionSettings = await NotionSyncService.GetSettingsAsync(_disposeCts.Token)
+                ?? new NotionConnectorSettingsView();
+            NotionMessage = "Webhook verification reset. Delete the old subscription in Notion, create the replacement, then refresh status.";
+            NotionMessageIsError = false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to reset Notion webhook verification.");
+            NotionMessage = $"Unable to reset webhook verification. {ex.Message}";
+            NotionMessageIsError = true;
+        }
+        finally
+        {
+            IsNotionBusy = false;
+        }
+    }
+
+    private static string ConflictTitle(string valueJson)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<string>(valueJson) ?? "Untitled";
+        }
+        catch (JsonException)
+        {
+            return "Untitled";
+        }
+    }
+
+    private async Task ResolveNotionConflictAsync(Guid conflictId, string resolution)
+    {
+        IsNotionBusy = true;
+        try
+        {
+            await NotionSyncService.ResolveConflictAsync(
+                conflictId,
+                resolution,
+                CurrentUsername,
+                _disposeCts.Token);
+            _notionConflicts = (await NotionSyncService.GetPendingConflictsAsync(_disposeCts.Token)).ToList();
+            await LoadTreeAsync(selectFirstPage: false);
+            if (SelectedPageId is { } selectedPageId)
+            {
+                await OpenPageAsync(selectedPageId);
+            }
+            NotionMessage = resolution == NotionConflictResolutions.UseNotion
+                ? "The Notion version was applied."
+                : "The Sentinel version was kept.";
+            NotionMessageIsError = false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to resolve Notion conflict {ConflictId}.", conflictId);
+            NotionMessage = $"Unable to resolve conflict. {ex.Message}";
+            NotionMessageIsError = true;
+        }
+        finally
+        {
+            IsNotionBusy = false;
+        }
+    }
+
+    private async Task OpenPageFromNotionConflictAsync(Guid pageId)
+    {
+        await OpenPageAsync(pageId);
+        ShowNotionModal = false;
     }
 
     [JSInvokable]
@@ -1613,11 +1826,11 @@
     }
 
     [JSInvokable]
-    public void OnCursorMoved(string blockId)
+    public void OnCursorMoved(string blockId, int? start = null, int? end = null)
     {
         if (SelectedPageId is { } wikiPageId && Guid.TryParse(blockId, out var parsedBlockId))
         {
-            CursorTracker.Move(wikiPageId, CurrentUsername, parsedBlockId);
+            CursorTracker.Move(wikiPageId, CurrentUsername, parsedBlockId, start, end);
         }
     }
 
@@ -1644,7 +1857,14 @@
         CursorColors[(uint)username.GetHashCode() % (uint)CursorColors.Length];
 
     private object BuildRemoteCursorPayload() => _remoteCursors
-        .Select(cursor => new { blockId = cursor.BlockId, username = cursor.Username, color = ColorForUsername(cursor.Username) })
+        .Select(cursor => new
+        {
+            blockId = cursor.BlockId,
+            username = cursor.Username,
+            color = ColorForUsername(cursor.Username),
+            start = cursor.Start,
+            end = cursor.End
+        })
         .ToList();
 
     private void LeaveCursorTracking()
@@ -1690,13 +1910,15 @@
         {
             var blockEditorModule = _blockEditorModule!;
             await blockEditorModule.InvokeVoidAsync(
-                "setBlocks",
+                "initialize",
                 _blockEditorContainer,
+                _blockEditorRef,
                 Editor.BlocksJson,
                 BlockEditorHistoryKey());
             await blockEditorModule.InvokeVoidAsync("setDiscussionCounts", _blockEditorContainer, _blockDiscussionCounts);
-            // setBlocks just wiped the DOM (revert, or a fresh save reload) - any remote cursor
-            // markers it removed need to be redrawn against the new block elements.
+            // The editor element can be replaced when the conditional page-context rail enters
+            // the render tree. Reinitializing, rather than assuming the old WeakMap state still
+            // owns this ElementReference, guarantees a loaded page renders its persisted blocks.
             await blockEditorModule.InvokeVoidAsync("setRemoteCursors", _blockEditorContainer, BuildRemoteCursorPayload());
             _blockEditorSyncedGeneration = _editorGeneration;
         }

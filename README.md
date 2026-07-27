@@ -98,5 +98,7 @@ Always review the generated migration file(s) under
 
 - `docs/ARCHITECTURE.md`
 - `docs/ROADMAP.md`
+- `docs/SENTINEL_REBUILD.md`
+- `docs/SENTINEL_OPERATIONS.md`
 - `docs/SEO_ARTICLE_GENERATOR.md`
 - `docs/ARTICLE_IMAGE_BRANDING.md`

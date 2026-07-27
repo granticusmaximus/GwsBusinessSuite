@@ -11,7 +11,7 @@ public sealed class NotionSyncBackgroundService(
     ILogger<NotionSyncBackgroundService> logger) : BackgroundService, INotionSyncCoordinator
 {
     private static readonly TimeSpan Interval = TimeSpan.FromHours(1);
-    private readonly Channel<bool> _manualRequests = Channel.CreateBounded<bool>(
+    private readonly Channel<string> _syncRequests = Channel.CreateBounded<string>(
         new BoundedChannelOptions(1)
         {
             SingleReader = true,
@@ -34,7 +34,7 @@ public sealed class NotionSyncBackgroundService(
     {
         lock (_statusLock)
         {
-            if (_status.IsActive || !_manualRequests.Writer.TryWrite(true))
+            if (_status.IsActive || !_syncRequests.Writer.TryWrite("manual"))
             {
                 return false;
             }
@@ -49,6 +49,8 @@ public sealed class NotionSyncBackgroundService(
         }
     }
 
+    public bool TryQueueWebhookSync() => _syncRequests.Writer.TryWrite("webhook");
+
     public NotionSyncJobStatus GetStatus()
     {
         lock (_statusLock)
@@ -59,9 +61,9 @@ public sealed class NotionSyncBackgroundService(
 
     private async Task RunManualLoopAsync(CancellationToken stoppingToken)
     {
-        await foreach (var _ in _manualRequests.Reader.ReadAllAsync(stoppingToken))
+        await foreach (var source in _syncRequests.Reader.ReadAllAsync(stoppingToken))
         {
-            await RunSyncAsync("manual", requireAutomaticSync: false, waitForLock: true, stoppingToken);
+            await RunSyncAsync(source, requireAutomaticSync: false, waitForLock: true, stoppingToken);
         }
     }
 
@@ -93,7 +95,7 @@ public sealed class NotionSyncBackgroundService(
 
         try
         {
-            if (source == "manual")
+            if (source is "manual" or "webhook")
             {
                 SetStatus(new NotionSyncJobStatus(
                     NotionSyncJobStates.Running,
@@ -118,7 +120,7 @@ public sealed class NotionSyncBackgroundService(
                     0,
                     0,
                     0);
-                if (source == "manual")
+                if (source is "manual" or "webhook")
                 {
                     CompleteStatus(source, unavailable);
                 }
@@ -127,7 +129,7 @@ public sealed class NotionSyncBackgroundService(
             }
 
             var result = await notionSync.SyncAsync(cancellationToken);
-            if (source == "manual")
+            if (source is "manual" or "webhook")
             {
                 CompleteStatus(source, result);
             }
@@ -150,7 +152,7 @@ public sealed class NotionSyncBackgroundService(
         catch (Exception ex)
         {
             var result = new NotionSyncResult(false, $"Sync failed: {ex.GetBaseException().Message}", 0, 0, 0);
-            if (source == "manual")
+            if (source is "manual" or "webhook")
             {
                 CompleteStatus(source, result);
             }

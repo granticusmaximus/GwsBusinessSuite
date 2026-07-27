@@ -95,6 +95,11 @@ public sealed class NotionConnectorSettingsView
     public int LastSyncSkippedCount { get; set; }
     public int LastSyncEmptyContentCount { get; set; }
     public int LastSyncContentBlockCount { get; set; }
+    public string WebhookVerificationToken { get; set; } = string.Empty;
+    public bool HasWebhookVerificationToken { get; set; }
+    public DateTimeOffset? WebhookVerificationReceivedAt { get; set; }
+    public DateTimeOffset? LastWebhookReceivedAt { get; set; }
+    public string? LastWebhookEventType { get; set; }
 
     // True when the stored token's ciphertext could not be decrypted (Data Protection key
     // ring rotated since it was saved) - mirrors CjConnectorSettingsView's
@@ -140,7 +145,34 @@ public sealed record NotionSyncJobStatus(
 public interface INotionSyncCoordinator
 {
     bool TryQueueManualSync();
+    bool TryQueueWebhookSync();
     NotionSyncJobStatus GetStatus();
+}
+
+public sealed record NotionWebhookHandleResult(int StatusCode, string Message);
+
+public static class NotionConflictResolutions
+{
+    public const string KeepSentinel = "keepSentinel";
+    public const string UseNotion = "useNotion";
+}
+
+public sealed record NotionSyncConflictView(
+    Guid Id,
+    Guid WikiPageId,
+    string PageTitle,
+    string FieldName,
+    string LocalValueJson,
+    string RemoteValueJson,
+    DateTimeOffset RemoteEditedAt,
+    DateTimeOffset DetectedAt);
+
+public interface INotionWebhookService
+{
+    Task<NotionWebhookHandleResult> HandleAsync(
+        string rawBody,
+        string? signature,
+        CancellationToken cancellationToken = default);
 }
 
 // Reconciliation (search -> upsert pages/databases -> wire hierarchy -> sync blocks/rows) and
@@ -153,4 +185,8 @@ public interface INotionSyncService
     Task<NotionValidationResult> SaveSettingsAsync(NotionConnectorSettingsView settings, CancellationToken cancellationToken = default);
     Task<NotionSyncResult> SyncAsync(CancellationToken cancellationToken = default);
     Task<NotionSyncResult> PushPageAsync(Guid wikiPageId, CancellationToken cancellationToken = default);
+    Task<NotionSyncResult> PushDatabaseRowAsync(Guid wikiDatabaseRowId, CancellationToken cancellationToken = default);
+    Task ResetWebhookVerificationAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<NotionSyncConflictView>> GetPendingConflictsAsync(CancellationToken cancellationToken = default);
+    Task ResolveConflictAsync(Guid conflictId, string resolution, string resolvedBy, CancellationToken cancellationToken = default);
 }

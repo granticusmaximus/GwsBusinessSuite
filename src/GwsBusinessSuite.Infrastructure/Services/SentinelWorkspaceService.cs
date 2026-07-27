@@ -20,8 +20,27 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
             return [];
         }
 
-        var pages = await dbContext.WikiPages.AsNoTracking().ToListAsync(cancellationToken);
-        var databases = await dbContext.WikiDatabases.AsNoTracking()
+        // Apply the broad token filter in SQLite before parsing/ranking rich JSON in
+        // process. This keeps search responsive as a workspace grows while the final
+        // Score pass below remains the source of truth for exact all-token matching.
+        var pageQuery = dbContext.WikiPages.AsNoTracking();
+        var databaseQuery = dbContext.WikiDatabases.AsNoTracking();
+        foreach (var term in terms)
+        {
+            var loweredTerm = term.ToLower();
+            pageQuery = pageQuery.Where(page =>
+                page.Title.ToLower().Contains(loweredTerm)
+                || page.BlocksJson.ToLower().Contains(loweredTerm));
+            databaseQuery = databaseQuery.Where(database =>
+                database.Title.ToLower().Contains(loweredTerm)
+                || database.Properties.Any(property => property.Name.ToLower().Contains(loweredTerm))
+                || database.Rows.Any(row =>
+                    row.PropertyValuesJson.ToLower().Contains(loweredTerm)
+                    || row.BlocksJson.ToLower().Contains(loweredTerm)));
+        }
+
+        var pages = await pageQuery.ToListAsync(cancellationToken);
+        var databases = await databaseQuery
             .Include(database => database.Properties)
             .Include(database => database.Rows)
             .ToListAsync(cancellationToken);

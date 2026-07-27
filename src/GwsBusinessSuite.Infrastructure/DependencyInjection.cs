@@ -157,6 +157,7 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(30);
         });
         services.AddScoped<INotionSyncService, NotionSyncService>();
+        services.AddScoped<INotionWebhookService, NotionWebhookService>();
         services.AddSingleton<NotionSyncBackgroundService>();
         services.AddSingleton<INotionSyncCoordinator>(provider =>
             provider.GetRequiredService<NotionSyncBackgroundService>());

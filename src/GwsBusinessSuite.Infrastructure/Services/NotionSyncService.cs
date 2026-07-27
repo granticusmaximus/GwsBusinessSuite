@@ -31,6 +31,7 @@ public sealed class NotionSyncService(
         }
 
         var (_, isUnreadable) = UnprotectToken(row.IntegrationToken);
+        var (webhookToken, webhookTokenUnreadable) = UnprotectToken(row.WebhookVerificationToken);
         return new NotionConnectorSettingsView
         {
             // Never return the decrypted credential to the Blazor client. A blank input means
@@ -55,6 +56,12 @@ public sealed class NotionSyncService(
             LastSyncSkippedCount = row.LastSyncSkippedCount,
             LastSyncEmptyContentCount = row.LastSyncEmptyContentCount,
             LastSyncContentBlockCount = row.LastSyncContentBlockCount,
+            WebhookVerificationToken = webhookTokenUnreadable ? string.Empty : webhookToken,
+            HasWebhookVerificationToken = !string.IsNullOrWhiteSpace(row.WebhookVerificationToken)
+                && !webhookTokenUnreadable,
+            WebhookVerificationReceivedAt = row.WebhookVerificationReceivedAt,
+            LastWebhookReceivedAt = row.LastWebhookReceivedAt,
+            LastWebhookEventType = row.LastWebhookEventType,
             IntegrationTokenUnreadable = isUnreadable
         };
     }
@@ -191,6 +198,19 @@ public sealed class NotionSyncService(
             logger.LogWarning(ex, "Unable to browse Notion content.");
             return new NotionPickerResult(false, $"Unable to browse Notion content. {ex.Message}", []);
         }
+    }
+
+    public async Task ResetWebhookVerificationAsync(CancellationToken cancellationToken = default)
+    {
+        var settings = await dbContext.NotionConnectorSettings.FirstOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException("Connect a Notion workspace before configuring a webhook.");
+        settings.WebhookVerificationToken = string.Empty;
+        settings.WebhookVerificationReceivedAt = null;
+        settings.LastWebhookReceivedAt = null;
+        settings.LastWebhookEventType = null;
+        settings.UpdatedAt = DateTimeOffset.UtcNow;
+        settings.UpdatedBy = "user";
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<NotionSyncResult> SyncAsync(CancellationToken cancellationToken = default)
@@ -355,6 +375,7 @@ public sealed class NotionSyncService(
                         notionId,
                         title,
                         isArchived,
+                        remoteEditedAt,
                         reservedPageSlugs,
                         cancellationToken);
                     existingPageSyncStates.TryGetValue(notionId, out var priorSyncState);
@@ -854,6 +875,7 @@ public sealed class NotionSyncService(
         string notionId,
         string title,
         bool isArchived,
+        DateTimeOffset? remoteEditedAt,
         HashSet<string> reservedSlugs,
         CancellationToken cancellationToken)
     {
@@ -875,15 +897,37 @@ public sealed class NotionSyncService(
             await dbContext.WikiPages.AddAsync(page, cancellationToken);
         }
 
-        var contentMetadataChanged = !isNew &&
-            (!string.Equals(page!.Title, title, StringComparison.Ordinal)
-             || wasArchived != isArchived);
+        var titleChanged = !isNew && !string.Equals(page!.Title, title, StringComparison.Ordinal);
+        var concurrentLocalEdit = !isNew
+            && remoteEditedAt is { } remoteTimestamp
+            && page!.NotionLastEditedAt is { } importedTimestamp
+            && remoteTimestamp > importedTimestamp
+            && !IsNotionActor(page.UpdatedBy);
+        if (titleChanged && concurrentLocalEdit)
+        {
+            await UpsertPendingConflictAsync(
+                page!,
+                "title",
+                JsonSerializer.Serialize(page!.Title),
+                JsonSerializer.Serialize(title),
+                remoteEditedAt!.Value,
+                cancellationToken);
+        }
 
-        page!.Title = title;
-        page.NotionArchivedAt = isArchived ? (page.NotionArchivedAt ?? DateTimeOffset.UtcNow) : null;
-        page.UpdatedAt = DateTimeOffset.UtcNow;
-        page.UpdatedBy = "notion-sync";
-        if (contentMetadataChanged) page.ContentVersion++;
+        if (!titleChanged || !concurrentLocalEdit)
+        {
+            page!.Title = title;
+        }
+        page!.NotionArchivedAt = isArchived ? (page.NotionArchivedAt ?? DateTimeOffset.UtcNow) : null;
+        if (!concurrentLocalEdit)
+        {
+            page.UpdatedAt = DateTimeOffset.UtcNow;
+            page.UpdatedBy = "notion-sync";
+        }
+        if ((!titleChanged || !concurrentLocalEdit) && (titleChanged || wasArchived != isArchived))
+        {
+            page.ContentVersion++;
+        }
         return (page.Id, isNew, isArchived && !wasArchived);
     }
 
@@ -976,16 +1020,75 @@ public sealed class NotionSyncService(
             var blocksJson = WikiBlockJson.Serialize(pageContent.Blocks);
             if (!string.Equals(page.BlocksJson, blocksJson, StringComparison.Ordinal))
             {
-                page.BlocksJson = blocksJson;
-                page.ContentVersion++;
+                var concurrentLocalEdit = remoteEditedAt is { } remoteTimestamp
+                    && page.NotionLastEditedAt is { } importedTimestamp
+                    && remoteTimestamp > importedTimestamp
+                    && !IsNotionActor(page.UpdatedBy);
+                if (concurrentLocalEdit)
+                {
+                    await UpsertPendingConflictAsync(
+                        page,
+                        "content",
+                        page.BlocksJson,
+                        blocksJson,
+                        remoteEditedAt!.Value,
+                        cancellationToken);
+                }
+                else
+                {
+                    page.BlocksJson = blocksJson;
+                    page.ContentVersion++;
+                }
             }
             page.NotionLastEditedAt = remoteEditedAt;
         }
-        page.UpdatedAt = DateTimeOffset.UtcNow;
-        page.UpdatedBy = "notion-sync";
+        if (IsNotionActor(page.UpdatedBy)
+            || !await dbContext.NotionSyncConflicts.AnyAsync(
+                conflict => conflict.WikiPageId == page.Id && conflict.Status == "pending",
+                cancellationToken))
+        {
+            page.UpdatedAt = DateTimeOffset.UtcNow;
+            page.UpdatedBy = "notion-sync";
+        }
         await dbContext.SaveChangesAsync(cancellationToken);
         return pageContent;
     }
+
+    private async Task UpsertPendingConflictAsync(
+        WikiPage page,
+        string fieldName,
+        string localValueJson,
+        string remoteValueJson,
+        DateTimeOffset remoteEditedAt,
+        CancellationToken cancellationToken)
+    {
+        var existing = await dbContext.NotionSyncConflicts.FirstOrDefaultAsync(
+            conflict => conflict.WikiPageId == page.Id
+                && conflict.FieldName == fieldName
+                && conflict.Status == "pending",
+            cancellationToken);
+        if (existing is null)
+        {
+            existing = new NotionSyncConflict
+            {
+                WikiPageId = page.Id,
+                NotionId = page.NotionId!,
+                FieldName = fieldName,
+                CreatedAt = DateTimeOffset.UtcNow,
+                CreatedBy = "notion-sync"
+            };
+            dbContext.NotionSyncConflicts.Add(existing);
+        }
+
+        existing.LocalValueJson = localValueJson;
+        existing.RemoteValueJson = remoteValueJson;
+        existing.RemoteEditedAt = remoteEditedAt;
+        existing.UpdatedAt = DateTimeOffset.UtcNow;
+        existing.UpdatedBy = "notion-sync";
+    }
+
+    private static bool IsNotionActor(string? actor) =>
+        actor is "notion-sync" or "notion-push";
 
     private async Task<PageContentSyncResult> LoadNotionPageBlocksAsync(
         string notionPageId,
@@ -1719,6 +1822,260 @@ public sealed class NotionSyncService(
             logger.LogError(ex, "Unable to push Sentinel page {WikiPageId} to Notion", wikiPageId);
             return new(false, $"Push failed: {ex.Message}", 0, 0, 0);
         }
+    }
+
+    public async Task<NotionSyncResult> PushDatabaseRowAsync(
+        Guid wikiDatabaseRowId,
+        CancellationToken cancellationToken = default)
+    {
+        var settings = await dbContext.NotionConnectorSettings.FirstOrDefaultAsync(cancellationToken);
+        if (settings is null || settings.SyncDirection != "twoWay" || !settings.AllowTwoWayWrites)
+        {
+            return new(false, "Two-way sync and the write acknowledgement must both be enabled.", 0, 0, 0);
+        }
+
+        var row = await dbContext.WikiDatabaseRows
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == wikiDatabaseRowId, cancellationToken);
+        if (row?.NotionId is null)
+        {
+            return new(false, "Only database rows imported from Notion can be pushed.", 0, 0, 0);
+        }
+
+        var properties = await dbContext.WikiDatabaseProperties
+            .AsNoTracking()
+            .Where(property => property.WikiDatabaseId == row.WikiDatabaseId)
+            .OrderBy(property => property.SortOrder)
+            .ToListAsync(cancellationToken);
+        var (token, unreadable) = UnprotectToken(settings.IntegrationToken);
+        if (unreadable || string.IsNullOrWhiteSpace(token))
+        {
+            return new(false, "The Notion token is unavailable. Reconnect first.", 0, 0, 0);
+        }
+
+        try
+        {
+            var remote = await notionService.GetPageAsync(token, row.NotionId, cancellationToken);
+            if (remote is null)
+            {
+                return new(false, "The Notion database row could not be retrieved.", 0, 0, 0);
+            }
+
+            if (row.NotionLastEditedAt is { } importedAt
+                && GetLastEditedAt(remote.Value) is { } remoteEditedAt
+                && remoteEditedAt > importedAt)
+            {
+                return new(
+                    false,
+                    "Notion changed this row after its last import. Sync and review the changes before pushing.",
+                    0,
+                    0,
+                    0);
+            }
+
+            var relationIds = properties
+                .Where(property => property.Type == WikiDatabasePropertyTypes.Relation)
+                .SelectMany(property => WikiPropertyValues.GetMultiSelect(
+                    WikiPropertyValues.ParseObject(row.PropertyValuesJson),
+                    property.Id))
+                .Select(value => Guid.TryParse(value, out var id) ? id : (Guid?)null)
+                .Where(id => id is not null)
+                .Select(id => id!.Value)
+                .Distinct()
+                .ToList();
+            var relatedNotionIds = relationIds.Count == 0
+                ? new Dictionary<Guid, string>()
+                : await dbContext.WikiDatabaseRows
+                    .AsNoTracking()
+                    .Where(item => relationIds.Contains(item.Id) && item.NotionId != null)
+                    .ToDictionaryAsync(item => item.Id, item => item.NotionId!, cancellationToken);
+
+            var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+            var propertyPayload = new Dictionary<string, object?>();
+            foreach (var property in properties.Where(property => !string.IsNullOrWhiteSpace(property.NotionId)))
+            {
+                var mapped = MapDatabaseRowPropertyForWrite(property, values, relatedNotionIds);
+                if (mapped.ShouldWrite)
+                {
+                    propertyPayload[property.NotionId!] = mapped.Value;
+                }
+            }
+
+            var payload = new Dictionary<string, object?>
+            {
+                ["properties"] = propertyPayload
+            };
+            if (!string.IsNullOrWhiteSpace(row.Icon) && !row.Icon.Contains('/', StringComparison.Ordinal))
+            {
+                payload["icon"] = new { type = "emoji", emoji = row.Icon };
+            }
+            if (Uri.TryCreate(row.CoverImageUrl, UriKind.Absolute, out var coverUri)
+                && coverUri.Scheme is "http" or "https")
+            {
+                payload["cover"] = new
+                {
+                    type = "external",
+                    external = new { url = coverUri.ToString() }
+                };
+            }
+
+            await notionService.UpdatePageAsync(token, row.NotionId, payload, cancellationToken);
+            await notionService.ReplaceBlockChildrenAsync(
+                token,
+                row.NotionId,
+                NotionMapping.MapBlocksForWrite(WikiBlockJson.ParseBlocks(row.BlocksJson)),
+                cancellationToken);
+
+            var refreshed = await notionService.GetPageAsync(token, row.NotionId, cancellationToken);
+            var trackedRow = await dbContext.WikiDatabaseRows
+                .FirstAsync(item => item.Id == row.Id, cancellationToken);
+            trackedRow.NotionLastEditedAt = refreshed is { } refreshedPage
+                ? GetLastEditedAt(refreshedPage)
+                : DateTimeOffset.UtcNow;
+            trackedRow.UpdatedAt = DateTimeOffset.UtcNow;
+            trackedRow.UpdatedBy = "notion-push";
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            return new(true, $"Database row pushed to Notion ({propertyPayload.Count} properties and page content).", 0, 1, 0);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Unable to push Sentinel database row {WikiDatabaseRowId} to Notion", wikiDatabaseRowId);
+            return new(false, $"Push failed: {ex.Message}", 0, 0, 0);
+        }
+    }
+
+    private static (bool ShouldWrite, object? Value) MapDatabaseRowPropertyForWrite(
+        WikiDatabaseProperty property,
+        System.Text.Json.Nodes.JsonObject values,
+        IReadOnlyDictionary<Guid, string> relatedNotionIds)
+    {
+        object RichText(string text) => new[]
+        {
+            new { type = "text", text = new { content = text } }
+        };
+
+        return property.Type switch
+        {
+            WikiDatabasePropertyTypes.Title =>
+                (true, new { title = RichText(WikiPropertyValues.GetText(values, property.Id) ?? string.Empty) }),
+            WikiDatabasePropertyTypes.Text =>
+                (true, new { rich_text = RichText(WikiPropertyValues.GetText(values, property.Id) ?? string.Empty) }),
+            WikiDatabasePropertyTypes.Url =>
+                (true, new { url = WikiPropertyValues.GetText(values, property.Id) }),
+            WikiDatabasePropertyTypes.Number =>
+                (true, new { number = WikiPropertyValues.GetNumber(values, property.Id) }),
+            WikiDatabasePropertyTypes.Checkbox =>
+                (true, new { checkbox = WikiPropertyValues.GetCheckbox(values, property.Id) }),
+            WikiDatabasePropertyTypes.Date =>
+                (true, new
+                {
+                    date = WikiPropertyValues.GetDate(values, property.Id) is { } date
+                        ? new { start = date.ToString("O") }
+                        : null
+                }),
+            WikiDatabasePropertyTypes.Select =>
+                (true, new
+                {
+                    select = WikiPropertyValues.GetText(values, property.Id) is { Length: > 0 } optionId
+                        ? new { id = optionId }
+                        : null
+                }),
+            WikiDatabasePropertyTypes.MultiSelect =>
+                (true, new
+                {
+                    multi_select = WikiPropertyValues.GetMultiSelect(values, property.Id)
+                        .Select(id => new { id })
+                        .ToArray()
+                }),
+            WikiDatabasePropertyTypes.Relation =>
+                (true, new
+                {
+                    relation = WikiPropertyValues.GetMultiSelect(values, property.Id)
+                        .Select(value => Guid.TryParse(value, out var id)
+                            && relatedNotionIds.TryGetValue(id, out var notionId)
+                                ? notionId
+                                : null)
+                        .Where(notionId => notionId is not null)
+                        .Select(notionId => new { id = notionId! })
+                        .ToArray()
+                }),
+            // People values currently store display names, files store durable local copies,
+            // and computed/audit properties are read-only. Writing them as if they were
+            // Notion ids or upload ids would corrupt remote data, so omit them explicitly.
+            _ => (false, null)
+        };
+    }
+
+    public async Task<IReadOnlyList<NotionSyncConflictView>> GetPendingConflictsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var conflicts = await dbContext.NotionSyncConflicts
+            .AsNoTracking()
+            .Where(conflict => conflict.Status == "pending")
+            .Join(
+                dbContext.WikiPages.AsNoTracking(),
+                conflict => conflict.WikiPageId,
+                page => page.Id,
+                (conflict, page) => new NotionSyncConflictView(
+                    conflict.Id,
+                    conflict.WikiPageId,
+                    page.Title,
+                    conflict.FieldName,
+                    conflict.LocalValueJson,
+                    conflict.RemoteValueJson,
+                    conflict.RemoteEditedAt,
+                    conflict.CreatedAt))
+            .ToListAsync(cancellationToken);
+        return conflicts.OrderByDescending(conflict => conflict.DetectedAt).ToList();
+    }
+
+    public async Task ResolveConflictAsync(
+        Guid conflictId,
+        string resolution,
+        string resolvedBy,
+        CancellationToken cancellationToken = default)
+    {
+        if (resolution is not (NotionConflictResolutions.KeepSentinel or NotionConflictResolutions.UseNotion))
+        {
+            throw new ArgumentOutOfRangeException(nameof(resolution), "Unknown Notion conflict resolution.");
+        }
+
+        var conflict = await dbContext.NotionSyncConflicts
+            .FirstOrDefaultAsync(item => item.Id == conflictId && item.Status == "pending", cancellationToken)
+            ?? throw new InvalidOperationException("The Notion conflict no longer exists or was already resolved.");
+        var page = await dbContext.WikiPages
+            .FirstOrDefaultAsync(item => item.Id == conflict.WikiPageId, cancellationToken)
+            ?? throw new InvalidOperationException("The conflicted Sentinel page no longer exists.");
+
+        if (resolution == NotionConflictResolutions.UseNotion)
+        {
+            if (conflict.FieldName == "title")
+            {
+                page.Title = JsonSerializer.Deserialize<string>(conflict.RemoteValueJson) ?? page.Title;
+            }
+            else if (conflict.FieldName == "content")
+            {
+                _ = WikiBlockJson.ParseBlocks(conflict.RemoteValueJson);
+                page.BlocksJson = conflict.RemoteValueJson;
+            }
+            else
+            {
+                throw new InvalidOperationException($"Unsupported conflict field '{conflict.FieldName}'.");
+            }
+
+            page.ContentVersion++;
+            page.UpdatedAt = DateTimeOffset.UtcNow;
+            page.UpdatedBy = resolvedBy;
+        }
+
+        conflict.Status = "resolved";
+        conflict.Resolution = resolution;
+        conflict.ResolvedAt = DateTimeOffset.UtcNow;
+        conflict.ResolvedBy = resolvedBy;
+        conflict.UpdatedAt = DateTimeOffset.UtcNow;
+        conflict.UpdatedBy = resolvedBy;
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private static IReadOnlyList<string> ParseSelectedIds(string value) => value

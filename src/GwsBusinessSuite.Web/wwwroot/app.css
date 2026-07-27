@@ -1977,6 +1977,7 @@ audio.wiki-embed-media { max-width: 100%; }
     --sentinel-faint: #78716c;
     width: min(100%, 1840px);
     margin: 0 auto;
+    container-type: inline-size;
 }
 
 .sentinel-workspace-header {
@@ -2090,6 +2091,7 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 
 .sentinel-layout {
+    position: relative;
     display: grid;
     grid-template-columns: minmax(250px, 286px) minmax(0, 1fr);
     align-items: start;
@@ -2099,6 +2101,40 @@ audio.wiki-embed-media { max-width: 100%; }
     border-radius: 12px;
     background: var(--sentinel-canvas);
     box-shadow: 0 12px 34px rgba(0, 0, 0, .2);
+}
+
+/* The admin rail reduces Sentinel's actual space well before viewport-based tablet
+   breakpoints fire. At laptop-sized content widths, keep the document and workspace
+   browser in-flow and present the optional context panel as a temporary overlay. */
+@container (max-width: 1120px) {
+    .sentinel-layout.has-context-sidebar,
+    .sentinel-layout.has-context-sidebar.is-context-collapsed {
+        grid-template-columns: minmax(230px, 255px) minmax(0, 1fr);
+    }
+
+    .sentinel-layout.has-context-sidebar.is-browser-collapsed,
+    .sentinel-layout.has-context-sidebar.is-browser-collapsed.is-context-collapsed {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .sentinel-context-sidebar {
+        position: absolute;
+        z-index: 20;
+        top: 0;
+        right: 0;
+        width: min(330px, calc(100% - 3rem));
+        box-shadow: -16px 0 32px rgba(0, 0, 0, .32);
+    }
+
+    .sentinel-context-sidebar.is-collapsed {
+        width: 3rem;
+        box-shadow: none;
+    }
+
+    .sentinel-document-canvas {
+        padding-right: 2.5rem;
+        padding-left: 2.5rem;
+    }
 }
 
 .sentinel-layout.has-context-sidebar {
@@ -2615,6 +2651,10 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-title-input {
     width: 100%;
     padding: .1rem 0;
+    field-sizing: content;
+    min-height: 1.2em;
+    overflow: hidden;
+    resize: none;
     font: 750 clamp(2rem, 4vw, 2.7rem)/1.14 var(--gws-font-sans);
     letter-spacing: -.035em;
 }
@@ -2734,8 +2774,22 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .wiki-block-content:empty::before { color: #57534e; }
 .sentinel-workspace .wiki-block-content a { color: #fbbf24; text-decoration-color: rgba(251, 191, 36, .45); text-underline-offset: 2px; }
 
-/* Block-granular remote cursor marker - see SentinelCursorTracker for why this is "which
-   block another viewer is in," not a character-position caret. */
+.wiki-offline-banner {
+    position: sticky;
+    top: 0;
+    z-index: 8;
+    margin-bottom: .75rem;
+    padding: .55rem .75rem;
+    border: 1px solid rgba(245, 158, 11, .45);
+    border-radius: .55rem;
+    background: #451a03;
+    color: #fde68a;
+    font-size: .78rem;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .24);
+}
+
+/* Remote character caret/name label. Falls back to the block's top-right corner when a
+   stale offset cannot be projected into the current DOM. */
 .wiki-remote-cursor {
     position: absolute;
     top: -.55rem;
@@ -2749,6 +2803,30 @@ audio.wiki-embed-media { max-width: 100%; }
     white-space: nowrap;
     pointer-events: none;
     box-shadow: 0 1px 4px rgba(0, 0, 0, .35);
+}
+
+.wiki-remote-cursor.is-character-cursor {
+    right: auto;
+    transform: translateY(-100%);
+    border-bottom-left-radius: 2px;
+}
+
+.wiki-remote-cursor.is-character-cursor::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 0;
+    width: 2px;
+    height: 1.45rem;
+    background: var(--wiki-remote-cursor-color, #f59e0b);
+}
+
+.wiki-remote-selection {
+    position: absolute;
+    z-index: 1;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--wiki-remote-cursor-color, #f59e0b) 28%, transparent);
+    pointer-events: none;
 }
 
 .sentinel-workspace .wiki-block[data-block-type="heading_1"] { margin-top: 1.45rem; }

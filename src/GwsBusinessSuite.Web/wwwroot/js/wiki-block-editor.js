@@ -69,7 +69,9 @@ export function initialize(container, dotNetRef, initialBlocksJson, historyKey =
         lastSnapshot: undefined,
         baseSnapshot: undefined,
         historyKey: normalizeHistoryKey(historyKey),
-        lastCursorBlockId: null
+        lastCursorKey: null,
+        isOffline: !navigator.onLine,
+        offlineBanner: null
     };
     states.set(container, state);
     setBlocks(container, initialBlocksJson, historyKey);
@@ -78,20 +80,23 @@ export function initialize(container, dotNetRef, initialBlocksJson, historyKey =
     container.addEventListener('pointermove', event => onHandlePointerMove(state, event));
     container.addEventListener('pointerup', event => onHandlePointerUp(state, event));
     container.addEventListener('pointercancel', event => onHandlePointerUp(state, event));
-    container.addEventListener('mouseup', state.selectionHandler = () => showInlineToolbar(state));
+    container.addEventListener('mouseup', state.selectionHandler = () => {
+        showInlineToolbar(state);
+        reportCursor(state);
+    });
     container.addEventListener('keyup', state.selectionHandler);
     document.addEventListener('mousedown', state.outsideClickHandler = event => closeFloatingMenus(state, event));
     window.addEventListener('resize', state.resizeHandler = () => repositionSuggestionMenu(state));
-    // Block-granular remote-cursor broadcast (see SentinelCursorTracker's doc comment for why
-    // this is block-level, not a character offset). focusin bubbles from the contenteditable
-    // the user actually clicked/tabbed into, so this fires on every real cursor move without
-    // needing a per-keystroke listener.
+    window.addEventListener('offline', state.offlineHandler = () => setOfflineState(state, true));
+    window.addEventListener('online', state.onlineHandler = () => {
+        setOfflineState(state, false);
+        notifyChanged(state);
+    });
+    setOfflineState(state, state.isOffline);
+    // Broadcast the active block plus character selection offsets. The offsets are visual
+    // presence metadata only; block-level three-way merge remains the content safety boundary.
     container.addEventListener('focusin', state.focusInHandler = event => {
-        const blockEl = event.target.closest('.wiki-block');
-        if (!blockEl || blockEl.dataset.blockId === state.lastCursorBlockId) return;
-        state.lastCursorBlockId = blockEl.dataset.blockId;
-        try { state.dotNetRef.invokeMethodAsync('OnCursorMoved', blockEl.dataset.blockId); }
-        catch { /* the Blazor circuit may have disconnected */ }
+        reportCursor(state, event.target.closest('.wiki-block-content'));
     });
 }
 
@@ -173,27 +178,123 @@ export function setDiscussionCounts(container, counts) {
     }
 }
 
-// Targeted per-block update, same shape as setDiscussionCounts - clears any previous remote
-// cursor markers and re-renders the current set. cursors: [{ blockId, username, color }].
+// Clears prior overlays and renders character selections/carets without inserting anything
+// into the contenteditable DOM (so cursor UI can never leak into serialized page content).
 export function setRemoteCursors(container, cursors) {
     const state = states.get(container);
     if (!state) return;
 
-    container.querySelectorAll(':scope > .wiki-block > .wiki-remote-cursor').forEach(el => el.remove());
+    container.querySelectorAll(':scope > .wiki-block > .wiki-remote-cursor, :scope > .wiki-block > .wiki-remote-selection').forEach(el => el.remove());
     for (const cursor of cursors || []) {
         const blockEl = container.querySelector(`:scope > .wiki-block[data-block-id="${cssEscape(cursor.blockId)}"]`);
         if (!blockEl) continue;
+        const content = blockEl.querySelector('.wiki-block-content');
+        const start = Number.isInteger(cursor.start) ? Math.max(0, cursor.start) : null;
+        const end = Number.isInteger(cursor.end) ? Math.max(start ?? 0, cursor.end) : start;
+        let caretRect = null;
+        if (content && start !== null) {
+            const startPoint = textPointAtOffset(content, start);
+            const endPoint = textPointAtOffset(content, end ?? start);
+            if (startPoint && endPoint) {
+                const range = document.createRange();
+                range.setStart(startPoint.node, startPoint.offset);
+                range.setEnd(endPoint.node, endPoint.offset);
+                const blockRect = blockEl.getBoundingClientRect();
+                if (!range.collapsed) {
+                    for (const rect of range.getClientRects()) {
+                        if (rect.width <= 0 || rect.height <= 0) continue;
+                        const highlight = document.createElement('span');
+                        highlight.className = 'wiki-remote-selection';
+                        highlight.style.setProperty('--wiki-remote-cursor-color', cursor.color || '#f59e0b');
+                        highlight.style.left = `${rect.left - blockRect.left}px`;
+                        highlight.style.top = `${rect.top - blockRect.top}px`;
+                        highlight.style.width = `${rect.width}px`;
+                        highlight.style.height = `${rect.height}px`;
+                        blockEl.appendChild(highlight);
+                        caretRect = rect;
+                    }
+                } else {
+                    caretRect = range.getBoundingClientRect();
+                }
+            }
+        }
         const marker = document.createElement('span');
         marker.className = 'wiki-remote-cursor';
         marker.style.setProperty('--wiki-remote-cursor-color', cursor.color || '#f59e0b');
         marker.textContent = cursor.username;
-        marker.title = `${cursor.username} is editing this block`;
+        marker.title = `${cursor.username} is editing here`;
+        if (caretRect && (caretRect.width || caretRect.height)) {
+            const blockRect = blockEl.getBoundingClientRect();
+            marker.classList.add('is-character-cursor');
+            marker.style.left = `${caretRect.right - blockRect.left}px`;
+            marker.style.top = `${caretRect.top - blockRect.top}px`;
+        }
         blockEl.appendChild(marker);
     }
 }
 
+function textPointAtOffset(content, requestedOffset) {
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+    let remaining = requestedOffset;
+    let lastNode = null;
+    while (walker.nextNode()) {
+        const node = walker.currentNode;
+        lastNode = node;
+        if (remaining <= node.textContent.length) {
+            return { node, offset: remaining };
+        }
+        remaining -= node.textContent.length;
+    }
+    return lastNode
+        ? { node: lastNode, offset: lastNode.textContent.length }
+        : { node: content, offset: 0 };
+}
+
+function reportCursor(state, preferredContent = null) {
+    const selection = window.getSelection();
+    const content = preferredContent
+        || selection?.anchorNode?.parentElement?.closest?.('.wiki-block-content')
+        || document.activeElement?.closest?.('.wiki-block-content');
+    if (!content || !state.container.contains(content)) return;
+    const blockEl = content.closest('.wiki-block');
+    if (!blockEl) return;
+
+    let start = 0;
+    let end = 0;
+    if (selection && selection.rangeCount > 0 && content.contains(selection.anchorNode) && content.contains(selection.focusNode)) {
+        const range = selection.getRangeAt(0);
+        const beforeStart = range.cloneRange();
+        beforeStart.selectNodeContents(content);
+        beforeStart.setEnd(range.startContainer, range.startOffset);
+        start = beforeStart.toString().length;
+        end = start + range.toString().length;
+    }
+    const key = `${blockEl.dataset.blockId}:${start}:${end}`;
+    if (key === state.lastCursorKey) return;
+    state.lastCursorKey = key;
+    try { state.dotNetRef.invokeMethodAsync('OnCursorMoved', blockEl.dataset.blockId, start, end); }
+    catch { /* the Blazor circuit may have disconnected */ }
+}
+
 function cssEscape(value) {
     return typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(value) : String(value).replace(/["\\]/g, '\\$&');
+}
+
+function setOfflineState(state, offline) {
+    state.isOffline = offline;
+    if (offline) {
+        if (!state.offlineBanner) {
+            const banner = document.createElement('div');
+            banner.className = 'wiki-offline-banner';
+            banner.setAttribute('role', 'status');
+            banner.textContent = 'Offline — edits are saved safely in this browser and will sync when you reconnect.';
+            state.container.before(banner);
+            state.offlineBanner = banner;
+        }
+        return;
+    }
+    state.offlineBanner?.remove();
+    state.offlineBanner = null;
 }
 
 export function dispose(container) {
@@ -208,6 +309,9 @@ export function dispose(container) {
     }
     if (state.outsideClickHandler) document.removeEventListener('mousedown', state.outsideClickHandler);
     if (state.resizeHandler) window.removeEventListener('resize', state.resizeHandler);
+    if (state.offlineHandler) window.removeEventListener('offline', state.offlineHandler);
+    if (state.onlineHandler) window.removeEventListener('online', state.onlineHandler);
+    state.offlineBanner?.remove();
     states.delete(container);
 }
 
@@ -1043,7 +1147,9 @@ function createContentEditable(block, state) {
         checkWikiLinkTrigger(state, content);
         checkMentionTrigger(state, content);
         scheduleNotify(state);
+        reportCursor(state, content);
     });
+    content.addEventListener('keyup', () => reportCursor(state, content));
     content.addEventListener('paste', event => {
         event.preventDefault();
         const text = (event.clipboardData || window.clipboardData).getData('text/plain');
@@ -1908,13 +2014,19 @@ function notifyChanged(state) {
     state.lastSnapshot = current;
     persistHistory(state);
     persistDraft(state, current);
-    try { state.dotNetRef.invokeMethodAsync('OnBlocksChanged', current); }
+    try {
+        const pending = state.dotNetRef.invokeMethodAsync('OnBlocksChanged', current);
+        pending?.catch?.(() => { /* localStorage remains the durable offline outbox */ });
+    }
     catch { /* the Blazor circuit may have disconnected */ }
 }
 
 function notifyChangedSilently(state) {
     if (state.notifyTimer) { clearTimeout(state.notifyTimer); state.notifyTimer = null; }
-    try { state.dotNetRef.invokeMethodAsync('OnBlocksChanged', getBlocksJson(state.container)); }
+    try {
+        const pending = state.dotNetRef.invokeMethodAsync('OnBlocksChanged', getBlocksJson(state.container));
+        pending?.catch?.(() => { /* localStorage remains the durable offline outbox */ });
+    }
     catch { /* the Blazor circuit may have disconnected */ }
 }
 

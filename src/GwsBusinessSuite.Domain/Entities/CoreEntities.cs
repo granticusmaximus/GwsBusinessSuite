@@ -703,6 +703,41 @@ public sealed class NotionConnectorSettings : AuditableEntity
     public int LastSyncSkippedCount { get; set; }
     public int LastSyncEmptyContentCount { get; set; }
     public int LastSyncContentBlockCount { get; set; }
+    // Connection-webhook verification token, encrypted through ISecretProtector. Notion
+    // uses it as the HMAC-SHA256 key for X-Notion-Signature.
+    public string WebhookVerificationToken { get; set; } = string.Empty;
+    public DateTimeOffset? WebhookVerificationReceivedAt { get; set; }
+    public DateTimeOffset? LastWebhookReceivedAt { get; set; }
+    public string? LastWebhookEventType { get; set; }
+}
+
+// Durable webhook receipt ledger. Notion retries a delivery when it does not receive a
+// successful response; the unique event id prevents the same signal from creating duplicate
+// work while still acknowledging the retry.
+public sealed class NotionWebhookEvent : AuditableEntity
+{
+    public required string NotionEventId { get; set; }
+    public required string EventType { get; set; }
+    public string? WorkspaceId { get; set; }
+    public string? EntityType { get; set; }
+    public string? EntityId { get; set; }
+    public DateTimeOffset EventTimestamp { get; set; }
+    public bool SyncQueued { get; set; }
+}
+
+public sealed class NotionSyncConflict : AuditableEntity
+{
+    public Guid WikiPageId { get; set; }
+    public required string NotionId { get; set; }
+    public required string FieldName { get; set; }
+    public string LocalValueJson { get; set; } = "null";
+    public string RemoteValueJson { get; set; } = "null";
+    public DateTimeOffset RemoteEditedAt { get; set; }
+    public string Status { get; set; } = "pending";
+    public string? Resolution { get; set; }
+    public DateTimeOffset? ResolvedAt { get; set; }
+    public string? ResolvedBy { get; set; }
+    public WikiPage? WikiPage { get; set; }
 }
 
 // WordPress-style "Settings" (General/Reading/Writing/Media/AI) — a singleton row for

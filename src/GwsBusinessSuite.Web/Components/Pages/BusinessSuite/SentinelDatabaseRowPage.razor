@@ -4,6 +4,7 @@
 @using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Domain.Entities
 @inject IWikiDatabaseService WikiDatabaseService
+@inject INotionSyncService NotionSyncService
 @inject IWikiService WikiService
 @inject ISentinelWorkspaceService SentinelWorkspaceService
 @inject IMediaLibraryService MediaLibraryService
@@ -214,6 +215,12 @@
             <span class="small text-secondary">@(string.IsNullOrEmpty(_saveStatus) ? "Changes save automatically. Use Save page to record a named version." : _saveStatus)</span>
             <div class="d-flex align-items-center gap-2">
                 <button type="button" class="btn btn-outline-secondary" @onclick="CloseAsync" disabled="@IsBusy">Close</button>
+                @if (!string.IsNullOrWhiteSpace(Row.NotionId))
+                {
+                    <button type="button" class="btn btn-warning" @onclick="PushToNotionAsync" disabled="@IsBusy">
+                        <i class="bi bi-cloud-arrow-up-fill me-1"></i>Push to Notion
+                    </button>
+                }
                 <button type="button" class="btn btn-primary" @onclick="SaveAsync" disabled="@IsBusy">
                     <i class="bi bi-floppy-fill me-1"></i>Save page
                 </button>
@@ -551,6 +558,38 @@
         {
             Logger.LogError(ex, "Unable to save Sentinel database row page {RowId}.", Row.Id);
             ErrorMessage = $"Unable to save page. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task PushToNotionAsync()
+    {
+        await SaveAsync();
+        if (!string.IsNullOrWhiteSpace(ErrorMessage))
+        {
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            var result = await NotionSyncService.PushDatabaseRowAsync(Row.Id);
+            if (result.IsSuccess)
+            {
+                _saveStatus = "Pushed to Notion";
+            }
+            else
+            {
+                ErrorMessage = result.Message;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to push Sentinel database row {RowId} to Notion.", Row.Id);
+            ErrorMessage = $"Unable to push row. {ex.Message}";
         }
         finally
         {

@@ -40,6 +40,7 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
 
         var now = DateTimeOffset.UtcNow;
         WikiPage page;
+        var previousBlocksJson = "[]";
         var isNew = !editor.WikiPageId.HasValue;
         if (editor.WikiPageId is { } wikiPageId)
         {
@@ -54,6 +55,7 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
             // Reload before comparing so an entity tracked by an earlier save cannot conceal a
             // change committed by another circuit.
             await ReloadAsync(page, cancellationToken);
+            previousBlocksJson = page.BlocksJson;
             if (page.ContentVersion != editor.ExpectedContentVersion)
             {
                 var metadataStillCurrent = string.Equals(editor.Title.Trim(), page.Title, StringComparison.Ordinal)
@@ -120,9 +122,59 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
             await ReloadAsync(page, cancellationToken);
             throw CreateConcurrencyException(page, editor.ExpectedContentVersion);
         }
+        if (!isNew && !string.Equals(previousBlocksJson, page.BlocksJson, StringComparison.Ordinal))
+        {
+            await ReanchorDiscussionsAsync(page.Id, previousBlocksJson, page.BlocksJson, cancellationToken);
+        }
         await CreateRevisionAsync(page, performedBy, cancellationToken);
 
         return page;
+    }
+
+    private async Task ReanchorDiscussionsAsync(
+        Guid wikiPageId,
+        string previousBlocksJson,
+        string currentBlocksJson,
+        CancellationToken cancellationToken)
+    {
+        var previousById = WikiBlockJson.ParseBlocks(previousBlocksJson).ToDictionary(block => block.Id);
+        var currentById = WikiBlockJson.ParseBlocks(currentBlocksJson).ToDictionary(block => block.Id);
+        var discussions = await dbContext.SentinelDiscussions
+            .Where(discussion => discussion.WikiPageId == wikiPageId
+                && discussion.BlockId != null
+                && discussion.AnchorText != null
+                && discussion.AnchorStart != null
+                && discussion.AnchorEnd != null)
+            .ToListAsync(cancellationToken);
+
+        foreach (var discussion in discussions)
+        {
+            if (discussion.BlockId is not { } blockId
+                || !previousById.TryGetValue(blockId, out var previousBlock)
+                || !currentById.TryGetValue(blockId, out var currentBlock))
+            {
+                continue;
+            }
+
+            var rebased = SentinelDiscussionAnchorRebaser.Rebase(
+                new SentinelDiscussionAnchor(
+                    discussion.AnchorText!,
+                    discussion.AnchorStart!.Value,
+                    discussion.AnchorEnd!.Value),
+                previousBlock.PlainText,
+                currentBlock.PlainText);
+            if (rebased is null)
+            {
+                continue;
+            }
+
+            discussion.AnchorStart = rebased.Start;
+            discussion.AnchorEnd = rebased.End;
+            discussion.UpdatedAt = DateTimeOffset.UtcNow;
+            discussion.UpdatedBy = "anchor-rebase";
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<WikiPage> DuplicatePageAsync(
