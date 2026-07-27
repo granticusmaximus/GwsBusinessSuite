@@ -28,6 +28,24 @@ public sealed class SentinelAccessServiceTests
     }
 
     [Fact]
+    public async Task GetAccessAsync_ShouldOrderPublicSharesNewestFirstOnSqlite()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var targetId = Guid.NewGuid();
+        var older = await fixture.Service.CreatePublicShareAsync(targetId, false, null, false, "owner");
+        var newer = await fixture.Service.CreatePublicShareAsync(targetId, false, DateTimeOffset.UtcNow.AddDays(1), true, "owner");
+        var rows = await fixture.Db.SentinelPublicShares.ToListAsync();
+        rows.Single(row => row.Id == older.Id).CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-5);
+        rows.Single(row => row.Id == newer.Id).CreatedAt = DateTimeOffset.UtcNow;
+        await fixture.Db.SaveChangesAsync();
+
+        var snapshot = await fixture.Service.GetAccessAsync(targetId, false);
+
+        snapshot.Shares.Select(share => share.Id).Should().Equal(newer.Id, older.Id);
+        snapshot.Shares[0].AllowSearchIndexing.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task CanAccess_ShouldApplyPermissionRanksAndOwnerOverride()
     {
         await using var fixture = await Fixture.CreateAsync();

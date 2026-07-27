@@ -26,10 +26,19 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
             .ToListAsync(cancellationToken);
         var shares = await dbContext.SentinelPublicShares.AsNoTracking()
             .Where(item => item.TargetId == targetId && item.IsDatabase == isDatabase)
-            .OrderByDescending(item => item.CreatedAt)
             .Select(item => new SentinelShareView(item.Id, item.TargetId, item.IsDatabase, null, item.ExpiresAt, item.AllowSearchIndexing, item.RevokedAt != null))
             .ToListAsync(cancellationToken);
-        return new SentinelAccessSnapshot(permissions, shares);
+        // SQLite stores DateTimeOffset as TEXT and cannot translate ORDER BY for it. Keep the
+        // bounded resource-share query server-side, then order the already-materialized rows
+        // using the source entities' creation order.
+        var shareOrder = await dbContext.SentinelPublicShares.AsNoTracking()
+            .Where(item => item.TargetId == targetId && item.IsDatabase == isDatabase)
+            .Select(item => new { item.Id, item.CreatedAt })
+            .ToListAsync(cancellationToken);
+        var orderById = shareOrder.ToDictionary(item => item.Id, item => item.CreatedAt);
+        return new SentinelAccessSnapshot(
+            permissions,
+            shares.OrderByDescending(share => orderById[share.Id]).ToList());
     }
 
     public async Task SetPermissionAsync(Guid targetId, bool isDatabase, string username, string accessLevel, string performedBy, CancellationToken cancellationToken = default)
