@@ -183,6 +183,32 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
         return document.RootElement.Clone();
     }
 
+    public async Task<NotionPage> ListViewsAsync(
+        string integrationToken,
+        string? databaseId,
+        string? dataSourceId,
+        string? cursor,
+        CancellationToken cancellationToken = default)
+    {
+        var scope = !string.IsNullOrWhiteSpace(databaseId)
+            ? $"database_id={Uri.EscapeDataString(databaseId)}"
+            : $"data_source_id={Uri.EscapeDataString(
+                dataSourceId ?? throw new ArgumentException("A database or data source id is required.", nameof(dataSourceId)))}";
+        var path = $"views?{scope}&page_size=100"
+            + (string.IsNullOrWhiteSpace(cursor)
+                ? string.Empty
+                : $"&start_cursor={Uri.EscapeDataString(cursor)}");
+        using var response = await SendNotionApiAsync(
+            HttpMethod.Get,
+            path,
+            integrationToken,
+            null,
+            cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        EnsureSuccess(response, body, $"listing views for {databaseId ?? dataSourceId}");
+        return ParsePage(body);
+    }
+
     public async Task<NotionPage> ListCommentsAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default)
     {
         var path = $"comments?block_id={Uri.EscapeDataString(blockId)}&page_size=100"

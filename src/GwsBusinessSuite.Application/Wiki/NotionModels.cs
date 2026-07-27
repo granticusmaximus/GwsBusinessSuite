@@ -67,6 +67,12 @@ public interface INotionService
         string? cursor,
         DateTimeOffset? editedAfter = null,
         CancellationToken cancellationToken = default);
+    Task<NotionPage> ListViewsAsync(
+        string integrationToken,
+        string? databaseId,
+        string? dataSourceId,
+        string? cursor,
+        CancellationToken cancellationToken = default);
     Task<JsonElement?> GetViewAsync(string integrationToken, string viewId, CancellationToken cancellationToken = default);
     Task<NotionPage> ListCommentsAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default);
     Task<NotionFileDownload> DownloadFileAsync(string fileUrl, CancellationToken cancellationToken = default);

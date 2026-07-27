@@ -22,7 +22,7 @@ public sealed class NotionSyncService(
     ISecretProtector secretProtector,
     ILogger<NotionSyncService> logger) : INotionSyncService
 {
-    private const string CurrentImportMappingVersion = "2";
+    private const string CurrentImportMappingVersion = "3";
 
     public async Task<NotionConnectorSettingsView?> GetSettingsAsync(CancellationToken cancellationToken = default)
     {
@@ -493,8 +493,17 @@ public sealed class NotionSyncService(
             {
                 if (notionIdToKind[notionId] is "database" or "data_source")
                 {
+                    var notionDatabaseContainerId = databaseContainerToLocalIds
+                        .FirstOrDefault(pair => pair.Value.Contains(localId))
+                        .Key;
+                    if (string.IsNullOrWhiteSpace(notionDatabaseContainerId)
+                        && notionIdToKind[notionId] == "database")
+                    {
+                        notionDatabaseContainerId = notionId;
+                    }
                     var databaseContent = await SyncDatabaseSchemaAndRowsAsync(
                         notionId,
+                        notionDatabaseContainerId,
                         localId,
                         token,
                         notionDatabaseIdsNeedingSchema.Contains(notionId),
@@ -1389,12 +1398,19 @@ public sealed class NotionSyncService(
                         .Select(column => string.Join("\n", column.Select(block => block.PlainText)))
                         .ToList();
                     var columnRichText = mappedColumns.Select(JoinBlocksAsRichText).ToList();
+                    var containsOnlyPageLinks = mappedColumns
+                        .SelectMany(column => column)
+                        .Any()
+                        && mappedColumns
+                            .SelectMany(column => column)
+                            .All(block => block.Props.GetValueOrDefault("notionChildPage") == "true");
 
                     blocks.Add(new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Columns, indentLevel,
                         [new WikiRichTextSpan(string.Join("|||", columnTexts))],
                         new Dictionary<string, string>
                         {
-                            ["columnRichTextJson"] = JsonSerializer.Serialize(columnRichText, WikiBlockJson.Options)
+                            ["columnRichTextJson"] = JsonSerializer.Serialize(columnRichText, WikiBlockJson.Options),
+                            ["notionPageLinkColumns"] = containsOnlyPageLinks ? "true" : "false"
                         }));
                 }
                 continue;
@@ -1496,8 +1512,7 @@ public sealed class NotionSyncService(
                     WikiBlockTypes.Paragraph,
                     indentLevel,
                     [
-                        new WikiRichTextSpan($"{icon} "),
-                        new WikiRichTextSpan(displayTitle, Link: link)
+                        new WikiRichTextSpan($"{icon} {displayTitle}", Link: link)
                     ],
                     new Dictionary<string, string> { ["notionChildPage"] = "true" })
             ];
@@ -1748,6 +1763,7 @@ public sealed class NotionSyncService(
 
     private async Task<DatabaseContentSyncResult> SyncDatabaseSchemaAndRowsAsync(
         string notionDatabaseId,
+        string? notionDatabaseContainerId,
         Guid wikiDatabaseId,
         string token,
         bool syncSchema,
@@ -1756,6 +1772,7 @@ public sealed class NotionSyncService(
         CancellationToken cancellationToken)
     {
         var notionPropertyIdToLocal = new Dictionary<string, (Guid Id, string Type)>();
+        JsonElement? schemaForViews = null;
         if (syncSchema)
         {
             var schema = await notionService.GetDatabaseAsync(token, notionDatabaseId, cancellationToken);
@@ -1763,6 +1780,7 @@ public sealed class NotionSyncService(
             {
                 return new DatabaseContentSyncResult(0, 0, 0, 0, 0, 0, 0);
             }
+            schemaForViews = schema.Value;
 
             if (schema.Value.TryGetProperty("properties", out var propertiesElement) && propertiesElement.ValueKind == JsonValueKind.Object)
             {
@@ -1843,12 +1861,6 @@ public sealed class NotionSyncService(
 
                 await dbContext.SaveChangesAsync(cancellationToken);
             }
-            await SyncDatabaseViewsAsync(
-                schema.Value,
-                wikiDatabaseId,
-                token,
-                notionPropertyIdToLocal,
-                cancellationToken);
         }
         else
         {
@@ -1862,6 +1874,14 @@ public sealed class NotionSyncService(
                     property => (property.Id, property.Type),
                     StringComparer.Ordinal);
         }
+        await SyncDatabaseViewsAsync(
+            schemaForViews,
+            notionDatabaseContainerId,
+            notionDatabaseId,
+            wikiDatabaseId,
+            token,
+            notionPropertyIdToLocal,
+            cancellationToken);
 
         var rows = new List<JsonElement>();
         string? rowCursor = null;
@@ -1999,16 +2019,40 @@ public sealed class NotionSyncService(
     }
 
     private async Task SyncDatabaseViewsAsync(
-        JsonElement schema,
+        JsonElement? schema,
+        string? notionDatabaseContainerId,
+        string notionDataSourceId,
         Guid wikiDatabaseId,
         string token,
         IReadOnlyDictionary<string, (Guid Id, string Type)> notionPropertyIdToLocal,
         CancellationToken cancellationToken)
     {
-        if (!schema.TryGetProperty("views", out var viewsElement) || viewsElement.ValueKind != JsonValueKind.Array) return;
+        var viewReferences = new List<JsonElement>();
+        string? cursor = null;
+        do
+        {
+            var page = await notionService.ListViewsAsync(
+                token,
+                notionDatabaseContainerId,
+                notionDataSourceId,
+                cursor,
+                cancellationToken);
+            viewReferences.AddRange(page.Results);
+            cursor = page.HasMore ? page.NextCursor : null;
+        } while (cursor is not null);
+
+        // Compatibility fallback for responses and test fixtures created before Notion
+        // moved view discovery to GET /v1/views.
+        if (viewReferences.Count == 0
+            && schema is { } schemaElement
+            && schemaElement.TryGetProperty("views", out var viewsElement)
+            && viewsElement.ValueKind == JsonValueKind.Array)
+        {
+            viewReferences.AddRange(viewsElement.EnumerateArray().Select(view => view.Clone()));
+        }
 
         var order = 0;
-        foreach (var viewElement in viewsElement.EnumerateArray())
+        foreach (var viewElement in viewReferences)
         {
             var notionId = viewElement.TryGetProperty("id", out var id) ? id.GetString() : null;
             if (string.IsNullOrWhiteSpace(notionId)) continue;

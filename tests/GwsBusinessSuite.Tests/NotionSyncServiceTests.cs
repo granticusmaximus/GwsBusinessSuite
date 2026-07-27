@@ -208,7 +208,7 @@ public sealed class NotionSyncServiceTests
                     WikiBlockTypes.Paragraph,
                     0,
                     [new WikiRichTextSpan("Existing")],
-                    new Dictionary<string, string> { ["notionImportMappingVersion"] = "2" })]),
+                    new Dictionary<string, string> { ["notionImportMappingVersion"] = "3" })]),
             CreatedBy = "notion-sync"
         });
         await fixture.Db.SaveChangesAsync();
@@ -298,7 +298,7 @@ public sealed class NotionSyncServiceTests
         var importedLink = WikiBlockJson.ParseBlocks(page.BlocksJson).Should().ContainSingle().Subject;
         importedLink.RichText.Should().Contain(span =>
             span.Link != null && span.Link.StartsWith("wikilink:", StringComparison.Ordinal));
-        importedLink.Props["notionImportMappingVersion"].Should().Be("2");
+        importedLink.Props["notionImportMappingVersion"].Should().Be("3");
     }
 
     [Fact]
@@ -834,13 +834,20 @@ public sealed class NotionSyncServiceTests
                   {"id":"doing","name":"In progress","color":"blue"},
                   {"id":"done","name":"Done","color":"green"}
                 ]}}
-              },
-              "views":[{
-                "id":"board-view",
-                "name":"Work Items",
-                "type":"board",
-                "configuration":{"type":"board","group_by":{"type":"select","property_id":"status"}}
-              }]
+              }
+            }
+            """);
+        fixture.Notion.DatabaseViews["work-items-source"] =
+        [
+            Json("""{"object":"view","id":"board-view"}""")
+        ];
+        fixture.Notion.DatabaseViewDetails["board-view"] = Json("""
+            {
+              "object":"view",
+              "id":"board-view",
+              "name":"Work Items",
+              "type":"board",
+              "configuration":{"type":"board","group_by":{"type":"select","property_id":"status"}}
             }
             """);
         fixture.Notion.DatabaseRows["work-items-source"] =
@@ -866,6 +873,7 @@ public sealed class NotionSyncServiceTests
         var blocks = WikiBlockJson.ParseBlocks(page.BlocksJson);
         var columns = blocks.Should().ContainSingle(block => block.Type == WikiBlockTypes.Columns).Subject;
         columns.Props.Should().ContainKey("columnRichTextJson");
+        columns.Props["notionPageLinkColumns"].Should().Be("true");
         var richColumns = JsonSerializer.Deserialize<List<List<WikiRichTextSpan>>>(
             columns.Props["columnRichTextJson"],
             WikiBlockJson.Options)!;
@@ -1232,6 +1240,8 @@ public sealed class NotionSyncServiceTests
         public Dictionary<string, NotionMarkdownPage> MarkdownPages { get; } = new();
         public Dictionary<string, JsonElement> DatabaseSchemas { get; } = new();
         public Dictionary<string, IReadOnlyList<JsonElement>> DatabaseRows { get; } = new();
+        public Dictionary<string, IReadOnlyList<JsonElement>> DatabaseViews { get; } = new();
+        public Dictionary<string, JsonElement> DatabaseViewDetails { get; } = new();
         public Dictionary<string, JsonElement> RemotePages { get; } = new();
         public Dictionary<string, NotionFileDownload> FileDownloads { get; } = new();
         public HashSet<string> MissingComments { get; } = [];
@@ -1294,8 +1304,19 @@ public sealed class NotionSyncServiceTests
             return Task.FromResult(new NotionPage(DatabaseRows.GetValueOrDefault(databaseId) ?? [], false, null));
         }
 
+        public Task<NotionPage> ListViewsAsync(
+            string integrationToken,
+            string? databaseId,
+            string? dataSourceId,
+            string? cursor,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new NotionPage(
+                dataSourceId is null ? [] : DatabaseViews.GetValueOrDefault(dataSourceId) ?? [],
+                false,
+                null));
+
         public Task<JsonElement?> GetViewAsync(string integrationToken, string viewId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<JsonElement?>(null);
+            Task.FromResult(DatabaseViewDetails.TryGetValue(viewId, out var view) ? (JsonElement?)view : null);
 
         public Task<NotionPage> ListCommentsAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default)
         {

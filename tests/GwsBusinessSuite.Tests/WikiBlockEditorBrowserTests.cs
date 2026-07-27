@@ -397,6 +397,7 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
 
         await Expect(page.Locator(".wiki-inline-database-board")).ToBeVisibleAsync();
         await Expect(page.Locator(".wiki-inline-board-column")).ToHaveCountAsync(3);
+        await Expect(page.Locator(".wiki-inline-board-status").Nth(1)).ToHaveAttributeAsync("data-color", "blue");
         await Expect(page.Locator(".wiki-inline-board-card")).ToHaveTextAsync("Review workflow");
         await page.Locator(".wiki-inline-board-card").ClickAsync();
         (await page.EvaluateAsync<string>(

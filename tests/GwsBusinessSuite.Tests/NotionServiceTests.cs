@@ -133,6 +133,25 @@ public sealed class NotionServiceTests
             .Should().Be("2026-07-23T11:59:58.0000000Z");
     }
 
+    [Fact]
+    public async Task ListViewsAsync_ShouldUseTheCurrentDataSourceViewEndpoint()
+    {
+        var handler = new RecordingHandler(request =>
+        {
+            request.Method.Should().Be(HttpMethod.Get);
+            request.RequestUri!.PathAndQuery.Should().Be(
+                "/v1/views?data_source_id=work%20items&page_size=100&start_cursor=next");
+            return JsonResponse(
+                """{"object":"list","results":[{"object":"view","id":"board-1"}],"has_more":false,"next_cursor":null}""");
+        });
+        var service = CreateService(handler);
+
+        var result = await service.ListViewsAsync("secret", null, "work items", "next");
+
+        result.Results.Should().ContainSingle();
+        result.Results[0].GetProperty("id").GetString().Should().Be("board-1");
+    }
+
     private static NotionService CreateService(HttpMessageHandler handler) =>
         new(new HttpClient(handler)
         {

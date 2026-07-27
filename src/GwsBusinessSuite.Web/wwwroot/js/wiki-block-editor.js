@@ -581,6 +581,9 @@ function createTableBody(block, state) {
 function createColumnsBody(block, state) {
     const wrapper = document.createElement('div');
     wrapper.className = 'wiki-columns-editor';
+    if (block.props && block.props.notionPageLinkColumns === 'true') {
+        wrapper.classList.add('wiki-notion-page-link-columns');
+    }
     const text = (block.richText || []).map(span => span.text || '').join('');
     const fallbackColumns = (text || 'Column one ||| Column two')
         .split('|||', 5)
@@ -1126,6 +1129,8 @@ function createInlineBoard(snapshot, groupByPropertyId, openDatabase) {
         const heading = document.createElement('div');
         heading.className = 'wiki-inline-board-heading';
         const label = document.createElement('span');
+        label.className = 'wiki-inline-board-status';
+        label.dataset.color = option.color || 'default';
         label.textContent = option.label || 'No status';
         const count = document.createElement('span');
         count.textContent = String(rows.length);
@@ -1136,7 +1141,23 @@ function createInlineBoard(snapshot, groupByPropertyId, openDatabase) {
             const card = document.createElement('button');
             card.type = 'button';
             card.className = 'wiki-inline-board-card';
-            card.textContent = row.cells.find(cell => cell.propertyId === titleProperty?.id)?.value || 'Untitled';
+            const title = document.createElement('strong');
+            title.textContent = row.cells.find(cell => cell.propertyId === titleProperty?.id)?.value || 'Untitled';
+            card.appendChild(title);
+            const visibleProperties = snapshot.properties
+                .filter(property => property.id !== titleProperty?.id && property.id !== groupByPropertyId)
+                .map(property => ({
+                    name: property.name,
+                    value: row.cells.find(cell => cell.propertyId === property.id)?.value || ''
+                }))
+                .filter(item => item.value)
+                .slice(0, 3);
+            for (const property of visibleProperties) {
+                const detail = document.createElement('span');
+                detail.className = 'wiki-inline-board-card-detail';
+                detail.textContent = `${property.name}: ${property.value}`;
+                card.appendChild(detail);
+            }
             card.addEventListener('click', openDatabase);
             column.appendChild(card);
         }
