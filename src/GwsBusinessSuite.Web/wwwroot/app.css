@@ -3313,6 +3313,57 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .sentinel-search-highlight { background: rgba(245, 158, 11, .3); color: #fef3c7; }
 .sentinel-workspace .wiki-mention { background: rgba(245, 158, 11, .12); color: #fbbf24; }
 
+.notion-connection-choice {
+    padding: 1rem;
+    border: 1px solid var(--sentinel-border, rgba(214, 211, 209, .16));
+    border-radius: .75rem;
+    background: rgba(255, 255, 255, .018);
+}
+
+.notion-connection-choice.is-primary {
+    border-color: rgba(245, 158, 11, .38);
+    background: rgba(245, 158, 11, .055);
+}
+
+.notion-connection-choice-icon {
+    display: grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 2.35rem;
+    height: 2.35rem;
+    border-radius: .65rem;
+    background: rgba(245, 158, 11, .16);
+    color: #fbbf24;
+}
+
+.notion-connection-steps {
+    display: grid;
+    gap: .3rem;
+    margin: .85rem 0 0;
+    padding-left: 1.15rem;
+    color: var(--sentinel-muted, #a8a29e);
+    font-size: .75rem;
+}
+
+.notion-connection-divider {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    margin: .85rem 0;
+    color: var(--sentinel-faint, #78716c);
+    font-size: .68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.notion-connection-divider::before,
+.notion-connection-divider::after {
+    flex: 1;
+    height: 1px;
+    background: var(--sentinel-border, rgba(214, 211, 209, .14));
+    content: "";
+}
+
 @media (max-width: 1180px) {
     .sentinel-layout { grid-template-columns: minmax(230px, 255px) minmax(0, 1fr); }
     .sentinel-document-canvas { padding-right: 2.5rem; padding-left: 2.5rem; }

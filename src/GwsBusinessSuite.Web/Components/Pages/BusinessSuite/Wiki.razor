@@ -642,11 +642,93 @@
                 </div>
                 <div class="modal-body">
                     <p class="text-secondary">
-                        Authorize a Notion workspace with OAuth or use an advanced token. Import is the safe default;
-                        optional page pushes require both two-way mode and an explicit write acknowledgement.
+                        Connect with the access token you already have, or use Notion OAuth when this server is
+                        configured for it. Sentinel never needs your Notion username or password.
                     </p>
 
-                    <div class="border rounded-3 p-3">
+                    <section class="notion-connection-choice is-primary" aria-labelledby="notion-token-heading">
+                        <div class="d-flex align-items-start gap-3">
+                            <span class="notion-connection-choice-icon" aria-hidden="true">
+                                <i class="bi bi-key-fill"></i>
+                            </span>
+                            <div class="flex-grow-1 min-w-0">
+                                <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+                                    <div>
+                                        <h3 id="notion-token-heading" class="h6 mb-1">Use an access token</h3>
+                                        <p class="small text-secondary mb-0">Fastest setup for a personal workspace.</p>
+                                    </div>
+                                    @if (NotionSettings.HasStoredIntegrationToken && !NotionSettings.IsOAuthConnected)
+                                    {
+                                        <span class="badge text-bg-success">
+                                            <i class="bi bi-check2-circle me-1"></i>Token connected
+                                        </span>
+                                    }
+                                </div>
+
+                                <label class="form-label fw-semibold small mt-3" for="notionAccessToken">
+                                    Notion personal access or internal integration token
+                                </label>
+                                <div class="input-group">
+                                    <input id="notionAccessToken" class="form-control"
+                                           type="@(ShowNotionToken ? "text" : "password")"
+                                           @bind="NotionSettings.IntegrationToken" @bind:event="oninput"
+                                           autocomplete="new-password"
+                                           placeholder="@(NotionSettings.HasStoredIntegrationToken
+                                               ? "Token saved securely — enter a value only to replace it"
+                                               : "Paste your ntn_… or secret_… token")" />
+                                    <button type="button" class="btn btn-outline-secondary"
+                                            aria-label="@(ShowNotionToken ? "Hide Notion token" : "Show Notion token")"
+                                            title="@(ShowNotionToken ? "Hide token" : "Show token")"
+                                            @onclick="() => ShowNotionToken = !ShowNotionToken">
+                                        <i class="bi @(ShowNotionToken ? "bi-eye-slash-fill" : "bi-eye-fill")"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-primary"
+                                            @onclick="SyncNotionNowAsync"
+                                            disabled="@(IsNotionOperationBusy
+                                                || HasInvalidNotionScope
+                                                || (!NotionSettings.HasStoredIntegrationToken
+                                                    && string.IsNullOrWhiteSpace(NotionSettings.IntegrationToken)))">
+                                        @if (IsNotionBusy)
+                                        {
+                                            <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                                        }
+                                        else
+                                        {
+                                            <i class="bi bi-plug-fill me-1"></i>
+                                        }
+                                        Connect &amp; sync
+                                    </button>
+                                </div>
+
+                                @if (NotionSettings.IntegrationTokenUnreadable)
+                                {
+                                    <div class="alert alert-warning py-2 mt-2 mb-0">
+                                        The stored token can no longer be decrypted. Paste it again to reconnect.
+                                    </div>
+                                }
+                                else if (NotionSettings.HasStoredIntegrationToken)
+                                {
+                                    <div class="form-text">
+                                        The token is encrypted on the server and is never returned to this browser.
+                                    </div>
+                                }
+
+                                <ol class="notion-connection-steps">
+                                    <li>Paste the token and select <strong>Connect &amp; sync</strong>.</li>
+                                    <li>
+                                        For an <strong>internal integration token</strong>, add that connection to each
+                                        top-level page or database in Notion. A personal access token already acts as you.
+                                    </li>
+                                    <li>Select <strong>Sync now</strong> to import everything the token can access.</li>
+                                </ol>
+                            </div>
+                        </div>
+                    </section>
+
+                    <div class="notion-connection-divider"><span>or</span></div>
+
+                    <section class="notion-connection-choice" aria-labelledby="notion-oauth-heading">
+                        <h3 id="notion-oauth-heading" class="h6 mb-2">Sign in with Notion OAuth</h3>
                         @if (NotionSettings.IsOAuthConnected)
                         {
                             <div class="d-flex flex-wrap align-items-center gap-3">
@@ -696,50 +778,20 @@
                         }
                         else
                         {
-                            <div class="alert alert-warning mb-0">
-                                Notion OAuth needs server configuration. Set
+                            <div class="small text-secondary">
+                                OAuth is optional and is not configured on this server. The access-token method above
+                                works without it. To enable OAuth later, set
                                 <code>NotionOAuth__ClientId</code>, <code>NotionOAuth__ClientSecret</code>,
                                 and <code>NotionOAuth__RedirectUri</code>, then restart the app.
                             </div>
                         }
-                    </div>
-
-                    <details class="mt-3">
-                        <summary class="small fw-semibold">Advanced: use an internal connection token or personal access token</summary>
-                        <div class="mt-2">
-                            <label class="form-label fw-semibold small">Integration token</label>
-                            <div class="input-group">
-                                <input class="form-control" type="@(ShowNotionToken ? "text" : "password")"
-                                       @bind="NotionSettings.IntegrationToken" autocomplete="new-password"
-                                       placeholder="@(NotionSettings.HasStoredIntegrationToken
-                                           ? "Token saved securely — enter a replacement only to rotate it"
-                                           : "Paste a Notion integration token")" />
-                                <button type="button" class="btn btn-outline-secondary" title="@(ShowNotionToken ? "Hide token" : "Show token")"
-                                        @onclick="() => ShowNotionToken = !ShowNotionToken">
-                                    <i class="bi @(ShowNotionToken ? "bi-eye-slash-fill" : "bi-eye-fill")"></i>
-                                </button>
-                            </div>
-                        </div>
-                    </details>
-                    @if (NotionSettings.IntegrationTokenUnreadable)
-                    {
-                        <div class="alert alert-warning py-2 mt-2 mb-0">
-                            The stored token can no longer be decrypted. Enter it again to reconnect.
-                        </div>
-                    }
-                    else if (NotionSettings.HasStoredIntegrationToken)
-                    {
-                        <div class="form-text">
-                            A token is stored encrypted on the server and is never returned to this browser.
-                        </div>
-                    }
+                    </section>
 
                     <div class="alert alert-info py-2 mt-3 mb-0">
-                        <strong>Notion access is page-based.</strong>
-                        In Notion, open each top-level page or database you want Sentinel to import, choose
-                        <strong>Connections</strong>, and add this integration. Sharing a parent page also exposes
-                        its accessible child content. In the Notion integration configuration, enable the
-                        <strong>Read content</strong> capability. Choose everything shared or browse to select specific roots.
+                        <strong>Using an internal integration?</strong>
+                        In Notion, open each top-level page or database, choose <strong>••• → Add connections</strong>,
+                        and select your integration. Sharing a parent grants its accessible children too. Personal
+                        access tokens do not need this page-sharing step.
                     </div>
 
                     <div class="form-check form-switch mt-3">
