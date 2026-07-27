@@ -49,9 +49,11 @@ is not guaranteed to exhaustively enumerate every accessible document. Sentinel 
    across page reopen and Blazor reconnect for the browser session. Nested blocks now behave
    as hierarchy-safe branches: split/insert, indent/outdent, duplicate, peer movement,
    drag/reorder, delete, and undo preserve every contiguous descendant while retaining the
-   migration-safe flat `IndentLevel` representation. Remaining slices cover richer
-   slash/mention/link menus, column movement, selection-aware comments, and durable
-   cross-session drafts.
+   migration-safe flat `IndentLevel` representation. Slash commands, page links, and
+   person/date/database-row mentions now share a grouped, descriptive, accessible listbox
+   with active-option semantics, Arrow/Home/End navigation, Enter/Tab selection, Escape
+   dismissal, responsive positioning, and stale async-result protection. Remaining slices
+   cover column movement, selection-aware comments, and durable cross-session drafts.
 4. **Database parity.** Unify inline/full-page databases, property menus, filters, sorts,
    groups, layouts, templates, row peeks, calculations, and relation/rollup editing.
 5. **Collaboration and sharing.** Presence, cursors, granular comments, notifications,

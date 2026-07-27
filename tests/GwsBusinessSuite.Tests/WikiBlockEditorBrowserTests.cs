@@ -295,6 +295,101 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
         pageErrors.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task SuggestionMenus_ShouldSupportKeyboardSelectionAndIgnoreStaleResults()
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "text/html",
+            Body = """<div id="editor" class="wiki-block-editor"></div>"""
+        }));
+        await page.GotoAsync("http://localhost/editor");
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+
+        var pageId = Guid.NewGuid();
+        var stalePageId = Guid.NewGuid();
+        await page.EvaluateAsync(
+            """
+            ids => window.sentinelBlockEditor.initialize(
+                document.querySelector('#editor'),
+                {
+                    invokeMethodAsync: (method, query) => {
+                        if (method === 'SearchWikiLinkSuggestions') {
+                            if (query === 'a') {
+                                return new Promise(resolve => setTimeout(
+                                    () => resolve([{ id: ids.stale, title: 'Stale page' }]), 100));
+                            }
+                            if (query === 'ab') {
+                                return Promise.resolve([{ id: ids.page, title: 'Current page' }]);
+                            }
+                            return Promise.resolve([]);
+                        }
+                        if (method === 'SearchMentionSuggestions') {
+                            return Promise.resolve([
+                                { kind: 'user', value: 'Grant', label: '@Grant', description: 'Person' },
+                                { kind: 'row', value: 'db:row', label: 'Grant project', description: 'Row in Projects' }
+                            ]);
+                        }
+                        return Promise.resolve([]);
+                    }
+                },
+                '[]')
+            """,
+            new { page = pageId, stale = stalePageId });
+
+        var content = page.Locator(".wiki-block-content");
+        await content.FillAsync("/heading");
+        var slashMenu = page.GetByRole(AriaRole.Listbox, new() { Name = "Insert a block" });
+        await Expect(slashMenu).ToBeVisibleAsync();
+        await Expect(slashMenu.GetByRole(AriaRole.Option).Nth(0)).ToHaveAttributeAsync("aria-selected", "true");
+        await content.PressAsync("ArrowDown");
+        await Expect(slashMenu.GetByRole(AriaRole.Option).Nth(1)).ToHaveAttributeAsync("aria-selected", "true");
+        await content.PressAsync("Enter");
+        await Expect(page.Locator(".wiki-block")).ToHaveAttributeAsync("data-block-type", WikiBlockTypes.Heading2);
+
+        content = page.Locator(".wiki-block-content");
+        await content.FillAsync("[[a");
+        await content.PressAsync("b");
+        var linkMenu = page.GetByRole(AriaRole.Listbox, new() { Name = "Link to a Sentinel page" });
+        await Expect(linkMenu.GetByRole(AriaRole.Option)).ToHaveCountAsync(1);
+        await Expect(linkMenu.GetByRole(AriaRole.Option)).ToContainTextAsync("Current page");
+        await page.WaitForTimeoutAsync(150);
+        await Expect(linkMenu.GetByRole(AriaRole.Option)).ToContainTextAsync("Current page");
+        await content.PressAsync("Enter");
+        var linked = (await EditorBlocksAsync(page)).Single();
+        linked.RichText.Should().ContainSingle(span =>
+            span.Text == "Current page" && span.Link == $"wikilink:{pageId}");
+
+        content = page.Locator(".wiki-block-content");
+        await content.FillAsync("@gr");
+        var mentionMenu = page.GetByRole(
+            AriaRole.Listbox,
+            new() { Name = "Mention a person, date, or database row" });
+        await Expect(mentionMenu.GetByRole(AriaRole.Option)).ToHaveCountAsync(2);
+        await Expect(mentionMenu).ToContainTextAsync("People");
+        await Expect(mentionMenu).ToContainTextAsync("Database rows");
+        await content.PressAsync("Tab");
+        var mentioned = (await EditorBlocksAsync(page)).Single();
+        mentioned.RichText.Should().ContainSingle(span =>
+            span.Text == "@Grant" && span.Link == "usermention:Grant");
+        await Expect(content).Not.ToHaveAttributeAsync("aria-expanded", "true");
+
+        await content.FillAsync("/");
+        await Expect(page.GetByRole(AriaRole.Listbox, new() { Name = "Insert a block" })).ToBeVisibleAsync();
+        await content.PressAsync("Escape");
+        await Expect(page.GetByRole(AriaRole.Listbox, new() { Name = "Insert a block" })).ToHaveCountAsync(0);
+        await Expect(content).ToHaveTextAsync("/");
+    }
+
     private static WikiBlock TextBlock(string text, int indentLevel) =>
         new(
             Guid.NewGuid(),

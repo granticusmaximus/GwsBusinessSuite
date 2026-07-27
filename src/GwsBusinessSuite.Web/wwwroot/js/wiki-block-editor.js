@@ -11,31 +11,32 @@
 const states = new WeakMap();
 const HISTORY_STORAGE_PREFIX = 'sentinel:block-history:v1:';
 const MAX_PERSISTED_HISTORY_CHARS = 1_500_000;
+let suggestionMenuSequence = 0;
 
 const BLOCK_TYPES = [
-    { type: 'paragraph', label: 'Text', icon: '¶' },
-    { type: 'heading_1', label: 'Heading 1', icon: 'H1' },
-    { type: 'heading_2', label: 'Heading 2', icon: 'H2' },
-    { type: 'heading_3', label: 'Heading 3', icon: 'H3' },
-    { type: 'bulleted_list_item', label: 'Bulleted list', icon: '•' },
-    { type: 'numbered_list_item', label: 'Numbered list', icon: '1.' },
-    { type: 'to_do', label: 'To-do', icon: '☑' },
-    { type: 'toggle', label: 'Toggle', icon: '▸' },
-    { type: 'quote', label: 'Quote', icon: '❝' },
-    { type: 'callout', label: 'Callout', icon: '💡' },
-    { type: 'code', label: 'Code', icon: '</>' },
-    { type: 'divider', label: 'Divider', icon: '—' },
-    { type: 'image', label: 'Image', icon: '🖼' },
-    { type: 'embed', label: 'Embed link', icon: '🔗' },
-    { type: 'linked_database', label: 'Linked database', icon: '▦' },
-    { type: 'inline_database', label: 'Inline database', icon: '▤' },
-    { type: 'table', label: 'Table', icon: '▦' },
-    { type: 'equation', label: 'Equation', icon: '∑' },
-    { type: 'breadcrumb', label: 'Breadcrumb', icon: '›' },
-    { type: 'table_of_contents', label: 'Table of contents', icon: '☷' },
-    { type: 'button', label: 'Button', icon: '▣' },
-    { type: 'synced_block', label: 'Synced block', icon: '↻' },
-    { type: 'columns', label: 'Columns', icon: '▥' }
+    { type: 'paragraph', label: 'Text', icon: '¶', group: 'Basic blocks', description: 'Start writing with plain text.', keywords: 'paragraph' },
+    { type: 'heading_1', label: 'Heading 1', icon: 'H1', group: 'Basic blocks', description: 'Large section heading.', keywords: 'title' },
+    { type: 'heading_2', label: 'Heading 2', icon: 'H2', group: 'Basic blocks', description: 'Medium section heading.', keywords: 'subtitle' },
+    { type: 'heading_3', label: 'Heading 3', icon: 'H3', group: 'Basic blocks', description: 'Small section heading.', keywords: 'subtitle' },
+    { type: 'bulleted_list_item', label: 'Bulleted list', icon: '•', group: 'Lists', description: 'Create a simple bulleted list.', keywords: 'unordered' },
+    { type: 'numbered_list_item', label: 'Numbered list', icon: '1.', group: 'Lists', description: 'Create an ordered list.', keywords: 'ordered' },
+    { type: 'to_do', label: 'To-do', icon: '☑', group: 'Lists', description: 'Track a task with a checkbox.', keywords: 'task checkbox' },
+    { type: 'toggle', label: 'Toggle', icon: '▸', group: 'Lists', description: 'Hide content inside a collapsible branch.', keywords: 'details collapse' },
+    { type: 'quote', label: 'Quote', icon: '❝', group: 'Advanced blocks', description: 'Capture a quotation.', keywords: 'blockquote' },
+    { type: 'callout', label: 'Callout', icon: '💡', group: 'Advanced blocks', description: 'Emphasize an important note.', keywords: 'notice aside' },
+    { type: 'code', label: 'Code', icon: '</>', group: 'Advanced blocks', description: 'Write a formatted code snippet.', keywords: 'preformatted' },
+    { type: 'divider', label: 'Divider', icon: '—', group: 'Advanced blocks', description: 'Visually separate sections.', keywords: 'rule separator' },
+    { type: 'equation', label: 'Equation', icon: '∑', group: 'Advanced blocks', description: 'Display a mathematical expression.', keywords: 'math formula' },
+    { type: 'button', label: 'Button', icon: '▣', group: 'Advanced blocks', description: 'Add a prominent action.', keywords: 'action link' },
+    { type: 'synced_block', label: 'Synced block', icon: '↻', group: 'Advanced blocks', description: 'Reuse synchronized content.', keywords: 'reusable' },
+    { type: 'columns', label: 'Columns', icon: '▥', group: 'Advanced blocks', description: 'Lay content out side by side.', keywords: 'layout' },
+    { type: 'image', label: 'Image', icon: '🖼', group: 'Media', description: 'Upload or link to an image.', keywords: 'photo picture' },
+    { type: 'embed', label: 'Embed link', icon: '🔗', group: 'Media', description: 'Embed content from another site.', keywords: 'video url' },
+    { type: 'linked_database', label: 'Linked database', icon: '▦', group: 'Data', description: 'Show an existing database view.', keywords: 'data view' },
+    { type: 'inline_database', label: 'Inline database', icon: '▤', group: 'Data', description: 'Create a database inside this page.', keywords: 'data collection' },
+    { type: 'table', label: 'Table', icon: '▦', group: 'Data', description: 'Add a simple table.', keywords: 'grid rows columns' },
+    { type: 'breadcrumb', label: 'Breadcrumb', icon: '›', group: 'Page tools', description: 'Show this page’s location.', keywords: 'navigation path' },
+    { type: 'table_of_contents', label: 'Table of contents', icon: '☷', group: 'Page tools', description: 'Link to headings on this page.', keywords: 'outline headings' }
 ];
 const TEXTLESS_TYPES = new Set(['divider', 'image', 'embed', 'linked_database', 'inline_database', 'breadcrumb', 'table_of_contents']);
 const RICH_TEXT_COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
@@ -50,6 +51,9 @@ export function initialize(container, dotNetRef, initialBlocksJson, historyKey =
         slashMenu: null,
         wikiLinkMenu: null,
         mentionMenu: null,
+        activeSuggestionMenu: null,
+        wikiLinkRequestId: 0,
+        mentionRequestId: 0,
         inlineToolbar: null,
         blockMenu: null,
         discussionCounts: new Map(),
@@ -73,6 +77,7 @@ export function initialize(container, dotNetRef, initialBlocksJson, historyKey =
     container.addEventListener('mouseup', state.selectionHandler = () => showInlineToolbar(state));
     container.addEventListener('keyup', state.selectionHandler);
     document.addEventListener('mousedown', state.outsideClickHandler = event => closeFloatingMenus(state, event));
+    window.addEventListener('resize', state.resizeHandler = () => repositionSuggestionMenu(state));
     // Block-granular remote-cursor broadcast (see SentinelCursorTracker's doc comment for why
     // this is block-level, not a character offset). focusin bubbles from the contenteditable
     // the user actually clicked/tabbed into, so this fires on every real cursor move without
@@ -186,6 +191,7 @@ export function dispose(container) {
         container.removeEventListener('keyup', state.selectionHandler);
     }
     if (state.outsideClickHandler) document.removeEventListener('mousedown', state.outsideClickHandler);
+    if (state.resizeHandler) window.removeEventListener('resize', state.resizeHandler);
     states.delete(container);
 }
 
@@ -959,6 +965,10 @@ function placeholderFor(type) {
 function onContentKeyDown(state, content, event) {
     const blockEl = content.closest('.wiki-block');
 
+    if (handleSuggestionMenuKey(state, event)) {
+        return;
+    }
+
     if (event.key === 'Escape') {
         closeFloatingMenus(state);
         return;
@@ -994,7 +1004,6 @@ function onContentKeyDown(state, content, event) {
     }
 
     if (event.key === 'Enter' && !event.shiftKey) {
-        if (state.slashMenu) return; // Enter/selection is handled by the menu itself.
         event.preventDefault();
         splitBlock(state, blockEl, content);
         return;
@@ -1177,28 +1186,22 @@ function checkSlashTrigger(state, content) {
     if (!match) return;
 
     const query = match[1].toLowerCase();
-    const matches = BLOCK_TYPES.filter(item => item.label.toLowerCase().includes(query) || item.type.includes(query));
+    const matches = BLOCK_TYPES.filter(item => `${item.label} ${item.type} ${item.keywords || ''}`
+        .toLowerCase()
+        .includes(query));
     if (matches.length === 0) return;
 
-    const menu = document.createElement('div');
-    menu.className = 'wiki-slash-menu list-group shadow-sm';
-    positionMenu(menu, content);
-
-    for (const item of matches) {
-        const option = document.createElement('button');
-        option.type = 'button';
-        option.className = 'list-group-item list-group-item-action py-1 px-2 small d-flex align-items-center gap-2';
-        option.innerHTML = `<span class="wiki-slash-icon">${item.icon}</span><span>${item.label}</span>`;
-        option.addEventListener('mousedown', event => {
-            event.preventDefault();
-            convertBlockType(state, content.closest('.wiki-block'), item.type);
-            closeSlashMenu(state);
-        });
-        menu.appendChild(option);
-    }
-
-    document.body.appendChild(menu);
-    state.slashMenu = menu;
+    openSuggestionMenu(state, {
+        kind: 'slash',
+        anchor: content,
+        ariaLabel: 'Insert a block',
+        items: matches,
+        group: item => item.group,
+        icon: item => item.icon,
+        label: item => item.label,
+        description: item => item.description,
+        commit: item => convertBlockType(state, content.closest('.wiki-block'), item.type)
+    });
 }
 
 function convertBlockType(state, blockEl, newType) {
@@ -1215,13 +1218,14 @@ function convertBlockType(state, blockEl, newType) {
 }
 
 function closeSlashMenu(state) {
-    if (state.slashMenu) { state.slashMenu.remove(); state.slashMenu = null; }
+    closeSuggestionMenu(state, 'slash');
 }
 
 // ---- Wiki-link ([[Page]]) autocomplete, same trigger pattern -------------
 
 function checkWikiLinkTrigger(state, content) {
     const range = getCaretRange(content);
+    const requestId = ++state.wikiLinkRequestId;
     closeWikiLinkMenu(state);
     if (!range) return;
 
@@ -1233,28 +1237,20 @@ function checkWikiLinkTrigger(state, content) {
     // SearchWikiLinkSuggestions returns { id, title } pairs (not just titles) so the chosen
     // page's id is already in hand here - no second round-trip needed to resolve an href.
     state.dotNetRef.invokeMethodAsync('SearchWikiLinkSuggestions', query).then(suggestions => {
+        if (requestId !== state.wikiLinkRequestId) return;
         closeWikiLinkMenu(state);
         if (!suggestions || suggestions.length === 0) return;
 
-        const menu = document.createElement('div');
-        menu.className = 'wiki-slash-menu list-group shadow-sm';
-        positionMenu(menu, content);
-
-        for (const suggestion of suggestions) {
-            const option = document.createElement('button');
-            option.type = 'button';
-            option.className = 'list-group-item list-group-item-action py-1 px-2 small';
-            option.textContent = suggestion.title;
-            option.addEventListener('mousedown', event => {
-                event.preventDefault();
-                insertWikiLink(state, content, query, suggestion.id, suggestion.title);
-                closeWikiLinkMenu(state);
-            });
-            menu.appendChild(option);
-        }
-
-        document.body.appendChild(menu);
-        state.wikiLinkMenu = menu;
+        openSuggestionMenu(state, {
+            kind: 'wikiLink',
+            anchor: content,
+            ariaLabel: 'Link to a Sentinel page',
+            items: suggestions,
+            icon: () => '📄',
+            label: suggestion => suggestion.title,
+            description: () => 'Sentinel page',
+            commit: suggestion => insertWikiLink(state, content, query, suggestion.id, suggestion.title)
+        });
     }).catch(() => { /* circuit may be gone */ });
 }
 
@@ -1279,13 +1275,14 @@ function insertWikiLink(state, content, query, pageId, title) {
 }
 
 function closeWikiLinkMenu(state) {
-    if (state.wikiLinkMenu) { state.wikiLinkMenu.remove(); state.wikiLinkMenu = null; }
+    closeSuggestionMenu(state, 'wikiLink');
 }
 
 // ---- Structured @person and @date mentions --------------------------------
 
 function checkMentionTrigger(state, content) {
     const range = getCaretRange(content);
+    const requestId = ++state.mentionRequestId;
     closeMentionMenu(state);
     if (!range) return;
 
@@ -1295,28 +1292,21 @@ function checkMentionTrigger(state, content) {
 
     const query = match[1];
     state.dotNetRef.invokeMethodAsync('SearchMentionSuggestions', query).then(suggestions => {
+        if (requestId !== state.mentionRequestId) return;
         closeMentionMenu(state);
         if (!suggestions || suggestions.length === 0) return;
 
-        const menu = document.createElement('div');
-        menu.className = 'wiki-slash-menu list-group shadow-sm';
-        positionMenu(menu, content);
-        for (const suggestion of suggestions) {
-            const option = document.createElement('button');
-            option.type = 'button';
-            option.className = 'list-group-item list-group-item-action py-1 px-2 small';
-            option.innerHTML = `<span class="fw-semibold">${escapeHtml(suggestion.label)}</span>`
-                + `<span class="text-secondary ms-2">${escapeHtml(suggestion.description)}</span>`;
-            option.addEventListener('mousedown', event => {
-                event.preventDefault();
-                insertMention(state, content, query, suggestion);
-                closeMentionMenu(state);
-            });
-            menu.appendChild(option);
-        }
-
-        document.body.appendChild(menu);
-        state.mentionMenu = menu;
+        openSuggestionMenu(state, {
+            kind: 'mention',
+            anchor: content,
+            ariaLabel: 'Mention a person, date, or database row',
+            items: suggestions,
+            group: suggestion => mentionGroup(suggestion.kind),
+            icon: suggestion => mentionIcon(suggestion.kind),
+            label: suggestion => suggestion.label,
+            description: suggestion => suggestion.description,
+            commit: suggestion => insertMention(state, content, query, suggestion)
+        });
     }).catch(() => { /* circuit may be gone */ });
 }
 
@@ -1342,7 +1332,186 @@ function insertMention(state, content, query, suggestion) {
 }
 
 function closeMentionMenu(state) {
-    if (state.mentionMenu) { state.mentionMenu.remove(); state.mentionMenu = null; }
+    closeSuggestionMenu(state, 'mention');
+}
+
+function mentionGroup(kind) {
+    if (kind === 'user') return 'People';
+    if (kind === 'date') return 'Dates';
+    if (kind === 'row') return 'Database rows';
+    return 'Suggestions';
+}
+
+function mentionIcon(kind) {
+    if (kind === 'user') return '@';
+    if (kind === 'date') return '◷';
+    if (kind === 'row') return '▦';
+    return '•';
+}
+
+function suggestionMenuProperty(kind) {
+    if (kind === 'wikiLink') return 'wikiLinkMenu';
+    if (kind === 'mention') return 'mentionMenu';
+    return 'slashMenu';
+}
+
+function openSuggestionMenu(state, configuration) {
+    closeSuggestionMenu(state, 'slash');
+    closeSuggestionMenu(state, 'wikiLink');
+    closeSuggestionMenu(state, 'mention');
+
+    const menu = document.createElement('div');
+    menu.id = `wiki-editor-menu-${++suggestionMenuSequence}`;
+    menu.className = 'wiki-slash-menu wiki-editor-suggestion-menu shadow-sm';
+    menu.setAttribute('role', 'listbox');
+    menu.setAttribute('aria-label', configuration.ariaLabel);
+    positionMenu(menu, configuration.anchor);
+
+    const hint = document.createElement('div');
+    hint.className = 'wiki-editor-menu-hint';
+    hint.textContent = `${configuration.ariaLabel} · ↑↓ navigate · Enter select`;
+    menu.appendChild(hint);
+
+    const options = [];
+    let previousGroup = null;
+    configuration.items.forEach((item, index) => {
+        const group = configuration.group ? configuration.group(item) : null;
+        if (group && group !== previousGroup) {
+            const heading = document.createElement('div');
+            heading.className = 'wiki-editor-menu-group';
+            heading.textContent = group;
+            heading.setAttribute('role', 'presentation');
+            menu.appendChild(heading);
+            previousGroup = group;
+        }
+
+        const option = document.createElement('button');
+        option.type = 'button';
+        option.id = `${menu.id}-option-${index}`;
+        option.className = 'wiki-editor-menu-item';
+        option.setAttribute('role', 'option');
+        option.setAttribute('aria-selected', 'false');
+
+        const icon = document.createElement('span');
+        icon.className = 'wiki-editor-menu-icon';
+        icon.textContent = configuration.icon ? configuration.icon(item) : '•';
+        icon.setAttribute('aria-hidden', 'true');
+
+        const copy = document.createElement('span');
+        copy.className = 'wiki-editor-menu-copy';
+        const label = document.createElement('span');
+        label.className = 'wiki-editor-menu-label';
+        label.textContent = configuration.label(item);
+        const description = document.createElement('span');
+        description.className = 'wiki-editor-menu-description';
+        description.textContent = configuration.description ? configuration.description(item) : '';
+        copy.append(label, description);
+        option.append(icon, copy);
+
+        option.addEventListener('mouseenter', () => setActiveSuggestion(state, index));
+        option.addEventListener('mousedown', event => {
+            event.preventDefault();
+            commitSuggestion(state, index);
+        });
+        menu.appendChild(option);
+        options.push(option);
+    });
+
+    document.body.appendChild(menu);
+    state[suggestionMenuProperty(configuration.kind)] = menu;
+    state.activeSuggestionMenu = {
+        kind: configuration.kind,
+        menu,
+        anchor: configuration.anchor,
+        items: configuration.items,
+        options,
+        activeIndex: 0,
+        commit: configuration.commit
+    };
+    configuration.anchor.setAttribute('aria-autocomplete', 'list');
+    configuration.anchor.setAttribute('aria-controls', menu.id);
+    configuration.anchor.setAttribute('aria-expanded', 'true');
+    setActiveSuggestion(state, 0);
+}
+
+function setActiveSuggestion(state, index) {
+    const active = state.activeSuggestionMenu;
+    if (!active || active.options.length === 0) return;
+    const nextIndex = (index + active.options.length) % active.options.length;
+    active.activeIndex = nextIndex;
+    active.options.forEach((option, optionIndex) => {
+        const selected = optionIndex === nextIndex;
+        option.classList.toggle('is-active', selected);
+        option.setAttribute('aria-selected', selected ? 'true' : 'false');
+    });
+    const selected = active.options[nextIndex];
+    active.anchor.setAttribute('aria-activedescendant', selected.id);
+    selected.scrollIntoView({ block: 'nearest' });
+}
+
+function commitSuggestion(state, index) {
+    const active = state.activeSuggestionMenu;
+    if (!active || index < 0 || index >= active.items.length) return;
+    const item = active.items[index];
+    const commit = active.commit;
+    closeSuggestionMenu(state, active.kind);
+    commit(item);
+}
+
+function handleSuggestionMenuKey(state, event) {
+    const active = state.activeSuggestionMenu;
+    if (!active) return false;
+    if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setActiveSuggestion(state, active.activeIndex + 1);
+        return true;
+    }
+    if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setActiveSuggestion(state, active.activeIndex - 1);
+        return true;
+    }
+    if (event.key === 'Home') {
+        event.preventDefault();
+        setActiveSuggestion(state, 0);
+        return true;
+    }
+    if (event.key === 'End') {
+        event.preventDefault();
+        setActiveSuggestion(state, active.options.length - 1);
+        return true;
+    }
+    if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault();
+        commitSuggestion(state, active.activeIndex);
+        return true;
+    }
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        closeSuggestionMenu(state, active.kind);
+        return true;
+    }
+    return false;
+}
+
+function closeSuggestionMenu(state, kind) {
+    const property = suggestionMenuProperty(kind);
+    const menu = state[property];
+    if (menu) menu.remove();
+    state[property] = null;
+
+    const active = state.activeSuggestionMenu;
+    if (!active || active.kind !== kind) return;
+    active.anchor.removeAttribute('aria-autocomplete');
+    active.anchor.removeAttribute('aria-controls');
+    active.anchor.removeAttribute('aria-expanded');
+    active.anchor.removeAttribute('aria-activedescendant');
+    state.activeSuggestionMenu = null;
+}
+
+function repositionSuggestionMenu(state) {
+    const active = state.activeSuggestionMenu;
+    if (active) positionMenu(active.menu, active.anchor);
 }
 
 function closeFloatingMenus(state, event) {
@@ -1358,8 +1527,10 @@ function closeFloatingMenus(state, event) {
 
 function positionMenu(menu, anchorEl) {
     const rect = anchorEl.getBoundingClientRect();
+    const menuWidth = Math.min(352, Math.max(200, window.innerWidth - 16));
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - menuWidth - 8));
     menu.style.position = 'absolute';
-    menu.style.left = `${window.scrollX + rect.left}px`;
+    menu.style.left = `${window.scrollX + left}px`;
     menu.style.top = `${window.scrollY + rect.bottom}px`;
     menu.style.zIndex = '2000';
 }
