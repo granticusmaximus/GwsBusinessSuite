@@ -197,6 +197,9 @@ public sealed class SentinelDiscussion : AuditableEntity
 {
     public Guid WikiPageId { get; set; }
     public Guid? BlockId { get; set; }
+    public string? AnchorText { get; set; }
+    public int? AnchorStart { get; set; }
+    public int? AnchorEnd { get; set; }
     public DateTimeOffset? ResolvedAt { get; set; }
     public string? ResolvedBy { get; set; }
     public WikiPage? WikiPage { get; set; }
@@ -696,6 +699,10 @@ public sealed class NotionConnectorSettings : AuditableEntity
     public int LastSyncImportedCount { get; set; }
     public int LastSyncUpdatedCount { get; set; }
     public int LastSyncArchivedCount { get; set; }
+    public int LastSyncDiscoveredCount { get; set; }
+    public int LastSyncSkippedCount { get; set; }
+    public int LastSyncEmptyContentCount { get; set; }
+    public int LastSyncContentBlockCount { get; set; }
 }
 
 // WordPress-style "Settings" (General/Reading/Writing/Media/AI) — a singleton row for

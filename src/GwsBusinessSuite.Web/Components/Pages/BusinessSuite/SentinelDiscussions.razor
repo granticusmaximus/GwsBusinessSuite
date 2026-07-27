@@ -66,7 +66,8 @@
         <textarea class="form-control" rows="2" @bind="NewDiscussionBody"
                   placeholder="Write a comment. Use @@username to notify someone."></textarea>
         <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
-            <select class="form-select form-select-sm sentinel-discussion-anchor" @bind="NewAnchorSelection">
+            <select class="form-select form-select-sm sentinel-discussion-anchor"
+                    @bind="NewAnchorSelection" @bind:after="ClearSelectionAnchor">
                 <option value="">Entire page</option>
                 @foreach (var block in BlockOptions)
                 {
@@ -78,6 +79,14 @@
                 Add discussion
             </button>
         </div>
+        @if (NewSelectionAnchor is not null)
+        {
+            <div class="sentinel-discussion-selection mt-2">
+                <i class="bi bi-quote"></i>
+                <span>“@NewSelectionAnchor.Text”</span>
+                <button type="button" class="btn btn-xs btn-link" @onclick="ClearSelectionAnchor">Remove selection</button>
+            </div>
+        }
     </div>
 
     @if (!string.IsNullOrWhiteSpace(ErrorMessage))
@@ -108,6 +117,10 @@
                             @if (discussion.IsResolved)
                             {
                                 <span class="badge text-bg-success ms-1">Resolved</span>
+                            }
+                            @if (discussion.Anchor is not null)
+                            {
+                                <blockquote class="sentinel-discussion-selection mt-2 mb-0">“@discussion.Anchor.Text”</blockquote>
                             }
                         </div>
                         <button type="button" class="btn btn-xs @(discussion.IsResolved ? "btn-outline-secondary" : "btn-outline-success")"
@@ -175,6 +188,7 @@
     private string CurrentUsername { get; set; } = "unknown";
     private string NewDiscussionBody { get; set; } = string.Empty;
     private string NewAnchorSelection { get; set; } = string.Empty;
+    private SentinelDiscussionAnchor? NewSelectionAnchor { get; set; }
     private bool IncludeResolved { get; set; }
     private bool ShowNotifications { get; set; }
     private bool IsBusy { get; set; }
@@ -278,17 +292,30 @@
         await JS.InvokeVoidAsync("gwsWikiLinks.scrollIntoView", _discussionRoot);
     }
 
+    public async Task FocusSelectionAsync(Guid blockId, string text, int start, int end)
+    {
+        FocusedBlockId = blockId;
+        NewAnchorSelection = blockId.ToString();
+        NewSelectionAnchor = new SentinelDiscussionAnchor(text, start, end);
+        await InvokeAsync(StateHasChanged);
+        await JS.InvokeVoidAsync("gwsWikiLinks.scrollIntoView", _discussionRoot);
+    }
+
     private Task NotifyDiscussionCountsAsync() =>
         OnDiscussionCountsChanged.InvokeAsync(SentinelDiscussionSummary.OpenBlockCounts(Discussions));
 
     private async Task CreateDiscussionAsync() => await RunAsync(async () =>
     {
         var blockId = Guid.TryParse(NewAnchorSelection, out var parsedBlockId) ? parsedBlockId : (Guid?)null;
-        await CollaborationService.CreateDiscussionAsync(WikiPageId, blockId, NewDiscussionBody, CurrentUsername);
+        await CollaborationService.CreateDiscussionAsync(
+            WikiPageId, blockId, NewDiscussionBody, CurrentUsername, NewSelectionAnchor);
         NewDiscussionBody = string.Empty;
         NewAnchorSelection = string.Empty;
+        NewSelectionAnchor = null;
         await ReloadAsync();
     });
+
+    private void ClearSelectionAnchor() => NewSelectionAnchor = null;
 
     private void BeginReply(Guid discussionId, Guid commentId, string author)
     {

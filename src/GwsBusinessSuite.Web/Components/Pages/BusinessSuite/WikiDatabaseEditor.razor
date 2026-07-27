@@ -361,6 +361,118 @@ else
                         </details>
                     </div>
                 </div>
+
+                <details class="sentinel-view-options mb-3">
+                    <summary class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-funnel me-1"></i>View options
+                        @if ((ActiveViewConfig?.Filters.Count ?? 0) + (ActiveViewConfig?.Sorts.Count ?? 0) > 0)
+                        {
+                            <span class="badge text-bg-primary ms-1">@((ActiveViewConfig?.Filters.Count ?? 0) + (ActiveViewConfig?.Sorts.Count ?? 0))</span>
+                        }
+                    </summary>
+                    <div class="border rounded-3 p-3 mt-2 bg-body-tertiary">
+                        <div class="row g-2 align-items-end">
+                            <div class="col-md-5">
+                                <label class="form-label small fw-semibold">View name</label>
+                                <input class="form-control form-control-sm" value="@ActiveView.Name"
+                                       @onchange="e => RenameActiveViewAsync(e.Value?.ToString() ?? ActiveView.Name)" disabled="@IsBusy" />
+                            </div>
+                            <div class="col-md-7 text-md-end">
+                                <button type="button" class="btn btn-sm btn-outline-danger"
+                                        @onclick="DeleteActiveViewAsync" disabled="@(IsBusy || Database.Views.Count <= 1)">
+                                    <i class="bi bi-trash me-1"></i>Delete view
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="fw-semibold small mt-3 mb-2">Filters</div>
+                        @foreach (var filter in ActiveViewConfig?.Filters ?? [])
+                        {
+                            <div class="d-flex align-items-center gap-2 mb-1 small">
+                                <span class="badge text-bg-light border">@PropertyName(filter.PropertyId)</span>
+                                <span>@FilterOperatorLabel(filter.Operator)</span>
+                                @if (!string.IsNullOrWhiteSpace(filter.Value))
+                                {
+                                    <strong>@FilterValueLabel(filter)</strong>
+                                }
+                                <button type="button" class="btn btn-xs btn-link text-danger ms-auto"
+                                        @onclick="() => RemoveFilterAsync(filter)" disabled="@IsBusy">Remove</button>
+                            </div>
+                        }
+                        <div class="row g-2 align-items-end">
+                            <div class="col-md-4">
+                                <select class="form-select form-select-sm" @bind="_filterPropertyId">
+                                    @foreach (var property in FilterableProperties)
+                                    {
+                                        <option value="@property.Id">@property.Name</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <select class="form-select form-select-sm" @bind="_filterOperator">
+                                    @foreach (var filterOperator in FilterOperators)
+                                    {
+                                        <option value="@filterOperator.Value">@filterOperator.Label</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                @if (SelectedFilterProperty?.Type == WikiDatabasePropertyTypes.Select)
+                                {
+                                    <select class="form-select form-select-sm" @bind="_filterValue">
+                                        @foreach (var option in WikiDatabasePropertyConfig.GetOptions(SelectedFilterProperty))
+                                        {
+                                            <option value="@option.Id">@option.Label</option>
+                                        }
+                                    </select>
+                                }
+                                else
+                                {
+                                    <input class="form-control form-control-sm"
+                                           type="@FilterValueInputType"
+                                           @bind="_filterValue"
+                                           placeholder="@FilterValuePlaceholder"
+                                           disabled="@FilterNeedsNoValue" />
+                                }
+                            </div>
+                            <div class="col-md-2">
+                                <button type="button" class="btn btn-sm btn-outline-primary w-100"
+                                        @onclick="AddFilterAsync" disabled="@(IsBusy || _filterPropertyId == Guid.Empty)">Add</button>
+                            </div>
+                        </div>
+
+                        <div class="fw-semibold small mt-3 mb-2">Sorts</div>
+                        @foreach (var sort in ActiveViewConfig?.Sorts ?? [])
+                        {
+                            <div class="d-flex align-items-center gap-2 mb-1 small">
+                                <span class="badge text-bg-light border">@PropertyName(sort.PropertyId)</span>
+                                <span>@(sort.Direction == "descending" ? "Descending" : "Ascending")</span>
+                                <button type="button" class="btn btn-xs btn-link text-danger ms-auto"
+                                        @onclick="() => RemoveSortAsync(sort)" disabled="@IsBusy">Remove</button>
+                            </div>
+                        }
+                        <div class="row g-2 align-items-end">
+                            <div class="col-md-5">
+                                <select class="form-select form-select-sm" @bind="_sortPropertyId">
+                                    @foreach (var property in Database.Properties.OrderBy(property => property.SortOrder))
+                                    {
+                                        <option value="@property.Id">@property.Name</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <select class="form-select form-select-sm" @bind="_sortDirection">
+                                    <option value="ascending">Ascending</option>
+                                    <option value="descending">Descending</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <button type="button" class="btn btn-sm btn-outline-primary w-100"
+                                        @onclick="AddSortAsync" disabled="@(IsBusy || _sortPropertyId == Guid.Empty)">Add sort</button>
+                            </div>
+                        </div>
+                    </div>
+                </details>
             }
 
             @{ var titleProperty = Database.Properties.First(p => p.Type == WikiDatabasePropertyTypes.Title); }
@@ -375,7 +487,7 @@ else
                 }
                 else
                 {
-                    var groups = WikiDatabaseViewLogic.GroupForBoard(Database.Rows.ToList(), groupByProperty);
+                    var groups = WikiDatabaseViewLogic.GroupForBoard(VisibleRows, groupByProperty);
                     <div class="wiki-db-board d-flex gap-3 overflow-auto pb-2">
                         @foreach (var group in groups)
                         {
@@ -476,7 +588,7 @@ else
             else if (ActiveView is { Type: WikiDatabaseViewTypes.Gallery })
             {
                 <div class="sentinel-db-gallery">
-                    @foreach (var row in WikiDatabaseViewLogic.ApplySort(Database.Rows.ToList(), Database.Properties.ToList(), ActiveViewConfig?.Sorts ?? []))
+                    @foreach (var row in VisibleRows)
                     {
                         <button type="button" class="sentinel-db-gallery-card text-start" @onclick="() => OpenRow(row)">
                             <div class="sentinel-db-gallery-cover"><i class="bi bi-file-earmark-text"></i></div>
@@ -501,7 +613,7 @@ else
             else if (ActiveView is { Type: WikiDatabaseViewTypes.List })
             {
                 <div class="list-group list-group-flush border rounded-3">
-                    @foreach (var row in WikiDatabaseViewLogic.ApplySort(Database.Rows.ToList(), Database.Properties.ToList(), ActiveViewConfig?.Sorts ?? []))
+                    @foreach (var row in VisibleRows)
                     {
                         <button type="button" class="list-group-item list-group-item-action d-flex align-items-center gap-3" @onclick="() => OpenRow(row)">
                             <i class="bi bi-file-earmark-text text-secondary"></i>
@@ -534,7 +646,7 @@ else
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var row in Database.Rows.OrderBy(r => r.SortOrder))
+                            @foreach (var row in VisibleRows)
                             {
                                 <tr>
                                     @foreach (var property in Database.Properties.OrderBy(p => p.SortOrder))
@@ -639,6 +751,35 @@ else
                                 </tr>
                             }
                         </tbody>
+                        <tfoot>
+                            <tr>
+                                @foreach (var property in Database.Properties.OrderBy(p => p.SortOrder))
+                                {
+                                    <td>
+                                        <select class="form-select form-select-sm sentinel-db-calculation"
+                                                value="@CalculationFor(property)"
+                                                @onchange="e => SetCalculationAsync(property, e.Value?.ToString())"
+                                                disabled="@IsBusy"
+                                                aria-label="@($"Calculate {property.Name}")">
+                                            <option value="">Calculate</option>
+                                            <option value="count">Count values</option>
+                                            @if (SupportsNumericCalculation(property))
+                                            {
+                                                <option value="sum">Sum</option>
+                                                <option value="average">Average</option>
+                                                <option value="minimum">Minimum</option>
+                                                <option value="maximum">Maximum</option>
+                                            }
+                                        </select>
+                                        @if (!string.IsNullOrWhiteSpace(CalculationFor(property)))
+                                        {
+                                            <div class="small fw-semibold mt-1">@CalculationText(property)</div>
+                                        }
+                                    </td>
+                                }
+                                <td></td>
+                            </tr>
+                        </tfoot>
                     </table>
                 </div>
                 <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddRowAsync" disabled="@IsBusy">
@@ -704,6 +845,11 @@ else
     private List<WikiDatabase> _databaseChoices = [];
     private readonly Dictionary<Guid, WikiDatabase> _relatedDatabases = [];
     private DateOnly _calendarMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private Guid _filterPropertyId;
+    private string _filterOperator = "contains";
+    private string _filterValue = string.Empty;
+    private Guid _sortPropertyId;
+    private string _sortDirection = "ascending";
 
     private WikiDatabaseView? ActiveView =>
         Database?.Views.FirstOrDefault(v => v.Id == _activeViewId) ?? Database?.Views.OrderBy(v => v.SortOrder).FirstOrDefault();
@@ -723,6 +869,46 @@ else
             ActiveViewConfig ?? WikiDatabaseViewConfig.Empty);
     private IReadOnlyList<WikiDatabaseProperty> RelationProperties =>
         Database?.Properties.Where(property => property.Type == WikiDatabasePropertyTypes.Relation).OrderBy(property => property.SortOrder).ToList() ?? [];
+    private IReadOnlyList<WikiDatabaseProperty> FilterableProperties =>
+        Database?.Properties.Where(property => property.Type is
+                WikiDatabasePropertyTypes.Title or WikiDatabasePropertyTypes.Text or WikiDatabasePropertyTypes.Url
+                or WikiDatabasePropertyTypes.Number or WikiDatabasePropertyTypes.Select
+                or WikiDatabasePropertyTypes.Checkbox or WikiDatabasePropertyTypes.Date
+                or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup)
+            .OrderBy(property => property.SortOrder).ToList() ?? [];
+    private WikiDatabaseProperty? SelectedFilterProperty =>
+        FilterableProperties.FirstOrDefault(property => property.Id == _filterPropertyId);
+    private IReadOnlyList<(string Value, string Label)> FilterOperators => SelectedFilterProperty?.Type switch
+    {
+        WikiDatabasePropertyTypes.Checkbox =>
+            [("isChecked", "Is checked"), ("isNotChecked", "Is not checked")],
+        WikiDatabasePropertyTypes.Number or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup =>
+            [("equals", "Equals"), ("greaterThan", "Greater than"), ("lessThan", "Less than")],
+        WikiDatabasePropertyTypes.Date =>
+            [("equals", "Is"), ("before", "Before"), ("after", "After")],
+        WikiDatabasePropertyTypes.Select =>
+            [("equals", "Is")],
+        _ => [("contains", "Contains"), ("equals", "Equals")]
+    };
+    private bool FilterNeedsNoValue => SelectedFilterProperty?.Type == WikiDatabasePropertyTypes.Checkbox;
+    private string FilterValueInputType => SelectedFilterProperty?.Type switch
+    {
+        WikiDatabasePropertyTypes.Number or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup => "number",
+        WikiDatabasePropertyTypes.Date => "date",
+        _ => "text"
+    };
+    private string FilterValuePlaceholder => FilterNeedsNoValue ? "No value needed" : "Value";
+    private IReadOnlyList<WikiDatabaseRow> VisibleRows
+    {
+        get
+        {
+            if (Database is null) return [];
+            var config = ActiveViewConfig ?? WikiDatabaseViewConfig.Empty;
+            var filtered = WikiDatabaseViewLogic.ApplyFilters(
+                Database.Rows.ToList(), Database.Properties.ToList(), config.Filters);
+            return WikiDatabaseViewLogic.ApplySort(filtered, Database.Properties.ToList(), config.Sorts);
+        }
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -751,6 +937,12 @@ else
                 }
                 await LoadRelatedDatabasesAsync();
                 _newRelatedDatabaseId ??= _databaseChoices.FirstOrDefault()?.Id;
+                _filterPropertyId = FilterableProperties.FirstOrDefault()?.Id ?? Guid.Empty;
+                _sortPropertyId = Database.Properties.OrderBy(property => property.SortOrder).FirstOrDefault()?.Id ?? Guid.Empty;
+                _filterOperator = FilterOperators.FirstOrDefault().Value ?? "contains";
+                _filterValue = SelectedFilterProperty?.Type == WikiDatabasePropertyTypes.Select
+                    ? WikiDatabasePropertyConfig.GetOptions(SelectedFilterProperty).FirstOrDefault()?.Id ?? string.Empty
+                    : string.Empty;
             }
         }
         catch (Exception ex)
@@ -1175,6 +1367,152 @@ else
             await OnChanged.InvokeAsync();
         });
     }
+
+    private async Task RenameActiveViewAsync(string name)
+    {
+        if (ActiveView is not { } activeView || string.IsNullOrWhiteSpace(name)) return;
+        await Work(async () =>
+        {
+            var savedView = await WikiDatabaseService.SaveViewAsync(
+                WikiDatabaseId,
+                activeView.Id,
+                name,
+                activeView.Type,
+                ActiveViewConfig ?? WikiDatabaseViewConfig.Empty,
+                await CurrentUserNameAsync());
+            activeView.Name = savedView.Name;
+            await OnChanged.InvokeAsync();
+        });
+    }
+
+    private async Task DeleteActiveViewAsync()
+    {
+        if (ActiveView is not { } activeView) return;
+        await Work(async () =>
+        {
+            await WikiDatabaseService.DeleteViewAsync(
+                WikiDatabaseId, activeView.Id, await CurrentUserNameAsync());
+            _activeViewId = null;
+            await ReloadAsync();
+            await OnChanged.InvokeAsync();
+        });
+    }
+
+    private async Task AddFilterAsync()
+    {
+        var property = SelectedFilterProperty;
+        if (property is null) return;
+        var supportedOperators = FilterOperators.Select(item => item.Value).ToHashSet(StringComparer.Ordinal);
+        var filterOperator = supportedOperators.Contains(_filterOperator)
+            ? _filterOperator
+            : FilterOperators[0].Value;
+        var filterValue = FilterNeedsNoValue ? string.Empty : _filterValue.Trim();
+        await UpdateActiveViewConfigAsync(config => config with
+        {
+            Filters = config.Filters.Concat(
+                [new WikiDatabaseFilter(property.Id.ToString(), filterOperator, filterValue)]).ToList()
+        });
+        _filterOperator = FilterOperators[0].Value;
+        _filterValue = property.Type == WikiDatabasePropertyTypes.Select
+            ? WikiDatabasePropertyConfig.GetOptions(property).FirstOrDefault()?.Id ?? string.Empty
+            : string.Empty;
+    }
+
+    private Task RemoveFilterAsync(WikiDatabaseFilter filter) =>
+        UpdateActiveViewConfigAsync(config => config with
+        {
+            Filters = config.Filters.Where(candidate => candidate != filter).ToList()
+        });
+
+    private async Task AddSortAsync()
+    {
+        if (_sortPropertyId == Guid.Empty) return;
+        await UpdateActiveViewConfigAsync(config => config with
+        {
+            Sorts = config.Sorts
+                .Where(sort => sort.PropertyId != _sortPropertyId.ToString())
+                .Append(new WikiDatabaseSort(_sortPropertyId.ToString(), _sortDirection))
+                .ToList()
+        });
+    }
+
+    private Task RemoveSortAsync(WikiDatabaseSort sort) =>
+        UpdateActiveViewConfigAsync(config => config with
+        {
+            Sorts = config.Sorts.Where(candidate => candidate != sort).ToList()
+        });
+
+    private Task SetCalculationAsync(WikiDatabaseProperty property, string? calculation) =>
+        UpdateActiveViewConfigAsync(config =>
+        {
+            var calculations = (config.Calculations ?? new Dictionary<string, string>())
+                .ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
+            if (string.IsNullOrWhiteSpace(calculation))
+            {
+                calculations.Remove(property.Id.ToString());
+            }
+            else
+            {
+                calculations[property.Id.ToString()] = calculation;
+            }
+            return config with { Calculations = calculations };
+        });
+
+    private string CalculationFor(WikiDatabaseProperty property) =>
+        (ActiveViewConfig?.Calculations ?? new Dictionary<string, string>())
+            .GetValueOrDefault(property.Id.ToString(), string.Empty);
+
+    private static bool SupportsNumericCalculation(WikiDatabaseProperty property) =>
+        property.Type is WikiDatabasePropertyTypes.Number or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup;
+
+    private string CalculationText(WikiDatabaseProperty property)
+    {
+        var calculation = CalculationFor(property);
+        var values = VisibleRows.Select(row => CalculationValue(property, row)).Where(value => value.HasValue)
+            .Select(value => value!.Value).ToList();
+        return calculation switch
+        {
+            "count" => $"{VisibleRows.Count(row => !string.IsNullOrWhiteSpace(WikiPropertyValues.GetDisplayText(property, WikiPropertyValues.ParseObject(row.PropertyValuesJson), row.CreatedAt)))} values",
+            "sum" => values.Sum().ToString("0.##"),
+            "average" => values.Count == 0 ? "—" : values.Average().ToString("0.##"),
+            "minimum" => values.Count == 0 ? "—" : values.Min().ToString("0.##"),
+            "maximum" => values.Count == 0 ? "—" : values.Max().ToString("0.##"),
+            _ => string.Empty
+        };
+    }
+
+    private static decimal? CalculationValue(WikiDatabaseProperty property, WikiDatabaseRow row)
+    {
+        var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+        if (property.Type == WikiDatabasePropertyTypes.Number)
+        {
+            return WikiPropertyValues.GetNumber(values, property.Id);
+        }
+        return WikiPropertyValues.GetComputedValue(values, property.Id) is decimal computed ? computed : null;
+    }
+
+    private string PropertyName(string propertyId) =>
+        Database?.Properties.FirstOrDefault(property => property.Id.ToString() == propertyId)?.Name ?? "Missing property";
+
+    private string FilterValueLabel(WikiDatabaseFilter filter)
+    {
+        var property = Database?.Properties.FirstOrDefault(candidate => candidate.Id.ToString() == filter.PropertyId);
+        if (property?.Type != WikiDatabasePropertyTypes.Select) return filter.Value;
+        return WikiDatabasePropertyConfig.GetOptions(property)
+            .FirstOrDefault(option => option.Id == filter.Value)?.Label ?? filter.Value;
+    }
+
+    private static string FilterOperatorLabel(string filterOperator) => filterOperator switch
+    {
+        "isChecked" => "is checked",
+        "isNotChecked" => "is not checked",
+        "greaterThan" => "is greater than",
+        "lessThan" => "is less than",
+        "before" => "is before",
+        "after" => "is after",
+        "contains" => "contains",
+        _ => "is"
+    };
 
     private async Task RowPageSavedAsync()
     {

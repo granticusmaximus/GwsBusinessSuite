@@ -845,11 +845,27 @@
                     @if (NotionSettings.LastSyncedAt is { } lastSyncedAt)
                     {
                         <div class="border rounded-3 p-3 mt-3 bg-body-tertiary">
-                            <div class="small text-secondary">Last sync @lastSyncedAt.ToLocalTime().ToString("g")</div>
-                            <div class="d-flex flex-wrap gap-3 mt-1 small">
-                                <span><strong>@NotionSettings.LastSyncImportedCount</strong> imported</span>
-                                <span><strong>@NotionSettings.LastSyncUpdatedCount</strong> updated</span>
-                                <span><strong>@NotionSettings.LastSyncArchivedCount</strong> archived</span>
+                            <div class="d-flex justify-content-between align-items-center gap-2">
+                                <div class="small text-secondary">Last sync @lastSyncedAt.ToLocalTime().ToString("g")</div>
+                                <span class="badge text-bg-success">Complete</span>
+                            </div>
+                            <div class="sentinel-sync-metrics mt-2">
+                                <span><strong>@NotionSettings.LastSyncDiscoveredCount</strong><small>discovered</small></span>
+                                <span><strong>@NotionSettings.LastSyncImportedCount</strong><small>imported</small></span>
+                                <span><strong>@NotionSettings.LastSyncUpdatedCount</strong><small>updated</small></span>
+                                <span><strong>@NotionSettings.LastSyncSkippedCount</strong><small>unchanged</small></span>
+                                <span><strong>@NotionSettings.LastSyncContentBlockCount</strong><small>blocks</small></span>
+                                <span><strong>@NotionSettings.LastSyncArchivedCount</strong><small>archived</small></span>
+                            </div>
+                            @if (NotionSettings.LastSyncEmptyContentCount > 0)
+                            {
+                                <div class="alert alert-warning py-2 mt-2 mb-0 small">
+                                    <strong>@NotionSettings.LastSyncEmptyContentCount item(s) returned no readable content.</strong>
+                                    Confirm the connection has Read content permission and that those pages are shared.
+                                </div>
+                            }
+                            <div class="small text-secondary mt-2">
+                                Coverage reflects content discoverable through Notion's API. Use a Notion workspace export for content the connection cannot enumerate.
                             </div>
                         </div>
                     }
@@ -875,7 +891,7 @@
                         {
                             <i class="bi bi-arrow-repeat me-1"></i>
                         }
-                        Sync now
+                        @(NotionMessageIsError ? "Retry sync" : "Sync now")
                     </button>
                     @if (SelectedPageId is { } notionPageId
                         && WikiPages.Any(page => page.Id == notionPageId && !string.IsNullOrWhiteSpace(page.NotionId))
@@ -1383,7 +1399,7 @@
     private void SetNotionSyncMessage(NotionSyncResult result)
     {
         NotionMessage = result.IsSuccess
-            ? $"{result.Message} {result.Imported} imported, {result.Updated} updated, {result.Archived} archived."
+            ? $"{result.Message} Discovered {result.Discovered}; {result.Imported} imported, {result.Updated} updated, {result.Skipped} unchanged, and {result.Archived} archived."
             : result.Message;
         NotionMessageIsError = !result.IsSuccess;
     }
@@ -1509,6 +1525,14 @@
         await InvokeAsync(StateHasChanged);
     }
 
+    [JSInvokable]
+    public async Task OnDraftRecovered(string blocksJson)
+    {
+        Editor.BlocksJson = blocksJson;
+        StatusMessage = "Recovered an unsaved local draft from this browser.";
+        await InvokeAsync(StateHasChanged);
+    }
+
     private async Task<string> CaptureEditorBlocksAsync()
     {
         if (_blockEditorInitialized && _blockEditorModule is not null)
@@ -1544,6 +1568,15 @@
         if (Guid.TryParse(blockId, out var parsedBlockId) && _sentinelDiscussions is not null)
         {
             await _sentinelDiscussions.FocusBlockAsync(parsedBlockId);
+        }
+    }
+
+    [JSInvokable]
+    public async Task OpenSelectionDiscussion(string blockId, string text, int start, int end)
+    {
+        if (Guid.TryParse(blockId, out var parsedBlockId) && _sentinelDiscussions is not null)
+        {
+            await _sentinelDiscussions.FocusSelectionAsync(parsedBlockId, text, start, end);
         }
     }
 

@@ -51,6 +51,10 @@ public sealed class NotionSyncService(
             LastSyncImportedCount = row.LastSyncImportedCount,
             LastSyncUpdatedCount = row.LastSyncUpdatedCount,
             LastSyncArchivedCount = row.LastSyncArchivedCount,
+            LastSyncDiscoveredCount = row.LastSyncDiscoveredCount,
+            LastSyncSkippedCount = row.LastSyncSkippedCount,
+            LastSyncEmptyContentCount = row.LastSyncEmptyContentCount,
+            LastSyncContentBlockCount = row.LastSyncContentBlockCount,
             IntegrationTokenUnreadable = isUnreadable
         };
     }
@@ -493,6 +497,10 @@ public sealed class NotionSyncService(
             settingsRow.LastSyncImportedCount = imported;
             settingsRow.LastSyncUpdatedCount = updated;
             settingsRow.LastSyncArchivedCount = archived;
+            settingsRow.LastSyncDiscoveredCount = discovered.Count;
+            settingsRow.LastSyncSkippedCount = skippedUnchangedPages + skippedUnchangedDatabaseRows;
+            settingsRow.LastSyncEmptyContentCount = emptyContentPages;
+            settingsRow.LastSyncContentBlockCount = contentBlocks;
             settingsRow.UpdatedAt = DateTimeOffset.UtcNow;
             settingsRow.UpdatedBy = "notion-sync";
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -515,7 +523,16 @@ public sealed class NotionSyncService(
                 message += $" Skipped {skippedUnchangedDatabaseRows} unchanged database row{(skippedUnchangedDatabaseRows == 1 ? string.Empty : "s")}.";
             }
 
-            return new NotionSyncResult(true, message, imported, updated, archived);
+            return new NotionSyncResult(
+                true,
+                message,
+                imported,
+                updated,
+                archived,
+                discovered.Count,
+                skippedUnchangedPages + skippedUnchangedDatabaseRows,
+                emptyContentPages,
+                contentBlocks);
         }
         catch (DbUpdateException ex)
         {

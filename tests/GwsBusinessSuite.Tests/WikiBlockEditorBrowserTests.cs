@@ -170,6 +170,144 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
     }
 
     [Fact]
+    public async Task LocalDraftAndSelectionComment_ShouldSurviveAFullEditorRestart()
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "text/html",
+            Body = """<div id="editor" class="wiki-block-editor"></div>"""
+        }));
+        await page.GotoAsync("http://localhost/editor");
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+
+        var blockId = Guid.NewGuid();
+        var initialJson = WikiBlockJson.Serialize(
+        [
+            new WikiBlock(
+                blockId,
+                WikiBlockTypes.Paragraph,
+                0,
+                [new WikiRichTextSpan("Original text")],
+                new Dictionary<string, string>())
+        ]);
+        await page.EvaluateAsync(
+            """
+            json => {
+                window.editorInvocations = [];
+                window.editorRef = {
+                    invokeMethodAsync: (name, ...args) => {
+                        window.editorInvocations.push({ name, args });
+                        return Promise.resolve([]);
+                    }
+                };
+                window.sentinelBlockEditor.initialize(
+                    document.querySelector('#editor'), window.editorRef, json, 'durable-draft-test');
+            }
+            """,
+            initialJson);
+
+        await page.Locator(".wiki-block-content").FillAsync("Unsaved local draft");
+        await page.WaitForTimeoutAsync(350);
+        var draftJson = await page.EvaluateAsync<string>(
+            "() => window.sentinelBlockEditor.getBlocksJson(document.querySelector('#editor'))");
+
+        await page.EvaluateAsync(
+            """
+            json => {
+                const editor = document.querySelector('#editor');
+                window.sentinelBlockEditor.dispose(editor);
+                sessionStorage.clear();
+                window.sentinelBlockEditor.initialize(
+                    editor, window.editorRef, json, 'durable-draft-test');
+            }
+            """,
+            initialJson);
+
+        await Expect(page.Locator(".wiki-block-content")).ToHaveTextAsync("Unsaved local draft");
+        (await page.EvaluateAsync<int>(
+            "() => window.editorInvocations.filter(item => item.name === 'OnDraftRecovered').length"))
+            .Should().Be(1);
+
+        await SelectWordAsync(page, "local");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Comment on selection" }).ClickAsync();
+        var selectionInvocation = await page.EvaluateAsync<JsonElement>(
+            "() => window.editorInvocations.find(item => item.name === 'OpenSelectionDiscussion')");
+        selectionInvocation.GetProperty("args")[0].GetString().Should().Be(blockId.ToString());
+        selectionInvocation.GetProperty("args")[1].GetString().Should().Be("local");
+        selectionInvocation.GetProperty("args")[2].GetInt32().Should().Be(8);
+        selectionInvocation.GetProperty("args")[3].GetInt32().Should().Be(13);
+
+        await page.EvaluateAsync(
+            """
+            json => {
+                const editor = document.querySelector('#editor');
+                window.sentinelBlockEditor.dispose(editor);
+                window.sentinelBlockEditor.initialize(
+                    editor, window.editorRef, json, 'durable-draft-test');
+            }
+            """,
+            draftJson);
+        (await page.EvaluateAsync<string?>(
+            "() => localStorage.getItem('sentinel:block-draft:v1:durable-draft-test')"))
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Columns_ShouldAddRemoveAndMoveWithoutLosingContent()
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.SetContentAsync("""<div id="editor" class="wiki-block-editor"></div>""");
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+        var initialJson = WikiBlockJson.Serialize(
+        [
+            new WikiBlock(
+                Guid.NewGuid(),
+                WikiBlockTypes.Columns,
+                0,
+                [new WikiRichTextSpan("First ||| Second")],
+                new Dictionary<string, string>())
+        ]);
+        await page.EvaluateAsync(
+            """
+            json => window.sentinelBlockEditor.initialize(
+                document.querySelector('#editor'),
+                { invokeMethodAsync: () => Promise.resolve([]) },
+                json)
+            """,
+            initialJson);
+
+        var columns = page.Locator(".wiki-column-editor");
+        await Expect(columns).ToHaveCountAsync(2);
+        await columns.Nth(0).GetByRole(AriaRole.Button, new() { Name = "Move column right" }).ClickAsync();
+        (await columns.Locator(".wiki-column-content").AllTextContentsAsync()).Should().Equal("Second", "First");
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Add column" }).ClickAsync();
+        await Expect(columns).ToHaveCountAsync(3);
+        await columns.Nth(2).Locator(".wiki-column-content").FillAsync("Third");
+        await columns.Nth(1).GetByRole(AriaRole.Button, new() { Name = "Remove column" }).ClickAsync();
+        await Expect(columns).ToHaveCountAsync(2);
+
+        var serialized = (await EditorBlocksAsync(page)).Single();
+        serialized.PlainText.Should().Be("Second ||| Third");
+    }
+
+    [Fact]
     public async Task NestedBlockActions_ShouldPreserveEntireBranches()
     {
         await using var page = await fixture.Browser.NewPageAsync();

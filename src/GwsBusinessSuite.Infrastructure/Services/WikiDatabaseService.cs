@@ -177,7 +177,9 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
                     config.GroupByPropertyId is null ? null : RemapPropertyId(config.GroupByPropertyId, propertyIds),
                     config.OpenPageMode,
                     (config.PagePropertyOrder ?? []).Select(propertyId => RemapPropertyId(propertyId, propertyIds)).ToList(),
-                    (config.HiddenPagePropertyIds ?? []).Select(propertyId => RemapPropertyId(propertyId, propertyIds)).ToList())),
+                    (config.HiddenPagePropertyIds ?? []).Select(propertyId => RemapPropertyId(propertyId, propertyIds)).ToList(),
+                    (config.Calculations ?? new Dictionary<string, string>())
+                        .ToDictionary(item => RemapPropertyId(item.Key, propertyIds), item => item.Value))),
                 CreatedAt = now,
                 CreatedBy = performedBy
             });
@@ -420,7 +422,9 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
                         : RemapPropertyId(config.GroupByPropertyId, propertyIds),
                     config.OpenPageMode,
                     (config.PagePropertyOrder ?? []).Select(propertyId => RemapPropertyId(propertyId, propertyIds)).ToList(),
-                    (config.HiddenPagePropertyIds ?? []).Select(propertyId => RemapPropertyId(propertyId, propertyIds)).ToList())),
+                    (config.HiddenPagePropertyIds ?? []).Select(propertyId => RemapPropertyId(propertyId, propertyIds)).ToList(),
+                    (config.Calculations ?? new Dictionary<string, string>())
+                        .ToDictionary(item => RemapPropertyId(item.Key, propertyIds), item => item.Value))),
                 CreatedAt = now,
                 CreatedBy = performedBy
             });

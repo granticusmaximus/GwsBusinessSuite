@@ -18,18 +18,21 @@ public sealed class WikiDatabaseViewLogicTests
                 null,
                 WikiDatabaseOpenPageModes.FullPage,
                 [secondPropertyId, firstPropertyId],
-                [firstPropertyId]));
+                [firstPropertyId],
+                new Dictionary<string, string> { [secondPropertyId] = "sum" }));
 
         var parsed = WikiDatabaseViewConfigJson.Parse(serialized);
         parsed.OpenPageMode.Should().Be(WikiDatabaseOpenPageModes.FullPage);
         parsed.PagePropertyOrder.Should().Equal(secondPropertyId, firstPropertyId);
         parsed.HiddenPagePropertyIds.Should().Equal(firstPropertyId);
+        parsed.Calculations.Should().Contain(secondPropertyId, "sum");
 
         var legacy = WikiDatabaseViewConfigJson.Parse(
             """{"filters":[],"sorts":[],"groupByPropertyId":null}""");
         legacy.OpenPageMode.Should().BeNull();
         legacy.PagePropertyOrder.Should().BeEmpty();
         legacy.HiddenPagePropertyIds.Should().BeEmpty();
+        legacy.Calculations.Should().BeEmpty();
     }
 
     [Fact]

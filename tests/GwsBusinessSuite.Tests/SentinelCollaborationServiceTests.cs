@@ -56,6 +56,22 @@ public sealed class SentinelCollaborationServiceTests
     }
 
     [Fact]
+    public async Task CreateDiscussionAsync_ShouldPersistASelectionAnchor()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var blockId = Guid.NewGuid();
+        var page = await fixture.CreatePageAsync(blockId);
+        var anchor = new SentinelDiscussionAnchor("review this phrase", 7, 25);
+
+        var discussion = await fixture.Service.CreateDiscussionAsync(
+            page.Id, blockId, "Could this be clearer?", "Member", anchor);
+
+        discussion.Anchor.Should().Be(anchor);
+        var reloaded = await fixture.Service.ListDiscussionsAsync(page.Id, "Member");
+        reloaded.Single().Anchor.Should().Be(anchor);
+    }
+
+    [Fact]
     public async Task CreateDiscussionAsync_ShouldRejectMissingBlock()
     {
         await using var fixture = await Fixture.CreateAsync();

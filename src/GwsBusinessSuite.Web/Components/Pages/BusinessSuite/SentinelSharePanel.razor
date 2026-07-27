@@ -3,6 +3,8 @@
 @using GwsBusinessSuite.Domain.Entities
 @inject ISentinelAccessService AccessService
 @inject ICurrentUserAccessor CurrentUserAccessor
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
 
 <div class="sentinel-share-panel">
     <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ToggleAsync">
@@ -35,13 +37,29 @@
                 </div>
             }
             <hr />
-            <div class="d-flex align-items-center justify-content-between gap-2">
-                <div><strong class="small d-block">Public link</strong><span class="small text-secondary">Anyone with the link can view.</span></div>
-                <button type="button" class="btn btn-sm btn-outline-warning" @onclick="CreateShareAsync">Create link</button>
+            <div>
+                <strong class="small d-block">Public link</strong>
+                <span class="small text-secondary">Anyone with the link can view.</span>
+                <div class="row g-2 align-items-end mt-1">
+                    <div class="col-7">
+                        <label class="form-label small mb-1">Expires (optional)</label>
+                        <input type="datetime-local" class="form-control form-control-sm" @bind="_shareExpiresAt" />
+                    </div>
+                    <div class="col-5">
+                        <button type="button" class="btn btn-sm btn-outline-warning w-100" @onclick="CreateShareAsync">Create link</button>
+                    </div>
+                </div>
+                <label class="form-check mt-2 small">
+                    <input class="form-check-input" type="checkbox" @bind="_allowSearchIndexing" />
+                    <span class="form-check-label">Allow search engines to index this page</span>
+                </label>
             </div>
             @if (!string.IsNullOrWhiteSpace(_newPublicUrl))
             {
-                <input class="form-control form-control-sm mt-2" value="@_newPublicUrl" readonly @onclick="SelectInput" />
+                <div class="input-group input-group-sm mt-2">
+                    <input class="form-control" value="@_newPublicUrl" readonly />
+                    <button type="button" class="btn btn-outline-light" @onclick="CopyShareUrlAsync">Copy</button>
+                </div>
                 <div class="small text-warning mt-1">Copy this link now. The secret token is not stored in plaintext.</div>
             }
             @foreach (var share in _snapshot.Shares.Where(item => !item.IsRevoked))
@@ -66,6 +84,8 @@
     private string _username = string.Empty;
     private string _accessLevel = SentinelAccessLevels.View;
     private string? _newPublicUrl;
+    private DateTime? _shareExpiresAt;
+    private bool _allowSearchIndexing;
 
     private async Task ToggleAsync()
     {
@@ -92,9 +112,11 @@
 
     private async Task CreateShareAsync()
     {
-        var share = await AccessService.CreatePublicShareAsync(TargetId, IsDatabase, null, false,
+        var expiresAt = _shareExpiresAt is { } parsed ? new DateTimeOffset(parsed) : (DateTimeOffset?)null;
+        var share = await AccessService.CreatePublicShareAsync(TargetId, IsDatabase, expiresAt, _allowSearchIndexing,
             await CurrentUserAccessor.GetCurrentUsernameAsync());
-        _newPublicUrl = $"/sentinel/share/{share.PublicToken}";
+        _newPublicUrl = Navigation.ToAbsoluteUri($"/sentinel/share/{share.PublicToken}").ToString();
+        _shareExpiresAt = null;
         await LoadAsync();
     }
 
@@ -104,5 +126,6 @@
         await LoadAsync();
     }
 
-    private static void SelectInput() { }
+    private async Task CopyShareUrlAsync() =>
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", _newPublicUrl);
 }

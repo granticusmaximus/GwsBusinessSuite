@@ -165,8 +165,15 @@ public sealed class NotionSyncServiceTests
 
         unchanged.IsSuccess.Should().BeTrue();
         unchanged.Message.Should().Contain("Skipped 1 unchanged page");
+        unchanged.Discovered.Should().Be(1);
+        unchanged.Skipped.Should().Be(1);
+        unchanged.ContentBlocks.Should().Be(0);
         fixture.Notion.BlockChildrenRequests.Should().BeEmpty();
         fixture.Notion.CommentRequests.Should().BeEmpty();
+        var diagnostics = await fixture.Service.GetSettingsAsync();
+        diagnostics!.LastSyncDiscoveredCount.Should().Be(1);
+        diagnostics.LastSyncSkippedCount.Should().Be(1);
+        diagnostics.LastSyncContentBlockCount.Should().Be(0);
 
         fixture.Notion.SearchResults = [Page("page-1", "First", lastEditedAt: editedAt.AddMinutes(1))];
         fixture.Notion.BlockChildren["page-1"] =

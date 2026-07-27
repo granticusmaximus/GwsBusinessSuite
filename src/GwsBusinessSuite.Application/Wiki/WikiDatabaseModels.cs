@@ -63,9 +63,10 @@ public sealed record WikiDatabaseViewConfig(
     string? GroupByPropertyId,
     string? OpenPageMode = null,
     IReadOnlyList<string>? PagePropertyOrder = null,
-    IReadOnlyList<string>? HiddenPagePropertyIds = null)
+    IReadOnlyList<string>? HiddenPagePropertyIds = null,
+    IReadOnlyDictionary<string, string>? Calculations = null)
 {
-    public static WikiDatabaseViewConfig Empty { get; } = new([], [], null, null, [], []);
+    public static WikiDatabaseViewConfig Empty { get; } = new([], [], null, null, [], [], new Dictionary<string, string>());
 }
 
 public static class WikiDatabasePagePresentation
@@ -148,7 +149,8 @@ public static class WikiDatabaseViewConfigJson
                     parsed.GroupByPropertyId,
                     parsed.OpenPageMode,
                     parsed.PagePropertyOrder ?? [],
-                    parsed.HiddenPagePropertyIds ?? []);
+                    parsed.HiddenPagePropertyIds ?? [],
+                    parsed.Calculations ?? new Dictionary<string, string>());
         }
         catch (JsonException) { return WikiDatabaseViewConfig.Empty; }
     }

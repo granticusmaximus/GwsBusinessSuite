@@ -47,6 +47,7 @@ public sealed class SentinelCollaborationService(
         Guid? blockId,
         string body,
         string performedBy,
+        SentinelDiscussionAnchor? anchor = null,
         CancellationToken cancellationToken = default)
     {
         var normalizedBody = ValidateBody(body);
@@ -59,12 +60,29 @@ public sealed class SentinelCollaborationService(
         {
             throw new InvalidOperationException("The block this discussion targets no longer exists.");
         }
+        if (anchor is not null)
+        {
+            if (blockId is null)
+            {
+                throw new InvalidOperationException("A text selection must target a block.");
+            }
+            if (string.IsNullOrWhiteSpace(anchor.Text)
+                || anchor.Text.Length > 500
+                || anchor.Start < 0
+                || anchor.End <= anchor.Start)
+            {
+                throw new InvalidOperationException("The selected text anchor is invalid.");
+            }
+        }
 
         var now = timeProvider.GetUtcNow();
         var discussion = new SentinelDiscussion
         {
             WikiPageId = wikiPageId,
             BlockId = blockId,
+            AnchorText = anchor?.Text.Trim(),
+            AnchorStart = anchor?.Start,
+            AnchorEnd = anchor?.End,
             CreatedAt = now,
             CreatedBy = actor
         };
@@ -356,7 +374,15 @@ public sealed class SentinelCollaborationService(
                             group.Any(reaction => reaction.Username == normalizedUser)))
                         .OrderBy(reaction => reaction.Emoji, StringComparer.Ordinal)
                         .ToList()))
-                .ToList());
+                .ToList(),
+            discussion.AnchorText is not null
+                && discussion.AnchorStart.HasValue
+                && discussion.AnchorEnd.HasValue
+                    ? new SentinelDiscussionAnchor(
+                        discussion.AnchorText,
+                        discussion.AnchorStart.Value,
+                        discussion.AnchorEnd.Value)
+                    : null);
     }
 
     private static string ValidateBody(string body)

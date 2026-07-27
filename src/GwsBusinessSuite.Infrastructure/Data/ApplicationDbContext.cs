@@ -152,6 +152,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .WithMany()
             .HasForeignKey(x => x.WikiPageId)
             .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<SentinelDiscussion>().Property(x => x.AnchorText).HasMaxLength(500);
         modelBuilder.Entity<SentinelDiscussionComment>()
             .HasOne(x => x.Discussion)
             .WithMany(x => x.Comments)

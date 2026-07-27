@@ -583,7 +583,8 @@ public sealed class WikiDatabaseServiceTests
                 status.Id.ToString(),
                 WikiDatabaseOpenPageModes.FullPage,
                 [status.Id.ToString(), sourceTitle.Id.ToString()],
-                [status.Id.ToString()]), "owner");
+                [status.Id.ToString()],
+                new Dictionary<string, string> { [sourceTitle.Id.ToString()] = "count" }), "owner");
 
         var duplicate = await service.DuplicateDatabaseAsync(source.Id, "member");
         var reloaded = await service.GetDatabaseAsync(duplicate.Id);
@@ -614,6 +615,7 @@ public sealed class WikiDatabaseServiceTests
             copiedStatus.Id.ToString(),
             copiedTitle.Id.ToString());
         copiedConfig.HiddenPagePropertyIds.Should().Equal(copiedStatus.Id.ToString());
+        copiedConfig.Calculations.Should().Contain(copiedTitle.Id.ToString(), "count");
     }
 
     [Fact]

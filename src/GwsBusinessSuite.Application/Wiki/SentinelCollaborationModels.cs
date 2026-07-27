@@ -13,6 +13,11 @@ public sealed record SentinelDiscussionCommentView(
     DateTimeOffset CreatedAt,
     IReadOnlyList<SentinelReactionView> Reactions);
 
+public sealed record SentinelDiscussionAnchor(
+    string Text,
+    int Start,
+    int End);
+
 public sealed record SentinelDiscussionView(
     Guid Id,
     Guid WikiPageId,
@@ -21,7 +26,8 @@ public sealed record SentinelDiscussionView(
     DateTimeOffset? ResolvedAt,
     string? ResolvedBy,
     DateTimeOffset CreatedAt,
-    IReadOnlyList<SentinelDiscussionCommentView> Comments);
+    IReadOnlyList<SentinelDiscussionCommentView> Comments,
+    SentinelDiscussionAnchor? Anchor = null);
 
 public sealed record SentinelNotificationView(
     Guid Id,
@@ -54,6 +60,7 @@ public interface ISentinelCollaborationService
         Guid? blockId,
         string body,
         string performedBy,
+        SentinelDiscussionAnchor? anchor = null,
         CancellationToken cancellationToken = default);
 
     Task ReplyAsync(

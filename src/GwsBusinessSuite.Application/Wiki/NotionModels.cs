@@ -91,6 +91,10 @@ public sealed class NotionConnectorSettingsView
     public int LastSyncImportedCount { get; set; }
     public int LastSyncUpdatedCount { get; set; }
     public int LastSyncArchivedCount { get; set; }
+    public int LastSyncDiscoveredCount { get; set; }
+    public int LastSyncSkippedCount { get; set; }
+    public int LastSyncEmptyContentCount { get; set; }
+    public int LastSyncContentBlockCount { get; set; }
 
     // True when the stored token's ciphertext could not be decrypted (Data Protection key
     // ring rotated since it was saved) - mirrors CjConnectorSettingsView's
@@ -98,7 +102,16 @@ public sealed class NotionConnectorSettingsView
     public bool IntegrationTokenUnreadable { get; set; }
 }
 
-public sealed record NotionSyncResult(bool IsSuccess, string Message, int Imported, int Updated, int Archived);
+public sealed record NotionSyncResult(
+    bool IsSuccess,
+    string Message,
+    int Imported,
+    int Updated,
+    int Archived,
+    int Discovered = 0,
+    int Skipped = 0,
+    int EmptyContent = 0,
+    int ContentBlocks = 0);
 
 public static class NotionSyncJobStates
 {

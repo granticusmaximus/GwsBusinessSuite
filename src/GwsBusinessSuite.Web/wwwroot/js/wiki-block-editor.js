@@ -10,7 +10,10 @@
 
 const states = new WeakMap();
 const HISTORY_STORAGE_PREFIX = 'sentinel:block-history:v1:';
+const DRAFT_STORAGE_PREFIX = 'sentinel:block-draft:v1:';
 const MAX_PERSISTED_HISTORY_CHARS = 1_500_000;
+const MAX_PERSISTED_DRAFT_CHARS = 1_500_000;
+const MAX_DRAFT_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 let suggestionMenuSequence = 0;
 
 const BLOCK_TYPES = [
@@ -64,6 +67,7 @@ export function initialize(container, dotNetRef, initialBlocksJson, historyKey =
         undoStack: [],
         redoStack: [],
         lastSnapshot: undefined,
+        baseSnapshot: undefined,
         historyKey: normalizeHistoryKey(historyKey),
         lastCursorBlockId: null
     };
@@ -103,9 +107,21 @@ export function setBlocks(container, blocksJson, historyKey = null) {
     // such as revert-to-revision) is a new baseline, not an edit - nothing before it should
     // be undoable, and any pending redo would apply to a document that no longer exists.
     const incomingSnapshot = getBlocksJson(container);
+    const persistedDraft = readPersistedDraft(state);
+    let activeSnapshot = incomingSnapshot;
+    if (persistedDraft?.baseSnapshot === incomingSnapshot
+        && persistedDraft.snapshot !== incomingSnapshot) {
+        renderBlocks(container, state, persistedDraft.snapshot);
+        activeSnapshot = getBlocksJson(container);
+        try { state.dotNetRef.invokeMethodAsync('OnDraftRecovered', activeSnapshot); }
+        catch { /* the Blazor circuit may have disconnected */ }
+    } else if (persistedDraft?.snapshot === incomingSnapshot) {
+        clearPersistedDraft(state);
+    }
+    state.baseSnapshot = incomingSnapshot;
     const persisted = readPersistedHistory(state);
-    state.lastSnapshot = incomingSnapshot;
-    if (persisted?.lastSnapshot === incomingSnapshot) {
+    state.lastSnapshot = activeSnapshot;
+    if (persisted?.lastSnapshot === activeSnapshot) {
         state.undoStack = persisted.undoStack;
         state.redoStack = persisted.redoStack;
     } else {
@@ -313,6 +329,11 @@ function createBlockBody(block, state) {
         return body;
     }
 
+    if (block.type === 'columns') {
+        body.appendChild(createColumnsBody(block, state));
+        return body;
+    }
+
     if (block.type === 'breadcrumb' || block.type === 'table_of_contents') {
         const placeholder = document.createElement('div');
         placeholder.className = `wiki-${block.type.replaceAll('_', '-')}`;
@@ -448,6 +469,97 @@ function createTableBody(block, state) {
     actions.append(addRow, addColumn);
     wrapper.append(table, actions);
     return wrapper;
+}
+
+function createColumnsBody(block, state) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'wiki-columns-editor';
+    const text = (block.richText || []).map(span => span.text || '').join('');
+    const columns = (text || 'Column one ||| Column two')
+        .split('|||', 5)
+        .map(column => column.trim());
+    while (columns.length < 2) columns.push('');
+
+    const renderColumn = value => {
+        const column = document.createElement('section');
+        column.className = 'wiki-column-editor';
+        const controls = document.createElement('div');
+        controls.className = 'wiki-column-controls';
+
+        const moveLeft = document.createElement('button');
+        moveLeft.type = 'button';
+        moveLeft.title = 'Move column left';
+        moveLeft.setAttribute('aria-label', 'Move column left');
+        moveLeft.textContent = '←';
+        moveLeft.addEventListener('click', () => {
+            const previous = column.previousElementSibling;
+            if (!previous?.classList.contains('wiki-column-editor')) return;
+            wrapper.insertBefore(column, previous);
+            refreshColumnControls(wrapper);
+            notifyChanged(state);
+        });
+
+        const moveRight = document.createElement('button');
+        moveRight.type = 'button';
+        moveRight.title = 'Move column right';
+        moveRight.setAttribute('aria-label', 'Move column right');
+        moveRight.textContent = '→';
+        moveRight.addEventListener('click', () => {
+            const next = column.nextElementSibling;
+            if (!next?.classList.contains('wiki-column-editor')) return;
+            wrapper.insertBefore(next, column);
+            refreshColumnControls(wrapper);
+            notifyChanged(state);
+        });
+
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.title = 'Remove column';
+        remove.setAttribute('aria-label', 'Remove column');
+        remove.textContent = '×';
+        remove.addEventListener('click', () => {
+            if (wrapper.querySelectorAll(':scope > .wiki-column-editor').length <= 2) return;
+            column.remove();
+            refreshColumnControls(wrapper);
+            notifyChanged(state);
+        });
+
+        const content = document.createElement('div');
+        content.className = 'wiki-block-content wiki-column-content';
+        content.contentEditable = 'plaintext-only' in document.body ? 'plaintext-only' : 'true';
+        content.textContent = value;
+        content.dataset.placeholder = 'Type in this column';
+        content.addEventListener('input', () => scheduleNotify(state));
+        controls.append(moveLeft, moveRight, remove);
+        column.append(controls, content);
+        return column;
+    };
+
+    columns.forEach(column => wrapper.appendChild(renderColumn(column)));
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'wiki-column-add';
+    add.textContent = '+ Add column';
+    add.addEventListener('click', () => {
+        if (wrapper.querySelectorAll(':scope > .wiki-column-editor').length >= 5) return;
+        wrapper.insertBefore(renderColumn(''), add);
+        refreshColumnControls(wrapper);
+        notifyChanged(state);
+    });
+    wrapper.appendChild(add);
+    refreshColumnControls(wrapper);
+    return wrapper;
+}
+
+function refreshColumnControls(wrapper) {
+    const columns = [...wrapper.querySelectorAll(':scope > .wiki-column-editor')];
+    columns.forEach((column, index) => {
+        column.querySelector('[aria-label="Move column left"]').disabled = index === 0;
+        column.querySelector('[aria-label="Move column right"]').disabled = index === columns.length - 1;
+        column.querySelector('[aria-label="Remove column"]').disabled = columns.length <= 2;
+    });
+    const add = wrapper.querySelector(':scope > .wiki-column-add');
+    if (add) add.disabled = columns.length >= 5;
 }
 
 function parseTableRows(block) {
@@ -1701,6 +1813,54 @@ function historyStorageKey(state) {
     return state.historyKey ? `${HISTORY_STORAGE_PREFIX}${state.historyKey}` : null;
 }
 
+function draftStorageKey(state) {
+    return state.historyKey ? `${DRAFT_STORAGE_PREFIX}${state.historyKey}` : null;
+}
+
+function readPersistedDraft(state) {
+    const key = draftStorageKey(state);
+    if (!key) return null;
+    try {
+        const value = JSON.parse(localStorage.getItem(key) || 'null');
+        if (!value || value.version !== 1 || typeof value.baseSnapshot !== 'string'
+            || typeof value.snapshot !== 'string' || typeof value.savedAt !== 'number') {
+            return null;
+        }
+        if (Date.now() - value.savedAt > MAX_DRAFT_AGE_MS) {
+            localStorage.removeItem(key);
+            return null;
+        }
+        return value;
+    } catch {
+        return null;
+    }
+}
+
+function persistDraft(state, snapshot) {
+    const key = draftStorageKey(state);
+    if (!key || state.baseSnapshot === undefined) return;
+    if (snapshot === state.baseSnapshot) {
+        clearPersistedDraft(state);
+        return;
+    }
+    const payload = JSON.stringify({
+        version: 1,
+        baseSnapshot: state.baseSnapshot,
+        snapshot,
+        savedAt: Date.now()
+    });
+    if (payload.length > MAX_PERSISTED_DRAFT_CHARS) return;
+    try { localStorage.setItem(key, payload); }
+    catch { /* private browsing or a full storage quota must not interrupt editing */ }
+}
+
+function clearPersistedDraft(state) {
+    const key = draftStorageKey(state);
+    if (!key) return;
+    try { localStorage.removeItem(key); }
+    catch { /* storage may be unavailable */ }
+}
+
 function readPersistedHistory(state) {
     const key = historyStorageKey(state);
     if (!key) return null;
@@ -1747,6 +1907,7 @@ function notifyChanged(state) {
     }
     state.lastSnapshot = current;
     persistHistory(state);
+    persistDraft(state, current);
     try { state.dotNetRef.invokeMethodAsync('OnBlocksChanged', current); }
     catch { /* the Blazor circuit may have disconnected */ }
 }
@@ -1766,6 +1927,7 @@ function undo(state) {
     renderBlocks(state.container, state, previous);
     state.lastSnapshot = previous;
     persistHistory(state);
+    persistDraft(state, previous);
     notifyChangedSilently(state);
     restoreFocusAfterHistory(state, focusedBlockId);
 }
@@ -1779,6 +1941,7 @@ function redo(state) {
     renderBlocks(state.container, state, next);
     state.lastSnapshot = next;
     persistHistory(state);
+    persistDraft(state, next);
     notifyChangedSilently(state);
     restoreFocusAfterHistory(state, focusedBlockId);
 }
@@ -1816,6 +1979,12 @@ function serializeBlock(blockEl) {
     const contentEl = blockEl.querySelector('.wiki-block-content');
     const richText = type === 'table'
         ? [{ text: serializeTable(blockEl) }]
+        : type === 'columns'
+            ? [{
+                text: [...blockEl.querySelectorAll(':scope > .wiki-block-body .wiki-column-content')]
+                    .map(column => column.textContent.trim())
+                    .join(' ||| ')
+            }]
         : contentEl ? richTextFromNode(contentEl) : [];
     return {
         id: blockEl.dataset.blockId,
@@ -1961,6 +2130,32 @@ function showInlineToolbar(state) {
         }
     });
     toolbar.appendChild(linkButton);
+
+    const commentButton = document.createElement('button');
+    commentButton.type = 'button';
+    commentButton.textContent = '💬';
+    commentButton.title = 'Comment on selection';
+    commentButton.setAttribute('aria-label', 'Comment on selection');
+    commentButton.addEventListener('mousedown', event => event.preventDefault());
+    commentButton.addEventListener('click', () => {
+        const selectedText = range.toString().trim();
+        const blockEl = content.closest('.wiki-block');
+        if (!selectedText || !blockEl) return;
+        const prefix = range.cloneRange();
+        prefix.selectNodeContents(content);
+        prefix.setEnd(range.startContainer, range.startOffset);
+        const startOffset = prefix.toString().length;
+        try {
+            state.dotNetRef.invokeMethodAsync(
+                'OpenSelectionDiscussion',
+                blockEl.dataset.blockId,
+                selectedText.slice(0, 500),
+                startOffset,
+                startOffset + range.toString().length);
+        } catch { /* the Blazor circuit may have disconnected */ }
+        closeInlineToolbar(state);
+    });
+    toolbar.appendChild(commentButton);
     appendColorMenuButton(toolbar, state, range, 'text');
     appendColorMenuButton(toolbar, state, range, 'background');
 
