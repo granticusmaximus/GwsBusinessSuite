@@ -23,6 +23,26 @@ public sealed class NotionMappingTests
         span.Strikethrough.Should().BeTrue();
         span.Code.Should().BeTrue();
         span.Link.Should().Be("https://example.com");
+        span.TextColor.Should().Be("red");
+        span.BackgroundColor.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("blue", "blue", null)]
+    [InlineData("yellow_background", null, "yellow")]
+    [InlineData("default", null, null)]
+    public void MapRichText_ShouldSeparateTextAndBackgroundColors(
+        string notionColor,
+        string? expectedTextColor,
+        string? expectedBackgroundColor)
+    {
+        var richText = Json(
+            $"[{{\"plain_text\":\"Color\",\"annotations\":{{\"color\":\"{notionColor}\"}}}}]");
+
+        var span = NotionMapping.MapRichText(richText).Should().ContainSingle().Subject;
+
+        span.TextColor.Should().Be(expectedTextColor);
+        span.BackgroundColor.Should().Be(expectedBackgroundColor);
     }
 
     [Theory]
@@ -130,6 +150,25 @@ public sealed class NotionMappingTests
         mapped.Should().NotBeNull();
         mapped!.Type.Should().Be(WikiBlockTypes.Paragraph);
         mapped.PlainText.Should().Contain("target-page-id");
+    }
+
+    [Fact]
+    public void MapBlocksForWrite_ShouldPreserveSupportedBackgroundColor()
+    {
+        var block = new WikiBlock(
+            Guid.NewGuid(),
+            WikiBlockTypes.Paragraph,
+            0,
+            [new WikiRichTextSpan("Important", BackgroundColor: "yellow")],
+            new Dictionary<string, string>());
+
+        var payload = JsonSerializer.SerializeToElement(
+            NotionMapping.MapBlocksForWrite([block]),
+            WikiBlockJson.Options);
+
+        payload[0].GetProperty("paragraph").GetProperty("rich_text")[0]
+            .GetProperty("annotations").GetProperty("color").GetString()
+            .Should().Be("yellow_background");
     }
 
     [Theory]

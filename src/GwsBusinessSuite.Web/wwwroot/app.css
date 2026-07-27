@@ -1431,6 +1431,7 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 
 .wiki-inline-toolbar {
+    position: absolute;
     z-index: 2100;
     display: flex;
     align-items: center;
@@ -1461,6 +1462,67 @@ audio.wiki-embed-media { max-width: 100%; }
 .wiki-inline-toolbar .is-italic { font-style: italic; }
 .wiki-inline-toolbar .is-strike { text-decoration: line-through; }
 .wiki-inline-toolbar .is-code { font-family: var(--bs-font-monospace, monospace); }
+.wiki-inline-toolbar .wiki-color-menu-toggle { font-weight: 800; text-decoration: underline; text-decoration-color: #f59e0b; text-underline-offset: 3px; }
+.wiki-inline-toolbar .wiki-background-menu-toggle { font-size: .92rem; }
+
+.wiki-color-menu {
+    position: absolute;
+    z-index: 1;
+    top: calc(100% + .35rem);
+    right: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(7.5rem, 1fr));
+    gap: 2px;
+    width: 16rem;
+    padding: .35rem;
+    border: 1px solid rgba(214, 211, 209, .16);
+    border-radius: 7px;
+    background: #1c1917;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .46);
+}
+
+.wiki-inline-toolbar .wiki-color-menu button {
+    display: flex;
+    justify-content: flex-start;
+    gap: .5rem;
+    width: 100%;
+    min-width: 0;
+    padding: .35rem .45rem;
+    color: #d6d3d1;
+    text-align: left;
+}
+
+.wiki-color-swatch {
+    display: grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 1.35rem;
+    height: 1.35rem;
+    border: 1px solid rgba(214, 211, 209, .16);
+    border-radius: 4px;
+    color: #d6d3d1;
+    font-size: .66rem;
+    font-weight: 750;
+}
+
+.wiki-rich-text-color-gray { color: #a8a29e; }
+.wiki-rich-text-color-brown { color: #d6a56f; }
+.wiki-rich-text-color-orange { color: #fb923c; }
+.wiki-rich-text-color-yellow { color: #facc15; }
+.wiki-rich-text-color-green { color: #4ade80; }
+.wiki-rich-text-color-blue { color: #60a5fa; }
+.wiki-rich-text-color-purple { color: #c084fc; }
+.wiki-rich-text-color-pink { color: #f472b6; }
+.wiki-rich-text-color-red { color: #f87171; }
+.wiki-rich-text-bg-gray { background: rgba(120, 113, 108, .32); }
+.wiki-rich-text-bg-brown { background: rgba(146, 95, 50, .32); }
+.wiki-rich-text-bg-orange { background: rgba(234, 88, 12, .3); }
+.wiki-rich-text-bg-yellow { background: rgba(202, 138, 4, .32); }
+.wiki-rich-text-bg-green { background: rgba(22, 163, 74, .3); }
+.wiki-rich-text-bg-blue { background: rgba(37, 99, 235, .3); }
+.wiki-rich-text-bg-purple { background: rgba(126, 34, 206, .3); }
+.wiki-rich-text-bg-pink { background: rgba(190, 24, 93, .3); }
+.wiki-rich-text-bg-red { background: rgba(220, 38, 38, .3); }
 
 .wiki-tree-row {
     display: flex;

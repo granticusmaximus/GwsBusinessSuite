@@ -1642,7 +1642,12 @@
         {
             _blockEditorRef ??= DotNetObjectReference.Create(this);
             _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js");
-            await _blockEditorModule.InvokeVoidAsync("initialize", _blockEditorContainer, _blockEditorRef, Editor.BlocksJson);
+            await _blockEditorModule.InvokeVoidAsync(
+                "initialize",
+                _blockEditorContainer,
+                _blockEditorRef,
+                Editor.BlocksJson,
+                BlockEditorHistoryKey());
             await _blockEditorModule.InvokeVoidAsync("setDiscussionCounts", _blockEditorContainer, _blockDiscussionCounts);
             await _blockEditorModule.InvokeVoidAsync("setRemoteCursors", _blockEditorContainer, BuildRemoteCursorPayload());
             _blockEditorInitialized = true;
@@ -1651,7 +1656,11 @@
         else if (SelectedDatabaseId is null && _blockEditorSyncedGeneration != _editorGeneration)
         {
             var blockEditorModule = _blockEditorModule!;
-            await blockEditorModule.InvokeVoidAsync("setBlocks", _blockEditorContainer, Editor.BlocksJson);
+            await blockEditorModule.InvokeVoidAsync(
+                "setBlocks",
+                _blockEditorContainer,
+                Editor.BlocksJson,
+                BlockEditorHistoryKey());
             await blockEditorModule.InvokeVoidAsync("setDiscussionCounts", _blockEditorContainer, _blockDiscussionCounts);
             // setBlocks just wiped the DOM (revert, or a fresh save reload) - any remote cursor
             // markers it removed need to be redrawn against the new block elements.
@@ -1661,6 +1670,9 @@
     }
 
     private Task<string> CurrentUserNameAsync() => CurrentUserAccessor.GetCurrentUsernameAsync();
+
+    private string BlockEditorHistoryKey() =>
+        Editor.WikiPageId?.ToString("N") ?? "new-page";
 
     private async Task LoadWorkspaceNavigationAsync()
     {
@@ -1971,6 +1983,10 @@
 
         try
         {
+            // The block editor owns its live DOM and reports changes on a short debounce.
+            // An explicit Save can legitimately arrive before that callback, especially after
+            // a toolbar action, so capture synchronously before writing the server snapshot.
+            await CaptureEditorBlocksAsync();
             var user = await CurrentUserNameAsync();
             var saved = await WikiService.SavePageAsync(Editor, user);
             SelectedPageId = saved.Id;
@@ -1989,6 +2005,13 @@
             // Deliberately not bumping _editorGeneration here - the block editor's DOM already
             // reflects exactly what was just saved (that's where BlocksJson came from), so
             // resetting it would only cost the user their cursor position for no benefit.
+            if (_blockEditorInitialized && _blockEditorModule is not null)
+            {
+                await _blockEditorModule.InvokeVoidAsync(
+                    "setHistoryKey",
+                    _blockEditorContainer,
+                    BlockEditorHistoryKey());
+            }
             StatusMessage = $"Saved Sentinel page '{saved.Title}'.";
             PageConflict = null;
             await LoadTreeAsync(selectFirstPage: false);

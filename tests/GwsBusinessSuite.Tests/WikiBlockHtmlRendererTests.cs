@@ -140,4 +140,19 @@ public sealed class WikiBlockHtmlRendererTests
         html.Should().Contain("<td>Sentinel</td>");
         html.Should().Contain("<td><b>Active</b></td>");
     }
+
+    [Fact]
+    public void RenderRichText_ShouldRenderOnlySupportedSemanticColors()
+    {
+        var html = WikiBlockHtmlRenderer.RenderRichText(
+        [
+            new WikiRichTextSpan("Red", TextColor: "red"),
+            new WikiRichTextSpan("Highlight", BackgroundColor: "yellow"),
+            new WikiRichTextSpan("Unsafe", TextColor: "url(javascript:alert(1))")
+        ]);
+
+        html.Should().Contain("wiki-rich-text-color-red");
+        html.Should().Contain("wiki-rich-text-bg-yellow");
+        html.Should().NotContain("javascript");
+    }
 }

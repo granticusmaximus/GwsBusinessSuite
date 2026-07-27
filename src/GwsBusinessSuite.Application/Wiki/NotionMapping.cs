@@ -48,20 +48,39 @@ public static class NotionMapping
             var italic = false;
             var strikethrough = false;
             var code = false;
+            string? textColor = null;
+            string? backgroundColor = null;
             if (span.TryGetProperty("annotations", out var annotations) && annotations.ValueKind == JsonValueKind.Object)
             {
                 bold = annotations.TryGetProperty("bold", out var b) && b.ValueKind == JsonValueKind.True;
                 italic = annotations.TryGetProperty("italic", out var i) && i.ValueKind == JsonValueKind.True;
                 strikethrough = annotations.TryGetProperty("strikethrough", out var s) && s.ValueKind == JsonValueKind.True;
                 code = annotations.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.True;
-                // annotations.underline/color have no GWS equivalent and are dropped.
+                if (annotations.TryGetProperty("color", out var colorElement)
+                    && colorElement.ValueKind == JsonValueKind.String)
+                {
+                    var color = colorElement.GetString();
+                    if (!string.IsNullOrWhiteSpace(color) && !color.Equals("default", StringComparison.OrdinalIgnoreCase))
+                    {
+                        const string backgroundSuffix = "_background";
+                        if (color.EndsWith(backgroundSuffix, StringComparison.OrdinalIgnoreCase))
+                        {
+                            backgroundColor = color[..^backgroundSuffix.Length];
+                        }
+                        else
+                        {
+                            textColor = color;
+                        }
+                    }
+                }
+                // Underline is not currently part of Sentinel's editor vocabulary.
             }
 
             var link = span.TryGetProperty("href", out var hrefElement) && hrefElement.ValueKind == JsonValueKind.String
                 ? hrefElement.GetString()
                 : null;
 
-            spans.Add(new WikiRichTextSpan(text, bold, italic, strikethrough, code, link));
+            spans.Add(new WikiRichTextSpan(text, bold, italic, strikethrough, code, link, textColor, backgroundColor));
         }
 
         return spans;
@@ -297,7 +316,15 @@ public static class NotionMapping
         {
             type = "text",
             text = new { content = span.Text, link = string.IsNullOrWhiteSpace(span.Link) ? null : new { url = span.Link } },
-            annotations = new { bold = span.Bold, italic = span.Italic, strikethrough = span.Strikethrough, underline = false, code = span.Code, color = "default" }
+            annotations = new
+            {
+                bold = span.Bold,
+                italic = span.Italic,
+                strikethrough = span.Strikethrough,
+                underline = false,
+                code = span.Code,
+                color = NotionColor(span)
+            }
         }).ToList();
 
         return block.Type switch
@@ -322,6 +349,18 @@ public static class NotionMapping
             _ when block.PlainText.Length > 0 => new { @object = "block", type = "paragraph", paragraph = new { rich_text = richText } },
             _ => null
         };
+    }
+
+    private static string NotionColor(WikiRichTextSpan span)
+    {
+        if (WikiRichTextColors.TryNormalize(span.BackgroundColor, out var backgroundColor))
+        {
+            return $"{backgroundColor}_background";
+        }
+
+        return WikiRichTextColors.TryNormalize(span.TextColor, out var textColor)
+            ? textColor
+            : "default";
     }
 
     // ---- Database property schema + values ----

@@ -32,6 +32,14 @@ public static class WikiBlockHtmlRenderer
             if (span.Bold) text = $"<b>{text}</b>";
             if (span.Italic) text = $"<i>{text}</i>";
             if (span.Strikethrough) text = $"<s>{text}</s>";
+            if (WikiRichTextColors.TryNormalize(span.TextColor, out var textColor))
+            {
+                text = $"<span class=\"wiki-rich-text-color-{textColor}\">{text}</span>";
+            }
+            if (WikiRichTextColors.TryNormalize(span.BackgroundColor, out var backgroundColor))
+            {
+                text = $"<span class=\"wiki-rich-text-bg-{backgroundColor}\">{text}</span>";
+            }
             if (!string.IsNullOrWhiteSpace(span.Link))
             {
                 var isMention = span.Link.StartsWith("usermention:", StringComparison.OrdinalIgnoreCase)
@@ -220,5 +228,19 @@ public static class WikiBlockHtmlRenderer
         return $"<div class=\"wiki-columns\"{indentStyle}>"
             + string.Concat(columns.Select(column => $"<div>{WebUtility.HtmlEncode(column).Replace("\n", "<br />")}</div>"))
             + "</div>";
+    }
+}
+
+public static class WikiRichTextColors
+{
+    public static IReadOnlySet<string> Supported { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "gray", "brown", "orange", "yellow", "green", "blue", "purple", "pink", "red"
+    };
+
+    public static bool TryNormalize(string? value, out string normalized)
+    {
+        normalized = value?.Trim().ToLowerInvariant() ?? string.Empty;
+        return Supported.Contains(normalized);
     }
 }

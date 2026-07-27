@@ -9,6 +9,8 @@
 // OnMarkdownChanged callback shape) and persists it on explicit Save, same as before.
 
 const states = new WeakMap();
+const HISTORY_STORAGE_PREFIX = 'sentinel:block-history:v1:';
+const MAX_PERSISTED_HISTORY_CHARS = 1_500_000;
 
 const BLOCK_TYPES = [
     { type: 'paragraph', label: 'Text', icon: '¶' },
@@ -36,8 +38,9 @@ const BLOCK_TYPES = [
     { type: 'columns', label: 'Columns', icon: '▥' }
 ];
 const TEXTLESS_TYPES = new Set(['divider', 'image', 'embed', 'linked_database', 'inline_database', 'breadcrumb', 'table_of_contents']);
+const RICH_TEXT_COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
 
-export function initialize(container, dotNetRef, initialBlocksJson) {
+export function initialize(container, dotNetRef, initialBlocksJson, historyKey = null) {
     dispose(container);
     const state = {
         container,
@@ -57,10 +60,11 @@ export function initialize(container, dotNetRef, initialBlocksJson) {
         undoStack: [],
         redoStack: [],
         lastSnapshot: undefined,
+        historyKey: normalizeHistoryKey(historyKey),
         lastCursorBlockId: null
     };
     states.set(container, state);
-    setBlocks(container, initialBlocksJson);
+    setBlocks(container, initialBlocksJson, historyKey);
 
     container.addEventListener('pointerdown', event => onHandlePointerDown(state, event));
     container.addEventListener('pointermove', event => onHandlePointerMove(state, event));
@@ -82,17 +86,40 @@ export function initialize(container, dotNetRef, initialBlocksJson) {
     });
 }
 
-export function setBlocks(container, blocksJson) {
+export function setBlocks(container, blocksJson, historyKey = null) {
     const state = states.get(container);
     if (!state) return;
 
+    if (historyKey !== null && historyKey !== undefined) {
+        state.historyKey = normalizeHistoryKey(historyKey);
+    }
     renderBlocks(container, state, blocksJson);
     // An externally-driven document replacement (initial load, or a Blazor-triggered reload
     // such as revert-to-revision) is a new baseline, not an edit - nothing before it should
     // be undoable, and any pending redo would apply to a document that no longer exists.
-    state.lastSnapshot = getBlocksJson(container);
-    state.undoStack = [];
-    state.redoStack = [];
+    const incomingSnapshot = getBlocksJson(container);
+    const persisted = readPersistedHistory(state);
+    state.lastSnapshot = incomingSnapshot;
+    if (persisted?.lastSnapshot === incomingSnapshot) {
+        state.undoStack = persisted.undoStack;
+        state.redoStack = persisted.redoStack;
+    } else {
+        state.undoStack = [];
+        state.redoStack = [];
+    }
+    persistHistory(state);
+}
+
+export function setHistoryKey(container, historyKey) {
+    const state = states.get(container);
+    if (!state) return;
+    const previousStorageKey = historyStorageKey(state);
+    state.historyKey = normalizeHistoryKey(historyKey);
+    persistHistory(state);
+    const nextStorageKey = historyStorageKey(state);
+    if (previousStorageKey && previousStorageKey !== nextStorageKey) {
+        try { sessionStorage.removeItem(previousStorageKey); } catch { /* storage may be unavailable */ }
+    }
 }
 
 function renderBlocks(container, state, blocksJson) {
@@ -1408,6 +1435,51 @@ function scheduleNotify(state) {
 // so a long editing session can't grow the stack unboundedly.
 const MAX_UNDO_ENTRIES = 100;
 
+function normalizeHistoryKey(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized && /^[a-z0-9-]{1,80}$/.test(normalized) ? normalized : null;
+}
+
+function historyStorageKey(state) {
+    return state.historyKey ? `${HISTORY_STORAGE_PREFIX}${state.historyKey}` : null;
+}
+
+function readPersistedHistory(state) {
+    const key = historyStorageKey(state);
+    if (!key) return null;
+    try {
+        const value = JSON.parse(sessionStorage.getItem(key) || 'null');
+        if (!value || value.version !== 1 || typeof value.lastSnapshot !== 'string'
+            || !Array.isArray(value.undoStack) || !Array.isArray(value.redoStack)) {
+            return null;
+        }
+        return {
+            lastSnapshot: value.lastSnapshot,
+            undoStack: value.undoStack.filter(item => typeof item === 'string').slice(-MAX_UNDO_ENTRIES),
+            redoStack: value.redoStack.filter(item => typeof item === 'string').slice(-MAX_UNDO_ENTRIES)
+        };
+    } catch {
+        return null;
+    }
+}
+
+function persistHistory(state) {
+    const key = historyStorageKey(state);
+    if (!key || state.lastSnapshot === undefined) return;
+
+    const undoStack = state.undoStack.slice(-MAX_UNDO_ENTRIES);
+    const redoStack = state.redoStack.slice(-MAX_UNDO_ENTRIES);
+    let payload = JSON.stringify({ version: 1, lastSnapshot: state.lastSnapshot, undoStack, redoStack });
+    while (payload.length > MAX_PERSISTED_HISTORY_CHARS && (undoStack.length > 1 || redoStack.length > 0)) {
+        if (undoStack.length > 1) undoStack.shift();
+        else redoStack.shift();
+        payload = JSON.stringify({ version: 1, lastSnapshot: state.lastSnapshot, undoStack, redoStack });
+    }
+
+    try { sessionStorage.setItem(key, payload); }
+    catch { /* private browsing or a full storage quota must not interrupt editing */ }
+}
+
 function notifyChanged(state) {
     if (state.notifyTimer) { clearTimeout(state.notifyTimer); state.notifyTimer = null; }
     const current = getBlocksJson(state.container);
@@ -1417,6 +1489,7 @@ function notifyChanged(state) {
         state.redoStack = [];
     }
     state.lastSnapshot = current;
+    persistHistory(state);
     try { state.dotNetRef.invokeMethodAsync('OnBlocksChanged', current); }
     catch { /* the Blazor circuit may have disconnected */ }
 }
@@ -1429,22 +1502,35 @@ function notifyChangedSilently(state) {
 
 function undo(state) {
     if (state.undoStack.length === 0) return;
+    const focusedBlockId = document.activeElement?.closest?.('.wiki-block')?.dataset.blockId;
     const current = getBlocksJson(state.container);
     const previous = state.undoStack.pop();
     state.redoStack.push(current);
     renderBlocks(state.container, state, previous);
     state.lastSnapshot = previous;
+    persistHistory(state);
     notifyChangedSilently(state);
+    restoreFocusAfterHistory(state, focusedBlockId);
 }
 
 function redo(state) {
     if (state.redoStack.length === 0) return;
+    const focusedBlockId = document.activeElement?.closest?.('.wiki-block')?.dataset.blockId;
     const current = getBlocksJson(state.container);
     const next = state.redoStack.pop();
     state.undoStack.push(current);
     renderBlocks(state.container, state, next);
     state.lastSnapshot = next;
+    persistHistory(state);
     notifyChangedSilently(state);
+    restoreFocusAfterHistory(state, focusedBlockId);
+}
+
+function restoreFocusAfterHistory(state, blockId) {
+    const target = blockId
+        ? state.container.querySelector(`:scope > .wiki-block[data-block-id="${cssEscape(blockId)}"]`)
+        : null;
+    focusBlock(target || state.container.querySelector(':scope > .wiki-block'));
 }
 
 function serializeBlock(blockEl) {
@@ -1505,6 +1591,12 @@ function walkRichText(node, marks, spans) {
         else if (tag === 's' || tag === 'strike' || tag === 'del') nextMarks.strikethrough = true;
         else if (tag === 'code') nextMarks.code = true;
         else if (tag === 'a') nextMarks.link = child.getAttribute('href') || '';
+        if (tag === 'span') {
+            const textColor = normalizeRichTextColor(child.dataset.wikiTextColor);
+            const backgroundColor = normalizeRichTextColor(child.dataset.wikiBackgroundColor);
+            if (textColor) nextMarks.textColor = textColor;
+            if (backgroundColor) nextMarks.backgroundColor = backgroundColor;
+        }
         walkRichText(child, nextMarks, spans);
     }
 }
@@ -1512,7 +1604,9 @@ function walkRichText(node, marks, spans) {
 function marksEqual(a, b) {
     return !!a.bold === !!b.bold && !!a.italic === !!b.italic
         && !!a.strikethrough === !!b.strikethrough && !!a.code === !!b.code
-        && (a.link || '') === (b.link || '');
+        && (a.link || '') === (b.link || '')
+        && (a.textColor || '') === (b.textColor || '')
+        && (a.backgroundColor || '') === (b.backgroundColor || '');
 }
 
 function mergeAdjacentSpans(spans) {
@@ -1532,12 +1626,21 @@ function htmlFromRichText(spans) {
         if (span.bold) html = `<b>${html}</b>`;
         if (span.italic) html = `<i>${html}</i>`;
         if (span.strikethrough) html = `<s>${html}</s>`;
+        const textColor = normalizeRichTextColor(span.textColor);
+        const backgroundColor = normalizeRichTextColor(span.backgroundColor);
+        if (textColor) html = `<span class="wiki-rich-text-color-${textColor}" data-wiki-text-color="${textColor}">${html}</span>`;
+        if (backgroundColor) html = `<span class="wiki-rich-text-bg-${backgroundColor}" data-wiki-background-color="${backgroundColor}">${html}</span>`;
         if (span.link) {
             const mentionClass = /^(user|date)mention:/i.test(span.link) ? ' class="wiki-mention"' : '';
             html = `<a${mentionClass} href="${escapeHtml(span.link)}">${html}</a>`;
         }
         return html;
     }).join('');
+}
+
+function normalizeRichTextColor(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return RICH_TEXT_COLORS.includes(normalized) ? normalized : null;
 }
 
 function escapeHtml(text) {
@@ -1601,6 +1704,8 @@ function showInlineToolbar(state) {
         }
     });
     toolbar.appendChild(linkButton);
+    appendColorMenuButton(toolbar, state, range, 'text');
+    appendColorMenuButton(toolbar, state, range, 'background');
 
     document.body.appendChild(toolbar);
     const rect = range.getBoundingClientRect();
@@ -1608,6 +1713,52 @@ function showInlineToolbar(state) {
     toolbar.style.left = `${window.scrollX + rect.left + (rect.width - toolbarRect.width) / 2}px`;
     toolbar.style.top = `${window.scrollY + rect.top - toolbarRect.height - 8}px`;
     state.inlineToolbar = toolbar;
+}
+
+function appendColorMenuButton(toolbar, state, selectionRange, kind) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = kind === 'text' ? 'wiki-color-menu-toggle' : 'wiki-background-menu-toggle';
+    button.textContent = kind === 'text' ? 'A' : '▧';
+    button.title = kind === 'text' ? 'Text color' : 'Background color';
+    button.setAttribute('aria-label', button.title);
+    button.setAttribute('aria-haspopup', 'menu');
+    button.addEventListener('mousedown', event => event.preventDefault());
+    button.addEventListener('click', event => {
+        event.stopPropagation();
+        toolbar.querySelectorAll('.wiki-color-menu').forEach(menu => menu.remove());
+        const menu = document.createElement('div');
+        menu.className = 'wiki-color-menu';
+        menu.setAttribute('role', 'menu');
+        menu.setAttribute('aria-label', button.title);
+
+        const choices = [{ value: null, label: 'Default' }, ...RICH_TEXT_COLORS.map(value => ({
+            value,
+            label: `${value[0].toUpperCase()}${value.slice(1)}`
+        }))];
+        for (const choice of choices) {
+            const option = document.createElement('button');
+            option.type = 'button';
+            option.setAttribute('role', 'menuitem');
+            option.setAttribute('aria-label', `${button.title} ${choice.label.toLowerCase()}`);
+            const swatch = document.createElement('span');
+            swatch.className = `wiki-color-swatch${choice.value ? ` wiki-rich-text-${kind === 'text' ? 'color' : 'bg'}-${choice.value}` : ''}`;
+            swatch.textContent = choice.value ? 'A' : '×';
+            const label = document.createElement('span');
+            label.textContent = choice.label;
+            option.append(swatch, label);
+            option.addEventListener('mousedown', mouseEvent => mouseEvent.preventDefault());
+            option.addEventListener('click', optionEvent => {
+                optionEvent.stopPropagation();
+                applyInlineColor(selectionRange, kind, choice.value);
+                scheduleNotify(state);
+                closeInlineToolbar(state);
+            });
+            menu.appendChild(option);
+        }
+        button.appendChild(menu);
+    });
+    toolbar.appendChild(button);
 }
 
 function closeInlineToolbar(state) {
@@ -1640,6 +1791,43 @@ function toggleInlineTag(tagName, attributes) {
     const newRange = document.createRange();
     newRange.selectNodeContents(wrapper);
     selection.addRange(newRange);
+}
+
+function applyInlineColor(savedRange, kind, color) {
+    if (!savedRange || savedRange.collapsed) return;
+    const range = savedRange.cloneRange();
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    const attribute = kind === 'text' ? 'data-wiki-text-color' : 'data-wiki-background-color';
+    const classPrefix = kind === 'text' ? 'wiki-rich-text-color-' : 'wiki-rich-text-bg-';
+    const fragment = range.extractContents();
+    for (const element of fragment.querySelectorAll(`[${attribute}]`)) {
+        const previous = element.getAttribute(attribute);
+        element.removeAttribute(attribute);
+        if (previous) element.classList.remove(`${classPrefix}${previous}`);
+    }
+
+    let insertedNode = fragment;
+    if (color) {
+        const wrapper = document.createElement('span');
+        wrapper.setAttribute(attribute, color);
+        wrapper.className = `${classPrefix}${color}`;
+        wrapper.appendChild(fragment);
+        insertedNode = wrapper;
+    }
+    range.insertNode(insertedNode);
+
+    const nextRange = document.createRange();
+    if (insertedNode.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+        nextRange.setStart(range.startContainer, range.startOffset);
+        nextRange.collapse(true);
+    } else {
+        nextRange.selectNodeContents(insertedNode);
+    }
+    selection.removeAllRanges();
+    selection.addRange(nextRange);
 }
 
 function findAncestorTag(node, tagName) {

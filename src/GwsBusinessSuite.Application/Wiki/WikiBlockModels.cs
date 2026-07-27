@@ -53,7 +53,9 @@ public sealed record WikiRichTextSpan(
     bool Italic = false,
     bool Strikethrough = false,
     bool Code = false,
-    string? Link = null);
+    string? Link = null,
+    string? TextColor = null,
+    string? BackgroundColor = null);
 
 public sealed record WikiBlock(
     Guid Id,

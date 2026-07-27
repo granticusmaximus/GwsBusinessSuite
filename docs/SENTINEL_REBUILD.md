@@ -43,8 +43,12 @@ is not guaranteed to exhaustively enumerate every accessible document. Sentinel 
    (`Ctrl/Command+Shift+F` for quick find, `Ctrl/Command+\` for the browser, and `Escape` to
    close the mobile browser). Existing page, database, collaboration, history, and Notion
    workflows remain on their original identifiers and services.
-3. **Editor parity.** Rebuild rich-text selection, text/highlight colors, nested blocks,
-   slash/mention/link menus, drag handles, column movement, comments, and persistent undo.
+3. **Editor parity — in progress.** Rich-text selection now round-trips bold, italic,
+   strikethrough, code, links, safe text colors, and safe highlight colors through the editor,
+   server renderer, Notion import, and Notion write-back. Bounded undo/redo history persists
+   across page reopen and Blazor reconnect for the browser session. Remaining slices cover
+   deeper nested-block behavior, richer slash/mention/link menus, drag/column movement,
+   selection-aware comments, and durable cross-session drafts.
 4. **Database parity.** Unify inline/full-page databases, property menus, filters, sorts,
    groups, layouts, templates, row peeks, calculations, and relation/rollup editing.
 5. **Collaboration and sharing.** Presence, cursors, granular comments, notifications,
