@@ -224,6 +224,26 @@ public static class WikiBlockHtmlRenderer
 
     private static string RenderColumns(WikiBlock block, string indentStyle)
     {
+        if (block.Props.TryGetValue("columnRichTextJson", out var columnRichTextJson))
+        {
+            try
+            {
+                var richColumns = JsonSerializer.Deserialize<List<List<WikiRichTextSpan>>>(
+                    columnRichTextJson,
+                    WikiBlockJson.Options);
+                if (richColumns is { Count: > 0 })
+                {
+                    return $"<div class=\"wiki-columns\"{indentStyle}>"
+                        + string.Concat(richColumns.Select(column => $"<div>{RenderRichText(column)}</div>"))
+                        + "</div>";
+                }
+            }
+            catch (JsonException)
+            {
+                // Older columns use the plain "|||" fallback below.
+            }
+        }
+
         var columns = block.PlainText.Split("|||", StringSplitOptions.TrimEntries);
         return $"<div class=\"wiki-columns\"{indentStyle}>"
             + string.Concat(columns.Select(column => $"<div>{WebUtility.HtmlEncode(column).Replace("\n", "<br />")}</div>"))

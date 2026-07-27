@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using GwsBusinessSuite.Application.Wiki;
+using GwsBusinessSuite.Domain.Entities;
 using Microsoft.Playwright;
 
 namespace GwsBusinessSuite.Tests;
@@ -309,6 +310,98 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
 
         var serialized = (await EditorBlocksAsync(page)).Single();
         serialized.PlainText.Should().Be("Second ||| Third");
+    }
+
+    [Fact]
+    public async Task ImportedInlineBoard_ShouldRenderGroupedCardsAndRemainNavigable()
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.SetContentAsync("""<div id="editor" class="wiki-block-editor"></div>""");
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+
+        var databaseId = Guid.NewGuid();
+        var titlePropertyId = Guid.NewGuid();
+        var statusPropertyId = Guid.NewGuid();
+        var blockJson = WikiBlockJson.Serialize(
+        [
+            new WikiBlock(
+                Guid.NewGuid(),
+                WikiBlockTypes.InlineDatabase,
+                0,
+                [],
+                new Dictionary<string, string>
+                {
+                    ["databaseId"] = databaseId.ToString(),
+                    ["databaseTitle"] = "Work Items"
+                })
+        ]);
+        var snapshot = new WikiInlineDatabaseSnapshot(
+            databaseId,
+            "Work Items",
+            "▦",
+            [
+                new WikiInlineDatabaseProperty(titlePropertyId, "Name", WikiDatabasePropertyTypes.Title, false, []),
+                new WikiInlineDatabaseProperty(
+                    statusPropertyId,
+                    "Status",
+                    WikiDatabasePropertyTypes.Select,
+                    false,
+                    [
+                        new WikiDatabasePropertyOption("todo", "Not started", "gray"),
+                        new WikiDatabasePropertyOption("doing", "In progress", "blue"),
+                        new WikiDatabasePropertyOption("done", "Done", "green")
+                    ])
+            ],
+            [
+                new WikiInlineDatabaseRow(
+                    Guid.NewGuid(),
+                    [
+                        new WikiInlineDatabaseCell(titlePropertyId, "Review workflow"),
+                        new WikiInlineDatabaseCell(statusPropertyId, "doing")
+                    ])
+            ])
+        {
+            Views =
+            [
+                new WikiInlineDatabaseView(Guid.NewGuid(), "Work Items", WikiDatabaseViewTypes.Board, statusPropertyId.ToString())
+            ]
+        };
+        var payload = JsonSerializer.Serialize(
+            new { blockJson, snapshot },
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+
+        await page.EvaluateAsync(
+            """
+            payloadJson => {
+                const payload = JSON.parse(payloadJson);
+                window.editorCalls = [];
+                window.sentinelBlockEditor.initialize(
+                    document.querySelector('#editor'),
+                    {
+                        invokeMethodAsync: (method, ...args) => {
+                            window.editorCalls.push({ method, args });
+                            return Promise.resolve(method === 'GetInlineDatabase' ? payload.snapshot : null);
+                        }
+                    },
+                    payload.blockJson);
+            }
+            """,
+            payload);
+
+        await Expect(page.Locator(".wiki-inline-database-board")).ToBeVisibleAsync();
+        await Expect(page.Locator(".wiki-inline-board-column")).ToHaveCountAsync(3);
+        await Expect(page.Locator(".wiki-inline-board-card")).ToHaveTextAsync("Review workflow");
+        await page.Locator(".wiki-inline-board-card").ClickAsync();
+        (await page.EvaluateAsync<string>(
+            "() => window.editorCalls.at(-1).method"))
+            .Should().Be("OpenLinkedDatabase");
     }
 
     [Fact]

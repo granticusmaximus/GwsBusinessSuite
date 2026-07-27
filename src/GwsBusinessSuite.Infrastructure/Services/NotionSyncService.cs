@@ -22,6 +22,8 @@ public sealed class NotionSyncService(
     ISecretProtector secretProtector,
     ILogger<NotionSyncService> logger) : INotionSyncService
 {
+    private const string CurrentImportMappingVersion = "2";
+
     public async Task<NotionConnectorSettingsView?> GetSettingsAsync(CancellationToken cancellationToken = default)
     {
         var row = await dbContext.NotionConnectorSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
@@ -291,9 +293,15 @@ public sealed class NotionSyncService(
                     .ToListAsync(cancellationToken))
                 .ToDictionary(
                     page => page.NotionId!,
-                    page => new ExistingPageSyncState(
-                        page.NotionLastEditedAt,
-                        WikiBlockJson.ParseBlocks(page.BlocksJson).Count > 0),
+                    page =>
+                    {
+                        var blocks = WikiBlockJson.ParseBlocks(page.BlocksJson);
+                        return new ExistingPageSyncState(
+                            page.NotionLastEditedAt,
+                            blocks.Count > 0,
+                            blocks.Any(block =>
+                                block.Props.GetValueOrDefault("notionImportMappingVersion") == CurrentImportMappingVersion));
+                    },
                     StringComparer.OrdinalIgnoreCase);
             var existingDatabaseWatermarks = (await dbContext.WikiDatabases
                     .AsNoTracking()
@@ -374,13 +382,15 @@ public sealed class NotionSyncService(
                     (localId, wasNew, becameArchived) = await UpsertPageAsync(
                         notionId,
                         title,
+                        item,
                         isArchived,
                         remoteEditedAt,
                         reservedPageSlugs,
                         cancellationToken);
                     existingPageSyncStates.TryGetValue(notionId, out var priorSyncState);
                     var priorWatermark = priorSyncState?.LastEditedAt;
-                    if (ShouldRefreshRemoteContent(
+                    if (!(priorSyncState?.HasCurrentMappingVersion ?? false)
+                        || ShouldRefreshRemoteContent(
                             wasNew,
                             remoteEditedAt,
                             priorWatermark,
@@ -459,6 +469,8 @@ public sealed class NotionSyncService(
                         localId,
                         token,
                         notionIdToRemoteEditedAt[notionId],
+                        notionIdToLocalId,
+                        databaseContainerToLocalIds,
                         cancellationToken);
                     childOrderByParentLocalId[localId] = pageContent.TreeChildren;
                     contentBlocks += pageContent.BlockCount;
@@ -874,6 +886,7 @@ public sealed class NotionSyncService(
     private async Task<(Guid LocalId, bool IsNew, bool BecameArchived)> UpsertPageAsync(
         string notionId,
         string title,
+        JsonElement notionPage,
         bool isArchived,
         DateTimeOffset? remoteEditedAt,
         HashSet<string> reservedSlugs,
@@ -917,6 +930,24 @@ public sealed class NotionSyncService(
         if (!titleChanged || !concurrentLocalEdit)
         {
             page!.Title = title;
+        }
+        var importedIcon = ExtractPageEmoji(notionPage);
+        var cover = ExtractNotionFile(notionPage, "cover");
+        var shouldRefreshPresentation = isNew
+            || remoteEditedAt is null
+            || page!.NotionLastEditedAt is null
+            || remoteEditedAt > page.NotionLastEditedAt;
+        if (shouldRefreshPresentation)
+        {
+            page!.Icon = importedIcon;
+            page.CoverImageUrl = cover is null
+                ? null
+                : await PersistNotionPageAssetAsync(
+                    notionId,
+                    "cover",
+                    cover.Value.Url,
+                    cover.Value.IsTemporary,
+                    cancellationToken);
         }
         page!.NotionArchivedAt = isArchived ? (page.NotionArchivedAt ?? DateTimeOffset.UtcNow) : null;
         if (!concurrentLocalEdit)
@@ -1005,9 +1036,17 @@ public sealed class NotionSyncService(
         Guid wikiPageId,
         string token,
         DateTimeOffset? remoteEditedAt,
+        IReadOnlyDictionary<string, Guid> notionIdToLocalId,
+        IReadOnlyDictionary<string, List<Guid>> databaseContainerToLocalIds,
         CancellationToken cancellationToken)
     {
-        var pageContent = await LoadNotionPageBlocksAsync(notionPageId, token, cancellationToken);
+        var pageContent = await LoadNotionPageBlocksAsync(
+            notionPageId,
+            token,
+            cancellationToken,
+            notionIdToLocalId,
+            databaseContainerToLocalIds);
+        pageContent = pageContent with { Blocks = StampCurrentMappingVersion(pageContent.Blocks) };
 
         var page = await dbContext.WikiPages.FirstOrDefaultAsync(p => p.Id == wikiPageId, cancellationToken);
         if (page is null)
@@ -1090,10 +1129,111 @@ public sealed class NotionSyncService(
     private static bool IsNotionActor(string? actor) =>
         actor is "notion-sync" or "notion-push";
 
+    private static string? ExtractPageEmoji(JsonElement page)
+    {
+        if (!page.TryGetProperty("icon", out var icon)
+            || icon.ValueKind != JsonValueKind.Object
+            || !icon.TryGetProperty("type", out var type)
+            || type.GetString() != "emoji"
+            || !icon.TryGetProperty("emoji", out var emoji)
+            || emoji.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+        return emoji.GetString();
+    }
+
+    private static (string Url, bool IsTemporary)? ExtractNotionFile(JsonElement item, string propertyName)
+    {
+        if (!item.TryGetProperty(propertyName, out var holder)
+            || holder.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var type = holder.TryGetProperty("type", out var typeElement)
+            ? typeElement.GetString()
+            : null;
+        foreach (var candidate in new[] { type, "file", "external", "file_upload" }
+                     .Where(value => !string.IsNullOrWhiteSpace(value))
+                     .Distinct(StringComparer.Ordinal))
+        {
+            if (holder.TryGetProperty(candidate!, out var source)
+                && source.ValueKind == JsonValueKind.Object
+                && source.TryGetProperty("url", out var urlElement)
+                && urlElement.ValueKind == JsonValueKind.String
+                && urlElement.GetString() is { Length: > 0 } url)
+            {
+                return (url, candidate is "file" or "file_upload");
+            }
+        }
+        return null;
+    }
+
+    private async Task<string> PersistNotionPageAssetAsync(
+        string notionPageId,
+        string assetKind,
+        string sourceUrl,
+        bool isTemporary,
+        CancellationToken cancellationToken)
+    {
+        if (!isTemporary)
+        {
+            return sourceUrl;
+        }
+
+        var assetKey = $"{assetKind}:{NormalizeNotionId(notionPageId)}";
+        var importedFile = dbContext.SentinelImportedFiles.Local
+            .FirstOrDefault(file => file.NotionBlockId == assetKey)
+            ?? await dbContext.SentinelImportedFiles
+                .FirstOrDefaultAsync(file => file.NotionBlockId == assetKey, cancellationToken);
+        try
+        {
+            var download = await notionService.DownloadFileAsync(sourceUrl, cancellationToken);
+            if (importedFile is null)
+            {
+                importedFile = new SentinelImportedFile
+                {
+                    NotionBlockId = assetKey,
+                    FileName = download.FileName,
+                    ContentType = download.ContentType,
+                    Content = download.Content,
+                    SizeBytes = download.Content.LongLength,
+                    CreatedBy = "notion-sync"
+                };
+                await dbContext.SentinelImportedFiles.AddAsync(importedFile, cancellationToken);
+            }
+            else
+            {
+                importedFile.FileName = download.FileName;
+                importedFile.ContentType = download.ContentType;
+                importedFile.Content = download.Content;
+                importedFile.SizeBytes = download.Content.LongLength;
+                importedFile.UpdatedAt = DateTimeOffset.UtcNow;
+                importedFile.UpdatedBy = "notion-sync";
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(
+                ex,
+                "Could not cache Notion {AssetKind} for page {NotionPageId}; retaining any existing durable copy.",
+                assetKind,
+                notionPageId);
+            return importedFile is null
+                ? sourceUrl
+                : $"/admin/sentinel/files/{importedFile.Id}";
+        }
+
+        return $"/admin/sentinel/files/{importedFile.Id}";
+    }
+
     private async Task<PageContentSyncResult> LoadNotionPageBlocksAsync(
         string notionPageId,
         string token,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, Guid>? notionIdToLocalId = null,
+        IReadOnlyDictionary<string, List<Guid>>? databaseContainerToLocalIds = null)
     {
         var blocks = new List<WikiBlock>();
         var treeChildren = new List<NotionTreeChild>();
@@ -1106,7 +1246,9 @@ public sealed class NotionSyncService(
                 token,
                 blocks,
                 cancellationToken,
-                treeChildren);
+                treeChildren,
+                notionIdToLocalId,
+                databaseContainerToLocalIds);
         }
         catch (HttpRequestException ex) when (ex.StatusCode is
                                              System.Net.HttpStatusCode.NotFound or
@@ -1172,7 +1314,9 @@ public sealed class NotionSyncService(
         string token,
         List<WikiBlock> blocks,
         CancellationToken cancellationToken,
-        List<NotionTreeChild>? directTreeChildren = null)
+        List<NotionTreeChild>? directTreeChildren = null,
+        IReadOnlyDictionary<string, Guid>? notionIdToLocalId = null,
+        IReadOnlyDictionary<string, List<Guid>>? databaseContainerToLocalIds = null)
     {
         var children = new List<JsonElement>();
         string? cursor = null;
@@ -1204,13 +1348,10 @@ public sealed class NotionSyncService(
                 continue;
             }
 
-            // column_list/column special-cased the same way "table" is above, rather than
-            // going through IsFlattenedWrapper (which would import each column's content
-            // sequentially and lose the side-by-side layout entirely). Sentinel's own native
-            // Columns block only stores a flat "|||"-joined string per column (see
-            // WikiBlockHtmlRenderer.RenderColumns), not nested block content, so a column
-            // containing multiple/rich blocks is flattened to its plain text - a real
-            // simplification, but strictly better than losing the column grouping altogether.
+            // column_list/column is special-cased the same way as table above. Each column is
+            // retained as rich text in columnRichTextJson (including resolved child-page
+            // wikilinks), with the original "|||" plain-text representation kept as a
+            // backward-compatible search/history fallback.
             if (type == "column_list" && childId.Length > 0)
             {
                 var columnChildren = new List<JsonElement>();
@@ -1222,33 +1363,57 @@ public sealed class NotionSyncService(
                     columnListCursor = columnListPage.HasMore ? columnListPage.NextCursor : null;
                 } while (columnListCursor is not null);
 
-                var columnTexts = new List<string>();
+                var mappedColumns = new List<List<WikiBlock>>();
                 foreach (var columnChild in columnChildren)
                 {
                     var columnChildId = columnChild.TryGetProperty("id", out var columnIdElement) ? columnIdElement.GetString() ?? string.Empty : string.Empty;
                     var columnBlocks = new List<WikiBlock>();
                     if (columnChildId.Length > 0)
                     {
-                        await AppendBlockChildrenAsync(columnChildId, 0, token, columnBlocks, cancellationToken);
+                        await AppendBlockChildrenAsync(
+                            columnChildId,
+                            0,
+                            token,
+                            columnBlocks,
+                            cancellationToken,
+                            directTreeChildren,
+                            notionIdToLocalId,
+                            databaseContainerToLocalIds);
                     }
-                    columnTexts.Add(string.Join(" ", columnBlocks.Select(columnBlock => columnBlock.PlainText)));
+                    mappedColumns.Add(columnBlocks);
                 }
 
-                if (columnTexts.Count > 0)
+                if (mappedColumns.Count > 0)
                 {
+                    var columnTexts = mappedColumns
+                        .Select(column => string.Join("\n", column.Select(block => block.PlainText)))
+                        .ToList();
+                    var columnRichText = mappedColumns.Select(JoinBlocksAsRichText).ToList();
+
                     blocks.Add(new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Columns, indentLevel,
-                        [new WikiRichTextSpan(string.Join("|||", columnTexts))], new Dictionary<string, string>()));
+                        [new WikiRichTextSpan(string.Join("|||", columnTexts))],
+                        new Dictionary<string, string>
+                        {
+                            ["columnRichTextJson"] = JsonSerializer.Serialize(columnRichText, WikiBlockJson.Options)
+                        }));
                 }
                 continue;
             }
 
             if (NotionMapping.IsPageTreeBlock(type))
             {
-                // child_page/child_database - already synced as their own top-level page/database.
                 if (directTreeChildren is not null && childId.Length > 0)
                 {
                     directTreeChildren.Add(new NotionTreeChild(childId, type == "child_database"));
                 }
+                blocks.AddRange(await MapPageTreeBlockAsync(
+                    child,
+                    type,
+                    childId,
+                    indentLevel,
+                    notionIdToLocalId,
+                    databaseContainerToLocalIds,
+                    cancellationToken));
                 continue;
             }
 
@@ -1264,7 +1429,9 @@ public sealed class NotionSyncService(
                 {
                     // Pure layout wrapper with no GWS equivalent - its children are imported in
                     // place, one after another, at the same indent level as the wrapper itself.
-                    await AppendBlockChildrenAsync(childId, indentLevel, token, blocks, cancellationToken);
+                    await AppendBlockChildrenAsync(
+                        childId, indentLevel, token, blocks, cancellationToken, null,
+                        notionIdToLocalId, databaseContainerToLocalIds);
                 }
                 continue;
             }
@@ -1278,7 +1445,9 @@ public sealed class NotionSyncService(
                 // still be retrieved and must not be discarded with it.
                 if (hasChildren && childId.Length > 0)
                 {
-                    await AppendBlockChildrenAsync(childId, indentLevel, token, blocks, cancellationToken);
+                    await AppendBlockChildrenAsync(
+                        childId, indentLevel, token, blocks, cancellationToken, null,
+                        notionIdToLocalId, databaseContainerToLocalIds);
                 }
                 continue;
             }
@@ -1287,9 +1456,156 @@ public sealed class NotionSyncService(
             blocks.Add(mapped);
             if (hasChildren && childId.Length > 0)
             {
-                await AppendBlockChildrenAsync(childId, indentLevel + 1, token, blocks, cancellationToken);
+                await AppendBlockChildrenAsync(
+                    childId, indentLevel + 1, token, blocks, cancellationToken, null,
+                    notionIdToLocalId, databaseContainerToLocalIds);
             }
         }
+    }
+
+    private async Task<IReadOnlyList<WikiBlock>> MapPageTreeBlockAsync(
+        JsonElement block,
+        string type,
+        string notionId,
+        int indentLevel,
+        IReadOnlyDictionary<string, Guid>? notionIdToLocalId,
+        IReadOnlyDictionary<string, List<Guid>>? databaseContainerToLocalIds,
+        CancellationToken cancellationToken)
+    {
+        var title = block.TryGetProperty(type, out var body)
+            && body.ValueKind == JsonValueKind.Object
+            && body.TryGetProperty("title", out var titleElement)
+            && titleElement.ValueKind == JsonValueKind.String
+                ? titleElement.GetString() ?? string.Empty
+                : string.Empty;
+
+        if (type == "child_page")
+        {
+            var localId = ResolveLocalId(notionId, notionIdToLocalId);
+            var page = localId is null
+                ? null
+                : await dbContext.WikiPages.AsNoTracking()
+                    .FirstOrDefaultAsync(item => item.Id == localId.Value, cancellationToken);
+            var displayTitle = string.IsNullOrWhiteSpace(title) ? page?.Title ?? "Untitled" : title;
+            var icon = string.IsNullOrWhiteSpace(page?.Icon) ? "📄" : page.Icon;
+            var link = page is null ? null : $"wikilink:{page.Id}";
+            return
+            [
+                new WikiBlock(
+                    Guid.NewGuid(),
+                    WikiBlockTypes.Paragraph,
+                    indentLevel,
+                    [
+                        new WikiRichTextSpan($"{icon} "),
+                        new WikiRichTextSpan(displayTitle, Link: link)
+                    ],
+                    new Dictionary<string, string> { ["notionChildPage"] = "true" })
+            ];
+        }
+
+        var databaseIds = new List<Guid>();
+        if (databaseContainerToLocalIds is not null)
+        {
+            var normalizedId = NormalizeNotionId(notionId);
+            var match = databaseContainerToLocalIds.FirstOrDefault(
+                pair => NormalizeNotionId(pair.Key) == normalizedId);
+            if (match.Value is not null)
+            {
+                databaseIds.AddRange(match.Value);
+            }
+        }
+        var directlyResolvedId = ResolveLocalId(notionId, notionIdToLocalId);
+        if (databaseIds.Count == 0 && directlyResolvedId is not null)
+        {
+            databaseIds.Add(directlyResolvedId.Value);
+        }
+
+        var mapped = new List<WikiBlock>();
+        foreach (var databaseId in databaseIds.Distinct())
+        {
+            var database = await dbContext.WikiDatabases.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Id == databaseId, cancellationToken);
+            if (database is null)
+            {
+                continue;
+            }
+            mapped.Add(new WikiBlock(
+                Guid.NewGuid(),
+                WikiBlockTypes.InlineDatabase,
+                indentLevel,
+                [],
+                new Dictionary<string, string>
+                {
+                    ["databaseId"] = database.Id.ToString(),
+                    ["databaseTitle"] = string.IsNullOrWhiteSpace(title) ? database.Title : title,
+                    ["databaseIcon"] = string.IsNullOrWhiteSpace(database.Icon) ? "▦" : database.Icon
+                }));
+        }
+
+        if (mapped.Count > 0)
+        {
+            return mapped;
+        }
+
+        return
+        [
+            new WikiBlock(
+                Guid.NewGuid(),
+                WikiBlockTypes.Paragraph,
+                indentLevel,
+                [new WikiRichTextSpan($"▦ {(string.IsNullOrWhiteSpace(title) ? "Database" : title)}")],
+                new Dictionary<string, string> { ["notionChildDatabase"] = "true" })
+        ];
+    }
+
+    private static Guid? ResolveLocalId(
+        string notionId,
+        IReadOnlyDictionary<string, Guid>? notionIdToLocalId)
+    {
+        if (notionIdToLocalId is null)
+        {
+            return null;
+        }
+        if (notionIdToLocalId.TryGetValue(notionId, out var exact))
+        {
+            return exact;
+        }
+        var normalizedId = NormalizeNotionId(notionId);
+        foreach (var pair in notionIdToLocalId)
+        {
+            if (NormalizeNotionId(pair.Key) == normalizedId)
+            {
+                return pair.Value;
+            }
+        }
+        return null;
+    }
+
+    private static IReadOnlyList<WikiRichTextSpan> JoinBlocksAsRichText(List<WikiBlock> blocks)
+    {
+        var spans = new List<WikiRichTextSpan>();
+        foreach (var block in blocks)
+        {
+            if (spans.Count > 0)
+            {
+                spans.Add(new WikiRichTextSpan("\n"));
+            }
+            spans.AddRange(block.RichText);
+        }
+        return spans;
+    }
+
+    private static IReadOnlyList<WikiBlock> StampCurrentMappingVersion(IReadOnlyList<WikiBlock> blocks)
+    {
+        if (blocks.Count == 0)
+        {
+            return blocks;
+        }
+        var stamped = blocks.ToList();
+        var props = stamped[0].Props.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        props["notionImportMappingVersion"] = CurrentImportMappingVersion;
+        stamped[0] = stamped[0] with { Props = props };
+        return stamped;
     }
 
     private async Task AppendMeetingNotesAsync(
@@ -1448,8 +1764,6 @@ public sealed class NotionSyncService(
                 return new DatabaseContentSyncResult(0, 0, 0, 0, 0, 0, 0);
             }
 
-            await SyncDatabaseViewsAsync(schema.Value, wikiDatabaseId, token, cancellationToken);
-
             if (schema.Value.TryGetProperty("properties", out var propertiesElement) && propertiesElement.ValueKind == JsonValueKind.Object)
             {
                 var sortOrder = 0;
@@ -1529,6 +1843,12 @@ public sealed class NotionSyncService(
 
                 await dbContext.SaveChangesAsync(cancellationToken);
             }
+            await SyncDatabaseViewsAsync(
+                schema.Value,
+                wikiDatabaseId,
+                token,
+                notionPropertyIdToLocal,
+                cancellationToken);
         }
         else
         {
@@ -1678,7 +1998,12 @@ public sealed class NotionSyncService(
             skippedRows);
     }
 
-    private async Task SyncDatabaseViewsAsync(JsonElement schema, Guid wikiDatabaseId, string token, CancellationToken cancellationToken)
+    private async Task SyncDatabaseViewsAsync(
+        JsonElement schema,
+        Guid wikiDatabaseId,
+        string token,
+        IReadOnlyDictionary<string, (Guid Id, string Type)> notionPropertyIdToLocal,
+        CancellationToken cancellationToken)
     {
         if (!schema.TryGetProperty("views", out var viewsElement) || viewsElement.ValueKind != JsonValueKind.Array) return;
 
@@ -1704,6 +2029,13 @@ public sealed class NotionSyncService(
             existing.NotionId = notionId;
             existing.Name = string.IsNullOrWhiteSpace(name) ? "Notion view" : name;
             existing.Type = MapViewType(type);
+            var groupByPropertyId = ExtractNotionViewGroupPropertyId(remote);
+            var localGroupByPropertyId = groupByPropertyId is not null
+                && notionPropertyIdToLocal.TryGetValue(groupByPropertyId, out var localProperty)
+                    ? localProperty.Id.ToString()
+                    : null;
+            existing.ConfigJson = WikiDatabaseViewConfigJson.Serialize(
+                WikiDatabaseViewConfig.Empty with { GroupByPropertyId = localGroupByPropertyId });
             existing.SortOrder = order++;
             existing.UpdatedAt = DateTimeOffset.UtcNow;
             existing.UpdatedBy = "notion-sync";
@@ -1711,6 +2043,20 @@ public sealed class NotionSyncService(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string? ExtractNotionViewGroupPropertyId(JsonElement view)
+    {
+        if (!view.TryGetProperty("configuration", out var configuration)
+            || configuration.ValueKind != JsonValueKind.Object
+            || !configuration.TryGetProperty("group_by", out var groupBy)
+            || groupBy.ValueKind != JsonValueKind.Object
+            || !groupBy.TryGetProperty("property_id", out var propertyId)
+            || propertyId.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+        return propertyId.GetString();
     }
 
     private static string MapViewType(string? type) => type switch
@@ -2216,7 +2562,10 @@ public sealed class NotionSyncService(
     }
 
     private sealed record NotionTreeChild(string NotionId, bool IsDatabase);
-    private sealed record ExistingPageSyncState(DateTimeOffset? LastEditedAt, bool HasImportedContent);
+    private sealed record ExistingPageSyncState(
+        DateTimeOffset? LastEditedAt,
+        bool HasImportedContent,
+        bool HasCurrentMappingVersion);
 
     private sealed record NotionTreeNodeState(
         Guid Id,

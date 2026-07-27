@@ -1244,7 +1244,22 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
             database.Title,
             string.IsNullOrWhiteSpace(database.Icon) ? "▦" : database.Icon,
             properties,
-            rows);
+            rows)
+        {
+            Views = database.Views
+                .OrderByDescending(view => view.NotionId is not null)
+                .ThenBy(view => view.SortOrder)
+                .Select(view =>
+                {
+                    var config = WikiDatabaseViewConfigJson.Parse(view.ConfigJson);
+                    return new WikiInlineDatabaseView(
+                        view.Id,
+                        view.Name,
+                        view.Type,
+                        config.GroupByPropertyId);
+                })
+                .ToList()
+        };
     }
 
     private static string GetInlineValue(

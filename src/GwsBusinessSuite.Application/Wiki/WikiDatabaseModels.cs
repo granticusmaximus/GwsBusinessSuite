@@ -634,9 +634,18 @@ public sealed record WikiInlineDatabaseCell(Guid PropertyId, string Value);
 
 public sealed record WikiInlineDatabaseRow(Guid Id, IReadOnlyList<WikiInlineDatabaseCell> Cells);
 
+public sealed record WikiInlineDatabaseView(
+    Guid Id,
+    string Name,
+    string Type,
+    string? GroupByPropertyId);
+
 public sealed record WikiInlineDatabaseSnapshot(
     Guid Id,
     string Title,
     string Icon,
     IReadOnlyList<WikiInlineDatabaseProperty> Properties,
-    IReadOnlyList<WikiInlineDatabaseRow> Rows);
+    IReadOnlyList<WikiInlineDatabaseRow> Rows)
+{
+    public IReadOnlyList<WikiInlineDatabaseView> Views { get; init; } = [];
+}

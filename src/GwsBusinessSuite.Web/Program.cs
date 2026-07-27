@@ -49,8 +49,8 @@ builder.Services.AddInfrastructure(builder.Configuration);
 
 builder.Services.AddOptions<DatabaseBackupOptions>()
     .Bind(builder.Configuration.GetSection(DatabaseBackupOptions.SectionName));
-var dataProtectionKeysPath = builder.Configuration[
-    $"{DatabaseBackupOptions.SectionName}:DataProtectionKeysPath"]
+var dataProtectionKeysPath = builder.Configuration["DataProtection:KeysPath"]
+    ?? builder.Configuration[$"{DatabaseBackupOptions.SectionName}:DataProtectionKeysPath"]
     ?? "/app/data/data-protection-keys";
 builder.Services.AddDataProtection()
     .SetApplicationName("GwsBusinessSuite")

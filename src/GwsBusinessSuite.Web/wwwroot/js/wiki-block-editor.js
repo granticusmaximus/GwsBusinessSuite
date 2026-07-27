@@ -328,6 +328,9 @@ function createBlockElement(block, state) {
     el.dataset.blockType = block.type;
     el.dataset.indent = String(block.indentLevel || 0);
     el.dataset.propsJson = JSON.stringify(block.props || {});
+    if (block.props && block.props.notionChildPage === 'true') {
+        el.classList.add('wiki-notion-child-page-link');
+    }
     if (block.type === 'to_do' && block.props && block.props.checked === 'true') el.dataset.checked = 'true';
     if (block.type === 'numbered_list_item') el.dataset.number = (block.props && block.props.number) || '';
     if (block.type === 'toggle') el.dataset.open = block.props && block.props.open === 'true' ? 'true' : 'false';
@@ -579,9 +582,14 @@ function createColumnsBody(block, state) {
     const wrapper = document.createElement('div');
     wrapper.className = 'wiki-columns-editor';
     const text = (block.richText || []).map(span => span.text || '').join('');
-    const columns = (text || 'Column one ||| Column two')
+    const fallbackColumns = (text || 'Column one ||| Column two')
         .split('|||', 5)
         .map(column => column.trim());
+    let columns = fallbackColumns.map(column => [{ text: column }]);
+    try {
+        const richColumns = JSON.parse((block.props && block.props.columnRichTextJson) || '[]');
+        if (Array.isArray(richColumns) && richColumns.length > 0) columns = richColumns;
+    } catch { /* use the plain-text fallback from older Sentinel versions */ }
     while (columns.length < 2) columns.push('');
 
     const renderColumn = value => {
@@ -630,8 +638,10 @@ function createColumnsBody(block, state) {
 
         const content = document.createElement('div');
         content.className = 'wiki-block-content wiki-column-content';
-        content.contentEditable = 'plaintext-only' in document.body ? 'plaintext-only' : 'true';
-        content.textContent = value;
+        content.contentEditable = 'true';
+        content.innerHTML = Array.isArray(value)
+            ? htmlFromRichText(value)
+            : htmlFromRichText([{ text: value || '' }]);
         content.dataset.placeholder = 'Type in this column';
         content.addEventListener('input', () => scheduleNotify(state));
         controls.append(moveLeft, moveRight, remove);
@@ -998,8 +1008,10 @@ function renderInlineDatabase(wrapper, state, databaseId, resetDatabase) {
     });
 }
 
-function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase) {
+function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, selectedViewId = null) {
     wrapper.innerHTML = '';
+    const views = snapshot.views || [];
+    const activeView = views.find(view => view.id === selectedViewId) || views[0] || null;
     const header = document.createElement('div');
     header.className = 'wiki-inline-database-header';
     const identity = document.createElement('button');
@@ -1025,36 +1037,56 @@ function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase) {
     headerActions.append(open, change);
     header.append(identity, headerActions);
 
+    const viewTabs = document.createElement('div');
+    viewTabs.className = 'wiki-inline-database-views';
+    for (const view of views) {
+        const tab = document.createElement('button');
+        tab.type = 'button';
+        tab.className = 'wiki-inline-database-view';
+        tab.classList.toggle('is-active', view.id === activeView?.id);
+        tab.textContent = view.name || view.type;
+        tab.addEventListener('click', () =>
+            renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, view.id));
+        viewTabs.appendChild(tab);
+    }
+
     const scroller = document.createElement('div');
     scroller.className = 'wiki-inline-database-scroller';
-    const table = document.createElement('table');
-    table.className = 'wiki-inline-database-table';
-    const thead = document.createElement('thead');
-    const headingRow = document.createElement('tr');
-    for (const property of snapshot.properties) {
-        const heading = document.createElement('th');
-        heading.textContent = property.name;
-        heading.title = property.type;
-        headingRow.appendChild(heading);
-    }
-    thead.appendChild(headingRow);
-    table.appendChild(thead);
-
-    const tbody = document.createElement('tbody');
-    for (const row of snapshot.rows) {
-        const tableRow = document.createElement('tr');
+    if (activeView?.type === 'board' && activeView.groupByPropertyId) {
+        scroller.appendChild(createInlineBoard(
+            snapshot,
+            activeView.groupByPropertyId,
+            () => state.dotNetRef.invokeMethodAsync('OpenLinkedDatabase', snapshot.id)));
+    } else {
+        const table = document.createElement('table');
+        table.className = 'wiki-inline-database-table';
+        const thead = document.createElement('thead');
+        const headingRow = document.createElement('tr');
         for (const property of snapshot.properties) {
-            const cell = document.createElement('td');
-            const value = row.cells.find(item => item.propertyId === property.id)?.value || '';
-            cell.appendChild(createInlineCellEditor(state, snapshot.id, row.id, property, value, updated => {
-                if (updated) renderInlineDatabaseSnapshot(wrapper, state, updated, resetDatabase);
-            }));
-            tableRow.appendChild(cell);
+            const heading = document.createElement('th');
+            heading.textContent = property.name;
+            heading.title = property.type;
+            headingRow.appendChild(heading);
         }
-        tbody.appendChild(tableRow);
+        thead.appendChild(headingRow);
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        for (const row of snapshot.rows) {
+            const tableRow = document.createElement('tr');
+            for (const property of snapshot.properties) {
+                const cell = document.createElement('td');
+                const value = row.cells.find(item => item.propertyId === property.id)?.value || '';
+                cell.appendChild(createInlineCellEditor(state, snapshot.id, row.id, property, value, updated => {
+                    if (updated) renderInlineDatabaseSnapshot(wrapper, state, updated, resetDatabase, activeView?.id);
+                }));
+                tableRow.appendChild(cell);
+            }
+            tbody.appendChild(tableRow);
+        }
+        table.appendChild(tbody);
+        scroller.appendChild(table);
     }
-    table.appendChild(tbody);
-    scroller.appendChild(table);
 
     const footer = document.createElement('div');
     footer.className = 'wiki-inline-database-footer';
@@ -1065,13 +1097,52 @@ function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase) {
         addRow.disabled = true;
         try {
             const updated = await state.dotNetRef.invokeMethodAsync('AddInlineDatabaseRow', snapshot.id);
-            if (updated) renderInlineDatabaseSnapshot(wrapper, state, updated, resetDatabase);
+            if (updated) renderInlineDatabaseSnapshot(wrapper, state, updated, resetDatabase, activeView?.id);
         } finally {
             addRow.disabled = false;
         }
     });
     footer.appendChild(addRow);
-    wrapper.append(header, scroller, footer);
+    wrapper.append(header);
+    if (views.length > 0) wrapper.append(viewTabs);
+    wrapper.append(scroller, footer);
+}
+
+function createInlineBoard(snapshot, groupByPropertyId, openDatabase) {
+    const board = document.createElement('div');
+    board.className = 'wiki-inline-database-board';
+    const groupProperty = snapshot.properties.find(property => property.id === groupByPropertyId);
+    const titleProperty = snapshot.properties.find(property => property.type === 'title')
+        || snapshot.properties[0];
+    const options = [...(groupProperty?.options || [])];
+    options.push({ id: '', label: 'No status' });
+
+    for (const option of options) {
+        const rows = snapshot.rows.filter(row =>
+            (row.cells.find(cell => cell.propertyId === groupByPropertyId)?.value || '') === option.id);
+        if (option.id === '' && rows.length === 0) continue;
+        const column = document.createElement('section');
+        column.className = 'wiki-inline-board-column';
+        const heading = document.createElement('div');
+        heading.className = 'wiki-inline-board-heading';
+        const label = document.createElement('span');
+        label.textContent = option.label || 'No status';
+        const count = document.createElement('span');
+        count.textContent = String(rows.length);
+        heading.append(label, count);
+        column.appendChild(heading);
+
+        for (const row of rows) {
+            const card = document.createElement('button');
+            card.type = 'button';
+            card.className = 'wiki-inline-board-card';
+            card.textContent = row.cells.find(cell => cell.propertyId === titleProperty?.id)?.value || 'Untitled';
+            card.addEventListener('click', openDatabase);
+            column.appendChild(card);
+        }
+        board.appendChild(column);
+    }
+    return board;
 }
 
 function createInlineCellEditor(state, databaseId, rowId, property, value, onSaved) {
@@ -2076,6 +2147,11 @@ function serializeBlock(blockEl) {
     }
     if (type === 'toggle') props.open = blockEl.dataset.open === 'true' ? 'true' : 'false';
     if (type === 'table') props.tableJson = JSON.stringify(serializeTableRichText(blockEl));
+    if (type === 'columns') {
+        props.columnRichTextJson = JSON.stringify(
+            [...blockEl.querySelectorAll(':scope > .wiki-block-body .wiki-column-content')]
+                .map(column => richTextFromNode(column)));
+    }
     if (type === 'image' || type === 'embed') {
         props.url = blockEl.dataset.url || '';
         if (blockEl.dataset.fileName) props.fileName = blockEl.dataset.fileName;

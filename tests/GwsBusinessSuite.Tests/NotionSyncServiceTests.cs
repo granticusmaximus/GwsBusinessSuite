@@ -203,7 +203,12 @@ public sealed class NotionSyncServiceTests
             Slug = "already-imported",
             NotionId = "page-1",
             BlocksJson = WikiBlockJson.Serialize(
-                [new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0, [new WikiRichTextSpan("Existing")], new Dictionary<string, string>())]),
+                [new WikiBlock(
+                    Guid.NewGuid(),
+                    WikiBlockTypes.Paragraph,
+                    0,
+                    [new WikiRichTextSpan("Existing")],
+                    new Dictionary<string, string> { ["notionImportMappingVersion"] = "2" })]),
             CreatedBy = "notion-sync"
         });
         await fixture.Db.SaveChangesAsync();
@@ -252,6 +257,48 @@ public sealed class NotionSyncServiceTests
         WikiBlockJson.ParseBlocks(page.BlocksJson)
             .Should().ContainSingle(block => block.PlainText == "Recovered page content");
         page.NotionLastEditedAt.Should().Be(remoteEditedAt);
+    }
+
+    [Fact]
+    public async Task SyncAsync_ShouldRefreshPagesCreatedByAnOlderImportMapping()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        var remoteEditedAt = DateTimeOffset.UtcNow.AddMinutes(-10);
+        fixture.Db.WikiPages.Add(new GwsBusinessSuite.Domain.Entities.WikiPage
+        {
+            Title = "Unum",
+            Slug = "unum",
+            NotionId = "unum",
+            NotionLastEditedAt = remoteEditedAt,
+            BlocksJson = WikiBlockJson.Serialize(
+                [new WikiBlock(
+                    Guid.NewGuid(),
+                    WikiBlockTypes.Paragraph,
+                    0,
+                    [new WikiRichTextSpan("Old flattened import")],
+                    new Dictionary<string, string>())]),
+            CreatedBy = "notion-sync"
+        });
+        await fixture.Db.SaveChangesAsync();
+        fixture.Notion.SearchResults =
+        [
+            Page("unum", "Unum", lastEditedAt: remoteEditedAt),
+            Page("notes", "Important Notes", """{"type":"page_id","page_id":"unum"}""")
+        ];
+        fixture.Notion.BlockChildren["unum"] =
+        [
+            Json("""{"object":"block","id":"notes","type":"child_page","has_children":false,"child_page":{"title":"Important Notes"}}""")
+        ];
+
+        var result = await fixture.Service.SyncAsync();
+
+        result.IsSuccess.Should().BeTrue();
+        fixture.Notion.BlockChildrenRequests.Should().Contain("unum");
+        var page = await fixture.Db.WikiPages.SingleAsync(item => item.NotionId == "unum");
+        var importedLink = WikiBlockJson.ParseBlocks(page.BlocksJson).Should().ContainSingle().Subject;
+        importedLink.RichText.Should().Contain(span =>
+            span.Link != null && span.Link.StartsWith("wikilink:", StringComparison.Ordinal));
+        importedLink.Props["notionImportMappingVersion"].Should().Be("2");
     }
 
     [Fact]
@@ -742,6 +789,107 @@ public sealed class NotionSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_ShouldPreserveNotionPagePresentationLinksColumnsAndInlineBoard()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.SearchResults =
+        [
+            Page("unum", "Unum", icon: "💼", coverUrl: "https://example.test/unum-cover.png"),
+            Page("on-call", "On Call Duties", """{"type":"page_id","page_id":"unum"}"""),
+            Page("notes", "Important Notes", """{"type":"page_id","page_id":"unum"}"""),
+            Page("meetings", "Meetings", """{"type":"page_id","page_id":"unum"}"""),
+            DataSource(
+                "work-items-source",
+                "Work Items",
+                "work-items-container",
+                """{"type":"page_id","page_id":"unum"}""")
+        ];
+        fixture.Notion.BlockChildren["unum"] =
+        [
+            Json("""{"object":"block","id":"intro","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Knowledge for my work"}]}}"""),
+            Json("""{"object":"block","id":"divider","type":"divider","has_children":false,"divider":{}}"""),
+            Json("""{"object":"block","id":"columns","type":"column_list","has_children":true,"column_list":{}}"""),
+            Json("""{"object":"block","id":"work-items-container","type":"child_database","has_children":false,"child_database":{"title":"Work Items"}}""")
+        ];
+        fixture.Notion.BlockChildren["columns"] =
+        [
+            Json("""{"object":"block","id":"left","type":"column","has_children":true,"column":{}}"""),
+            Json("""{"object":"block","id":"right","type":"column","has_children":true,"column":{}}""")
+        ];
+        fixture.Notion.BlockChildren["left"] =
+        [
+            Json("""{"object":"block","id":"on-call","type":"child_page","has_children":false,"child_page":{"title":"On Call Duties"}}"""),
+            Json("""{"object":"block","id":"notes","type":"child_page","has_children":false,"child_page":{"title":"Important Notes"}}""")
+        ];
+        fixture.Notion.BlockChildren["right"] =
+        [
+            Json("""{"object":"block","id":"meetings","type":"child_page","has_children":false,"child_page":{"title":"Meetings"}}""")
+        ];
+        fixture.Notion.DatabaseSchemas["work-items-source"] = Json("""
+            {
+              "properties":{
+                "Name":{"id":"title","type":"title","title":{}},
+                "Status":{"id":"status","type":"select","select":{"options":[
+                  {"id":"todo","name":"Not started","color":"gray"},
+                  {"id":"doing","name":"In progress","color":"blue"},
+                  {"id":"done","name":"Done","color":"green"}
+                ]}}
+              },
+              "views":[{
+                "id":"board-view",
+                "name":"Work Items",
+                "type":"board",
+                "configuration":{"type":"board","group_by":{"type":"select","property_id":"status"}}
+              }]
+            }
+            """);
+        fixture.Notion.DatabaseRows["work-items-source"] =
+        [
+            Json("""
+                {
+                  "object":"page",
+                  "id":"task-1",
+                  "parent":{"type":"data_source_id","data_source_id":"work-items-source"},
+                  "properties":{
+                    "Name":{"id":"title","type":"title","title":[{"plain_text":"Review workflow"}]},
+                    "Status":{"id":"status","type":"select","select":{"id":"doing","name":"In progress","color":"blue"}}
+                  }
+                }
+                """)
+        ];
+
+        (await fixture.Service.SyncAsync()).IsSuccess.Should().BeTrue();
+
+        var page = await fixture.Db.WikiPages.SingleAsync(item => item.NotionId == "unum");
+        page.Icon.Should().Be("💼");
+        page.CoverImageUrl.Should().Be("https://example.test/unum-cover.png");
+        var blocks = WikiBlockJson.ParseBlocks(page.BlocksJson);
+        var columns = blocks.Should().ContainSingle(block => block.Type == WikiBlockTypes.Columns).Subject;
+        columns.Props.Should().ContainKey("columnRichTextJson");
+        var richColumns = JsonSerializer.Deserialize<List<List<WikiRichTextSpan>>>(
+            columns.Props["columnRichTextJson"],
+            WikiBlockJson.Options)!;
+        richColumns.SelectMany(column => column)
+            .Where(span => span.Link is not null)
+            .Should().HaveCount(3)
+            .And.OnlyContain(span => span.Link!.StartsWith("wikilink:", StringComparison.Ordinal));
+
+        var database = await fixture.Db.WikiDatabases.SingleAsync(item => item.NotionId == "work-items-source");
+        blocks.Should().ContainSingle(block =>
+            block.Type == WikiBlockTypes.InlineDatabase
+            && block.Props["databaseId"] == database.Id.ToString());
+        (await fixture.Db.WikiDatabaseViews
+                .Where(item => item.WikiDatabaseId == database.Id)
+                .ToListAsync())
+            .Should().Contain(view => view.Type == WikiDatabaseViewTypes.Board);
+        var inlineSnapshot = await new WikiDatabaseService(fixture.Db).GetInlineDatabaseAsync(database.Id);
+        inlineSnapshot!.Views.Should().ContainSingle(view =>
+            view.Type == WikiDatabaseViewTypes.Board
+            && view.GroupByPropertyId != null);
+        inlineSnapshot.Rows.Should().ContainSingle();
+    }
+
+    [Fact]
     public async Task SyncAsync_ShouldQueryOnlyChangedDatabaseRowsAndSkipUnchangedRowContent()
     {
         await using var fixture = await SyncFixture.CreateAsync();
@@ -961,7 +1109,9 @@ public sealed class NotionSyncServiceTests
         string title,
         string parent = "{\"type\":\"workspace\",\"workspace\":true}",
         bool archived = false,
-        DateTimeOffset? lastEditedAt = null)
+        DateTimeOffset? lastEditedAt = null,
+        string? icon = null,
+        string? coverUrl = null)
     {
         var page = new Dictionary<string, object?>
         {
@@ -978,6 +1128,18 @@ public sealed class NotionSyncServiceTests
                 }
             }
         };
+        if (icon is not null)
+        {
+            page["icon"] = new Dictionary<string, object?> { ["type"] = "emoji", ["emoji"] = icon };
+        }
+        if (coverUrl is not null)
+        {
+            page["cover"] = new Dictionary<string, object?>
+            {
+                ["type"] = "external",
+                ["external"] = new Dictionary<string, object?> { ["url"] = coverUrl }
+            };
+        }
         if (lastEditedAt is not null)
         {
             page["last_edited_time"] = lastEditedAt.Value.UtcDateTime.ToString("O");
