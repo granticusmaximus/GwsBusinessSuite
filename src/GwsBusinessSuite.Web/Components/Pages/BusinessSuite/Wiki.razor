@@ -1861,6 +1861,7 @@
         CursorTracker.Moved += HandleCursorsMoved;
         await LoadTreeAsync(selectFirstPage: false);
         await LoadWorkspaceNavigationAsync();
+        await RestoreLastOpenedItemAsync();
 
         var query = QueryHelpers.ParseQuery(Navigator.ToAbsoluteUri(Navigator.Uri).Query);
         if (query.TryGetValue("notionOAuth", out var oauthResult))
@@ -2085,6 +2086,24 @@
 
     private Task OpenNavigationItemAsync(SentinelNavigationItem item) =>
         item.IsDatabase ? OpenDatabaseAsync(item.Id) : OpenPageAsync(item.Id);
+
+    private async Task RestoreLastOpenedItemAsync()
+    {
+        var lastOpened = Navigation.Recents.FirstOrDefault(item =>
+            item.IsDatabase
+                ? WikiDatabases.Any(database =>
+                    database.Id == item.Id && database.NotionArchivedAt is null)
+                : WikiPages.Any(page =>
+                    page.Id == item.Id && page.NotionArchivedAt is null));
+        if (lastOpened is null)
+        {
+            return;
+        }
+
+        await OpenNavigationItemAsync(lastOpened);
+        // Restoration should feel like continuity, not a new user action that needs a banner.
+        StatusMessage = string.Empty;
+    }
 
     private async Task LoadTreeAsync(bool selectFirstPage)
     {
