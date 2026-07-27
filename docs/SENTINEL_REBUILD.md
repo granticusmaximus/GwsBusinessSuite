@@ -46,9 +46,12 @@ is not guaranteed to exhaustively enumerate every accessible document. Sentinel 
 3. **Editor parity — in progress.** Rich-text selection now round-trips bold, italic,
    strikethrough, code, links, safe text colors, and safe highlight colors through the editor,
    server renderer, Notion import, and Notion write-back. Bounded undo/redo history persists
-   across page reopen and Blazor reconnect for the browser session. Remaining slices cover
-   deeper nested-block behavior, richer slash/mention/link menus, drag/column movement,
-   selection-aware comments, and durable cross-session drafts.
+   across page reopen and Blazor reconnect for the browser session. Nested blocks now behave
+   as hierarchy-safe branches: split/insert, indent/outdent, duplicate, peer movement,
+   drag/reorder, delete, and undo preserve every contiguous descendant while retaining the
+   migration-safe flat `IndentLevel` representation. Remaining slices cover richer
+   slash/mention/link menus, column movement, selection-aware comments, and durable
+   cross-session drafts.
 4. **Database parity.** Unify inline/full-page databases, property menus, filters, sorts,
    groups, layouts, templates, row peeks, calculations, and relation/rollup editing.
 5. **Collaboration and sharing.** Presence, cursors, granular comments, notifications,

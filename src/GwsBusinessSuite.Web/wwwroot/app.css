@@ -1316,7 +1316,9 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 }
 .wiki-block-menu .list-group-item:disabled,
 .wiki-block-menu .list-group-item[disabled] {
-    opacity: .4;
+    background: var(--gws-panel-bg) !important;
+    color: var(--gws-text-soft) !important;
+    opacity: 1;
     pointer-events: none;
 }
 .wiki-block-body {

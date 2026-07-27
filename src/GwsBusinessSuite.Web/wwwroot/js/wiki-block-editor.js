@@ -228,8 +228,11 @@ function createBlockElement(block, state) {
     addBtn.textContent = '+';
     addBtn.addEventListener('mousedown', event => {
         event.preventDefault();
-        const created = createBlockElement(emptyBlock('paragraph'), state);
-        el.after(created);
+        const block = emptyBlock('paragraph');
+        block.indentLevel = blockIndent(el);
+        const created = createBlockElement(block, state);
+        const branch = getBlockBranch(el);
+        branch[branch.length - 1].after(created);
         refreshBlockPresentation(state.container);
         focusBlock(created);
         notifyChanged(state);
@@ -1071,9 +1074,10 @@ function splitBlock(state, blockEl, content) {
         ? 'paragraph'
         : blockEl.dataset.blockType;
     const newBlock = emptyBlock(newType);
-    newBlock.indentLevel = Number(blockEl.dataset.indent || '0');
+    newBlock.indentLevel = blockIndent(blockEl);
     const newEl = createBlockElement(newBlock, state);
-    blockEl.after(newEl);
+    const branch = getBlockBranch(blockEl);
+    branch[branch.length - 1].after(newEl);
     const newContent = newEl.querySelector('.wiki-block-content');
     if (newContent) newContent.innerHTML = afterHtml;
 
@@ -1101,19 +1105,66 @@ function mergeIntoPrevious(state, blockEl, previous) {
 function indentBlock(state, blockEl) {
     const previous = blockEl.previousElementSibling;
     if (!previous) return;
-    const current = Number(blockEl.dataset.indent || '0');
-    const max = Number(previous.dataset.indent || '0') + 1;
-    blockEl.dataset.indent = String(Math.min(current + 1, max));
-    applyIndentStyle(blockEl);
+    const current = blockIndent(blockEl);
+    if (blockIndent(previous) < current) return;
+    changeBranchIndent(blockEl, 1);
     notifyChanged(state);
 }
 
 function outdentBlock(state, blockEl) {
-    const current = Number(blockEl.dataset.indent || '0');
+    const current = blockIndent(blockEl);
     if (current === 0) return;
-    blockEl.dataset.indent = String(current - 1);
-    applyIndentStyle(blockEl);
+    changeBranchIndent(blockEl, -1);
     notifyChanged(state);
+}
+
+function blockIndent(blockEl) {
+    const indent = Number(blockEl?.dataset.indent || '0');
+    return Number.isFinite(indent) ? Math.max(0, indent) : 0;
+}
+
+// Sentinel persists hierarchy as a flat, ordered block list with IndentLevel. A branch is a
+// block plus every contiguous block that is more deeply indented. Structural editor actions
+// must move the entire branch or they silently re-parent descendants on the next round trip.
+function getBlockBranch(blockEl) {
+    const branch = [blockEl];
+    const rootIndent = blockIndent(blockEl);
+    let candidate = blockEl.nextElementSibling;
+    while (candidate && candidate.classList.contains('wiki-block') && blockIndent(candidate) > rootIndent) {
+        branch.push(candidate);
+        candidate = candidate.nextElementSibling;
+    }
+    return branch;
+}
+
+function changeBranchIndent(blockEl, delta) {
+    for (const branchBlock of getBlockBranch(blockEl)) {
+        branchBlock.dataset.indent = String(Math.max(0, blockIndent(branchBlock) + delta));
+        applyIndentStyle(branchBlock);
+    }
+}
+
+function previousPeerRoot(blockEl) {
+    const indent = blockIndent(blockEl);
+    let candidate = blockEl.previousElementSibling;
+    while (candidate) {
+        const candidateIndent = blockIndent(candidate);
+        if (candidateIndent === indent) return candidate;
+        if (candidateIndent < indent) return null;
+        candidate = candidate.previousElementSibling;
+    }
+    return null;
+}
+
+function nextPeerRoot(blockEl) {
+    const branch = getBlockBranch(blockEl);
+    const candidate = branch[branch.length - 1].nextElementSibling;
+    return candidate && blockIndent(candidate) === blockIndent(blockEl) ? candidate : null;
+}
+
+function canIndentBlock(blockEl) {
+    const previous = blockEl.previousElementSibling;
+    return Boolean(previous) && blockIndent(previous) >= blockIndent(blockEl);
 }
 
 // ---- Slash command menu (same trigger -> async search -> floating dropdown
@@ -1322,33 +1373,51 @@ function onHandlePointerDown(state, event) {
     const blockEl = handle.closest('.wiki-block');
     if (!blockEl) return;
 
-    state.drag = { blockEl, pointerId: event.pointerId, placeholder: null };
-    blockEl.classList.add('is-dragging');
+    const branch = getBlockBranch(blockEl);
+    state.drag = { blockEl, branch, pointerId: event.pointerId };
+    branch.forEach(element => element.classList.add('is-dragging'));
     handle.setPointerCapture(event.pointerId);
     event.preventDefault();
 }
 
 function onHandlePointerMove(state, event) {
     if (!state.drag || state.drag.pointerId !== event.pointerId) return;
-    const siblings = [...state.container.querySelectorAll('.wiki-block')].filter(el => el !== state.drag.blockEl);
+    const dragged = new Set(state.drag.branch);
+    const siblings = [...state.container.querySelectorAll('.wiki-block')].filter(el => !dragged.has(el));
     const target = siblings.find(el => {
         const rect = el.getBoundingClientRect();
         return event.clientY >= rect.top && event.clientY <= rect.bottom;
     });
     if (!target) return;
 
-    const rect = target.getBoundingClientRect();
-    const insertAfter = event.clientY > rect.top + rect.height / 2;
-    if (insertAfter) target.after(state.drag.blockEl);
-    else target.before(state.drag.blockEl);
+    const peer = peerRootAtIndent(target, blockIndent(state.drag.blockEl));
+    if (!peer) return;
+    const peerBranch = getBlockBranch(peer).filter(element => !dragged.has(element));
+    if (peerBranch.length === 0) return;
+    const firstRect = peerBranch[0].getBoundingClientRect();
+    const lastRect = peerBranch[peerBranch.length - 1].getBoundingClientRect();
+    const insertAfter = event.clientY > firstRect.top + ((lastRect.bottom - firstRect.top) / 2);
+    if (insertAfter) peerBranch[peerBranch.length - 1].after(...state.drag.branch);
+    else peer.before(...state.drag.branch);
 }
 
 function onHandlePointerUp(state, event) {
     if (!state.drag || state.drag.pointerId !== event.pointerId) return;
-    state.drag.blockEl.classList.remove('is-dragging');
+    state.drag.branch.forEach(element => element.classList.remove('is-dragging'));
     state.drag = null;
     refreshBlockPresentation(state.container);
     notifyChanged(state);
+}
+
+function peerRootAtIndent(blockEl, indent) {
+    let candidate = blockEl;
+    while (candidate) {
+        const candidateIndent = blockIndent(candidate);
+        if (candidateIndent === indent) return candidate;
+        if (candidateIndent < indent) return null;
+        candidate = candidate.previousElementSibling;
+    }
+    return null;
 }
 
 // ---- Contextual block actions (⋮ menu, mirrored by keyboard shortcuts) ---
@@ -1358,12 +1427,16 @@ function openBlockMenu(state, blockEl, anchorEl) {
 
     const menu = document.createElement('div');
     menu.className = 'wiki-slash-menu wiki-block-menu list-group shadow-sm';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', 'Block actions');
     positionMenu(menu, anchorEl);
 
     const items = [
         { label: 'Duplicate', icon: '⧉', action: () => duplicateBlock(state, blockEl) },
-        { label: 'Move up', icon: '↑', action: () => moveBlock(state, blockEl, -1), disabled: !blockEl.previousElementSibling },
-        { label: 'Move down', icon: '↓', action: () => moveBlock(state, blockEl, 1), disabled: !blockEl.nextElementSibling },
+        { label: 'Indent', icon: '→', action: () => indentBlock(state, blockEl), disabled: !canIndentBlock(blockEl) },
+        { label: 'Outdent', icon: '←', action: () => outdentBlock(state, blockEl), disabled: blockIndent(blockEl) === 0 },
+        { label: 'Move up', icon: '↑', action: () => moveBlock(state, blockEl, -1), disabled: !previousPeerRoot(blockEl) },
+        { label: 'Move down', icon: '↓', action: () => moveBlock(state, blockEl, 1), disabled: !nextPeerRoot(blockEl) },
         { label: 'Delete', icon: '🗑', action: () => deleteBlockAction(state, blockEl) }
     ];
 
@@ -1371,6 +1444,7 @@ function openBlockMenu(state, blockEl, anchorEl) {
         const option = document.createElement('button');
         option.type = 'button';
         option.className = 'list-group-item list-group-item-action py-1 px-2 small d-flex align-items-center gap-2';
+        option.setAttribute('role', 'menuitem');
         option.disabled = !!item.disabled;
         option.innerHTML = `<span class="wiki-slash-icon">${item.icon}</span><span>${item.label}</span>`;
         option.addEventListener('mousedown', event => {
@@ -1390,33 +1464,45 @@ function closeBlockMenu(state) {
 }
 
 function duplicateBlock(state, blockEl) {
-    const block = serializeBlock(blockEl);
-    block.id = crypto.randomUUID();
-    const newEl = createBlockElement(block, state);
-    blockEl.after(newEl);
+    const branch = getBlockBranch(blockEl);
+    const duplicate = branch.map(element => {
+        const block = serializeBlock(element);
+        block.id = crypto.randomUUID();
+        return createBlockElement(block, state);
+    });
+    branch[branch.length - 1].after(...duplicate);
     refreshBlockPresentation(state.container);
-    focusBlock(newEl);
+    focusBlock(duplicate[0]);
     notifyChanged(state);
 }
 
 function moveBlock(state, blockEl, direction) {
-    const sibling = direction < 0 ? blockEl.previousElementSibling : blockEl.nextElementSibling;
-    if (!sibling) return;
-    if (direction < 0) sibling.before(blockEl);
-    else sibling.after(blockEl);
+    const branch = getBlockBranch(blockEl);
+    if (direction < 0) {
+        const previous = previousPeerRoot(blockEl);
+        if (!previous) return;
+        previous.before(...branch);
+    } else {
+        const next = nextPeerRoot(blockEl);
+        if (!next) return;
+        const nextBranch = getBlockBranch(next);
+        nextBranch[nextBranch.length - 1].after(...branch);
+    }
     refreshBlockPresentation(state.container);
     notifyChanged(state);
 }
 
 function deleteBlockAction(state, blockEl) {
-    const next = blockEl.nextElementSibling || blockEl.previousElementSibling;
-    if (state.container.children.length <= 1) {
+    const branch = getBlockBranch(blockEl);
+    const next = branch[branch.length - 1].nextElementSibling || blockEl.previousElementSibling;
+    if (state.container.children.length <= branch.length) {
         // Mirrors setBlocks' own invariant: the editor always shows at least one block.
         const empty = createBlockElement(emptyBlock('paragraph'), state);
-        blockEl.replaceWith(empty);
+        blockEl.before(empty);
+        branch.forEach(element => element.remove());
         focusBlock(empty);
     } else {
-        blockEl.remove();
+        branch.forEach(element => element.remove());
         if (next) focusBlock(next);
     }
     refreshBlockPresentation(state.container);
