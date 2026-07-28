@@ -62,6 +62,17 @@ dotnet build src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-and
 dotnet build src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-maccatalyst
 ```
 
+On a configured development Mac, launch the native Mac Catalyst client from any directory with:
+
+```bash
+open GWS
+```
+
+The shell shortcut delegates to `scripts/open-gws-mac.sh`. The script selects the Mac's
+architecture, rebuilds the Debug app bundle when client source files have changed, and opens
+the native `GWS Business Suite.app`. Other uses of the macOS `open` command are delegated
+unchanged.
+
 Apple builds must use the Xcode version required by the installed iOS/Mac Catalyst workload.
 Windows packaging must run on a Windows build agent; signed iOS/macOS packages require an Apple
 developer identity and provisioning profile.
