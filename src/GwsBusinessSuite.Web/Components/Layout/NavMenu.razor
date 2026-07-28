@@ -21,12 +21,12 @@
             </NavLink>
             <NavLink class="gws-nav-link" href="admin/content-studio" title="Content Studio">
                 <i class="bi bi-magic" aria-hidden="true"></i>
-                <span class="gws-nav-link-copy"><span>Content Studio</span><small>AI-assisted drafts</small></span>
+                <span class="gws-nav-link-copy"><span>Content Studio</span><small>SentinelGPT-assisted drafts</small></span>
                 @if (_pendingDraftCount > 0) { <span class="gws-nav-count">@_pendingDraftCount</span> }
             </NavLink>
-            <NavLink class="gws-nav-link" href="admin/app-generation" title="AI App Builder">
+            <NavLink class="gws-nav-link" href="admin/app-generation" title="SentinelGPT Page Builder">
                 <i class="bi bi-stars" aria-hidden="true"></i>
-                <span class="gws-nav-link-copy"><span>AI Page Builder</span><small>Draft new site pages</small></span>
+                <span class="gws-nav-link-copy"><span>SentinelGPT Builder</span><small>Draft new site pages</small></span>
             </NavLink>
             @if (IsContributorOrAbove)
             {
@@ -80,7 +80,7 @@
             <div class="gws-nav-group-items">
                 <NavLink class="gws-nav-link" href="admin/news-intelligence" title="Media Watch">
                     <i class="bi bi-newspaper" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Media Watch</span><small>AI-curated topic feeds</small></span>
+                    <span class="gws-nav-link-copy"><span>Media Watch</span><small>SentinelGPT-curated feeds</small></span>
                 </NavLink>
                 <NavLink class="gws-nav-link" href="admin/government-intelligence" title="Civic Watch">
                     <i class="bi bi-building" aria-hidden="true"></i>
@@ -106,20 +106,20 @@
                 </NavLink>
                 <NavLink class="gws-nav-link" href="admin/affiliate-suggestions" title="Affiliate Suggestions">
                     <i class="bi bi-link-45deg" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Suggestions</span><small>AI-matched placements</small></span>
+                    <span class="gws-nav-link-copy"><span>Suggestions</span><small>SentinelGPT-matched placements</small></span>
                 </NavLink>
                 <NavLink class="gws-nav-link" href="admin/affiliate-analytics" title="Affiliate Analytics">
                     <i class="bi bi-graph-up-arrow" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Analytics</span><small>Clicks and commission</small></span>
                 </NavLink>
-                <NavLink class="gws-nav-link" href="admin/app-generation-queue" title="AI App Queue">
+                <NavLink class="gws-nav-link" href="admin/app-generation-queue" title="SentinelGPT Page Queue">
                     <i class="bi bi-inbox-fill" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Approval Queue</span><small>Review generated plans</small></span>
                     @if (_pendingAppGenerationCount > 0) { <span class="gws-nav-count">@_pendingAppGenerationCount</span> }
                 </NavLink>
                 <NavLink class="gws-nav-link" href="admin/sentinel" title="Sentinel">
                     <i class="bi bi-journal-bookmark-fill" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Sentinel</span><small>Connected workspace</small></span>
+                    <span class="gws-nav-link-copy"><span>Sentinel</span><small>Workspace + SentinelGPT</small></span>
                 </NavLink>
                 <NavLink class="gws-nav-link" href="admin/cms-knowledge" title="Builder Reference">
                     <i class="bi bi-journal-richtext" aria-hidden="true"></i>
@@ -128,10 +128,6 @@
                 <NavLink class="gws-nav-link" href="admin/live-show" title="Live Show">
                     <i class="bi bi-camera-video-fill" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Live Show</span><small>Broadcast studio</small></span>
-                </NavLink>
-                <NavLink class="gws-nav-link" href="admin/ollama-console" title="Ollama Console">
-                    <i class="bi bi-cpu-fill" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Ollama</span><small>Local model console</small></span>
                 </NavLink>
                 <NavLink class="gws-nav-link" href="admin/docker-health" title="Docker Management">
                     <i class="bi bi-box-seam" aria-hidden="true"></i>
@@ -154,7 +150,7 @@
     private static readonly string[] PublishingPrefixes = ["admin/article", "admin/content-studio", "admin/app-generation", "admin/media", "admin/pages", "admin/appearance"];
     private static readonly string[] RelationshipPrefixes = ["admin/comments", "admin/crm", "admin/users"];
     private static readonly string[] IntelligencePrefixes = ["admin/news-intelligence", "admin/government-intelligence", "admin/podcasts"];
-    private static readonly string[] OperationsPrefixes = ["admin/automation", "admin/cj-ads", "admin/affiliate", "admin/app-generation-queue", "admin/sentinel", "admin/wiki", "admin/cms-knowledge", "admin/live-show", "admin/ollama", "admin/docker"];
+    private static readonly string[] OperationsPrefixes = ["admin/automation", "admin/cj-ads", "admin/affiliate", "admin/app-generation-queue", "admin/sentinel", "admin/wiki", "admin/cms-knowledge", "admin/live-show", "admin/docker"];
 
     private string _role = string.Empty;
     private int _pendingCommentCount;

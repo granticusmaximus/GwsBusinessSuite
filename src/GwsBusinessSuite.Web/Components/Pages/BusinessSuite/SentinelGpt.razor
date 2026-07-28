@@ -1,0 +1,460 @@
+@page "/admin/sentinel/gpt"
+@page "/admin/ollama-console"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.ContentStudio
+@using GwsBusinessSuite.Application.Settings
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+@using Microsoft.Extensions.Options
+@inject ISentinelAiService SentinelGptService
+@inject ISentinelWorkspaceService WorkspaceService
+@inject IWikiService WikiService
+@inject IOllamaService LocalModelService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject ISiteSettingsService SiteSettingsService
+@inject IOptions<ContentStudioOptions> StudioOptions
+@inject NavigationManager Navigator
+@inject ILogger<SentinelGpt> Logger
+
+<PageTitle>SentinelGPT</PageTitle>
+
+<div class="sentinel-gpt-shell">
+    <aside class="sentinel-gpt-workspace" aria-label="Sentinel workspace">
+        <header>
+            <a href="admin/sentinel" class="sentinel-gpt-brand">
+                <span class="sentinel-gpt-shield">S</span>
+                <span><strong>Sentinel</strong><small>GWS workspace</small></span>
+            </a>
+        </header>
+
+        <div class="sentinel-gpt-workspace-search">
+            <i class="bi bi-search"></i>
+            <input @bind="_pageSearch" @bind:event="oninput" placeholder="Search Sentinel" aria-label="Filter Sentinel pages" />
+            <kbd>⌘K</kbd>
+        </div>
+
+        <nav class="sentinel-gpt-workspace-nav">
+            <a class="active" href="admin/sentinel/gpt">
+                <i class="bi bi-chat-dots-fill"></i><span>SentinelGPT</span>
+            </a>
+            <a href="admin/sentinel">
+                <i class="bi bi-journal-bookmark"></i><span>Open workspace</span>
+            </a>
+        </nav>
+
+        @if (_navigation.Recents.Count > 0)
+        {
+            <section class="sentinel-gpt-page-section">
+                <div class="sentinel-gpt-section-label">Recent</div>
+                @foreach (var item in FilterNavigation(_navigation.Recents).Take(5))
+                {
+                    <a href="@SentinelUrl(item.Id, item.IsDatabase)">
+                        <span>@(string.IsNullOrWhiteSpace(item.Icon) ? (item.IsDatabase ? "🗄️" : "📄") : item.Icon)</span>
+                        <span>@item.Title</span>
+                    </a>
+                }
+            </section>
+        }
+
+        <section class="sentinel-gpt-page-section sentinel-gpt-page-tree">
+            <div class="sentinel-gpt-section-label">Private</div>
+            @foreach (var page in FilterPages(_pages.Where(page => page.ParentWikiPageId is null)).Take(14))
+            {
+                <details>
+                    <summary>
+                        <i class="bi bi-chevron-right"></i>
+                        <span>@(string.IsNullOrWhiteSpace(page.Icon) ? "📄" : page.Icon)</span>
+                        <a href="@SentinelUrl(page.Id, false)">@page.Title</a>
+                    </summary>
+                    @foreach (var child in FilterPages(_pages.Where(candidate => candidate.ParentWikiPageId == page.Id)).Take(8))
+                    {
+                        <a class="sentinel-gpt-child-page" href="@SentinelUrl(child.Id, false)">
+                            <span>@(string.IsNullOrWhiteSpace(child.Icon) ? "📄" : child.Icon)</span>
+                            <span>@child.Title</span>
+                        </a>
+                    }
+                </details>
+            }
+        </section>
+    </aside>
+
+    <aside class="sentinel-gpt-history" aria-label="SentinelGPT chats">
+        <button type="button" class="sentinel-gpt-new-chat" @onclick="StartNewChat">
+            <i class="bi bi-plus-lg"></i><span>New chat</span>
+        </button>
+
+        <div class="sentinel-gpt-history-scroll">
+            @if (_loadingConversations)
+            {
+                <div class="sentinel-gpt-history-empty"><span class="spinner-border spinner-border-sm"></span> Loading chats…</div>
+            }
+            else if (_conversations.Count == 0)
+            {
+                <div class="sentinel-gpt-history-empty">Your conversations will appear here.</div>
+            }
+            else
+            {
+                @foreach (var group in ConversationGroups)
+                {
+                    <section>
+                        <div class="sentinel-gpt-section-label">@group.Label</div>
+                        @foreach (var conversation in group.Items)
+                        {
+                            <button type="button"
+                                    class="sentinel-gpt-history-item @(_conversationId == conversation.Id ? "active" : null)"
+                                    @onclick="() => OpenConversationAsync(conversation.Id)">
+                                <i class="bi bi-chat"></i>
+                                <span><strong>@conversation.Title</strong><small>@ConversationMeta(conversation)</small></span>
+                            </button>
+                        }
+                    </section>
+                }
+            }
+        </div>
+    </aside>
+
+    <main class="sentinel-gpt-chat">
+        <header class="sentinel-gpt-chat-header">
+            <div>
+                <h1>SentinelGPT</h1>
+                <span class="@(_connected ? "is-connected" : "is-offline")">
+                    <i></i>@(_connected ? "Local · Private" : "Local model unavailable")
+                </span>
+            </div>
+            <div class="sentinel-gpt-header-actions">
+                <span class="sentinel-gpt-model-pill"><i class="bi bi-cpu"></i>@_configuredModel</span>
+                <button type="button" @onclick="ToggleSettings" aria-label="SentinelGPT settings" title="Model settings">
+                    <i class="bi bi-gear"></i>
+                </button>
+            </div>
+        </header>
+
+        @if (_settingsOpen)
+        {
+            <section class="sentinel-gpt-settings">
+                <div>
+                    <strong>Local model</strong>
+                    <small>@(_connected ? $"Connected in {_latencyMs} ms" : _connectionError)</small>
+                </div>
+                <select value="@_configuredModel" @onchange="ChangeConfiguredModelAsync" disabled="@(!_connected || _models.Count == 0)">
+                    @foreach (var model in _models)
+                    {
+                        <option value="@model">@model</option>
+                    }
+                </select>
+                <div class="sentinel-gpt-model-install">
+                    <input @bind="_pullModelName" placeholder="Install a model, e.g. llama3.2" />
+                    <button type="button" @onclick="PullModelAsync" disabled="@(_modelBusy || string.IsNullOrWhiteSpace(_pullModelName))">
+                        @if (_modelBusy) { <span class="spinner-border spinner-border-sm"></span> }
+                        else { <i class="bi bi-download"></i> }
+                        Install
+                    </button>
+                </div>
+                <button type="button" class="sentinel-gpt-recheck" @onclick="CheckConnectionAsync" disabled="@_checkingConnection">
+                    <i class="bi bi-arrow-clockwise"></i> Recheck
+                </button>
+            </section>
+        }
+
+        <section class="sentinel-gpt-thread" aria-live="polite">
+            @if (_runs.Count == 0 && !_generating)
+            {
+                <div class="sentinel-gpt-welcome">
+                    <span class="sentinel-gpt-avatar">S</span>
+                    <div>
+                        <h2>What should we work on?</h2>
+                        <p>Ask questions, summarize pages, research your workspace, or turn what Sentinel knows into a useful draft.</p>
+                        <div class="sentinel-gpt-starters">
+                            <button type="button" @onclick="() => UseStarter(\"Summarize my open work items and flag anything overdue.\")">Summarize open work</button>
+                            <button type="button" @onclick="() => UseStarter(\"What changed recently across my Sentinel workspace?\")">Review recent changes</button>
+                            <button type="button" @onclick="() => UseStarter(\"Create a concise plan from my latest meeting notes.\")">Plan from meeting notes</button>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @foreach (var run in _runs)
+            {
+                <article class="sentinel-gpt-exchange">
+                    <div class="sentinel-gpt-message sentinel-gpt-user-message">
+                        <div>@run.Instruction</div>
+                        <time>@run.CreatedAt.ToLocalTime().ToString("t")</time>
+                    </div>
+                    <div class="sentinel-gpt-assistant-row">
+                        <span class="sentinel-gpt-avatar">S</span>
+                        <div>
+                            <div class="sentinel-gpt-message sentinel-gpt-assistant-message">@run.Output</div>
+                            @if (run.Citations.Count > 0)
+                            {
+                                <details class="sentinel-gpt-sources">
+                                    <summary><i class="bi bi-file-earmark-text"></i>Sources · @string.Join(" · ", run.Citations.Take(3).Select(item => item.Title))</summary>
+                                    <div>
+                                        @foreach (var citation in run.Citations)
+                                        {
+                                            <a href="@SentinelUrl(citation.TargetId, citation.IsDatabase)">
+                                                <i class="bi @(citation.IsDatabase ? "bi-grid-3x3-gap" : "bi-file-earmark-text")"></i>@citation.Title
+                                            </a>
+                                        }
+                                    </div>
+                                </details>
+                            }
+                            <time>@run.CreatedAt.ToLocalTime().ToString("t") · @run.Model</time>
+                        </div>
+                    </div>
+                </article>
+            }
+
+            @if (_generating)
+            {
+                <article class="sentinel-gpt-exchange">
+                    <div class="sentinel-gpt-message sentinel-gpt-user-message">
+                        <div>@_pendingInstruction</div>
+                        <time>Now</time>
+                    </div>
+                    <div class="sentinel-gpt-assistant-row">
+                        <span class="sentinel-gpt-avatar">S</span>
+                        <div class="sentinel-gpt-message sentinel-gpt-assistant-message is-streaming">
+                            @if (string.IsNullOrEmpty(_liveOutput))
+                            {
+                                <span class="sentinel-gpt-thinking"><i></i><i></i><i></i></span>
+                            }
+                            else
+                            {
+                                @_liveOutput
+                            }
+                        </div>
+                    </div>
+                </article>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <div class="sentinel-gpt-error"><i class="bi bi-exclamation-circle"></i>@_error</div>
+            }
+        </section>
+
+        <footer class="sentinel-gpt-composer-wrap">
+            <div class="sentinel-gpt-composer">
+                <button type="button" aria-label="Attach context" title="Workspace context is automatically selected">
+                    <i class="bi bi-paperclip"></i>
+                </button>
+                <textarea rows="1" @bind="_instruction" placeholder="Message SentinelGPT…" disabled="@_generating"></textarea>
+                <span class="sentinel-gpt-context-pill"><i class="bi bi-building"></i>Workspace context <i class="bi bi-toggle-on"></i></span>
+                <button type="button" aria-label="Voice input" title="Voice input">
+                    <i class="bi bi-mic"></i>
+                </button>
+                <button type="button" class="sentinel-gpt-send" @onclick="SendAsync"
+                        disabled="@(_generating || string.IsNullOrWhiteSpace(_instruction) || !_connected)"
+                        aria-label="Send message">
+                    <i class="bi bi-arrow-up"></i>
+                </button>
+            </div>
+            <small>SentinelGPT can make mistakes. Verify important information.</small>
+        </footer>
+    </main>
+</div>
+
+@code {
+    private string _username = string.Empty;
+    private string _pageSearch = string.Empty;
+    private string _instruction = string.Empty;
+    private string _pendingInstruction = string.Empty;
+    private string _liveOutput = string.Empty;
+    private string _error = string.Empty;
+    private string _configuredModel = ContentStudioOptions.DefaultModel;
+    private string _connectionError = string.Empty;
+    private string _pullModelName = string.Empty;
+    private long _latencyMs;
+    private bool _connected;
+    private bool _checkingConnection;
+    private bool _loadingConversations = true;
+    private bool _generating;
+    private bool _settingsOpen;
+    private bool _modelBusy;
+    private Guid? _conversationId;
+    private List<WikiPage> _pages = [];
+    private SentinelNavigationState _navigation = new([], []);
+    private List<SentinelGptConversationView> _conversations = [];
+    private List<SentinelAiRunView> _runs = [];
+    private List<string> _models = [];
+    private SiteSettingsView? _settings;
+
+    private IEnumerable<(string Label, IReadOnlyList<SentinelGptConversationView> Items)> ConversationGroups
+    {
+        get
+        {
+            var today = DateTimeOffset.Now.Date;
+            var todayItems = _conversations.Where(item => item.UpdatedAt.ToLocalTime().Date == today).ToList();
+            var earlier = _conversations.Where(item => item.UpdatedAt.ToLocalTime().Date != today).ToList();
+            if (todayItems.Count > 0) yield return ("Today", todayItems);
+            if (earlier.Count > 0) yield return ("Earlier", earlier);
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        _settings = await SiteSettingsService.GetSettingsAsync();
+        _configuredModel = _settings.OllamaModelOverride ?? StudioOptions.Value.Model;
+        _pages = (await WikiService.ListPagesAsync()).Where(page => page.NotionArchivedAt is null).ToList();
+        _navigation = await WorkspaceService.GetNavigationAsync(_username, 8);
+        await Task.WhenAll(CheckConnectionAsync(), LoadConversationsAsync());
+        if (_conversations.Count > 0)
+        {
+            await OpenConversationAsync(_conversations[0].Id);
+        }
+        else
+        {
+            StartNewChat();
+        }
+    }
+
+    private IEnumerable<WikiPage> FilterPages(IEnumerable<WikiPage> pages) =>
+        string.IsNullOrWhiteSpace(_pageSearch)
+            ? pages.OrderBy(page => page.SortOrder).ThenBy(page => page.Title)
+            : pages.Where(page => page.Title.Contains(_pageSearch, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(page => page.Title);
+
+    private IEnumerable<SentinelNavigationItem> FilterNavigation(IEnumerable<SentinelNavigationItem> items) =>
+        string.IsNullOrWhiteSpace(_pageSearch)
+            ? items
+            : items.Where(item => item.Title.Contains(_pageSearch, StringComparison.OrdinalIgnoreCase));
+
+    private static string SentinelUrl(Guid id, bool isDatabase) =>
+        isDatabase ? $"admin/sentinel?database={id}" : $"admin/sentinel?page={id}";
+
+    private async Task LoadConversationsAsync()
+    {
+        _loadingConversations = true;
+        try
+        {
+            _conversations = (await SentinelGptService.ListConversationsAsync(_username)).ToList();
+        }
+        finally
+        {
+            _loadingConversations = false;
+        }
+    }
+
+    private void StartNewChat()
+    {
+        _conversationId = Guid.NewGuid();
+        _runs = [];
+        _instruction = string.Empty;
+        _liveOutput = string.Empty;
+        _error = string.Empty;
+    }
+
+    private async Task OpenConversationAsync(Guid id)
+    {
+        if (_generating) return;
+        _conversationId = id;
+        _error = string.Empty;
+        _runs = (await SentinelGptService.ListConversationRunsAsync(id, _username)).ToList();
+    }
+
+    private async Task SendAsync()
+    {
+        var instruction = _instruction.Trim();
+        if (_generating || !_connected || instruction.Length == 0) return;
+
+        _conversationId ??= Guid.NewGuid();
+        _pendingInstruction = instruction;
+        _instruction = string.Empty;
+        _liveOutput = string.Empty;
+        _error = string.Empty;
+        _generating = true;
+        try
+        {
+            await foreach (var chunk in SentinelGptService.StreamConversationAsync(
+                _conversationId.Value, null, SentinelAiActions.Ask, instruction, _username))
+            {
+                if (chunk.CompletedRun is not null)
+                {
+                    _runs.Add(chunk.CompletedRun);
+                }
+                else
+                {
+                    _liveOutput += chunk.Delta;
+                }
+                StateHasChanged();
+            }
+            await LoadConversationsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "SentinelGPT generation failed");
+            _error = $"SentinelGPT could not complete that response: {ex.Message}";
+        }
+        finally
+        {
+            _generating = false;
+            _pendingInstruction = string.Empty;
+            _liveOutput = string.Empty;
+        }
+    }
+
+    private void UseStarter(string prompt) => _instruction = prompt;
+    private void ToggleSettings() => _settingsOpen = !_settingsOpen;
+
+    private async Task CheckConnectionAsync()
+    {
+        _checkingConnection = true;
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            _models = (await LocalModelService.ListModelsAsync()).OrderBy(model => model).ToList();
+            stopwatch.Stop();
+            _latencyMs = stopwatch.ElapsedMilliseconds;
+            _connected = true;
+            _connectionError = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _connected = false;
+            _models = [];
+            _connectionError = ex.Message;
+        }
+        finally
+        {
+            _checkingConnection = false;
+        }
+    }
+
+    private async Task ChangeConfiguredModelAsync(ChangeEventArgs args)
+    {
+        if (_settings is null || string.IsNullOrWhiteSpace(args.Value?.ToString())) return;
+        _configuredModel = args.Value!.ToString()!;
+        _settings = _settings with { OllamaModelOverride = _configuredModel };
+        await SiteSettingsService.SaveSettingsAsync(_settings);
+    }
+
+    private async Task PullModelAsync()
+    {
+        var model = _pullModelName.Trim();
+        if (model.Length == 0 || _modelBusy) return;
+        _modelBusy = true;
+        _error = string.Empty;
+        try
+        {
+            await LocalModelService.PullModelAsync(model);
+            _pullModelName = string.Empty;
+            await CheckConnectionAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Could not install model '{model}': {ex.Message}";
+        }
+        finally
+        {
+            _modelBusy = false;
+        }
+    }
+
+    private static string ConversationMeta(SentinelGptConversationView conversation) =>
+        conversation.ExchangeCount == 1
+            ? conversation.UpdatedAt.ToLocalTime().ToString("t")
+            : $"{conversation.ExchangeCount} messages · {conversation.UpdatedAt.ToLocalTime():MMM d}";
+}

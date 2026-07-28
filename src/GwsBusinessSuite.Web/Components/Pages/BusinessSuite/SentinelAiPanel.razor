@@ -6,7 +6,7 @@
 
 <div class="sentinel-ai-panel">
     <button type="button" class="sentinel-ai-toggle" @onclick="ToggleAsync">
-        <span>✦</span><strong>Ask Sentinel AI</strong><small>Grounded in this workspace</small><i class="bi bi-chevron-down"></i>
+        <span>✦</span><strong>Ask SentinelGPT</strong><small>Grounded in this workspace</small><i class="bi bi-chevron-down"></i>
     </button>
     @if (_open)
     {
@@ -59,7 +59,7 @@
             @if (_runs.Count > 0)
             {
                 <details class="sentinel-ai-history">
-                    <summary>Recent AI runs (@_runs.Count)</summary>
+                    <summary>Recent SentinelGPT runs (@_runs.Count)</summary>
                     @foreach (var run in _runs.Take(8))
                     {
                         <div><span>@run.Action</span><small>@run.Status · @run.CreatedAt.ToLocalTime().ToString("g")</small></div>
@@ -94,7 +94,7 @@
         SentinelAiActions.MeetingNotes => "Paste a transcript or rough meeting notes…",
         SentinelAiActions.Translate => "Paste text and specify the target language…",
         SentinelAiActions.Rewrite => "Paste text and describe the desired tone…",
-        SentinelAiActions.Research => "What should Sentinel investigate across the workspace?",
+        SentinelAiActions.Research => "What should SentinelGPT investigate across the workspace?",
         _ => "Ask about this page or the wider workspace…"
     };
 

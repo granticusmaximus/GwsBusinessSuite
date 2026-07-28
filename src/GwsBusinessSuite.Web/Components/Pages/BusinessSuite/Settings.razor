@@ -20,7 +20,7 @@
 
 <div class="page-header">
     <h1><i class="bi bi-gear-fill me-2 text-primary"></i>Settings</h1>
-    <p>Site-wide configuration for reading, writing, media, and AI generation defaults.</p>
+    <p>Site-wide configuration for reading, writing, media, and SentinelGPT generation defaults.</p>
 </div>
 
 @if (!string.IsNullOrWhiteSpace(StatusMessage))
@@ -129,7 +129,7 @@ else
             </div>
         </div>
     }
-    else if (ActiveTab == "AI (Ollama)")
+    else if (ActiveTab == "SentinelGPT")
     {
         <div class="card border-0 shadow-sm">
             <div class="card-body">
@@ -143,14 +143,14 @@ else
                     <input class="form-control" type="number" min="1" max="180" @bind="OllamaTimeoutOverrideInput" placeholder="@StudioOptions.Value.GenerationTimeoutMinutes" />
                     <div class="form-text">Leave blank to use the server default (@StudioOptions.Value.GenerationTimeoutMinutes minutes).</div>
                 </div>
-                <div class="form-text mb-3">The Ollama endpoint (@StudioOptions.Value.BaseUrl) is a deployment setting and isn't editable here.</div>
+                <div class="form-text mb-3">The SentinelGPT local-model endpoint (@StudioOptions.Value.BaseUrl) is a deployment setting and isn't editable here.</div>
                 <div class="mb-3">
                     <label class="form-label small text-secondary">Hero image model</label>
                     <input class="form-control" @bind="HeroImageModelOverrideInput" placeholder="e.g. x/z-image-turbo" />
                     <div class="form-text">
-                        Model used by Content Studio's "Generate with Ollama" hero image button. Must be an
-                        installed model with image-generation capability. Ollama's image generation is
-                        <strong>experimental and currently macOS-only</strong> per Ollama's own docs, so this may
+                        Model used by Content Studio's "Generate with SentinelGPT" hero image button. Must be an
+                        installed model with image-generation capability. Local image generation is
+                        <strong>experimental and currently macOS-only</strong>, so this may
                         not work against a Linux-hosted Ollama instance. Leave blank to disable the button.
                     </div>
                 </div>
@@ -169,7 +169,7 @@ else
         new("Reading", "bi-book", "Public blog display"),
         new("Writing", "bi-pencil", "Post defaults"),
         new("Media", "bi-image", "Upload limits"),
-        new("AI (Ollama)", "bi-stars", "Models and generation")
+        new("SentinelGPT", "bi-stars", "Models and generation")
     ];
     private string ActiveTab { get; set; } = "General";
 

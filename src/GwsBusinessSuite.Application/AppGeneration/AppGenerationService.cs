@@ -291,7 +291,7 @@ public sealed class AppGenerationService(
         catch (Exception ex)
         {
             var currentSiteName = await GetSiteNameAsync(request.TargetSiteId, cancellationToken);
-            return new AppGenerationChatResult(false, $"Ollama generation failed: {ex.Message}", await BuildViewAsync(request, currentSiteName, cancellationToken));
+            return new AppGenerationChatResult(false, $"SentinelGPT generation failed: {ex.Message}", await BuildViewAsync(request, currentSiteName, cancellationToken));
         }
 
         var (reply, pages) = ParseAssistantTurn(raw);

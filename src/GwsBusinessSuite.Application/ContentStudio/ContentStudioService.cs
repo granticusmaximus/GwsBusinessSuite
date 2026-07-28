@@ -183,7 +183,7 @@ public sealed class ContentStudioService(
         if (string.IsNullOrWhiteSpace(markdown))
         {
             logger.LogWarning("Ollama returned an empty draft for topic '{Topic}'.", request.Topic);
-            throw new InvalidOperationException("Ollama returned an empty draft. Try again or switch models.");
+            throw new InvalidOperationException("SentinelGPT returned an empty draft. Try again or switch models.");
         }
 
         var markdownWithAffiliateSlots = EnsureAffiliatePlaceholders(markdown);
@@ -287,7 +287,7 @@ public sealed class ContentStudioService(
         var revisedMarkdown = (await ollama.GenerateAsync(configuredModel, BuildSystemPrompt(), prompt, timeoutCts.Token)).Trim();
         if (string.IsNullOrWhiteSpace(revisedMarkdown))
         {
-            throw new InvalidOperationException("Ollama returned an empty revised draft.");
+            throw new InvalidOperationException("SentinelGPT returned an empty revised draft.");
         }
 
         var revisedMarkdownWithAffiliateSlots = EnsureAffiliatePlaceholders(revisedMarkdown);
@@ -363,7 +363,7 @@ public sealed class ContentStudioService(
         var configuredModel = await GetEffectiveImageModelAsync(cancellationToken);
         if (string.IsNullOrWhiteSpace(configuredModel))
         {
-            throw new InvalidOperationException("No hero image model is configured. Set one in Settings > AI (Ollama).");
+            throw new InvalidOperationException("No hero image model is configured. Set one in Settings > SentinelGPT.");
         }
 
         var timeout = await GetEffectiveTimeoutAsync(cancellationToken);
@@ -376,7 +376,7 @@ public sealed class ContentStudioService(
         var imageBase64 = await ollama.GenerateImageAsync(configuredModel, prompt, timeoutCts.Token);
         if (string.IsNullOrWhiteSpace(imageBase64))
         {
-            throw new InvalidOperationException("Ollama returned no image data.");
+            throw new InvalidOperationException("SentinelGPT returned no image data.");
         }
 
         await using var freshContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -390,7 +390,7 @@ public sealed class ContentStudioService(
         freshDraft.HeroImageDataUri = $"data:image/png;base64,{imageBase64}";
         freshDraft.HeroImagePrompt = prompt;
         freshDraft.HeroImageAltText = freshDraft.Title;
-        freshDraft.HeroImageProvider = "Ollama";
+        freshDraft.HeroImageProvider = "SentinelGPT";
         freshDraft.HeroImageConfiguredModel = configuredModel;
         freshDraft.IsHeroImageGeneratedByOllama = true;
         freshDraft.UpdatedAt = DateTimeOffset.UtcNow;
@@ -400,7 +400,7 @@ public sealed class ContentStudioService(
         {
             SeoArticleDraftId = freshDraft.Id,
             EventType = SeoArticleWorkflowEventTypes.HeroImageRegenerated,
-            Notes = $"Generated via Ollama ({configuredModel}). Prompt: {prompt}",
+            Notes = $"Generated via SentinelGPT ({configuredModel}). Prompt: {prompt}",
             CreatedBy = request.PerformedBy
         });
 

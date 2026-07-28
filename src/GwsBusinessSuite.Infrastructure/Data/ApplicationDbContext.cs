@@ -203,6 +203,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<SentinelPublicShare>().HasIndex(x => x.TokenHash).IsUnique();
         modelBuilder.Entity<SentinelPublicShare>().HasIndex(x => new { x.TargetId, x.IsDatabase, x.RevokedAt });
         modelBuilder.Entity<SentinelPresenceLease>().HasIndex(x => new { x.WikiPageId, x.LastSeenAt });
+        modelBuilder.Entity<SentinelAiRun>().HasIndex(x => new { x.ConversationId, x.CreatedAt });
         modelBuilder.Entity<SentinelAiRun>().HasIndex(x => new { x.WikiPageId, x.CreatedAt });
         modelBuilder.Entity<SentinelAiRun>().HasIndex(x => new { x.Status, x.CreatedAt });
         modelBuilder.Entity<WikiDatabaseProperty>()

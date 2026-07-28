@@ -291,6 +291,7 @@ public static class SentinelAiRunStatuses
 
 public sealed class SentinelAiRun : AuditableEntity
 {
+    public Guid ConversationId { get; set; }
     public Guid? WikiPageId { get; set; }
     public required string Action { get; set; }
     public string Instruction { get; set; } = string.Empty;

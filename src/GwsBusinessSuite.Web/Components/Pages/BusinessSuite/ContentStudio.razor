@@ -15,7 +15,7 @@
 
 <div class="page-header">
     <h1><i class="bi bi-pencil-square me-2 text-primary"></i>Content Studio</h1>
-    <p>Generate SEO-focused technical articles with Ollama, manage drafts, publish live to the site, and keep optional external backups.</p>
+    <p>Generate SEO-focused technical articles with SentinelGPT, manage drafts, publish live to the site, and keep optional external backups.</p>
 </div>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
@@ -53,7 +53,7 @@
     </div>
     <div class="card-body">
         <p class="text-secondary small mb-3">
-            Pulls currently trending posts from Hacker News and dev.to, then asks Ollama to summarize
+            Pulls currently trending posts from Hacker News and dev.to, then asks SentinelGPT to summarize
             the hot takes (positive and negative) and suggest article angles for this blog. Leave the
             focus area blank for general software-development trends, or narrow it to a topic.
         </p>
@@ -177,7 +177,7 @@
             <button class="btn btn-primary d-inline-flex align-items-center gap-2" @onclick="GenerateDraft"
                     disabled="@IsBusy">
                 <i class="bi bi-stars"></i>
-                <span>Generate Draft With Ollama</span>
+                <span>Generate Draft With SentinelGPT</span>
             </button>
             <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2"
                     @onclick="RefreshDraftsClicked" disabled="@IsBusy">
@@ -278,7 +278,7 @@
 
     private List<ContentStudioDraftSummary> Drafts { get; set; } = new();
     private bool IsBusy { get; set; }
-    private string BusyMessage { get; set; } = "Working with Ollama and local workflow persistence.";
+    private string BusyMessage { get; set; } = "Working with SentinelGPT and local workflow persistence.";
     private DateTimeOffset? BusyStartedAt { get; set; }
     private CancellationTokenSource? BusyTickerCts { get; set; }
     private string StatusMessage { get; set; } = string.Empty;
@@ -432,7 +432,7 @@
     {
         ErrorMessage = string.Empty;
         StatusMessage = string.Empty;
-        BeginBusy("Pulling trending posts from Hacker News and dev.to, then asking Ollama to summarize them.");
+        BeginBusy("Pulling trending posts from Hacker News and dev.to, then asking SentinelGPT to summarize them.");
         await InvokeAsync(StateHasChanged);
 
         try
@@ -447,7 +447,7 @@
             {
                 > 0 => $"Found {TrendResult.Suggestions.Count} suggested article angles from {TrendResult.Signals.Count} trending sources.",
                 _ when TrendResult.Signals.Count == 0 => "No live trend data could be retrieved from Hacker News or dev.to for this focus area. Try Force Refresh or broaden the focus area.",
-                _ => $"Retrieved {TrendResult.Signals.Count} trending sources, but Ollama did not return parseable suggestions. Try Force Refresh to re-run it."
+                _ => $"Retrieved {TrendResult.Signals.Count} trending sources, but SentinelGPT did not return parseable suggestions. Try Force Refresh to re-run it."
             };
         }
         catch (Exception ex)
@@ -467,7 +467,7 @@
         Topic = suggestion.Topic;
         PrimaryKeyword = suggestion.PrimaryKeyword;
         SecondaryKeywords = suggestion.SecondaryKeywords;
-        StatusMessage = $"Article Brief pre-filled from trend suggestion '{suggestion.Topic}'. Review it below and click Generate Draft With Ollama.";
+        StatusMessage = $"Article Brief pre-filled from trend suggestion '{suggestion.Topic}'. Review it below and click Generate Draft With SentinelGPT.";
     }
 
     private async Task GenerateDraft()
@@ -480,7 +480,7 @@
         }
 
         ErrorMessage = string.Empty;
-        StatusMessage = $"Generating a draft for '{Topic.Trim()}' with local Ollama...";
+        StatusMessage = $"Generating a draft for '{Topic.Trim()}' with SentinelGPT...";
         BeginBusy("Generating article content and scoring affiliate placements. This can take up to a minute.");
         Logger.LogInformation("Content Studio generate button clicked for topic '{Topic}'.", Topic);
         await InvokeAsync(StateHasChanged);
@@ -503,7 +503,7 @@
         {
             Logger.LogError(ex, "Content Studio draft generation failed for topic '{Topic}'.", Topic);
             StatusMessage = string.Empty;
-            ErrorMessage = $"Unable to generate article. Make sure Ollama is running and the configured model is available. Details: {ex.Message}";
+            ErrorMessage = $"Unable to generate article. Make sure the SentinelGPT local model is running and available. Details: {ex.Message}";
         }
         finally
         {

@@ -137,6 +137,11 @@
                     Searches titles and the contents of pages, attachments, databases, and rows.
                 </div>
             </div>
+            <a class="sentinel-gpt-entry" href="admin/sentinel/gpt">
+                <span class="sentinel-gpt-entry-icon"><i class="bi bi-chat-dots-fill"></i></span>
+                <span><strong>SentinelGPT</strong><small>Chat with your workspace</small></span>
+                <i class="bi bi-chevron-right"></i>
+            </a>
             @if (string.IsNullOrWhiteSpace(SearchQuery)
                 && (Navigation.Favorites.Count > 0 || Navigation.Recents.Count > 0 || Mentions.Count > 0 || SavedSearches.Count > 0))
             {
@@ -2024,6 +2029,17 @@
         await RestoreLastOpenedItemAsync();
 
         var query = QueryHelpers.ParseQuery(Navigator.ToAbsoluteUri(Navigator.Uri).Query);
+        if (query.TryGetValue("page", out var requestedPage)
+            && Guid.TryParse(requestedPage.ToString(), out var requestedPageId))
+        {
+            await OpenPageAsync(requestedPageId);
+        }
+        else if (query.TryGetValue("database", out var requestedDatabase)
+            && Guid.TryParse(requestedDatabase.ToString(), out var requestedDatabaseId))
+        {
+            await OpenDatabaseAsync(requestedDatabaseId);
+        }
+
         if (query.TryGetValue("notionOAuth", out var oauthResult))
         {
             await OpenNotionModalAsync();
@@ -2534,7 +2550,7 @@
         Editor.BlocksJson = WikiBlockJson.Serialize(blocks);
         _editorGeneration++;
         await InvokeAsync(StateHasChanged);
-        StatusMessage = "Inserted a reviewed Sentinel AI draft. Save the page to persist it.";
+        StatusMessage = "Inserted a reviewed SentinelGPT draft. Save the page to persist it.";
     }
 
     private async Task ReloadLatestAfterConflictAsync()
