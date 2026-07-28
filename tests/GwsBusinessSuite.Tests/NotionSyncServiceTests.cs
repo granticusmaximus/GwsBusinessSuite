@@ -864,7 +864,7 @@ public sealed class NotionSyncServiceTests
             {
               "properties":{
                 "Name":{"id":"title","type":"title","title":{}},
-                "Status":{"id":"status","type":"select","select":{"options":[
+                "Status":{"id":"status%3Acode","type":"select","select":{"options":[
                   {"id":"todo","name":"Not started","color":"gray"},
                   {"id":"doing","name":"In progress","color":"blue"},
                   {"id":"done","name":"Done","color":"green"}
@@ -882,7 +882,7 @@ public sealed class NotionSyncServiceTests
               "id":"board-view",
               "name":"Work Items",
               "type":"board",
-              "configuration":{"type":"board","group_by":{"type":"select","property_id":"status"}}
+              "configuration":{"type":"board","group_by":{"type":"select","property_id":"status:code"}}
             }
             """);
         fixture.Notion.DatabaseRows["work-items-source"] =
@@ -894,7 +894,7 @@ public sealed class NotionSyncServiceTests
                   "parent":{"type":"data_source_id","data_source_id":"work-items-source"},
                   "properties":{
                     "Name":{"id":"title","type":"title","title":[{"plain_text":"Review workflow"}]},
-                    "Status":{"id":"status","type":"select","select":{"id":"doing","name":"In progress","color":"blue"}}
+                    "Status":{"id":"status%3Acode","type":"select","select":{"id":"doing","name":"In progress","color":"blue"}}
                   }
                 }
                 """)

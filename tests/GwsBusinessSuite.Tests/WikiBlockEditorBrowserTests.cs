@@ -370,7 +370,7 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
         {
             Views =
             [
-                new WikiInlineDatabaseView(Guid.NewGuid(), "Work Items", WikiDatabaseViewTypes.Board, statusPropertyId.ToString())
+                new WikiInlineDatabaseView(Guid.NewGuid(), "Work Items", WikiDatabaseViewTypes.Board, null)
             ]
         };
         var payload = JsonSerializer.Serialize(

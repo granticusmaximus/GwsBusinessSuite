@@ -1868,7 +1868,7 @@ public sealed class NotionSyncService(
                         await dbContext.WikiDatabaseProperties.AddAsync(property, cancellationToken);
                     }
 
-                    notionPropertyIdToLocal[notionPropertyId] = (property.Id, property.Type);
+                    notionPropertyIdToLocal[NormalizeNotionPropertyId(notionPropertyId)] = (property.Id, property.Type);
                     sortOrder++;
                 }
 
@@ -1883,7 +1883,7 @@ public sealed class NotionSyncService(
                     .Select(property => new { property.NotionId, property.Id, property.Type })
                     .ToListAsync(cancellationToken))
                 .ToDictionary(
-                    property => property.NotionId!,
+                    property => NormalizeNotionPropertyId(property.NotionId!),
                     property => (property.Id, property.Type),
                     StringComparer.Ordinal);
         }
@@ -1950,7 +1950,10 @@ public sealed class NotionSyncService(
                 foreach (var propertyValue in rowProperties.EnumerateObject())
                 {
                     var notionPropertyId = propertyValue.Value.TryGetProperty("id", out var idElement) ? idElement.GetString() : null;
-                    if (notionPropertyId is not null && notionPropertyIdToLocal.TryGetValue(notionPropertyId, out var local))
+                    if (notionPropertyId is not null
+                        && notionPropertyIdToLocal.TryGetValue(
+                            NormalizeNotionPropertyId(notionPropertyId),
+                            out var local))
                     {
                         NotionMapping.ApplyPropertyValue(values, local.Id, local.Type, propertyValue.Value);
                     }
@@ -2089,9 +2092,41 @@ public sealed class NotionSyncService(
             existing.Type = MapViewType(type);
             var groupByPropertyId = ExtractNotionViewGroupPropertyId(remote);
             var localGroupByPropertyId = groupByPropertyId is not null
-                && notionPropertyIdToLocal.TryGetValue(groupByPropertyId, out var localProperty)
+                && notionPropertyIdToLocal.TryGetValue(
+                    NormalizeNotionPropertyId(groupByPropertyId),
+                    out var localProperty)
                     ? localProperty.Id.ToString()
                     : null;
+            if (existing.Type == WikiDatabaseViewTypes.Board
+                && localGroupByPropertyId is null)
+            {
+                // A Board view is unusable without a local grouping property. Notion has
+                // returned property ids in both encoded and decoded forms across endpoints;
+                // normalization above handles that known mismatch. If the API omits or
+                // changes the id shape entirely, a single select/status property is still
+                // an unambiguous board grouping fallback.
+                var selectProperties = notionPropertyIdToLocal.Values
+                    .Where(property => property.Type == WikiDatabasePropertyTypes.Select)
+                    .Select(property => property.Id)
+                    .Distinct()
+                    .ToList();
+                if (selectProperties.Count == 1)
+                {
+                    localGroupByPropertyId = selectProperties[0].ToString();
+                    logger.LogWarning(
+                        "Notion Board view {NotionViewId} used its only select/status property because grouping property {NotionPropertyId} did not resolve directly.",
+                        notionId,
+                        groupByPropertyId);
+                }
+                else
+                {
+                    logger.LogWarning(
+                        "Notion Board view {NotionViewId} could not resolve grouping property {NotionPropertyId}; {SelectPropertyCount} select/status properties were available.",
+                        notionId,
+                        groupByPropertyId,
+                        selectProperties.Count);
+                }
+            }
             existing.ConfigJson = WikiDatabaseViewConfigJson.Serialize(
                 WikiDatabaseViewConfig.Empty with { GroupByPropertyId = localGroupByPropertyId });
             existing.SortOrder = order++;
@@ -2115,6 +2150,18 @@ public sealed class NotionSyncService(
             return null;
         }
         return propertyId.GetString();
+    }
+
+    private static string NormalizeNotionPropertyId(string propertyId)
+    {
+        try
+        {
+            return Uri.UnescapeDataString(propertyId);
+        }
+        catch (UriFormatException)
+        {
+            return propertyId;
+        }
     }
 
     private static string MapViewType(string? type) => type switch

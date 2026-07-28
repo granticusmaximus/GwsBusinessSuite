@@ -1015,6 +1015,12 @@ function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, s
     wrapper.innerHTML = '';
     const views = snapshot.views || [];
     const activeView = views.find(view => view.id === selectedViewId) || views[0] || null;
+    const selectProperties = (snapshot.properties || [])
+        .filter(property => property.type === 'select');
+    const boardGroupByPropertyId = activeView?.groupByPropertyId
+        || (activeView?.type === 'board' && selectProperties.length === 1
+            ? selectProperties[0].id
+            : null);
     const header = document.createElement('div');
     header.className = 'wiki-inline-database-header';
     const identity = document.createElement('button');
@@ -1055,10 +1061,10 @@ function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, s
 
     const scroller = document.createElement('div');
     scroller.className = 'wiki-inline-database-scroller';
-    if (activeView?.type === 'board' && activeView.groupByPropertyId) {
+    if (activeView?.type === 'board' && boardGroupByPropertyId) {
         scroller.appendChild(createInlineBoard(
             snapshot,
-            activeView.groupByPropertyId,
+            boardGroupByPropertyId,
             () => state.dotNetRef.invokeMethodAsync('OpenLinkedDatabase', snapshot.id)));
     } else {
         const table = document.createElement('table');
@@ -1131,6 +1137,10 @@ function createInlineBoard(snapshot, groupByPropertyId, openDatabase) {
         const label = document.createElement('span');
         label.className = 'wiki-inline-board-status';
         label.dataset.color = option.color || 'default';
+        if (/^#[0-9a-f]{6}$/i.test(option.color || '')) {
+            label.style.backgroundColor = `${option.color}45`;
+            label.style.color = option.color;
+        }
         label.textContent = option.label || 'No status';
         const count = document.createElement('span');
         count.textContent = String(rows.length);
