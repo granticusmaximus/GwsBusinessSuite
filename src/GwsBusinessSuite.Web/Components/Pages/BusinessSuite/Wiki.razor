@@ -628,7 +628,7 @@
 @if (ShowNotionModal)
 {
     <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
-        <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable" role="document">
             <div class="modal-content">
                 <div class="modal-header">
                     <div>
@@ -641,11 +641,62 @@
                     <button type="button" class="btn-close" aria-label="Close" @onclick="CloseNotionModal"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="text-secondary">
-                        Connect with the access token you already have, or use Notion OAuth when this server is
-                        configured for it. Sentinel never needs your Notion username or password.
-                    </p>
+                    @if (HasNotionConnection)
+                    {
+                        <div class="notion-sync-summary d-flex flex-wrap align-items-center gap-3 p-3 rounded-3 border bg-body-tertiary">
+                            <span class="notion-connection-choice-icon flex-shrink-0" aria-hidden="true">
+                                <i class="bi bi-check2-circle"></i>
+                            </span>
+                            <div class="me-auto">
+                                <div class="fw-semibold">
+                                    @(string.IsNullOrWhiteSpace(NotionSettings.WorkspaceName)
+                                        ? "Notion connected"
+                                        : NotionSettings.WorkspaceName)
+                                </div>
+                                <div class="small text-secondary">
+                                    @if (NotionSettings.LastSyncedAt is { } summaryLastSyncedAt)
+                                    {
+                                        <span>Last synced @summaryLastSyncedAt.ToLocalTime().ToString("g")</span>
+                                    }
+                                    else
+                                    {
+                                        <span>Ready to sync</span>
+                                    }
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-primary" @onclick="SyncNotionNowAsync"
+                                    disabled="@(IsNotionOperationBusy || HasInvalidNotionScope)">
+                                @if (IsNotionBusy)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                                }
+                                else
+                                {
+                                    <i class="bi bi-arrow-repeat me-1"></i>
+                                }
+                                @(NotionMessageIsError ? "Retry resync" : "Resync now")
+                            </button>
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="text-secondary mb-3">
+                            Paste a Notion access token to connect. Sentinel never needs your Notion username or password.
+                        </p>
+                    }
 
+                    @if (HasNotionConnection)
+                    {
+                        <button type="button" class="btn btn-sm btn-link text-secondary px-0 mt-2"
+                                aria-expanded="@ShowNotionConnectionSettings"
+                                @onclick="() => ShowNotionConnectionSettings = !ShowNotionConnectionSettings">
+                            <i class="bi @(ShowNotionConnectionSettings ? "bi-chevron-down" : "bi-chevron-right") me-1"></i>
+                            Change connection
+                        </button>
+                    }
+
+                    @if (ShowNotionConnectionSettings || !HasNotionConnection)
+                    {
                     <section class="notion-connection-choice is-primary" aria-labelledby="notion-token-heading">
                         <div class="d-flex align-items-start gap-3">
                             <span class="notion-connection-choice-icon" aria-hidden="true">
@@ -713,14 +764,13 @@
                                     </div>
                                 }
 
-                                <ol class="notion-connection-steps">
-                                    <li>Paste the token and select <strong>Connect &amp; sync</strong>.</li>
-                                    <li>
-                                        For an <strong>internal integration token</strong>, add that connection to each
-                                        top-level page or database in Notion. A personal access token already acts as you.
-                                    </li>
-                                    <li>Select <strong>Full resync</strong> to refresh everything the token can access.</li>
-                                </ol>
+                                @if (!NotionSettings.HasStoredIntegrationToken)
+                                {
+                                    <div class="small text-secondary mt-2">
+                                        Paste the token, then select <strong>Connect &amp; sync</strong>.
+                                        Internal integrations must also be added to the pages you want to import.
+                                    </div>
+                                }
                             </div>
                         </div>
                     </section>
@@ -779,21 +829,30 @@
                         else
                         {
                             <div class="small text-secondary">
-                                OAuth is optional and is not configured on this server. The access-token method above
-                                works without it. To enable OAuth later, set
-                                <code>NotionOAuth__ClientId</code>, <code>NotionOAuth__ClientSecret</code>,
-                                and <code>NotionOAuth__RedirectUri</code>, then restart the app.
+                                OAuth is optional and is not configured on this server. The access-token method above works without it.
                             </div>
                         }
                     </section>
 
-                    <div class="alert alert-info py-2 mt-3 mb-0">
-                        <strong>Using an internal integration?</strong>
-                        In Notion, open each top-level page or database, choose <strong>••• → Add connections</strong>,
-                        and select your integration. Sharing a parent grants its accessible children too. Personal
-                        access tokens do not need this page-sharing step.
+                    <div class="small text-secondary mt-2">
+                        Internal integrations must be added through <strong>••• → Add connections</strong> in Notion.
+                        Personal access tokens do not need that step.
                     </div>
+                    }
 
+                    <div class="d-flex align-items-center justify-content-between gap-2 border-top mt-3 pt-3">
+                        <div>
+                            <div class="fw-semibold">Sync settings</div>
+                            <div class="small text-secondary">@NotionSyncSettingsSummary</div>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                aria-expanded="@ShowNotionSyncSettings"
+                                @onclick="() => ShowNotionSyncSettings = !ShowNotionSyncSettings">
+                            @(ShowNotionSyncSettings ? "Hide" : "Edit")
+                        </button>
+                    </div>
+                    @if (ShowNotionSyncSettings)
+                    {
                     <div class="form-check form-switch mt-3">
                         <input class="form-check-input" type="checkbox" role="switch" id="notionAutoSync"
                                @bind="NotionSettings.AutoSyncEnabled" />
@@ -895,8 +954,22 @@
                             </label>
                         </div>
                     }
+                    }
 
-                    <section class="border rounded-3 p-3 mt-3 bg-body-tertiary" aria-labelledby="notion-webhook-heading">
+                    <div class="d-flex align-items-center justify-content-between gap-2 border-top mt-3 pt-3">
+                        <div>
+                            <div class="fw-semibold">Webhook settings</div>
+                            <div class="small text-secondary">@NotionWebhookSummary</div>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                aria-expanded="@ShowNotionWebhookSettings"
+                                @onclick="() => ShowNotionWebhookSettings = !ShowNotionWebhookSettings">
+                            @(ShowNotionWebhookSettings ? "Hide" : "Manage")
+                        </button>
+                    </div>
+                    @if (ShowNotionWebhookSettings)
+                    {
+                    <section class="border rounded-3 p-3 mt-2 bg-body-tertiary" aria-labelledby="notion-webhook-heading">
                         <div class="d-flex justify-content-between align-items-start gap-3">
                             <div>
                                 <h3 id="notion-webhook-heading" class="h6 mb-1">Instant refresh webhook</h3>
@@ -949,6 +1022,7 @@
                             </div>
                         }
                     </section>
+                    }
 
                     @if (_notionConflicts.Count > 0)
                     {
@@ -1039,12 +1113,19 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-secondary" @onclick="CloseNotionModal" disabled="@IsNotionOperationBusy">Close</button>
+                    @if (ShowNotionConnectionSettings || ShowNotionSyncSettings || !HasNotionConnection)
+                    {
                     <button type="button" class="btn btn-outline-primary" @onclick="SaveNotionSettingsAsync"
                             disabled="@(IsNotionOperationBusy || HasInvalidNotionScope)">
-                        <i class="bi bi-plug-fill me-1"></i>Save connection
+                        <i class="bi bi-check2 me-1"></i>Save changes
                     </button>
+                    }
                     <button type="button" class="btn btn-primary" @onclick="SyncNotionNowAsync"
-                            disabled="@(IsNotionOperationBusy || HasInvalidNotionScope)">
+                            disabled="@(IsNotionOperationBusy
+                                || HasInvalidNotionScope
+                                || (!NotionSettings.HasStoredIntegrationToken
+                                    && !NotionSettings.IsOAuthConnected
+                                    && string.IsNullOrWhiteSpace(NotionSettings.IntegrationToken)))">
                         @if (IsNotionBusy)
                         {
                             <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
@@ -1053,7 +1134,7 @@
                         {
                             <i class="bi bi-arrow-repeat me-1"></i>
                         }
-                        @(NotionMessageIsError ? "Retry full sync" : "Full resync")
+                        @(NotionMessageIsError ? "Retry resync" : "Resync now")
                     </button>
                     @if (SelectedPageId is { } notionPageId
                         && WikiPages.Any(page => page.Id == notionPageId && !string.IsNullOrWhiteSpace(page.NotionId))
@@ -1105,6 +1186,9 @@
 
     private bool ShowNotionModal { get; set; }
     private bool ShowNotionToken { get; set; }
+    private bool ShowNotionConnectionSettings { get; set; }
+    private bool ShowNotionSyncSettings { get; set; }
+    private bool ShowNotionWebhookSettings { get; set; }
     private bool IsNotionBusy { get; set; }
     private bool NotionMessageIsError { get; set; }
     private string NotionMessage { get; set; } = string.Empty;
@@ -1112,6 +1196,19 @@
     private bool IsNotionBrowseBusy { get; set; }
     private bool IsNotionOperationBusy => IsNotionBusy || IsNotionBrowseBusy;
     private bool HasInvalidNotionScope => !SyncAllNotionContent && SelectedNotionPickerIds.Count == 0;
+    private bool HasNotionConnection =>
+        NotionSettings.IsOAuthConnected
+        || (NotionSettings.HasStoredIntegrationToken && !NotionSettings.IntegrationTokenUnreadable);
+    private string NotionSyncSettingsSummary =>
+        $"{(NotionSettings.SyncDirection == "twoWay" ? "Two-way" : "Import only")} · "
+        + $"{(SyncAllNotionContent ? "Everything shared" : $"{SelectedNotionPickerIds.Count} selected")} · "
+        + (NotionSettings.AutoSyncEnabled ? "Hourly sync on" : "Hourly sync off");
+    private string NotionWebhookSummary =>
+        NotionSettings.HasWebhookVerificationToken
+            ? NotionSettings.LastWebhookReceivedAt is { } lastWebhookAt
+                ? $"Verified · Last event {lastWebhookAt.ToLocalTime():g}"
+                : "Verified · Waiting for events"
+            : "Not configured";
     private bool SyncAllNotionContent { get; set; } = true;
     private List<NotionPickerItem> NotionPickerItems { get; set; } = [];
     private HashSet<string> SelectedNotionPickerIds { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -1206,11 +1303,15 @@
     {
         ShowNotionModal = true;
         ShowNotionToken = false;
+        ShowNotionConnectionSettings = false;
+        ShowNotionSyncSettings = false;
+        ShowNotionWebhookSettings = false;
         NotionMessage = string.Empty;
         NotionMessageIsError = false;
         try
         {
             NotionSettings = await NotionSyncService.GetSettingsAsync() ?? new NotionConnectorSettingsView();
+            ShowNotionConnectionSettings = !HasNotionConnection;
             _notionConflicts = (await NotionSyncService.GetPendingConflictsAsync()).ToList();
             ResetNotionPickerSelection();
             var syncStatus = NotionSyncCoordinator.GetStatus();
