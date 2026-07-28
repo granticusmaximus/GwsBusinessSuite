@@ -332,6 +332,19 @@
         <div class="sentinel-document">
             <div class="sentinel-document-toolbar">
                 <nav class="sentinel-document-context" aria-label="Page breadcrumb">
+                    @if (CurrentParentNode() is { } parentBreadcrumb)
+                    {
+                        <button type="button"
+                                class="sentinel-breadcrumb-up"
+                                aria-label="@($"Back to {parentBreadcrumb.Title}")"
+                                title="@($"Back to {parentBreadcrumb.Title}")"
+                                @onclick="() => OpenNodeAsync(parentBreadcrumb)"
+                                disabled="@IsBusy">
+                            <i class="bi bi-arrow-left" aria-hidden="true"></i>
+                            <span class="text-truncate">@parentBreadcrumb.Title</span>
+                        </button>
+                        <span class="sentinel-breadcrumb-divider" aria-hidden="true"></span>
+                    }
                     <span class="sentinel-document-breadcrumb-root">Sentinel</span>
                     @foreach (var breadcrumb in CurrentBreadcrumbNodes())
                     {
@@ -2838,6 +2851,24 @@
             .Where(byId.ContainsKey)
             .Select(nodeId => byId[nodeId])
             .ToList();
+    }
+
+    private WikiTreeNode? CurrentParentNode()
+    {
+        var selectedNodeId = SelectedPageId ?? SelectedDatabaseId;
+        if (selectedNodeId is null)
+        {
+            return null;
+        }
+
+        var nodes = AllTreeNodes();
+        var byId = nodes.ToDictionary(node => node.Id);
+        return SentinelTreeNavigation.GetParentNodeId(
+                selectedNodeId.Value,
+                nodes.Select(ToNavigationNode).ToList()) is { } parentId
+            && byId.TryGetValue(parentId, out var parent)
+                ? parent
+                : null;
     }
 
     private int GetNodeDepth(WikiTreeNode node)

@@ -2453,6 +2453,27 @@ audio.wiki-embed-media { max-width: 100%; }
     background: var(--sentinel-hover);
     color: #e7e5e4;
 }
+.sentinel-document-context .sentinel-breadcrumb-up {
+    max-width: 15rem;
+    padding: .3rem .5rem;
+    border: 1px solid var(--sentinel-border);
+    background: rgba(255,255,255,.025);
+    color: #e7e5e4;
+}
+.sentinel-document-context .sentinel-breadcrumb-up i {
+    color: #f59e0b;
+    font-size: .75rem;
+}
+.sentinel-document-context .sentinel-breadcrumb-up:hover,
+.sentinel-document-context .sentinel-breadcrumb-up:focus-visible {
+    border-color: var(--sentinel-border-strong);
+    background: var(--sentinel-hover);
+}
+.sentinel-breadcrumb-divider {
+    width: 1px;
+    height: 1.2rem;
+    background: var(--sentinel-border);
+}
 .sentinel-breadcrumb-current { max-width: 15rem; color: #e7e5e4; }
 
 .sentinel-context-sidebar {

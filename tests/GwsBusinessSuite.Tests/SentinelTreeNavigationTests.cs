@@ -64,6 +64,20 @@ public sealed class SentinelTreeNavigationTests
     }
 
     [Fact]
+    public void GetParentNodeId_ShouldReturnOnlyAParentThatExistsInTheWorkspace()
+    {
+        var root = Node();
+        var child = Node(root.Id);
+        var orphan = Node(Guid.NewGuid());
+        var nodes = new[] { child, orphan, root };
+
+        SentinelTreeNavigation.GetParentNodeId(child.Id, nodes).Should().Be(root.Id);
+        SentinelTreeNavigation.GetParentNodeId(root.Id, nodes).Should().BeNull();
+        SentinelTreeNavigation.GetParentNodeId(orphan.Id, nodes).Should().BeNull();
+        SentinelTreeNavigation.GetParentNodeId(Guid.NewGuid(), nodes).Should().BeNull();
+    }
+
+    [Fact]
     public void GetBreadcrumbNodeIds_ShouldBeEmptyForUnknownNodeAndStopAtCycles()
     {
         var firstId = Guid.NewGuid();

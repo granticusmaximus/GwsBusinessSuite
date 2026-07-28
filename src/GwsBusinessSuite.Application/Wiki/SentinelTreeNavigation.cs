@@ -86,4 +86,16 @@ public static class SentinelTreeNavigation
             .Append(nodeId)
             .ToList();
     }
+
+    public static Guid? GetParentNodeId(
+        Guid nodeId,
+        IReadOnlyCollection<SentinelTreeNavigationNode> nodes)
+    {
+        var byId = nodes.ToDictionary(node => node.Id);
+        return byId.TryGetValue(nodeId, out var node)
+            && node.ParentId is { } parentId
+            && byId.ContainsKey(parentId)
+                ? parentId
+                : null;
+    }
 }
