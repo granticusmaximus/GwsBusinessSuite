@@ -155,4 +155,50 @@ public sealed class WikiBlockHtmlRendererTests
         html.Should().Contain("wiki-rich-text-bg-yellow");
         html.Should().NotContain("javascript");
     }
+
+    [Fact]
+    public void RenderRichText_ShouldRejectExecutableLinksAndKeepSupportedLinks()
+    {
+        var html = WikiBlockHtmlRenderer.RenderRichText(
+        [
+            new WikiRichTextSpan("Unsafe", Link: "javascript:alert(1)"),
+            new WikiRichTextSpan("Web", Link: "https://example.com/docs"),
+            new WikiRichTextSpan("Page", Link: $"wikilink:{Guid.NewGuid()}")
+        ]);
+
+        html.Should().NotContain("javascript:");
+        html.Should().Contain("href=\"https://example.com/docs\"");
+        html.Should().Contain("href=\"wikilink:");
+        html.Should().StartWith("Unsafe");
+    }
+
+    [Theory]
+    [InlineData(WikiBlockTypes.Image)]
+    [InlineData(WikiBlockTypes.Embed)]
+    public void RenderBlock_ShouldRejectExecutableMediaUrls(string blockType)
+    {
+        var block = new WikiBlock(
+            Guid.NewGuid(),
+            blockType,
+            0,
+            [new WikiRichTextSpan("Unsafe")],
+            new Dictionary<string, string> { ["url"] = "javascript:alert(1)" });
+
+        WikiBlockHtmlRenderer.RenderBlock(block).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void RenderBlock_ShouldFallBackToANonExecutableButtonTarget()
+    {
+        var block = new WikiBlock(
+            Guid.NewGuid(),
+            WikiBlockTypes.Button,
+            0,
+            [new WikiRichTextSpan("Run")],
+            new Dictionary<string, string> { ["url"] = "javascript:alert(1)" });
+
+        WikiBlockHtmlRenderer.RenderBlock(block)
+            .Should().Contain("href=\"#\"")
+            .And.NotContain("javascript:");
+    }
 }

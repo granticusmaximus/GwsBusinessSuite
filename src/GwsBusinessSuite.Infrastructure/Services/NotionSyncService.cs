@@ -1797,6 +1797,15 @@ public sealed class NotionSyncService(
 
             if (schema.Value.TryGetProperty("properties", out var propertiesElement) && propertiesElement.ValueKind == JsonValueKind.Object)
             {
+                var existingProperties = await dbContext.WikiDatabaseProperties
+                    .Where(property => property.WikiDatabaseId == wikiDatabaseId)
+                    .ToListAsync(cancellationToken);
+                var propertiesByNotionId = existingProperties
+                    .Where(property => property.NotionId is not null)
+                    .GroupBy(property => NormalizeNotionPropertyId(property.NotionId!), StringComparer.Ordinal)
+                    .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+                var unclaimedTitleProperty = existingProperties.FirstOrDefault(
+                    property => property.Type == WikiDatabasePropertyTypes.Title && property.NotionId is null);
                 var sortOrder = 0;
                 foreach (var propertyField in propertiesElement.EnumerateObject())
                 {
@@ -1809,16 +1818,17 @@ public sealed class NotionSyncService(
                     }
 
                     var localType = NotionMapping.MapPropertyType(notionPropertyType);
-                    var existing = await dbContext.WikiDatabaseProperties.FirstOrDefaultAsync(
-                        p => p.WikiDatabaseId == wikiDatabaseId && p.NotionId == notionPropertyId, cancellationToken);
+                    propertiesByNotionId.TryGetValue(
+                        NormalizeNotionPropertyId(notionPropertyId),
+                        out var existing);
 
                     // A database always starts with a locally-seeded, NotionId-less Title property
                     // (see UpsertDatabaseAsync) - Notion's own title property claims that row
                     // instead of creating a second Title property, since exactly one is allowed.
                     if (existing is null && localType == WikiDatabasePropertyTypes.Title)
                     {
-                        existing = await dbContext.WikiDatabaseProperties.FirstOrDefaultAsync(
-                            p => p.WikiDatabaseId == wikiDatabaseId && p.Type == WikiDatabasePropertyTypes.Title && p.NotionId == null, cancellationToken);
+                        existing = unclaimedTitleProperty;
+                        unclaimedTitleProperty = null;
                     }
 
                     var isNew = existing is null;
@@ -1910,10 +1920,14 @@ public sealed class NotionSyncService(
             rowCursor = page.HasMore ? page.NextCursor : null;
         } while (rowCursor is not null);
 
-        var nextSortOrder = (await dbContext.WikiDatabaseRows
-            .Where(r => r.WikiDatabaseId == wikiDatabaseId)
-            .Select(r => (int?)r.SortOrder)
-            .MaxAsync(cancellationToken) ?? -1) + 1;
+        var existingRows = await dbContext.WikiDatabaseRows
+            .Where(row => row.WikiDatabaseId == wikiDatabaseId)
+            .ToListAsync(cancellationToken);
+        var rowsByNotionId = existingRows
+            .Where(row => row.NotionId is not null)
+            .GroupBy(row => row.NotionId!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var nextSortOrder = (existingRows.Select(row => (int?)row.SortOrder).Max() ?? -1) + 1;
 
         var imported = 0;
         var updated = 0;
@@ -1931,7 +1945,7 @@ public sealed class NotionSyncService(
             }
 
             seenRowNotionIds.Add(rowNotionId);
-            var row = await dbContext.WikiDatabaseRows.FirstOrDefaultAsync(r => r.WikiDatabaseId == wikiDatabaseId && r.NotionId == rowNotionId, cancellationToken);
+            rowsByNotionId.TryGetValue(rowNotionId, out var row);
             var isNew = row is null;
             var wasArchived = row?.NotionArchivedAt is not null;
             var rowRemoteEditedAt = GetLastEditedAt(rowElement);
@@ -2003,9 +2017,6 @@ public sealed class NotionSyncService(
 
         if (rowsEditedAfter is null)
         {
-            var existingRows = await dbContext.WikiDatabaseRows
-                .Where(r => r.WikiDatabaseId == wikiDatabaseId && r.NotionId != null)
-                .ToListAsync(cancellationToken);
             foreach (var existingRow in existingRows)
             {
                 if (existingRow.NotionId is { } notionId && !seenRowNotionIds.Contains(notionId) && existingRow.NotionArchivedAt is null)
@@ -2068,6 +2079,12 @@ public sealed class NotionSyncService(
             viewReferences.AddRange(viewsElement.EnumerateArray().Select(view => view.Clone()));
         }
 
+        var existingViews = await dbContext.WikiDatabaseViews
+            .Where(view => view.WikiDatabaseId == wikiDatabaseId && view.NotionId != null)
+            .ToListAsync(cancellationToken);
+        var viewsByNotionId = existingViews
+            .GroupBy(view => view.NotionId!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
         var order = 0;
         foreach (var viewElement in viewReferences)
         {
@@ -2077,7 +2094,7 @@ public sealed class NotionSyncService(
                 ?? viewElement;
             var name = remote.TryGetProperty("name", out var nameElement) ? nameElement.GetString() : null;
             var type = remote.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : null;
-            var existing = await dbContext.WikiDatabaseViews.FirstOrDefaultAsync(v => v.WikiDatabaseId == wikiDatabaseId && v.NotionId == notionId, cancellationToken);
+            viewsByNotionId.TryGetValue(notionId, out var existing);
             var isNew = existing is null;
             existing ??= new WikiDatabaseView
             {
@@ -2206,14 +2223,29 @@ public sealed class NotionSyncService(
                 return;
             }
 
+            var commentIds = commentPage.Results
+                .Select(item => item.TryGetProperty("id", out var id) ? id.GetString() : null)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => id!)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            var existingCommentIds = commentIds.Count == 0
+                ? new HashSet<string>(StringComparer.Ordinal)
+                : (await dbContext.SentinelDiscussionComments
+                    .AsNoTracking()
+                    .Where(comment => comment.NotionId != null && commentIds.Contains(comment.NotionId))
+                    .Select(comment => comment.NotionId!)
+                    .ToListAsync(cancellationToken))
+                    .ToHashSet(StringComparer.Ordinal);
             foreach (var item in commentPage.Results)
             {
                 var notionId = item.TryGetProperty("id", out var id) ? id.GetString() : null;
-                if (string.IsNullOrWhiteSpace(notionId) || await dbContext.SentinelDiscussionComments.AnyAsync(c => c.NotionId == notionId, cancellationToken)) continue;
+                if (string.IsNullOrWhiteSpace(notionId) || existingCommentIds.Contains(notionId)) continue;
                 var body = item.TryGetProperty("rich_text", out var richText)
                     ? string.Concat(NotionMapping.MapRichText(richText).Select(span => span.Text))
                     : string.Empty;
                 if (string.IsNullOrWhiteSpace(body)) continue;
+                existingCommentIds.Add(notionId);
                 var discussion = new SentinelDiscussion
                 {
                     WikiPageId = wikiPageId,

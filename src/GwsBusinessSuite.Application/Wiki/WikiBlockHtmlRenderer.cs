@@ -42,16 +42,54 @@ public static class WikiBlockHtmlRenderer
             }
             if (!string.IsNullOrWhiteSpace(span.Link))
             {
-                var isMention = span.Link.StartsWith("usermention:", StringComparison.OrdinalIgnoreCase)
-                    || span.Link.StartsWith("datemention:", StringComparison.OrdinalIgnoreCase)
-                    || span.Link.StartsWith("rowmention:", StringComparison.OrdinalIgnoreCase);
-                text = isMention
-                    ? $"<a class=\"wiki-mention\" href=\"{WebUtility.HtmlEncode(span.Link)}\">{text}</a>"
-                    : $"<a href=\"{WebUtility.HtmlEncode(span.Link)}\" target=\"_blank\" rel=\"noopener noreferrer\">{text}</a>";
+                var safeLink = GetSafeLink(span.Link);
+                if (safeLink is not null)
+                {
+                    var isMention = safeLink.StartsWith("usermention:", StringComparison.OrdinalIgnoreCase)
+                        || safeLink.StartsWith("datemention:", StringComparison.OrdinalIgnoreCase)
+                        || safeLink.StartsWith("rowmention:", StringComparison.OrdinalIgnoreCase);
+                    var isInternal = isMention || safeLink.StartsWith("wikilink:", StringComparison.OrdinalIgnoreCase);
+                    text = isMention
+                        ? $"<a class=\"wiki-mention\" href=\"{WebUtility.HtmlEncode(safeLink)}\">{text}</a>"
+                        : isInternal
+                            ? $"<a href=\"{WebUtility.HtmlEncode(safeLink)}\">{text}</a>"
+                            : $"<a href=\"{WebUtility.HtmlEncode(safeLink)}\" target=\"_blank\" rel=\"noopener noreferrer\">{text}</a>";
+                }
             }
             builder.Append(text);
         }
         return builder.ToString();
+    }
+
+    private static string? GetSafeLink(string? value)
+    {
+        var link = value?.Trim();
+        if (string.IsNullOrEmpty(link))
+        {
+            return null;
+        }
+
+        if (link.StartsWith("wikilink:", StringComparison.OrdinalIgnoreCase)
+            || link.StartsWith("usermention:", StringComparison.OrdinalIgnoreCase)
+            || link.StartsWith("datemention:", StringComparison.OrdinalIgnoreCase)
+            || link.StartsWith("rowmention:", StringComparison.OrdinalIgnoreCase))
+        {
+            return link;
+        }
+
+        if (Uri.TryCreate(link, UriKind.Absolute, out var absolute))
+        {
+            return absolute.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                || absolute.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+                || absolute.Scheme.Equals(Uri.UriSchemeMailto, StringComparison.OrdinalIgnoreCase)
+                || absolute.Scheme.Equals("tel", StringComparison.OrdinalIgnoreCase)
+                    ? link
+                    : null;
+        }
+
+        // A colon in a value that failed absolute-URI parsing is treated as a malformed
+        // scheme, not as a relative application link.
+        return link.Contains(':', StringComparison.Ordinal) ? null : link;
     }
 
     public static string RenderBlock(WikiBlock block, IReadOnlyList<WikiPage>? pagesForWikiLinks = null)
@@ -73,9 +111,9 @@ public static class WikiBlockHtmlRenderer
             WikiBlockTypes.Callout => $"<div class=\"wiki-callout\"{indentStyle}>{WebUtility.HtmlEncode(block.Props.GetValueOrDefault("icon", "💡"))} {content}</div>",
             WikiBlockTypes.Code => $"<pre class=\"wiki-code\" data-language=\"{WebUtility.HtmlEncode(block.Props.GetValueOrDefault("language", string.Empty))}\"{indentStyle}><code>{WebUtility.HtmlEncode(block.PlainText)}</code></pre>",
             WikiBlockTypes.Divider => "<hr />",
-            WikiBlockTypes.Image => string.IsNullOrWhiteSpace(block.Props.GetValueOrDefault("url"))
+            WikiBlockTypes.Image => GetSafeLink(block.Props.GetValueOrDefault("url")) is not { } imageUrl
                 ? string.Empty
-                : $"<img src=\"{WebUtility.HtmlEncode(block.Props["url"])}\" alt=\"{WebUtility.HtmlEncode(block.PlainText)}\" loading=\"lazy\" style=\"max-width:100%\" />",
+                : $"<img src=\"{WebUtility.HtmlEncode(imageUrl)}\" alt=\"{WebUtility.HtmlEncode(block.PlainText)}\" loading=\"lazy\" style=\"max-width:100%\" />",
             WikiBlockTypes.Embed => RenderEmbed(block),
             WikiBlockTypes.LinkedDatabase => RenderLinkedDatabase(block, indentStyle),
             WikiBlockTypes.InlineDatabase => RenderLinkedDatabase(block, indentStyle, isInline: true),
@@ -83,7 +121,7 @@ public static class WikiBlockHtmlRenderer
             WikiBlockTypes.Equation => $"<div class=\"wiki-equation\"{indentStyle}>{WebUtility.HtmlEncode(block.PlainText)}</div>",
             WikiBlockTypes.Breadcrumb => $"<nav class=\"wiki-breadcrumb\"{indentStyle} aria-label=\"Breadcrumb\">{content}</nav>",
             WikiBlockTypes.TableOfContents => $"<nav class=\"wiki-table-of-contents\"{indentStyle}>Table of contents</nav>",
-            WikiBlockTypes.Button => $"<a class=\"wiki-button\" href=\"{WebUtility.HtmlEncode(block.Props.GetValueOrDefault("url", "#"))}\">{content}</a>",
+            WikiBlockTypes.Button => $"<a class=\"wiki-button\" href=\"{WebUtility.HtmlEncode(GetSafeLink(block.Props.GetValueOrDefault("url")) ?? "#")}\">{content}</a>",
             WikiBlockTypes.SyncedBlock => $"<div class=\"wiki-synced-block\"{indentStyle}>{content}</div>",
             WikiBlockTypes.Columns => RenderColumns(block, indentStyle),
             // Legacy content from the pre-block-editor wiki still uses [[Page Title]] syntax,
@@ -140,8 +178,8 @@ public static class WikiBlockHtmlRenderer
 
     private static string RenderEmbed(WikiBlock block)
     {
-        var url = block.Props.GetValueOrDefault("url");
-        if (string.IsNullOrWhiteSpace(url))
+        var url = GetSafeLink(block.Props.GetValueOrDefault("url"));
+        if (url is null)
         {
             return string.Empty;
         }

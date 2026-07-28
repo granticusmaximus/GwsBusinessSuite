@@ -10,6 +10,59 @@ namespace GwsBusinessSuite.Tests;
 public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture)
 {
     [Fact]
+    public async Task ImportedRichText_ShouldRejectExecutableLinkSchemes()
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "text/html",
+            Body = """<main class="sentinel-workspace"><div id="editor" class="wiki-block-editor"></div></main>"""
+        }));
+        await page.GotoAsync("http://localhost/editor");
+
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions
+        {
+            Type = "module",
+            Content = moduleSource
+        });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+
+        var blocksJson = WikiBlockJson.Serialize(
+        [
+            new WikiBlock(
+                Guid.NewGuid(),
+                WikiBlockTypes.Paragraph,
+                0,
+                [
+                    new WikiRichTextSpan("Unsafe", Link: "javascript:alert(1)"),
+                    new WikiRichTextSpan("Safe", Link: "https://example.com")
+                ],
+                new Dictionary<string, string>())
+        ]);
+        await page.EvaluateAsync(
+            """
+            json => window.sentinelBlockEditor.initialize(
+                document.querySelector('#editor'),
+                { invokeMethodAsync: () => Promise.resolve([]) },
+                json)
+            """,
+            blocksJson);
+
+        var contentHtml = await page.Locator(".wiki-block-content").InnerHTMLAsync();
+        contentHtml.Should().Contain("<a");
+        await Expect(page.Locator(".wiki-block-content a")).ToHaveCountAsync(1);
+        await Expect(page.Locator(".wiki-block-content a")).ToHaveAttributeAsync("href", "https://example.com");
+        await Expect(page.Locator(".wiki-block-content")).ToContainTextAsync("UnsafeSafe");
+    }
+
+    [Fact]
     public async Task ImportedNotionBlocks_ShouldRenderAndRoundTripWithoutLosingStructure()
     {
         await using var page = await fixture.Browser.NewPageAsync();

@@ -823,9 +823,11 @@ function resolveEmbedUrl(url) {
 function renderMediaPreview(preview, type, url, fileName = '', mediaKind = '') {
     preview.innerHTML = '';
     if (!url) return;
+    const safeUrl = safeMediaHref(url);
+    if (!safeUrl) return;
     if (type === 'image') {
         const img = document.createElement('img');
-        img.src = url;
+        img.src = safeUrl;
         img.loading = 'lazy';
         img.className = 'wiki-media-image';
         img.alt = '';
@@ -839,14 +841,14 @@ function renderMediaPreview(preview, type, url, fileName = '', mediaKind = '') {
     if (mediaKind === 'video' || mediaKind === 'audio') {
         const player = document.createElement(mediaKind);
         player.className = 'wiki-embed-media';
-        player.src = url;
+        player.src = safeUrl;
         player.controls = true;
         player.preload = 'metadata';
         preview.appendChild(player);
         return;
     }
 
-    const resolved = resolveEmbedUrl(url);
+    const resolved = resolveEmbedUrl(safeUrl);
     if (resolved) {
         const frame = document.createElement('div');
         frame.className = 'wiki-embed-frame';
@@ -863,12 +865,12 @@ function renderMediaPreview(preview, type, url, fileName = '', mediaKind = '') {
     }
 
     const link = document.createElement('a');
-    link.href = url;
+    link.href = safeUrl;
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
     link.className = 'wiki-embed-link';
-    link.textContent = fileName || url;
-    if (fileName) link.title = url;
+    link.textContent = fileName || safeUrl;
+    if (fileName) link.title = safeUrl;
     preview.appendChild(link);
 }
 
@@ -1377,7 +1379,8 @@ function onContentKeyDown(state, content, event) {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         const url = window.prompt('Link URL');
-        if (url) { toggleInlineTag('a', { href: url }); scheduleNotify(state); }
+        const safeUrl = safeRichTextHref(url);
+        if (safeUrl) { toggleInlineTag('a', { href: safeUrl }); scheduleNotify(state); }
         return;
     }
 }
@@ -2276,11 +2279,40 @@ function htmlFromRichText(spans) {
         if (textColor) html = `<span class="wiki-rich-text-color-${textColor}" data-wiki-text-color="${textColor}">${html}</span>`;
         if (backgroundColor) html = `<span class="wiki-rich-text-bg-${backgroundColor}" data-wiki-background-color="${backgroundColor}">${html}</span>`;
         if (span.link) {
-            const mentionClass = /^(user|date)mention:/i.test(span.link) ? ' class="wiki-mention"' : '';
-            html = `<a${mentionClass} href="${escapeHtml(span.link)}">${html}</a>`;
+            const safeLink = safeRichTextHref(span.link);
+            if (safeLink) {
+                const mentionClass = /^(user|date|row)mention:/i.test(safeLink) ? ' class="wiki-mention"' : '';
+                html = `<a${mentionClass} href="${escapeHtml(safeLink)}">${html}</a>`;
+            }
         }
         return html;
     }).join('');
+}
+
+function safeRichTextHref(value) {
+    const link = String(value || '').trim();
+    if (!link) return null;
+    if (/^(wiki|usermention|datemention|rowmention):/i.test(link)) return link;
+
+    try {
+        const parsed = new URL(link, window.location.origin);
+        return ['http:', 'https:', 'mailto:', 'tel:'].includes(parsed.protocol)
+            ? link
+            : null;
+    } catch {
+        return null;
+    }
+}
+
+function safeMediaHref(value) {
+    const link = safeRichTextHref(value);
+    if (!link) return null;
+    try {
+        const parsed = new URL(link, window.location.origin);
+        return ['http:', 'https:'].includes(parsed.protocol) ? link : null;
+    } catch {
+        return null;
+    }
 }
 
 function normalizeRichTextColor(value) {
@@ -2343,8 +2375,9 @@ function showInlineToolbar(state) {
     linkButton.addEventListener('mousedown', event => event.preventDefault());
     linkButton.addEventListener('click', () => {
         const url = window.prompt('Link URL');
-        if (url) {
-            toggleInlineTag('a', { href: url });
+        const safeUrl = safeRichTextHref(url);
+        if (safeUrl) {
+            toggleInlineTag('a', { href: safeUrl });
             scheduleNotify(state);
         }
     });
