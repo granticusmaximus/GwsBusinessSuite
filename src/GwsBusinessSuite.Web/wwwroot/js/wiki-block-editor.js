@@ -80,6 +80,19 @@ export function initialize(container, dotNetRef, initialBlocksJson, historyKey =
     container.addEventListener('pointermove', event => onHandlePointerMove(state, event));
     container.addEventListener('pointerup', event => onHandlePointerUp(state, event));
     container.addEventListener('pointercancel', event => onHandlePointerUp(state, event));
+    container.addEventListener('click', state.linkClickHandler = event => {
+        const anchor = wikiLinkAnchorFromEvent(event);
+        if (!anchor) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        const href = anchor.getAttribute('href');
+        if (state.lastWikiLinkPointerNavigation?.href === href
+            && performance.now() - state.lastWikiLinkPointerNavigation.at < 1000) {
+            return;
+        }
+        navigateToWikiLink(state, anchor);
+    });
     container.addEventListener('mouseup', state.selectionHandler = () => {
         showInlineToolbar(state);
         reportCursor(state);
@@ -303,6 +316,7 @@ export function dispose(container) {
     if (state.notifyTimer) clearTimeout(state.notifyTimer);
     closeFloatingMenus(state);
     if (state.focusInHandler) container.removeEventListener('focusin', state.focusInHandler);
+    if (state.linkClickHandler) container.removeEventListener('click', state.linkClickHandler);
     if (state.selectionHandler) {
         container.removeEventListener('mouseup', state.selectionHandler);
         container.removeEventListener('keyup', state.selectionHandler);
@@ -1862,6 +1876,18 @@ function positionMenu(menu, anchorEl) {
 
 function onHandlePointerDown(state, event) {
     if (event.button !== 0) return;
+    const wikiLink = wikiLinkAnchorFromEvent(event);
+    if (wikiLink) {
+        event.preventDefault();
+        event.stopPropagation();
+        state.lastWikiLinkPointerNavigation = {
+            href: wikiLink.getAttribute('href'),
+            at: performance.now()
+        };
+        navigateToWikiLink(state, wikiLink);
+        return;
+    }
+
     const handle = event.target.closest('.wiki-block-handle');
     if (!handle) return;
     const blockEl = handle.closest('.wiki-block');
@@ -1872,6 +1898,25 @@ function onHandlePointerDown(state, event) {
     branch.forEach(element => element.classList.add('is-dragging'));
     handle.setPointerCapture(event.pointerId);
     event.preventDefault();
+}
+
+function wikiLinkAnchorFromEvent(event) {
+    const pathAnchor = event.composedPath?.()
+        .find(element => element.matches?.('a[href^="wikilink:"]'));
+    if (pathAnchor) return pathAnchor;
+
+    const targetAnchor = event.target.closest?.('a[href^="wikilink:"]');
+    if (targetAnchor) return targetAnchor;
+
+    return Number.isFinite(event.clientX) && Number.isFinite(event.clientY)
+        ? document.elementFromPoint(event.clientX, event.clientY)?.closest?.('a[href^="wikilink:"]')
+        : null;
+}
+
+function navigateToWikiLink(state, anchor) {
+    const href = anchor.getAttribute('href') || '';
+    const pageId = href.substring('wikilink:'.length);
+    if (pageId) state.dotNetRef.invokeMethodAsync('NavigateToWikiPageId', pageId);
 }
 
 function onHandlePointerMove(state, event) {
@@ -2292,7 +2337,7 @@ function htmlFromRichText(spans) {
 function safeRichTextHref(value) {
     const link = String(value || '').trim();
     if (!link) return null;
-    if (/^(wiki|usermention|datemention|rowmention):/i.test(link)) return link;
+    if (/^(wikilink|usermention|datemention|rowmention):/i.test(link)) return link;
 
     try {
         const parsed = new URL(link, window.location.origin);

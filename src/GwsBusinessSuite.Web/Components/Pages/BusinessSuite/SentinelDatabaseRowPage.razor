@@ -305,7 +305,7 @@
         if (!_initialized)
         {
             _dotNetRef = DotNetObjectReference.Create(this);
-            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=4");
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=5");
             await _module.InvokeVoidAsync("initialize", _editorContainer, _dotNetRef, _blocksJson);
             _initialized = true;
         }
@@ -397,6 +397,10 @@
     [JSInvokable]
     public async Task<IReadOnlyList<WikiLinkSuggestion>> SearchWikiLinkSuggestions(string query) =>
         WikiMarkdownHelper.SearchLinkSuggestions(query, await WikiService.ListPagesAsync());
+
+    [JSInvokable]
+    public Task NavigateToWikiPageId(string pageId) =>
+        Guid.TryParse(pageId, out var id) ? OnOpenPage.InvokeAsync(id) : Task.CompletedTask;
 
     private async Task ToggleCoverPickerAsync()
     {

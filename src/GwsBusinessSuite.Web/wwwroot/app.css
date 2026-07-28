@@ -2773,6 +2773,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .wiki-block-content:focus { border-radius: 3px; background: rgba(255, 255, 255, .018); }
 .sentinel-workspace .wiki-block-content:empty::before { color: #57534e; }
 .sentinel-workspace .wiki-block-content a { color: #fbbf24; text-decoration-color: rgba(251, 191, 36, .45); text-underline-offset: 2px; }
+.sentinel-workspace .wiki-block-content a[href^="wikilink:"] { cursor: pointer; }
 
 .wiki-offline-banner {
     position: sticky;

@@ -33,7 +33,15 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
             Content = moduleSource
         });
         await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+        var wikiLinksPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wikiLinks.js"));
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions
+        {
+            Content = await File.ReadAllTextAsync(wikiLinksPath)
+        });
 
+        var linkedPageId = Guid.NewGuid();
         var blocksJson = WikiBlockJson.Serialize(
         [
             new WikiBlock(
@@ -42,7 +50,8 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
                 0,
                 [
                     new WikiRichTextSpan("Unsafe", Link: "javascript:alert(1)"),
-                    new WikiRichTextSpan("Safe", Link: "https://example.com")
+                    new WikiRichTextSpan("Safe", Link: "https://example.com"),
+                    new WikiRichTextSpan("Page", Link: $"wikilink:{linkedPageId}")
                 ],
                 new Dictionary<string, string>())
         ]);
@@ -50,16 +59,27 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
             """
             json => window.sentinelBlockEditor.initialize(
                 document.querySelector('#editor'),
-                { invokeMethodAsync: () => Promise.resolve([]) },
+                window.wikiDotNetRef = {
+                    invokeMethodAsync: (...args) => {
+                        window.wikiLinkCalls = [...(window.wikiLinkCalls || []), args];
+                        return Promise.resolve([]);
+                    }
+                },
                 json)
             """,
             blocksJson);
+        await page.EvaluateAsync("() => window.gwsWikiLinks.init(window.wikiDotNetRef)");
 
         var contentHtml = await page.Locator(".wiki-block-content").InnerHTMLAsync();
         contentHtml.Should().Contain("<a");
-        await Expect(page.Locator(".wiki-block-content a")).ToHaveCountAsync(1);
-        await Expect(page.Locator(".wiki-block-content a")).ToHaveAttributeAsync("href", "https://example.com");
-        await Expect(page.Locator(".wiki-block-content")).ToContainTextAsync("UnsafeSafe");
+        await Expect(page.Locator(".wiki-block-content a")).ToHaveCountAsync(2);
+        await Expect(page.Locator(".wiki-block-content a").First).ToHaveAttributeAsync("href", "https://example.com");
+        await page.Locator("""a[href^="wikilink:"]""").ClickAsync();
+        await page.WaitForFunctionAsync("() => (window.wikiLinkCalls || []).length === 1");
+        var linkCall = await page.EvaluateAsync<string>(
+            "() => JSON.stringify(window.wikiLinkCalls[0])");
+        linkCall.Should().Be($"[\"NavigateToWikiPageId\",\"{linkedPageId}\"]");
+        await Expect(page.Locator(".wiki-block-content")).ToContainTextAsync("UnsafeSafePage");
     }
 
     [Fact]
