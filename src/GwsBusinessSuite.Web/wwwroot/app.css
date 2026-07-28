@@ -3712,11 +3712,17 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 
 /* SentinelGPT — conversation-first local workspace assistant */
+.gws-content:has(> .sentinel-gpt-shell) {
+    height: calc(100dvh - var(--gws-admin-bar-height));
+    min-height: 0;
+    overflow: hidden;
+}
+
 .sentinel-gpt-shell {
     display: grid;
     grid-template-columns: minmax(220px, 255px) minmax(0, 1fr);
-    height: calc(100dvh - var(--gws-admin-bar-height) - 2rem);
-    min-height: 40rem;
+    height: 100%;
+    min-height: 0;
     overflow: hidden;
     border: 1px solid var(--gws-panel-border);
     border-radius: 14px;
@@ -3918,6 +3924,8 @@ audio.wiki-embed-media { max-width: 100%; }
     position: relative;
     display: grid;
     grid-template-rows: auto auto minmax(0, 1fr) auto;
+    height: 100%;
+    min-height: 0;
     min-width: 0;
     overflow: hidden;
     background: radial-gradient(circle at 66% 10%, rgba(245, 158, 11, .025), transparent 30%), #11100f;
@@ -3986,8 +3994,20 @@ audio.wiki-embed-media { max-width: 100%; }
     min-height: 0;
     padding: 2rem clamp(1.25rem, 5vw, 5.5rem) 1.25rem;
     overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-color: #514a45 #181614;
+    scrollbar-gutter: stable;
     scrollbar-width: thin;
 }
+
+.sentinel-gpt-thread::-webkit-scrollbar { width: 9px; }
+.sentinel-gpt-thread::-webkit-scrollbar-track { background: #181614; }
+.sentinel-gpt-thread::-webkit-scrollbar-thumb {
+    border: 2px solid #181614;
+    border-radius: 999px;
+    background: #514a45;
+}
+.sentinel-gpt-thread::-webkit-scrollbar-thumb:hover { background: #6a615b; }
 
 .sentinel-gpt-welcome {
     display: grid;
@@ -4004,8 +4024,17 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-starters button { padding: .45rem .65rem; border: 1px solid #38332f; border-radius: 999px; background: #1d1a18; color: #aaa49f; font-size: .68rem; }
 .sentinel-gpt-starters button:hover { border-color: rgba(245, 158, 11, .5); color: #fbbf24; }
 
-.sentinel-gpt-exchange { display: flex; flex-direction: column; width: min(100%, 58rem); margin: 0 auto 2rem; }
-.sentinel-gpt-message { line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sentinel-gpt-exchange {
+    display: flex;
+    flex-direction: column;
+    width: min(100%, 58rem);
+    margin: 0 auto 1rem;
+}
+
+.sentinel-gpt-message {
+    line-height: 1.48;
+    overflow-wrap: anywhere;
+}
 
 .sentinel-gpt-user-message {
     align-self: flex-end;
@@ -4026,18 +4055,24 @@ audio.wiki-embed-media { max-width: 100%; }
     text-align: right;
 }
 
+.sentinel-gpt-user-message > div,
+.sentinel-gpt-assistant-message:not(.is-streaming),
+.sentinel-gpt-output {
+    white-space: pre-wrap;
+}
+
 .sentinel-gpt-assistant-row {
     display: grid;
     grid-template-columns: auto minmax(0, 42rem);
     align-self: flex-start;
     gap: .7rem;
     max-width: 88%;
-    margin-top: .85rem;
+    margin-top: .55rem;
 }
 
 .sentinel-gpt-assistant-row > div { min-width: 0; }
 .sentinel-gpt-assistant-message {
-    padding: .8rem .95rem;
+    padding: .7rem .85rem;
     border: 1px solid #36312e;
     border-radius: 4px 16px 16px 16px;
     background: #24211f;
@@ -4045,7 +4080,7 @@ audio.wiki-embed-media { max-width: 100%; }
     font-size: .82rem;
     box-shadow: 0 5px 18px rgba(0, 0, 0, .18);
 }
-.sentinel-gpt-assistant-row time { display: block; margin: .3rem .25rem 0; color: #716b66; font-size: .58rem; }
+.sentinel-gpt-assistant-row time { display: block; margin: .22rem .25rem 0; color: #716b66; font-size: .58rem; }
 .sentinel-gpt-assistant-message.is-streaming::after { content: "▋"; margin-left: .15rem; animation: sentinelAiCaretBlink 1s step-end infinite; color: #f59e0b; }
 .sentinel-gpt-thinking-copy { display: inline-flex; align-items: center; gap: .55rem; color: #aaa49f; font-size: .72rem; }
 .sentinel-gpt-thinking { display: flex; gap: .25rem; padding: .35rem .1rem; }
@@ -4055,7 +4090,7 @@ audio.wiki-embed-media { max-width: 100%; }
 @keyframes sentinelGptThinking { 0%, 70%, 100% { opacity: .3; transform: translateY(0); } 35% { opacity: 1; transform: translateY(-3px); } }
 
 .sentinel-gpt-sources {
-    margin-top: .45rem;
+    margin-top: .32rem;
     border: 1px solid #34302d;
     border-radius: 8px;
     background: #191715;
@@ -4077,6 +4112,8 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-confirmation button.sentinel-gpt-confirm { border-color: #b56a08; background: #d98208; color: #211305; font-weight: 700; }
 
 .sentinel-gpt-composer-wrap {
+    position: relative;
+    z-index: 2;
     padding: .65rem clamp(1rem, 4vw, 4.5rem) .75rem;
     background: linear-gradient(transparent, #11100f 24%);
 }
@@ -4127,10 +4164,10 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 
 @media (max-width: 767.98px) {
-    .sentinel-gpt-shell { display: block; height: auto; min-height: calc(100dvh - var(--gws-admin-bar-height) - 1.5rem); overflow: visible; }
+    .sentinel-gpt-shell { display: block; height: 100%; min-height: 0; overflow: hidden; }
     .sentinel-gpt-history { display: none; }
-    .sentinel-gpt-chat { min-height: calc(100dvh - var(--gws-admin-bar-height) - 1.5rem); }
-    .sentinel-gpt-thread { min-height: 28rem; padding: 1.25rem .75rem; }
+    .sentinel-gpt-chat { height: 100%; min-height: 0; }
+    .sentinel-gpt-thread { min-height: 0; padding: 1.25rem .75rem; }
     .sentinel-gpt-settings { grid-template-columns: 1fr; }
     .sentinel-gpt-assistant-row { max-width: 96%; }
     .sentinel-gpt-user-message { max-width: 88%; }

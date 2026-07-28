@@ -110,7 +110,7 @@
             </section>
         }
 
-        <section class="sentinel-gpt-thread" aria-live="polite">
+        <section class="sentinel-gpt-thread" aria-live="polite" aria-label="SentinelGPT conversation" tabindex="0">
             @if (_runs.Count == 0 && !_generating)
             {
                 <div class="sentinel-gpt-welcome">
@@ -180,7 +180,7 @@
                             }
                             else
                             {
-                                @_liveOutput
+                                <span class="sentinel-gpt-output">@_liveOutput</span>
                             }
                         </div>
                     </div>
