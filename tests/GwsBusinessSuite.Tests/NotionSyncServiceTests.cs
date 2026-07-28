@@ -226,6 +226,28 @@ public sealed class NotionSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_ForcedRefresh_ShouldReloadUnchangedPageCover()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        var editedAt = DateTimeOffset.UtcNow.AddMinutes(-10);
+        fixture.Notion.SearchResults =
+        [
+            Page("page-1", "Unum", lastEditedAt: editedAt, coverUrl: "https://example.test/old-cover.png")
+        ];
+        (await fixture.Service.SyncAsync()).IsSuccess.Should().BeTrue();
+
+        fixture.Notion.SearchResults =
+        [
+            Page("page-1", "Unum", lastEditedAt: editedAt, coverUrl: "https://example.test/unum-cover.png")
+        ];
+        var result = await fixture.Service.SyncAsync(forceRefresh: true);
+
+        result.IsSuccess.Should().BeTrue();
+        var page = await fixture.Db.WikiPages.SingleAsync(item => item.NotionId == "page-1");
+        page.CoverImageUrl.Should().Be("https://example.test/unum-cover.png");
+    }
+
+    [Fact]
     public async Task SyncAsync_ShouldBootstrapExistingPagesFromTheLastSuccessfulConnectorSync()
     {
         await using var fixture = await SyncFixture.CreateAsync();

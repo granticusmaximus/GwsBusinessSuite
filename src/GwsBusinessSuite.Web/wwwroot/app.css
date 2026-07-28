@@ -3203,17 +3203,26 @@ audio.wiki-embed-media { max-width: 100%; }
     display: grid;
     grid-auto-columns: minmax(13rem, 1fr);
     grid-auto-flow: column;
+    align-items: start;
     gap: .65rem;
     min-width: max-content;
     padding: .7rem;
 }
 .sentinel-workspace .wiki-inline-board-column {
+    align-self: start;
+    display: flex;
+    flex-direction: column;
     width: min(17rem, 72vw);
-    min-height: 7rem;
     padding: .45rem;
     border-radius: 7px;
     background: rgba(255,255,255,.025);
+    transition: background .12s ease, box-shadow .12s ease, opacity .12s ease;
 }
+.sentinel-workspace .wiki-inline-board-column.is-drop-target {
+    background: rgba(245,158,11,.08);
+    box-shadow: inset 0 0 0 1px rgba(245,158,11,.55);
+}
+.sentinel-workspace .wiki-inline-board-column.is-saving { opacity: .65; }
 .sentinel-workspace .wiki-inline-board-heading {
     display: flex;
     justify-content: space-between;
@@ -3237,6 +3246,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .wiki-inline-board-status[data-color="purple"] { background: rgba(107,33,168,.4); color: #e9d5ff; }
 .sentinel-workspace .wiki-inline-board-status[data-color="pink"] { background: rgba(157,23,77,.38); color: #fbcfe8; }
 .sentinel-workspace .wiki-inline-board-status[data-color="brown"] { background: rgba(120,53,15,.38); color: #e7c9a9; }
+.sentinel-workspace .wiki-inline-board-cards { min-height: .75rem; }
 .sentinel-workspace .wiki-inline-board-card {
     display: block;
     width: 100%;
@@ -3250,7 +3260,10 @@ audio.wiki-embed-media { max-width: 100%; }
     font-weight: 600;
     line-height: 1.4;
     text-align: left;
+    cursor: grab;
 }
+.sentinel-workspace .wiki-inline-board-card:active { cursor: grabbing; }
+.sentinel-workspace .wiki-inline-board-card.is-dragging { opacity: .35; }
 .sentinel-workspace .wiki-inline-board-card strong { display: block; color: #f5f5f4; font: inherit; }
 .sentinel-workspace .wiki-inline-board-card-detail {
     display: block;
@@ -3260,6 +3273,58 @@ audio.wiki-embed-media { max-width: 100%; }
     font-weight: 500;
 }
 .sentinel-workspace .wiki-inline-board-card:hover { border-color: var(--sentinel-border-strong); background: var(--sentinel-hover); }
+.sentinel-workspace .wiki-inline-board-new-task {
+    width: 100%;
+    min-height: 2rem;
+    padding: .35rem .45rem;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--sentinel-muted);
+    font-size: .7rem;
+    font-weight: 600;
+    text-align: left;
+}
+.sentinel-workspace .wiki-inline-board-new-task:hover {
+    background: var(--sentinel-hover);
+    color: #f5f5f4;
+}
+.sentinel-workspace .wiki-inline-board-composer {
+    display: grid;
+    gap: .35rem;
+    padding-top: .2rem;
+}
+.sentinel-workspace .wiki-inline-board-composer input {
+    width: 100%;
+    min-height: 2rem;
+    padding: .35rem .45rem;
+    border: 1px solid var(--sentinel-border-strong);
+    border-radius: 5px;
+    background: var(--sentinel-canvas-raised);
+    color: #f5f5f4;
+    font-size: .72rem;
+    outline: none;
+}
+.sentinel-workspace .wiki-inline-board-composer input:focus {
+    border-color: #f59e0b;
+    box-shadow: 0 0 0 2px rgba(245,158,11,.16);
+}
+.sentinel-workspace .wiki-inline-board-composer > div { display: flex; gap: .3rem; }
+.sentinel-workspace .wiki-inline-board-composer button {
+    min-height: 1.75rem;
+    padding: .2rem .45rem;
+    border: 1px solid var(--sentinel-border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--sentinel-muted);
+    font-size: .65rem;
+}
+.sentinel-workspace .wiki-inline-board-composer button:first-child {
+    border-color: #f59e0b;
+    background: #f59e0b;
+    color: #1c1917;
+    font-weight: 700;
+}
 .sentinel-workspace .wiki-inline-database-table { width: 100%; min-width: 34rem; border-collapse: collapse; table-layout: fixed; }
 .sentinel-workspace .wiki-inline-database-table th,
 .sentinel-workspace .wiki-inline-database-table td {

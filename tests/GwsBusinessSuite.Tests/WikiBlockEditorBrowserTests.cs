@@ -389,7 +389,12 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
     public async Task ImportedInlineBoard_ShouldRenderGroupedCardsAndRemainNavigable()
     {
         await using var page = await fixture.Browser.NewPageAsync();
-        await page.SetContentAsync("""<div id="editor" class="wiki-block-editor"></div>""");
+        await page.SetContentAsync(
+            """<main class="sentinel-workspace"><div id="editor" class="wiki-block-editor"></div></main>""");
+        var stylesPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/app.css"));
+        await page.AddStyleTagAsync(new PageAddStyleTagOptions { Content = await File.ReadAllTextAsync(stylesPath) });
         var scriptPath = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
             "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
@@ -460,7 +465,10 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
                     {
                         invokeMethodAsync: (method, ...args) => {
                             window.editorCalls.push({ method, args });
-                            return Promise.resolve(method === 'GetInlineDatabase' ? payload.snapshot : null);
+                            return Promise.resolve(
+                                ['GetInlineDatabase', 'MoveInlineDatabaseRow', 'AddInlineBoardTask'].includes(method)
+                                    ? payload.snapshot
+                                    : null);
                         }
                     },
                     payload.blockJson);
@@ -476,6 +484,37 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
         (await page.EvaluateAsync<string>(
             "() => window.editorCalls.at(-1).method"))
             .Should().Be("OpenLinkedDatabase");
+
+        var columns = page.Locator(".wiki-inline-board-column");
+        var emptyColumnBox = await columns.Nth(0).BoundingBoxAsync();
+        var taskColumnBox = await columns.Nth(1).BoundingBoxAsync();
+        emptyColumnBox.Should().NotBeNull();
+        taskColumnBox.Should().NotBeNull();
+        taskColumnBox!.Height.Should().BeGreaterThan(emptyColumnBox!.Height,
+            "each board column should end beneath its own lowest task instead of stretching to the tallest column");
+
+        await page.Locator(".wiki-inline-board-card")
+            .DragToAsync(columns.Nth(2).Locator(".wiki-inline-board-cards"));
+        await page.WaitForFunctionAsync(
+            "() => window.editorCalls.some(call => call.method === 'MoveInlineDatabaseRow')");
+        var moveCall = await page.EvaluateAsync<string>(
+            "() => JSON.stringify(window.editorCalls.find(call => call.method === 'MoveInlineDatabaseRow'))");
+        moveCall.Should().Contain(databaseId.ToString()).And.Contain(statusPropertyId.ToString()).And.Contain("done");
+
+        await Expect(page.GetByRole(AriaRole.Button, new() { Name = "New task" })).ToHaveCountAsync(3);
+        await page.GetByRole(AriaRole.Button, new() { Name = "New task" }).Nth(1).ClickAsync();
+        var taskName = page.GetByRole(AriaRole.Textbox, new() { Name = "New task in In progress" });
+        await Expect(taskName).ToBeFocusedAsync();
+        await taskName.FillAsync("Write launch notes");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Add task" }).ClickAsync();
+        await page.WaitForFunctionAsync(
+            "() => window.editorCalls.some(call => call.method === 'AddInlineBoardTask')");
+        var addCall = await page.EvaluateAsync<string>(
+            "() => JSON.stringify(window.editorCalls.find(call => call.method === 'AddInlineBoardTask'))");
+        addCall.Should().Contain(databaseId.ToString())
+            .And.Contain(statusPropertyId.ToString())
+            .And.Contain("doing")
+            .And.Contain("Write launch notes");
     }
 
     [Fact]

@@ -391,6 +391,7 @@ public sealed class NotionSyncService(
                         item,
                         isArchived,
                         remoteEditedAt,
+                        forceRefresh,
                         reservedPageSlugs,
                         cancellationToken);
                     existingPageSyncStates.TryGetValue(notionId, out var priorSyncState);
@@ -910,6 +911,7 @@ public sealed class NotionSyncService(
         JsonElement notionPage,
         bool isArchived,
         DateTimeOffset? remoteEditedAt,
+        bool forceRefresh,
         HashSet<string> reservedSlugs,
         CancellationToken cancellationToken)
     {
@@ -954,10 +956,12 @@ public sealed class NotionSyncService(
         }
         var importedIcon = ExtractPageEmoji(notionPage);
         var cover = ExtractNotionFile(notionPage, "cover");
-        var shouldRefreshPresentation = isNew
+        var shouldRefreshPresentation = forceRefresh
+            || isNew
             || remoteEditedAt is null
             || page!.NotionLastEditedAt is null
-            || remoteEditedAt > page.NotionLastEditedAt;
+            || remoteEditedAt > page.NotionLastEditedAt
+            || (cover is not null && string.IsNullOrWhiteSpace(page.CoverImageUrl));
         if (shouldRefreshPresentation)
         {
             page!.Icon = importedIcon;

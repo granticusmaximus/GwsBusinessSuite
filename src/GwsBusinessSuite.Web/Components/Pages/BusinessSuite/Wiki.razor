@@ -1863,6 +1863,52 @@
     }
 
     [JSInvokable]
+    public async Task<WikiInlineDatabaseSnapshot?> AddInlineBoardTask(
+        string databaseId,
+        string groupByPropertyId,
+        string? groupOptionId,
+        string? title)
+    {
+        if (!Guid.TryParse(databaseId, out var parsedDatabaseId)
+            || !Guid.TryParse(groupByPropertyId, out var parsedGroupByPropertyId))
+        {
+            return null;
+        }
+
+        return await WikiDatabaseService.AddInlineBoardRowAsync(
+            parsedDatabaseId,
+            parsedGroupByPropertyId,
+            groupOptionId,
+            title,
+            await CurrentUserNameAsync());
+    }
+
+    [JSInvokable]
+    public async Task<WikiInlineDatabaseSnapshot?> MoveInlineDatabaseRow(
+        string databaseId,
+        string rowId,
+        string groupByPropertyId,
+        string? groupOptionId,
+        int newSortOrder)
+    {
+        if (!Guid.TryParse(databaseId, out var parsedDatabaseId)
+            || !Guid.TryParse(rowId, out var parsedRowId)
+            || !Guid.TryParse(groupByPropertyId, out var parsedGroupByPropertyId))
+        {
+            return null;
+        }
+
+        await WikiDatabaseService.MoveRowAsync(
+            parsedDatabaseId,
+            parsedRowId,
+            parsedGroupByPropertyId,
+            groupOptionId,
+            newSortOrder,
+            await CurrentUserNameAsync());
+        return await WikiDatabaseService.GetInlineDatabaseAsync(parsedDatabaseId);
+    }
+
+    [JSInvokable]
     public async Task<WikiInlineDatabaseSnapshot?> SaveInlineDatabaseCell(
         string databaseId,
         string rowId,
@@ -2048,7 +2094,7 @@
         if (SelectedDatabaseId is null && !_blockEditorInitialized)
         {
             _blockEditorRef ??= DotNetObjectReference.Create(this);
-            _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=5");
+            _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=6");
             await _blockEditorModule.InvokeVoidAsync(
                 "initialize",
                 _blockEditorContainer,

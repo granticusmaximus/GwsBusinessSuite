@@ -1043,6 +1043,46 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
             ?? throw new KeyNotFoundException("The database no longer exists.");
     }
 
+    public async Task<WikiInlineDatabaseSnapshot> AddInlineBoardRowAsync(
+        Guid wikiDatabaseId,
+        Guid groupByPropertyId,
+        string? groupOptionId,
+        string? title,
+        string performedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var database = await GetDatabaseAsync(wikiDatabaseId, cancellationToken)
+            ?? throw new KeyNotFoundException("The database no longer exists.");
+        var groupProperty = database.Properties.FirstOrDefault(property =>
+            property.Id == groupByPropertyId && property.Type == WikiDatabasePropertyTypes.Select)
+            ?? throw new InvalidOperationException("The board grouping property is no longer available.");
+        var normalizedOptionId = string.IsNullOrWhiteSpace(groupOptionId) ? null : groupOptionId;
+        if (normalizedOptionId is not null
+            && !WikiDatabasePropertyConfig.GetOptions(groupProperty).Any(option => option.Id == normalizedOptionId))
+        {
+            throw new InvalidOperationException("The board column is no longer available.");
+        }
+
+        var values = new JsonObject();
+        WikiPropertyValues.SetText(values, groupByPropertyId, normalizedOptionId);
+        var titleProperty = database.Properties.FirstOrDefault(
+            property => property.Type == WikiDatabasePropertyTypes.Title);
+        if (titleProperty is not null && !string.IsNullOrWhiteSpace(title))
+        {
+            WikiPropertyValues.SetText(values, titleProperty.Id, title.Trim());
+        }
+        await SaveRowAsync(
+            wikiDatabaseId,
+            new WikiDatabaseRowEditor
+            {
+                Values = values.ToDictionary(item => item.Key, item => item.Value)
+            },
+            performedBy,
+            cancellationToken);
+        return await GetInlineDatabaseAsync(wikiDatabaseId, cancellationToken)
+            ?? throw new KeyNotFoundException("The database no longer exists.");
+    }
+
     public async Task<WikiInlineDatabaseSnapshot> SaveInlineCellAsync(
         Guid wikiDatabaseId,
         Guid rowId,

@@ -479,6 +479,37 @@ public sealed class WikiDatabaseServiceTests
     }
 
     [Fact]
+    public async Task AddInlineBoardRowAsync_ShouldCreateTheTaskInTheRequestedColumn()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Board", null, "u");
+        var statusProperty = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Status",
+            Type = WikiDatabasePropertyTypes.Select,
+            Options =
+            [
+                new WikiDatabasePropertyOption("todo", "To Do", "gray"),
+                new WikiDatabasePropertyOption("done", "Done", "green")
+            ]
+        }, "u");
+
+        var snapshot = await service.AddInlineBoardRowAsync(
+            database.Id,
+            statusProperty.Id,
+            "done",
+            "Ship Kanban",
+            "u");
+
+        snapshot.Rows.Should().ContainSingle();
+        snapshot.Rows.Single().Cells.Should().Contain(cell =>
+            cell.PropertyId == statusProperty.Id && cell.Value == "done");
+        snapshot.Rows.Single().Cells.Should().Contain(cell =>
+            cell.Value == "Ship Kanban");
+    }
+
+    [Fact]
     public async Task GetInlineDatabaseAsync_ShouldReturnOrderedTypedCells()
     {
         await using var db = await CreateDbAsync();

@@ -1077,11 +1077,31 @@ function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, s
 
     const scroller = document.createElement('div');
     scroller.className = 'wiki-inline-database-scroller';
-    if (activeView?.type === 'board' && boardGroupByPropertyId) {
+    const isBoard = activeView?.type === 'board' && boardGroupByPropertyId;
+    if (isBoard) {
         scroller.appendChild(createInlineBoard(
             snapshot,
             boardGroupByPropertyId,
-            () => state.dotNetRef.invokeMethodAsync('OpenLinkedDatabase', snapshot.id)));
+            () => state.dotNetRef.invokeMethodAsync('OpenLinkedDatabase', snapshot.id),
+            async (rowId, optionId, newSortOrder) => {
+                const updated = await state.dotNetRef.invokeMethodAsync(
+                    'MoveInlineDatabaseRow',
+                    snapshot.id,
+                    rowId,
+                    boardGroupByPropertyId,
+                    optionId || null,
+                    newSortOrder);
+                if (updated) renderInlineDatabaseSnapshot(wrapper, state, updated, resetDatabase, activeView?.id);
+            },
+            async (optionId, title) => {
+                const updated = await state.dotNetRef.invokeMethodAsync(
+                    'AddInlineBoardTask',
+                    snapshot.id,
+                    boardGroupByPropertyId,
+                    optionId || null,
+                    title);
+                if (updated) renderInlineDatabaseSnapshot(wrapper, state, updated, resetDatabase, activeView?.id);
+            }));
     } else {
         const table = document.createElement('table');
         table.className = 'wiki-inline-database-table';
@@ -1113,27 +1133,30 @@ function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, s
         scroller.appendChild(table);
     }
 
-    const footer = document.createElement('div');
-    footer.className = 'wiki-inline-database-footer';
-    const addRow = document.createElement('button');
-    addRow.type = 'button';
-    addRow.innerHTML = '<span>+</span> New row';
-    addRow.addEventListener('click', async () => {
-        addRow.disabled = true;
-        try {
-            const updated = await state.dotNetRef.invokeMethodAsync('AddInlineDatabaseRow', snapshot.id);
-            if (updated) renderInlineDatabaseSnapshot(wrapper, state, updated, resetDatabase, activeView?.id);
-        } finally {
-            addRow.disabled = false;
-        }
-    });
-    footer.appendChild(addRow);
     wrapper.append(header);
     if (views.length > 0) wrapper.append(viewTabs);
-    wrapper.append(scroller, footer);
+    wrapper.append(scroller);
+    if (!isBoard) {
+        const footer = document.createElement('div');
+        footer.className = 'wiki-inline-database-footer';
+        const addRow = document.createElement('button');
+        addRow.type = 'button';
+        addRow.innerHTML = '<span>+</span> New row';
+        addRow.addEventListener('click', async () => {
+            addRow.disabled = true;
+            try {
+                const updated = await state.dotNetRef.invokeMethodAsync('AddInlineDatabaseRow', snapshot.id);
+                if (updated) renderInlineDatabaseSnapshot(wrapper, state, updated, resetDatabase, activeView?.id);
+            } finally {
+                addRow.disabled = false;
+            }
+        });
+        footer.appendChild(addRow);
+        wrapper.append(footer);
+    }
 }
 
-function createInlineBoard(snapshot, groupByPropertyId, openDatabase) {
+function createInlineBoard(snapshot, groupByPropertyId, openDatabase, moveRow, addTask) {
     const board = document.createElement('div');
     board.className = 'wiki-inline-database-board';
     const groupProperty = snapshot.properties.find(property => property.id === groupByPropertyId);
@@ -1163,10 +1186,41 @@ function createInlineBoard(snapshot, groupByPropertyId, openDatabase) {
         heading.append(label, count);
         column.appendChild(heading);
 
+        const cards = document.createElement('div');
+        cards.className = 'wiki-inline-board-cards';
+        cards.addEventListener('dragover', event => {
+            event.preventDefault();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+            column.classList.add('is-drop-target');
+        });
+        cards.addEventListener('dragleave', event => {
+            if (!cards.contains(event.relatedTarget)) column.classList.remove('is-drop-target');
+        });
+        cards.addEventListener('drop', async event => {
+            event.preventDefault();
+            column.classList.remove('is-drop-target');
+            const rowId = event.dataTransfer?.getData('text/plain');
+            if (!rowId) return;
+
+            const targetCards = [...cards.querySelectorAll('.wiki-inline-board-card:not(.is-dragging)')];
+            const targetIndex = targetCards.findIndex(card => {
+                const rect = card.getBoundingClientRect();
+                return event.clientY < rect.top + (rect.height / 2);
+            });
+            column.classList.add('is-saving');
+            try {
+                await moveRow(rowId, option.id, targetIndex < 0 ? targetCards.length : targetIndex);
+            } finally {
+                column.classList.remove('is-saving');
+            }
+        });
+
         for (const row of rows) {
             const card = document.createElement('button');
             card.type = 'button';
             card.className = 'wiki-inline-board-card';
+            card.draggable = true;
+            card.dataset.rowId = row.id;
             const title = document.createElement('strong');
             title.textContent = row.cells.find(cell => cell.propertyId === titleProperty?.id)?.value || 'Untitled';
             card.appendChild(title);
@@ -1184,9 +1238,75 @@ function createInlineBoard(snapshot, groupByPropertyId, openDatabase) {
                 detail.textContent = `${property.name}: ${property.value}`;
                 card.appendChild(detail);
             }
+            card.addEventListener('dragstart', event => {
+                card.classList.add('is-dragging');
+                event.dataTransfer?.setData('text/plain', row.id);
+                if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+            });
+            card.addEventListener('dragend', () => {
+                card.classList.remove('is-dragging');
+                board.querySelectorAll('.wiki-inline-board-column').forEach(item =>
+                    item.classList.remove('is-drop-target', 'is-saving'));
+            });
             card.addEventListener('click', openDatabase);
-            column.appendChild(card);
+            cards.appendChild(card);
         }
+        column.appendChild(cards);
+
+        const newTask = document.createElement('button');
+        newTask.type = 'button';
+        newTask.className = 'wiki-inline-board-new-task';
+        newTask.innerHTML = '<span aria-hidden="true">+</span> New task';
+        newTask.addEventListener('click', () => {
+            newTask.hidden = true;
+            const composer = document.createElement('div');
+            composer.className = 'wiki-inline-board-composer';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.placeholder = 'Task name';
+            input.setAttribute('aria-label', `New task in ${option.label || 'No status'}`);
+            const actions = document.createElement('div');
+            const save = document.createElement('button');
+            save.type = 'button';
+            save.textContent = 'Add task';
+            const cancel = document.createElement('button');
+            cancel.type = 'button';
+            cancel.textContent = 'Cancel';
+            const closeComposer = () => {
+                composer.remove();
+                newTask.hidden = false;
+            };
+            const submit = async () => {
+                const title = input.value.trim();
+                if (!title) {
+                    input.focus();
+                    return;
+                }
+                input.disabled = save.disabled = cancel.disabled = true;
+                try {
+                    await addTask(option.id, title);
+                } catch {
+                    input.disabled = save.disabled = cancel.disabled = false;
+                    input.focus();
+                }
+            };
+            input.addEventListener('keydown', event => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    submit();
+                } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closeComposer();
+                }
+            });
+            save.addEventListener('click', submit);
+            cancel.addEventListener('click', closeComposer);
+            actions.append(save, cancel);
+            composer.append(input, actions);
+            column.insertBefore(composer, newTask);
+            input.focus();
+        });
+        column.appendChild(newTask);
         board.appendChild(column);
     }
     return board;
