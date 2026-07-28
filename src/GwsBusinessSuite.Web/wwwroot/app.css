@@ -3941,6 +3941,8 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-chat-header > div:first-child > span.is-connected i { background: #55b45f; box-shadow: 0 0 0 3px rgba(85, 180, 95, .1); }
 
 .sentinel-gpt-header-actions { display: flex; align-items: center; gap: .4rem; }
+.sentinel-gpt-web-status { display: inline-flex; align-items: center; gap: .32rem; padding: .34rem .5rem; border: 1px solid #34302d; border-radius: 8px; color: #77716c; font-size: .64rem; }
+.sentinel-gpt-web-status.is-ready { border-color: rgba(74, 222, 128, .2); color: #65b96d; }
 .sentinel-gpt-model-pill { display: inline-flex; align-items: center; gap: .4rem; max-width: 15rem; padding: .38rem .6rem; border: 1px solid #34302d; border-radius: 8px; color: #aaa49f; font-size: .68rem; }
 .sentinel-gpt-header-actions button,
 .sentinel-gpt-composer > button { display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: #97918c; }
@@ -3959,6 +3961,7 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 
 .sentinel-gpt-settings > div:first-child { display: flex; flex-direction: column; }
+.sentinel-gpt-internet-setting { display: flex; flex-direction: column; grid-column: 1 / -1; padding-top: .45rem; border-top: 1px solid #302c29; }
 .sentinel-gpt-settings strong { font-size: .72rem; }
 .sentinel-gpt-settings small { color: #7f7974; font-size: .61rem; }
 .sentinel-gpt-settings select,
@@ -4044,6 +4047,7 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 .sentinel-gpt-assistant-row time { display: block; margin: .3rem .25rem 0; color: #716b66; font-size: .58rem; }
 .sentinel-gpt-assistant-message.is-streaming::after { content: "▋"; margin-left: .15rem; animation: sentinelAiCaretBlink 1s step-end infinite; color: #f59e0b; }
+.sentinel-gpt-thinking-copy { display: inline-flex; align-items: center; gap: .55rem; color: #aaa49f; font-size: .72rem; }
 .sentinel-gpt-thinking { display: flex; gap: .25rem; padding: .35rem .1rem; }
 .sentinel-gpt-thinking i { width: .35rem; height: .35rem; border-radius: 50%; background: #918b86; animation: sentinelGptThinking 1.2s infinite ease-in-out; }
 .sentinel-gpt-thinking i:nth-child(2) { animation-delay: .15s; }
@@ -4064,6 +4068,13 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-sources a { display: inline-flex; align-items: center; gap: .3rem; padding: .3rem .45rem; border-radius: 6px; background: #24211f; color: #d3cfcb; text-decoration: none; }
 .sentinel-gpt-sources a:hover { color: #fbbf24; }
 .sentinel-gpt-error { display: flex; align-items: flex-start; gap: .45rem; width: min(100%, 58rem); margin: 0 auto 1rem; padding: .65rem .8rem; border: 1px solid rgba(239, 68, 68, .25); border-radius: 8px; background: rgba(127, 29, 29, .12); color: #fca5a5; font-size: .72rem; }
+.sentinel-gpt-confirmation { width: min(100%, 58rem); margin: 0 auto 1rem; padding: .8rem; border: 1px solid rgba(245, 158, 11, .35); border-radius: 10px; background: rgba(120, 53, 15, .14); color: #d6d3d1; font-size: .72rem; }
+.sentinel-gpt-confirmation > div:first-child { display: flex; align-items: flex-start; gap: .55rem; }
+.sentinel-gpt-confirmation > div:first-child > i { color: #f59e0b; }
+.sentinel-gpt-confirmation span { display: flex; flex-direction: column; gap: .18rem; }
+.sentinel-gpt-confirmation > div:last-child { display: flex; gap: .45rem; margin-top: .65rem; padding-left: 1.4rem; }
+.sentinel-gpt-confirmation button { padding: .38rem .7rem; border: 1px solid #4a433d; border-radius: 7px; background: #24211f; color: #d6d3d1; font-size: .68rem; }
+.sentinel-gpt-confirmation button.sentinel-gpt-confirm { border-color: #b56a08; background: #d98208; color: #211305; font-weight: 700; }
 
 .sentinel-gpt-composer-wrap {
     padding: .65rem clamp(1rem, 4vw, 4.5rem) .75rem;
@@ -4099,7 +4110,9 @@ audio.wiki-embed-media { max-width: 100%; }
 
 .sentinel-gpt-composer textarea::placeholder { color: #77716c; }
 .sentinel-gpt-composer > button { width: 2.2rem; height: 2.2rem; border-radius: 50%; }
-.sentinel-gpt-context-pill { display: inline-flex; align-items: center; gap: .35rem; padding: .38rem .55rem; border: 1px solid #3b3632; border-radius: 999px; color: #aaa49f; font-size: .62rem; white-space: nowrap; }
+.sentinel-gpt-composer > button.sentinel-gpt-context-pill { width: auto; height: auto; display: inline-flex; align-items: center; gap: .35rem; padding: .38rem .55rem; border: 1px solid #3b3632; border-radius: 999px; background: transparent; color: #aaa49f; font-size: .62rem; white-space: nowrap; }
+.sentinel-gpt-composer > button.sentinel-gpt-context-pill:hover,
+.sentinel-gpt-composer > button.sentinel-gpt-context-pill.is-enabled { border-color: rgba(245, 158, 11, .5); background: rgba(245, 158, 11, .08); color: #fbbf24; }
 .sentinel-gpt-context-pill .bi-toggle-on { color: #f59e0b; font-size: 1rem; }
 .sentinel-gpt-composer > button.sentinel-gpt-send { background: #f59e0b; color: #231506; }
 .sentinel-gpt-composer > button.sentinel-gpt-send:hover { background: #fbbf24; color: #231506; }
@@ -4123,8 +4136,11 @@ audio.wiki-embed-media { max-width: 100%; }
     .sentinel-gpt-user-message { max-width: 88%; }
     .sentinel-gpt-composer-wrap { padding: .6rem; }
     .sentinel-gpt-composer { grid-template-columns: auto minmax(0, 1fr) auto; border-radius: 16px; }
-    .sentinel-gpt-context-pill,
+    .sentinel-gpt-composer > button[aria-label="Attach context"],
     .sentinel-gpt-composer > button[title="Voice input"] { display: none; }
+    .sentinel-gpt-context-pill span { display: none; }
+    .sentinel-gpt-composer > button.sentinel-gpt-context-pill { width: 2.2rem; height: 2.2rem; padding: 0; border-radius: 50%; }
     .sentinel-gpt-chat-header { padding: .7rem .85rem; }
+    .sentinel-gpt-web-status { display: none; }
     .sentinel-gpt-model-pill { max-width: 8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }

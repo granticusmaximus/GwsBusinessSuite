@@ -49,6 +49,15 @@ public static class DependencyInjection
             .SetApplicationName("GwsBusinessSuite");
 
         services.Configure<ContentStudioOptions>(configuration.GetSection(ContentStudioOptions.SectionName));
+        services.AddOptions<OllamaWebOptions>()
+            .Bind(configuration.GetSection(OllamaWebOptions.SectionName))
+            .Validate(options =>
+                Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var uri)
+                && uri.Scheme == Uri.UriSchemeHttps,
+                "OllamaWeb:BaseUrl must be an absolute HTTPS URL.")
+            .Validate(options => options.MaxResults is >= 1 and <= 10,
+                "OllamaWeb:MaxResults must be between 1 and 10.")
+            .ValidateOnStart();
 
         services.TryAddSingleton<IPublicContentCacheInvalidator, NoOpPublicContentCacheInvalidator>();
         services.AddSingleton<PublicContentCacheInvalidationInterceptor>();
@@ -86,6 +95,15 @@ public static class DependencyInjection
                 BackoffType = DelayBackoffType.Exponential,
                 Delay = TimeSpan.FromSeconds(1)
             });
+        });
+        services.AddHttpClient<IOllamaWebSearchService, OllamaWebSearchService>((serviceProvider, client) =>
+        {
+            var options = serviceProvider.GetRequiredService<
+                Microsoft.Extensions.Options.IOptions<OllamaWebOptions>>().Value;
+            client.BaseAddress = new Uri(string.IsNullOrWhiteSpace(options.BaseUrl)
+                ? OllamaWebOptions.DefaultBaseUrl
+                : options.BaseUrl);
+            client.Timeout = TimeSpan.FromSeconds(45);
         });
         services.AddMemoryCache();
         services.TryAddSingleton(TimeProvider.System);

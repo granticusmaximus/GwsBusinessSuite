@@ -12,6 +12,9 @@ services:
       # These override the localhost defaults in appsettings.json.
       ContentStudio__BaseUrl: http://ollama:11434
       ExternalServices__OllamaBaseUrl: http://ollama:11434
+      # Optional live internet research for SentinelGPT. Keep the actual key in the
+      # gitignored .env file as OLLAMA_WEB_API_KEY, never in this Compose file.
+      OllamaWeb__ApiKey: ${OLLAMA_WEB_API_KEY:-}
       # TURN stays disabled when these values are absent. When the optional `turn`
       # profile is enabled, the app derives short-lived browser credentials from the
       # same secret coturn uses; the shared secret itself is never sent to clients.

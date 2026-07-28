@@ -30,6 +30,18 @@ public interface IOllamaService
     // Turbo / FLUX build) - returns raw base64 PNG bytes, no data: URI prefix.
     Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default);
 }
+
+public sealed record OllamaWebSearchResult(string Title, string Url, string Content);
+
+public interface IOllamaWebSearchService
+{
+    bool IsConfigured { get; }
+    Task<IReadOnlyList<OllamaWebSearchResult>> SearchAsync(
+        string query,
+        int? maxResults = null,
+        CancellationToken ct = default);
+    Task<OllamaWebSearchResult> FetchAsync(string url, CancellationToken ct = default);
+}
 public interface IDockerDeploymentService { Task<string> DeployAsync(string appName, string dockerfilePath, CancellationToken ct = default); }
 
 public sealed record CjConnectionRequest(

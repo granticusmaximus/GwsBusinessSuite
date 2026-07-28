@@ -62,10 +62,16 @@
             <div>
                 <h1>SentinelGPT</h1>
                 <span class="@(_connected ? "is-connected" : "is-offline")">
-                    <i></i>@(_connected ? "Local · Private" : "Local model unavailable")
+                    <i></i>@(_connected
+                        ? _includeInternet ? "Local model · Web research" : "Local · Private"
+                        : "Local model unavailable")
                 </span>
             </div>
             <div class="sentinel-gpt-header-actions">
+                <span class="sentinel-gpt-web-status @(SentinelGptService.IsInternetConfigured ? "is-ready" : null)"
+                      title="@(SentinelGptService.IsInternetConfigured ? "Ollama web search is configured" : "Set OllamaWeb__ApiKey to enable internet research")">
+                    <i class="bi bi-globe2"></i>@(SentinelGptService.IsInternetConfigured ? "Web ready" : "Web offline")
+                </span>
                 <span class="sentinel-gpt-model-pill"><i class="bi bi-cpu"></i>@_configuredModel</span>
                 <button type="button" @onclick="ToggleSettings" aria-label="SentinelGPT settings" title="Model settings">
                     <i class="bi bi-gear"></i>
@@ -97,6 +103,10 @@
                 <button type="button" class="sentinel-gpt-recheck" @onclick="CheckConnectionAsync" disabled="@_checkingConnection">
                     <i class="bi bi-arrow-clockwise"></i> Recheck
                 </button>
+                <div class="sentinel-gpt-internet-setting">
+                    <strong>Internet research</strong>
+                    <small>@(SentinelGptService.IsInternetConfigured ? "API key loaded securely on the server" : "Not configured — set OllamaWeb__ApiKey")</small>
+                </div>
             </section>
         }
 
@@ -112,6 +122,7 @@
                             <button type="button" @onclick='() => UseStarter("Summarize my open work items and flag anything overdue.")'>Summarize open work</button>
                             <button type="button" @onclick='() => UseStarter("What changed recently across my Sentinel workspace?")'>Review recent changes</button>
                             <button type="button" @onclick='() => UseStarter("Create a concise plan from my latest meeting notes.")'>Plan from meeting notes</button>
+                            <button type="button" @onclick='() => UseWebStarter("Research the latest information relevant to GWS Business Suite and cite the sources.")'>Research the web</button>
                         </div>
                     </div>
                 </div>
@@ -135,8 +146,10 @@
                                     <div>
                                         @foreach (var citation in run.Citations)
                                         {
-                                            <a href="@SentinelUrl(citation.TargetId, citation.IsDatabase)">
-                                                <i class="bi @(citation.IsDatabase ? "bi-grid-3x3-gap" : "bi-file-earmark-text")"></i>@citation.Title
+                                            <a href="@CitationUrl(citation)"
+                                               target="@(citation.SourceType == "web" ? "_blank" : null)"
+                                               rel="@(citation.SourceType == "web" ? "noopener noreferrer" : null)">
+                                                <i class="bi @CitationIcon(citation)"></i>@citation.Title
                                             </a>
                                         }
                                     </div>
@@ -160,7 +173,10 @@
                         <div class="sentinel-gpt-message sentinel-gpt-assistant-message is-streaming">
                             @if (string.IsNullOrEmpty(_liveOutput))
                             {
-                                <span class="sentinel-gpt-thinking"><i></i><i></i><i></i></span>
+                                <span class="sentinel-gpt-thinking-copy">
+                                    <span class="sentinel-gpt-thinking"><i></i><i></i><i></i></span>
+                                    @(!string.IsNullOrWhiteSpace(_toolActivity) ? _toolActivity : "Thinking")
+                                </span>
                             }
                             else
                             {
@@ -175,6 +191,17 @@
             {
                 <div class="sentinel-gpt-error"><i class="bi bi-exclamation-circle"></i>@_error</div>
             }
+
+            @if (!string.IsNullOrWhiteSpace(_confirmationPrompt))
+            {
+                <div class="sentinel-gpt-confirmation">
+                    <div><i class="bi bi-exclamation-triangle"></i><span><strong>Confirmation required</strong>@_confirmationPrompt</span></div>
+                    <div>
+                        <button type="button" class="sentinel-gpt-confirm" @onclick="ConfirmModelCommandAsync" disabled="@_generating">Confirm</button>
+                        <button type="button" @onclick="CancelModelCommand" disabled="@_generating">Cancel</button>
+                    </div>
+                </div>
+            }
         </section>
 
         <footer class="sentinel-gpt-composer-wrap">
@@ -183,7 +210,11 @@
                     <i class="bi bi-paperclip"></i>
                 </button>
                 <textarea rows="1" @bind="_instruction" @bind:event="oninput" placeholder="Message SentinelGPT…" disabled="@_generating"></textarea>
-                <span class="sentinel-gpt-context-pill"><i class="bi bi-building"></i>Workspace context <i class="bi bi-toggle-on"></i></span>
+                <button type="button" class="sentinel-gpt-context-pill @(_includeInternet ? "is-enabled" : null)"
+                        @onclick="ToggleInternet" title="@(SentinelGptService.IsInternetConfigured ? "Include live internet research" : "Internet research is not configured")">
+                    <i class="bi bi-globe2"></i><span>@(_includeInternet ? "Web on" : "Web off")</span>
+                    <i class="bi @(_includeInternet ? "bi-toggle-on" : "bi-toggle-off")"></i>
+                </button>
                 <button type="button" aria-label="Voice input" title="Voice input">
                     <i class="bi bi-mic"></i>
                 </button>
@@ -193,7 +224,9 @@
                     <i class="bi bi-arrow-up"></i>
                 </button>
             </div>
-            <small>SentinelGPT can make mistakes. Verify important information.</small>
+            <small>@(_includeInternet
+                ? "Web on: this prompt is sent to Ollama web search. Do not include secrets. Verify important information."
+                : "SentinelGPT can make mistakes. Verify important information.")</small>
         </footer>
     </main>
 </div>
@@ -203,7 +236,10 @@
     private string _instruction = string.Empty;
     private string _pendingInstruction = string.Empty;
     private string _liveOutput = string.Empty;
+    private string _toolActivity = string.Empty;
     private string _error = string.Empty;
+    private string _pendingModelCommand = string.Empty;
+    private string _confirmationPrompt = string.Empty;
     private string _configuredModel = ContentStudioOptions.DefaultModel;
     private string _connectionError = string.Empty;
     private string _pullModelName = string.Empty;
@@ -214,6 +250,7 @@
     private bool _generating;
     private bool _settingsOpen;
     private bool _modelBusy;
+    private bool _includeInternet;
     private Guid? _conversationId;
     private List<SentinelGptConversationView> _conversations = [];
     private List<SentinelAiRunView> _runs = [];
@@ -251,6 +288,21 @@
     private static string SentinelUrl(Guid id, bool isDatabase) =>
         isDatabase ? $"admin/sentinel?database={id}" : $"admin/sentinel?page={id}";
 
+    private static string CitationUrl(SentinelAiCitation citation) =>
+        !string.IsNullOrWhiteSpace(citation.Url)
+            ? citation.Url
+            : citation.TargetId is { } id
+                ? SentinelUrl(id, citation.IsDatabase)
+                : "#";
+
+    private static string CitationIcon(SentinelAiCitation citation) =>
+        citation.SourceType switch
+        {
+            "web" => "bi-globe2",
+            "gws" => "bi-grid-1x2",
+            _ => citation.IsDatabase ? "bi-grid-3x3-gap" : "bi-file-earmark-text"
+        };
+
     private async Task LoadConversationsAsync()
     {
         _loadingConversations = true;
@@ -270,7 +322,10 @@
         _runs = [];
         _instruction = string.Empty;
         _liveOutput = string.Empty;
+        _toolActivity = string.Empty;
         _error = string.Empty;
+        _pendingModelCommand = string.Empty;
+        _confirmationPrompt = string.Empty;
     }
 
     private async Task OpenConversationAsync(Guid id)
@@ -290,24 +345,52 @@
         _pendingInstruction = instruction;
         _instruction = string.Empty;
         _liveOutput = string.Empty;
+        _toolActivity = string.Empty;
         _error = string.Empty;
         _generating = true;
         try
         {
-            await foreach (var chunk in SentinelGptService.StreamConversationAsync(
-                _conversationId.Value, null, SentinelAiActions.Ask, instruction, _username))
+            var command = await SentinelGptService.ExecuteModelCommandAsync(
+                _conversationId.Value, instruction, _username, confirmed: false);
+            if (command.Handled)
             {
-                if (chunk.CompletedRun is not null)
+                if (command.RequiresConfirmation)
                 {
-                    _runs.Add(chunk.CompletedRun);
+                    _pendingModelCommand = instruction;
+                    _confirmationPrompt = command.ConfirmationPrompt ?? "Confirm this model operation.";
                 }
-                else
+                else if (command.CompletedRun is not null)
                 {
-                    _liveOutput += chunk.Delta;
+                    _runs.Add(command.CompletedRun);
+                    _settings = await SiteSettingsService.GetSettingsAsync();
+                    _configuredModel = _settings.OllamaModelOverride ?? StudioOptions.Value.Model;
+                    await CheckConnectionAsync();
                 }
-                StateHasChanged();
             }
-            await LoadConversationsAsync();
+            else
+            {
+                await foreach (var chunk in SentinelGptService.StreamAgentConversationAsync(
+                    _conversationId.Value, null, instruction, _username, _includeInternet))
+                {
+                    if (!string.IsNullOrWhiteSpace(chunk.Activity))
+                    {
+                        _toolActivity = chunk.Activity;
+                    }
+                    else if (chunk.CompletedRun is not null)
+                    {
+                        _runs.Add(chunk.CompletedRun);
+                    }
+                    else
+                    {
+                        _liveOutput += chunk.Delta;
+                    }
+                    StateHasChanged();
+                }
+            }
+            if ((command.Handled && !command.RequiresConfirmation) || !command.Handled)
+            {
+                await LoadConversationsAsync();
+            }
         }
         catch (Exception ex)
         {
@@ -319,10 +402,79 @@
             _generating = false;
             _pendingInstruction = string.Empty;
             _liveOutput = string.Empty;
+            _toolActivity = string.Empty;
         }
     }
 
     private void UseStarter(string prompt) => _instruction = prompt;
+    private void UseWebStarter(string prompt)
+    {
+        _instruction = prompt;
+        if (SentinelGptService.IsInternetConfigured)
+        {
+            _includeInternet = true;
+            _error = string.Empty;
+        }
+        else
+        {
+            _error = "Internet research is not configured yet. Set OllamaWeb__ApiKey on the server and restart the app.";
+        }
+    }
+
+    private void ToggleInternet()
+    {
+        if (!SentinelGptService.IsInternetConfigured)
+        {
+            _includeInternet = false;
+            _error = "Internet research is not configured yet. Set OllamaWeb__ApiKey on the server and restart the app.";
+            return;
+        }
+
+        _includeInternet = !_includeInternet;
+        _error = string.Empty;
+    }
+
+    private async Task ConfirmModelCommandAsync()
+    {
+        if (_generating || string.IsNullOrWhiteSpace(_pendingModelCommand)) return;
+        var instruction = _pendingModelCommand;
+        _conversationId ??= Guid.NewGuid();
+        _pendingInstruction = instruction;
+        _confirmationPrompt = string.Empty;
+        _error = string.Empty;
+        _toolActivity = "Updating the local model";
+        _generating = true;
+        try
+        {
+            var result = await SentinelGptService.ExecuteModelCommandAsync(
+                _conversationId.Value, instruction, _username, confirmed: true);
+            if (result.CompletedRun is not null)
+            {
+                _runs.Add(result.CompletedRun);
+            }
+            _pendingModelCommand = string.Empty;
+            await CheckConnectionAsync();
+            await LoadConversationsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "SentinelGPT model command failed");
+            _error = $"The model operation could not be completed: {ex.Message}";
+        }
+        finally
+        {
+            _generating = false;
+            _pendingInstruction = string.Empty;
+            _toolActivity = string.Empty;
+        }
+    }
+
+    private void CancelModelCommand()
+    {
+        _pendingModelCommand = string.Empty;
+        _confirmationPrompt = string.Empty;
+    }
+
     private void ToggleSettings() => _settingsOpen = !_settingsOpen;
 
     private async Task CheckConnectionAsync()

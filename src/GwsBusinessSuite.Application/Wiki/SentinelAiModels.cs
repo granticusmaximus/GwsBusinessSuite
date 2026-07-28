@@ -9,12 +9,18 @@ public static class SentinelAiActions
     public const string Research = "research";
     public const string MeetingNotes = "meetingNotes";
     public const string DatabaseAutofill = "databaseAutofill";
+    public const string ModelManagement = "modelManagement";
 }
 
 // A workspace search result actually folded into a run's grounding context - see
 // SentinelAiService.BuildGroundedContextAsync. TargetId/IsDatabase match
 // SentinelSearchResult/SentinelNavigationItem's existing page-or-database pointer shape.
-public sealed record SentinelAiCitation(Guid TargetId, bool IsDatabase, string Title);
+public sealed record SentinelAiCitation(
+    Guid? TargetId,
+    bool IsDatabase,
+    string Title,
+    string? Url = null,
+    string SourceType = "sentinel");
 
 public sealed record SentinelAiRunView(
     Guid Id, Guid ConversationId, Guid? WikiPageId, string Action, string Instruction, string Output,
@@ -34,12 +40,35 @@ public sealed record SentinelGptConversationView(
 // included). Keeping both on one record avoids a second round-trip to fetch the saved run
 // after the stream ends, and avoids calling Ollama twice (streaming display + a separate
 // non-streaming persist call), which could non-deterministically produce different output.
-public sealed record SentinelAiStreamChunk(string Delta, SentinelAiRunView? CompletedRun);
+public sealed record SentinelAiStreamChunk(
+    string Delta,
+    SentinelAiRunView? CompletedRun,
+    string? Activity = null);
+
+public sealed record SentinelGptCommandResult(
+    bool Handled,
+    bool RequiresConfirmation,
+    string? ConfirmationPrompt,
+    SentinelAiRunView? CompletedRun);
 
 public interface ISentinelAiService
 {
+    bool IsInternetConfigured { get; }
     IAsyncEnumerable<SentinelAiStreamChunk> StreamAsync(Guid? wikiPageId, string action, string instruction, string performedBy, CancellationToken cancellationToken = default);
     IAsyncEnumerable<SentinelAiStreamChunk> StreamConversationAsync(Guid conversationId, Guid? wikiPageId, string action, string instruction, string performedBy, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<SentinelAiStreamChunk> StreamAgentConversationAsync(
+        Guid conversationId,
+        Guid? wikiPageId,
+        string instruction,
+        string performedBy,
+        bool includeInternet,
+        CancellationToken cancellationToken = default);
+    Task<SentinelGptCommandResult> ExecuteModelCommandAsync(
+        Guid conversationId,
+        string instruction,
+        string performedBy,
+        bool confirmed,
+        CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SentinelAiRunView>> ListRunsAsync(Guid? wikiPageId, int maxResults = 20, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SentinelGptConversationView>> ListConversationsAsync(string requestedBy, int maxResults = 40, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SentinelAiRunView>> ListConversationRunsAsync(Guid conversationId, string requestedBy, CancellationToken cancellationToken = default);

@@ -118,23 +118,146 @@ public sealed class SentinelAiServiceTests
         run.ReviewedAt.Should().NotBeNull();
     }
 
+    [Fact]
+    public async Task StreamAgentConversationAsync_ShouldGroundOnSuiteDataAndOptionalWebResearch()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        db.Contacts.Add(new GwsBusinessSuite.Domain.Entities.Contact
+        {
+            FullName = "Ada Lovelace",
+            Company = "Analytical Engines",
+            Email = "private@example.test",
+            Status = "Customer",
+            CreatedBy = "grant"
+        });
+        db.AutomationCredentials.Add(new GwsBusinessSuite.Domain.Entities.AutomationCredential
+        {
+            Name = "Production API",
+            TypeKey = "httpHeader",
+            ProtectedData = "must-never-enter-the-prompt",
+            Description = "Secret production credential",
+            CreatedBy = "grant"
+        });
+        await db.SaveChangesAsync();
+
+        var ollama = new FakeStreamingOllamaService(["A grounded answer."]);
+        var web = new FakeWebSearchService([
+            new OllamaWebSearchResult(
+                "Official ASP.NET Core guidance",
+                "https://learn.microsoft.com/aspnet/core/",
+                "Current framework guidance.")
+        ]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options),
+            ollama,
+            new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System),
+            web);
+
+        SentinelAiRunView? completed = null;
+        await foreach (var chunk in service.StreamAgentConversationAsync(
+            Guid.NewGuid(), null, "Tell me about Ada and current ASP.NET guidance", "grant", includeInternet: true))
+        {
+            completed ??= chunk.CompletedRun;
+        }
+
+        ollama.LastUserPrompt.Should().Contain("GWS BUSINESS SUITE LIVE OVERVIEW");
+        ollama.LastUserPrompt.Should().Contain("Ada Lovelace");
+        ollama.LastUserPrompt.Should().Contain("Current framework guidance");
+        ollama.LastUserPrompt.Should().NotContain("private@example.test");
+        ollama.LastUserPrompt.Should().NotContain("must-never-enter-the-prompt");
+        completed!.Citations.Should().Contain(item => item.SourceType == "gws" && item.Title == "Ada Lovelace");
+        completed.Citations.Should().Contain(item => item.SourceType == "web"
+            && item.Url == "https://learn.microsoft.com/aspnet/core/");
+    }
+
+    [Fact]
+    public async Task ExecuteModelCommandAsync_ShouldRequireConfirmationBeforeUpdatingAModel()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var ollama = new FakeStreamingOllamaService(["unused"], ["llama3.2"]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options),
+            ollama,
+            new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System));
+        var conversationId = Guid.NewGuid();
+
+        var pending = await service.ExecuteModelCommandAsync(
+            conversationId, "/model update llama3.2", "grant", confirmed: false);
+
+        pending.Handled.Should().BeTrue();
+        pending.RequiresConfirmation.Should().BeTrue();
+        ollama.PulledModels.Should().BeEmpty();
+        (await db.SentinelAiRuns.CountAsync()).Should().Be(0);
+
+        var completed = await service.ExecuteModelCommandAsync(
+            conversationId, "/model update llama3.2", "grant", confirmed: true);
+
+        completed.CompletedRun!.Output.Should().Contain("refreshed");
+        ollama.PulledModels.Should().ContainSingle().Which.Should().Be("llama3.2");
+        (await db.SentinelAiRuns.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ExecuteModelCommandAsync_ShouldSwitchOnlyToAnInstalledModel()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var ollama = new FakeStreamingOllamaService(["unused"], ["llama3.2", "qwen3:8b"]);
+        var settings = new SiteSettingsService(db);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options),
+            ollama,
+            settings,
+            new SentinelWorkspaceService(db, TimeProvider.System));
+
+        var result = await service.ExecuteModelCommandAsync(
+            Guid.NewGuid(), "switch to model qwen3:8b", "grant", confirmed: false);
+
+        result.CompletedRun!.Output.Should().Contain("qwen3:8b");
+        (await settings.GetSettingsAsync()).OllamaModelOverride.Should().Be("qwen3:8b");
+    }
+
     private sealed class FakeAppDbContextFactory(DbContextOptions<ApplicationDbContext> options) : IAppDbContextFactory
     {
         public Task<IAppDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<IAppDbContext>(new ApplicationDbContext(options));
     }
 
-    private sealed class FakeStreamingOllamaService(IReadOnlyList<string> fragments) : GwsBusinessSuite.Application.Abstractions.IOllamaService
+    private sealed class FakeStreamingOllamaService(
+        IReadOnlyList<string> fragments,
+        IReadOnlyCollection<string>? installedModels = null) : GwsBusinessSuite.Application.Abstractions.IOllamaService
     {
         public bool WasCalled { get; private set; }
+        public string LastUserPrompt { get; private set; } = string.Empty;
+        public List<string> PulledModels { get; } = [];
 
-        public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
-            Task.FromResult(string.Join(string.Empty, fragments));
+        public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
+        {
+            LastUserPrompt = userPrompt;
+            return Task.FromResult(string.Join(string.Empty, fragments));
+        }
 
         public async IAsyncEnumerable<string> GenerateStreamAsync(
             string model, string systemPrompt, string userPrompt, [EnumeratorCancellation] CancellationToken ct = default)
         {
             WasCalled = true;
+            LastUserPrompt = userPrompt;
             foreach (var fragment in fragments)
             {
                 await Task.Yield();
@@ -143,13 +266,30 @@ public sealed class SentinelAiServiceTests
         }
 
         public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyCollection<string>>(Array.Empty<string>());
+            Task.FromResult(installedModels ?? (IReadOnlyCollection<string>)Array.Empty<string>());
 
-        public Task PullModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+        public Task PullModelAsync(string model, CancellationToken ct = default)
+        {
+            PulledModels.Add(model);
+            return Task.CompletedTask;
+        }
 
         public Task DeleteModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
 
         public Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default) =>
             Task.FromResult(string.Empty);
+    }
+
+    private sealed class FakeWebSearchService(IReadOnlyList<OllamaWebSearchResult> results) : IOllamaWebSearchService
+    {
+        public bool IsConfigured => true;
+
+        public Task<IReadOnlyList<OllamaWebSearchResult>> SearchAsync(
+            string query,
+            int? maxResults = null,
+            CancellationToken ct = default) => Task.FromResult(results);
+
+        public Task<OllamaWebSearchResult> FetchAsync(string url, CancellationToken ct = default) =>
+            Task.FromResult(results[0]);
     }
 }
