@@ -66,7 +66,7 @@
                     <summary>
                         <i class="bi bi-chevron-right"></i>
                         <span>@(string.IsNullOrWhiteSpace(page.Icon) ? "📄" : page.Icon)</span>
-                        <a href="@SentinelUrl(page.Id, false)">@page.Title</a>
+                        <a href="@SentinelUrl(page.Id, false)">@(page.Title)</a>
                     </summary>
                     @foreach (var child in FilterPages(_pages.Where(candidate => candidate.ParentWikiPageId == page.Id)).Take(8))
                     {
@@ -167,9 +167,9 @@
                         <h2>What should we work on?</h2>
                         <p>Ask questions, summarize pages, research your workspace, or turn what Sentinel knows into a useful draft.</p>
                         <div class="sentinel-gpt-starters">
-                            <button type="button" @onclick="() => UseStarter(\"Summarize my open work items and flag anything overdue.\")">Summarize open work</button>
-                            <button type="button" @onclick="() => UseStarter(\"What changed recently across my Sentinel workspace?\")">Review recent changes</button>
-                            <button type="button" @onclick="() => UseStarter(\"Create a concise plan from my latest meeting notes.\")">Plan from meeting notes</button>
+                            <button type="button" @onclick='() => UseStarter("Summarize my open work items and flag anything overdue.")'>Summarize open work</button>
+                            <button type="button" @onclick='() => UseStarter("What changed recently across my Sentinel workspace?")'>Review recent changes</button>
+                            <button type="button" @onclick='() => UseStarter("Create a concise plan from my latest meeting notes.")'>Plan from meeting notes</button>
                         </div>
                     </div>
                 </div>
@@ -240,7 +240,7 @@
                 <button type="button" aria-label="Attach context" title="Workspace context is automatically selected">
                     <i class="bi bi-paperclip"></i>
                 </button>
-                <textarea rows="1" @bind="_instruction" placeholder="Message SentinelGPT…" disabled="@_generating"></textarea>
+                <textarea rows="1" @bind="_instruction" @bind:event="oninput" placeholder="Message SentinelGPT…" disabled="@_generating"></textarea>
                 <span class="sentinel-gpt-context-pill"><i class="bi bi-building"></i>Workspace context <i class="bi bi-toggle-on"></i></span>
                 <button type="button" aria-label="Voice input" title="Voice input">
                     <i class="bi bi-mic"></i>
@@ -456,5 +456,5 @@
     private static string ConversationMeta(SentinelGptConversationView conversation) =>
         conversation.ExchangeCount == 1
             ? conversation.UpdatedAt.ToLocalTime().ToString("t")
-            : $"{conversation.ExchangeCount} messages · {conversation.UpdatedAt.ToLocalTime():MMM d}";
+            : $"{conversation.ExchangeCount} exchanges · {conversation.UpdatedAt.ToLocalTime():MMM d}";
 }

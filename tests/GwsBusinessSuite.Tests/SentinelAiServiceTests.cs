@@ -47,15 +47,26 @@ public sealed class SentinelAiServiceTests
             .Should().Equal("The ", "blue switch ", "starts the sequence.");
 
         var completed = chunks.Should().ContainSingle(chunk => chunk.CompletedRun != null).Subject.CompletedRun!;
+        completed.ConversationId.Should().NotBeEmpty();
         completed.Output.Should().Be("The blue switch starts the sequence.");
         completed.Citations.Should().ContainSingle(citation => citation.TargetId == page.Id && citation.Title == "Launch runbook");
 
         var persisted = await db.SentinelAiRuns.AsNoTracking().SingleAsync();
         persisted.Output.Should().Be("The blue switch starts the sequence.");
+        persisted.ConversationId.Should().Be(completed.ConversationId);
         persisted.CitationsJson.Should().Contain(page.Id.ToString());
 
         var listed = await service.ListRunsAsync(null);
         listed.Should().ContainSingle(run => run.Id == completed.Id && run.Citations.Count == 1);
+
+        var conversations = await service.ListConversationsAsync("grant");
+        conversations.Should().ContainSingle(conversation =>
+            conversation.Id == completed.ConversationId
+            && conversation.ExchangeCount == 1
+            && conversation.Title == "blue switch");
+
+        var conversationRuns = await service.ListConversationRunsAsync(completed.ConversationId, "grant");
+        conversationRuns.Should().ContainSingle(run => run.Id == completed.Id);
     }
 
     [Fact]

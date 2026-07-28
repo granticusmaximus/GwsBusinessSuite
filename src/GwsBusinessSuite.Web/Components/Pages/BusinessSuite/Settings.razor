@@ -151,7 +151,7 @@ else
                         Model used by Content Studio's "Generate with SentinelGPT" hero image button. Must be an
                         installed model with image-generation capability. Local image generation is
                         <strong>experimental and currently macOS-only</strong>, so this may
-                        not work against a Linux-hosted Ollama instance. Leave blank to disable the button.
+                        not work against a Linux-hosted local model service. Leave blank to disable the button.
                     </div>
                 </div>
                 <div class="gws-settings-actions"><span>Overrides deployment defaults for this site.</span><button class="btn btn-primary" @onclick="SaveAiAsync" disabled="@IsBusy">@(IsBusy ? "Saving…" : "Save changes")</button></div>

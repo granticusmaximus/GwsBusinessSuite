@@ -110,7 +110,7 @@ public sealed class AppGenerationServiceTests
         var result = await service.StartAsync(new StartAppGenerationInput(site.Id, "Pricing page", "Build a pricing page"));
 
         result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("Ollama generation failed");
+        result.ErrorMessage.Should().Contain("SentinelGPT generation failed");
         result.Request.Should().NotBeNull();
         result.Request!.Status.Should().Be(AppGenerationRequestStatuses.Drafting);
         result.Request.Messages.Should().ContainSingle(m => m.Role == AppGenerationMessageRoles.User && m.Content == "Build a pricing page");
@@ -129,7 +129,7 @@ public sealed class AppGenerationServiceTests
         var result = await service.SendMessageAsync(started.Request!.Id, "Make it punchier");
 
         result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("Ollama generation failed");
+        result.ErrorMessage.Should().Contain("SentinelGPT generation failed");
         // The plan from the earlier successful turn must survive an unrelated failure later.
         result.Request!.GeneratedPages.Should().ContainSingle(p => p.Title == "Pricing");
     }

@@ -4078,7 +4078,9 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-composer > button.sentinel-gpt-send:disabled { background: #4a433d; color: #77716c; opacity: 1; }
 .sentinel-gpt-composer-wrap > small { display: block; margin-top: .4rem; color: #625d58; font-size: .57rem; text-align: center; }
 
-@media (max-width: 1199.98px) {
+/* The portal navigation already consumes 248px. Collapse the workspace column on
+   laptop-sized windows so the conversation and composer never clip horizontally. */
+@media (max-width: 1399.98px) {
     .sentinel-gpt-shell { grid-template-columns: minmax(205px, 230px) minmax(0, 1fr); }
     .sentinel-gpt-workspace { display: none; }
     .sentinel-gpt-settings { grid-template-columns: 1fr 1fr; }
