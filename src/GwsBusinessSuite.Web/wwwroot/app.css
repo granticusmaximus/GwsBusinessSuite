@@ -3713,7 +3713,9 @@ audio.wiki-embed-media { max-width: 100%; }
 
 /* SentinelGPT — conversation-first local workspace assistant */
 .gws-content:has(> .sentinel-gpt-shell) {
+    flex: 0 0 calc(100dvh - var(--gws-admin-bar-height));
     height: calc(100dvh - var(--gws-admin-bar-height));
+    max-height: calc(100dvh - var(--gws-admin-bar-height));
     min-height: 0;
     overflow: hidden;
 }
@@ -3932,6 +3934,7 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 
 .sentinel-gpt-chat-header {
+    grid-row: 1;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -3959,6 +3962,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-composer > button:hover { background: #292522; color: #fff; }
 
 .sentinel-gpt-settings {
+    grid-row: 2;
     display: grid;
     grid-template-columns: minmax(10rem, auto) minmax(10rem, 16rem) minmax(14rem, 1fr) auto;
     align-items: center;
@@ -3991,6 +3995,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-recheck { border-radius: 7px; }
 
 .sentinel-gpt-thread {
+    grid-row: 3;
     min-height: 0;
     padding: 2rem clamp(1.25rem, 5vw, 5.5rem) 1.25rem;
     overflow-y: auto;
@@ -4112,6 +4117,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-confirmation button.sentinel-gpt-confirm { border-color: #b56a08; background: #d98208; color: #211305; font-weight: 700; }
 
 .sentinel-gpt-composer-wrap {
+    grid-row: 4;
     position: relative;
     z-index: 2;
     padding: .65rem clamp(1rem, 4vw, 4.5rem) .75rem;
