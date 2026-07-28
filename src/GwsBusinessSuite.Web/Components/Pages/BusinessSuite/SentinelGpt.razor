@@ -1,3 +1,4 @@
+@page "/admin/sentinel-gpt"
 @page "/admin/sentinel/gpt"
 @page "/admin/ollama-console"
 @rendermode InteractiveServer
@@ -6,81 +7,22 @@
 @using GwsBusinessSuite.Application.ContentStudio
 @using GwsBusinessSuite.Application.Settings
 @using GwsBusinessSuite.Application.Wiki
-@using GwsBusinessSuite.Domain.Entities
 @using Microsoft.Extensions.Options
 @inject ISentinelAiService SentinelGptService
-@inject ISentinelWorkspaceService WorkspaceService
-@inject IWikiService WikiService
 @inject IOllamaService LocalModelService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject ISiteSettingsService SiteSettingsService
 @inject IOptions<ContentStudioOptions> StudioOptions
-@inject NavigationManager Navigator
 @inject ILogger<SentinelGpt> Logger
 
 <PageTitle>SentinelGPT</PageTitle>
 
 <div class="sentinel-gpt-shell">
-    <aside class="sentinel-gpt-workspace" aria-label="Sentinel workspace">
-        <header>
-            <a href="admin/sentinel" class="sentinel-gpt-brand">
-                <span class="sentinel-gpt-shield">S</span>
-                <span><strong>Sentinel</strong><small>GWS workspace</small></span>
-            </a>
-        </header>
-
-        <div class="sentinel-gpt-workspace-search">
-            <i class="bi bi-search"></i>
-            <input @bind="_pageSearch" @bind:event="oninput" placeholder="Search Sentinel" aria-label="Filter Sentinel pages" />
-            <kbd>⌘K</kbd>
-        </div>
-
-        <nav class="sentinel-gpt-workspace-nav">
-            <a class="active" href="admin/sentinel/gpt">
-                <i class="bi bi-chat-dots-fill"></i><span>SentinelGPT</span>
-            </a>
-            <a href="admin/sentinel">
-                <i class="bi bi-journal-bookmark"></i><span>Open workspace</span>
-            </a>
-        </nav>
-
-        @if (_navigation.Recents.Count > 0)
-        {
-            <section class="sentinel-gpt-page-section">
-                <div class="sentinel-gpt-section-label">Recent</div>
-                @foreach (var item in FilterNavigation(_navigation.Recents).Take(5))
-                {
-                    <a href="@SentinelUrl(item.Id, item.IsDatabase)">
-                        <span>@(string.IsNullOrWhiteSpace(item.Icon) ? (item.IsDatabase ? "🗄️" : "📄") : item.Icon)</span>
-                        <span>@item.Title</span>
-                    </a>
-                }
-            </section>
-        }
-
-        <section class="sentinel-gpt-page-section sentinel-gpt-page-tree">
-            <div class="sentinel-gpt-section-label">Private</div>
-            @foreach (var page in FilterPages(_pages.Where(page => page.ParentWikiPageId is null)).Take(14))
-            {
-                <details>
-                    <summary>
-                        <i class="bi bi-chevron-right"></i>
-                        <span>@(string.IsNullOrWhiteSpace(page.Icon) ? "📄" : page.Icon)</span>
-                        <a href="@SentinelUrl(page.Id, false)">@(page.Title)</a>
-                    </summary>
-                    @foreach (var child in FilterPages(_pages.Where(candidate => candidate.ParentWikiPageId == page.Id)).Take(8))
-                    {
-                        <a class="sentinel-gpt-child-page" href="@SentinelUrl(child.Id, false)">
-                            <span>@(string.IsNullOrWhiteSpace(child.Icon) ? "📄" : child.Icon)</span>
-                            <span>@child.Title</span>
-                        </a>
-                    }
-                </details>
-            }
-        </section>
-    </aside>
-
     <aside class="sentinel-gpt-history" aria-label="SentinelGPT chats">
+        <a href="admin/sentinel-gpt" class="sentinel-gpt-brand sentinel-gpt-app-brand">
+            <span class="sentinel-gpt-shield">S</span>
+            <span><strong>SentinelGPT</strong><small>GWS private assistant</small></span>
+        </a>
         <button type="button" class="sentinel-gpt-new-chat" @onclick="StartNewChat">
             <i class="bi bi-plus-lg"></i><span>New chat</span>
         </button>
@@ -258,7 +200,6 @@
 
 @code {
     private string _username = string.Empty;
-    private string _pageSearch = string.Empty;
     private string _instruction = string.Empty;
     private string _pendingInstruction = string.Empty;
     private string _liveOutput = string.Empty;
@@ -274,8 +215,6 @@
     private bool _settingsOpen;
     private bool _modelBusy;
     private Guid? _conversationId;
-    private List<WikiPage> _pages = [];
-    private SentinelNavigationState _navigation = new([], []);
     private List<SentinelGptConversationView> _conversations = [];
     private List<SentinelAiRunView> _runs = [];
     private List<string> _models = [];
@@ -298,8 +237,6 @@
         _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
         _settings = await SiteSettingsService.GetSettingsAsync();
         _configuredModel = _settings.OllamaModelOverride ?? StudioOptions.Value.Model;
-        _pages = (await WikiService.ListPagesAsync()).Where(page => page.NotionArchivedAt is null).ToList();
-        _navigation = await WorkspaceService.GetNavigationAsync(_username, 8);
         await Task.WhenAll(CheckConnectionAsync(), LoadConversationsAsync());
         if (_conversations.Count > 0)
         {
@@ -310,17 +247,6 @@
             StartNewChat();
         }
     }
-
-    private IEnumerable<WikiPage> FilterPages(IEnumerable<WikiPage> pages) =>
-        string.IsNullOrWhiteSpace(_pageSearch)
-            ? pages.OrderBy(page => page.SortOrder).ThenBy(page => page.Title)
-            : pages.Where(page => page.Title.Contains(_pageSearch, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(page => page.Title);
-
-    private IEnumerable<SentinelNavigationItem> FilterNavigation(IEnumerable<SentinelNavigationItem> items) =>
-        string.IsNullOrWhiteSpace(_pageSearch)
-            ? items
-            : items.Where(item => item.Title.Contains(_pageSearch, StringComparison.OrdinalIgnoreCase));
 
     private static string SentinelUrl(Guid id, bool isDatabase) =>
         isDatabase ? $"admin/sentinel?database={id}" : $"admin/sentinel?page={id}";

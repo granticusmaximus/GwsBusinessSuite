@@ -188,6 +188,26 @@ h1:focus { outline: none; }
     gap: .65rem;
 }
 
+.gws-sentinel-gpt-trigger {
+    min-height: 2.35rem;
+    display: inline-flex;
+    align-items: center;
+    gap: .45rem;
+    padding: 0 .7rem;
+    border: 1px solid rgba(245, 158, 11, .45);
+    border-radius: var(--gws-radius-sm);
+    background: rgba(245, 158, 11, .08);
+    color: #fbbf24;
+    font-weight: 650;
+    text-decoration: none;
+}
+
+.gws-sentinel-gpt-trigger:hover {
+    border-color: rgba(245, 158, 11, .75);
+    background: rgba(245, 158, 11, .14);
+    color: #fde68a;
+}
+
 .gws-command-trigger {
     min-height: 2.35rem;
     min-width: 13rem;
@@ -1083,11 +1103,13 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 @media (max-width: 767.98px) {
     .gws-admin-bar { padding: 0 .55rem; }
     .gws-admin-bar-brand span,
+    .gws-sentinel-gpt-trigger span,
     .gws-command-trigger span,
     .gws-command-trigger kbd,
     .gws-account-name,
     .gws-account-menu > summary .bi-chevron-down { display: none; }
-    .gws-command-trigger { min-width: 2.5rem; width: 2.5rem; justify-content: center; padding: 0; }
+    .gws-command-trigger,
+    .gws-sentinel-gpt-trigger { min-width: 2.5rem; width: 2.5rem; justify-content: center; padding: 0; }
     .gws-sidebar-toggle-desktop { display: none; }
     .gws-sidebar-toggle-mobile { display: inline-block; font-size: 1.25rem; }
     .gws-sidebar {
@@ -3692,7 +3714,7 @@ audio.wiki-embed-media { max-width: 100%; }
 /* SentinelGPT — conversation-first local workspace assistant */
 .sentinel-gpt-shell {
     display: grid;
-    grid-template-columns: minmax(230px, 270px) minmax(210px, 245px) minmax(0, 1fr);
+    grid-template-columns: minmax(220px, 255px) minmax(0, 1fr);
     height: calc(100dvh - var(--gws-admin-bar-height) - 2rem);
     min-height: 40rem;
     overflow: hidden;
@@ -3842,6 +3864,12 @@ audio.wiki-embed-media { max-width: 100%; }
     display: flex;
     flex-direction: column;
     padding: .9rem .7rem;
+}
+
+.sentinel-gpt-app-brand {
+    margin: -.15rem 0 .8rem;
+    padding: .2rem .25rem .8rem;
+    border-bottom: 1px solid #2b2825;
 }
 
 .sentinel-gpt-new-chat {
@@ -4082,7 +4110,6 @@ audio.wiki-embed-media { max-width: 100%; }
    laptop-sized windows so the conversation and composer never clip horizontally. */
 @media (max-width: 1399.98px) {
     .sentinel-gpt-shell { grid-template-columns: minmax(205px, 230px) minmax(0, 1fr); }
-    .sentinel-gpt-workspace { display: none; }
     .sentinel-gpt-settings { grid-template-columns: 1fr 1fr; }
 }
 
