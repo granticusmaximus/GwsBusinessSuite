@@ -7,6 +7,7 @@
 @using GwsBusinessSuite.Application.ContentStudio
 @using GwsBusinessSuite.Application.Settings
 @using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
 @using Microsoft.Extensions.Options
 @inject ISentinelAiService SentinelGptService
 @inject IOllamaService LocalModelService
@@ -155,7 +156,38 @@
                                     </div>
                                 </details>
                             }
-                            <time>@run.CreatedAt.ToLocalTime().ToString("t") · @run.Model</time>
+                            <div class="sentinel-gpt-response-meta">
+                                <time>@run.CreatedAt.ToLocalTime().ToString("t") · @run.Model</time>
+                                @if (run.Action != SentinelAiActions.ModelManagement)
+                                {
+                                    <div class="sentinel-gpt-feedback" aria-label="Teach SentinelGPT from this answer">
+                                        <button type="button"
+                                                class="@(run.Status == SentinelAiRunStatuses.Approved ? "is-selected" : null)"
+                                                title="Approve this answer as reusable SentinelGPT learning memory"
+                                                aria-label="Approve answer as learning memory"
+                                                disabled="@_reviewingRunIds.Contains(run.Id)"
+                                                @onclick="() => ReviewRunAsync(run, true)">
+                                            <i class="bi bi-hand-thumbs-up"></i>
+                                        </button>
+                                        <button type="button"
+                                                class="@(run.Status == SentinelAiRunStatuses.Rejected ? "is-selected is-rejected" : null)"
+                                                title="Reject this answer so SentinelGPT does not learn from it"
+                                                aria-label="Reject answer"
+                                                disabled="@_reviewingRunIds.Contains(run.Id)"
+                                                @onclick="() => ReviewRunAsync(run, false)">
+                                            <i class="bi bi-hand-thumbs-down"></i>
+                                        </button>
+                                        @if (run.Status == SentinelAiRunStatuses.Approved)
+                                        {
+                                            <span>Saved to learning memory</span>
+                                        }
+                                        else if (run.Status == SentinelAiRunStatuses.Rejected)
+                                        {
+                                            <span>Excluded from learning memory</span>
+                                        }
+                                    </div>
+                                }
+                            </div>
                         </div>
                     </div>
                 </article>
@@ -262,6 +294,7 @@
     private List<SentinelGptConversationView> _conversations = [];
     private List<SentinelAiRunView> _runs = [];
     private List<string> _models = [];
+    private HashSet<Guid> _reviewingRunIds = [];
     private SiteSettingsView? _settings;
 
     private IEnumerable<(string Label, IReadOnlyList<SentinelGptConversationView> Items)> ConversationGroups
@@ -343,6 +376,33 @@
         _runs = (await SentinelGptService.ListConversationRunsAsync(id, _username)).ToList();
     }
 
+    private async Task ReviewRunAsync(SentinelAiRunView run, bool approved)
+    {
+        if (!_reviewingRunIds.Add(run.Id)) return;
+        _error = string.Empty;
+        try
+        {
+            await SentinelGptService.ReviewAsync(run.Id, approved, _username);
+            var index = _runs.FindIndex(item => item.Id == run.Id);
+            if (index >= 0)
+            {
+                _runs[index] = run with
+                {
+                    Status = approved ? SentinelAiRunStatuses.Approved : SentinelAiRunStatuses.Rejected
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "SentinelGPT feedback could not be saved for run {RunId}", run.Id);
+            _error = $"The learning feedback could not be saved: {ex.Message}";
+        }
+        finally
+        {
+            _reviewingRunIds.Remove(run.Id);
+        }
+    }
+
     private async Task SendAsync()
     {
         var instruction = _instruction.Trim();
@@ -370,7 +430,7 @@
                 {
                     _runs.Add(command.CompletedRun);
                     _settings = await SiteSettingsService.GetSettingsAsync();
-                    _configuredModel = _settings.OllamaModelOverride ?? StudioOptions.Value.Model;
+                    _configuredModel = _settings.OllamaModelOverride ?? SentinelGptDefaults.Model;
                     await CheckConnectionAsync();
                 }
             }

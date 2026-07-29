@@ -4086,6 +4086,23 @@ audio.wiki-embed-media { max-width: 100%; }
     box-shadow: 0 5px 18px rgba(0, 0, 0, .18);
 }
 .sentinel-gpt-assistant-row time { display: block; margin: .22rem .25rem 0; color: #716b66; font-size: .58rem; }
+.sentinel-gpt-response-meta { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem; }
+.sentinel-gpt-feedback { display: inline-flex; align-items: center; gap: .2rem; color: #716b66; font-size: .62rem; }
+.sentinel-gpt-feedback button {
+    display: inline-grid;
+    place-items: center;
+    width: 1.55rem;
+    height: 1.55rem;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: #837d78;
+}
+.sentinel-gpt-feedback button:hover { border-color: #4b4642; color: #f4a515; }
+.sentinel-gpt-feedback button.is-selected { border-color: #5b4820; background: #302713; color: #f4a515; }
+.sentinel-gpt-feedback button.is-selected.is-rejected { border-color: #633838; background: #321f1f; color: #ef8c8c; }
+.sentinel-gpt-feedback button:disabled { opacity: .55; cursor: wait; }
 .sentinel-gpt-assistant-message.is-streaming::after { content: "▋"; margin-left: .15rem; animation: sentinelAiCaretBlink 1s step-end infinite; color: #f59e0b; }
 .sentinel-gpt-thinking-copy { display: inline-flex; align-items: center; gap: .55rem; color: #aaa49f; font-size: .72rem; }
 .sentinel-gpt-thinking { display: flex; gap: .25rem; padding: .35rem .1rem; }

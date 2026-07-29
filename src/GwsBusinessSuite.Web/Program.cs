@@ -27,6 +27,7 @@ using Microsoft.EntityFrameworkCore;
 using System.IO.Compression;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.RateLimiting;
 
@@ -265,6 +266,7 @@ using (var scope = app.Services.CreateScope())
     await EnsureGrantWatsonHomepageAsync(dbContext, app.Configuration, app.Logger);
     await EnsureAboutPageResumeSectionAsync(dbContext, app.Logger);
     await EnsureWikiPagesHaveBlocksAsync(dbContext, app.Logger);
+    await EnsureSentinelLearningWorkflowAsync(scope.ServiceProvider, app.Logger);
 
     if (!await dbContext.AppUsers.AnyAsync())
     {
@@ -2191,6 +2193,109 @@ static async Task EnsureAboutPageResumeSectionAsync(ApplicationDbContext dbConte
 // Markdown column has content gets that content wrapped into a single legacy "markdown"
 // block (rendered through the existing Markdig pipeline unchanged) so nothing is lost -
 // idempotent, since a page that already has blocks is left alone on every subsequent run.
+static async Task EnsureSentinelLearningWorkflowAsync(IServiceProvider services, ILogger logger)
+{
+    const string workflowName = "SentinelGPT Teacher Panel";
+    var workflows = services.GetRequiredService<IAutomationWorkflowService>();
+    if ((await workflows.ListAsync()).Any(item => item.Name.Equals(workflowName, StringComparison.OrdinalIgnoreCase)))
+    {
+        return;
+    }
+
+    var workflow = await workflows.CreateAsync(
+        workflowName,
+        "Qwen reviews engineering concerns, DeepSeek challenges reasoning, SentinelGPT synthesizes their advice, and only a human-approved result becomes reusable SentinelGPT memory.");
+    await workflows.UpdateMetadataAsync(
+        workflow.Id,
+        workflowName,
+        workflow.Description,
+        "sentinelgpt,ai,teacher-panel,supervised-learning");
+    var trigger = workflow.Nodes.Single(node => node.TypeKey == "core.manualTrigger");
+    var qwen = await workflows.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+    {
+        Name = "Qwen engineering review",
+        TypeKey = "ai.modelAdvisor",
+        PositionX = 380,
+        PositionY = 80,
+        TimeoutMs = 300_000,
+        ParametersJson = JsonSerializer.Serialize(new
+        {
+            model = "qwen2.5-coder",
+            role = "Review the request as a senior Microsoft .NET, C#, Blazor, security, testing, and software architecture specialist. Correct invalid APIs or assumptions.",
+            promptPath = "prompt",
+            outputField = "qwenAdvice"
+        })
+    });
+    var deepSeek = await workflows.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+    {
+        Name = "DeepSeek reasoning review",
+        TypeKey = "ai.modelAdvisor",
+        PositionX = 380,
+        PositionY = 280,
+        TimeoutMs = 300_000,
+        ParametersJson = JsonSerializer.Serialize(new
+        {
+            model = "deepseek-r1",
+            role = "Audit the request's reasoning. Challenge its premises, identify missing evidence and counterexamples, and recommend the most defensible course.",
+            promptPath = "prompt",
+            outputField = "deepseekAdvice"
+        })
+    });
+    var merge = await workflows.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+    {
+        Name = "Merge specialist reviews",
+        TypeKey = "core.merge",
+        PositionX = 650,
+        PositionY = 180,
+        ParametersJson = "{}"
+    });
+    var synthesize = await workflows.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+    {
+        Name = "SentinelGPT final synthesis",
+        TypeKey = "ai.sentinelSynthesize",
+        PositionX = 900,
+        PositionY = 180,
+        TimeoutMs = 300_000,
+        ParametersJson = "{\"model\":\"sentinelgpt\",\"promptPath\":\"prompt\",\"answerField\":\"sentinelAnswer\"}"
+    });
+    var approval = await workflows.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+    {
+        Name = "Approve as learning memory",
+        TypeKey = "core.approval",
+        PositionX = 1160,
+        PositionY = 180,
+        ParametersJson = "{\"message\":\"Review the SentinelGPT synthesis in the execution output. Save it as reusable learning memory?\",\"timeoutHours\":0}"
+    });
+    var save = await workflows.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+    {
+        Name = "Save approved lesson",
+        TypeKey = "ai.saveApprovedLesson",
+        PositionX = 1410,
+        PositionY = 100,
+        ParametersJson = "{\"promptPath\":\"prompt\",\"answerPath\":\"sentinelAnswer\"}"
+    });
+    var reject = await workflows.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+    {
+        Name = "Discard rejected lesson",
+        TypeKey = "core.noOp",
+        PositionX = 1410,
+        PositionY = 280,
+        ParametersJson = "{}"
+    });
+
+    await workflows.AddConnectionAsync(workflow.Id, trigger.Id, "main", qwen.Id);
+    await workflows.AddConnectionAsync(workflow.Id, trigger.Id, "main", deepSeek.Id);
+    await workflows.AddConnectionAsync(workflow.Id, qwen.Id, "main", merge.Id, "qwen");
+    await workflows.AddConnectionAsync(workflow.Id, deepSeek.Id, "main", merge.Id, "deepseek");
+    await workflows.AddConnectionAsync(workflow.Id, merge.Id, "main", synthesize.Id);
+    await workflows.AddConnectionAsync(workflow.Id, synthesize.Id, "main", approval.Id);
+    await workflows.AddConnectionAsync(workflow.Id, approval.Id, "approved", save.Id);
+    await workflows.AddConnectionAsync(workflow.Id, approval.Id, "rejected", reject.Id);
+    await workflows.PublishAsync(workflow.Id, "Initial supervised teacher-panel workflow");
+    await workflows.SetActiveAsync(workflow.Id, true);
+    logger.LogInformation("Seeded the {WorkflowName} automation workflow.", workflowName);
+}
+
 static async Task EnsureWikiPagesHaveBlocksAsync(ApplicationDbContext dbContext, ILogger logger)
 {
     // The AddWikiBlockEditor migration defaulted every existing row's new BlocksJson column

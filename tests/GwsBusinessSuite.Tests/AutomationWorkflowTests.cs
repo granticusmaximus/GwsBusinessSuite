@@ -643,6 +643,56 @@ public sealed class AutomationWorkflowTests
         resumed.OutputJson.Should().NotContain("v2");
     }
 
+    [Fact]
+    public async Task AiTeacherNodes_ShouldConsultSpecialistsSynthesizeAndSaveOnlyApprovedMemory()
+    {
+        await using var db = await CreateDbAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(db.Database.GetDbConnection())
+            .Options;
+        var ollama = new FakeOllamaService();
+        var registry = new AutomationNodeRegistry(
+            new FakeHttpClient(),
+            ollama,
+            new FakeAppDbContextFactory(options));
+        var input = System.Text.Json.JsonSerializer.SerializeToElement(new
+        {
+            prompt = "Review this Blazor workflow architecture."
+        });
+        var qwen = await registry.ExecuteAsync(
+            Node("ai.modelAdvisor", "{\"model\":\"qwen2.5-coder\",\"role\":\"Review .NET code.\",\"promptPath\":\"prompt\",\"outputField\":\"qwenAdvice\"}"),
+            input,
+            null);
+        var deepSeek = await registry.ExecuteAsync(
+            Node("ai.modelAdvisor", "{\"model\":\"deepseek-r1\",\"role\":\"Challenge assumptions.\",\"promptPath\":\"prompt\",\"outputField\":\"deepseekAdvice\"}"),
+            input,
+            null);
+        var merged = System.Text.Json.JsonSerializer.SerializeToElement(new
+        {
+            qwen = qwen.Outputs["main"].Single(),
+            deepseek = deepSeek.Outputs["main"].Single()
+        });
+        var synthesis = await registry.ExecuteAsync(
+            Node("ai.sentinelSynthesize", "{\"model\":\"sentinelgpt\",\"promptPath\":\"prompt\",\"answerField\":\"sentinelAnswer\"}"),
+            merged,
+            null);
+        var approved = System.Text.Json.Nodes.JsonNode.Parse(
+            synthesis.Outputs["main"].Single().GetRawText())!.AsObject();
+        approved["_approval"] = new System.Text.Json.Nodes.JsonObject { ["approved"] = true };
+        var saved = await registry.ExecuteAsync(
+            Node("ai.saveApprovedLesson", "{\"promptPath\":\"prompt\",\"answerPath\":\"sentinelAnswer\"}"),
+            System.Text.Json.JsonSerializer.SerializeToElement(approved),
+            null);
+
+        ollama.RequestedModels.Should().Equal("qwen2.5-coder", "deepseek-r1", "sentinelgpt");
+        saved.DisplayOutputJson.Should().Contain("\"saved\":true");
+        await using var verificationDb = new ApplicationDbContext(options);
+        var lesson = await verificationDb.SentinelAiRuns.AsNoTracking().SingleAsync();
+        lesson.Status.Should().Be(SentinelAiRunStatuses.Approved);
+        lesson.Action.Should().Be("teacherWorkflow");
+        lesson.Output.Should().Contain("Sentinel synthesis");
+    }
+
     private static AutomationNodeEditor NewSetNode(string name, double x) => new()
     {
         Name = name,
@@ -686,5 +736,49 @@ public sealed class AutomationWorkflowTests
     {
         public DateTimeOffset UtcNow { get; set; } = DateTimeOffset.UtcNow;
         public override DateTimeOffset GetUtcNow() => UtcNow;
+    }
+
+    private sealed class FakeAppDbContextFactory(DbContextOptions<ApplicationDbContext> options) : IAppDbContextFactory
+    {
+        public Task<IAppDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IAppDbContext>(new ApplicationDbContext(options));
+    }
+
+    private sealed class FakeOllamaService : IOllamaService
+    {
+        public List<string> RequestedModels { get; } = [];
+
+        public Task<string> GenerateAsync(
+            string model,
+            string systemPrompt,
+            string userPrompt,
+            CancellationToken ct = default)
+        {
+            RequestedModels.Add(model);
+            var output = model switch
+            {
+                "qwen2.5-coder" => "Qwen engineering advice",
+                "deepseek-r1" => "DeepSeek reasoning advice",
+                "sentinelgpt" => "Sentinel synthesis approved by the reviewer",
+                _ => "Unknown model"
+            };
+            return Task.FromResult(output);
+        }
+
+        public async IAsyncEnumerable<string> GenerateStreamAsync(
+            string model,
+            string systemPrompt,
+            string userPrompt,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            yield return await GenerateAsync(model, systemPrompt, userPrompt, ct);
+        }
+
+        public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyCollection<string>>(["qwen2.5-coder", "deepseek-r1", "sentinelgpt"]);
+        public Task PullModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+        public Task DeleteModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default) =>
+            Task.FromResult(string.Empty);
     }
 }

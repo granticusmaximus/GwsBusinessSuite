@@ -143,6 +143,18 @@ public sealed class SentinelAiServiceTests
             Description = "Secret production credential",
             CreatedBy = "grant"
         });
+        db.SentinelAiRuns.Add(new GwsBusinessSuite.Domain.Entities.SentinelAiRun
+        {
+            ConversationId = Guid.NewGuid(),
+            Action = SentinelAiActions.Ask,
+            Instruction = "ASP.NET framework guidance",
+            Output = "Prefer the repository target framework and verify version-sensitive APIs.",
+            Status = GwsBusinessSuite.Domain.Entities.SentinelAiRunStatuses.Approved,
+            Model = "sentinelgpt",
+            ReviewedAt = DateTimeOffset.UtcNow,
+            ReviewedBy = "grant",
+            CreatedBy = "grant"
+        });
         await db.SaveChangesAsync();
 
         var ollama = new FakeStreamingOllamaService(["A grounded answer."]);
@@ -178,8 +190,12 @@ public sealed class SentinelAiServiceTests
         ollama.LastUserPrompt.Should().Contain("GWS BUSINESS SUITE LIVE OVERVIEW");
         ollama.LastUserPrompt.Should().Contain("Ada Lovelace");
         ollama.LastUserPrompt.Should().Contain("Current framework guidance");
+        ollama.LastUserPrompt.Should().Contain("HUMAN-APPROVED SENTINELGPT MEMORY");
+        ollama.LastUserPrompt.Should().Contain("verify version-sensitive APIs");
         ollama.LastSystemPrompt.Should().Contain("truth rather than agreement");
         ollama.LastSystemPrompt.Should().Contain("official Microsoft Learn");
+        ollama.RequestedModels.Should().Contain("qwen2.5-coder");
+        ollama.RequestedModels.Should().Contain("deepseek-r1");
         ollama.LastUserPrompt.Should().NotContain("private@example.test");
         ollama.LastUserPrompt.Should().NotContain("must-never-enter-the-prompt");
         web.Queries.Should().Contain(query => query.StartsWith("site:learn.microsoft.com"));
@@ -261,9 +277,11 @@ public sealed class SentinelAiServiceTests
         public string LastUserPrompt { get; private set; } = string.Empty;
         public string LastSystemPrompt { get; private set; } = string.Empty;
         public List<string> PulledModels { get; } = [];
+        public List<string> RequestedModels { get; } = [];
 
         public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
         {
+            RequestedModels.Add(model);
             LastUserPrompt = userPrompt;
             return Task.FromResult(string.Join(string.Empty, fragments));
         }
@@ -272,6 +290,7 @@ public sealed class SentinelAiServiceTests
             string model, string systemPrompt, string userPrompt, [EnumeratorCancellation] CancellationToken ct = default)
         {
             WasCalled = true;
+            RequestedModels.Add(model);
             LastSystemPrompt = systemPrompt;
             LastUserPrompt = userPrompt;
             foreach (var fragment in fragments)

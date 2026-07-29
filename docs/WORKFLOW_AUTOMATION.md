@@ -37,7 +37,7 @@ UI assets, trademarks, node definitions, or enterprise-only implementation detai
 | Credentials | Protected credential records and credential references | OAuth2 refresh, credential types, sharing, external secret stores, rotation/audit |
 | Operations | Run list, node logs, timestamps, errors, outputs, cancel, resume, approve/reject | Filtering, retention/pruning, concurrency controls, metrics, OpenTelemetry |
 | Scale and reliability | In-process execution with durable records | Queue transport, independent workers, webhook processors, leader election, Postgres |
-| AI automation | Registry can host AI nodes | Agents, tools, memory, vector stores, model credentials, human approval nodes |
+| AI automation | Qwen/DeepSeek adviser nodes, SentinelGPT synthesis, human-approved learning memory | Tool calling, embeddings/vector search, evaluation suites, model credentials |
 | Governance | Admin-only boundary and immutable version snapshots | Projects/RBAC, audit stream, environment promotion, source control, security audit |
 | Integrations | Extensible C# node handler contract | First-party connectors, community package SDK, node versioning and compatibility policy |
 

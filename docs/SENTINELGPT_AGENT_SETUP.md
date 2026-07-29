@@ -30,6 +30,53 @@ The application uses `sentinelgpt` by default when no model override has been se
 Recreating the profile updates its behavior without altering the underlying `llama3.2`
 weights.
 
+## Qwen and DeepSeek teacher panel
+
+SentinelGPT uses the installed specialist models without pretending their weights have
+been merged:
+
+- substantial GWS, engineering, security, architecture, strategy, and reasoning questions
+  consult `qwen2.5-coder` and `deepseek-r1`;
+- Qwen acts as the .NET/C#/Blazor engineering reviewer;
+- DeepSeek audits premises, missing evidence, counterexamples, and reasoning;
+- SentinelGPT receives both opinions as explicitly untrusted advisory material and produces
+  the final response using verified GWS context and cited documentation;
+- short/simple prompts bypass the panel to avoid unnecessary latency.
+
+The teacher responses are not factual sources and are not automatically saved as memory.
+Use the thumbs-up control below a SentinelGPT response to approve it as reusable learning
+memory. Thumbs-down rejects or removes it from the eligible memory set. Future related
+questions retrieve up to four relevant human-approved lessons. Model-management responses
+are never eligible for learning memory.
+
+At startup, GWS creates an active **SentinelGPT Teacher Panel** workflow if one does not
+already exist. Open **Automation**, select that workflow, and run it with input shaped like:
+
+```json
+{
+  "prompt": "Review this proposed Blazor architecture and correct my assumptions."
+}
+```
+
+The visible workflow is:
+
+```text
+Manual Trigger
+  ├─ Qwen engineering review ─┐
+  └─ DeepSeek reasoning review ─┤
+                               Merge
+                                 ↓
+                      SentinelGPT final synthesis
+                                 ↓
+                      Approve as learning memory
+                         ├─ approved → Save approved lesson
+                         └─ rejected → Discard rejected lesson
+```
+
+Inspect the SentinelGPT synthesis in the execution evidence before approving it. Approval
+is the security and quality boundary: installed models cannot silently teach persistent
+behavior or turn an unsupported claim into a remembered fact.
+
 ## Capabilities
 
 - Every normal SentinelGPT question receives a sanitized live GWS Business Suite overview

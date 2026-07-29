@@ -1,10 +1,15 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Domain.Entities;
 
 namespace GwsBusinessSuite.Application.Automation;
 
-public sealed partial class AutomationNodeRegistry(IAutomationHttpClient httpClient) : IAutomationNodeRegistry
+public sealed partial class AutomationNodeRegistry(
+    IAutomationHttpClient httpClient,
+    IOllamaService? ollama = null,
+    IAppDbContextFactory? dbContextFactory = null) : IAutomationNodeRegistry
 {
     private static readonly IReadOnlyList<AutomationNodeDefinition> Definitions =
     [
@@ -27,6 +32,36 @@ public sealed partial class AutomationNodeRegistry(IAutomationHttpClient httpCli
         new("core.stopError", 1, "Stop and Error", "Stops the workflow with a configured error message.", "Flow", "bi-exclamation-octagon", false, ["main"], "{\"message\":\"Workflow stopped\"}"),
         new("core.wait", 1, "Wait", "Pauses the workflow until a duration, timestamp, or resume webhook.", "Flow", "bi-hourglass-split", false, ["main"], "{\"mode\":\"duration\",\"durationMs\":60000,\"timestamp\":null}"),
         new("core.approval", 1, "Approval", "Pauses the workflow for a human decision.", "Flow", "bi-person-check", false, ["approved", "rejected"], "{\"message\":\"Approve this step?\",\"timeoutHours\":0}"),
+        new(
+            "ai.modelAdvisor",
+            1,
+            "Model Adviser",
+            "Asks an installed Ollama model for bounded specialist advice and appends it to the workflow item.",
+            "AI",
+            "bi-cpu-fill",
+            false,
+            ["main"],
+            "{\"model\":\"qwen2.5-coder\",\"role\":\"Review the request as a senior .NET and C# engineer. Identify correctness, security, testing, and architecture concerns.\",\"promptPath\":\"prompt\",\"outputField\":\"qwenAdvice\"}"),
+        new(
+            "ai.sentinelSynthesize",
+            1,
+            "SentinelGPT Synthesize",
+            "Uses SentinelGPT to reconcile specialist advice into one evidence-aware proposed lesson.",
+            "AI",
+            "bi-stars",
+            false,
+            ["main"],
+            "{\"model\":\"sentinelgpt\",\"promptPath\":\"prompt\",\"answerField\":\"sentinelAnswer\"}"),
+        new(
+            "ai.saveApprovedLesson",
+            1,
+            "Save Approved Lesson",
+            "Stores a human-approved SentinelGPT answer as reusable learning memory. Rejected or unapproved items are not stored.",
+            "AI",
+            "bi-journal-check",
+            false,
+            ["main"],
+            "{\"promptPath\":\"prompt\",\"answerPath\":\"sentinelAnswer\"}"),
     ];
 
     public IReadOnlyList<AutomationNodeDefinition> ListDefinitions() => Definitions;
@@ -60,8 +95,133 @@ public sealed partial class AutomationNodeRegistry(IAutomationHttpClient httpCli
             "core.noOp" => SingleOutput("main", input),
             "core.stopError" => throw new InvalidOperationException(ResolveText(ParseObject(node.ParametersJson, node.Name)["message"]?.GetValue<string>() ?? "Workflow stopped.", input)),
             "core.wait" or "core.approval" => throw new InvalidOperationException($"{node.Name} must be paused and resumed by the execution engine, not called directly."),
+            "ai.modelAdvisor" => await ExecuteModelAdvisorAsync(node, input, cancellationToken),
+            "ai.sentinelSynthesize" => await ExecuteSentinelSynthesisAsync(node, input, cancellationToken),
+            "ai.saveApprovedLesson" => await ExecuteSaveApprovedLessonAsync(node, input, cancellationToken),
             _ => throw new InvalidOperationException($"Node type '{node.TypeKey}' is not executable.")
         };
+    }
+
+    private async Task<AutomationNodeRunResult> ExecuteModelAdvisorAsync(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        CancellationToken cancellationToken)
+    {
+        var ai = ollama ?? throw new InvalidOperationException("Ollama is not available to the automation engine.");
+        var parameters = ParseObject(node.ParametersJson, node.Name);
+        var source = RequireObject(input, node.Name);
+        var model = RequireSafeModelName(parameters["model"]?.GetValue<string>(), node.Name);
+        var role = parameters["role"]?.GetValue<string>()?.Trim();
+        if (string.IsNullOrWhiteSpace(role))
+            throw new InvalidOperationException($"{node.Name} requires a specialist role.");
+        var promptPath = parameters["promptPath"]?.GetValue<string>()?.Trim() ?? "prompt";
+        var outputField = RequireSafeFieldName(parameters["outputField"]?.GetValue<string>() ?? "advice", node.Name);
+        var prompt = FindString(source, promptPath)
+            ?? throw new InvalidOperationException($"{node.Name} could not find a non-empty prompt at '{promptPath}'.");
+
+        var systemPrompt =
+            $"{role} Return independent advisory analysis, not a final user-facing answer. " +
+            "Challenge unsupported assumptions. Separate verified facts from inference. " +
+            "Never claim that an action ran. Keep the response under 700 words and do not request or reveal secrets.";
+        var advice = (await ai.GenerateAsync(
+            model,
+            systemPrompt,
+            $"REQUEST:\n{LimitText(prompt, 12_000)}\n\nWORKFLOW CONTEXT:\n{LimitText(source.ToJsonString(), 12_000)}",
+            cancellationToken)).Trim();
+        if (advice.Length == 0) throw new InvalidOperationException($"{model} returned empty specialist advice.");
+
+        var output = source.DeepClone().AsObject();
+        output[outputField] = LimitText(advice, 8_000);
+        output[$"{outputField}Model"] = model;
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    private async Task<AutomationNodeRunResult> ExecuteSentinelSynthesisAsync(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        CancellationToken cancellationToken)
+    {
+        var ai = ollama ?? throw new InvalidOperationException("Ollama is not available to the automation engine.");
+        var parameters = ParseObject(node.ParametersJson, node.Name);
+        var source = RequireObject(input, node.Name);
+        var model = RequireSafeModelName(parameters["model"]?.GetValue<string>() ?? "sentinelgpt", node.Name);
+        var promptPath = parameters["promptPath"]?.GetValue<string>()?.Trim() ?? "prompt";
+        var answerField = RequireSafeFieldName(parameters["answerField"]?.GetValue<string>() ?? "sentinelAnswer", node.Name);
+        var prompt = FindStringRecursive(source, promptPath)
+            ?? throw new InvalidOperationException($"{node.Name} could not find a non-empty prompt at '{promptPath}'.");
+        var advice = FindPropertiesEndingWith(source, "Advice")
+            .Select(item => $"{item.Key}:\n{item.Value}")
+            .ToList();
+        if (advice.Count == 0)
+            throw new InvalidOperationException($"{node.Name} requires at least one specialist advice field.");
+
+        var systemPrompt =
+            "You are SentinelGPT acting as the final judge. Reconcile the specialist opinions, but do not treat them as factual sources. " +
+            "Prefer supplied verified evidence, identify disagreements, correct faulty premises, and produce the strongest practical answer. " +
+            "Do not claim that any application action succeeded. Keep the answer under 1,200 words.";
+        var combinedAdvice = string.Join("\n\n", advice);
+        var answer = (await ai.GenerateAsync(
+            model,
+            systemPrompt,
+            $"ORIGINAL REQUEST:\n{LimitText(prompt, 12_000)}\n\nSPECIALIST ADVICE:\n{LimitText(combinedAdvice, 16_000)}",
+            cancellationToken)).Trim();
+        if (answer.Length == 0) throw new InvalidOperationException("SentinelGPT returned an empty synthesis.");
+
+        var output = source.DeepClone().AsObject();
+        output["prompt"] = prompt;
+        output[answerField] = LimitText(answer, 12_000);
+        output[$"{answerField}Model"] = model;
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    private async Task<AutomationNodeRunResult> ExecuteSaveApprovedLessonAsync(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        CancellationToken cancellationToken)
+    {
+        var factory = dbContextFactory
+            ?? throw new InvalidOperationException("Learning-memory storage is not available to the automation engine.");
+        var parameters = ParseObject(node.ParametersJson, node.Name);
+        var source = RequireObject(input, node.Name);
+        var approved = ResolveNode(source, "_approval.approved")?.GetValue<bool>() == true;
+        var output = source.DeepClone().AsObject();
+        if (!approved)
+        {
+            output["learningMemory"] = new JsonObject { ["saved"] = false, ["reason"] = "Human approval is required." };
+            return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+        }
+
+        var promptPath = parameters["promptPath"]?.GetValue<string>()?.Trim() ?? "prompt";
+        var answerPath = parameters["answerPath"]?.GetValue<string>()?.Trim() ?? "sentinelAnswer";
+        var prompt = FindStringRecursive(source, promptPath)
+            ?? throw new InvalidOperationException($"{node.Name} could not find the lesson prompt.");
+        var answer = FindStringRecursive(source, answerPath)
+            ?? throw new InvalidOperationException($"{node.Name} could not find the approved lesson answer.");
+        var now = DateTimeOffset.UtcNow;
+        var lesson = new SentinelAiRun
+        {
+            ConversationId = Guid.NewGuid(),
+            Action = "teacherWorkflow",
+            Instruction = LimitText(prompt, 12_000),
+            Output = LimitText(answer, 24_000),
+            Status = SentinelAiRunStatuses.Approved,
+            Model = "sentinelgpt",
+            ReviewedAt = now,
+            ReviewedBy = "workflow-approval",
+            CreatedAt = now,
+            CreatedBy = "sentinel-learning-workflow",
+            CitationsJson = "[]"
+        };
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        db.SentinelAiRuns.Add(lesson);
+        await db.SaveChangesAsync(cancellationToken);
+        output["learningMemory"] = new JsonObject
+        {
+            ["saved"] = true,
+            ["lessonId"] = lesson.Id.ToString(),
+            ["savedAt"] = now.ToString("O")
+        };
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
     }
 
     private static AutomationNodeRunResult ExecuteSplitOut(AutomationNodeSnapshot node, JsonElement input)
@@ -274,6 +434,86 @@ public sealed partial class AutomationNodeRegistry(IAutomationHttpClient httpCli
             current = current is JsonObject obj && obj.TryGetPropertyValue(segment, out var next) ? next : null;
         return current;
     }
+
+    private static string? FindString(JsonNode root, string path)
+    {
+        var value = ResolveNode(root, path);
+        var text = value is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var stringValue)
+            ? stringValue
+            : value?.ToString();
+        return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+    }
+
+    private static string? FindStringRecursive(JsonNode? root, string propertyName)
+    {
+        if (root is JsonObject obj)
+        {
+            if (obj.TryGetPropertyValue(propertyName, out var direct))
+            {
+                var text = direct is JsonValue value && value.TryGetValue<string>(out var stringValue)
+                    ? stringValue
+                    : direct?.ToString();
+                if (!string.IsNullOrWhiteSpace(text)) return text.Trim();
+            }
+            foreach (var child in obj)
+            {
+                var found = FindStringRecursive(child.Value, propertyName);
+                if (!string.IsNullOrWhiteSpace(found)) return found;
+            }
+        }
+        else if (root is JsonArray array)
+        {
+            foreach (var child in array)
+            {
+                var found = FindStringRecursive(child, propertyName);
+                if (!string.IsNullOrWhiteSpace(found)) return found;
+            }
+        }
+        return null;
+    }
+
+    private static IEnumerable<KeyValuePair<string, string>> FindPropertiesEndingWith(JsonNode? root, string suffix)
+    {
+        if (root is JsonObject obj)
+        {
+            foreach (var property in obj)
+            {
+                if (property.Key.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+                    && property.Value is JsonValue value
+                    && value.TryGetValue<string>(out var text)
+                    && !string.IsNullOrWhiteSpace(text))
+                {
+                    yield return new KeyValuePair<string, string>(property.Key, text.Trim());
+                }
+                foreach (var nested in FindPropertiesEndingWith(property.Value, suffix)) yield return nested;
+            }
+        }
+        else if (root is JsonArray array)
+        {
+            foreach (var child in array)
+                foreach (var nested in FindPropertiesEndingWith(child, suffix))
+                    yield return nested;
+        }
+    }
+
+    private static string RequireSafeModelName(string? value, string nodeName)
+    {
+        var model = value?.Trim() ?? string.Empty;
+        if (!Regex.IsMatch(model, "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$"))
+            throw new InvalidOperationException($"{nodeName} requires a valid installed Ollama model name.");
+        return model;
+    }
+
+    private static string RequireSafeFieldName(string value, string nodeName)
+    {
+        var field = value.Trim();
+        if (!Regex.IsMatch(field, "^[A-Za-z][A-Za-z0-9_]{0,63}$"))
+            throw new InvalidOperationException($"{nodeName} output fields must start with a letter and contain only letters, numbers, or underscores.");
+        return field;
+    }
+
+    private static string LimitText(string value, int maxLength) =>
+        value.Length <= maxLength ? value : value[..maxLength];
 
     private static JsonElement ReplaceArray(JsonObject source, string field, IEnumerable<JsonNode?> values)
     {
