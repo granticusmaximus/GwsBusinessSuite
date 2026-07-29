@@ -80,6 +80,19 @@ public sealed class PublicSiteHtmlRendererTests
     }
 
     [Fact]
+    public void Layout_ShouldIncludeCjDeepLinkAutomationOnce()
+    {
+        var html = PublicSiteHtmlRenderer.Layout("Title", "Description", null, "<p>body</p>");
+        const string script =
+            """<script src="https://www.anrdoezrs.net/am/101461368/include/allCj/impressions/page/am.js"></script>""";
+
+        Assert.Equal(1, html.Split(script, StringSplitOptions.None).Length - 1);
+        Assert.True(
+            html.IndexOf(script, StringComparison.Ordinal)
+            < html.IndexOf("</body>", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Layout_ShouldFallBackToDefaultAccentAndFontPairing_WhenTokensOmitted()
     {
         var html = PublicSiteHtmlRenderer.Layout("Title", "Description", null, "<p>body</p>");

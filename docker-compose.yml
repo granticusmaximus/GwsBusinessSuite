@@ -43,6 +43,8 @@ services:
       - ollama-models:/root/.ollama
       # Mount the init script from the repo into the container read-only.
       - ./scripts/ollama-init.sh:/scripts/ollama-init.sh:ro
+      # Version-controlled behavioral profile for the private SentinelGPT model.
+      - ./ollama:/ollama-profiles:ro
     entrypoint: ["/bin/sh", "/scripts/ollama-init.sh"]
     healthcheck:
       # Passes as soon as the Ollama server is accepting requests —

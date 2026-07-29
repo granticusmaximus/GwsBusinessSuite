@@ -209,7 +209,14 @@
                 <button type="button" aria-label="Attach context" title="Workspace context is automatically selected">
                     <i class="bi bi-paperclip"></i>
                 </button>
-                <textarea rows="1" @bind="_instruction" @bind:event="oninput" placeholder="Message SentinelGPT…" disabled="@_generating"></textarea>
+                <textarea rows="1"
+                          data-sentinel-gpt-composer
+                          @bind="_instruction"
+                          @bind:event="oninput"
+                          @onkeydown="HandleComposerKeyDownAsync"
+                          placeholder="Message SentinelGPT…"
+                          title="Enter to send. Shift+Enter for a new line."
+                          disabled="@_generating"></textarea>
                 <button type="button" class="sentinel-gpt-context-pill @(_includeInternet ? "is-enabled" : null)"
                         @onclick="ToggleInternet" title="@(SentinelGptService.IsInternetConfigured ? "Include live internet research" : "Internet research is not configured")">
                     <i class="bi bi-globe2"></i><span>@(_includeInternet ? "Web on" : "Web off")</span>
@@ -224,8 +231,8 @@
                     <i class="bi bi-arrow-up"></i>
                 </button>
             </div>
-            <small>@(_includeInternet
-                ? "Web on: this prompt is sent to Ollama web search. Do not include secrets. Verify important information."
+            <small>Enter to send · Shift+Enter for a new line. @(_includeInternet
+                ? "Web on: this prompt is sent to Ollama web search. Do not include secrets."
                 : "SentinelGPT can make mistakes. Verify important information.")</small>
         </footer>
     </main>
@@ -240,7 +247,7 @@
     private string _error = string.Empty;
     private string _pendingModelCommand = string.Empty;
     private string _confirmationPrompt = string.Empty;
-    private string _configuredModel = ContentStudioOptions.DefaultModel;
+    private string _configuredModel = SentinelGptDefaults.Model;
     private string _connectionError = string.Empty;
     private string _pullModelName = string.Empty;
     private long _latencyMs;
@@ -273,7 +280,7 @@
     {
         _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
         _settings = await SiteSettingsService.GetSettingsAsync();
-        _configuredModel = _settings.OllamaModelOverride ?? StudioOptions.Value.Model;
+        _configuredModel = _settings.OllamaModelOverride ?? SentinelGptDefaults.Model;
         await Task.WhenAll(CheckConnectionAsync(), LoadConversationsAsync());
         if (_conversations.Count > 0)
         {
@@ -403,6 +410,14 @@
             _pendingInstruction = string.Empty;
             _liveOutput = string.Empty;
             _toolActivity = string.Empty;
+        }
+    }
+
+    private async Task HandleComposerKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter" && !args.ShiftKey && !args.IsComposing)
+        {
+            await SendAsync();
         }
     }
 

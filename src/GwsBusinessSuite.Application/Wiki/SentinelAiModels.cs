@@ -12,6 +12,11 @@ public static class SentinelAiActions
     public const string ModelManagement = "modelManagement";
 }
 
+public static class SentinelGptDefaults
+{
+    public const string Model = "sentinelgpt";
+}
+
 // A workspace search result actually folded into a run's grounding context - see
 // SentinelAiService.BuildGroundedContextAsync. TargetId/IsDatabase match
 // SentinelSearchResult/SentinelNavigationItem's existing page-or-database pointer shape.

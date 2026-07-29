@@ -5,6 +5,31 @@ internet, and model-management operation; the model never receives database cred
 connector tokens, password hashes, protected automation credentials, or unrestricted
 network/database access.
 
+## SentinelGPT behavioral profile
+
+Docker creates the version-controlled `sentinelgpt` Ollama profile from
+`ollama/SentinelGPT.Modelfile` during Ollama startup. It is based on `llama3.2`, uses a
+low temperature and a 16K context window, and instructs the model to:
+
+- prioritize correctness over agreement and respectfully challenge faulty assumptions;
+- separate confirmed facts, inferences, recommendations, and unknowns;
+- verify current/version-sensitive claims from supplied current evidence;
+- prefer official Microsoft developer documentation for .NET ecosystem questions;
+- never claim an application action succeeded without a confirmed server-side result.
+
+For local Ollama outside Docker, create or refresh the same profile from the repository
+root:
+
+```zsh
+ollama pull llama3.2
+ollama create sentinelgpt -f ollama/SentinelGPT.Modelfile
+ollama run sentinelgpt
+```
+
+The application uses `sentinelgpt` by default when no model override has been selected.
+Recreating the profile updates its behavior without altering the underlying `llama3.2`
+weights.
+
 ## Capabilities
 
 - Every normal SentinelGPT question receives a sanitized live GWS Business Suite overview
@@ -15,6 +40,12 @@ network/database access.
   External results are labeled and linked separately from internal GWS sources.
   When Web is on, the current prompt is sent to Ollama's web-search service; do not put
   secrets or private credentials in an internet-enabled prompt.
+- For .NET, C#, ASP.NET Core, Blazor, EF Core, NuGet, MSBuild, Visual Studio, and MAUI
+  questions with **Web** enabled, SentinelGPT performs an additional search scoped to
+  Microsoft Learn. Only HTTPS results from Microsoft Learn, dotnet.microsoft.com, or an
+  official `github.com/dotnet` repository are accepted into the official-documentation
+  context. This on-demand retrieval is preferred to embedding a stale copy of every
+  Microsoft document in the model.
 - Model operations are available from the same chat input:
 
   ```text

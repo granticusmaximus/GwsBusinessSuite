@@ -191,6 +191,16 @@
 		});
 
 		document.addEventListener('keydown', function (event) {
+			if (event.target instanceof Element
+				&& event.target.matches('[data-sentinel-gpt-composer]')
+				&& event.key === 'Enter'
+				&& !event.shiftKey
+				&& !event.isComposing
+				&& event.keyCode !== 229) {
+				// Blazor handles the send. Prevent only the browser's newline insertion;
+				// Shift+Enter remains untouched and keeps the textarea's native behavior.
+				event.preventDefault();
+			}
 			if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
 				event.preventDefault();
 				openCommand();

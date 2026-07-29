@@ -148,9 +148,18 @@ public sealed class SentinelAiServiceTests
         var ollama = new FakeStreamingOllamaService(["A grounded answer."]);
         var web = new FakeWebSearchService([
             new OllamaWebSearchResult(
+                "General current framework discussion",
+                "https://example.test/framework",
+                "Untrusted current framework discussion.")
+        ], [
+            new OllamaWebSearchResult(
                 "Official ASP.NET Core guidance",
                 "https://learn.microsoft.com/aspnet/core/",
-                "Current framework guidance.")
+                "Current framework guidance."),
+            new OllamaWebSearchResult(
+                "Impersonated documentation",
+                "https://not-microsoft.example/docs",
+                "This result must not enter the official documentation section.")
         ]);
         var service = new SentinelAiService(
             new FakeAppDbContextFactory(options),
@@ -169,11 +178,16 @@ public sealed class SentinelAiServiceTests
         ollama.LastUserPrompt.Should().Contain("GWS BUSINESS SUITE LIVE OVERVIEW");
         ollama.LastUserPrompt.Should().Contain("Ada Lovelace");
         ollama.LastUserPrompt.Should().Contain("Current framework guidance");
+        ollama.LastSystemPrompt.Should().Contain("truth rather than agreement");
+        ollama.LastSystemPrompt.Should().Contain("official Microsoft Learn");
         ollama.LastUserPrompt.Should().NotContain("private@example.test");
         ollama.LastUserPrompt.Should().NotContain("must-never-enter-the-prompt");
+        web.Queries.Should().Contain(query => query.StartsWith("site:learn.microsoft.com"));
         completed!.Citations.Should().Contain(item => item.SourceType == "gws" && item.Title == "Ada Lovelace");
-        completed.Citations.Should().Contain(item => item.SourceType == "web"
+        completed.Citations.Should().Contain(item => item.SourceType == "microsoft-docs"
             && item.Url == "https://learn.microsoft.com/aspnet/core/");
+        completed.Citations.Should().NotContain(item => item.SourceType == "microsoft-docs"
+            && item.Url == "https://not-microsoft.example/docs");
     }
 
     [Fact]
@@ -245,6 +259,7 @@ public sealed class SentinelAiServiceTests
     {
         public bool WasCalled { get; private set; }
         public string LastUserPrompt { get; private set; } = string.Empty;
+        public string LastSystemPrompt { get; private set; } = string.Empty;
         public List<string> PulledModels { get; } = [];
 
         public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
@@ -257,6 +272,7 @@ public sealed class SentinelAiServiceTests
             string model, string systemPrompt, string userPrompt, [EnumeratorCancellation] CancellationToken ct = default)
         {
             WasCalled = true;
+            LastSystemPrompt = systemPrompt;
             LastUserPrompt = userPrompt;
             foreach (var fragment in fragments)
             {
@@ -280,14 +296,24 @@ public sealed class SentinelAiServiceTests
             Task.FromResult(string.Empty);
     }
 
-    private sealed class FakeWebSearchService(IReadOnlyList<OllamaWebSearchResult> results) : IOllamaWebSearchService
+    private sealed class FakeWebSearchService(
+        IReadOnlyList<OllamaWebSearchResult> results,
+        IReadOnlyList<OllamaWebSearchResult>? microsoftResults = null) : IOllamaWebSearchService
     {
         public bool IsConfigured => true;
+        public List<string> Queries { get; } = [];
 
         public Task<IReadOnlyList<OllamaWebSearchResult>> SearchAsync(
             string query,
             int? maxResults = null,
-            CancellationToken ct = default) => Task.FromResult(results);
+            CancellationToken ct = default)
+        {
+            Queries.Add(query);
+            return Task.FromResult(
+                query.StartsWith("site:learn.microsoft.com", StringComparison.OrdinalIgnoreCase)
+                    ? microsoftResults ?? results
+                    : results);
+        }
 
         public Task<OllamaWebSearchResult> FetchAsync(string url, CancellationToken ct = default) =>
             Task.FromResult(results[0]);

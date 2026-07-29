@@ -111,6 +111,12 @@ public static class PublicSiteHtmlRenderer
     private const string ReducedMotionRevealScript =
         "<script>if(!window.matchMedia('(prefers-reduced-motion: reduce)').matches){document.documentElement.classList.add('js-reveal')}</script>";
 
+    // CJ's site-wide deep-link automation. This publisher-specific URL is intentionally
+    // limited to the public renderer so affiliate link rewriting never runs in the admin,
+    // Sentinel, or authenticated Canvas editing surfaces.
+    private const string CjDeepLinkScript =
+        """<script src="https://www.anrdoezrs.net/am/101461368/include/allCj/impressions/page/am.js"></script>""";
+
     // ── Page shell ───────────────────────────────────────────────────────────
 
     public static string Layout(
@@ -171,6 +177,7 @@ public static class PublicSiteHtmlRenderer
               {bodyHtml}
               {Footer(footerNavItems ?? [])}
               <script src="/public-site.js" defer></script>
+              {CjDeepLinkScript}
             </body>
             </html>
             """;
