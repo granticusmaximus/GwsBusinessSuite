@@ -5,6 +5,7 @@ using GwsBusinessSuite.Application.Articles;
 using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.Comments;
+using GwsBusinessSuite.Application.Growth;
 using GwsBusinessSuite.Application.LiveShow;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure;
@@ -1073,6 +1074,27 @@ app.MapPost("/blog/{slug}/comments", async (
     }
 
     return Results.Redirect(thanksUrl);
+}).RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-write");
+
+// First-party, cookieless public-site analytics. The collector deliberately receives no
+// authentication cookie and the service persists neither IP addresses nor raw user agents.
+app.MapPost("/api/analytics/events", async (
+    WebAnalyticsEventInput input,
+    HttpContext context,
+    IGrowthAnalyticsService analyticsService) =>
+{
+    try
+    {
+        await analyticsService.RecordAsync(
+            input,
+            context.Request.Headers.UserAgent.ToString(),
+            context.RequestAborted);
+        return Results.NoContent();
+    }
+    catch (ArgumentException)
+    {
+        return Results.BadRequest();
+    }
 }).RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-write");
 
 // Public-facing affiliate click-tracking redirect: records a click against the

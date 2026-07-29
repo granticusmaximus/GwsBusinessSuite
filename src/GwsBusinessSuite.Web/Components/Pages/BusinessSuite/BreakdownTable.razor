@@ -1,0 +1,29 @@
+@using GwsBusinessSuite.Application.Growth
+
+<article class="growth-panel breakdown-panel">
+    <div class="panel-heading"><div><span><i class="bi @Icon"></i> @Title</span></div></div>
+    @if (Rows.Count == 0)
+    {
+        <p class="breakdown-empty">@EmptyText</p>
+    }
+    else
+    {
+        <div class="breakdown-list">
+            @foreach (var row in Rows)
+            {
+                <div class="breakdown-row">
+                    <div><strong title="@row.Label">@row.Label</strong><span style="@($"width:{row.Share}%")"></span></div>
+                    <small>@row.Visitors.ToString("N0") visitors</small>
+                    <b>@row.Share.ToString("N1")%</b>
+                </div>
+            }
+        </div>
+    }
+</article>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public IReadOnlyList<AnalyticsBreakdownRow> Rows { get; set; } = [];
+    [Parameter] public string Icon { get; set; } = "bi-bar-chart";
+    [Parameter] public string EmptyText { get; set; } = "No data in this period.";
+}

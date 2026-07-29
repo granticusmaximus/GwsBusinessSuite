@@ -14,6 +14,7 @@ using GwsBusinessSuite.Application.DigitalOcean;
 using GwsBusinessSuite.Application.CjAds;
 using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.GovernmentIntelligence;
+using GwsBusinessSuite.Application.Growth;
 using GwsBusinessSuite.Application.LiveShow;
 using GwsBusinessSuite.Application.NewsIntelligence;
 using GwsBusinessSuite.Application.Podcasts;
@@ -136,6 +137,13 @@ public static class DependencyInjection
         services.AddScoped<IResumePdfService, ResumePdfService>();
         services.AddScoped<IAffiliateSuggestionService, AffiliateSuggestionService>();
         services.AddScoped<IAffiliateAnalyticsService, AffiliateAnalyticsService>();
+        services.AddScoped<IGrowthAnalyticsService, GrowthAnalyticsService>();
+        services.AddHttpClient<ISocialPublishingService, SocialPublishingService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-SocialPublisher/1.0");
+        });
+        services.AddHostedService<SocialPublishingBackgroundService>();
         services.AddScoped<IAffiliateRotationService, AffiliateRotationService>();
         services.AddScoped<IAppGenerationService, AppGenerationService>();
         services.AddHttpClient<IAutomationHttpClient, AutomationHttpClient>(client =>

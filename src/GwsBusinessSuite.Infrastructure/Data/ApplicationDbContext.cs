@@ -77,6 +77,10 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<ArticleAffiliateSuggestion> ArticleAffiliateSuggestions => Set<ArticleAffiliateSuggestion>();
     public DbSet<ArticleAffiliateClick> ArticleAffiliateClicks => Set<ArticleAffiliateClick>();
     public DbSet<CjCommissionRecord> CjCommissionRecords => Set<CjCommissionRecord>();
+    public DbSet<WebAnalyticsEvent> WebAnalyticsEvents => Set<WebAnalyticsEvent>();
+    public DbSet<SocialAccount> SocialAccounts => Set<SocialAccount>();
+    public DbSet<SocialPost> SocialPosts => Set<SocialPost>();
+    public DbSet<SocialPostTarget> SocialPostTargets => Set<SocialPostTarget>();
     public DbSet<AppUser> AppUsers => Set<AppUser>();
     public DbSet<WatchedTopic> WatchedTopics => Set<WatchedTopic>();
     public DbSet<NewsItem> NewsItems => Set<NewsItem>();
@@ -330,6 +334,30 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
 
         modelBuilder.Entity<CjCommissionRecord>().HasIndex(x => x.ExternalId).IsUnique();
         modelBuilder.Entity<CjCommissionRecord>().HasIndex(x => x.AdvertiserId);
+
+        modelBuilder.Entity<WebAnalyticsEvent>().HasIndex(x => new { x.OccurredAtUnixSeconds, x.EventName });
+        modelBuilder.Entity<WebAnalyticsEvent>().HasIndex(x => new { x.SessionKey, x.OccurredAtUnixSeconds });
+        modelBuilder.Entity<WebAnalyticsEvent>().Property(x => x.EventName).HasMaxLength(64);
+        modelBuilder.Entity<WebAnalyticsEvent>().Property(x => x.VisitorKey).HasMaxLength(64);
+        modelBuilder.Entity<WebAnalyticsEvent>().Property(x => x.SessionKey).HasMaxLength(64);
+        modelBuilder.Entity<WebAnalyticsEvent>().Property(x => x.Path).HasMaxLength(500);
+        modelBuilder.Entity<WebAnalyticsEvent>().Property(x => x.ReferrerHost).HasMaxLength(160);
+        modelBuilder.Entity<SocialAccount>().HasIndex(x => new { x.Network, x.ExternalAccountId }).IsUnique();
+        modelBuilder.Entity<SocialAccount>().Property(x => x.Network).HasMaxLength(24);
+        modelBuilder.Entity<SocialPost>().HasIndex(x => new { x.Status, x.ScheduledFor });
+        modelBuilder.Entity<SocialPostTarget>()
+            .HasOne(x => x.SocialPost)
+            .WithMany(x => x.Targets)
+            .HasForeignKey(x => x.SocialPostId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<SocialPostTarget>()
+            .HasOne(x => x.SocialAccount)
+            .WithMany()
+            .HasForeignKey(x => x.SocialAccountId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<SocialPostTarget>()
+            .HasIndex(x => new { x.SocialPostId, x.SocialAccountId })
+            .IsUnique();
 
         modelBuilder.Entity<AppUser>().HasIndex(x => x.Username).IsUnique();
         modelBuilder.Entity<AppUser>().HasIndex(x => x.Role);

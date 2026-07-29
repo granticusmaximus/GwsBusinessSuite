@@ -1,0 +1,433 @@
+@page "/admin/growth"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using GwsBusinessSuite.Application.Growth
+@using GwsBusinessSuite.Domain.Entities
+@using Microsoft.AspNetCore.Authorization
+@inject IGrowthAnalyticsService AnalyticsService
+@inject ISocialPublishingService SocialService
+@inject ILogger<Growth> Logger
+
+<PageTitle>Growth Studio</PageTitle>
+
+<main class="growth-shell">
+    <header class="growth-header">
+        <div>
+            <span class="growth-eyebrow">GWS Growth Studio</span>
+            <h1>Understand what works. Publish what matters.</h1>
+            <p>First-party audience intelligence and considered social publishing in one workspace.</p>
+        </div>
+        <div class="growth-live"><span></span><strong>@Dashboard.VisitorsNow</strong> active now</div>
+    </header>
+
+    <nav class="growth-tabs" aria-label="Growth Studio sections">
+        <button class="@TabClass("analytics")" @onclick="@(() => ActiveTab = "analytics")">
+            <i class="bi bi-graph-up"></i> Analytics
+        </button>
+        <button class="@TabClass("publish")" @onclick="@(() => ActiveTab = "publish")">
+            <i class="bi bi-send"></i> Social publisher
+        </button>
+    </nav>
+
+    @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+    {
+        <div class="growth-alert growth-alert-error" role="alert">@ErrorMessage</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(StatusMessage))
+    {
+        <div class="growth-alert" role="status">@StatusMessage</div>
+    }
+
+    @if (ActiveTab == "analytics")
+    {
+        <section class="analytics-workspace">
+            <div class="section-toolbar">
+                <div>
+                    <h2>Site performance</h2>
+                    <p>Cookieless, first-party measurement. No raw IPs or full user agents retained.</p>
+                </div>
+                <div class="range-picker" aria-label="Analytics date range">
+                    @foreach (var days in new[] { 7, 30, 90 })
+                    {
+                        <button class="@(RangeDays == days ? "active" : null)" @onclick="() => ChangeRangeAsync(days)">
+                            @days days
+                        </button>
+                    }
+                </div>
+            </div>
+
+            @if (!_analyticsLoaded)
+            {
+                <div class="growth-loading">Loading audience data…</div>
+            }
+            else
+            {
+                <div class="metric-grid">
+                    <MetricCard Label="Unique visitors" Value="@Dashboard.Visitors.ToString("N0")" Detail="Session-scoped, cookieless" />
+                    <MetricCard Label="Page views" Value="@Dashboard.PageViews.ToString("N0")" Detail="@($"{Dashboard.ViewsPerSession:N2} per session")" />
+                    <MetricCard Label="Bounce rate" Value="@($"{Dashboard.BounceRate:N1}%")" Detail="Single-page sessions" />
+                    <MetricCard Label="Avg. engagement" Value="@FormatDuration(Dashboard.AverageEngagement)" Detail="Active page time" />
+                </div>
+
+                <div class="growth-panel trend-panel">
+                    <div class="panel-heading">
+                        <div><span>Audience trend</span><small>Visitors and page views by day</small></div>
+                        <div class="legend"><i class="views"></i> Views <i class="visitors"></i> Visitors</div>
+                    </div>
+                    <div class="trend-chart" role="img" aria-label="Daily visitors and page views">
+                        @foreach (var point in Dashboard.Trend)
+                        {
+                            <div class="trend-day" title="@($"{point.Date:MMM d}: {point.Visitors} visitors, {point.PageViews} views")">
+                                <div class="bars">
+                                    <span class="bar views" style="@BarHeight(point.PageViews)"></span>
+                                    <span class="bar visitors" style="@BarHeight(point.Visitors)"></span>
+                                </div>
+                                <small>@point.Date.ToString(Dashboard.Trend.Count > 35 ? "MMM" : "M/d")</small>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <div class="insight-grid">
+                    <BreakdownTable Title="Top pages" Rows="Dashboard.TopPages" Icon="bi-file-earmark-text" />
+                    <BreakdownTable Title="Acquisition" Rows="Dashboard.TopSources" Icon="bi-signpost-split" />
+                    <BreakdownTable Title="Campaigns" Rows="Dashboard.Campaigns" Icon="bi-megaphone" EmptyText="UTM-tagged traffic will appear here." />
+                    <BreakdownTable Title="Devices" Rows="Dashboard.Devices" Icon="bi-laptop" />
+                </div>
+            }
+        </section>
+    }
+    else
+    {
+        <section class="publisher-workspace">
+            <div class="publisher-main">
+                <div class="section-toolbar">
+                    <div>
+                        <h2>Compose once. Respect every channel.</h2>
+                        <p>SentinelGPT drafts distinct variants; you remain the editor and publisher.</p>
+                    </div>
+                    <button class="quiet-button" @onclick="ToggleAccountSetup">
+                        <i class="bi bi-sliders"></i> Manage channels
+                    </button>
+                </div>
+
+                @if (Accounts.Count == 0)
+                {
+                    <div class="growth-empty">
+                        <i class="bi bi-broadcast"></i>
+                        <h3>Connect a publishing channel</h3>
+                        <p>Add a Facebook Page, X account, or LinkedIn identity before drafting.</p>
+                        <button class="primary-button" @onclick="ToggleAccountSetup">Connect first channel</button>
+                    </div>
+                }
+                else
+                {
+                    <div class="composer-card">
+                        <label>Working title <input @bind="PostTitle" maxlength="140" placeholder="Internal label for this campaign" /></label>
+                        <label>What should the post communicate?
+                            <textarea @bind="Topic" rows="4" maxlength="3000" placeholder="Give SentinelGPT the facts, point of view, and desired action."></textarea>
+                        </label>
+                        <label>Source link <input @bind="SourceUrl" type="url" placeholder="https://grantwatson.dev/…" /></label>
+
+                        <fieldset class="channel-picker">
+                            <legend>Publish to</legend>
+                            @foreach (var account in Accounts.Where(item => item.IsEnabled))
+                            {
+                                <label class="channel-choice @(_selectedAccounts.Contains(account.Id) ? "selected" : null)">
+                                    <input type="checkbox"
+                                           checked="@_selectedAccounts.Contains(account.Id)"
+                                           @onchange="args => ToggleAccount(account.Id, args.Value is true)" />
+                                    <i class="@NetworkIcon(account.Network)"></i>
+                                    <span><strong>@account.Network</strong><small>@account.DisplayName</small></span>
+                                    @if (!account.HasCredential) { <em>Token needed</em> }
+                                </label>
+                            }
+                        </fieldset>
+
+                        <div class="composer-actions">
+                            <button class="primary-button" @onclick="GenerateAsync" disabled="@IsBusy">
+                                <i class="bi bi-stars"></i> @(IsBusy ? "Working…" : "Generate channel drafts")
+                            </button>
+                            <span>SentinelGPT uses only the facts you provide here.</span>
+                        </div>
+                    </div>
+
+                    @if (_variants.Count > 0)
+                    {
+                        <div class="variant-stack">
+                            @foreach (var account in Accounts.Where(item => _variants.ContainsKey(item.Id)))
+                            {
+                                <article class="variant-card">
+                                    <header>
+                                        <div class="network-mark"><i class="@NetworkIcon(account.Network)"></i></div>
+                                        <div><strong>@account.Network</strong><small>@account.DisplayName</small></div>
+                                        <span>@CharacterCount(account)</span>
+                                    </header>
+                                    <textarea value="@_variants[account.Id]"
+                                              @oninput="args => _variants[account.Id] = args.Value?.ToString() ?? string.Empty"
+                                              rows="6"
+                                              maxlength="@(account.Network == SocialNetworks.X ? 280 : 3000)"></textarea>
+                                </article>
+                            }
+
+                            <div class="publish-bar">
+                                <label>Schedule (optional)
+                                    <input type="datetime-local" @bind="ScheduledLocal" />
+                                </label>
+                                <button class="quiet-button" @onclick="SaveDraftAsync" disabled="@IsBusy">Save draft</button>
+                                <button class="primary-button" @onclick="PublishNowAsync" disabled="@IsBusy">
+                                    <i class="bi bi-send-fill"></i> Publish now
+                                </button>
+                            </div>
+                        </div>
+                    }
+                }
+
+                <section class="queue-section">
+                    <div class="panel-heading"><div><span>Publishing queue</span><small>Drafts, scheduled posts, and delivery history</small></div></div>
+                    @if (Posts.Count == 0)
+                    {
+                        <p class="queue-empty">No posts yet. Your first campaign will appear here.</p>
+                    }
+                    else
+                    {
+                        @foreach (var post in Posts)
+                        {
+                            <article class="queue-item">
+                                <div>
+                                    <strong>@post.Title</strong>
+                                    <small>@QueueTime(post)</small>
+                                </div>
+                                <div class="queue-networks">
+                                    @foreach (var target in post.Targets)
+                                    {
+                                        <span title="@($"{target.Network}: {target.Status}")"><i class="@NetworkIcon(target.Network)"></i></span>
+                                    }
+                                </div>
+                                <span class="status-pill @post.Status.ToLowerInvariant()">@post.Status</span>
+                                @if (post.Status is SocialPostStatuses.Draft or SocialPostStatuses.Failed or SocialPostStatuses.PartiallyPublished)
+                                {
+                                    <button class="icon-button" title="Publish" @onclick="() => PublishExistingAsync(post.Id)">
+                                        <i class="bi bi-send"></i>
+                                    </button>
+                                }
+                            </article>
+                        }
+                    }
+                </section>
+            </div>
+
+            @if (_showAccountSetup)
+            {
+                <aside class="account-drawer" aria-label="Social channel settings">
+                    <header><div><strong>Publishing channels</strong><small>Credentials are encrypted on the server.</small></div><button @onclick="ToggleAccountSetup">×</button></header>
+                    @foreach (var account in Accounts)
+                    {
+                        <div class="connected-account">
+                            <i class="@NetworkIcon(account.Network)"></i>
+                            <span><strong>@account.DisplayName</strong><small>@account.Network · @(account.HasCredential ? "Connected" : "Token needed")</small></span>
+                            <button title="Disconnect" @onclick="() => RemoveAccountAsync(account.Id)"><i class="bi bi-trash3"></i></button>
+                        </div>
+                    }
+                    <form @onsubmit="SaveAccountAsync" @onsubmit:preventDefault>
+                        <hr />
+                        <label>Network
+                            <select @bind="AccountNetwork">
+                                @foreach (var network in SocialNetworks.All) { <option value="@network">@network</option> }
+                            </select>
+                        </label>
+                        <label>Display name <input @bind="AccountDisplayName" placeholder="GWS Business Suite" /></label>
+                        <label>@ExternalIdLabel <input @bind="AccountExternalId" placeholder="@ExternalIdPlaceholder" /></label>
+                        <label>User access token
+                            <input @bind="AccountAccessToken" type="password" autocomplete="off" placeholder="Stored encrypted; never shown again" />
+                        </label>
+                        <p class="credential-note">@CredentialHelp</p>
+                        <button type="submit" class="primary-button w-100" disabled="@IsBusy">Save channel</button>
+                    </form>
+                </aside>
+            }
+        </section>
+    }
+</main>
+
+@code {
+    private string ActiveTab = "analytics";
+    private int RangeDays = 30;
+    private GrowthAnalyticsDashboard Dashboard = new();
+    private bool _analyticsLoaded;
+    private bool IsBusy;
+    private string ErrorMessage = string.Empty;
+    private string StatusMessage = string.Empty;
+
+    private List<SocialAccountView> Accounts = [];
+    private List<SocialPostView> Posts = [];
+    private readonly HashSet<Guid> _selectedAccounts = [];
+    private readonly Dictionary<Guid, string> _variants = [];
+    private bool _showAccountSetup;
+    private string PostTitle = string.Empty;
+    private string Topic = string.Empty;
+    private string SourceUrl = string.Empty;
+    private DateTime? ScheduledLocal;
+    private string AccountNetwork = SocialNetworks.Facebook;
+    private string AccountDisplayName = string.Empty;
+    private string AccountExternalId = string.Empty;
+    private string AccountAccessToken = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Task.WhenAll(LoadAnalyticsAsync(), LoadPublishingAsync());
+    }
+
+    private async Task LoadAnalyticsAsync()
+    {
+        Dashboard = await AnalyticsService.GetDashboardAsync(
+            DateTimeOffset.UtcNow.AddDays(-RangeDays),
+            DateTimeOffset.UtcNow.AddMinutes(1));
+        _analyticsLoaded = true;
+    }
+
+    private async Task LoadPublishingAsync()
+    {
+        Accounts = (await SocialService.GetAccountsAsync()).ToList();
+        Posts = (await SocialService.GetPostsAsync()).ToList();
+    }
+
+    private async Task ChangeRangeAsync(int days)
+    {
+        RangeDays = days;
+        _analyticsLoaded = false;
+        await RunAsync(LoadAnalyticsAsync);
+    }
+
+    private async Task GenerateAsync()
+    {
+        if (_selectedAccounts.Count == 0) { ErrorMessage = "Select at least one connected channel."; return; }
+        await RunAsync(async () =>
+        {
+            var generated = await SocialService.GenerateVariantsAsync(Topic, SourceUrl, _selectedAccounts);
+            _variants.Clear();
+            foreach (var pair in generated) _variants[pair.Key] = pair.Value;
+            StatusMessage = $"Prepared {_variants.Count} channel-specific draft{(_variants.Count == 1 ? string.Empty : "s")}.";
+        });
+    }
+
+    private async Task SaveDraftAsync()
+    {
+        await RunAsync(async () =>
+        {
+            var id = await SaveCurrentAsync(ScheduledLocal);
+            StatusMessage = ScheduledLocal.HasValue ? "Post scheduled." : "Draft saved.";
+            await LoadPublishingAsync();
+            ResetComposer();
+        });
+    }
+
+    private async Task PublishNowAsync()
+    {
+        await RunAsync(async () =>
+        {
+            var id = await SaveCurrentAsync(null);
+            var result = await SocialService.PublishAsync(id);
+            StatusMessage = result.Message;
+            await LoadPublishingAsync();
+            if (result.IsSuccess) ResetComposer();
+        });
+    }
+
+    private async Task<Guid> SaveCurrentAsync(DateTime? scheduled)
+    {
+        DateTimeOffset? date = scheduled.HasValue
+            ? new DateTimeOffset(DateTime.SpecifyKind(scheduled.Value, DateTimeKind.Local)).ToUniversalTime()
+            : null;
+        return await SocialService.SaveDraftAsync(
+            string.IsNullOrWhiteSpace(PostTitle) ? Topic[..Math.Min(Topic.Length, 80)] : PostTitle,
+            SourceUrl,
+            _variants.Select(pair => new SocialTargetDraft(pair.Key, pair.Value)).ToList(),
+            date);
+    }
+
+    private async Task PublishExistingAsync(Guid postId) => await RunAsync(async () =>
+    {
+        var result = await SocialService.PublishAsync(postId);
+        StatusMessage = result.Message;
+        await LoadPublishingAsync();
+    });
+
+    private async Task SaveAccountAsync() => await RunAsync(async () =>
+    {
+        await SocialService.SaveAccountAsync(new(
+            null, AccountNetwork, AccountDisplayName, AccountExternalId, AccountAccessToken, true));
+        AccountDisplayName = AccountExternalId = AccountAccessToken = string.Empty;
+        await LoadPublishingAsync();
+        StatusMessage = $"{AccountNetwork} channel saved.";
+    });
+
+    private async Task RemoveAccountAsync(Guid id) => await RunAsync(async () =>
+    {
+        await SocialService.RemoveAccountAsync(id);
+        _selectedAccounts.Remove(id);
+        _variants.Remove(id);
+        await LoadPublishingAsync();
+        StatusMessage = "Channel disconnected.";
+    });
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        IsBusy = true;
+        ErrorMessage = StatusMessage = string.Empty;
+        try { await action(); }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Growth Studio action failed.");
+            ErrorMessage = ex.Message;
+        }
+        finally { IsBusy = false; }
+    }
+
+    private void ToggleAccount(Guid id, bool selected)
+    {
+        if (selected) _selectedAccounts.Add(id); else { _selectedAccounts.Remove(id); _variants.Remove(id); }
+    }
+    private void ToggleAccountSetup() => _showAccountSetup = !_showAccountSetup;
+    private void ResetComposer()
+    {
+        PostTitle = Topic = SourceUrl = string.Empty;
+        ScheduledLocal = null;
+        _variants.Clear();
+    }
+    private string TabClass(string tab) => ActiveTab == tab ? "active" : string.Empty;
+    private string NetworkIcon(string network) => network switch
+    {
+        SocialNetworks.Facebook => "bi bi-facebook",
+        SocialNetworks.LinkedIn => "bi bi-linkedin",
+        _ => "bi bi-twitter-x"
+    };
+    private string CharacterCount(SocialAccountView account) =>
+        account.Network == SocialNetworks.X ? $"{_variants[account.Id].Length}/280" : $"{_variants[account.Id].Length} characters";
+    private string QueueTime(SocialPostView post) => post.PublishedAt?.ToLocalTime().ToString("'Published' MMM d, h:mm tt")
+        ?? post.ScheduledFor?.ToLocalTime().ToString("'Scheduled' MMM d, h:mm tt")
+        ?? "Saved draft";
+    private string FormatDuration(TimeSpan duration) => duration.TotalMinutes >= 1
+        ? $"{(int)duration.TotalMinutes}m {duration.Seconds}s"
+        : $"{duration.Seconds}s";
+    private int TrendMax => Math.Max(1, Dashboard.Trend.Select(item => Math.Max(item.PageViews, item.Visitors)).DefaultIfEmpty(1).Max());
+    private string BarHeight(int value) => $"height:{Math.Max(2, value * 100d / TrendMax):0.#}%";
+    private string ExternalIdLabel => AccountNetwork switch
+    {
+        SocialNetworks.Facebook => "Facebook Page ID",
+        SocialNetworks.LinkedIn => "LinkedIn author URN",
+        _ => "X user ID"
+    };
+    private string ExternalIdPlaceholder => AccountNetwork switch
+    {
+        SocialNetworks.Facebook => "1234567890",
+        SocialNetworks.LinkedIn => "urn:li:organization:123456",
+        _ => "1234567890"
+    };
+    private string CredentialHelp => AccountNetwork switch
+    {
+        SocialNetworks.Facebook => "Use a Page access token with pages_manage_posts for this Page.",
+        SocialNetworks.LinkedIn => "Use a member token with w_member_social, or w_organization_social for an approved organization Page.",
+        _ => "Use an OAuth 2.0 user access token with tweet.write—not an app-only bearer token."
+    };
+}

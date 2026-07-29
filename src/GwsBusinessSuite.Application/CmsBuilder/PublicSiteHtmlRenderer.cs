@@ -177,6 +177,7 @@ public static class PublicSiteHtmlRenderer
               {bodyHtml}
               {Footer(footerNavItems ?? [])}
               <script src="/public-site.js" defer></script>
+              <script src="/public-analytics.js" defer></script>
               {CjDeepLinkScript}
             </body>
             </html>

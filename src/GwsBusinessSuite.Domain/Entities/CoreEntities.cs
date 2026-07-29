@@ -937,6 +937,86 @@ public sealed class ArticleAffiliateClick : AuditableEntity
     public string TrackingUrl { get; set; } = string.Empty;
 }
 
+public static class WebAnalyticsEventNames
+{
+    public const string PageView = "pageview";
+    public const string Engagement = "engagement";
+}
+
+// Privacy-first, first-party website telemetry. VisitorKey and SessionKey are random,
+// browser-generated, session-scoped identifiers; no cookie, raw IP address, full
+// referrer URL, or full user-agent is persisted.
+public sealed class WebAnalyticsEvent : AuditableEntity
+{
+    public required string EventName { get; set; }
+    public required string VisitorKey { get; set; }
+    public required string SessionKey { get; set; }
+    public required string Path { get; set; }
+    public string PageTitle { get; set; } = string.Empty;
+    public string ReferrerHost { get; set; } = string.Empty;
+    public string Source { get; set; } = string.Empty;
+    public string Medium { get; set; } = string.Empty;
+    public string Campaign { get; set; } = string.Empty;
+    public string DeviceType { get; set; } = "Unknown";
+    public string BrowserFamily { get; set; } = "Unknown";
+    public int EngagementSeconds { get; set; }
+    public long OccurredAtUnixSeconds { get; set; }
+}
+
+public static class SocialNetworks
+{
+    public const string Facebook = "Facebook";
+    public const string X = "X";
+    public const string LinkedIn = "LinkedIn";
+    public static readonly string[] All = [Facebook, X, LinkedIn];
+}
+
+public static class SocialPostStatuses
+{
+    public const string Draft = "Draft";
+    public const string Scheduled = "Scheduled";
+    public const string Publishing = "Publishing";
+    public const string Published = "Published";
+    public const string PartiallyPublished = "PartiallyPublished";
+    public const string Failed = "Failed";
+}
+
+// One encrypted server-side credential per social identity/page. ExternalAccountId is a
+// Facebook Page id, LinkedIn author URN, or X user id. ProtectedAccessToken is never
+// returned to a Razor component.
+public sealed class SocialAccount : AuditableEntity
+{
+    public required string Network { get; set; }
+    public required string DisplayName { get; set; }
+    public required string ExternalAccountId { get; set; }
+    public string ProtectedAccessToken { get; set; } = string.Empty;
+    public bool IsEnabled { get; set; } = true;
+    public DateTimeOffset? LastPublishedAt { get; set; }
+}
+
+public sealed class SocialPost : AuditableEntity
+{
+    public required string Title { get; set; }
+    public string SourceUrl { get; set; } = string.Empty;
+    public string Status { get; set; } = SocialPostStatuses.Draft;
+    public DateTimeOffset? ScheduledFor { get; set; }
+    public DateTimeOffset? PublishedAt { get; set; }
+    public ICollection<SocialPostTarget> Targets { get; set; } = new List<SocialPostTarget>();
+}
+
+public sealed class SocialPostTarget : AuditableEntity
+{
+    public Guid SocialPostId { get; set; }
+    public Guid SocialAccountId { get; set; }
+    public required string Network { get; set; }
+    public required string Content { get; set; }
+    public string Status { get; set; } = SocialPostStatuses.Draft;
+    public string ExternalPostId { get; set; } = string.Empty;
+    public string ErrorMessage { get; set; } = string.Empty;
+    public SocialPost? SocialPost { get; set; }
+    public SocialAccount? SocialAccount { get; set; }
+}
+
 // Best-effort import of CJ's own commission/transaction ledger for revenue reporting -
 // see CjAffiliateService.FetchCommissionsAsync for the caveat that CJ's GraphQL
 // commission-amount fields aren't independently verified against live docs here, so
