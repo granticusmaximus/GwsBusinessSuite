@@ -206,7 +206,8 @@ public sealed class SentinelAiServiceTests
 
         SentinelAiRunView? completed = null;
         await foreach (var chunk in service.StreamAgentConversationAsync(
-            Guid.NewGuid(), null, "Tell me about Ada and current ASP.NET guidance", "grant", includeInternet: true))
+            Guid.NewGuid(), null, "Tell me about Ada and current ASP.NET guidance", "grant",
+            includeInternet: true, useDeepAnalysis: true))
         {
             completed ??= chunk.CompletedRun;
         }
@@ -248,7 +249,33 @@ public sealed class SentinelAiServiceTests
         var longOrdinaryText = string.Join(' ', Enumerable.Repeat("meeting notes and customer correspondence", 30));
 
         await foreach (var _ in service.StreamAgentConversationAsync(
-            Guid.NewGuid(), null, longOrdinaryText, "grant", includeInternet: false))
+            Guid.NewGuid(), null, longOrdinaryText, "grant",
+            includeInternet: false, useDeepAnalysis: false))
+        {
+        }
+
+        ollama.RequestedModels.Should().Equal(SentinelGptDefaults.Model);
+    }
+
+    [Fact]
+    public async Task StreamAgentConversationAsync_FastModeShouldSkipTeachersForTechnicalPrompt()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var ollama = new FakeStreamingOllamaService(["A fast answer."]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options),
+            ollama,
+            new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System));
+
+        await foreach (var _ in service.StreamAgentConversationAsync(
+            Guid.NewGuid(), null, "Improve SentinelGPT performance and security", "grant",
+            includeInternet: false, useDeepAnalysis: false))
         {
         }
 

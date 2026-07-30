@@ -73,6 +73,7 @@ public interface ISentinelAiService
         string instruction,
         string performedBy,
         bool includeInternet,
+        bool useDeepAnalysis,
         CancellationToken cancellationToken = default);
     Task<SentinelGptCommandResult> ExecuteModelCommandAsync(
         Guid conversationId,

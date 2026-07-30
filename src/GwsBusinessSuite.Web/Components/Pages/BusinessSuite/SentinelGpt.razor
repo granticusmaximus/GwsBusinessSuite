@@ -264,9 +264,18 @@
                           title="Enter to send. Shift+Enter for a new line."
                           disabled="@_generating"></textarea>
                 <button type="button" class="sentinel-gpt-context-pill @(_includeInternet ? "is-enabled" : null)"
-                        @onclick="ToggleInternet" title="@(SentinelGptService.IsInternetConfigured ? "Include live internet research" : "Internet research is not configured")">
+                        @onclick="ToggleInternet"
+                        disabled="@_generating"
+                        title="@(SentinelGptService.IsInternetConfigured ? "Include live internet research" : "Internet research is not configured")">
                     <i class="bi bi-globe2"></i><span>@(_includeInternet ? "Web on" : "Web off")</span>
                     <i class="bi @(_includeInternet ? "bi-toggle-on" : "bi-toggle-off")"></i>
+                </button>
+                <button type="button" class="sentinel-gpt-context-pill @(_useDeepAnalysis ? "is-enabled" : null)"
+                        @onclick="ToggleDeepAnalysis"
+                        disabled="@_generating"
+                        title="@(_useDeepAnalysis ? "Deep analysis uses Qwen and DeepSeek before SentinelGPT" : "Fast mode uses SentinelGPT directly")">
+                    <i class="bi @(_useDeepAnalysis ? "bi-stars" : "bi-lightning-charge")"></i>
+                    <span>@(_useDeepAnalysis ? "Deep" : "Fast")</span>
                 </button>
                 <button type="button" aria-label="Voice input" title="Voice input">
                     <i class="bi bi-mic"></i>
@@ -298,7 +307,9 @@
                 }
                 Enter to send · Shift+Enter for a new line. @(_includeInternet
                     ? "Web on: this prompt is sent to Ollama web search. Do not include secrets."
-                    : "SentinelGPT can make mistakes. Verify important information.")
+                    : _useDeepAnalysis
+                        ? "Deep analysis consults Qwen and DeepSeek before SentinelGPT."
+                        : "Fast mode: SentinelGPT responds directly.")
             </small>
         </footer>
     </main>
@@ -326,6 +337,7 @@
     private bool _modelBusy;
     private bool _stoppingGeneration;
     private bool _includeInternet;
+    private bool _useDeepAnalysis;
     private Guid? _conversationId;
     private Guid? _activeGenerationId;
     private List<SentinelGptConversationView> _conversations = [];
@@ -496,7 +508,7 @@
             else
             {
                 var generation = await GenerationCoordinator.StartAsync(
-                    _conversationId.Value, null, instruction, _username, _includeInternet);
+                    _conversationId.Value, null, instruction, _username, _includeInternet, _useDeepAnalysis);
                 _activeGenerationId = generation.Id;
                 await MonitorGenerationAsync(generation.Id);
             }
@@ -598,6 +610,7 @@
         _conversationId = snapshot.ConversationId;
         _pendingInstruction = snapshot.Instruction;
         _includeInternet = snapshot.IncludeInternet;
+        _useDeepAnalysis = snapshot.UseDeepAnalysis;
         _liveOutput = snapshot.Output;
         _toolActivity = snapshot.Activity;
         RequestThreadScroll();
@@ -672,6 +685,12 @@
         }
 
         _includeInternet = !_includeInternet;
+        _error = string.Empty;
+    }
+
+    private void ToggleDeepAnalysis()
+    {
+        _useDeepAnalysis = !_useDeepAnalysis;
         _error = string.Empty;
     }
 

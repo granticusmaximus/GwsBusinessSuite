@@ -1,4 +1,5 @@
 using GwsBusinessSuite.Application.Abstractions;
+using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -9,6 +10,8 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 
 public sealed class OllamaService(HttpClient http, ILogger<OllamaService> logger) : IOllamaService
 {
+    private const string ModelKeepAlive = "30m";
+
     public async Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
     {
         var payload = new
@@ -16,15 +19,19 @@ public sealed class OllamaService(HttpClient http, ILogger<OllamaService> logger
             model,
             stream = false,
             system = systemPrompt,
-            prompt = userPrompt
+            prompt = userPrompt,
+            keep_alive = ModelKeepAlive
         };
 
         try
         {
+            var stopwatch = Stopwatch.StartNew();
             using var response = await http.PostAsJsonAsync("/api/generate", payload, ct);
             response.EnsureSuccessStatusCode();
 
             var result = await response.Content.ReadFromJsonAsync<OllamaGenerateResponse>(cancellationToken: ct);
+            stopwatch.Stop();
+            LogGenerationMetrics(model, result, stopwatch.Elapsed, stopwatch.Elapsed);
             return result?.Response ?? string.Empty;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
@@ -45,9 +52,12 @@ public sealed class OllamaService(HttpClient http, ILogger<OllamaService> logger
             model,
             stream = true,
             system = systemPrompt,
-            prompt = userPrompt
+            prompt = userPrompt,
+            keep_alive = ModelKeepAlive
         };
 
+        var stopwatch = Stopwatch.StartNew();
+        TimeSpan? timeToFirstToken = null;
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/generate") { Content = JsonContent.Create(payload) };
         using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         response.EnsureSuccessStatusCode();
@@ -57,7 +67,14 @@ public sealed class OllamaService(HttpClient http, ILogger<OllamaService> logger
         while (true)
         {
             var line = await reader.ReadLineAsync(ct);
-            if (line is null) yield break;
+            if (line is null)
+            {
+                logger.LogWarning(
+                    "Ollama stream for model '{Model}' ended without a completion record after {ElapsedMs:F0} ms.",
+                    model,
+                    stopwatch.Elapsed.TotalMilliseconds);
+                yield break;
+            }
             if (line.Length == 0) continue;
 
             OllamaGenerateResponse? chunk;
@@ -72,8 +89,17 @@ public sealed class OllamaService(HttpClient http, ILogger<OllamaService> logger
             }
 
             if (chunk is null) continue;
-            if (!string.IsNullOrEmpty(chunk.Response)) yield return chunk.Response;
-            if (chunk.Done) yield break;
+            if (!string.IsNullOrEmpty(chunk.Response))
+            {
+                timeToFirstToken ??= stopwatch.Elapsed;
+                yield return chunk.Response;
+            }
+            if (chunk.Done)
+            {
+                stopwatch.Stop();
+                LogGenerationMetrics(model, chunk, stopwatch.Elapsed, timeToFirstToken);
+                yield break;
+            }
         }
     }
 
@@ -176,9 +202,41 @@ public sealed class OllamaService(HttpClient http, ILogger<OllamaService> logger
 
     private sealed record OllamaGenerateResponse(
         [property: JsonPropertyName("response")] string Response,
-        [property: JsonPropertyName("done")] bool Done = false);
+        [property: JsonPropertyName("done")] bool Done = false,
+        [property: JsonPropertyName("total_duration")] long? TotalDuration = null,
+        [property: JsonPropertyName("load_duration")] long? LoadDuration = null,
+        [property: JsonPropertyName("prompt_eval_count")] long? PromptEvalCount = null,
+        [property: JsonPropertyName("prompt_eval_duration")] long? PromptEvalDuration = null,
+        [property: JsonPropertyName("eval_count")] long? EvalCount = null,
+        [property: JsonPropertyName("eval_duration")] long? EvalDuration = null);
 
     private sealed record OllamaTagsResponse([property: JsonPropertyName("models")] OllamaTagModel[]? Models);
 
     private sealed record OllamaTagModel([property: JsonPropertyName("name")] string Name);
+
+    private void LogGenerationMetrics(
+        string model,
+        OllamaGenerateResponse? result,
+        TimeSpan requestDuration,
+        TimeSpan? timeToFirstToken)
+    {
+        var tokensPerSecond = result?.EvalCount is > 0 && result.EvalDuration is > 0
+            ? result.EvalCount.Value / (result.EvalDuration.Value / 1_000_000_000d)
+            : 0d;
+        logger.LogInformation(
+            "Ollama generation metrics for '{Model}': request {RequestMs:F0} ms, first token {FirstTokenMs:F0} ms, " +
+            "model load {LoadMs:F0} ms, prompt {PromptTokens} tokens in {PromptMs:F0} ms, " +
+            "output {OutputTokens} tokens at {TokensPerSecond:F1} tokens/sec.",
+            model,
+            requestDuration.TotalMilliseconds,
+            timeToFirstToken?.TotalMilliseconds ?? requestDuration.TotalMilliseconds,
+            NanosecondsToMilliseconds(result?.LoadDuration),
+            result?.PromptEvalCount ?? 0,
+            NanosecondsToMilliseconds(result?.PromptEvalDuration),
+            result?.EvalCount ?? 0,
+            tokensPerSecond);
+    }
+
+    private static double NanosecondsToMilliseconds(long? nanoseconds) =>
+        (nanoseconds ?? 0) / 1_000_000d;
 }

@@ -20,6 +20,7 @@ public sealed record SentinelGptGenerationSnapshot(
     string Instruction,
     string RequestedBy,
     bool IncludeInternet,
+    bool UseDeepAnalysis,
     string Status,
     string Output,
     string Activity,
@@ -54,7 +55,8 @@ public sealed class SentinelGptGenerationCoordinator(
         Guid? wikiPageId,
         string instruction,
         string requestedBy,
-        bool includeInternet)
+        bool includeInternet,
+        bool useDeepAnalysis)
     {
         if (conversationId == Guid.Empty)
             throw new ArgumentException("A conversation is required.", nameof(conversationId));
@@ -86,6 +88,7 @@ public sealed class SentinelGptGenerationCoordinator(
                 instruction.Trim(),
                 requestedBy,
                 includeInternet,
+                useDeepAnalysis,
                 now);
             _jobs[state.Id] = state;
         }
@@ -144,6 +147,7 @@ public sealed class SentinelGptGenerationCoordinator(
                 state.Instruction,
                 state.RequestedBy,
                 state.IncludeInternet,
+                state.UseDeepAnalysis,
                 generationToken.Token))
             {
                 state.Apply(chunk, timeProvider.GetUtcNow());
@@ -206,6 +210,7 @@ public sealed class SentinelGptGenerationCoordinator(
             string instruction,
             string requestedBy,
             bool includeInternet,
+            bool useDeepAnalysis,
             DateTimeOffset startedAt)
         {
             Id = id;
@@ -214,6 +219,7 @@ public sealed class SentinelGptGenerationCoordinator(
             Instruction = instruction;
             RequestedBy = requestedBy;
             IncludeInternet = includeInternet;
+            UseDeepAnalysis = useDeepAnalysis;
             StartedAt = startedAt;
             _updatedAt = startedAt;
         }
@@ -224,6 +230,7 @@ public sealed class SentinelGptGenerationCoordinator(
         public string Instruction { get; }
         public string RequestedBy { get; }
         public bool IncludeInternet { get; }
+        public bool UseDeepAnalysis { get; }
         public DateTimeOffset StartedAt { get; }
         public CancellationToken CancellationToken => _cancellation.Token;
         public bool IsCancellationRequested => _cancellation.IsCancellationRequested;
@@ -374,6 +381,7 @@ public sealed class SentinelGptGenerationCoordinator(
                     Instruction,
                     RequestedBy,
                     IncludeInternet,
+                    UseDeepAnalysis,
                     _status,
                     _output.ToString(),
                     _activity,

@@ -4144,7 +4144,7 @@ audio.wiki-embed-media { max-width: 100%; }
 
 .sentinel-gpt-composer {
     display: grid;
-    grid-template-columns: auto minmax(8rem, 1fr) auto auto auto;
+    grid-template-columns: auto minmax(8rem, 1fr) auto auto auto auto;
     align-items: center;
     gap: .45rem;
     width: min(100%, 58rem);
@@ -4174,6 +4174,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-composer > button.sentinel-gpt-context-pill { width: auto; height: auto; display: inline-flex; align-items: center; gap: .35rem; padding: .38rem .55rem; border: 1px solid #3b3632; border-radius: 999px; background: transparent; color: #aaa49f; font-size: .62rem; white-space: nowrap; }
 .sentinel-gpt-composer > button.sentinel-gpt-context-pill:hover,
 .sentinel-gpt-composer > button.sentinel-gpt-context-pill.is-enabled { border-color: rgba(245, 158, 11, .5); background: rgba(245, 158, 11, .08); color: #fbbf24; }
+.sentinel-gpt-composer > button.sentinel-gpt-context-pill:disabled { cursor: default; opacity: .65; }
 .sentinel-gpt-context-pill .bi-toggle-on { color: #f59e0b; font-size: 1rem; }
 .sentinel-gpt-composer > button.sentinel-gpt-send { background: #f59e0b; color: #231506; }
 .sentinel-gpt-composer > button.sentinel-gpt-send:hover { background: #fbbf24; color: #231506; }
@@ -4199,7 +4200,7 @@ audio.wiki-embed-media { max-width: 100%; }
     .sentinel-gpt-assistant-row { max-width: 96%; }
     .sentinel-gpt-user-message { max-width: 88%; }
     .sentinel-gpt-composer-wrap { padding: .6rem; }
-    .sentinel-gpt-composer { grid-template-columns: auto minmax(0, 1fr) auto; border-radius: 16px; }
+    .sentinel-gpt-composer { grid-template-columns: minmax(0, 1fr) auto auto auto; border-radius: 16px; }
     .sentinel-gpt-composer > button[aria-label="Attach context"],
     .sentinel-gpt-composer > button[title="Voice input"] { display: none; }
     .sentinel-gpt-context-pill span { display: none; }

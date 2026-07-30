@@ -33,10 +33,11 @@ public sealed class SentinelAiService(
             @"\b(?:\.net|dotnet|c#|csharp|asp\.?net|blazor|razor|ef\s*core|entity\s+framework|nuget|msbuild|visual\s+studio|maui|linq)\b",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    private static readonly Regex TeacherPanelQuestionPattern =
-        new(
-            @"\b(?:gws|sentinel|workflow|automation|code|develop|build|implement|debug|error|security|performance|architecture|database|deploy|docker|assumption|compare|recommend|strategy)\b",
-            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private const int HistoryExchangeLimit = 4;
+    private const int HistoryInstructionCharacterLimit = 2_000;
+    private const int HistoryOutputCharacterLimit = 4_000;
+    private const int MaxContextualPromptCharacters = 40_000;
+    private const int MaxGroundedContextCharacters = 24_000;
 
     public bool IsInternetConfigured => webSearchService?.IsConfigured == true;
 
@@ -70,6 +71,7 @@ public sealed class SentinelAiService(
             performedBy,
             includeSuiteContext: false,
             includeInternet: false,
+            useDeepAnalysis: false,
             cancellationToken: cancellationToken))
         {
             yield return chunk;
@@ -82,6 +84,7 @@ public sealed class SentinelAiService(
         string instruction,
         string performedBy,
         bool includeInternet,
+        bool useDeepAnalysis,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         await foreach (var chunk in StreamGroundedConversationAsync(
@@ -92,6 +95,7 @@ public sealed class SentinelAiService(
             performedBy,
             includeSuiteContext: true,
             includeInternet: includeInternet,
+            useDeepAnalysis: useDeepAnalysis,
             cancellationToken: cancellationToken))
         {
             yield return chunk;
@@ -106,6 +110,7 @@ public sealed class SentinelAiService(
         string performedBy,
         bool includeSuiteContext,
         bool includeInternet,
+        bool useDeepAnalysis,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (conversationId == Guid.Empty) throw new ArgumentException("A conversation is required.", nameof(conversationId));
@@ -187,7 +192,7 @@ public sealed class SentinelAiService(
                 context.AppendLine().AppendLine(approvedMemory);
             }
 
-            if (ShouldConsultTeacherPanel(instruction))
+            if (useDeepAnalysis)
             {
                 var advisoryContext = LimitRaw(context.ToString(), 18_000);
                 yield return new SentinelAiStreamChunk(string.Empty, null, "Consulting Qwen engineering adviser");
@@ -238,11 +243,19 @@ public sealed class SentinelAiService(
             .ToListAsync(cancellationToken);
         var history = string.Join("\n\n", priorRuns
             .OrderBy(item => item.CreatedAt)
-            .TakeLast(8)
-            .Select(item => $"USER: {item.Instruction}\nSENTINELGPT: {item.Output}"));
-        var userPrompt = string.IsNullOrWhiteSpace(history)
-            ? $"GROUNDED CONTEXT:\n{context}\n\nREQUEST:\n{instruction.Trim()}"
-            : $"CONVERSATION SO FAR:\n{history}\n\nGROUNDED CONTEXT:\n{context}\n\nNEW REQUEST:\n{instruction.Trim()}";
+            .TakeLast(HistoryExchangeLimit)
+            .Select(item =>
+                $"USER: {LimitRaw(item.Instruction, HistoryInstructionCharacterLimit)}\n" +
+                $"SENTINELGPT: {LimitRaw(item.Output, HistoryOutputCharacterLimit)}"));
+        var trimmedInstruction = instruction.Trim();
+        var contextualBudget = Math.Max(1_000, MaxContextualPromptCharacters - trimmedInstruction.Length);
+        var contextBudget = Math.Min(MaxGroundedContextCharacters, contextualBudget * 3 / 4);
+        var boundedContext = LimitRaw(context.ToString(), contextBudget);
+        var historyBudget = Math.Max(0, contextualBudget - boundedContext.Length);
+        var boundedHistory = historyBudget == 0 ? string.Empty : LimitRaw(history, historyBudget);
+        var userPrompt = string.IsNullOrWhiteSpace(boundedHistory)
+            ? $"GROUNDED CONTEXT:\n{boundedContext}\n\nREQUEST:\n{trimmedInstruction}"
+            : $"CONVERSATION SO FAR:\n{boundedHistory}\n\nGROUNDED CONTEXT:\n{boundedContext}\n\nNEW REQUEST:\n{trimmedInstruction}";
 
         var stream = ollama.GenerateStreamAsync(model, systemPrompt, userPrompt, cancellationToken);
         await using var enumerator = stream.GetAsyncEnumerator(cancellationToken);
@@ -810,10 +823,6 @@ public sealed class SentinelAiService(
             return null;
         }
     }
-
-    private static bool ShouldConsultTeacherPanel(string instruction) =>
-        TeacherPanelQuestionPattern.IsMatch(instruction)
-        || MicrosoftDeveloperQuestionPattern.IsMatch(instruction);
 
     private static string LimitRaw(string value, int maxLength) =>
         value.Length <= maxLength ? value : $"{value[..Math.Max(0, maxLength - 1)]}…";

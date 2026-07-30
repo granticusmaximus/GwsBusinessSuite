@@ -18,13 +18,15 @@ public sealed class SentinelGptGenerationCoordinatorTests
         var conversationId = Guid.NewGuid();
 
         var started = await coordinator.StartAsync(
-            conversationId, null, "Summarize this long email.", "grant", includeInternet: false);
+            conversationId, null, "Summarize this long email.", "grant", includeInternet: false, useDeepAnalysis: true);
         await sentinel.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         coordinator.GetActive("grant").Should().Match<SentinelGptGenerationSnapshot>(snapshot =>
             snapshot.Id == started.Id
             && snapshot.ConversationId == conversationId
+            && snapshot.UseDeepAnalysis
             && snapshot.Status == SentinelGptGenerationStatuses.Running);
+        sentinel.LastUseDeepAnalysis.Should().BeTrue();
 
         // No component or request awaits the generation here. Releasing the fake model
         // simulates work continuing while the original browser circuit is disconnected.
@@ -43,11 +45,11 @@ public sealed class SentinelGptGenerationCoordinatorTests
         var sentinel = new ControllableSentinelAiService();
         var coordinator = CreateCoordinator(sentinel);
         await coordinator.StartAsync(
-            Guid.NewGuid(), null, "First request", "grant", includeInternet: false);
+            Guid.NewGuid(), null, "First request", "grant", includeInternet: false, useDeepAnalysis: false);
         await sentinel.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         var act = () => coordinator.StartAsync(
-            Guid.NewGuid(), null, "Second request", "grant", includeInternet: false);
+            Guid.NewGuid(), null, "Second request", "grant", includeInternet: false, useDeepAnalysis: false);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*already generating*");
@@ -60,7 +62,7 @@ public sealed class SentinelGptGenerationCoordinatorTests
         var sentinel = new ControllableSentinelAiService();
         var coordinator = CreateCoordinator(sentinel);
         var started = await coordinator.StartAsync(
-            Guid.NewGuid(), null, "Private request", "grant", includeInternet: false);
+            Guid.NewGuid(), null, "Private request", "grant", includeInternet: false, useDeepAnalysis: false);
 
         coordinator.Get(started.Id, "another-user").Should().BeNull();
         coordinator.GetActive("another-user").Should().BeNull();
@@ -73,7 +75,7 @@ public sealed class SentinelGptGenerationCoordinatorTests
         var sentinel = new ControllableSentinelAiService();
         var coordinator = CreateCoordinator(sentinel);
         var started = await coordinator.StartAsync(
-            Guid.NewGuid(), null, "Long running request", "grant", includeInternet: false);
+            Guid.NewGuid(), null, "Long running request", "grant", includeInternet: false, useDeepAnalysis: false);
         await sentinel.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         coordinator.Cancel(started.Id, "another-user").Should().BeFalse();
@@ -128,6 +130,7 @@ public sealed class SentinelGptGenerationCoordinatorTests
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public bool IsInternetConfigured => false;
+        public bool? LastUseDeepAnalysis { get; private set; }
 
         public async IAsyncEnumerable<SentinelAiStreamChunk> StreamAgentConversationAsync(
             Guid conversationId,
@@ -135,8 +138,10 @@ public sealed class SentinelGptGenerationCoordinatorTests
             string instruction,
             string performedBy,
             bool includeInternet,
+            bool useDeepAnalysis,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            LastUseDeepAnalysis = useDeepAnalysis;
             Started.TrySetResult();
             yield return new SentinelAiStreamChunk(string.Empty, null, "Thinking");
             try
