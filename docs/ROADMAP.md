@@ -69,8 +69,9 @@
 - Growth Studio (Plausible/Matomo/GA-inspired analytics and social publishing) 🚧 — the
   privacy-first collection layer, indexed dashboard, custom-event hook, SentinelGPT
   channel variants, encrypted Facebook/X/LinkedIn credentials, direct text publishing,
-  scheduling, queue, delivery history, and named event/destination conversion goals are
-  delivered. Funnels, segments, retention, report exports, social OAuth/media, and engagement imports are staged in
+  scheduling, queue, delivery history, named event/destination conversion goals, and
+  ordered funnel/drop-off reporting are delivered. Segments, retention, report exports,
+  social OAuth/media, and engagement imports are staged in
   `docs/GROWTH_STUDIO.md`.
 - Workflow Automation (n8n-class, clean-room) 🚧 — foundational graph persistence,
   immutable publish versions, protected credential references, execution history, core node

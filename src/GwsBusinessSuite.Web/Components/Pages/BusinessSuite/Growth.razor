@@ -114,6 +114,8 @@
                     }
                 </div>
 
+                <GrowthFunnelPanel Funnels="Dashboard.Funnels" OnChanged="ReloadAnalyticsAfterFunnelChangeAsync" />
+
                 <div class="growth-panel trend-panel">
                     <div class="panel-heading">
                         <div><span>Audience trend</span><small>Visitors and page views by day</small></div>
@@ -400,6 +402,12 @@
         RangeDays = days;
         _analyticsLoaded = false;
         await RunAsync(LoadAnalyticsAsync);
+    }
+
+    private async Task ReloadAnalyticsAfterFunnelChangeAsync()
+    {
+        _analyticsLoaded = false;
+        await LoadAnalyticsAsync();
     }
 
     private async Task SaveGoalAsync() => await RunAsync(async () =>

@@ -981,6 +981,23 @@ public sealed class AnalyticsGoal : AuditableEntity
     public bool IsActive { get; set; } = true;
 }
 
+public sealed class AnalyticsFunnel : AuditableEntity
+{
+    public required string Name { get; set; }
+    public bool IsActive { get; set; } = true;
+    public ICollection<AnalyticsFunnelStep> Steps { get; set; } = new List<AnalyticsFunnelStep>();
+}
+
+public sealed class AnalyticsFunnelStep : AuditableEntity
+{
+    public Guid AnalyticsFunnelId { get; set; }
+    public required string Name { get; set; }
+    public string MatchType { get; set; } = AnalyticsGoalMatchTypes.PagePath;
+    public required string MatchValue { get; set; }
+    public int SortOrder { get; set; }
+    public AnalyticsFunnel? AnalyticsFunnel { get; set; }
+}
+
 public static class SocialNetworks
 {
     public const string Facebook = "Facebook";

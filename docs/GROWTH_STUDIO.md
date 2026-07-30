@@ -19,6 +19,9 @@ algorithms.
   prefixes ending in `*`, with active/paused state, conversion counts, unique converting
   visitors, session conversion rate, and top acquisition source. Removing a goal never
   removes the underlying analytics history.
+- Two-to-eight-step funnels built from ordered custom events and page destinations, with
+  per-step session counts, continuation rates, drop-off counts/rates, and overall completion.
+  Editing or removing a funnel changes only its definition, not the event history.
 - SentinelGPT-assisted, network-specific Facebook, X, and LinkedIn copy with editable
   previews, per-channel character limits, drafts, scheduling, delivery state, and retry.
 - Encrypted social access tokens. Tokens remain on the server and are never returned to the
@@ -34,7 +37,6 @@ rather than represented as one finished checkbox.
 
 ### Analytics phase 2
 
-- Funnel builder and step-dropoff reports
 - Saved segments and report filters
 - Retention/cohort and new-versus-returning analysis
 - Country/region reporting through a privacy-reviewed, locally hosted GeoIP database

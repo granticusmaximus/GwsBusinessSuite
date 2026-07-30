@@ -164,6 +164,95 @@ public sealed class GrowthAnalyticsServiceTests
         fixture.Db.WebAnalyticsEvents.Should().ContainSingle();
     }
 
+    [Fact]
+    public async Task GetDashboardAsync_ShouldReportOrderedFunnelProgressAndDropOff()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var now = DateTimeOffset.UtcNow;
+        fixture.Db.AnalyticsFunnels.Add(new AnalyticsFunnel
+        {
+            Name = "Pricing to customer",
+            Steps =
+            [
+                new AnalyticsFunnelStep { Name = "Pricing", MatchType = AnalyticsGoalMatchTypes.PagePath, MatchValue = "/pricing", SortOrder = 0 },
+                new AnalyticsFunnelStep { Name = "Checkout", MatchType = AnalyticsGoalMatchTypes.Event, MatchValue = "begin_checkout", SortOrder = 1 },
+                new AnalyticsFunnelStep { Name = "Thank you", MatchType = AnalyticsGoalMatchTypes.PagePath, MatchValue = "/thank-you", SortOrder = 2 }
+            ]
+        });
+        fixture.Db.WebAnalyticsEvents.AddRange(
+            Event("pageview", "visitor-a", "session-a", "/pricing", now.AddMinutes(-12)),
+            Event("begin_checkout", "visitor-a", "session-a", "/pricing", now.AddMinutes(-11)),
+            Event("pageview", "visitor-a", "session-a", "/thank-you", now.AddMinutes(-10)),
+            Event("pageview", "visitor-b", "session-b", "/pricing", now.AddMinutes(-9)),
+            Event("begin_checkout", "visitor-b", "session-b", "/pricing", now.AddMinutes(-8)),
+            Event("begin_checkout", "visitor-c", "session-c", "/", now.AddMinutes(-7)),
+            Event("pageview", "visitor-c", "session-c", "/pricing", now.AddMinutes(-6)),
+            Event("pageview", "visitor-d", "session-d", "/thank-you", now.AddMinutes(-5)));
+        await fixture.Db.SaveChangesAsync();
+
+        var dashboard = await new GrowthAnalyticsService(fixture.Db)
+            .GetDashboardAsync(now.AddDays(-1), now.AddMinutes(1));
+
+        var funnel = dashboard.Funnels.Should().ContainSingle().Which;
+        funnel.StartedSessions.Should().Be(3);
+        funnel.CompletedSessions.Should().Be(1);
+        funnel.CompletionRate.Should().BeApproximately(33.3m, 0.01m);
+        funnel.Steps.Select(step => step.ReachedSessions).Should().Equal(3, 2, 1);
+        funnel.Steps[0].DropOffSessions.Should().Be(1);
+        funnel.Steps[0].DropOffRate.Should().BeApproximately(33.3m, 0.01m);
+        funnel.Steps[1].DropOffSessions.Should().Be(1);
+        funnel.Steps[1].DropOffRate.Should().Be(50);
+    }
+
+    [Fact]
+    public async Task FunnelManagement_ShouldNormalizeReplaceStepsAndRetainAnalyticsHistory()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var service = new GrowthAnalyticsService(fixture.Db);
+        fixture.Db.WebAnalyticsEvents.Add(
+            Event("pageview", "visitor", "session", "/pricing", DateTimeOffset.UtcNow));
+        await fixture.Db.SaveChangesAsync();
+
+        await service.SaveFunnelAsync(new(
+            null,
+            "Lead journey",
+            true,
+            [
+                new("Pricing", AnalyticsGoalMatchTypes.PagePath, "pricing?campaign=test"),
+                new("Signup", AnalyticsGoalMatchTypes.Event, "NEWSLETTER_SIGNUP")
+            ]));
+        var stored = await fixture.Db.AnalyticsFunnels.Include(item => item.Steps).SingleAsync();
+        stored.Steps.OrderBy(step => step.SortOrder).Select(step => step.MatchValue)
+            .Should().Equal("/pricing", "newsletter_signup");
+
+        await service.SaveFunnelAsync(new(
+            stored.Id,
+            "Lead journey",
+            false,
+            [
+                new("Home", AnalyticsGoalMatchTypes.PagePath, "/"),
+                new("Pricing section", AnalyticsGoalMatchTypes.PagePath, "/pricing/*"),
+                new("Signup", AnalyticsGoalMatchTypes.Event, "newsletter_signup")
+            ]));
+        fixture.Db.ChangeTracker.Clear();
+        var updated = await fixture.Db.AnalyticsFunnels.Include(item => item.Steps).SingleAsync();
+        updated.IsActive.Should().BeFalse();
+        updated.Steps.OrderBy(step => step.SortOrder).Select(step => step.MatchValue)
+            .Should().Equal("/", "/pricing/*", "newsletter_signup");
+
+        var invalid = () => service.SaveFunnelAsync(new(
+            null,
+            "Too short",
+            true,
+            [new("Only", AnalyticsGoalMatchTypes.PagePath, "/")]));
+        await invalid.Should().ThrowAsync<ArgumentException>().WithMessage("*between 2 and 8*");
+
+        await service.DeleteFunnelAsync(updated.Id);
+        fixture.Db.AnalyticsFunnels.Should().BeEmpty();
+        fixture.Db.AnalyticsFunnelSteps.Should().BeEmpty();
+        fixture.Db.WebAnalyticsEvents.Should().ContainSingle();
+    }
+
     private static WebAnalyticsEvent Event(
         string name,
         string visitor,

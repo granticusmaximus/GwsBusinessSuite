@@ -1,0 +1,280 @@
+@using GwsBusinessSuite.Application.Growth
+@using GwsBusinessSuite.Domain.Entities
+@inject IGrowthAnalyticsService AnalyticsService
+@inject ILogger<GrowthFunnelPanel> Logger
+
+<section class="funnel-panel">
+    <header class="funnel-heading">
+        <div>
+            <span>Funnels</span>
+            <small>See where sessions continue—and exactly where they leave an intended journey.</small>
+        </div>
+        <button class="funnel-manage" @onclick="OpenNew">
+            <i class="bi bi-filter"></i> Manage funnels
+        </button>
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+    {
+        <div class="funnel-message error" role="alert">@ErrorMessage</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(StatusMessage))
+    {
+        <div class="funnel-message" role="status">@StatusMessage</div>
+    }
+
+    @if (Funnels.Count == 0)
+    {
+        <div class="funnel-empty">
+            <i class="bi bi-funnel"></i>
+            <div>
+                <strong>Build the journey, then find the friction.</strong>
+                <small>Start with two ordered pages or events. You can add up to eight steps.</small>
+            </div>
+            <button class="funnel-manage" @onclick="OpenNew">Build first funnel</button>
+        </div>
+    }
+    else
+    {
+        <div class="funnel-grid">
+            @foreach (var funnel in Funnels)
+            {
+                <article class="funnel-card @(funnel.IsActive ? null : "inactive")">
+                    <header>
+                        <button class="funnel-title" @onclick="() => Edit(funnel)" title="Edit funnel">
+                            <span>@funnel.Name</span>
+                            <small>@(funnel.IsActive ? "Active" : "Paused") · @funnel.StartedSessions.ToString("N0") entrants</small>
+                        </button>
+                        <div class="funnel-completion">
+                            <strong>@($"{funnel.CompletionRate:N1}%")</strong>
+                            <small>@funnel.CompletedSessions.ToString("N0") completed</small>
+                        </div>
+                    </header>
+                    <div class="funnel-steps">
+                        @foreach (var step in funnel.Steps)
+                        {
+                            <div class="funnel-step">
+                                <div class="step-topline">
+                                    <span>@(step.SortOrder + 1)</span>
+                                    <strong>@step.Name</strong>
+                                    <b>@step.ReachedSessions.ToString("N0")</b>
+                                </div>
+                                <div class="step-bar">
+                                    <i style="@StepWidth(funnel, step)"></i>
+                                </div>
+                                <div class="step-detail">
+                                    <small>@Rule(step)</small>
+                                    @if (step.SortOrder + 1 < funnel.Steps.Count)
+                                    {
+                                        <em>@step.DropOffSessions.ToString("N0") dropped · @($"{step.DropOffRate:N1}%")</em>
+                                    }
+                                    else
+                                    {
+                                        <em>Final step</em>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </article>
+            }
+        </div>
+    }
+</section>
+
+@if (_showEditor)
+{
+    <aside class="funnel-drawer" aria-label="Funnel settings">
+        <header>
+            <div>
+                <strong>@(FunnelId.HasValue ? "Edit funnel" : "New funnel")</strong>
+                <small>Sessions must reach each step in this order.</small>
+            </div>
+            <button @onclick="CloseEditor" aria-label="Close funnel settings">×</button>
+        </header>
+
+        <form @onsubmit="SaveAsync" @onsubmit:preventDefault>
+            <label>Funnel name
+                <input @bind="FunnelName" maxlength="120" placeholder="Visitor to newsletter subscriber" />
+            </label>
+            <label class="active-toggle">
+                <input type="checkbox" @bind="FunnelIsActive" />
+                Mark this funnel active
+            </label>
+
+            <div class="step-editor-heading">
+                <div><strong>Ordered steps</strong><small>Two required, eight maximum</small></div>
+                <button type="button" @onclick="AddStep" disabled="@(Steps.Count >= 8)">+ Add step</button>
+            </div>
+
+            @for (var index = 0; index < Steps.Count; index++)
+            {
+                var stepIndex = index;
+                var stepNumber = index + 1;
+                <fieldset class="step-editor">
+                    <legend>Step @stepNumber</legend>
+                    <div class="step-controls">
+                        <button type="button" title="Move step up" aria-label="@($"Move step {stepNumber} up")"
+                                disabled="@(stepIndex == 0)" @onclick="() => MoveStep(stepIndex, -1)">↑</button>
+                        <button type="button" title="Move step down" aria-label="@($"Move step {stepNumber} down")"
+                                disabled="@(stepIndex == Steps.Count - 1)" @onclick="() => MoveStep(stepIndex, 1)">↓</button>
+                        <button type="button" title="Remove step" aria-label="@($"Remove step {stepNumber}")"
+                                disabled="@(Steps.Count <= 2)" @onclick="() => RemoveStep(stepIndex)">×</button>
+                    </div>
+                    <label>Step name
+                        <input @bind="Steps[stepIndex].Name" maxlength="120" placeholder="@StepNamePlaceholder(stepIndex)" />
+                    </label>
+                    <label>Match
+                        <select @bind="Steps[stepIndex].MatchType">
+                            <option value="@AnalyticsGoalMatchTypes.PagePath">Page is visited</option>
+                            <option value="@AnalyticsGoalMatchTypes.Event">Custom event is recorded</option>
+                        </select>
+                    </label>
+                    <label>@MatchLabel(Steps[stepIndex])
+                        <input @bind="Steps[stepIndex].MatchValue" maxlength="500" placeholder="@MatchPlaceholder(Steps[stepIndex])" />
+                    </label>
+                </fieldset>
+            }
+
+            <p class="funnel-help">Page paths can end in <code>*</code> to match a section. One event advances only one step.</p>
+            <button type="submit" class="funnel-save" disabled="@IsBusy">
+                @(IsBusy ? "Saving…" : FunnelId.HasValue ? "Save funnel" : "Create funnel")
+            </button>
+            @if (FunnelId.HasValue)
+            {
+                <button type="button" class="funnel-delete" disabled="@IsBusy" @onclick="DeleteAsync">
+                    Delete funnel definition
+                </button>
+            }
+        </form>
+    </aside>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<AnalyticsFunnelView> Funnels { get; set; } = [];
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private bool _showEditor;
+    private bool IsBusy;
+    private Guid? FunnelId;
+    private string FunnelName = string.Empty;
+    private bool FunnelIsActive = true;
+    private List<FunnelStepDraft> Steps = DefaultSteps();
+    private string ErrorMessage = string.Empty;
+    private string StatusMessage = string.Empty;
+
+    private void OpenNew()
+    {
+        ResetForm();
+        _showEditor = true;
+    }
+
+    private void Edit(AnalyticsFunnelView funnel)
+    {
+        FunnelId = funnel.Id;
+        FunnelName = funnel.Name;
+        FunnelIsActive = funnel.IsActive;
+        Steps = funnel.Steps.OrderBy(step => step.SortOrder)
+            .Select(step => new FunnelStepDraft(step.Name, step.MatchType, step.MatchValue))
+            .ToList();
+        ErrorMessage = StatusMessage = string.Empty;
+        _showEditor = true;
+    }
+
+    private void CloseEditor()
+    {
+        _showEditor = false;
+        ResetForm();
+    }
+
+    private async Task SaveAsync() => await RunAsync(async () =>
+    {
+        var wasEditing = FunnelId.HasValue;
+        await AnalyticsService.SaveFunnelAsync(new(
+            FunnelId,
+            FunnelName,
+            FunnelIsActive,
+            Steps.Select(step => new AnalyticsFunnelStepInput(step.Name, step.MatchType, step.MatchValue)).ToList()));
+        await OnChanged.InvokeAsync();
+        StatusMessage = wasEditing ? "Funnel updated." : "Funnel created.";
+        _showEditor = false;
+        ResetForm(clearMessages: false);
+    });
+
+    private async Task DeleteAsync()
+    {
+        if (FunnelId is not { } id) return;
+        await RunAsync(async () =>
+        {
+            await AnalyticsService.DeleteFunnelAsync(id);
+            await OnChanged.InvokeAsync();
+            StatusMessage = "Funnel definition removed. Analytics history was retained.";
+            _showEditor = false;
+            ResetForm(clearMessages: false);
+        });
+    }
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        IsBusy = true;
+        ErrorMessage = StatusMessage = string.Empty;
+        try { await action(); }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Growth funnel action failed.");
+            ErrorMessage = ex.Message;
+        }
+        finally { IsBusy = false; }
+    }
+
+    private void AddStep()
+    {
+        if (Steps.Count < 8) Steps.Add(new($"Step {Steps.Count + 1}", AnalyticsGoalMatchTypes.PagePath, string.Empty));
+    }
+
+    private void RemoveStep(int index)
+    {
+        if (Steps.Count > 2 && index >= 0 && index < Steps.Count) Steps.RemoveAt(index);
+    }
+
+    private void MoveStep(int index, int offset)
+    {
+        var target = index + offset;
+        if (index < 0 || index >= Steps.Count || target < 0 || target >= Steps.Count) return;
+        (Steps[index], Steps[target]) = (Steps[target], Steps[index]);
+    }
+
+    private void ResetForm(bool clearMessages = true)
+    {
+        FunnelId = null;
+        FunnelName = string.Empty;
+        FunnelIsActive = true;
+        Steps = DefaultSteps();
+        if (clearMessages) ErrorMessage = StatusMessage = string.Empty;
+    }
+
+    private static List<FunnelStepDraft> DefaultSteps() =>
+    [
+        new("Landing page", AnalyticsGoalMatchTypes.PagePath, "/"),
+        new("Conversion", AnalyticsGoalMatchTypes.Event, string.Empty)
+    ];
+
+    private static string Rule(AnalyticsFunnelStepView step) =>
+        step.MatchType == AnalyticsGoalMatchTypes.Event
+            ? $"Event · {step.MatchValue}"
+            : $"Page · {step.MatchValue}";
+    private static string StepWidth(AnalyticsFunnelView funnel, AnalyticsFunnelStepView step) =>
+        $"width:{(funnel.StartedSessions == 0 ? 0 : Math.Max(2, step.ReachedSessions * 100d / funnel.StartedSessions)):0.#}%";
+    private static string MatchLabel(FunnelStepDraft step) =>
+        step.MatchType == AnalyticsGoalMatchTypes.Event ? "Event name" : "Public page path";
+    private static string MatchPlaceholder(FunnelStepDraft step) =>
+        step.MatchType == AnalyticsGoalMatchTypes.Event ? "newsletter_signup" : "/pricing";
+    private static string StepNamePlaceholder(int index) => index == 0 ? "Landing page" : "Conversion";
+
+    private sealed class FunnelStepDraft(string name, string matchType, string matchValue)
+    {
+        public string Name { get; set; } = name;
+        public string MatchType { get; set; } = matchType;
+        public string MatchValue { get; set; } = matchValue;
+    }
+}

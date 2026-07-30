@@ -19,6 +19,12 @@ public interface IGrowthAnalyticsService
 
     Task SaveGoalAsync(AnalyticsGoalInput input, CancellationToken cancellationToken = default);
     Task DeleteGoalAsync(Guid goalId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<AnalyticsFunnelView>> GetFunnelsAsync(
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken = default);
+    Task SaveFunnelAsync(AnalyticsFunnelInput input, CancellationToken cancellationToken = default);
+    Task DeleteFunnelAsync(Guid funnelId, CancellationToken cancellationToken = default);
 }
 
 public interface ISocialPublishingService

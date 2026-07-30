@@ -34,6 +34,37 @@ public sealed record AnalyticsGoalView(
     DateTimeOffset? LastConvertedAt,
     string TopSource);
 
+public sealed record AnalyticsFunnelStepInput(
+    string Name,
+    string MatchType,
+    string MatchValue);
+
+public sealed record AnalyticsFunnelInput(
+    Guid? Id,
+    string Name,
+    bool IsActive,
+    IReadOnlyList<AnalyticsFunnelStepInput> Steps);
+
+public sealed record AnalyticsFunnelStepView(
+    Guid Id,
+    string Name,
+    string MatchType,
+    string MatchValue,
+    int SortOrder,
+    int ReachedSessions,
+    int DropOffSessions,
+    decimal StepConversionRate,
+    decimal DropOffRate);
+
+public sealed record AnalyticsFunnelView(
+    Guid Id,
+    string Name,
+    bool IsActive,
+    int StartedSessions,
+    int CompletedSessions,
+    decimal CompletionRate,
+    IReadOnlyList<AnalyticsFunnelStepView> Steps);
+
 public sealed class GrowthAnalyticsDashboard
 {
     public int Visitors { get; init; }
@@ -52,6 +83,7 @@ public sealed class GrowthAnalyticsDashboard
     public IReadOnlyList<AnalyticsBreakdownRow> Devices { get; init; } = [];
     public IReadOnlyList<AnalyticsBreakdownRow> Browsers { get; init; } = [];
     public IReadOnlyList<AnalyticsGoalView> Goals { get; init; } = [];
+    public IReadOnlyList<AnalyticsFunnelView> Funnels { get; init; } = [];
 }
 
 public sealed record SocialAccountView(

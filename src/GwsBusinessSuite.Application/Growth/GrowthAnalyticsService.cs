@@ -80,6 +80,10 @@ public sealed class GrowthAnalyticsService(IAppDbContext db) : IGrowthAnalyticsS
             .ToListAsync(cancellationToken);
         var goalReport = BuildGoalReport(goalDefinitions, events, sessionKeys);
         var activeGoals = goalReport.Goals.Where(item => item.IsActive).ToList();
+        var funnelDefinitions = await db.AnalyticsFunnels.AsNoTracking()
+            .Include(item => item.Steps)
+            .OrderBy(item => item.Name)
+            .ToListAsync(cancellationToken);
 
         return new GrowthAnalyticsDashboard
         {
@@ -111,7 +115,8 @@ public sealed class GrowthAnalyticsService(IAppDbContext db) : IGrowthAnalyticsS
             Campaigns = Breakdown(pageViews.Where(item => !string.IsNullOrWhiteSpace(item.Campaign)), item => item.Campaign),
             Devices = Breakdown(pageViews, item => item.DeviceType),
             Browsers = Breakdown(pageViews, item => item.BrowserFamily),
-            Goals = goalReport.Goals
+            Goals = goalReport.Goals,
+            Funnels = BuildFunnelReport(funnelDefinitions, events)
         };
     }
 
@@ -182,6 +187,88 @@ public sealed class GrowthAnalyticsService(IAppDbContext db) : IGrowthAnalyticsS
         var goal = await db.AnalyticsGoals.FirstOrDefaultAsync(item => item.Id == goalId, cancellationToken);
         if (goal is null) return;
         db.AnalyticsGoals.Remove(goal);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<AnalyticsFunnelView>> GetFunnelsAsync(
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken = default)
+    {
+        var fromUnix = from.ToUnixTimeSeconds();
+        var toUnix = to.ToUnixTimeSeconds();
+        var events = await db.WebAnalyticsEvents.AsNoTracking()
+            .Where(item => item.OccurredAtUnixSeconds >= fromUnix && item.OccurredAtUnixSeconds < toUnix)
+            .ToListAsync(cancellationToken);
+        var definitions = await db.AnalyticsFunnels.AsNoTracking()
+            .Include(item => item.Steps)
+            .OrderBy(item => item.Name)
+            .ToListAsync(cancellationToken);
+        return BuildFunnelReport(definitions, events);
+    }
+
+    public async Task SaveFunnelAsync(AnalyticsFunnelInput input, CancellationToken cancellationToken = default)
+    {
+        var name = Clean(input.Name, 120);
+        if (name.Length == 0) throw new ArgumentException("Funnel name is required.", nameof(input));
+        if (input.Steps.Count is < 2 or > 8)
+            throw new ArgumentException("A funnel must contain between 2 and 8 ordered steps.", nameof(input));
+
+        var steps = input.Steps.Select((step, index) =>
+        {
+            var stepName = Clean(step.Name, 120);
+            if (stepName.Length == 0) throw new ArgumentException($"Step {index + 1} needs a name.", nameof(input));
+            var (matchType, matchValue) = NormalizeMatchRule(step.MatchType, step.MatchValue, input);
+            return new AnalyticsFunnelStep
+            {
+                Name = stepName,
+                MatchType = matchType,
+                MatchValue = matchValue,
+                SortOrder = index
+            };
+        }).ToList();
+
+        var duplicateName = await db.AnalyticsFunnels.AsNoTracking().AnyAsync(
+            item => item.Name.ToLower() == name.ToLower() && (!input.Id.HasValue || item.Id != input.Id.Value),
+            cancellationToken);
+        if (duplicateName) throw new InvalidOperationException("A funnel with that name already exists.");
+
+        await using var transaction = input.Id.HasValue
+            ? await db.BeginTransactionAsync(cancellationToken)
+            : null;
+        AnalyticsFunnel funnel;
+        if (input.Id is { } id)
+        {
+            funnel = await db.AnalyticsFunnels
+                .FirstOrDefaultAsync(item => item.Id == id, cancellationToken)
+                ?? throw new InvalidOperationException("Funnel no longer exists.");
+            await db.AnalyticsFunnelSteps
+                .Where(item => item.AnalyticsFunnelId == id)
+                .ExecuteDeleteAsync(cancellationToken);
+        }
+        else
+        {
+            funnel = new AnalyticsFunnel { Name = name };
+            await db.AnalyticsFunnels.AddAsync(funnel, cancellationToken);
+        }
+
+        funnel.Name = name;
+        funnel.IsActive = input.IsActive;
+        funnel.UpdatedAt = DateTimeOffset.UtcNow;
+        foreach (var step in steps)
+        {
+            step.AnalyticsFunnelId = funnel.Id;
+            await db.AnalyticsFunnelSteps.AddAsync(step, cancellationToken);
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task DeleteFunnelAsync(Guid funnelId, CancellationToken cancellationToken = default)
+    {
+        var funnel = await db.AnalyticsFunnels.FirstOrDefaultAsync(item => item.Id == funnelId, cancellationToken);
+        if (funnel is null) return;
+        db.AnalyticsFunnels.Remove(funnel);
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -266,16 +353,99 @@ public sealed class GrowthAnalyticsService(IAppDbContext db) : IGrowthAnalyticsS
         return new(goals, activeConvertingSessions);
     }
 
-    private static bool Matches(AnalyticsGoal goal, WebAnalyticsEvent item)
+    private static IReadOnlyList<AnalyticsFunnelView> BuildFunnelReport(
+        IReadOnlyCollection<AnalyticsFunnel> definitions,
+        IReadOnlyCollection<WebAnalyticsEvent> events)
     {
-        if (goal.MatchType == AnalyticsGoalMatchTypes.Event)
-            return string.Equals(item.EventName, goal.MatchValue, StringComparison.OrdinalIgnoreCase);
+        var sessions = events
+            .GroupBy(item => item.SessionKey, StringComparer.Ordinal)
+            .Select(group => group
+                .OrderBy(item => item.OccurredAtUnixSeconds)
+                .ThenBy(item => item.CreatedAt)
+                .ThenBy(item => item.Id)
+                .ToList())
+            .ToList();
+
+        return definitions.Select(funnel =>
+        {
+            var orderedSteps = funnel.Steps.OrderBy(step => step.SortOrder).ToList();
+            var reached = new int[orderedSteps.Count];
+            foreach (var session in sessions)
+            {
+                var nextStep = 0;
+                foreach (var analyticsEvent in session)
+                {
+                    if (nextStep >= orderedSteps.Count) break;
+                    var step = orderedSteps[nextStep];
+                    if (!Matches(step.MatchType, step.MatchValue, analyticsEvent)) continue;
+                    reached[nextStep]++;
+                    nextStep++;
+                }
+            }
+
+            var stepViews = orderedSteps.Select((step, index) =>
+            {
+                var previous = index == 0 ? reached[index] : reached[index - 1];
+                var next = index + 1 < reached.Length ? reached[index + 1] : reached[index];
+                var dropOff = reached[index] - next;
+                return new AnalyticsFunnelStepView(
+                    step.Id,
+                    step.Name,
+                    step.MatchType,
+                    step.MatchValue,
+                    step.SortOrder,
+                    reached[index],
+                    dropOff,
+                    previous == 0 ? 0 : Math.Round(reached[index] * 100m / previous, 1),
+                    reached[index] == 0 ? 0 : Math.Round(dropOff * 100m / reached[index], 1));
+            }).ToList();
+            var started = reached.Length == 0 ? 0 : reached[0];
+            var completed = reached.Length == 0 ? 0 : reached[^1];
+            return new AnalyticsFunnelView(
+                funnel.Id,
+                funnel.Name,
+                funnel.IsActive,
+                started,
+                completed,
+                started == 0 ? 0 : Math.Round(completed * 100m / started, 1),
+                stepViews);
+        }).ToList();
+    }
+
+    private static bool Matches(AnalyticsGoal goal, WebAnalyticsEvent item) =>
+        Matches(goal.MatchType, goal.MatchValue, item);
+
+    private static bool Matches(string matchType, string matchValue, WebAnalyticsEvent item)
+    {
+        if (matchType == AnalyticsGoalMatchTypes.Event)
+            return string.Equals(item.EventName, matchValue, StringComparison.OrdinalIgnoreCase);
         if (item.EventName != WebAnalyticsEventNames.PageView) return false;
-        var prefix = goal.MatchValue.EndsWith('*');
-        var expected = prefix ? goal.MatchValue[..^1] : goal.MatchValue;
+        var prefix = matchValue.EndsWith('*');
+        var expected = prefix ? matchValue[..^1] : matchValue;
         return prefix
             ? item.Path.StartsWith(expected, StringComparison.OrdinalIgnoreCase)
             : string.Equals(item.Path, expected, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static (string MatchType, string MatchValue) NormalizeMatchRule(
+        string? rawMatchType,
+        string? rawMatchValue,
+        object input)
+    {
+        var matchType = Clean(rawMatchType, 24);
+        var matchValue = Clean(rawMatchValue, 500);
+        if (!AnalyticsGoalMatchTypes.All.Contains(matchType, StringComparer.Ordinal))
+            throw new ArgumentException("Choose an event or page-path match for every step.", nameof(input));
+        if (matchValue.Length == 0)
+            throw new ArgumentException("Every step needs an event name or public page path.", nameof(input));
+        matchValue = matchType == AnalyticsGoalMatchTypes.Event
+            ? matchValue.ToLowerInvariant()
+            : NormalizeGoalPath(matchValue);
+        if ((matchType == AnalyticsGoalMatchTypes.Event && !IsValidCustomEvent(matchValue))
+            || (matchType == AnalyticsGoalMatchTypes.PagePath
+                && matchValue.StartsWith("/admin", StringComparison.OrdinalIgnoreCase)))
+            throw new ArgumentException("Enter a valid event name or public page path for every step.", nameof(input));
+        return (matchType, matchValue);
     }
 
     private static string SourceLabel(WebAnalyticsEvent item) =>
