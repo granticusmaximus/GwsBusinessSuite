@@ -1,0 +1,293 @@
+@using GwsBusinessSuite.Application.Growth
+@using GwsBusinessSuite.Domain.Entities
+@inject IGrowthAnalyticsService AnalyticsService
+@inject ILogger<GrowthSegmentPanel> Logger
+
+<section class="segment-panel" aria-label="Audience segment filter">
+    <div class="segment-picker">
+        <span><i class="bi bi-people"></i> Audience</span>
+        <select value="@SelectedSegmentId" @onchange="SelectAsync" aria-label="Filter analytics by saved segment">
+            <option value="">All traffic</option>
+            @foreach (var segment in Segments)
+            {
+                <option value="@segment.Id">@segment.Name</option>
+            }
+        </select>
+        @if (SelectedSegment is { } selected)
+        {
+            <small>@RuleSummary(selected)</small>
+        }
+    </div>
+    <button class="segment-manage" @onclick="OpenNew">
+        <i class="bi bi-sliders"></i> Manage segments
+    </button>
+</section>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="segment-message error" role="alert">@ErrorMessage</div>
+}
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="segment-message" role="status">@StatusMessage</div>
+}
+
+@if (ShowEditor)
+{
+    <aside class="segment-drawer" aria-label="Saved segment settings">
+        <header>
+            <div>
+                <strong>Saved segments</strong>
+                <small>Every rule must match somewhere in the same visit.</small>
+            </div>
+            <button @onclick="CloseEditor" aria-label="Close segment settings">×</button>
+        </header>
+
+        @foreach (var segment in Segments)
+        {
+            <div class="segment-definition">
+                <i class="bi bi-people"></i>
+                <span>
+                    <strong>@segment.Name</strong>
+                    <small>@RuleSummary(segment)</small>
+                </span>
+                <button title="Edit segment" aria-label="@($"Edit {segment.Name}")" @onclick="() => Edit(segment)">
+                    <i class="bi bi-pencil"></i>
+                </button>
+                <button title="Delete segment" aria-label="@($"Delete {segment.Name}")" @onclick="() => DeleteAsync(segment.Id)">
+                    <i class="bi bi-trash3"></i>
+                </button>
+            </div>
+        }
+
+        <form @onsubmit="SaveAsync" @onsubmit:preventDefault>
+            <div class="segment-form-heading">
+                <strong>@(SegmentId.HasValue ? "Edit segment" : "New segment")</strong>
+                @if (SegmentId.HasValue)
+                {
+                    <button type="button" @onclick="ResetForm">Add another</button>
+                }
+            </div>
+            <label>
+                Segment name
+                <input @bind="SegmentName" maxlength="120" placeholder="LinkedIn visitors" />
+            </label>
+
+            <div class="rule-stack">
+                @for (var index = 0; index < Rules.Count; index++)
+                {
+                    var ruleIndex = index;
+                    <div class="segment-rule">
+                        <div class="rule-number">@(ruleIndex + 1)</div>
+                        <label>
+                            Dimension
+                            <select @bind="Rules[ruleIndex].Dimension">
+                                @foreach (var dimension in AnalyticsSegmentDimensions.All)
+                                {
+                                    <option value="@dimension">@DimensionLabel(dimension)</option>
+                                }
+                            </select>
+                        </label>
+                        <label>
+                            Match
+                            <select @bind="Rules[ruleIndex].Operator">
+                                @foreach (var matchOperator in AnalyticsSegmentOperators.All)
+                                {
+                                    <option value="@matchOperator">@OperatorLabel(matchOperator)</option>
+                                }
+                            </select>
+                        </label>
+                        <label class="rule-value">
+                            Value
+                            <input @bind="Rules[ruleIndex].Value" maxlength="500" placeholder="@ValuePlaceholder(Rules[ruleIndex].Dimension)" />
+                        </label>
+                        <button type="button"
+                                class="rule-remove"
+                                disabled="@(Rules.Count == 1)"
+                                title="Remove rule"
+                                aria-label="@($"Remove rule {ruleIndex + 1}")"
+                                @onclick="() => RemoveRule(ruleIndex)">
+                            <i class="bi bi-trash3"></i>
+                        </button>
+                    </div>
+                }
+            </div>
+
+            <button type="button" class="rule-add" disabled="@(Rules.Count >= 5)" @onclick="AddRule">
+                <i class="bi bi-plus-lg"></i> Add AND rule
+            </button>
+            <p class="segment-help">
+                Matching is session-scoped. For example, “Source equals LinkedIn” keeps every event from visits that arrived through LinkedIn.
+            </p>
+            <button type="submit" class="segment-save" disabled="@IsBusy">
+                @(IsBusy ? "Saving…" : SegmentId.HasValue ? "Save and apply" : "Create and apply")
+            </button>
+        </form>
+    </aside>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<AnalyticsSegmentView> Segments { get; set; } = [];
+    [Parameter] public Guid? SelectedSegmentId { get; set; }
+    [Parameter] public EventCallback<Guid?> OnChanged { get; set; }
+
+    private bool ShowEditor;
+    private bool IsBusy;
+    private Guid? SegmentId;
+    private string SegmentName = string.Empty;
+    private List<EditableRule> Rules = [new()];
+    private string ErrorMessage = string.Empty;
+    private string StatusMessage = string.Empty;
+
+    private AnalyticsSegmentView? SelectedSegment =>
+        SelectedSegmentId is { } id ? Segments.FirstOrDefault(item => item.Id == id) : null;
+
+    private async Task SelectAsync(ChangeEventArgs args)
+    {
+        var selected = Guid.TryParse(args.Value?.ToString(), out var id) ? id : (Guid?)null;
+        await OnChanged.InvokeAsync(selected);
+    }
+
+    private void OpenNew()
+    {
+        ResetForm();
+        ShowEditor = true;
+    }
+
+    private void CloseEditor()
+    {
+        ShowEditor = false;
+        ResetMessages();
+    }
+
+    private void Edit(AnalyticsSegmentView segment)
+    {
+        SegmentId = segment.Id;
+        SegmentName = segment.Name;
+        Rules = segment.Rules
+            .OrderBy(rule => rule.SortOrder)
+            .Select(rule => new EditableRule
+            {
+                Dimension = rule.Dimension,
+                Operator = rule.Operator,
+                Value = rule.Value
+            })
+            .ToList();
+        ResetMessages();
+    }
+
+    private async Task SaveAsync()
+    {
+        IsBusy = true;
+        ResetMessages();
+        try
+        {
+            var id = await AnalyticsService.SaveSegmentAsync(new(
+                SegmentId,
+                SegmentName,
+                Rules.Select(rule => new AnalyticsSegmentRuleInput(
+                    rule.Dimension,
+                    rule.Operator,
+                    rule.Value)).ToList()));
+            StatusMessage = SegmentId.HasValue ? "Segment updated and applied." : "Segment created and applied.";
+            SegmentId = id;
+            await OnChanged.InvokeAsync(id);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Growth Studio segment action failed.");
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task DeleteAsync(Guid id)
+    {
+        IsBusy = true;
+        ResetMessages();
+        try
+        {
+            await AnalyticsService.DeleteSegmentAsync(id);
+            if (SegmentId == id) ResetForm();
+            StatusMessage = "Segment removed. Historical analytics events were retained.";
+            await OnChanged.InvokeAsync(SelectedSegmentId == id ? null : SelectedSegmentId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Growth Studio segment deletion failed.");
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void AddRule()
+    {
+        if (Rules.Count < 5) Rules.Add(new());
+    }
+
+    private void RemoveRule(int index)
+    {
+        if (Rules.Count > 1 && index >= 0 && index < Rules.Count) Rules.RemoveAt(index);
+    }
+
+    private void ResetForm()
+    {
+        SegmentId = null;
+        SegmentName = string.Empty;
+        Rules = [new()];
+        ResetMessages();
+    }
+
+    private void ResetMessages() => ErrorMessage = StatusMessage = string.Empty;
+
+    private static string RuleSummary(AnalyticsSegmentView segment) =>
+        string.Join(" AND ", segment.Rules.OrderBy(rule => rule.SortOrder).Select(rule =>
+            $"{DimensionLabel(rule.Dimension)} {OperatorLabel(rule.Operator).ToLowerInvariant()} {rule.Value}"));
+
+    private static string DimensionLabel(string dimension) => dimension switch
+    {
+        AnalyticsSegmentDimensions.PagePath => "Page path",
+        AnalyticsSegmentDimensions.Event => "Event",
+        AnalyticsSegmentDimensions.Source => "Source",
+        AnalyticsSegmentDimensions.Medium => "Medium",
+        AnalyticsSegmentDimensions.Campaign => "Campaign",
+        AnalyticsSegmentDimensions.Referrer => "Referrer",
+        AnalyticsSegmentDimensions.Device => "Device",
+        AnalyticsSegmentDimensions.Browser => "Browser",
+        _ => dimension
+    };
+
+    private static string OperatorLabel(string matchOperator) => matchOperator switch
+    {
+        AnalyticsSegmentOperators.Is => "Equals",
+        AnalyticsSegmentOperators.Contains => "Contains",
+        AnalyticsSegmentOperators.StartsWith => "Starts with",
+        _ => matchOperator
+    };
+
+    private static string ValuePlaceholder(string dimension) => dimension switch
+    {
+        AnalyticsSegmentDimensions.PagePath => "/pricing",
+        AnalyticsSegmentDimensions.Event => "newsletter_signup",
+        AnalyticsSegmentDimensions.Source => "linkedin",
+        AnalyticsSegmentDimensions.Medium => "email",
+        AnalyticsSegmentDimensions.Campaign => "launch",
+        AnalyticsSegmentDimensions.Referrer => "google.com",
+        AnalyticsSegmentDimensions.Device => "Mobile",
+        AnalyticsSegmentDimensions.Browser => "Safari",
+        _ => "Value"
+    };
+
+    private sealed class EditableRule
+    {
+        public string Dimension { get; set; } = AnalyticsSegmentDimensions.Source;
+        public string Operator { get; set; } = AnalyticsSegmentOperators.Is;
+        public string Value { get; set; } = string.Empty;
+    }
+}

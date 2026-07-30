@@ -62,6 +62,7 @@ public sealed class GrowthAnalyticsService(IAppDbContext db) : IGrowthAnalyticsS
     public async Task<GrowthAnalyticsDashboard> GetDashboardAsync(
         DateTimeOffset from,
         DateTimeOffset to,
+        Guid? segmentId = null,
         CancellationToken cancellationToken = default)
     {
         var fromUnix = from.ToUnixTimeSeconds();
@@ -69,6 +70,14 @@ public sealed class GrowthAnalyticsService(IAppDbContext db) : IGrowthAnalyticsS
         var events = await db.WebAnalyticsEvents.AsNoTracking()
             .Where(item => item.OccurredAtUnixSeconds >= fromUnix && item.OccurredAtUnixSeconds < toUnix)
             .ToListAsync(cancellationToken);
+        if (segmentId is { } selectedSegmentId)
+        {
+            var segment = await db.AnalyticsSegments.AsNoTracking()
+                .Include(item => item.Rules)
+                .FirstOrDefaultAsync(item => item.Id == selectedSegmentId, cancellationToken)
+                ?? throw new InvalidOperationException("The selected audience segment no longer exists.");
+            events = ApplySegment(events, segment);
+        }
         var pageViews = events.Where(item => item.EventName == WebAnalyticsEventNames.PageView).ToList();
         var sessions = pageViews.GroupBy(item => item.SessionKey).ToList();
         var sessionKeys = sessions.Select(group => group.Key).ToHashSet(StringComparer.Ordinal);
@@ -271,6 +280,154 @@ public sealed class GrowthAnalyticsService(IAppDbContext db) : IGrowthAnalyticsS
         db.AnalyticsFunnels.Remove(funnel);
         await db.SaveChangesAsync(cancellationToken);
     }
+
+    public async Task<IReadOnlyList<AnalyticsSegmentView>> GetSegmentsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var segments = await db.AnalyticsSegments.AsNoTracking()
+            .Include(item => item.Rules)
+            .OrderBy(item => item.Name)
+            .ToListAsync(cancellationToken);
+        return segments.Select(ToView).ToList();
+    }
+
+    public async Task<Guid> SaveSegmentAsync(
+        AnalyticsSegmentInput input,
+        CancellationToken cancellationToken = default)
+    {
+        var name = Clean(input.Name, 120);
+        if (name.Length == 0) throw new ArgumentException("Segment name is required.", nameof(input));
+        if (input.Rules.Count is < 1 or > 5)
+            throw new ArgumentException("A segment must contain between 1 and 5 rules.", nameof(input));
+
+        var rules = input.Rules.Select((rule, index) =>
+        {
+            var dimension = AnalyticsSegmentDimensions.All.FirstOrDefault(
+                item => string.Equals(item, Clean(rule.Dimension, 24), StringComparison.OrdinalIgnoreCase))
+                ?? throw new ArgumentException($"Rule {index + 1} has an unsupported dimension.", nameof(input));
+            var matchOperator = AnalyticsSegmentOperators.All.FirstOrDefault(
+                item => string.Equals(item, Clean(rule.Operator, 24), StringComparison.OrdinalIgnoreCase))
+                ?? throw new ArgumentException($"Rule {index + 1} has an unsupported operator.", nameof(input));
+            var value = Clean(rule.Value, 500);
+            if (value.Length == 0) throw new ArgumentException($"Rule {index + 1} needs a value.", nameof(input));
+            if (dimension == AnalyticsSegmentDimensions.PagePath)
+            {
+                value = NormalizePath(value);
+                if (value.StartsWith("/admin", StringComparison.OrdinalIgnoreCase))
+                    throw new ArgumentException("Segments cannot target authenticated admin routes.", nameof(input));
+            }
+            else if (dimension == AnalyticsSegmentDimensions.Event)
+            {
+                value = value.ToLowerInvariant();
+                if (!ReservedEvents.Contains(value) && !IsValidCustomEvent(value))
+                    throw new ArgumentException($"Rule {index + 1} has an invalid event name.", nameof(input));
+            }
+
+            return new AnalyticsSegmentRule
+            {
+                Dimension = dimension,
+                Operator = matchOperator,
+                Value = value,
+                SortOrder = index
+            };
+        }).ToList();
+
+        var duplicateName = await db.AnalyticsSegments.AsNoTracking().AnyAsync(
+            item => item.Name.ToLower() == name.ToLower() && (!input.Id.HasValue || item.Id != input.Id.Value),
+            cancellationToken);
+        if (duplicateName) throw new InvalidOperationException("A segment with that name already exists.");
+
+        await using var transaction = input.Id.HasValue
+            ? await db.BeginTransactionAsync(cancellationToken)
+            : null;
+        AnalyticsSegment segment;
+        if (input.Id is { } id)
+        {
+            segment = await db.AnalyticsSegments.FirstOrDefaultAsync(item => item.Id == id, cancellationToken)
+                ?? throw new InvalidOperationException("Segment no longer exists.");
+            await db.AnalyticsSegmentRules
+                .Where(item => item.AnalyticsSegmentId == id)
+                .ExecuteDeleteAsync(cancellationToken);
+        }
+        else
+        {
+            segment = new AnalyticsSegment { Name = name };
+            await db.AnalyticsSegments.AddAsync(segment, cancellationToken);
+        }
+
+        segment.Name = name;
+        segment.UpdatedAt = DateTimeOffset.UtcNow;
+        foreach (var rule in rules)
+        {
+            rule.AnalyticsSegmentId = segment.Id;
+            await db.AnalyticsSegmentRules.AddAsync(rule, cancellationToken);
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+        return segment.Id;
+    }
+
+    public async Task DeleteSegmentAsync(Guid segmentId, CancellationToken cancellationToken = default)
+    {
+        var segment = await db.AnalyticsSegments.FirstOrDefaultAsync(item => item.Id == segmentId, cancellationToken);
+        if (segment is null) return;
+        db.AnalyticsSegments.Remove(segment);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static List<WebAnalyticsEvent> ApplySegment(
+        IReadOnlyCollection<WebAnalyticsEvent> events,
+        AnalyticsSegment segment)
+    {
+        var rules = segment.Rules.OrderBy(rule => rule.SortOrder).ToList();
+        if (rules.Count == 0) return [];
+        var matchingSessions = events
+            .GroupBy(item => item.SessionKey, StringComparer.Ordinal)
+            .Where(session => rules.All(rule => session.Any(item => Matches(rule, item))))
+            .Select(session => session.Key)
+            .ToHashSet(StringComparer.Ordinal);
+        return events.Where(item => matchingSessions.Contains(item.SessionKey)).ToList();
+    }
+
+    private static bool Matches(AnalyticsSegmentRule rule, WebAnalyticsEvent item)
+    {
+        var value = rule.Dimension switch
+        {
+            AnalyticsSegmentDimensions.PagePath when item.EventName == WebAnalyticsEventNames.PageView => item.Path,
+            AnalyticsSegmentDimensions.Event => item.EventName,
+            AnalyticsSegmentDimensions.Source when item.EventName == WebAnalyticsEventNames.PageView => SourceLabel(item),
+            AnalyticsSegmentDimensions.Medium when item.EventName == WebAnalyticsEventNames.PageView =>
+                string.IsNullOrWhiteSpace(item.Medium) ? "Direct" : item.Medium,
+            AnalyticsSegmentDimensions.Campaign when item.EventName == WebAnalyticsEventNames.PageView => item.Campaign,
+            AnalyticsSegmentDimensions.Referrer when item.EventName == WebAnalyticsEventNames.PageView =>
+                string.IsNullOrWhiteSpace(item.ReferrerHost) ? "Direct" : item.ReferrerHost,
+            AnalyticsSegmentDimensions.Device when item.EventName == WebAnalyticsEventNames.PageView => item.DeviceType,
+            AnalyticsSegmentDimensions.Browser when item.EventName == WebAnalyticsEventNames.PageView => item.BrowserFamily,
+            _ => null
+        };
+        if (value is null) return false;
+        return rule.Operator switch
+        {
+            AnalyticsSegmentOperators.Is => string.Equals(value, rule.Value, StringComparison.OrdinalIgnoreCase),
+            AnalyticsSegmentOperators.Contains => value.Contains(rule.Value, StringComparison.OrdinalIgnoreCase),
+            AnalyticsSegmentOperators.StartsWith => value.StartsWith(rule.Value, StringComparison.OrdinalIgnoreCase),
+            _ => false
+        };
+    }
+
+    private static AnalyticsSegmentView ToView(AnalyticsSegment segment) =>
+        new(
+            segment.Id,
+            segment.Name,
+            segment.Rules
+                .OrderBy(rule => rule.SortOrder)
+                .Select(rule => new AnalyticsSegmentRuleView(
+                    rule.Id,
+                    rule.Dimension,
+                    rule.Operator,
+                    rule.Value,
+                    rule.SortOrder))
+                .ToList());
 
     private static IReadOnlyList<AnalyticsPoint> BuildTrend(
         IReadOnlyCollection<WebAnalyticsEvent> pageViews,

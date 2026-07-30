@@ -61,6 +61,10 @@
                 </div>
             </div>
 
+            <GrowthSegmentPanel Segments="Segments"
+                                SelectedSegmentId="SelectedSegmentId"
+                                OnChanged="ChangeSegmentAsync" />
+
             @if (!_analyticsLoaded)
             {
                 <div class="growth-loading">Loading audience data…</div>
@@ -353,6 +357,8 @@
     private string ActiveTab = "analytics";
     private int RangeDays = 30;
     private GrowthAnalyticsDashboard Dashboard = new();
+    private IReadOnlyList<AnalyticsSegmentView> Segments = [];
+    private Guid? SelectedSegmentId;
     private bool _analyticsLoaded;
     private bool _showGoalSetup;
     private bool IsBusy;
@@ -385,9 +391,13 @@
 
     private async Task LoadAnalyticsAsync()
     {
+        Segments = await AnalyticsService.GetSegmentsAsync();
+        if (SelectedSegmentId.HasValue && Segments.All(item => item.Id != SelectedSegmentId.Value))
+            SelectedSegmentId = null;
         Dashboard = await AnalyticsService.GetDashboardAsync(
             DateTimeOffset.UtcNow.AddDays(-RangeDays),
-            DateTimeOffset.UtcNow.AddMinutes(1));
+            DateTimeOffset.UtcNow.AddMinutes(1),
+            SelectedSegmentId);
         _analyticsLoaded = true;
     }
 
@@ -408,6 +418,13 @@
     {
         _analyticsLoaded = false;
         await LoadAnalyticsAsync();
+    }
+
+    private async Task ChangeSegmentAsync(Guid? segmentId)
+    {
+        SelectedSegmentId = segmentId;
+        _analyticsLoaded = false;
+        await RunAsync(LoadAnalyticsAsync);
     }
 
     private async Task SaveGoalAsync() => await RunAsync(async () =>

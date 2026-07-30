@@ -70,7 +70,8 @@
   privacy-first collection layer, indexed dashboard, custom-event hook, SentinelGPT
   channel variants, encrypted Facebook/X/LinkedIn credentials, direct text publishing,
   scheduling, queue, delivery history, named event/destination conversion goals, and
-  ordered funnel/drop-off reporting are delivered. Segments, retention, report exports,
+  ordered funnel/drop-off reporting, saved audience segments, and session-scoped report
+  filters are delivered. Retention, report exports,
   social OAuth/media, and engagement imports are staged in
   `docs/GROWTH_STUDIO.md`.
 - Workflow Automation (n8n-class, clean-room) 🚧 — foundational graph persistence,

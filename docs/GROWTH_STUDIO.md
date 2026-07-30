@@ -22,6 +22,10 @@ algorithms.
 - Two-to-eight-step funnels built from ordered custom events and page destinations, with
   per-step session counts, continuation rates, drop-off counts/rates, and overall completion.
   Editing or removing a funnel changes only its definition, not the event history.
+- Saved audience segments with one-to-five AND rules across page path, event, source, medium,
+  campaign, referrer, device, and browser dimensions. Applying a segment filters the complete
+  visit, so dashboard metrics, engagement, goals, and funnels remain internally consistent.
+  Segment definitions can be edited or removed without changing historical analytics events.
 - SentinelGPT-assisted, network-specific Facebook, X, and LinkedIn copy with editable
   previews, per-channel character limits, drafts, scheduling, delivery state, and retry.
 - Encrypted social access tokens. Tokens remain on the server and are never returned to the
@@ -37,7 +41,6 @@ rather than represented as one finished checkbox.
 
 ### Analytics phase 2
 
-- Saved segments and report filters
 - Retention/cohort and new-versus-returning analysis
 - Country/region reporting through a privacy-reviewed, locally hosted GeoIP database
 - CSV export, scheduled email reports, annotations, and comparison periods

@@ -10,6 +10,7 @@ public interface IGrowthAnalyticsService
     Task<GrowthAnalyticsDashboard> GetDashboardAsync(
         DateTimeOffset from,
         DateTimeOffset to,
+        Guid? segmentId = null,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<AnalyticsGoalView>> GetGoalsAsync(
@@ -25,6 +26,9 @@ public interface IGrowthAnalyticsService
         CancellationToken cancellationToken = default);
     Task SaveFunnelAsync(AnalyticsFunnelInput input, CancellationToken cancellationToken = default);
     Task DeleteFunnelAsync(Guid funnelId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<AnalyticsSegmentView>> GetSegmentsAsync(CancellationToken cancellationToken = default);
+    Task<Guid> SaveSegmentAsync(AnalyticsSegmentInput input, CancellationToken cancellationToken = default);
+    Task DeleteSegmentAsync(Guid segmentId, CancellationToken cancellationToken = default);
 }
 
 public interface ISocialPublishingService

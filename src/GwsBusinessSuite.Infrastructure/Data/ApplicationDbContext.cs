@@ -81,6 +81,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<AnalyticsGoal> AnalyticsGoals => Set<AnalyticsGoal>();
     public DbSet<AnalyticsFunnel> AnalyticsFunnels => Set<AnalyticsFunnel>();
     public DbSet<AnalyticsFunnelStep> AnalyticsFunnelSteps => Set<AnalyticsFunnelStep>();
+    public DbSet<AnalyticsSegment> AnalyticsSegments => Set<AnalyticsSegment>();
+    public DbSet<AnalyticsSegmentRule> AnalyticsSegmentRules => Set<AnalyticsSegmentRule>();
     public DbSet<SocialAccount> SocialAccounts => Set<SocialAccount>();
     public DbSet<SocialPost> SocialPosts => Set<SocialPost>();
     public DbSet<SocialPostTarget> SocialPostTargets => Set<SocialPostTarget>();
@@ -363,6 +365,19 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<AnalyticsFunnelStep>().Property(x => x.Name).HasMaxLength(120);
         modelBuilder.Entity<AnalyticsFunnelStep>().Property(x => x.MatchType).HasMaxLength(24);
         modelBuilder.Entity<AnalyticsFunnelStep>().Property(x => x.MatchValue).HasMaxLength(500);
+        modelBuilder.Entity<AnalyticsSegment>().HasIndex(x => x.Name).IsUnique();
+        modelBuilder.Entity<AnalyticsSegment>().Property(x => x.Name).HasMaxLength(120);
+        modelBuilder.Entity<AnalyticsSegmentRule>()
+            .HasOne(x => x.AnalyticsSegment)
+            .WithMany(x => x.Rules)
+            .HasForeignKey(x => x.AnalyticsSegmentId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<AnalyticsSegmentRule>()
+            .HasIndex(x => new { x.AnalyticsSegmentId, x.SortOrder })
+            .IsUnique();
+        modelBuilder.Entity<AnalyticsSegmentRule>().Property(x => x.Dimension).HasMaxLength(24);
+        modelBuilder.Entity<AnalyticsSegmentRule>().Property(x => x.Operator).HasMaxLength(24);
+        modelBuilder.Entity<AnalyticsSegmentRule>().Property(x => x.Value).HasMaxLength(500);
         modelBuilder.Entity<SocialAccount>().HasIndex(x => new { x.Network, x.ExternalAccountId }).IsUnique();
         modelBuilder.Entity<SocialAccount>().Property(x => x.Network).HasMaxLength(24);
         modelBuilder.Entity<SocialPost>().HasIndex(x => new { x.Status, x.ScheduledFor });

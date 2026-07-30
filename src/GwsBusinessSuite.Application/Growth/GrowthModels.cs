@@ -65,6 +65,28 @@ public sealed record AnalyticsFunnelView(
     decimal CompletionRate,
     IReadOnlyList<AnalyticsFunnelStepView> Steps);
 
+public sealed record AnalyticsSegmentRuleInput(
+    string Dimension,
+    string Operator,
+    string Value);
+
+public sealed record AnalyticsSegmentInput(
+    Guid? Id,
+    string Name,
+    IReadOnlyList<AnalyticsSegmentRuleInput> Rules);
+
+public sealed record AnalyticsSegmentRuleView(
+    Guid Id,
+    string Dimension,
+    string Operator,
+    string Value,
+    int SortOrder);
+
+public sealed record AnalyticsSegmentView(
+    Guid Id,
+    string Name,
+    IReadOnlyList<AnalyticsSegmentRuleView> Rules);
+
 public sealed class GrowthAnalyticsDashboard
 {
     public int Visitors { get; init; }

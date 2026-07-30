@@ -998,6 +998,43 @@ public sealed class AnalyticsFunnelStep : AuditableEntity
     public AnalyticsFunnel? AnalyticsFunnel { get; set; }
 }
 
+public static class AnalyticsSegmentDimensions
+{
+    public const string PagePath = "PagePath";
+    public const string Event = "Event";
+    public const string Source = "Source";
+    public const string Medium = "Medium";
+    public const string Campaign = "Campaign";
+    public const string Referrer = "Referrer";
+    public const string Device = "Device";
+    public const string Browser = "Browser";
+    public static readonly string[] All = [PagePath, Event, Source, Medium, Campaign, Referrer, Device, Browser];
+}
+
+public static class AnalyticsSegmentOperators
+{
+    public const string Is = "Equals";
+    public const string Contains = "Contains";
+    public const string StartsWith = "StartsWith";
+    public static readonly string[] All = [Is, Contains, StartsWith];
+}
+
+public sealed class AnalyticsSegment : AuditableEntity
+{
+    public required string Name { get; set; }
+    public ICollection<AnalyticsSegmentRule> Rules { get; set; } = new List<AnalyticsSegmentRule>();
+}
+
+public sealed class AnalyticsSegmentRule : AuditableEntity
+{
+    public Guid AnalyticsSegmentId { get; set; }
+    public required string Dimension { get; set; }
+    public required string Operator { get; set; }
+    public required string Value { get; set; }
+    public int SortOrder { get; set; }
+    public AnalyticsSegment? AnalyticsSegment { get; set; }
+}
+
 public static class SocialNetworks
 {
     public const string Facebook = "Facebook";

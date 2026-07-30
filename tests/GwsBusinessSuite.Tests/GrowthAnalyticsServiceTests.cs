@@ -253,6 +253,125 @@ public sealed class GrowthAnalyticsServiceTests
         fixture.Db.WebAnalyticsEvents.Should().ContainSingle();
     }
 
+    [Fact]
+    public async Task GetDashboardAsync_ShouldApplySavedSegmentToEntireMatchingSessions()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var now = DateTimeOffset.UtcNow;
+        var segment = new AnalyticsSegment
+        {
+            Name = "LinkedIn pricing visitors",
+            Rules =
+            [
+                new AnalyticsSegmentRule
+                {
+                    Dimension = AnalyticsSegmentDimensions.Source,
+                    Operator = AnalyticsSegmentOperators.Is,
+                    Value = "linkedin",
+                    SortOrder = 0
+                },
+                new AnalyticsSegmentRule
+                {
+                    Dimension = AnalyticsSegmentDimensions.PagePath,
+                    Operator = AnalyticsSegmentOperators.StartsWith,
+                    Value = "/pricing",
+                    SortOrder = 1
+                }
+            ]
+        };
+        fixture.Db.AnalyticsSegments.Add(segment);
+        fixture.Db.AnalyticsGoals.Add(new AnalyticsGoal
+        {
+            Name = "Signup",
+            MatchType = AnalyticsGoalMatchTypes.Event,
+            MatchValue = "newsletter_signup"
+        });
+        fixture.Db.AnalyticsFunnels.Add(new AnalyticsFunnel
+        {
+            Name = "Pricing signup",
+            Steps =
+            [
+                new AnalyticsFunnelStep
+                {
+                    Name = "Pricing",
+                    MatchType = AnalyticsGoalMatchTypes.PagePath,
+                    MatchValue = "/pricing/*",
+                    SortOrder = 0
+                },
+                new AnalyticsFunnelStep
+                {
+                    Name = "Signup",
+                    MatchType = AnalyticsGoalMatchTypes.Event,
+                    MatchValue = "newsletter_signup",
+                    SortOrder = 1
+                }
+            ]
+        });
+        fixture.Db.WebAnalyticsEvents.AddRange(
+            Event("pageview", "visitor-a", "session-a", "/pricing/team", now.AddMinutes(-12), source: "linkedin"),
+            Event("engagement", "visitor-a", "session-a", "/pricing/team", now.AddMinutes(-11), engagement: 24),
+            Event("newsletter_signup", "visitor-a", "session-a", "/pricing/team", now.AddMinutes(-10)),
+            Event("pageview", "visitor-b", "session-b", "/blog", now.AddMinutes(-9), source: "linkedin"),
+            Event("newsletter_signup", "visitor-b", "session-b", "/blog", now.AddMinutes(-8)),
+            Event("pageview", "visitor-c", "session-c", "/pricing", now.AddMinutes(-7), source: "email"),
+            Event("newsletter_signup", "visitor-c", "session-c", "/pricing", now.AddMinutes(-6)));
+        await fixture.Db.SaveChangesAsync();
+
+        var dashboard = await new GrowthAnalyticsService(fixture.Db)
+            .GetDashboardAsync(now.AddDays(-1), now.AddMinutes(1), segment.Id);
+
+        dashboard.Sessions.Should().Be(1);
+        dashboard.Visitors.Should().Be(1);
+        dashboard.PageViews.Should().Be(1);
+        dashboard.AverageEngagement.Should().Be(TimeSpan.FromSeconds(24));
+        dashboard.TopSources.Should().ContainSingle(row => row.Label == "linkedin");
+        dashboard.TotalConversions.Should().Be(1);
+        dashboard.OverallConversionRate.Should().Be(100);
+        dashboard.Funnels.Should().ContainSingle().Which.CompletionRate.Should().Be(100);
+    }
+
+    [Fact]
+    public async Task SegmentManagement_ShouldNormalizeReplaceRulesAndRetainAnalyticsHistory()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var service = new GrowthAnalyticsService(fixture.Db);
+        fixture.Db.WebAnalyticsEvents.Add(
+            Event("pageview", "visitor", "session", "/pricing", DateTimeOffset.UtcNow, source: "linkedin"));
+        await fixture.Db.SaveChangesAsync();
+
+        var id = await service.SaveSegmentAsync(new(
+            null,
+            "High intent",
+            [
+                new(AnalyticsSegmentDimensions.PagePath, AnalyticsSegmentOperators.StartsWith, "pricing?plan=team"),
+                new(AnalyticsSegmentDimensions.Event, AnalyticsSegmentOperators.Is, "NEWSLETTER_SIGNUP")
+            ]));
+        var stored = await fixture.Db.AnalyticsSegments.Include(item => item.Rules).SingleAsync();
+        stored.Id.Should().Be(id);
+        stored.Rules.OrderBy(rule => rule.SortOrder).Select(rule => rule.Value)
+            .Should().Equal("/pricing", "newsletter_signup");
+
+        await service.SaveSegmentAsync(new(
+            id,
+            "High intent visitors",
+            [new(AnalyticsSegmentDimensions.Source, AnalyticsSegmentOperators.Contains, "LinkedIn")]));
+        fixture.Db.ChangeTracker.Clear();
+        var updated = await fixture.Db.AnalyticsSegments.Include(item => item.Rules).SingleAsync();
+        updated.Name.Should().Be("High intent visitors");
+        updated.Rules.Should().ContainSingle().Which.Value.Should().Be("LinkedIn");
+
+        var duplicate = () => service.SaveSegmentAsync(new(
+            null,
+            "High intent visitors",
+            [new(AnalyticsSegmentDimensions.Device, AnalyticsSegmentOperators.Is, "Mobile")]));
+        await duplicate.Should().ThrowAsync<InvalidOperationException>().WithMessage("*already exists*");
+
+        await service.DeleteSegmentAsync(id);
+        fixture.Db.AnalyticsSegments.Should().BeEmpty();
+        fixture.Db.AnalyticsSegmentRules.Should().BeEmpty();
+        fixture.Db.WebAnalyticsEvents.Should().ContainSingle();
+    }
+
     private static WebAnalyticsEvent Event(
         string name,
         string visitor,
