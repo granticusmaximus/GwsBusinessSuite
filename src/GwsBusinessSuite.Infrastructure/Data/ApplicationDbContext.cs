@@ -347,6 +347,10 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<WebAnalyticsEvent>().Property(x => x.SessionKey).HasMaxLength(64);
         modelBuilder.Entity<WebAnalyticsEvent>().Property(x => x.Path).HasMaxLength(500);
         modelBuilder.Entity<WebAnalyticsEvent>().Property(x => x.ReferrerHost).HasMaxLength(160);
+        modelBuilder.Entity<WebAnalyticsEvent>().Property(x => x.CountryCode).HasMaxLength(8);
+        modelBuilder.Entity<WebAnalyticsEvent>().Property(x => x.CountryName).HasMaxLength(100);
+        modelBuilder.Entity<WebAnalyticsEvent>().Property(x => x.RegionCode).HasMaxLength(16);
+        modelBuilder.Entity<WebAnalyticsEvent>().Property(x => x.RegionName).HasMaxLength(120);
         modelBuilder.Entity<AnalyticsGoal>().HasIndex(x => x.Name).IsUnique();
         modelBuilder.Entity<AnalyticsGoal>().HasIndex(x => new { x.IsActive, x.MatchType });
         modelBuilder.Entity<AnalyticsGoal>().Property(x => x.Name).HasMaxLength(120);

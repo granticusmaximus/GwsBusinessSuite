@@ -4,6 +4,7 @@ using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using System.Net;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -37,6 +38,48 @@ public sealed class GrowthAnalyticsServiceTests
         stored.Should().NotBeNull();
         typeof(WebAnalyticsEvent).GetProperty("IpAddress").Should().BeNull();
         typeof(WebAnalyticsEvent).GetProperty("UserAgent").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RecordAsync_ShouldPersistOnlyCoarseResolvedGeography()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var resolver = new StubGeoLocationResolver(
+            new("us", "United States", "ga", "Georgia"));
+        var service = new GrowthAnalyticsService(fixture.Db, resolver);
+        var address = IPAddress.Parse("8.8.8.8");
+
+        await service.RecordAsync(
+            new("pageview", "visitor", "session", "/", "Home", null, null, null, null, 0),
+            "Mozilla/5.0",
+            address);
+
+        var stored = await fixture.Db.WebAnalyticsEvents.SingleAsync();
+        resolver.LastAddress.Should().Be(address);
+        stored.CountryCode.Should().Be("US");
+        stored.CountryName.Should().Be("United States");
+        stored.RegionCode.Should().Be("GA");
+        stored.RegionName.Should().Be("Georgia");
+        typeof(WebAnalyticsEvent).GetProperty("IpAddress").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RecordAsync_ShouldNotResolveGeographyForEngagementEvents()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var resolver = new StubGeoLocationResolver(
+            new("US", "United States", "GA", "Georgia"));
+        var service = new GrowthAnalyticsService(fixture.Db, resolver);
+
+        await service.RecordAsync(
+            new("engagement", "visitor", "session", "/", "Home", null, null, null, null, 12),
+            "Mozilla/5.0",
+            IPAddress.Parse("8.8.8.8"));
+
+        resolver.ResolveCallCount.Should().Be(0);
+        var stored = await fixture.Db.WebAnalyticsEvents.SingleAsync();
+        stored.CountryCode.Should().BeEmpty();
+        stored.RegionCode.Should().BeEmpty();
     }
 
     [Fact]
@@ -74,6 +117,36 @@ public sealed class GrowthAnalyticsServiceTests
         dashboard.AverageEngagement.Should().Be(TimeSpan.FromSeconds(42));
         dashboard.TopSources.Should().Contain(row => row.Label == "linkedin" && row.Views == 2);
         dashboard.Campaigns.Should().ContainSingle(row => row.Label == "launch" && row.Views == 2);
+    }
+
+    [Fact]
+    public async Task GetDashboardAsync_ShouldAggregateCountryAndRegionWithoutRawAddresses()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var now = DateTimeOffset.UtcNow;
+        fixture.Db.WebAnalyticsEvents.AddRange(
+            Event("pageview", "visitor-a", "session-a", "/", now.AddMinutes(-3),
+                countryCode: "US", countryName: "United States", regionCode: "GA", regionName: "Georgia"),
+            Event("pageview", "visitor-b", "session-b", "/", now.AddMinutes(-2),
+                countryCode: "US", countryName: "United States", regionCode: "GA", regionName: "Georgia"),
+            Event("pageview", "visitor-c", "session-c", "/", now.AddMinutes(-1),
+                countryCode: "CA", countryName: "Canada", regionCode: "ON", regionName: "Ontario"));
+        await fixture.Db.SaveChangesAsync();
+
+        var dashboard = await new GrowthAnalyticsService(
+                fixture.Db,
+                new StubGeoLocationResolver(null, isConfigured: true))
+            .GetDashboardAsync(now.AddDays(-1), now.AddMinutes(1));
+
+        dashboard.GeoLocationConfigured.Should().BeTrue();
+        dashboard.Countries.Should().Contain(row =>
+            row.Label == "United States" && row.Views == 2 && row.Share == 66.7m);
+        dashboard.Countries.Should().Contain(row =>
+            row.Label == "Canada" && row.Views == 1 && row.Share == 33.3m);
+        dashboard.Regions.Should().Contain(row =>
+            row.Label == "Georgia, US" && row.Views == 2);
+        dashboard.Regions.Should().Contain(row =>
+            row.Label == "Ontario, CA" && row.Views == 1);
     }
 
     [Fact]
@@ -409,7 +482,11 @@ public sealed class GrowthAnalyticsServiceTests
         DateTimeOffset createdAt,
         string source = "",
         string campaign = "",
-        int engagement = 0) => new()
+        int engagement = 0,
+        string countryCode = "",
+        string countryName = "",
+        string regionCode = "",
+        string regionName = "") => new()
         {
             EventName = name,
             VisitorKey = visitor,
@@ -417,10 +494,30 @@ public sealed class GrowthAnalyticsServiceTests
             Path = path,
             Source = source,
             Campaign = campaign,
+            CountryCode = countryCode,
+            CountryName = countryName,
+            RegionCode = regionCode,
+            RegionName = regionName,
             EngagementSeconds = engagement,
             CreatedAt = createdAt,
             OccurredAtUnixSeconds = createdAt.ToUnixTimeSeconds()
         };
+
+    private sealed class StubGeoLocationResolver(
+        AnalyticsGeoLocation? location,
+        bool isConfigured = true) : IAnalyticsGeoLocationResolver
+    {
+        public bool IsConfigured { get; } = isConfigured;
+        public IPAddress? LastAddress { get; private set; }
+        public int ResolveCallCount { get; private set; }
+
+        public AnalyticsGeoLocation? Resolve(IPAddress? address)
+        {
+            ResolveCallCount++;
+            LastAddress = address;
+            return location;
+        }
+    }
 
     private sealed class Fixture(SqliteConnection connection, ApplicationDbContext db) : IAsyncDisposable
     {

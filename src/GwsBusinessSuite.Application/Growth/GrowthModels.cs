@@ -111,6 +111,7 @@ public sealed class GrowthAnalyticsDashboard
     public int NewVisitors { get; init; }
     public int ReturningVisitors { get; init; }
     public decimal ReturningVisitorRate { get; init; }
+    public bool GeoLocationConfigured { get; init; }
     public string RetentionPeriodLabel { get; init; } = "Day";
     public IReadOnlyList<AnalyticsRetentionCohort> RetentionCohorts { get; init; } = [];
     public IReadOnlyList<AnalyticsPoint> Trend { get; init; } = [];
@@ -119,6 +120,8 @@ public sealed class GrowthAnalyticsDashboard
     public IReadOnlyList<AnalyticsBreakdownRow> Campaigns { get; init; } = [];
     public IReadOnlyList<AnalyticsBreakdownRow> Devices { get; init; } = [];
     public IReadOnlyList<AnalyticsBreakdownRow> Browsers { get; init; } = [];
+    public IReadOnlyList<AnalyticsBreakdownRow> Countries { get; init; } = [];
+    public IReadOnlyList<AnalyticsBreakdownRow> Regions { get; init; } = [];
     public IReadOnlyList<AnalyticsGoalView> Goals { get; init; } = [];
     public IReadOnlyList<AnalyticsFunnelView> Funnels { get; init; } = [];
 }

@@ -1,0 +1,51 @@
+@using GwsBusinessSuite.Application.Growth
+
+<section class="growth-panel geo-panel">
+    <header class="geo-heading">
+        <div>
+            <span>Audience geography</span>
+            <small>Coarse location from a database hosted inside GWS Business Suite</small>
+        </div>
+        <span class="geo-status @(Dashboard.GeoLocationConfigured ? "ready" : "setup")">
+            <i class="bi @(Dashboard.GeoLocationConfigured ? "bi-shield-check" : "bi-database-exclamation")"></i>
+            @(Dashboard.GeoLocationConfigured ? "Local database ready" : "Setup required")
+        </span>
+    </header>
+
+    @if (!Dashboard.GeoLocationConfigured && Dashboard.Countries.Count == 0)
+    {
+        <div class="geo-empty">
+            <span class="geo-empty-icon"><i class="bi bi-globe-americas"></i></span>
+            <div>
+                <strong>Add the local location database to begin.</strong>
+                <p>Place <code>GeoLite2-City.mmdb</code> in the persistent app data volume and restart GWS Business Suite. New visits will be enriched automatically.</p>
+            </div>
+        </div>
+    }
+    else
+    {
+        @if (!Dashboard.GeoLocationConfigured)
+        {
+            <p class="geo-warning"><i class="bi bi-exclamation-triangle"></i> The local database is currently unavailable. Previously enriched visits are still shown.</p>
+        }
+        <div class="geo-grid">
+            <BreakdownTable Title="Countries"
+                            Rows="Dashboard.Countries"
+                            Icon="bi-globe2"
+                            EmptyText="Country data will appear with new visits." />
+            <BreakdownTable Title="Regions"
+                            Rows="Dashboard.Regions"
+                            Icon="bi-geo-alt"
+                            EmptyText="Region data will appear when the local database provides it." />
+        </div>
+    }
+
+    <footer>
+        <i class="bi bi-shield-lock"></i>
+        <span>The request IP is used only for an in-process lookup and then discarded. Only country and region are saved; GeoIP is approximate.</span>
+    </footer>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public GrowthAnalyticsDashboard Dashboard { get; set; } = new();
+}

@@ -1088,6 +1088,7 @@ app.MapPost("/api/analytics/events", async (
         await analyticsService.RecordAsync(
             input,
             context.Request.Headers.UserAgent.ToString(),
+            context.Connection.RemoteIpAddress,
             context.RequestAborted);
         return Results.NoContent();
     }

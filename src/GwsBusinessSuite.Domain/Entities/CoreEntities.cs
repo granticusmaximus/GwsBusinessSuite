@@ -959,6 +959,10 @@ public sealed class WebAnalyticsEvent : AuditableEntity
     public string Campaign { get; set; } = string.Empty;
     public string DeviceType { get; set; } = "Unknown";
     public string BrowserFamily { get; set; } = "Unknown";
+    public string CountryCode { get; set; } = string.Empty;
+    public string CountryName { get; set; } = string.Empty;
+    public string RegionCode { get; set; } = string.Empty;
+    public string RegionName { get; set; } = string.Empty;
     public int EngagementSeconds { get; set; }
     public long OccurredAtUnixSeconds { get; set; }
 }

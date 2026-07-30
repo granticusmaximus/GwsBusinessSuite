@@ -25,6 +25,7 @@ coverage/
 *.sqlite
 dp-keys/
 *.sqlite3
+*.mmdb
 
 # Local environment and secret files
 .env

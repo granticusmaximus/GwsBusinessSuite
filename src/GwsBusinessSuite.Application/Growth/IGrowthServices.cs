@@ -1,10 +1,23 @@
 namespace GwsBusinessSuite.Application.Growth;
 
+public sealed record AnalyticsGeoLocation(
+    string CountryCode,
+    string CountryName,
+    string RegionCode,
+    string RegionName);
+
+public interface IAnalyticsGeoLocationResolver
+{
+    bool IsConfigured { get; }
+    AnalyticsGeoLocation? Resolve(System.Net.IPAddress? address);
+}
+
 public interface IGrowthAnalyticsService
 {
     Task RecordAsync(
         WebAnalyticsEventInput input,
         string? userAgent,
+        System.Net.IPAddress? remoteAddress = null,
         CancellationToken cancellationToken = default);
 
     Task<GrowthAnalyticsDashboard> GetDashboardAsync(

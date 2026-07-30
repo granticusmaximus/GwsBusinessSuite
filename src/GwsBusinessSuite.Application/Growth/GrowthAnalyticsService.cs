@@ -4,7 +4,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GwsBusinessSuite.Application.Growth;
 
-public sealed class GrowthAnalyticsService(IAppDbContext db) : IGrowthAnalyticsService
+public sealed class GrowthAnalyticsService(
+    IAppDbContext db,
+    IAnalyticsGeoLocationResolver? geoLocationResolver = null) : IGrowthAnalyticsService
 {
     private static readonly HashSet<string> ReservedEvents =
         new([WebAnalyticsEventNames.PageView, WebAnalyticsEventNames.Engagement], StringComparer.OrdinalIgnoreCase);
@@ -12,6 +14,7 @@ public sealed class GrowthAnalyticsService(IAppDbContext db) : IGrowthAnalyticsS
     public async Task RecordAsync(
         WebAnalyticsEventInput input,
         string? userAgent,
+        System.Net.IPAddress? remoteAddress = null,
         CancellationToken cancellationToken = default)
     {
         var eventName = Clean(input.EventName, 64).ToLowerInvariant();
@@ -37,6 +40,11 @@ public sealed class GrowthAnalyticsService(IAppDbContext db) : IGrowthAnalyticsS
         }
 
         var (device, browser) = Classify(userAgent);
+        // Geography is a page-view dimension. Avoid repeating the transient lookup for
+        // engagement pings and custom events that never participate in the geo reports.
+        var location = eventName == WebAnalyticsEventNames.PageView
+            ? geoLocationResolver?.Resolve(remoteAddress)
+            : null;
         var now = DateTimeOffset.UtcNow;
         await db.WebAnalyticsEvents.AddAsync(new WebAnalyticsEvent
         {
@@ -51,6 +59,10 @@ public sealed class GrowthAnalyticsService(IAppDbContext db) : IGrowthAnalyticsS
             Campaign = Clean(input.Campaign, 120),
             DeviceType = device,
             BrowserFamily = browser,
+            CountryCode = Clean(location?.CountryCode, 8).ToUpperInvariant(),
+            CountryName = Clean(location?.CountryName, 100),
+            RegionCode = Clean(location?.RegionCode, 16).ToUpperInvariant(),
+            RegionName = Clean(location?.RegionName, 120),
             EngagementSeconds = Math.Clamp(input.EngagementSeconds, 0, 86_400),
             CreatedAt = now,
             OccurredAtUnixSeconds = now.ToUnixTimeSeconds(),
@@ -119,6 +131,7 @@ public sealed class GrowthAnalyticsService(IAppDbContext db) : IGrowthAnalyticsS
             NewVisitors = retention.NewVisitors,
             ReturningVisitors = retention.ReturningVisitors,
             ReturningVisitorRate = retention.ReturningVisitorRate,
+            GeoLocationConfigured = geoLocationResolver?.IsConfigured == true,
             RetentionPeriodLabel = retention.PeriodLabel,
             RetentionCohorts = retention.Cohorts,
             Trend = BuildTrend(pageViews, from, to),
@@ -130,6 +143,16 @@ public sealed class GrowthAnalyticsService(IAppDbContext db) : IGrowthAnalyticsS
             Campaigns = Breakdown(pageViews.Where(item => !string.IsNullOrWhiteSpace(item.Campaign)), item => item.Campaign),
             Devices = Breakdown(pageViews, item => item.DeviceType),
             Browsers = Breakdown(pageViews, item => item.BrowserFamily),
+            Countries = Breakdown(
+                pageViews.Where(item =>
+                    !string.IsNullOrWhiteSpace(item.CountryCode)
+                    || !string.IsNullOrWhiteSpace(item.CountryName)),
+                item => CountryLabel(item)),
+            Regions = Breakdown(
+                pageViews.Where(item =>
+                    !string.IsNullOrWhiteSpace(item.RegionCode)
+                    || !string.IsNullOrWhiteSpace(item.RegionName)),
+                item => RegionLabel(item)),
             Goals = goalReport.Goals,
             Funnels = BuildFunnelReport(funnelDefinitions, events)
         };
@@ -706,6 +729,15 @@ public sealed class GrowthAnalyticsService(IAppDbContext db) : IGrowthAnalyticsS
         !string.IsNullOrWhiteSpace(item.Source)
             ? item.Source
             : string.IsNullOrWhiteSpace(item.ReferrerHost) ? "Direct" : item.ReferrerHost;
+
+    private static string CountryLabel(WebAnalyticsEvent item) =>
+        string.IsNullOrWhiteSpace(item.CountryName) ? item.CountryCode : item.CountryName;
+
+    private static string RegionLabel(WebAnalyticsEvent item)
+    {
+        var region = string.IsNullOrWhiteSpace(item.RegionName) ? item.RegionCode : item.RegionName;
+        return string.IsNullOrWhiteSpace(item.CountryCode) ? region : $"{region}, {item.CountryCode}";
+    }
 
     private static string NormalizePath(string? value)
     {

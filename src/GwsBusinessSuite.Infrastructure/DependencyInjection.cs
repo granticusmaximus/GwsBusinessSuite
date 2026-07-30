@@ -50,6 +50,8 @@ public static class DependencyInjection
             .SetApplicationName("GwsBusinessSuite");
 
         services.Configure<ContentStudioOptions>(configuration.GetSection(ContentStudioOptions.SectionName));
+        services.AddOptions<AnalyticsGeoIpOptions>()
+            .Bind(configuration.GetSection(AnalyticsGeoIpOptions.SectionName));
         services.AddOptions<OllamaWebOptions>()
             .Bind(configuration.GetSection(OllamaWebOptions.SectionName))
             .Validate(options =>
@@ -137,6 +139,7 @@ public static class DependencyInjection
         services.AddScoped<IResumePdfService, ResumePdfService>();
         services.AddScoped<IAffiliateSuggestionService, AffiliateSuggestionService>();
         services.AddScoped<IAffiliateAnalyticsService, AffiliateAnalyticsService>();
+        services.AddSingleton<IAnalyticsGeoLocationResolver, AnalyticsGeoLocationResolver>();
         services.AddScoped<IGrowthAnalyticsService, GrowthAnalyticsService>();
         services.AddHttpClient<ISocialPublishingService, SocialPublishingService>(client =>
         {

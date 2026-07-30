@@ -15,6 +15,9 @@ services:
       # Optional live internet research for SentinelGPT. Keep the actual key in the
       # gitignored .env file as OLLAMA_WEB_API_KEY, never in this Compose file.
       OllamaWeb__ApiKey: ${OLLAMA_WEB_API_KEY:-}
+      # Optional local-only country/region enrichment. The request IP is discarded
+      # after lookup; only coarse geography is persisted.
+      AnalyticsGeoIp__DatabasePath: ${ANALYTICS_GEOIP_DATABASE_PATH:-/app/data/GeoLite2-City.mmdb}
       # TURN stays disabled when these values are absent. When the optional `turn`
       # profile is enabled, the app derives short-lived browser credentials from the
       # same secret coturn uses; the shared secret itself is never sent to clients.

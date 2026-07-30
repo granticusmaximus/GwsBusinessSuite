@@ -32,6 +32,10 @@ algorithms.
   cohort sizes and period-by-period retained visitor rates. Selected audience segments apply
   consistently to retention activity while new/returning status reflects the browser's actual
   first recorded visit.
+- Country and region reporting from a locally hosted MaxMind-compatible City database. The
+  request IP exists only long enough for the in-process lookup and is never stored or logged;
+  analytics events retain only country/region names and codes. Private, loopback, link-local,
+  carrier-grade NAT, and reserved addresses are ignored. Location is approximate.
 - SentinelGPT-assisted, network-specific Facebook, X, and LinkedIn copy with editable
   previews, per-channel character limits, drafts, scheduling, delivery state, and retry.
 - Encrypted social access tokens. Tokens remain on the server and are never returned to the
@@ -47,7 +51,6 @@ rather than represented as one finished checkbox.
 
 ### Analytics phase 2
 
-- Country/region reporting through a privacy-reviewed, locally hosted GeoIP database
 - CSV export, scheduled email reports, annotations, and comparison periods
 
 ### Analytics phase 3
@@ -78,3 +81,29 @@ rather than represented as one finished checkbox.
 
 Platform access tiers and review rules can change. Validate them against the current official
 developer documentation before connecting production accounts.
+
+## Local GeoIP database setup
+
+Geography is optional. GWS Business Suite starts normally without a database and shows a setup
+state in Growth Studio. Existing enriched history remains reportable if the database is
+temporarily unavailable.
+
+1. Create a MaxMind account and download the GeoLite2 City MMDB from the official
+   [GeoLite database page](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data).
+   Accept and follow MaxMind's license and update requirements.
+2. From the droplet, copy the downloaded file into the web container's persistent data volume:
+
+   ```bash
+   cd /opt/gwssuite
+   docker compose cp /absolute/path/GeoLite2-City.mmdb \
+     gwssuite:/app/data/GeoLite2-City.mmdb
+   docker compose restart gwssuite
+   ```
+
+3. Open Growth Studio. The Audience geography panel should say **Local database ready**.
+   Only visits received after setup gain location data; no historical IP data exists to
+   backfill by design.
+
+The default location is `/app/data/GeoLite2-City.mmdb`. To use another container path, set
+`ANALYTICS_GEOIP_DATABASE_PATH` in the deployment `.env` file. Never commit an MMDB file to
+the repository; `*.mmdb` is ignored.
