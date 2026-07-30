@@ -35,7 +35,7 @@ public sealed class SentinelAiService(
 
     private static readonly Regex TeacherPanelQuestionPattern =
         new(
-            @"\b(?:gws|sentinel|workflow|automation|code|develop|build|implement|debug|error|security|performance|architecture|database|deploy|docker|assumption|compare|recommend|strategy|why|should)\b",
+            @"\b(?:gws|sentinel|workflow|automation|code|develop|build|implement|debug|error|security|performance|architecture|database|deploy|docker|assumption|compare|recommend|strategy)\b",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     public bool IsInternetConfigured => webSearchService?.IsConfigured == true;
@@ -111,6 +111,13 @@ public sealed class SentinelAiService(
         if (conversationId == Guid.Empty) throw new ArgumentException("A conversation is required.", nameof(conversationId));
         if (!AllowedActions.Contains(action)) throw new ArgumentException("Unknown SentinelGPT action.", nameof(action));
         if (string.IsNullOrWhiteSpace(instruction)) throw new ArgumentException("An instruction or source text is required.", nameof(instruction));
+        if (instruction.Length > SentinelGptDefaults.MaxInstructionLength)
+        {
+            throw new ArgumentException(
+                $"SentinelGPT prompts are limited to {SentinelGptDefaults.MaxInstructionLength:N0} characters. " +
+                "Split this document into smaller sections and send them separately.",
+                nameof(instruction));
+        }
 
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var settings = await siteSettings.GetSettingsAsync(cancellationToken);
@@ -805,8 +812,7 @@ public sealed class SentinelAiService(
     }
 
     private static bool ShouldConsultTeacherPanel(string instruction) =>
-        instruction.Length >= 120
-        || TeacherPanelQuestionPattern.IsMatch(instruction)
+        TeacherPanelQuestionPattern.IsMatch(instruction)
         || MicrosoftDeveloperQuestionPattern.IsMatch(instruction);
 
     private static string LimitRaw(string value, int maxLength) =>

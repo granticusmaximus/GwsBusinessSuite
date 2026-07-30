@@ -92,6 +92,30 @@ public sealed class SentinelAiServiceTests
     }
 
     [Fact]
+    public async Task StreamAsync_ShouldRejectAnOversizedPromptBeforeCallingOllama()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var ollama = new FakeStreamingOllamaService(["should not be called"]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db), new SentinelWorkspaceService(db, TimeProvider.System));
+        var oversizedPrompt = new string('x', SentinelGptDefaults.MaxInstructionLength + 1);
+
+        var act = async () =>
+        {
+            await foreach (var _ in service.StreamAsync(null, SentinelAiActions.Ask, oversizedPrompt, "grant")) { }
+        };
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*32,000 characters*");
+        ollama.WasCalled.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task ReviewAsync_ShouldApproveOrRejectAPersistedRun()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -204,6 +228,31 @@ public sealed class SentinelAiServiceTests
             && item.Url == "https://learn.microsoft.com/aspnet/core/");
         completed.Citations.Should().NotContain(item => item.SourceType == "microsoft-docs"
             && item.Url == "https://not-microsoft.example/docs");
+    }
+
+    [Fact]
+    public async Task StreamAgentConversationAsync_ShouldNotLoadTeacherModelsForOrdinaryLongText()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var ollama = new FakeStreamingOllamaService(["A concise summary."]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options),
+            ollama,
+            new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System));
+        var longOrdinaryText = string.Join(' ', Enumerable.Repeat("meeting notes and customer correspondence", 30));
+
+        await foreach (var _ in service.StreamAgentConversationAsync(
+            Guid.NewGuid(), null, longOrdinaryText, "grant", includeInternet: false))
+        {
+        }
+
+        ollama.RequestedModels.Should().Equal(SentinelGptDefaults.Model);
     }
 
     [Fact]

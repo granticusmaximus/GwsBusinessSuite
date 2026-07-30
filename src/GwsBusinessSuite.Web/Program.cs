@@ -61,7 +61,11 @@ builder.Services.AddScoped<DatabaseBackupService>();
 builder.Services.AddHostedService<DatabaseBackupBackgroundService>();
 
 builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents();
+    .AddInteractiveServerComponents()
+    // Long pasted emails/documents arrive through the Blazor SignalR circuit.
+    // Retain a bounded allowance above SentinelGPT's 32,000-character prompt
+    // limit so JSON/UTF-8 framing cannot disconnect an otherwise valid paste.
+    .AddHubOptions(options => options.MaximumReceiveMessageSize = 256 * 1024);
 // Compress server-rendered HTML, JSON/API responses, and static assets. Forwarded
 // headers surface the original HTTPS scheme behind Cloudflare, so HTTPS compression
 // must be enabled explicitly or production traffic would silently skip it.

@@ -246,6 +246,7 @@
                           @bind="_instruction"
                           @bind:event="oninput"
                           @onkeydown="HandleComposerKeyDownAsync"
+                          maxlength="@SentinelGptDefaults.MaxInstructionLength"
                           placeholder="Message SentinelGPT…"
                           title="Enter to send. Shift+Enter for a new line."
                           disabled="@_generating"></textarea>
@@ -263,9 +264,15 @@
                     <i class="bi bi-arrow-up"></i>
                 </button>
             </div>
-            <small>Enter to send · Shift+Enter for a new line. @(_includeInternet
-                ? "Web on: this prompt is sent to Ollama web search. Do not include secrets."
-                : "SentinelGPT can make mistakes. Verify important information.")</small>
+            <small>
+                @if (RemainingPromptCharacters <= 2_000)
+                {
+                    <span class="sentinel-gpt-character-count">@RemainingPromptCharacters.ToString("N0") characters remaining · </span>
+                }
+                Enter to send · Shift+Enter for a new line. @(_includeInternet
+                    ? "Web on: this prompt is sent to Ollama web search. Do not include secrets."
+                    : "SentinelGPT can make mistakes. Verify important information.")
+            </small>
         </footer>
     </main>
 </div>
@@ -296,6 +303,8 @@
     private List<string> _models = [];
     private HashSet<Guid> _reviewingRunIds = [];
     private SiteSettingsView? _settings;
+    private int RemainingPromptCharacters =>
+        Math.Max(0, SentinelGptDefaults.MaxInstructionLength - _instruction.Length);
 
     private IEnumerable<(string Label, IReadOnlyList<SentinelGptConversationView> Items)> ConversationGroups
     {
@@ -436,6 +445,8 @@
             }
             else
             {
+                var output = new System.Text.StringBuilder();
+                var renderTimer = System.Diagnostics.Stopwatch.StartNew();
                 await foreach (var chunk in SentinelGptService.StreamAgentConversationAsync(
                     _conversationId.Value, null, instruction, _username, _includeInternet))
                 {
@@ -449,7 +460,17 @@
                     }
                     else
                     {
-                        _liveOutput += chunk.Delta;
+                        output.Append(chunk.Delta);
+                        // Rendering every model token creates excessive SignalR traffic
+                        // and repeated large-string allocations. Update at a smooth,
+                        // bounded cadence while retaining every streamed fragment.
+                        if (renderTimer.ElapsedMilliseconds < 75)
+                        {
+                            continue;
+                        }
+
+                        _liveOutput = output.ToString();
+                        renderTimer.Restart();
                     }
                     StateHasChanged();
                 }

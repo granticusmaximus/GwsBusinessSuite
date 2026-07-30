@@ -15,6 +15,12 @@ public static class SentinelAiActions
 public static class SentinelGptDefaults
 {
     public const string Model = "sentinelgpt";
+
+    // Keep pasted documents below both the configured model context window and the
+    // Blazor circuit's bounded inbound-message allowance. This is deliberately a
+    // character limit (rather than a token estimate) so the browser and service can
+    // enforce the exact same rule before any workspace or model work begins.
+    public const int MaxInstructionLength = 32_000;
 }
 
 // A workspace search result actually folded into a run's grounding context - see
