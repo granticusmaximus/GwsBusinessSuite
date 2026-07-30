@@ -46,13 +46,18 @@
                     <h2>Site performance</h2>
                     <p>Cookieless, first-party measurement. No raw IPs or full user agents retained.</p>
                 </div>
-                <div class="range-picker" aria-label="Analytics date range">
-                    @foreach (var days in new[] { 7, 30, 90 })
-                    {
-                        <button class="@(RangeDays == days ? "active" : null)" @onclick="() => ChangeRangeAsync(days)">
-                            @days days
-                        </button>
-                    }
+                <div class="analytics-actions">
+                    <button class="quiet-button" @onclick="ToggleGoalSetup">
+                        <i class="bi bi-bullseye"></i> Manage goals
+                    </button>
+                    <div class="range-picker" aria-label="Analytics date range">
+                        @foreach (var days in new[] { 7, 30, 90 })
+                        {
+                            <button class="@(RangeDays == days ? "active" : null)" @onclick="() => ChangeRangeAsync(days)">
+                                @days days
+                            </button>
+                        }
+                    </div>
                 </div>
             </div>
 
@@ -67,6 +72,46 @@
                     <MetricCard Label="Page views" Value="@Dashboard.PageViews.ToString("N0")" Detail="@($"{Dashboard.ViewsPerSession:N2} per session")" />
                     <MetricCard Label="Bounce rate" Value="@($"{Dashboard.BounceRate:N1}%")" Detail="Single-page sessions" />
                     <MetricCard Label="Avg. engagement" Value="@FormatDuration(Dashboard.AverageEngagement)" Detail="Active page time" />
+                </div>
+
+                <div class="growth-panel conversion-panel">
+                    <div class="panel-heading conversion-heading">
+                        <div>
+                            <span>Conversions</span>
+                            <small>Named outcomes matched against first-party events and page visits</small>
+                        </div>
+                        <div class="conversion-totals">
+                            <span><strong>@Dashboard.TotalConversions.ToString("N0")</strong><small>events</small></span>
+                            <span><strong>@($"{Dashboard.OverallConversionRate:N1}%")</strong><small>of sessions</small></span>
+                        </div>
+                    </div>
+                    @if (Dashboard.Goals.Count == 0)
+                    {
+                        <div class="goal-empty">
+                            <i class="bi bi-bullseye"></i>
+                            <div><strong>Define the action that matters.</strong><small>Track a signup, purchase, lead, or destination page without adding another analytics vendor.</small></div>
+                            <button class="quiet-button" @onclick="ToggleGoalSetup">Create first goal</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="goal-list">
+                            @foreach (var goal in Dashboard.Goals)
+                            {
+                                <button class="goal-row" @onclick="() => EditGoal(goal)" title="Edit goal">
+                                    <span class="goal-icon @(goal.IsActive ? null : "inactive")"><i class="bi bi-bullseye"></i></span>
+                                    <span class="goal-name">
+                                        <strong>@goal.Name</strong>
+                                        <small>@GoalRule(goal)</small>
+                                    </span>
+                                    <span><strong>@goal.Conversions.ToString("N0")</strong><small>conversions</small></span>
+                                    <span><strong>@($"{goal.ConversionRate:N1}%")</strong><small>session rate</small></span>
+                                    <span><strong>@goal.TopSource</strong><small>top source</small></span>
+                                    <i class="bi bi-chevron-right"></i>
+                                </button>
+                            }
+                        </div>
+                    }
                 </div>
 
                 <div class="growth-panel trend-panel">
@@ -94,6 +139,58 @@
                     <BreakdownTable Title="Campaigns" Rows="Dashboard.Campaigns" Icon="bi-megaphone" EmptyText="UTM-tagged traffic will appear here." />
                     <BreakdownTable Title="Devices" Rows="Dashboard.Devices" Icon="bi-laptop" />
                 </div>
+            }
+
+            @if (_showGoalSetup)
+            {
+                <aside class="account-drawer goal-drawer" aria-label="Analytics goal settings">
+                    <header>
+                        <div><strong>Conversion goals</strong><small>Turn first-party activity into named business outcomes.</small></div>
+                        <button @onclick="ToggleGoalSetup" aria-label="Close goal settings">×</button>
+                    </header>
+                    @foreach (var goal in Dashboard.Goals)
+                    {
+                        <div class="connected-account goal-definition">
+                            <i class="bi bi-bullseye"></i>
+                            <span>
+                                <strong>@goal.Name</strong>
+                                <small>@GoalRule(goal) · @(goal.IsActive ? "Active" : "Paused")</small>
+                            </span>
+                            <button title="Edit goal" aria-label="@($"Edit {goal.Name}")" @onclick="() => EditGoal(goal)"><i class="bi bi-pencil"></i></button>
+                            <button title="Delete goal definition" aria-label="@($"Delete {goal.Name}")" @onclick="() => DeleteGoalAsync(goal.Id)"><i class="bi bi-trash3"></i></button>
+                        </div>
+                    }
+                    <form @onsubmit="SaveGoalAsync" @onsubmit:preventDefault>
+                        <hr />
+                        <div class="drawer-form-heading">
+                            <strong>@(GoalId.HasValue ? "Edit goal" : "New goal")</strong>
+                            @if (GoalId.HasValue)
+                            {
+                                <button type="button" @onclick="ResetGoalForm">Add another</button>
+                            }
+                        </div>
+                        <label>Goal name
+                            <input @bind="GoalName" maxlength="120" placeholder="Newsletter signup" />
+                        </label>
+                        <label>Conversion happens when
+                            <select @bind="GoalMatchType">
+                                <option value="@AnalyticsGoalMatchTypes.Event">A custom event is recorded</option>
+                                <option value="@AnalyticsGoalMatchTypes.PagePath">A page is visited</option>
+                            </select>
+                        </label>
+                        <label>@GoalMatchLabel
+                            <input @bind="GoalMatchValue" maxlength="500" placeholder="@GoalMatchPlaceholder" />
+                        </label>
+                        <p class="credential-note">@GoalMatchHelp</p>
+                        <label class="active-toggle">
+                            <input type="checkbox" @bind="GoalIsActive" />
+                            Include this goal in conversion reporting
+                        </label>
+                        <button type="submit" class="primary-button w-100" disabled="@IsBusy">
+                            @(GoalId.HasValue ? "Save changes" : "Create goal")
+                        </button>
+                    </form>
+                </aside>
             }
         </section>
     }
@@ -255,6 +352,7 @@
     private int RangeDays = 30;
     private GrowthAnalyticsDashboard Dashboard = new();
     private bool _analyticsLoaded;
+    private bool _showGoalSetup;
     private bool IsBusy;
     private string ErrorMessage = string.Empty;
     private string StatusMessage = string.Empty;
@@ -272,6 +370,11 @@
     private string AccountDisplayName = string.Empty;
     private string AccountExternalId = string.Empty;
     private string AccountAccessToken = string.Empty;
+    private Guid? GoalId;
+    private string GoalName = string.Empty;
+    private string GoalMatchType = AnalyticsGoalMatchTypes.Event;
+    private string GoalMatchValue = string.Empty;
+    private bool GoalIsActive = true;
 
     protected override async Task OnInitializedAsync()
     {
@@ -298,6 +401,28 @@
         _analyticsLoaded = false;
         await RunAsync(LoadAnalyticsAsync);
     }
+
+    private async Task SaveGoalAsync() => await RunAsync(async () =>
+    {
+        var wasEditing = GoalId.HasValue;
+        await AnalyticsService.SaveGoalAsync(new(
+            GoalId,
+            GoalName,
+            GoalMatchType,
+            GoalMatchValue,
+            GoalIsActive));
+        await LoadAnalyticsAsync();
+        StatusMessage = wasEditing ? "Conversion goal updated." : "Conversion goal created.";
+        ResetGoalForm();
+    });
+
+    private async Task DeleteGoalAsync(Guid id) => await RunAsync(async () =>
+    {
+        await AnalyticsService.DeleteGoalAsync(id);
+        if (GoalId == id) ResetGoalForm();
+        await LoadAnalyticsAsync();
+        StatusMessage = "Goal definition removed. Historical analytics events were retained.";
+    });
 
     private async Task GenerateAsync()
     {
@@ -389,6 +514,27 @@
         if (selected) _selectedAccounts.Add(id); else { _selectedAccounts.Remove(id); _variants.Remove(id); }
     }
     private void ToggleAccountSetup() => _showAccountSetup = !_showAccountSetup;
+    private void ToggleGoalSetup()
+    {
+        _showGoalSetup = !_showGoalSetup;
+        if (!_showGoalSetup) ResetGoalForm();
+    }
+    private void EditGoal(AnalyticsGoalView goal)
+    {
+        GoalId = goal.Id;
+        GoalName = goal.Name;
+        GoalMatchType = goal.MatchType;
+        GoalMatchValue = goal.MatchValue;
+        GoalIsActive = goal.IsActive;
+        _showGoalSetup = true;
+    }
+    private void ResetGoalForm()
+    {
+        GoalId = null;
+        GoalName = GoalMatchValue = string.Empty;
+        GoalMatchType = AnalyticsGoalMatchTypes.Event;
+        GoalIsActive = true;
+    }
     private void ResetComposer()
     {
         PostTitle = Topic = SourceUrl = string.Empty;
@@ -430,4 +576,13 @@
         SocialNetworks.LinkedIn => "Use a member token with w_member_social, or w_organization_social for an approved organization Page.",
         _ => "Use an OAuth 2.0 user access token with tweet.write—not an app-only bearer token."
     };
+    private string GoalMatchLabel => GoalMatchType == AnalyticsGoalMatchTypes.Event ? "Event name" : "Public page path";
+    private string GoalMatchPlaceholder => GoalMatchType == AnalyticsGoalMatchTypes.Event ? "newsletter_signup" : "/thank-you";
+    private string GoalMatchHelp => GoalMatchType == AnalyticsGoalMatchTypes.Event
+        ? "Use the exact event name sent to the first-party analytics collector."
+        : "Use an exact path such as /thank-you, or end with * to include every path below a prefix.";
+    private static string GoalRule(AnalyticsGoalView goal) =>
+        goal.MatchType == AnalyticsGoalMatchTypes.Event
+            ? $"Event · {goal.MatchValue}"
+            : $"Page · {goal.MatchValue}";
 }

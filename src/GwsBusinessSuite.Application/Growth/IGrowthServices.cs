@@ -11,6 +11,14 @@ public interface IGrowthAnalyticsService
         DateTimeOffset from,
         DateTimeOffset to,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<AnalyticsGoalView>> GetGoalsAsync(
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken = default);
+
+    Task SaveGoalAsync(AnalyticsGoalInput input, CancellationToken cancellationToken = default);
+    Task DeleteGoalAsync(Guid goalId, CancellationToken cancellationToken = default);
 }
 
 public interface ISocialPublishingService
@@ -33,4 +41,3 @@ public interface ISocialPublishingService
     Task<SocialPublishResult> PublishAsync(Guid postId, CancellationToken cancellationToken = default);
     Task PublishDueAsync(CancellationToken cancellationToken = default);
 }
-

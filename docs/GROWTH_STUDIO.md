@@ -15,6 +15,10 @@ algorithms.
 - Indexed, server-side date filtering with 7/30/90-day ranges, real-time visitor count,
   audience trend, top pages, acquisition, campaigns, devices, bounce rate, and engagement.
 - `window.gwsAnalytics.track("event-name")` for first-party custom events.
+- Named conversion goals for exact custom events, exact destination pages, or page-path
+  prefixes ending in `*`, with active/paused state, conversion counts, unique converting
+  visitors, session conversion rate, and top acquisition source. Removing a goal never
+  removes the underlying analytics history.
 - SentinelGPT-assisted, network-specific Facebook, X, and LinkedIn copy with editable
   previews, per-channel character limits, drafts, scheduling, delivery state, and retry.
 - Encrypted social access tokens. Tokens remain on the server and are never returned to the
@@ -30,7 +34,6 @@ rather than represented as one finished checkbox.
 
 ### Analytics phase 2
 
-- Named goals/conversions and a goal-management UI over existing custom events
 - Funnel builder and step-dropoff reports
 - Saved segments and report filters
 - Retention/cohort and new-versus-returning analysis

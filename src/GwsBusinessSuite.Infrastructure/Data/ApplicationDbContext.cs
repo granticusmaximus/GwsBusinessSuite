@@ -78,6 +78,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<ArticleAffiliateClick> ArticleAffiliateClicks => Set<ArticleAffiliateClick>();
     public DbSet<CjCommissionRecord> CjCommissionRecords => Set<CjCommissionRecord>();
     public DbSet<WebAnalyticsEvent> WebAnalyticsEvents => Set<WebAnalyticsEvent>();
+    public DbSet<AnalyticsGoal> AnalyticsGoals => Set<AnalyticsGoal>();
     public DbSet<SocialAccount> SocialAccounts => Set<SocialAccount>();
     public DbSet<SocialPost> SocialPosts => Set<SocialPost>();
     public DbSet<SocialPostTarget> SocialPostTargets => Set<SocialPostTarget>();
@@ -342,6 +343,11 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<WebAnalyticsEvent>().Property(x => x.SessionKey).HasMaxLength(64);
         modelBuilder.Entity<WebAnalyticsEvent>().Property(x => x.Path).HasMaxLength(500);
         modelBuilder.Entity<WebAnalyticsEvent>().Property(x => x.ReferrerHost).HasMaxLength(160);
+        modelBuilder.Entity<AnalyticsGoal>().HasIndex(x => x.Name).IsUnique();
+        modelBuilder.Entity<AnalyticsGoal>().HasIndex(x => new { x.IsActive, x.MatchType });
+        modelBuilder.Entity<AnalyticsGoal>().Property(x => x.Name).HasMaxLength(120);
+        modelBuilder.Entity<AnalyticsGoal>().Property(x => x.MatchType).HasMaxLength(24);
+        modelBuilder.Entity<AnalyticsGoal>().Property(x => x.MatchValue).HasMaxLength(500);
         modelBuilder.Entity<SocialAccount>().HasIndex(x => new { x.Network, x.ExternalAccountId }).IsUnique();
         modelBuilder.Entity<SocialAccount>().Property(x => x.Network).HasMaxLength(24);
         modelBuilder.Entity<SocialPost>().HasIndex(x => new { x.Status, x.ScheduledFor });

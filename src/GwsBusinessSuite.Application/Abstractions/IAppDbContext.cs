@@ -59,6 +59,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<ArticleAffiliateClick> ArticleAffiliateClicks { get; }
     DbSet<CjCommissionRecord> CjCommissionRecords { get; }
     DbSet<WebAnalyticsEvent> WebAnalyticsEvents { get; }
+    DbSet<AnalyticsGoal> AnalyticsGoals { get; }
     DbSet<SocialAccount> SocialAccounts { get; }
     DbSet<SocialPost> SocialPosts { get; }
     DbSet<SocialPostTarget> SocialPostTargets { get; }

@@ -963,6 +963,24 @@ public sealed class WebAnalyticsEvent : AuditableEntity
     public long OccurredAtUnixSeconds { get; set; }
 }
 
+public static class AnalyticsGoalMatchTypes
+{
+    public const string Event = "Event";
+    public const string PagePath = "PagePath";
+    public static readonly string[] All = [Event, PagePath];
+}
+
+// A named conversion definition evaluated against the same minimized first-party event
+// stream as the dashboard. PagePath patterns are exact unless they end in '*', which
+// intentionally means prefix match (for example /checkout/success/*).
+public sealed class AnalyticsGoal : AuditableEntity
+{
+    public required string Name { get; set; }
+    public string MatchType { get; set; } = AnalyticsGoalMatchTypes.Event;
+    public required string MatchValue { get; set; }
+    public bool IsActive { get; set; } = true;
+}
+
 public static class SocialNetworks
 {
     public const string Facebook = "Facebook";
