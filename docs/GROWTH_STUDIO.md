@@ -8,8 +8,10 @@ algorithms.
 
 ## Delivered foundation
 
-- Cookieless public-site page views, session-scoped visitors, engagement time, custom events,
-  referrer host, UTM acquisition dimensions, device category, and browser family.
+- Cookieless public-site page views, engagement time, custom events, referrer host, UTM
+  acquisition dimensions, device category, and browser family. A random first-party browser
+  identifier is stored in local storage with a rolling 90-day expiry so returning visits can
+  be measured without cookies, IP storage, fingerprinting, or third-party analytics requests.
 - No raw IP address, full user-agent, full referrer URL, query string, or admin-route activity
   is stored. Do Not Track and Global Privacy Control disable the browser collector.
 - Indexed, server-side date filtering with 7/30/90-day ranges, real-time visitor count,
@@ -26,6 +28,10 @@ algorithms.
   campaign, referrer, device, and browser dimensions. Applying a segment filters the complete
   visit, so dashboard metrics, engagement, goals, and funnels remain internally consistent.
   Segment definitions can be edited or removed without changing historical analytics events.
+- New-versus-returning visitor reporting and daily/weekly retention cohorts, including
+  cohort sizes and period-by-period retained visitor rates. Selected audience segments apply
+  consistently to retention activity while new/returning status reflects the browser's actual
+  first recorded visit.
 - SentinelGPT-assisted, network-specific Facebook, X, and LinkedIn copy with editable
   previews, per-channel character limits, drafts, scheduling, delivery state, and retry.
 - Encrypted social access tokens. Tokens remain on the server and are never returned to the
@@ -41,7 +47,6 @@ rather than represented as one finished checkbox.
 
 ### Analytics phase 2
 
-- Retention/cohort and new-versus-returning analysis
 - Country/region reporting through a privacy-reviewed, locally hosted GeoIP database
 - CSV export, scheduled email reports, annotations, and comparison periods
 

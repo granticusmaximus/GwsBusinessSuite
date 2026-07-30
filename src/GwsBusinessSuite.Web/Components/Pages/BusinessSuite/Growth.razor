@@ -72,11 +72,13 @@
             else
             {
                 <div class="metric-grid">
-                    <MetricCard Label="Unique visitors" Value="@Dashboard.Visitors.ToString("N0")" Detail="Session-scoped, cookieless" />
+                    <MetricCard Label="Unique visitors" Value="@Dashboard.Visitors.ToString("N0")" Detail="First-party, cookieless" />
                     <MetricCard Label="Page views" Value="@Dashboard.PageViews.ToString("N0")" Detail="@($"{Dashboard.ViewsPerSession:N2} per session")" />
                     <MetricCard Label="Bounce rate" Value="@($"{Dashboard.BounceRate:N1}%")" Detail="Single-page sessions" />
                     <MetricCard Label="Avg. engagement" Value="@FormatDuration(Dashboard.AverageEngagement)" Detail="Active page time" />
                 </div>
+
+                <GrowthRetentionPanel Dashboard="Dashboard" />
 
                 <div class="growth-panel conversion-panel">
                     <div class="panel-heading conversion-heading">

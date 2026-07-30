@@ -93,6 +93,7 @@ public sealed class GrowthAnalyticsService(IAppDbContext db) : IGrowthAnalyticsS
             .Include(item => item.Steps)
             .OrderBy(item => item.Name)
             .ToListAsync(cancellationToken);
+        var retention = await BuildRetentionAsync(pageViews, from, to, cancellationToken);
 
         return new GrowthAnalyticsDashboard
         {
@@ -115,6 +116,11 @@ public sealed class GrowthAnalyticsService(IAppDbContext db) : IGrowthAnalyticsS
             OverallConversionRate = sessions.Count == 0
                 ? 0
                 : Math.Round(goalReport.ActiveConvertingSessions.Count * 100m / sessions.Count, 1),
+            NewVisitors = retention.NewVisitors,
+            ReturningVisitors = retention.ReturningVisitors,
+            ReturningVisitorRate = retention.ReturningVisitorRate,
+            RetentionPeriodLabel = retention.PeriodLabel,
+            RetentionCohorts = retention.Cohorts,
             Trend = BuildTrend(pageViews, from, to),
             TopPages = Breakdown(pageViews, item => item.Path),
             TopSources = Breakdown(pageViews, item =>
@@ -389,6 +395,97 @@ public sealed class GrowthAnalyticsService(IAppDbContext db) : IGrowthAnalyticsS
         return events.Where(item => matchingSessions.Contains(item.SessionKey)).ToList();
     }
 
+    private async Task<RetentionReport> BuildRetentionAsync(
+        IReadOnlyCollection<WebAnalyticsEvent> pageViews,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken)
+    {
+        var visitorKeys = pageViews
+            .Select(item => item.VisitorKey)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (visitorKeys.Count == 0) return new(0, 0, 0, "Day", []);
+
+        var firstVisits = await db.WebAnalyticsEvents.AsNoTracking()
+            .Where(item => item.EventName == WebAnalyticsEventNames.PageView
+                && visitorKeys.Contains(item.VisitorKey))
+            .GroupBy(item => item.VisitorKey)
+            .Select(group => new
+            {
+                VisitorKey = group.Key,
+                FirstVisitUnixSeconds = group.Min(item => item.OccurredAtUnixSeconds)
+            })
+            .ToDictionaryAsync(
+                item => item.VisitorKey,
+                item => item.FirstVisitUnixSeconds,
+                StringComparer.Ordinal,
+                cancellationToken);
+
+        var fromUnix = from.ToUnixTimeSeconds();
+        var newVisitorKeys = visitorKeys
+            .Where(key => firstVisits.GetValueOrDefault(key, long.MaxValue) >= fromUnix)
+            .ToHashSet(StringComparer.Ordinal);
+        var returningVisitors = visitorKeys.Count - newVisitorKeys.Count;
+        var rangeDays = Math.Max(1, (int)Math.Round((to - from).TotalDays, MidpointRounding.AwayFromZero));
+        var periodDays = rangeDays <= 14 ? 1 : 7;
+        var periodLabel = periodDays == 1 ? "Day" : "Week";
+        var periodCount = Math.Min(8, (int)Math.Ceiling(rangeDays / (double)periodDays));
+        var reportStart = DateOnly.FromDateTime(from.UtcDateTime);
+        var reportEnd = DateOnly.FromDateTime(to.AddTicks(-1).UtcDateTime);
+        var activityByVisitor = pageViews
+            .GroupBy(item => item.VisitorKey, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(item => DateOnly.FromDateTime(
+                        DateTimeOffset.FromUnixTimeSeconds(item.OccurredAtUnixSeconds).UtcDateTime))
+                    .Distinct()
+                    .ToList(),
+                StringComparer.Ordinal);
+
+        var cohorts = newVisitorKeys
+            .Select(key =>
+            {
+                var firstDate = DateOnly.FromDateTime(
+                    DateTimeOffset.FromUnixTimeSeconds(firstVisits[key]).UtcDateTime);
+                var bucket = Math.Max(0, (firstDate.DayNumber - reportStart.DayNumber) / periodDays);
+                return new { VisitorKey = key, CohortStart = reportStart.AddDays(bucket * periodDays) };
+            })
+            .GroupBy(item => item.CohortStart)
+            .OrderBy(group => group.Key)
+            .Select(group =>
+            {
+                var cohortKeys = group.Select(item => item.VisitorKey).ToHashSet(StringComparer.Ordinal);
+                var cells = Enumerable.Range(0, periodCount)
+                    .Select(periodIndex =>
+                    {
+                        var periodStart = group.Key.AddDays(periodIndex * periodDays);
+                        if (periodStart > reportEnd)
+                            return new AnalyticsRetentionCell(periodIndex, null, null);
+                        var periodEnd = periodStart.AddDays(periodDays);
+                        var activeVisitors = cohortKeys.Count(key =>
+                            activityByVisitor.GetValueOrDefault(key, [])
+                                .Any(date => date >= periodStart && date < periodEnd));
+                        return new AnalyticsRetentionCell(
+                            periodIndex,
+                            activeVisitors,
+                            cohortKeys.Count == 0
+                                ? 0
+                                : Math.Round(activeVisitors * 100m / cohortKeys.Count, 1));
+                    })
+                    .ToList();
+                return new AnalyticsRetentionCohort(group.Key, cohortKeys.Count, cells);
+            })
+            .ToList();
+
+        return new(
+            newVisitorKeys.Count,
+            returningVisitors,
+            visitorKeys.Count == 0 ? 0 : Math.Round(returningVisitors * 100m / visitorKeys.Count, 1),
+            periodLabel,
+            cohorts);
+    }
+
     private static bool Matches(AnalyticsSegmentRule rule, WebAnalyticsEvent item)
     {
         var value = rule.Dimension switch
@@ -656,4 +753,11 @@ public sealed class GrowthAnalyticsService(IAppDbContext db) : IGrowthAnalyticsS
     private sealed record GoalReport(
         IReadOnlyList<AnalyticsGoalView> Goals,
         HashSet<string> ActiveConvertingSessions);
+
+    private sealed record RetentionReport(
+        int NewVisitors,
+        int ReturningVisitors,
+        decimal ReturningVisitorRate,
+        string PeriodLabel,
+        IReadOnlyList<AnalyticsRetentionCohort> Cohorts);
 }

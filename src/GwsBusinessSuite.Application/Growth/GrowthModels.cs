@@ -87,6 +87,16 @@ public sealed record AnalyticsSegmentView(
     string Name,
     IReadOnlyList<AnalyticsSegmentRuleView> Rules);
 
+public sealed record AnalyticsRetentionCell(
+    int PeriodIndex,
+    int? Visitors,
+    decimal? Rate);
+
+public sealed record AnalyticsRetentionCohort(
+    DateOnly CohortStart,
+    int Visitors,
+    IReadOnlyList<AnalyticsRetentionCell> Periods);
+
 public sealed class GrowthAnalyticsDashboard
 {
     public int Visitors { get; init; }
@@ -98,6 +108,11 @@ public sealed class GrowthAnalyticsDashboard
     public int VisitorsNow { get; init; }
     public int TotalConversions { get; init; }
     public decimal OverallConversionRate { get; init; }
+    public int NewVisitors { get; init; }
+    public int ReturningVisitors { get; init; }
+    public decimal ReturningVisitorRate { get; init; }
+    public string RetentionPeriodLabel { get; init; } = "Day";
+    public IReadOnlyList<AnalyticsRetentionCohort> RetentionCohorts { get; init; } = [];
     public IReadOnlyList<AnalyticsPoint> Trend { get; init; } = [];
     public IReadOnlyList<AnalyticsBreakdownRow> TopPages { get; init; } = [];
     public IReadOnlyList<AnalyticsBreakdownRow> TopSources { get; init; } = [];

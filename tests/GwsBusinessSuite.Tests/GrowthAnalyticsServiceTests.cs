@@ -77,6 +77,35 @@ public sealed class GrowthAnalyticsServiceTests
     }
 
     [Fact]
+    public async Task GetDashboardAsync_ShouldReportNewReturningVisitorsAndRetentionCohorts()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var from = new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);
+        var to = from.AddDays(7).AddMinutes(1);
+        fixture.Db.WebAnalyticsEvents.AddRange(
+            Event("pageview", "returning", "old-session", "/", from.AddDays(-3)),
+            Event("pageview", "returning", "return-session", "/", from.AddHours(1)),
+            Event("pageview", "new-a", "new-a-first", "/", from.AddHours(2)),
+            Event("pageview", "new-b", "new-b-first", "/", from.AddHours(3)),
+            Event("pageview", "new-a", "new-a-return", "/blog", from.AddDays(2).AddHours(1)));
+        await fixture.Db.SaveChangesAsync();
+
+        var dashboard = await new GrowthAnalyticsService(fixture.Db).GetDashboardAsync(from, to);
+
+        dashboard.Visitors.Should().Be(3);
+        dashboard.NewVisitors.Should().Be(2);
+        dashboard.ReturningVisitors.Should().Be(1);
+        dashboard.ReturningVisitorRate.Should().BeApproximately(33.3m, 0.01m);
+        dashboard.RetentionPeriodLabel.Should().Be("Day");
+        var cohort = dashboard.RetentionCohorts.Should().ContainSingle().Which;
+        cohort.CohortStart.Should().Be(new DateOnly(2026, 7, 1));
+        cohort.Visitors.Should().Be(2);
+        cohort.Periods.Should().HaveCount(7);
+        cohort.Periods[0].Should().BeEquivalentTo(new { Visitors = (int?)2, Rate = (decimal?)100m });
+        cohort.Periods[2].Should().BeEquivalentTo(new { Visitors = (int?)1, Rate = (decimal?)50m });
+    }
+
+    [Fact]
     public async Task GetDashboardAsync_ShouldReportEventGoalsByConvertingSession()
     {
         await using var fixture = await Fixture.CreateAsync();

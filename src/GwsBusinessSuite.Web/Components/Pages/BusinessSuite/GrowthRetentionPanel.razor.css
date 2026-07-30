@@ -1,0 +1,91 @@
+.retention-panel {
+    margin-bottom: .9rem;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,.09);
+    border-radius: .9rem;
+    background: #191714;
+    color: #f7f3ed;
+}
+
+.retention-panel > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: .9rem 1rem;
+    border-bottom: 1px solid rgba(255,255,255,.09);
+}
+
+.retention-panel header > div:first-child span,
+.retention-panel header > div:first-child small,
+.retention-summary strong,
+.retention-summary small {
+    display: block;
+}
+
+.retention-panel header > div:first-child span { font-weight: 800; }
+.retention-panel header > div:first-child small,
+.retention-summary small {
+    color: #9b958e;
+    font-size: .65rem;
+}
+
+.retention-summary {
+    display: flex;
+    align-items: center;
+    gap: 1.35rem;
+    text-align: right;
+}
+
+.retention-summary strong { font: 650 1.15rem/1.1 Georgia, serif; }
+
+.cohort-scroll { overflow-x: auto; }
+.cohort-scroll table {
+    width: 100%;
+    min-width: 620px;
+    border-collapse: collapse;
+    font-size: .7rem;
+}
+
+.cohort-scroll th, .cohort-scroll td {
+    min-width: 68px;
+    padding: .65rem .7rem;
+    border-right: 1px solid rgba(255,255,255,.06);
+    border-bottom: 1px solid rgba(255,255,255,.06);
+    text-align: center;
+}
+
+.cohort-scroll th:first-child { min-width: 105px; text-align: left; }
+.cohort-scroll thead th {
+    color: #9b958e;
+    font-size: .6rem;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+}
+.cohort-scroll tbody th { font-weight: 750; }
+.cohort-scroll tbody td:nth-child(2) { color: #c7c1b9; }
+.retention-cell { font-weight: 800; }
+
+.retention-empty {
+    display: flex;
+    align-items: center;
+    gap: .8rem;
+    padding: 1rem;
+}
+.retention-empty > i { color: #f59e0b; font-size: 1.1rem; }
+.retention-empty strong, .retention-empty small { display: block; }
+.retention-empty small { margin-top: .15rem; color: #9b958e; font-size: .68rem; }
+
+.retention-privacy {
+    margin: 0;
+    padding: .7rem 1rem;
+    border-top: 1px solid rgba(255,255,255,.06);
+    color: #837d76;
+    font-size: .61rem;
+    line-height: 1.45;
+}
+
+@media (max-width: 620px) {
+    .retention-panel > header { align-items: flex-start; flex-direction: column; }
+    .retention-summary { width: 100%; justify-content: space-between; text-align: left; }
+}

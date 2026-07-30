@@ -943,9 +943,9 @@ public static class WebAnalyticsEventNames
     public const string Engagement = "engagement";
 }
 
-// Privacy-first, first-party website telemetry. VisitorKey and SessionKey are random,
-// browser-generated, session-scoped identifiers; no cookie, raw IP address, full
-// referrer URL, or full user-agent is persisted.
+// Privacy-first, first-party website telemetry. VisitorKey is a random browser-generated
+// identifier capped client-side at 90 days; SessionKey is scoped to the browser session.
+// No cookie, fingerprint, raw IP address, full referrer URL, or full user-agent is persisted.
 public sealed class WebAnalyticsEvent : AuditableEntity
 {
     public required string EventName { get; set; }

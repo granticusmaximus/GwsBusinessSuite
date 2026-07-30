@@ -7,7 +7,7 @@
         return;
     }
 
-    const key = name => {
+    const sessionKey = name => {
         try {
             const existing = sessionStorage.getItem(name);
             if (existing) return existing;
@@ -18,8 +18,28 @@
             return crypto.randomUUID();
         }
     };
-    const visitorKey = key("gws_analytics_visitor");
-    const sessionKey = key("gws_analytics_session");
+    const visitorKey = (() => {
+        const storageKey = "gws_analytics_visitor_v2";
+        const now = Date.now();
+        const expiresAt = now + (90 * 24 * 60 * 60 * 1000);
+        try {
+            const stored = JSON.parse(localStorage.getItem(storageKey) || "null");
+            if (stored
+                && typeof stored.id === "string"
+                && stored.id.length <= 64
+                && Number.isFinite(stored.expiresAt)
+                && stored.expiresAt > now) {
+                localStorage.setItem(storageKey, JSON.stringify({ id: stored.id, expiresAt }));
+                return stored.id;
+            }
+            const id = crypto.randomUUID();
+            localStorage.setItem(storageKey, JSON.stringify({ id, expiresAt }));
+            return id;
+        } catch {
+            return sessionKey("gws_analytics_visitor");
+        }
+    })();
+    const visitKey = sessionKey("gws_analytics_session");
     const startedAt = performance.now();
     let engagementSent = false;
     const query = new URLSearchParams(window.location.search);
@@ -27,7 +47,7 @@
     const payload = (eventName, engagementSeconds = 0) => JSON.stringify({
         eventName,
         visitorKey,
-        sessionKey,
+        sessionKey: visitKey,
         path: window.location.pathname,
         pageTitle: document.title,
         referrer: document.referrer,

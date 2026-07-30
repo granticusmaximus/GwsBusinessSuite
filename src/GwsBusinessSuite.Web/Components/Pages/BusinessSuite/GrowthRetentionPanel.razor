@@ -1,0 +1,89 @@
+@using GwsBusinessSuite.Application.Growth
+
+<section class="retention-panel">
+    <header>
+        <div>
+            <span>Visitor retention</span>
+            <small>New versus returning browsers and cohort activity over time</small>
+        </div>
+        <div class="retention-summary">
+            <span><strong>@Dashboard.NewVisitors.ToString("N0")</strong><small>new</small></span>
+            <span><strong>@Dashboard.ReturningVisitors.ToString("N0")</strong><small>returning</small></span>
+            <span><strong>@($"{Dashboard.ReturningVisitorRate:N1}%")</strong><small>returning share</small></span>
+        </div>
+    </header>
+
+    @if (Dashboard.RetentionCohorts.Count == 0)
+    {
+        <div class="retention-empty">
+            <i class="bi bi-arrow-repeat"></i>
+            <div>
+                <strong>Retention will build with repeat visits.</strong>
+                <small>New visitor cohorts appear after first-party page views are collected.</small>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="cohort-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Cohort</th>
+                        <th>Visitors</th>
+                        @foreach (var period in PeriodIndexes)
+                        {
+                            <th>@Dashboard.RetentionPeriodLabel @period</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var cohort in Dashboard.RetentionCohorts)
+                    {
+                        <tr>
+                            <th>@CohortLabel(cohort.CohortStart)</th>
+                            <td>@cohort.Visitors.ToString("N0")</td>
+                            @foreach (var cell in cohort.Periods)
+                            {
+                                <td class="retention-cell"
+                                    style="@CellStyle(cell.Rate)"
+                                    title="@CellTitle(cell)">
+                                    @(cell.Rate.HasValue ? $"{cell.Rate:N0}%" : "—")
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <p class="retention-privacy">
+        Uses a random first-party browser ID that expires 90 days after the last visit. No cookie,
+        fingerprint, raw IP, or third-party analytics request is used; Do Not Track and Global Privacy Control disable collection.
+    </p>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public GrowthAnalyticsDashboard Dashboard { get; set; } = new();
+
+    private IEnumerable<int> PeriodIndexes =>
+        Enumerable.Range(
+            0,
+            Dashboard.RetentionCohorts.Select(item => item.Periods.Count).DefaultIfEmpty(0).Max());
+
+    private string CohortLabel(DateOnly date) =>
+        Dashboard.RetentionPeriodLabel == "Week" ? $"Week of {date:MMM d}" : date.ToString("MMM d");
+
+    private static string CellStyle(decimal? rate)
+    {
+        if (!rate.HasValue) return string.Empty;
+        var alpha = .05 + ((double)rate.Value / 100 * .4);
+        return $"background:rgba(245,158,11,{alpha:0.###})";
+    }
+
+    private static string CellTitle(AnalyticsRetentionCell cell) =>
+        cell.Rate.HasValue
+            ? $"{cell.Visitors:N0} retained visitor{(cell.Visitors == 1 ? string.Empty : "s")} · {cell.Rate:N1}%"
+            : "This cohort has not reached this period yet.";
+}
