@@ -243,4 +243,11 @@
 			});
 		}
 	};
+
+	window.sentinelGptChat = {
+		scrollToBottom: function (thread) {
+			if (!(thread instanceof HTMLElement)) return;
+			thread.scrollTop = thread.scrollHeight;
+		}
+	};
 })();
