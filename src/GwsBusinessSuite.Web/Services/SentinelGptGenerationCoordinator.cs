@@ -9,6 +9,7 @@ public static class SentinelGptGenerationStatuses
     public const string Queued = "queued";
     public const string Running = "running";
     public const string Completed = "completed";
+    public const string Cancelled = "cancelled";
     public const string Failed = "failed";
 }
 
@@ -28,7 +29,9 @@ public sealed record SentinelGptGenerationSnapshot(
     DateTimeOffset UpdatedAt)
 {
     public bool IsTerminal =>
-        Status is SentinelGptGenerationStatuses.Completed or SentinelGptGenerationStatuses.Failed;
+        Status is SentinelGptGenerationStatuses.Completed
+            or SentinelGptGenerationStatuses.Cancelled
+            or SentinelGptGenerationStatuses.Failed;
 }
 
 /// <summary>
@@ -114,9 +117,23 @@ public sealed class SentinelGptGenerationCoordinator(
             .FirstOrDefault();
     }
 
+    public bool Cancel(Guid id, string requestedBy)
+    {
+        if (!_jobs.TryGetValue(id, out var state)
+            || !string.Equals(state.RequestedBy, requestedBy, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return state.TryCancel(timeProvider.GetUtcNow());
+    }
+
     private async Task RunAsync(GenerationState state, CancellationToken stoppingToken)
     {
         state.MarkRunning(timeProvider.GetUtcNow());
+        using var generationToken = CancellationTokenSource.CreateLinkedTokenSource(
+            stoppingToken,
+            state.CancellationToken);
         try
         {
             await using var scope = scopeFactory.CreateAsyncScope();
@@ -127,12 +144,17 @@ public sealed class SentinelGptGenerationCoordinator(
                 state.Instruction,
                 state.RequestedBy,
                 state.IncludeInternet,
-                stoppingToken))
+                generationToken.Token))
             {
                 state.Apply(chunk, timeProvider.GetUtcNow());
             }
 
             state.MarkCompleted(timeProvider.GetUtcNow());
+        }
+        catch (OperationCanceledException)
+            when (state.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
+        {
+            state.MarkCancelled(timeProvider.GetUtcNow());
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -158,7 +180,10 @@ public sealed class SentinelGptGenerationCoordinator(
         {
             if (pair.Value.IsTerminal && pair.Value.UpdatedAt < cutoff)
             {
-                _jobs.TryRemove(pair.Key, out _);
+                if (_jobs.TryRemove(pair.Key, out var removed))
+                {
+                    removed.Dispose();
+                }
             }
         }
     }
@@ -167,6 +192,7 @@ public sealed class SentinelGptGenerationCoordinator(
     {
         private readonly object _gate = new();
         private readonly StringBuilder _output = new();
+        private readonly CancellationTokenSource _cancellation = new();
         private string _status = SentinelGptGenerationStatuses.Queued;
         private string _activity = "Preparing SentinelGPT";
         private string? _error;
@@ -199,6 +225,8 @@ public sealed class SentinelGptGenerationCoordinator(
         public string RequestedBy { get; }
         public bool IncludeInternet { get; }
         public DateTimeOffset StartedAt { get; }
+        public CancellationToken CancellationToken => _cancellation.Token;
+        public bool IsCancellationRequested => _cancellation.IsCancellationRequested;
 
         public bool IsTerminal
         {
@@ -207,6 +235,7 @@ public sealed class SentinelGptGenerationCoordinator(
                 lock (_gate)
                 {
                     return _status is SentinelGptGenerationStatuses.Completed
+                        or SentinelGptGenerationStatuses.Cancelled
                         or SentinelGptGenerationStatuses.Failed;
                 }
             }
@@ -227,6 +256,11 @@ public sealed class SentinelGptGenerationCoordinator(
         {
             lock (_gate)
             {
+                if (_status == SentinelGptGenerationStatuses.Cancelled)
+                {
+                    return;
+                }
+
                 _status = SentinelGptGenerationStatuses.Running;
                 _updatedAt = updatedAt;
             }
@@ -236,6 +270,11 @@ public sealed class SentinelGptGenerationCoordinator(
         {
             lock (_gate)
             {
+                if (_status == SentinelGptGenerationStatuses.Cancelled)
+                {
+                    return;
+                }
+
                 if (!string.IsNullOrWhiteSpace(chunk.Activity))
                 {
                     _activity = chunk.Activity;
@@ -258,6 +297,11 @@ public sealed class SentinelGptGenerationCoordinator(
         {
             lock (_gate)
             {
+                if (_status == SentinelGptGenerationStatuses.Cancelled)
+                {
+                    return;
+                }
+
                 if (_completedRun is null)
                 {
                     _status = SentinelGptGenerationStatuses.Failed;
@@ -276,8 +320,45 @@ public sealed class SentinelGptGenerationCoordinator(
         {
             lock (_gate)
             {
+                if (_status == SentinelGptGenerationStatuses.Cancelled)
+                {
+                    return;
+                }
+
                 _status = SentinelGptGenerationStatuses.Failed;
                 _error = error;
+                _updatedAt = updatedAt;
+            }
+        }
+
+        public bool TryCancel(DateTimeOffset updatedAt)
+        {
+            lock (_gate)
+            {
+                if (_status is SentinelGptGenerationStatuses.Completed
+                    or SentinelGptGenerationStatuses.Cancelled
+                    or SentinelGptGenerationStatuses.Failed)
+                {
+                    return false;
+                }
+
+                _status = SentinelGptGenerationStatuses.Cancelled;
+                _activity = "Response stopped";
+                _error = null;
+                _updatedAt = updatedAt;
+            }
+
+            _cancellation.Cancel();
+            return true;
+        }
+
+        public void MarkCancelled(DateTimeOffset updatedAt)
+        {
+            lock (_gate)
+            {
+                _status = SentinelGptGenerationStatuses.Cancelled;
+                _activity = "Response stopped";
+                _error = null;
                 _updatedAt = updatedAt;
             }
         }
@@ -302,5 +383,7 @@ public sealed class SentinelGptGenerationCoordinator(
                     _updatedAt);
             }
         }
+
+        public void Dispose() => _cancellation.Dispose();
     }
 }

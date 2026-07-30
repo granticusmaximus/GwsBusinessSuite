@@ -184,6 +184,11 @@ user refreshes or double-submits during recovery. A full application/container r
 still interrupts an in-flight model request, which must be sent again after the app is
 ready.
 
+While a normal chat response is running, the send control becomes **Stop generating**.
+Stopping cancels the server-owned generation token all the way through the Ollama HTTP
+stream, releases the active-response slot, and returns the composer to an idle state. Only
+the user who owns a generation can inspect or stop it.
+
 ## Current safety boundary
 
 SentinelGPT's broad GWS access is read-only. Dedicated GWS workflows can still create

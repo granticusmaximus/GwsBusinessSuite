@@ -4125,6 +4125,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-sources a { display: inline-flex; align-items: center; gap: .3rem; padding: .3rem .45rem; border-radius: 6px; background: #24211f; color: #d3cfcb; text-decoration: none; }
 .sentinel-gpt-sources a:hover { color: #fbbf24; }
 .sentinel-gpt-error { display: flex; align-items: flex-start; gap: .45rem; width: min(100%, 58rem); margin: 0 auto 1rem; padding: .65rem .8rem; border: 1px solid rgba(239, 68, 68, .25); border-radius: 8px; background: rgba(127, 29, 29, .12); color: #fca5a5; font-size: .72rem; }
+.sentinel-gpt-notice { display: flex; align-items: center; gap: .45rem; width: min(100%, 58rem); margin: 0 auto 1rem; padding: .65rem .8rem; border: 1px solid #48413c; border-radius: 8px; background: #211e1b; color: #c8c3be; font-size: .72rem; }
 .sentinel-gpt-confirmation { width: min(100%, 58rem); margin: 0 auto 1rem; padding: .8rem; border: 1px solid rgba(245, 158, 11, .35); border-radius: 10px; background: rgba(120, 53, 15, .14); color: #d6d3d1; font-size: .72rem; }
 .sentinel-gpt-confirmation > div:first-child { display: flex; align-items: flex-start; gap: .55rem; }
 .sentinel-gpt-confirmation > div:first-child > i { color: #f59e0b; }
@@ -4177,6 +4178,8 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-composer > button.sentinel-gpt-send { background: #f59e0b; color: #231506; }
 .sentinel-gpt-composer > button.sentinel-gpt-send:hover { background: #fbbf24; color: #231506; }
 .sentinel-gpt-composer > button.sentinel-gpt-send:disabled { background: #4a433d; color: #77716c; opacity: 1; }
+.sentinel-gpt-composer > button.sentinel-gpt-stop { background: #eeeae7; color: #211e1b; }
+.sentinel-gpt-composer > button.sentinel-gpt-stop:hover { background: #fff; color: #171513; }
 .sentinel-gpt-composer-wrap > small { display: block; margin-top: .4rem; color: #625d58; font-size: .57rem; text-align: center; }
 .sentinel-gpt-character-count { color: #d6a047; font-variant-numeric: tabular-nums; }
 

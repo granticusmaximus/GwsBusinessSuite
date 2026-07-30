@@ -67,6 +67,28 @@ public sealed class SentinelGptGenerationCoordinatorTests
         sentinel.Release.TrySetResult();
     }
 
+    [Fact]
+    public async Task Cancel_ShouldStopOnlyTheRequestingUsersActiveGeneration()
+    {
+        var sentinel = new ControllableSentinelAiService();
+        var coordinator = CreateCoordinator(sentinel);
+        var started = await coordinator.StartAsync(
+            Guid.NewGuid(), null, "Long running request", "grant", includeInternet: false);
+        await sentinel.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        coordinator.Cancel(started.Id, "another-user").Should().BeFalse();
+        coordinator.GetActive("grant").Should().NotBeNull();
+
+        coordinator.Cancel(started.Id, "grant").Should().BeTrue();
+        await sentinel.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var cancelled = await WaitForTerminalAsync(coordinator, started.Id, "grant");
+
+        cancelled.Status.Should().Be(SentinelGptGenerationStatuses.Cancelled);
+        cancelled.Error.Should().BeNull();
+        coordinator.GetActive("grant").Should().BeNull();
+        coordinator.Cancel(started.Id, "grant").Should().BeFalse();
+    }
+
     private static SentinelGptGenerationCoordinator CreateCoordinator(
         ControllableSentinelAiService sentinel)
     {
@@ -102,6 +124,8 @@ public sealed class SentinelGptGenerationCoordinatorTests
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource CancellationObserved { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public bool IsInternetConfigured => false;
 
@@ -115,7 +139,15 @@ public sealed class SentinelGptGenerationCoordinatorTests
         {
             Started.TrySetResult();
             yield return new SentinelAiStreamChunk(string.Empty, null, "Thinking");
-            await Release.Task.WaitAsync(cancellationToken);
+            try
+            {
+                await Release.Task.WaitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                CancellationObserved.TrySetResult();
+                throw;
+            }
             yield return new SentinelAiStreamChunk("Recovered ", null);
             yield return new SentinelAiStreamChunk("response.", null);
             yield return new SentinelAiStreamChunk(

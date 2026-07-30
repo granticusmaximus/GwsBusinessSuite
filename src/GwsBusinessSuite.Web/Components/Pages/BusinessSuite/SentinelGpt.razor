@@ -232,6 +232,11 @@
                 <div class="sentinel-gpt-error"><i class="bi bi-exclamation-circle"></i>@_error</div>
             }
 
+            @if (!string.IsNullOrWhiteSpace(_notice))
+            {
+                <div class="sentinel-gpt-notice"><i class="bi bi-stop-circle"></i>@_notice</div>
+            }
+
             @if (!string.IsNullOrWhiteSpace(_confirmationPrompt))
             {
                 <div class="sentinel-gpt-confirmation">
@@ -266,11 +271,25 @@
                 <button type="button" aria-label="Voice input" title="Voice input">
                     <i class="bi bi-mic"></i>
                 </button>
-                <button type="button" class="sentinel-gpt-send" @onclick="SendAsync"
-                        disabled="@(_generating || string.IsNullOrWhiteSpace(_instruction) || !_connected)"
-                        aria-label="Send message">
-                    <i class="bi bi-arrow-up"></i>
-                </button>
+                @if (_generating && _activeGenerationId is not null)
+                {
+                    <button type="button"
+                            class="sentinel-gpt-send sentinel-gpt-stop"
+                            @onclick="StopGeneration"
+                            disabled="@_stoppingGeneration"
+                            aria-label="Stop generating"
+                            title="Stop generating">
+                        <i class="bi bi-stop-fill"></i>
+                    </button>
+                }
+                else
+                {
+                    <button type="button" class="sentinel-gpt-send" @onclick="SendAsync"
+                            disabled="@(_generating || string.IsNullOrWhiteSpace(_instruction) || !_connected)"
+                            aria-label="Send message">
+                        <i class="bi bi-arrow-up"></i>
+                    </button>
+                }
             </div>
             <small>
                 @if (RemainingPromptCharacters <= 2_000)
@@ -292,6 +311,7 @@
     private string _liveOutput = string.Empty;
     private string _toolActivity = string.Empty;
     private string _error = string.Empty;
+    private string _notice = string.Empty;
     private string _pendingModelCommand = string.Empty;
     private string _confirmationPrompt = string.Empty;
     private string _configuredModel = SentinelGptDefaults.Model;
@@ -304,8 +324,10 @@
     private bool _generating;
     private bool _settingsOpen;
     private bool _modelBusy;
+    private bool _stoppingGeneration;
     private bool _includeInternet;
     private Guid? _conversationId;
+    private Guid? _activeGenerationId;
     private List<SentinelGptConversationView> _conversations = [];
     private List<SentinelAiRunView> _runs = [];
     private List<string> _models = [];
@@ -340,6 +362,7 @@
         {
             ApplyGenerationSnapshot(activeGeneration);
             _generating = true;
+            _activeGenerationId = activeGeneration.Id;
             RequestThreadScroll();
             _ = InvokeAsync(() => ResumeGenerationAsync(activeGeneration.Id));
         }
@@ -393,6 +416,7 @@
         _liveOutput = string.Empty;
         _toolActivity = string.Empty;
         _error = string.Empty;
+        _notice = string.Empty;
         _pendingModelCommand = string.Empty;
         _confirmationPrompt = string.Empty;
     }
@@ -402,6 +426,7 @@
         if (_generating) return;
         _conversationId = id;
         _error = string.Empty;
+        _notice = string.Empty;
         _runs = (await SentinelGptService.ListConversationRunsAsync(id, _username)).ToList();
         RequestThreadScroll();
     }
@@ -444,6 +469,7 @@
         _liveOutput = string.Empty;
         _toolActivity = string.Empty;
         _error = string.Empty;
+        _notice = string.Empty;
         _generating = true;
         RequestThreadScroll();
         await InvokeAsync(StateHasChanged);
@@ -471,6 +497,7 @@
             {
                 var generation = await GenerationCoordinator.StartAsync(
                     _conversationId.Value, null, instruction, _username, _includeInternet);
+                _activeGenerationId = generation.Id;
                 await MonitorGenerationAsync(generation.Id);
             }
             if ((command.Handled && !command.RequiresConfirmation) || !command.Handled)
@@ -494,6 +521,7 @@
             _pendingInstruction = string.Empty;
             _liveOutput = string.Empty;
             _toolActivity = string.Empty;
+            _activeGenerationId = null;
         }
     }
 
@@ -519,6 +547,7 @@
             _pendingInstruction = string.Empty;
             _liveOutput = string.Empty;
             _toolActivity = string.Empty;
+            _activeGenerationId = null;
             if (!_componentLifetime.IsCancellationRequested)
             {
                 await InvokeAsync(StateHasChanged);
@@ -540,6 +569,12 @@
             {
                 throw new InvalidOperationException(
                     snapshot.Error ?? "SentinelGPT generation failed.");
+            }
+
+            if (snapshot.Status == SentinelGptGenerationStatuses.Cancelled)
+            {
+                _notice = "Response stopped.";
+                return;
             }
 
             if (snapshot.Status == SentinelGptGenerationStatuses.Completed)
@@ -566,6 +601,22 @@
         _liveOutput = snapshot.Output;
         _toolActivity = snapshot.Activity;
         RequestThreadScroll();
+    }
+
+    private void StopGeneration()
+    {
+        if (_activeGenerationId is not { } generationId || _stoppingGeneration)
+        {
+            return;
+        }
+
+        _stoppingGeneration = true;
+        _error = string.Empty;
+        if (!GenerationCoordinator.Cancel(generationId, _username))
+        {
+            _notice = "That response already finished.";
+        }
+        _stoppingGeneration = false;
     }
 
     private void RequestThreadScroll() => _scrollThreadAfterRender = true;
