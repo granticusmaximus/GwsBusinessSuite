@@ -78,6 +78,7 @@ builder.Services.AddOutputCache(options =>
 });
 builder.Services.AddSingleton<IPublicContentCacheInvalidator, OutputCachePublicContentInvalidator>();
 builder.Services.AddSingleton<PerformanceTelemetry>();
+builder.Services.AddSingleton<SentinelGptGenerationCoordinator>();
 builder.Services.AddOptions<LiveShowIceOptions>()
     .Bind(builder.Configuration.GetSection("LiveShow:Ice"));
 builder.Services.AddSingleton(TimeProvider.System);

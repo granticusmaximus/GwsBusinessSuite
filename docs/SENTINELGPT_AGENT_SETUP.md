@@ -170,6 +170,20 @@ Do not put the key directly in `docker-compose.yml`. For a larger deployment, re
 9. Ask about a protected secret. SentinelGPT should refuse to expose it because those
    fields are never placed in model context.
 
+## Response recovery
+
+Normal chat generation is owned by the server rather than the interactive Blazor page.
+Refreshing the page, closing the tab, or temporarily losing the SignalR connection stops
+only that browser's live polling; the model request continues under a server-owned scope.
+When the same user returns while it is still running, SentinelGPT reopens the active
+conversation and resumes the streamed progress. On completion, the existing
+`SentinelAiRun` persistence remains the durable conversation history.
+
+One active chat response is allowed per user. This prevents duplicate model work when a
+user refreshes or double-submits during recovery. A full application/container restart
+still interrupts an in-flight model request, which must be sent again after the app is
+ready.
+
 ## Current safety boundary
 
 SentinelGPT's broad GWS access is read-only. Dedicated GWS workflows can still create

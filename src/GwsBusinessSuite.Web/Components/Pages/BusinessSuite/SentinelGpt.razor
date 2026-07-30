@@ -3,13 +3,16 @@
 @page "/admin/ollama-console"
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "AdminOnly")]
+@implements IAsyncDisposable
 @using GwsBusinessSuite.Application.Abstractions
 @using GwsBusinessSuite.Application.ContentStudio
 @using GwsBusinessSuite.Application.Settings
 @using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Domain.Entities
+@using GwsBusinessSuite.Web.Services
 @using Microsoft.Extensions.Options
 @inject ISentinelAiService SentinelGptService
+@inject SentinelGptGenerationCoordinator GenerationCoordinator
 @inject IOllamaService LocalModelService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject ISiteSettingsService SiteSettingsService
@@ -24,7 +27,7 @@
             <span class="sentinel-gpt-shield">S</span>
             <span><strong>SentinelGPT</strong><small>GWS private assistant</small></span>
         </a>
-        <button type="button" class="sentinel-gpt-new-chat" @onclick="StartNewChat">
+        <button type="button" class="sentinel-gpt-new-chat" @onclick="StartNewChat" disabled="@_generating">
             <i class="bi bi-plus-lg"></i><span>New chat</span>
         </button>
 
@@ -303,6 +306,7 @@
     private List<string> _models = [];
     private HashSet<Guid> _reviewingRunIds = [];
     private SiteSettingsView? _settings;
+    private readonly CancellationTokenSource _componentLifetime = new();
     private int RemainingPromptCharacters =>
         Math.Max(0, SentinelGptDefaults.MaxInstructionLength - _instruction.Length);
 
@@ -324,7 +328,14 @@
         _settings = await SiteSettingsService.GetSettingsAsync();
         _configuredModel = _settings.OllamaModelOverride ?? SentinelGptDefaults.Model;
         await Task.WhenAll(CheckConnectionAsync(), LoadConversationsAsync());
-        if (_conversations.Count > 0)
+        var activeGeneration = GenerationCoordinator.GetActive(_username);
+        if (activeGeneration is not null)
+        {
+            ApplyGenerationSnapshot(activeGeneration);
+            _generating = true;
+            _ = InvokeAsync(() => ResumeGenerationAsync(activeGeneration.Id));
+        }
+        else if (_conversations.Count > 0)
         {
             await OpenConversationAsync(_conversations[0].Id);
         }
@@ -367,6 +378,7 @@
 
     private void StartNewChat()
     {
+        if (_generating) return;
         _conversationId = Guid.NewGuid();
         _runs = [];
         _instruction = string.Empty;
@@ -445,40 +457,19 @@
             }
             else
             {
-                var output = new System.Text.StringBuilder();
-                var renderTimer = System.Diagnostics.Stopwatch.StartNew();
-                await foreach (var chunk in SentinelGptService.StreamAgentConversationAsync(
-                    _conversationId.Value, null, instruction, _username, _includeInternet))
-                {
-                    if (!string.IsNullOrWhiteSpace(chunk.Activity))
-                    {
-                        _toolActivity = chunk.Activity;
-                    }
-                    else if (chunk.CompletedRun is not null)
-                    {
-                        _runs.Add(chunk.CompletedRun);
-                    }
-                    else
-                    {
-                        output.Append(chunk.Delta);
-                        // Rendering every model token creates excessive SignalR traffic
-                        // and repeated large-string allocations. Update at a smooth,
-                        // bounded cadence while retaining every streamed fragment.
-                        if (renderTimer.ElapsedMilliseconds < 75)
-                        {
-                            continue;
-                        }
-
-                        _liveOutput = output.ToString();
-                        renderTimer.Restart();
-                    }
-                    StateHasChanged();
-                }
+                var generation = await GenerationCoordinator.StartAsync(
+                    _conversationId.Value, null, instruction, _username, _includeInternet);
+                await MonitorGenerationAsync(generation.Id);
             }
             if ((command.Handled && !command.RequiresConfirmation) || !command.Handled)
             {
                 await LoadConversationsAsync();
             }
+        }
+        catch (OperationCanceledException) when (_componentLifetime.IsCancellationRequested)
+        {
+            // The component was disposed (navigation, refresh, or a lost circuit).
+            // The server-owned coordinator intentionally continues the model request.
         }
         catch (Exception ex)
         {
@@ -492,6 +483,75 @@
             _liveOutput = string.Empty;
             _toolActivity = string.Empty;
         }
+    }
+
+    private async Task ResumeGenerationAsync(Guid generationId)
+    {
+        try
+        {
+            await MonitorGenerationAsync(generationId);
+            await LoadConversationsAsync();
+        }
+        catch (OperationCanceledException) when (_componentLifetime.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "SentinelGPT resumed generation failed");
+            _error = $"SentinelGPT could not complete that response: {ex.Message}";
+        }
+        finally
+        {
+            _generating = false;
+            _pendingInstruction = string.Empty;
+            _liveOutput = string.Empty;
+            _toolActivity = string.Empty;
+            if (!_componentLifetime.IsCancellationRequested)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private async Task MonitorGenerationAsync(Guid generationId)
+    {
+        while (true)
+        {
+            _componentLifetime.Token.ThrowIfCancellationRequested();
+            var snapshot = GenerationCoordinator.Get(generationId, _username)
+                ?? throw new InvalidOperationException(
+                    "The active SentinelGPT response is no longer available. Refresh the conversation history.");
+            ApplyGenerationSnapshot(snapshot);
+
+            if (snapshot.Status == SentinelGptGenerationStatuses.Failed)
+            {
+                throw new InvalidOperationException(
+                    snapshot.Error ?? "SentinelGPT generation failed.");
+            }
+
+            if (snapshot.Status == SentinelGptGenerationStatuses.Completed)
+            {
+                if (snapshot.CompletedRun is { } completed
+                    && _runs.All(item => item.Id != completed.Id))
+                {
+                    _runs.Add(completed);
+                }
+                return;
+            }
+
+            await InvokeAsync(StateHasChanged);
+            await Task.Delay(100, _componentLifetime.Token);
+        }
+    }
+
+    private void ApplyGenerationSnapshot(SentinelGptGenerationSnapshot snapshot)
+    {
+        _conversationId = snapshot.ConversationId;
+        _pendingInstruction = snapshot.Instruction;
+        _includeInternet = snapshot.IncludeInternet;
+        _liveOutput = snapshot.Output;
+        _toolActivity = snapshot.Activity;
     }
 
     private async Task HandleComposerKeyDownAsync(KeyboardEventArgs args)
@@ -631,4 +691,11 @@
         conversation.ExchangeCount == 1
             ? conversation.UpdatedAt.ToLocalTime().ToString("t")
             : $"{conversation.ExchangeCount} exchanges · {conversation.UpdatedAt.ToLocalTime():MMM d}";
+
+    public ValueTask DisposeAsync()
+    {
+        _componentLifetime.Cancel();
+        _componentLifetime.Dispose();
+        return ValueTask.CompletedTask;
+    }
 }

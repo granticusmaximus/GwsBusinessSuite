@@ -1,0 +1,197 @@
+using System.Runtime.CompilerServices;
+using FluentAssertions;
+using GwsBusinessSuite.Application.Wiki;
+using GwsBusinessSuite.Web.Services;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace GwsBusinessSuite.Tests;
+
+public sealed class SentinelGptGenerationCoordinatorTests
+{
+    [Fact]
+    public async Task Generation_ShouldContinueWithoutAWaitingBrowserCaller()
+    {
+        var sentinel = new ControllableSentinelAiService();
+        var coordinator = CreateCoordinator(sentinel);
+        var conversationId = Guid.NewGuid();
+
+        var started = await coordinator.StartAsync(
+            conversationId, null, "Summarize this long email.", "grant", includeInternet: false);
+        await sentinel.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        coordinator.GetActive("grant").Should().Match<SentinelGptGenerationSnapshot>(snapshot =>
+            snapshot.Id == started.Id
+            && snapshot.ConversationId == conversationId
+            && snapshot.Status == SentinelGptGenerationStatuses.Running);
+
+        // No component or request awaits the generation here. Releasing the fake model
+        // simulates work continuing while the original browser circuit is disconnected.
+        sentinel.Release.TrySetResult();
+        var completed = await WaitForTerminalAsync(coordinator, started.Id, "grant");
+
+        completed.Status.Should().Be(SentinelGptGenerationStatuses.Completed);
+        completed.Output.Should().Be("Recovered response.");
+        completed.CompletedRun!.ConversationId.Should().Be(conversationId);
+        coordinator.GetActive("grant").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Generation_ShouldAllowOnlyOneActiveResponsePerUser()
+    {
+        var sentinel = new ControllableSentinelAiService();
+        var coordinator = CreateCoordinator(sentinel);
+        await coordinator.StartAsync(
+            Guid.NewGuid(), null, "First request", "grant", includeInternet: false);
+        await sentinel.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        var act = () => coordinator.StartAsync(
+            Guid.NewGuid(), null, "Second request", "grant", includeInternet: false);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*already generating*");
+        sentinel.Release.TrySetResult();
+    }
+
+    [Fact]
+    public async Task GenerationSnapshots_ShouldNotBeVisibleToAnotherUser()
+    {
+        var sentinel = new ControllableSentinelAiService();
+        var coordinator = CreateCoordinator(sentinel);
+        var started = await coordinator.StartAsync(
+            Guid.NewGuid(), null, "Private request", "grant", includeInternet: false);
+
+        coordinator.Get(started.Id, "another-user").Should().BeNull();
+        coordinator.GetActive("another-user").Should().BeNull();
+        sentinel.Release.TrySetResult();
+    }
+
+    private static SentinelGptGenerationCoordinator CreateCoordinator(
+        ControllableSentinelAiService sentinel)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<ISentinelAiService>(sentinel);
+        var provider = services.BuildServiceProvider();
+        return new SentinelGptGenerationCoordinator(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new TestHostApplicationLifetime(),
+            TimeProvider.System,
+            NullLogger<SentinelGptGenerationCoordinator>.Instance);
+    }
+
+    private static async Task<SentinelGptGenerationSnapshot> WaitForTerminalAsync(
+        SentinelGptGenerationCoordinator coordinator,
+        Guid id,
+        string requestedBy)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        while (true)
+        {
+            timeout.Token.ThrowIfCancellationRequested();
+            var snapshot = coordinator.Get(id, requestedBy)
+                ?? throw new InvalidOperationException("Generation disappeared before completion.");
+            if (snapshot.IsTerminal) return snapshot;
+            await Task.Delay(10, timeout.Token);
+        }
+    }
+
+    private sealed class ControllableSentinelAiService : ISentinelAiService
+    {
+        public TaskCompletionSource Started { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool IsInternetConfigured => false;
+
+        public async IAsyncEnumerable<SentinelAiStreamChunk> StreamAgentConversationAsync(
+            Guid conversationId,
+            Guid? wikiPageId,
+            string instruction,
+            string performedBy,
+            bool includeInternet,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            Started.TrySetResult();
+            yield return new SentinelAiStreamChunk(string.Empty, null, "Thinking");
+            await Release.Task.WaitAsync(cancellationToken);
+            yield return new SentinelAiStreamChunk("Recovered ", null);
+            yield return new SentinelAiStreamChunk("response.", null);
+            yield return new SentinelAiStreamChunk(
+                string.Empty,
+                new SentinelAiRunView(
+                    Guid.NewGuid(),
+                    conversationId,
+                    wikiPageId,
+                    SentinelAiActions.Ask,
+                    instruction,
+                    "Recovered response.",
+                    "completed",
+                    SentinelGptDefaults.Model,
+                    performedBy,
+                    DateTimeOffset.UtcNow,
+                    []));
+        }
+
+        public IAsyncEnumerable<SentinelAiStreamChunk> StreamAsync(
+            Guid? wikiPageId,
+            string action,
+            string instruction,
+            string performedBy,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public IAsyncEnumerable<SentinelAiStreamChunk> StreamConversationAsync(
+            Guid conversationId,
+            Guid? wikiPageId,
+            string action,
+            string instruction,
+            string performedBy,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<SentinelGptCommandResult> ExecuteModelCommandAsync(
+            Guid conversationId,
+            string instruction,
+            string performedBy,
+            bool confirmed,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<SentinelAiRunView>> ListRunsAsync(
+            Guid? wikiPageId,
+            int maxResults = 20,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<SentinelGptConversationView>> ListConversationsAsync(
+            string requestedBy,
+            int maxResults = 40,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<SentinelAiRunView>> ListConversationRunsAsync(
+            Guid conversationId,
+            string requestedBy,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task ReviewAsync(
+            Guid runId,
+            bool approved,
+            string performedBy,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class TestHostApplicationLifetime : IHostApplicationLifetime
+    {
+        public CancellationToken ApplicationStarted => CancellationToken.None;
+        public CancellationToken ApplicationStopping => CancellationToken.None;
+        public CancellationToken ApplicationStopped => CancellationToken.None;
+        public void StopApplication()
+        {
+        }
+    }
+}
