@@ -24,6 +24,15 @@ public sealed class AppUser : AuditableEntity
     // lockout expires (or is cleared early by an admin via UnlockUserAsync).
     public int FailedLoginAttempts      { get; set; }
     public DateTimeOffset? LockoutEndAt { get; set; }
+
+    // Mandatory portal MFA. The TOTP seed is protected with ASP.NET Core Data
+    // Protection; recovery codes are stored only as SHA-256 hashes. A nullable last
+    // step prevents accepting the same authenticator code twice in one time window.
+    public bool MfaEnabled { get; set; }
+    public string MfaSecretProtected { get; set; } = string.Empty;
+    public string MfaRecoveryCodeHashesJson { get; set; } = "[]";
+    public long? MfaLastAcceptedStep { get; set; }
+    public DateTimeOffset? MfaEnrolledAt { get; set; }
 }
 
 public static class SeoArticleDraftStatuses

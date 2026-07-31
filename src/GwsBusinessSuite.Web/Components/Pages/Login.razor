@@ -97,6 +97,10 @@
             var minutesText = LockoutMinutes is > 0 ? $"{LockoutMinutes} minute(s)" : "a few minutes";
             ErrorMessage = $"Too many failed attempts on this account. Try again in {minutesText}, or contact an administrator to unlock it.";
         }
+        else if (string.Equals(Error, "expired", StringComparison.OrdinalIgnoreCase))
+        {
+            ErrorMessage = "Your verification session expired. Enter your username and password again.";
+        }
         else
         {
             ErrorMessage = string.Empty;

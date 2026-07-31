@@ -1,0 +1,79 @@
+@page "/admin/login/mfa/setup"
+@attribute [Authorize(Policy = "MfaPending")]
+@inject IUserManagementService UserManagementService
+@using GwsBusinessSuite.Application.Users
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+
+<PageTitle>Set up two-factor authentication</PageTitle>
+
+<div class="gws-login-shell">
+    <div class="page-header">
+        <h1><i class="bi bi-shield-lock-fill me-2 text-primary"></i>Secure your GWS account</h1>
+        <p>Two-factor authentication is required before confidential portal access is granted.</p>
+    </div>
+
+    <div class="card border-0 shadow-sm gws-login-card">
+        <div class="card-body p-4">
+            @if (string.Equals(Error, "invalid", StringComparison.OrdinalIgnoreCase))
+            {
+                <div class="alert alert-danger" role="alert">The code did not match. Check your device clock and try a new code.</div>
+            }
+            @if (_enrollment is null)
+            {
+                <div class="alert alert-warning">The enrollment session is unavailable. <a href="/auth/logout">Start again</a>.</div>
+            }
+            else
+            {
+                <ol class="ps-3">
+                    <li class="mb-3">Open your password manager or authenticator app and add a time-based one-time password (TOTP).</li>
+                    <li class="mb-3">Enter this setup key:<br><code class="mfa-secret">@FormatSecret(_enrollment.Secret)</code></li>
+                    <li class="mb-3">Enter the six-digit code it generates.</li>
+                </ol>
+                <details class="mb-3">
+                    <summary>Advanced: authenticator URI</summary>
+                    <code class="d-block text-break mt-2">@_enrollment.AuthenticatorUri</code>
+                </details>
+                <form method="post" action="/auth/mfa/enroll">
+                    <AntiforgeryToken />
+                    <label class="form-label fw-semibold" for="mfa-code">Authenticator code</label>
+                    <input id="mfa-code" class="form-control form-control-lg" name="code"
+                           inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
+                           autocomplete="one-time-code" autofocus required />
+                    <button type="submit" class="btn btn-primary w-100 mt-3">Enable MFA and continue</button>
+                </form>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthenticationStateTask { get; set; }
+
+    private MfaEnrollment? _enrollment;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthenticationStateTask is null) return;
+        var state = await AuthenticationStateTask;
+        if (Guid.TryParse(state.User.FindFirstValue("UserId"), out var userId))
+        {
+            _enrollment = await UserManagementService.PrepareMfaEnrollmentAsync(userId);
+        }
+    }
+
+    private static string FormatSecret(string secret) =>
+        string.Join(' ', Enumerable.Range(0, (secret.Length + 3) / 4)
+            .Select(index => secret.Substring(index * 4, Math.Min(4, secret.Length - index * 4))));
+}
+
+<style>
+    .gws-login-shell { max-width: 42rem; margin: 0 auto; padding: 1rem 0 2rem; }
+    .gws-login-card { border: 1px solid var(--gws-panel-border); border-radius: 14px; overflow: hidden; }
+    .mfa-secret { display: inline-block; margin-top: .5rem; padding: .65rem; font-size: 1.1rem; letter-spacing: .08em; user-select: all; }
+</style>

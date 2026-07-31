@@ -10,7 +10,22 @@ public sealed class UserView
     public bool IsActive { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? LockoutEndAt { get; init; }
+    public bool MfaEnabled { get; init; }
 }
+
+public sealed record MfaEnrollment(string Secret, string AuthenticatorUri);
+
+public sealed record MfaEnrollmentResult(
+    bool Succeeded,
+    UserView? User,
+    IReadOnlyList<string> RecoveryCodes,
+    string? FailureReason = null);
+
+public sealed record MfaVerificationResult(
+    bool Succeeded,
+    UserView? User,
+    bool UsedRecoveryCode = false,
+    string? FailureReason = null);
 
 public sealed class CreateUserInput
 {

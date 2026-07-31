@@ -8,6 +8,9 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Buffers.Binary;
+using System.Globalization;
+using System.Security.Cryptography;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -389,12 +392,51 @@ public sealed class UserManagementServiceTests
         user.FailedLoginAttempts.Should().Be(0);
     }
 
-    private static UserManagementService CreateService(SqliteConnection connection) =>
+    [Fact]
+    public async Task MfaEnrollmentAndVerification_ShouldRequireFreshTotp_AndConsumeRecoveryCodesOnce()
+    {
+        using var connection = await OpenConnectionAsync();
+        var clock = new MutableTimeProvider(new DateTimeOffset(2026, 7, 31, 20, 0, 0, TimeSpan.Zero));
+        var service = CreateService(connection, new PassthroughSecretProtector(), clock);
+        await service.CreateUserAsync(new CreateUserInput
+        {
+            Username = "jsmith",
+            Password = "correct-horse-battery",
+            Role = AppRoles.Author
+        });
+        var userId = (await service.ListUsersAsync()).Single().Id;
+
+        var enrollment = await service.PrepareMfaEnrollmentAsync(userId);
+        enrollment.Should().NotBeNull();
+        var firstCode = GenerateTotp(enrollment!.Secret, clock.GetUtcNow());
+        var completed = await service.CompleteMfaEnrollmentAsync(userId, firstCode);
+
+        completed.Succeeded.Should().BeTrue();
+        completed.User!.MfaEnabled.Should().BeTrue();
+        completed.RecoveryCodes.Should().HaveCount(10).And.OnlyHaveUniqueItems();
+
+        (await service.VerifyMfaAsync(userId, firstCode)).Succeeded.Should().BeFalse("a TOTP step cannot be replayed");
+        clock.Advance(TimeSpan.FromSeconds(30));
+        (await service.VerifyMfaAsync(userId, GenerateTotp(enrollment.Secret, clock.GetUtcNow()))).Succeeded.Should().BeTrue();
+
+        var recoveryCode = completed.RecoveryCodes[0];
+        var recovery = await service.VerifyMfaAsync(userId, recoveryCode);
+        recovery.Succeeded.Should().BeTrue();
+        recovery.UsedRecoveryCode.Should().BeTrue();
+        (await service.VerifyMfaAsync(userId, recoveryCode)).Succeeded.Should().BeFalse("recovery codes are one-time use");
+    }
+
+    private static UserManagementService CreateService(
+        SqliteConnection connection,
+        ISecretProtector? secretProtector = null,
+        TimeProvider? timeProvider = null) =>
         new(
             new TestDbContextFactory(connection),
             new PasswordHasher<AppUser>(),
             NullLogger<UserManagementService>.Instance,
-            new FixedCurrentUserAccessor("grantwatson"));
+            new FixedCurrentUserAccessor("grantwatson"),
+            secretProtector,
+            timeProvider);
 
     private static ApplicationDbContext CreateReadDbContext(SqliteConnection connection) =>
         new(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options);
@@ -422,5 +464,46 @@ public sealed class UserManagementServiceTests
 
         public Task<ApplicationDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(CreateDbContext());
+    }
+
+    private sealed class PassthroughSecretProtector : ISecretProtector
+    {
+        public string Protect(string plaintext) => $"protected::{plaintext}";
+        public string Unprotect(string protectedValue) => protectedValue["protected::".Length..];
+    }
+
+    private sealed class MutableTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        private DateTimeOffset _now = now;
+        public override DateTimeOffset GetUtcNow() => _now;
+        public void Advance(TimeSpan value) => _now = _now.Add(value);
+    }
+
+    private static string GenerateTotp(string base32Secret, DateTimeOffset now)
+    {
+        const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+        var bytes = new List<byte>();
+        var buffer = 0;
+        var bits = 0;
+        foreach (var character in base32Secret)
+        {
+            buffer = (buffer << 5) | alphabet.IndexOf(character);
+            bits += 5;
+            if (bits >= 8)
+            {
+                bytes.Add((byte)((buffer >> (bits - 8)) & 255));
+                bits -= 8;
+            }
+        }
+
+        Span<byte> counter = stackalloc byte[8];
+        BinaryPrimitives.WriteInt64BigEndian(counter, now.ToUnixTimeSeconds() / 30);
+        var hash = HMACSHA1.HashData(bytes.ToArray(), counter);
+        var offset = hash[^1] & 0x0f;
+        var value = ((hash[offset] & 0x7f) << 24)
+                    | (hash[offset + 1] << 16)
+                    | (hash[offset + 2] << 8)
+                    | hash[offset + 3];
+        return (value % 1_000_000).ToString("D6", CultureInfo.InvariantCulture);
     }
 }

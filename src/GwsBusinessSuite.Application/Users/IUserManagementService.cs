@@ -17,6 +17,12 @@ public interface IUserManagementService
     // AppUser/PasswordHash directly.
     Task<LoginAttemptResult> AttemptLoginAsync(string username, string password, CancellationToken cancellationToken = default);
 
+    Task<MfaEnrollment?> PrepareMfaEnrollmentAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    Task<MfaEnrollmentResult> CompleteMfaEnrollmentAsync(Guid userId, string code, CancellationToken cancellationToken = default);
+
+    Task<MfaVerificationResult> VerifyMfaAsync(Guid userId, string code, CancellationToken cancellationToken = default);
+
     // Admin override to clear a lockout (and reset the failed-attempt counter) without
     // waiting for it to expire, independent of resetting the password.
     Task<UserManagementResult> UnlockUserAsync(Guid userId, CancellationToken cancellationToken = default);

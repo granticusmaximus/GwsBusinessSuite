@@ -1,0 +1,40 @@
+@page "/admin/login/mfa"
+@attribute [Authorize(Policy = "MfaPending")]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Web
+
+<PageTitle>Verify your identity</PageTitle>
+
+<div class="gws-login-shell">
+    <div class="page-header">
+        <h1><i class="bi bi-shield-check me-2 text-primary"></i>Two-factor verification</h1>
+        <p>Enter the current code from your authenticator app, or use one of your recovery codes.</p>
+    </div>
+
+    <div class="card border-0 shadow-sm gws-login-card">
+        <div class="card-body p-4">
+            @if (string.Equals(Error, "invalid", StringComparison.OrdinalIgnoreCase))
+            {
+                <div class="alert alert-danger" role="alert">That code is invalid, expired, or was already used.</div>
+            }
+            <form method="post" action="/auth/mfa/verify">
+                <AntiforgeryToken />
+                <label class="form-label fw-semibold" for="mfa-code">Authenticator or recovery code</label>
+                <input id="mfa-code" class="form-control form-control-lg" name="code"
+                       inputmode="numeric" autocomplete="one-time-code" autofocus required />
+                <button type="submit" class="btn btn-primary w-100 mt-3">Verify and sign in</button>
+            </form>
+            <a class="btn btn-link px-0 mt-2" href="/auth/logout">Cancel sign in</a>
+        </div>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+}
+
+<style>
+    .gws-login-shell { max-width: 42rem; margin: 0 auto; padding: 1rem 0 2rem; }
+    .gws-login-card { border: 1px solid var(--gws-panel-border); border-radius: 14px; overflow: hidden; }
+</style>

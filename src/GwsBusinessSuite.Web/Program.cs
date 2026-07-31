@@ -18,6 +18,7 @@ using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Web.Services;
 using GwsBusinessSuite.Web.Components;
 using GwsBusinessSuite.Web.Hubs;
+using GwsBusinessSuite.Web.Security;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -132,6 +133,15 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         // and break login in that case.
         options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
         options.Cookie.SameSite = SameSiteMode.Lax;
+    })
+    .AddCookie(MfaAuthenticationDefaults.PendingScheme, options =>
+    {
+        options.Cookie.Name = "GwsBusinessSuite.MfaPending";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Strict;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        options.ExpireTimeSpan = TimeSpan.FromMinutes(10);
+        options.SlidingExpiration = false;
     });
 
 builder.Services.AddAuthorization(options =>
@@ -147,6 +157,12 @@ builder.Services.AddAuthorization(options =>
 
     options.AddPolicy("ContributorAccess", policy =>
         policy.RequireAuthenticatedUser().RequireRole(AppRoles.Admin, AppRoles.Contributor));
+
+    options.AddPolicy("MfaPending", policy =>
+    {
+        policy.AddAuthenticationSchemes(MfaAuthenticationDefaults.PendingScheme);
+        policy.RequireAuthenticatedUser();
+    });
 
     options.FallbackPolicy = options.GetPolicy("AdminOnly");
 });
@@ -486,23 +502,76 @@ app.MapPost("/auth/login", async (
     }
 
     var user = attempt.User;
-    var claims = new List<Claim>
+    var pendingClaims = new List<Claim>
     {
         new(ClaimTypes.Name, user.Username),
-        new(ClaimTypes.Role, user.Role),
-        new("UserId", user.Id.ToString())
+        new("UserId", user.Id.ToString()),
+        new(MfaAuthenticationDefaults.ReturnUrlClaim, safeReturn)
     };
+    var pendingIdentity = new ClaimsIdentity(pendingClaims, MfaAuthenticationDefaults.PendingScheme);
+    await httpContext.SignInAsync(
+        MfaAuthenticationDefaults.PendingScheme,
+        new ClaimsPrincipal(pendingIdentity),
+        new AuthenticationProperties { IsPersistent = false });
 
-    var identity  = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
-    var principal = new ClaimsPrincipal(identity);
-    await httpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
-
-    return Results.LocalRedirect(PortalNavigation.ResolvePostLoginPath(returnUrl));
+    return Results.LocalRedirect(user.MfaEnabled ? "/admin/login/mfa" : "/admin/login/mfa/setup");
 }).AllowAnonymous().RequireRateLimiting("login");
+
+app.MapPost("/auth/mfa/verify", async (
+    HttpContext httpContext,
+    IAntiforgery antiforgery,
+    IUserManagementService userManagementService) =>
+{
+    if (await ValidateAntiforgeryAsync(httpContext, antiforgery) is not null)
+        return Results.LocalRedirect("/admin/login/mfa?error=invalid");
+
+    var pending = await httpContext.AuthenticateAsync(MfaAuthenticationDefaults.PendingScheme);
+    if (!TryGetPendingUser(pending, out var userId))
+        return Results.LocalRedirect("/admin/login?error=expired");
+
+    var form = await httpContext.Request.ReadFormAsync();
+    var result = await userManagementService.VerifyMfaAsync(userId, form["code"].ToString());
+    if (!result.Succeeded || result.User is null)
+        return Results.LocalRedirect("/admin/login/mfa?error=invalid");
+
+    await SignInPortalAsync(httpContext, result.User);
+    await httpContext.SignOutAsync(MfaAuthenticationDefaults.PendingScheme);
+    return Results.LocalRedirect(GetPendingReturnUrl(pending));
+}).RequireAuthorization("MfaPending").RequireRateLimiting("login");
+
+app.MapPost("/auth/mfa/enroll", async (
+    HttpContext httpContext,
+    IAntiforgery antiforgery,
+    IUserManagementService userManagementService) =>
+{
+    if (await ValidateAntiforgeryAsync(httpContext, antiforgery) is not null)
+        return Results.LocalRedirect("/admin/login/mfa/setup?error=invalid");
+
+    var pending = await httpContext.AuthenticateAsync(MfaAuthenticationDefaults.PendingScheme);
+    if (!TryGetPendingUser(pending, out var userId))
+        return Results.LocalRedirect("/admin/login?error=expired");
+
+    var form = await httpContext.Request.ReadFormAsync();
+    var result = await userManagementService.CompleteMfaEnrollmentAsync(userId, form["code"].ToString());
+    if (!result.Succeeded || result.User is null)
+        return Results.LocalRedirect("/admin/login/mfa/setup?error=invalid");
+
+    await SignInPortalAsync(httpContext, result.User);
+    await httpContext.SignOutAsync(MfaAuthenticationDefaults.PendingScheme);
+    var returnUrl = GetPendingReturnUrl(pending);
+    var encodedCodes = string.Join("", result.RecoveryCodes.Select(code => $"<li><code>{System.Net.WebUtility.HtmlEncode(code)}</code></li>"));
+    var encodedReturn = System.Net.WebUtility.HtmlEncode(returnUrl);
+    return Results.Content($$"""
+        <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+        <title>Save GWS recovery codes</title><style>body{font:16px system-ui;background:#111;color:#eee;margin:0;padding:2rem}.card{max-width:42rem;margin:auto;background:#1c1a18;border:1px solid #4b4338;border-radius:14px;padding:2rem}code{font-size:1.05rem}a{display:inline-block;margin-top:1rem;padding:.7rem 1rem;border-radius:8px;background:#f5a000;color:#111;text-decoration:none;font-weight:700}</style></head>
+        <body><main class="card"><h1>MFA is enabled</h1><p>Save these one-time recovery codes in a secure password manager. They will not be shown again.</p><ol>{{encodedCodes}}</ol><a href="{{encodedReturn}}">Continue to GWS</a></main></body></html>
+        """, "text/html; charset=utf-8");
+}).RequireAuthorization("MfaPending").RequireRateLimiting("login");
 
 app.MapGet("/auth/logout", async (HttpContext httpContext) =>
 {
     await httpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    await httpContext.SignOutAsync(MfaAuthenticationDefaults.PendingScheme);
     return Results.LocalRedirect("/admin/login");
 }).AllowAnonymous();
 
@@ -2365,6 +2434,33 @@ static async Task<IResult?> ValidateAntiforgeryAsync(HttpContext httpContext, IA
     {
         return Results.BadRequest(new { error = "Missing or invalid CSRF token." });
     }
+}
+
+static bool TryGetPendingUser(AuthenticateResult result, out Guid userId)
+{
+    return Guid.TryParse(result.Principal?.FindFirstValue("UserId"), out userId);
+}
+
+static string GetPendingReturnUrl(AuthenticateResult result)
+{
+    return PortalNavigation.ResolvePostLoginPath(
+        result.Principal?.FindFirstValue(MfaAuthenticationDefaults.ReturnUrlClaim));
+}
+
+static async Task SignInPortalAsync(HttpContext httpContext, UserView user)
+{
+    var claims = new List<Claim>
+    {
+        new(ClaimTypes.Name, user.Username),
+        new(ClaimTypes.Role, user.Role),
+        new("UserId", user.Id.ToString()),
+        new("amr", "mfa")
+    };
+    var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+    await httpContext.SignInAsync(
+        CookieAuthenticationDefaults.AuthenticationScheme,
+        new ClaimsPrincipal(identity),
+        new AuthenticationProperties { IsPersistent = false });
 }
 
 static string NormalizePathBase(string? pathBase)
