@@ -15,6 +15,7 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 // (it loops over whatever's in the partner roster, which is empty in that case).
 public sealed class CjAdsSyncBackgroundService(
     IServiceScopeFactory scopeFactory,
+    OllamaWorkloadScheduler ollamaWorkloads,
     ILogger<CjAdsSyncBackgroundService> logger) : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromHours(1);
@@ -40,6 +41,7 @@ public sealed class CjAdsSyncBackgroundService(
         }
         try
         {
+            using var workloadPriority = ollamaWorkloads.UseBackgroundPriority();
             logger.LogInformation("CJ Ads: starting scheduled link sync");
             await using var scope = scopeFactory.CreateAsyncScope();
             var cjAds = scope.ServiceProvider.GetRequiredService<ICjAdsService>();

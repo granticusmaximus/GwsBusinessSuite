@@ -8,7 +8,10 @@ using Microsoft.Extensions.Logging;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
-public sealed class OllamaService(HttpClient http, ILogger<OllamaService> logger) : IOllamaService
+public sealed class OllamaService(
+    HttpClient http,
+    OllamaWorkloadScheduler workloadScheduler,
+    ILogger<OllamaService> logger) : IOllamaService
 {
     private const string ModelKeepAlive = "30m";
 
@@ -25,6 +28,10 @@ public sealed class OllamaService(HttpClient http, ILogger<OllamaService> logger
 
         try
         {
+            var queueTimer = Stopwatch.StartNew();
+            await using var workloadLease = await workloadScheduler.AcquireAsync(ct);
+            queueTimer.Stop();
+            LogQueueWait(model, queueTimer.Elapsed);
             var stopwatch = Stopwatch.StartNew();
             using var response = await http.PostAsJsonAsync("/api/generate", payload, ct);
             response.EnsureSuccessStatusCode();
@@ -56,6 +63,10 @@ public sealed class OllamaService(HttpClient http, ILogger<OllamaService> logger
             keep_alive = ModelKeepAlive
         };
 
+        var queueTimer = Stopwatch.StartNew();
+        await using var workloadLease = await workloadScheduler.AcquireAsync(ct);
+        queueTimer.Stop();
+        LogQueueWait(model, queueTimer.Elapsed);
         var stopwatch = Stopwatch.StartNew();
         TimeSpan? timeToFirstToken = null;
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/generate") { Content = JsonContent.Create(payload) };
@@ -136,6 +147,10 @@ public sealed class OllamaService(HttpClient http, ILogger<OllamaService> logger
 
         try
         {
+            var queueTimer = Stopwatch.StartNew();
+            await using var workloadLease = await workloadScheduler.AcquireAsync(ct);
+            queueTimer.Stop();
+            LogQueueWait(model, queueTimer.Elapsed);
             using var response = await http.PostAsJsonAsync("/api/generate", payload, ct);
             response.EnsureSuccessStatusCode();
 
@@ -239,4 +254,15 @@ public sealed class OllamaService(HttpClient http, ILogger<OllamaService> logger
 
     private static double NanosecondsToMilliseconds(long? nanoseconds) =>
         (nanoseconds ?? 0) / 1_000_000d;
+
+    private void LogQueueWait(string model, TimeSpan queueWait)
+    {
+        if (queueWait >= TimeSpan.FromMilliseconds(25))
+        {
+            logger.LogInformation(
+                "Ollama model '{Model}' waited {QueueWaitMs:F0} ms for the local generation slot.",
+                model,
+                queueWait.TotalMilliseconds);
+        }
+    }
 }

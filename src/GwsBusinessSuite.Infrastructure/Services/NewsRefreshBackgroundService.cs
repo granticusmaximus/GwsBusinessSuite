@@ -7,6 +7,7 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 
 public sealed class NewsRefreshBackgroundService(
     IServiceScopeFactory scopeFactory,
+    OllamaWorkloadScheduler ollamaWorkloads,
     ILogger<NewsRefreshBackgroundService> logger) : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromHours(1);
@@ -35,6 +36,7 @@ public sealed class NewsRefreshBackgroundService(
         }
         try
         {
+            using var workloadPriority = ollamaWorkloads.UseBackgroundPriority();
             logger.LogInformation("News Intelligence: starting scheduled refresh");
             await using var scope = scopeFactory.CreateAsyncScope();
             var svc = scope.ServiceProvider.GetRequiredService<INewsIntelligenceService>();

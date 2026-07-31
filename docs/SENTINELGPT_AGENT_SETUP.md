@@ -35,13 +35,14 @@ weights.
 SentinelGPT uses the installed specialist models without pretending their weights have
 been merged:
 
-- substantial GWS, engineering, security, architecture, strategy, and reasoning questions
-  consult `qwen2.5-coder` and `deepseek-r1`;
+- **Fast** mode is the default and sends the grounded request directly to SentinelGPT;
+- **Deep** mode is an explicit composer control that consults `qwen2.5-coder` and
+  `deepseek-r1` before SentinelGPT writes the final answer;
 - Qwen acts as the .NET/C#/Blazor engineering reviewer;
 - DeepSeek audits premises, missing evidence, counterexamples, and reasoning;
 - SentinelGPT receives both opinions as explicitly untrusted advisory material and produces
   the final response using verified GWS context and cited documentation;
-- short/simple prompts bypass the panel to avoid unnecessary latency.
+- specialist calls never run merely because a prompt contains technical keywords.
 
 The teacher responses are not factual sources and are not automatically saved as memory.
 Use the thumbs-up control below a SentinelGPT response to approve it as reusable learning
@@ -83,6 +84,15 @@ behavior or turn an unsupported claim into a remembered fact.
   plus relevant records from Sentinel, publishing, CRM, automation, container health,
   intelligence, podcasts, affiliate operations, page generation, Notion sync status, and
   live-show modules.
+- The sanitized suite overview and term-matched module context use a 20-second in-memory
+  cache. Cache keys contain only normalized search terms, cached records exclude protected
+  and unnecessary fields, and distinct term sets remain isolated.
+- Conversation history and grounding context are bounded before they reach Ollama so long
+  chats do not repeatedly re-evaluate an ever-growing prompt.
+- Local model generation is coordinated inside the web process to match the production
+  one-request Ollama limit. Interactive requests are selected before queued scheduled
+  news, CJ suggestion, or automation work. A background generation already running is
+  allowed to finish; the chat takes the next available model slot.
 - The **Web** control in the composer optionally adds current Ollama web-search results.
   External results are labeled and linked separately from internal GWS sources.
   When Web is on, the current prompt is sent to Ollama's web-search service; do not put
@@ -178,6 +188,11 @@ only that browser's live polling; the model request continues under a server-own
 When the same user returns while it is still running, SentinelGPT reopens the active
 conversation and resumes the streamed progress. On completion, the existing
 `SentinelAiRun` persistence remains the durable conversation history.
+
+Production logs separately report request-preparation time, model-slot queue time, model
+load time, first-token time, prompt evaluation, and output tokens per second. Together,
+these show whether a slow response came from database grounding, queued background work,
+a cold model load, a large prompt, or CPU/GPU generation speed.
 
 One active chat response is allowed per user. This prevents duplicate model work when a
 user refreshes or double-submits during recovery. A full application/container restart

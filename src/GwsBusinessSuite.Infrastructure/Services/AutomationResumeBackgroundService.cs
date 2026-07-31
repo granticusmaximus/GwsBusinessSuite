@@ -7,6 +7,7 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 
 public sealed class AutomationResumeBackgroundService(
     IServiceScopeFactory scopeFactory,
+    OllamaWorkloadScheduler ollamaWorkloads,
     ILogger<AutomationResumeBackgroundService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -16,6 +17,7 @@ public sealed class AutomationResumeBackgroundService(
         {
             try
             {
+                using var workloadPriority = ollamaWorkloads.UseBackgroundPriority();
                 await using var scope = scopeFactory.CreateAsyncScope();
                 var service = scope.ServiceProvider.GetRequiredService<IAutomationTriggerService>();
                 var count = await service.ResumeDueWaitsAsync(stoppingToken);

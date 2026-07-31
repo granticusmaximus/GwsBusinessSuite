@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -6,6 +7,7 @@ using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
 namespace GwsBusinessSuite.Application.Wiki;
@@ -15,6 +17,7 @@ public sealed class SentinelAiService(
     IOllamaService ollama,
     ISiteSettingsService siteSettings,
     ISentinelWorkspaceService workspaceService,
+    IMemoryCache cache,
     IOllamaWebSearchService? webSearchService = null,
     ILogger<SentinelAiService>? logger = null) : ISentinelAiService
 {
@@ -38,6 +41,8 @@ public sealed class SentinelAiService(
     private const int HistoryOutputCharacterLimit = 4_000;
     private const int MaxContextualPromptCharacters = 40_000;
     private const int MaxGroundedContextCharacters = 24_000;
+    private static readonly TimeSpan SuiteContextCacheDuration = TimeSpan.FromSeconds(20);
+    private const string SuiteOverviewCacheKey = "sentinel-gpt:suite-overview:v1";
 
     public bool IsInternetConfigured => webSearchService?.IsConfigured == true;
 
@@ -124,6 +129,7 @@ public sealed class SentinelAiService(
                 nameof(instruction));
         }
 
+        var preparationTimer = Stopwatch.StartNew();
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var settings = await siteSettings.GetSettingsAsync(cancellationToken);
         var model = string.IsNullOrWhiteSpace(settings.OllamaModelOverride) ? SentinelGptDefaults.Model : settings.OllamaModelOverride;
@@ -256,6 +262,15 @@ public sealed class SentinelAiService(
         var userPrompt = string.IsNullOrWhiteSpace(boundedHistory)
             ? $"GROUNDED CONTEXT:\n{boundedContext}\n\nREQUEST:\n{trimmedInstruction}"
             : $"CONVERSATION SO FAR:\n{boundedHistory}\n\nGROUNDED CONTEXT:\n{boundedContext}\n\nNEW REQUEST:\n{trimmedInstruction}";
+        preparationTimer.Stop();
+        logger?.LogInformation(
+            "Prepared SentinelGPT request in {PreparationMs:F0} ms with {ContextCharacters} context characters, " +
+            "{HistoryCharacters} history characters, web {IncludeInternet}, deep analysis {UseDeepAnalysis}.",
+            preparationTimer.Elapsed.TotalMilliseconds,
+            boundedContext.Length,
+            boundedHistory.Length,
+            includeInternet,
+            useDeepAnalysis);
 
         var stream = ollama.GenerateStreamAsync(model, systemPrompt, userPrompt, cancellationToken);
         await using var enumerator = stream.GetAsyncEnumerator(cancellationToken);
@@ -547,20 +562,30 @@ public sealed class SentinelAiService(
         string instruction,
         CancellationToken cancellationToken)
     {
+        var terms = SearchTerms(instruction);
+        var cacheKey = $"sentinel-gpt:suite-context:v1:{string.Join('|', terms)}";
+        var cached = await cache.GetOrCreateAsync(
+            cacheKey,
+            async entry =>
+            {
+                entry.AbsoluteExpirationRelativeToNow = SuiteContextCacheDuration;
+                entry.Size = 1;
+                return await BuildSuiteContextUncachedAsync(db, terms, cancellationToken);
+            });
+        cached ??= await BuildSuiteContextUncachedAsync(db, terms, cancellationToken);
+        return (cached.Context, cached.Citations.ToList());
+    }
+
+    private async Task<CachedSuiteContext> BuildSuiteContextUncachedAsync(
+        IAppDbContext db,
+        string[] terms,
+        CancellationToken cancellationToken)
+    {
         var builder = new StringBuilder();
         var citations = new List<SentinelAiCitation>();
         var citedUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var terms = SearchTerms(instruction);
 
-        builder.AppendLine("GWS BUSINESS SUITE LIVE OVERVIEW (read-only, secrets excluded):");
-        builder.AppendLine($"- CRM contacts: {await db.Contacts.CountAsync(item => item.TrashedAt == null, cancellationToken)}");
-        builder.AppendLine($"- Sentinel pages/databases: {await db.WikiPages.CountAsync(item => item.NotionArchivedAt == null, cancellationToken)}/{await db.WikiDatabases.CountAsync(item => item.NotionArchivedAt == null, cancellationToken)}");
-        builder.AppendLine($"- CMS pages/articles/drafts: {await db.CmsPages.CountAsync(item => item.TrashedAt == null, cancellationToken)}/{await db.Articles.CountAsync(item => item.TrashedAt == null, cancellationToken)}/{await db.SeoArticleDrafts.CountAsync(cancellationToken)}");
-        builder.AppendLine($"- Automation workflows/executions: {await db.AutomationWorkflows.CountAsync(cancellationToken)}/{await db.AutomationExecutions.CountAsync(cancellationToken)}");
-        builder.AppendLine($"- News items/podcast shows: {await db.NewsItems.CountAsync(cancellationToken)}/{await db.PodcastShows.CountAsync(cancellationToken)}");
-        builder.AppendLine($"- Affiliate offers/commissions: {await db.AffiliateOffers.CountAsync(cancellationToken)}/{await db.CjCommissionRecords.CountAsync(cancellationToken)}");
-        builder.AppendLine($"- App-generation requests/live shows: {await db.AppGenerationRequests.CountAsync(cancellationToken)}/{await db.LiveShowSessions.CountAsync(cancellationToken)}");
-        builder.AppendLine($"- Unread container alerts: {await db.DockerHealthAlerts.CountAsync(item => !item.IsRead, cancellationToken)}");
+        builder.Append(await GetSuiteOverviewAsync(db, cancellationToken));
 
         void AddResult(string type, string title, string details, string url)
         {
@@ -571,73 +596,112 @@ public sealed class SentinelAiService(
             }
         }
 
-        var articles = await db.Articles.AsNoTracking().Where(item => item.TrashedAt == null).Take(80).ToListAsync(cancellationToken);
-        foreach (var item in articles.Where(item => MatchesAny(terms, item.Title, item.Topic, item.Tags, item.MetaDescription, item.BodyMarkdown)).Take(4))
+        var articles = await db.Articles.AsNoTracking()
+            .Where(item => item.TrashedAt == null)
+            .Select(item => new { item.Id, item.Title, item.Topic, item.Tags, item.MetaDescription, item.Status })
+            .Take(80)
+            .ToListAsync(cancellationToken);
+        foreach (var item in articles.Where(item => MatchesAny(terms, item.Title, item.Topic, item.Tags, item.MetaDescription)).Take(4))
         {
             AddResult("ARTICLE", item.Title, $"Status: {item.Status}. Topic: {item.Topic}. {item.MetaDescription}", $"admin/article-editor/{item.Id}");
         }
 
-        var drafts = await db.SeoArticleDrafts.AsNoTracking().Take(80).ToListAsync(cancellationToken);
-        foreach (var item in drafts.Where(item => MatchesAny(terms, item.Title, item.Topic, item.PrimaryKeyword, item.Tags, item.ArticleMarkdown)).Take(4))
+        var drafts = await db.SeoArticleDrafts.AsNoTracking()
+            .Select(item => new { item.Id, item.Title, item.Topic, item.PrimaryKeyword, item.Tags, item.Status })
+            .Take(80)
+            .ToListAsync(cancellationToken);
+        foreach (var item in drafts.Where(item => MatchesAny(terms, item.Title, item.Topic, item.PrimaryKeyword, item.Tags)).Take(4))
         {
             AddResult("CONTENT DRAFT", string.IsNullOrWhiteSpace(item.Title) ? item.Topic : item.Title, $"Status: {item.Status}. Topic: {item.Topic}. Keyword: {item.PrimaryKeyword}", $"admin/content-studio/drafts/{item.Id}");
         }
 
-        var pages = await db.CmsPages.AsNoTracking().Where(item => item.TrashedAt == null).Take(80).ToListAsync(cancellationToken);
+        var pages = await db.CmsPages.AsNoTracking()
+            .Where(item => item.TrashedAt == null)
+            .Select(item => new { item.Id, item.Title, item.Slug, item.MetaDescription, item.Tags, item.Status })
+            .Take(80)
+            .ToListAsync(cancellationToken);
         foreach (var item in pages.Where(item => MatchesAny(terms, item.Title, item.Slug, item.MetaDescription, item.Tags)).Take(4))
         {
             AddResult("CMS PAGE", item.Title, $"Status: {item.Status}. Slug: {item.Slug}. {item.MetaDescription}", $"admin/pages/{item.Id}");
         }
 
-        var contacts = await db.Contacts.AsNoTracking().Where(item => item.TrashedAt == null).Take(80).ToListAsync(cancellationToken);
+        var contacts = await db.Contacts.AsNoTracking()
+            .Where(item => item.TrashedAt == null)
+            .Select(item => new { item.Id, item.FullName, item.Company, item.Status, item.FollowUpDate })
+            .Take(80)
+            .ToListAsync(cancellationToken);
         foreach (var item in contacts.Where(item => MatchesAny(terms, item.FullName, item.Company, item.Status)).Take(4))
         {
             AddResult("CRM CONTACT", item.FullName, $"Company: {item.Company ?? "Not set"}. Status: {item.Status}. Follow-up: {item.FollowUpDate?.ToString("u") ?? "Not scheduled"}.", $"admin/crm/{item.Id}");
         }
 
-        var workflows = await db.AutomationWorkflows.AsNoTracking().Take(80).ToListAsync(cancellationToken);
+        var workflows = await db.AutomationWorkflows.AsNoTracking()
+            .Select(item => new { item.Id, item.Name, item.Description, item.Status, item.TagsCsv, item.CurrentVersion, item.LastExecutedAt })
+            .Take(80)
+            .ToListAsync(cancellationToken);
         foreach (var item in workflows.Where(item => MatchesAny(terms, item.Name, item.Description, item.Status, item.TagsCsv)).Take(4))
         {
             AddResult("AUTOMATION", item.Name, $"Status: {item.Status}. Version: {item.CurrentVersion}. Last run: {item.LastExecutedAt?.ToString("u") ?? "Never"}. {item.Description}", $"admin/automation/{item.Id}");
         }
 
-        var executions = await db.AutomationExecutions.AsNoTracking().Take(80).ToListAsync(cancellationToken);
+        var executions = await db.AutomationExecutions.AsNoTracking()
+            .Select(item => new { item.Id, item.Status, item.Mode, item.ErrorMessage })
+            .Take(80)
+            .ToListAsync(cancellationToken);
         foreach (var item in executions.Where(item => MatchesAny(terms, item.Status, item.Mode, item.ErrorMessage)).Take(4))
         {
             AddResult("AUTOMATION EXECUTION", item.Id.ToString(), $"Status: {item.Status}. Mode: {item.Mode}. Error: {Limit(item.ErrorMessage, 300)}", $"admin/automation/executions/{item.Id}");
         }
 
-        var alerts = await db.DockerHealthAlerts.AsNoTracking().Take(80).ToListAsync(cancellationToken);
+        var alerts = await db.DockerHealthAlerts.AsNoTracking()
+            .Select(item => new { item.ContainerName, item.Severity, item.Message, item.IsRead })
+            .Take(80)
+            .ToListAsync(cancellationToken);
         foreach (var item in alerts.Where(item => MatchesAny(terms, item.ContainerName, item.Severity, item.Message)).Take(4))
         {
             AddResult("CONTAINER ALERT", item.ContainerName, $"Severity: {item.Severity}. Read: {item.IsRead}. {item.Message}", "admin/docker-health");
         }
 
-        var news = await db.NewsItems.AsNoTracking().Take(100).ToListAsync(cancellationToken);
+        var news = await db.NewsItems.AsNoTracking()
+            .Select(item => new { item.Title, item.Source, item.Description, item.OllamaSummary, item.PublishedAt })
+            .Take(100)
+            .ToListAsync(cancellationToken);
         foreach (var item in news.Where(item => MatchesAny(terms, item.Title, item.Source, item.Description, item.OllamaSummary)).Take(4))
         {
             AddResult("NEWS ITEM", item.Title, $"Source: {item.Source}. Published: {item.PublishedAt?.ToString("u") ?? "Unknown"}. {item.Description}", "admin/news-intelligence");
         }
 
-        var podcasts = await db.PodcastShows.AsNoTracking().Take(80).ToListAsync(cancellationToken);
+        var podcasts = await db.PodcastShows.AsNoTracking()
+            .Select(item => new { item.Title, item.Author, item.Category, item.Description })
+            .Take(80)
+            .ToListAsync(cancellationToken);
         foreach (var item in podcasts.Where(item => MatchesAny(terms, item.Title, item.Author, item.Category, item.Description)).Take(4))
         {
             AddResult("PODCAST", item.Title, $"Author: {item.Author}. Category: {item.Category}. {item.Description}", "admin/podcasts");
         }
 
-        var requests = await db.AppGenerationRequests.AsNoTracking().Take(80).ToListAsync(cancellationToken);
+        var requests = await db.AppGenerationRequests.AsNoTracking()
+            .Select(item => new { item.Title, item.Status, item.RejectionReason, item.ApprovedBy })
+            .Take(80)
+            .ToListAsync(cancellationToken);
         foreach (var item in requests.Where(item => MatchesAny(terms, item.Title, item.Status, item.RejectionReason)).Take(4))
         {
             AddResult("APP GENERATION", item.Title, $"Status: {item.Status}. Approved by: {item.ApprovedBy ?? "Not approved"}.", "admin/app-generation-queue");
         }
 
-        var offers = await db.AffiliateOffers.AsNoTracking().Take(100).ToListAsync(cancellationToken);
+        var offers = await db.AffiliateOffers.AsNoTracking()
+            .Select(item => new { item.LinkName, item.AdvertiserName, item.Network, item.Category, item.RelationshipStatus })
+            .Take(100)
+            .ToListAsync(cancellationToken);
         foreach (var item in offers.Where(item => MatchesAny(terms, item.AdvertiserName, item.LinkName, item.Category, item.RelationshipStatus)).Take(4))
         {
             AddResult("AFFILIATE OFFER", item.LinkName, $"Advertiser: {item.AdvertiserName}. Network: {item.Network}. Category: {item.Category}.", "admin/cj-ads");
         }
 
-        var shows = await db.LiveShowSessions.AsNoTracking().Take(50).ToListAsync(cancellationToken);
+        var shows = await db.LiveShowSessions.AsNoTracking()
+            .Select(item => new { item.Title, item.Status, item.StartedAt, item.EndedAt })
+            .Take(50)
+            .ToListAsync(cancellationToken);
         foreach (var item in shows.Where(item => MatchesAny(terms, item.Title, item.Status)).Take(4))
         {
             AddResult("LIVE SHOW", item.Title, $"Status: {item.Status}. Started: {item.StartedAt:u}. Ended: {item.EndedAt?.ToString("u") ?? "Not ended"}.", "admin/live-show");
@@ -662,7 +726,29 @@ public sealed class SentinelAiService(
             citations.Add(new SentinelAiCitation(null, false, "Notion connector status", "admin/sentinel", "gws"));
         }
 
-        return (builder.ToString(), citations);
+        return new CachedSuiteContext(builder.ToString(), citations.ToArray());
+    }
+
+    private async Task<string> GetSuiteOverviewAsync(IAppDbContext db, CancellationToken cancellationToken)
+    {
+        var cached = await cache.GetOrCreateAsync(
+            SuiteOverviewCacheKey,
+            async entry =>
+            {
+                entry.AbsoluteExpirationRelativeToNow = SuiteContextCacheDuration;
+                entry.Size = 1;
+                var builder = new StringBuilder("GWS BUSINESS SUITE LIVE OVERVIEW (read-only, secrets excluded):\n");
+                builder.AppendLine($"- CRM contacts: {await db.Contacts.CountAsync(item => item.TrashedAt == null, cancellationToken)}");
+                builder.AppendLine($"- Sentinel pages/databases: {await db.WikiPages.CountAsync(item => item.NotionArchivedAt == null, cancellationToken)}/{await db.WikiDatabases.CountAsync(item => item.NotionArchivedAt == null, cancellationToken)}");
+                builder.AppendLine($"- CMS pages/articles/drafts: {await db.CmsPages.CountAsync(item => item.TrashedAt == null, cancellationToken)}/{await db.Articles.CountAsync(item => item.TrashedAt == null, cancellationToken)}/{await db.SeoArticleDrafts.CountAsync(cancellationToken)}");
+                builder.AppendLine($"- Automation workflows/executions: {await db.AutomationWorkflows.CountAsync(cancellationToken)}/{await db.AutomationExecutions.CountAsync(cancellationToken)}");
+                builder.AppendLine($"- News items/podcast shows: {await db.NewsItems.CountAsync(cancellationToken)}/{await db.PodcastShows.CountAsync(cancellationToken)}");
+                builder.AppendLine($"- Affiliate offers/commissions: {await db.AffiliateOffers.CountAsync(cancellationToken)}/{await db.CjCommissionRecords.CountAsync(cancellationToken)}");
+                builder.AppendLine($"- App-generation requests/live shows: {await db.AppGenerationRequests.CountAsync(cancellationToken)}/{await db.LiveShowSessions.CountAsync(cancellationToken)}");
+                builder.AppendLine($"- Unread container alerts: {await db.DockerHealthAlerts.CountAsync(item => !item.IsRead, cancellationToken)}");
+                return builder.ToString();
+            });
+        return cached ?? "GWS BUSINESS SUITE LIVE OVERVIEW unavailable.\n";
     }
 
     private static void AppendPage(StringBuilder builder, WikiPage page)
@@ -877,6 +963,10 @@ public sealed class SentinelAiService(
             run.Instruction, run.Output, run.Status, run.Model, run.CreatedBy, run.CreatedAt, citations);
 
     private sealed record ModelCommand(string Kind, string Model);
+
+    private sealed record CachedSuiteContext(
+        string Context,
+        IReadOnlyList<SentinelAiCitation> Citations);
 
     private static class ModelCommandKinds
     {

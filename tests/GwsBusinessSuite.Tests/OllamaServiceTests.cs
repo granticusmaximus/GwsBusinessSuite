@@ -68,7 +68,7 @@ public sealed class OllamaServiceTests
     private static OllamaService CreateService(HttpMessageHandler handler, ILogger<OllamaService> logger)
     {
         var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
-        return new OllamaService(client, logger);
+        return new OllamaService(client, new OllamaWorkloadScheduler(), logger);
     }
 
     private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler

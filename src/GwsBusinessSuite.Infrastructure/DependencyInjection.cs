@@ -72,6 +72,7 @@ public static class DependencyInjection
         services.AddScoped<IAdminPortalSummaryService, AdminPortalSummaryService>();
         services.AddScoped<ISecretProtector, DataProtectionSecretProtector>();
         services.AddHttpClient<ICjAffiliateService, CjAffiliateService>();
+        services.AddSingleton<OllamaWorkloadScheduler>();
         services.AddHttpClient<IOllamaService, OllamaService>((serviceProvider, client) =>
         {
             var options = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ContentStudioOptions>>().Value;

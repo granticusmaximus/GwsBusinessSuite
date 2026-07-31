@@ -7,6 +7,7 @@ using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -32,7 +33,9 @@ public sealed class SentinelAiServiceTests
 
         var ollama = new FakeStreamingOllamaService(["The ", "blue switch ", "starts the sequence."]);
         var factory = new FakeAppDbContextFactory(options);
-        var service = new SentinelAiService(factory, ollama, new SiteSettingsService(db), new SentinelWorkspaceService(db, TimeProvider.System));
+        var service = new SentinelAiService(
+            factory, ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache());
 
         // SentinelWorkspaceService.SearchAsync requires every instruction token to appear in
         // the candidate's title/content (an AND match, not a relevance-ranked OR), so the
@@ -80,7 +83,8 @@ public sealed class SentinelAiServiceTests
 
         var ollama = new FakeStreamingOllamaService(["should not be called"]);
         var service = new SentinelAiService(
-            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db), new SentinelWorkspaceService(db, TimeProvider.System));
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache());
 
         var act = async () =>
         {
@@ -102,7 +106,8 @@ public sealed class SentinelAiServiceTests
 
         var ollama = new FakeStreamingOllamaService(["should not be called"]);
         var service = new SentinelAiService(
-            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db), new SentinelWorkspaceService(db, TimeProvider.System));
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache());
         var oversizedPrompt = new string('x', SentinelGptDefaults.MaxInstructionLength + 1);
 
         var act = async () =>
@@ -126,7 +131,8 @@ public sealed class SentinelAiServiceTests
 
         var ollama = new FakeStreamingOllamaService(["A short answer."]);
         var service = new SentinelAiService(
-            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db), new SentinelWorkspaceService(db, TimeProvider.System));
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache());
 
         SentinelAiRunView? completed = null;
         await foreach (var chunk in service.StreamAsync(null, SentinelAiActions.Ask, "anything", "grant"))
@@ -202,6 +208,7 @@ public sealed class SentinelAiServiceTests
             ollama,
             new SiteSettingsService(db),
             new SentinelWorkspaceService(db, TimeProvider.System),
+            CreateCache(),
             web);
 
         SentinelAiRunView? completed = null;
@@ -245,7 +252,8 @@ public sealed class SentinelAiServiceTests
             new FakeAppDbContextFactory(options),
             ollama,
             new SiteSettingsService(db),
-            new SentinelWorkspaceService(db, TimeProvider.System));
+            new SentinelWorkspaceService(db, TimeProvider.System),
+            CreateCache());
         var longOrdinaryText = string.Join(' ', Enumerable.Repeat("meeting notes and customer correspondence", 30));
 
         await foreach (var _ in service.StreamAgentConversationAsync(
@@ -271,7 +279,8 @@ public sealed class SentinelAiServiceTests
             new FakeAppDbContextFactory(options),
             ollama,
             new SiteSettingsService(db),
-            new SentinelWorkspaceService(db, TimeProvider.System));
+            new SentinelWorkspaceService(db, TimeProvider.System),
+            CreateCache());
 
         await foreach (var _ in service.StreamAgentConversationAsync(
             Guid.NewGuid(), null, "Improve SentinelGPT performance and security", "grant",
@@ -280,6 +289,61 @@ public sealed class SentinelAiServiceTests
         }
 
         ollama.RequestedModels.Should().Equal(SentinelGptDefaults.Model);
+    }
+
+    [Fact]
+    public async Task StreamAgentConversationAsync_ShouldCacheSanitizedSuiteContextPerSearchTerms()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var ada = new GwsBusinessSuite.Domain.Entities.Contact
+        {
+            FullName = "Ada Lovelace",
+            Company = "Analytical Engines",
+            Email = "ada-private@example.test",
+            Status = "Customer",
+            CreatedBy = "grant"
+        };
+        db.Contacts.AddRange(
+            ada,
+            new GwsBusinessSuite.Domain.Entities.Contact
+            {
+                FullName = "Grace Hopper",
+                Company = "Navy",
+                Email = "grace-private@example.test",
+                Status = "Lead",
+                CreatedBy = "grant"
+            });
+        await db.SaveChangesAsync();
+
+        var cache = CreateCache();
+        var ollama = new FakeStreamingOllamaService(["Answer."]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options),
+            ollama,
+            new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System),
+            cache);
+
+        await DrainAgentResponseAsync(service, "Ada");
+        ollama.LastUserPrompt.Should().Contain("Ada Lovelace");
+        ollama.LastUserPrompt.Should().Contain("Analytical Engines");
+        ollama.LastUserPrompt.Should().NotContain("ada-private@example.test");
+
+        ada.Company = "Updated Company";
+        await db.SaveChangesAsync();
+        await DrainAgentResponseAsync(service, "Ada");
+        ollama.LastUserPrompt.Should().Contain("Analytical Engines");
+        ollama.LastUserPrompt.Should().NotContain("Updated Company");
+
+        await DrainAgentResponseAsync(service, "Grace");
+        ollama.LastUserPrompt.Should().Contain("Grace Hopper");
+        ollama.LastUserPrompt.Should().NotContain("Ada Lovelace");
+        ollama.LastUserPrompt.Should().NotContain("grace-private@example.test");
     }
 
     [Fact]
@@ -296,7 +360,8 @@ public sealed class SentinelAiServiceTests
             new FakeAppDbContextFactory(options),
             ollama,
             new SiteSettingsService(db),
-            new SentinelWorkspaceService(db, TimeProvider.System));
+            new SentinelWorkspaceService(db, TimeProvider.System),
+            CreateCache());
         var conversationId = Guid.NewGuid();
 
         var pending = await service.ExecuteModelCommandAsync(
@@ -330,7 +395,8 @@ public sealed class SentinelAiServiceTests
             new FakeAppDbContextFactory(options),
             ollama,
             settings,
-            new SentinelWorkspaceService(db, TimeProvider.System));
+            new SentinelWorkspaceService(db, TimeProvider.System),
+            CreateCache());
 
         var result = await service.ExecuteModelCommandAsync(
             Guid.NewGuid(), "switch to model qwen3:8b", "grant", confirmed: false);
@@ -343,6 +409,17 @@ public sealed class SentinelAiServiceTests
     {
         public Task<IAppDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<IAppDbContext>(new ApplicationDbContext(options));
+    }
+
+    private static MemoryCache CreateCache() => new(new MemoryCacheOptions());
+
+    private static async Task DrainAgentResponseAsync(SentinelAiService service, string instruction)
+    {
+        await foreach (var _ in service.StreamAgentConversationAsync(
+            Guid.NewGuid(), null, instruction, "grant",
+            includeInternet: false, useDeepAnalysis: false))
+        {
+        }
     }
 
     private sealed class FakeStreamingOllamaService(
