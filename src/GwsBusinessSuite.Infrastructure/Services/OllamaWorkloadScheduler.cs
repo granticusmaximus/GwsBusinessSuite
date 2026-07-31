@@ -19,6 +19,9 @@ public sealed class OllamaWorkloadScheduler
     private readonly AsyncLocal<OllamaWorkloadPriority?> _ambientPriority = new();
     private bool _held;
 
+    public OllamaWorkloadPriority CurrentPriority =>
+        _ambientPriority.Value ?? OllamaWorkloadPriority.Interactive;
+
     public IDisposable UseBackgroundPriority()
     {
         var previous = _ambientPriority.Value;

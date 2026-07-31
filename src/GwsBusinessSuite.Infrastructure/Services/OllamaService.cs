@@ -11,6 +11,7 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 public sealed class OllamaService(
     HttpClient http,
     OllamaWorkloadScheduler workloadScheduler,
+    OllamaPerformanceTracker performanceTracker,
     ILogger<OllamaService> logger) : IOllamaService
 {
     private const string ModelKeepAlive = "30m";
@@ -28,6 +29,7 @@ public sealed class OllamaService(
 
         try
         {
+            var workloadPriority = workloadScheduler.CurrentPriority;
             var queueTimer = Stopwatch.StartNew();
             await using var workloadLease = await workloadScheduler.AcquireAsync(ct);
             queueTimer.Stop();
@@ -38,7 +40,9 @@ public sealed class OllamaService(
 
             var result = await response.Content.ReadFromJsonAsync<OllamaGenerateResponse>(cancellationToken: ct);
             stopwatch.Stop();
-            LogGenerationMetrics(model, result, stopwatch.Elapsed, stopwatch.Elapsed);
+            LogGenerationMetrics(
+                model, result, queueTimer.Elapsed, stopwatch.Elapsed, stopwatch.Elapsed,
+                workloadPriority, recordInteractiveChatPerformance: false);
             return result?.Response ?? string.Empty;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
@@ -88,6 +92,7 @@ public sealed class OllamaService(
             keep_alive = ModelKeepAlive
         };
 
+        var workloadPriority = workloadScheduler.CurrentPriority;
         var queueTimer = Stopwatch.StartNew();
         await using var workloadLease = await workloadScheduler.AcquireAsync(ct);
         queueTimer.Stop();
@@ -133,7 +138,9 @@ public sealed class OllamaService(
             if (chunk.Done)
             {
                 stopwatch.Stop();
-                LogGenerationMetrics(model, chunk, stopwatch.Elapsed, timeToFirstToken);
+                LogGenerationMetrics(
+                    model, chunk, queueTimer.Elapsed, stopwatch.Elapsed, timeToFirstToken,
+                    workloadPriority, recordInteractiveChatPerformance: true);
                 yield break;
             }
         }
@@ -257,8 +264,11 @@ public sealed class OllamaService(
     private void LogGenerationMetrics(
         string model,
         OllamaGenerateResponse? result,
+        TimeSpan queueWait,
         TimeSpan requestDuration,
-        TimeSpan? timeToFirstToken)
+        TimeSpan? timeToFirstToken,
+        OllamaWorkloadPriority workloadPriority,
+        bool recordInteractiveChatPerformance)
     {
         var tokensPerSecond = result?.EvalCount is > 0 && result.EvalDuration is > 0
             ? result.EvalCount.Value / (result.EvalDuration.Value / 1_000_000_000d)
@@ -275,6 +285,21 @@ public sealed class OllamaService(
             NanosecondsToMilliseconds(result?.PromptEvalDuration),
             result?.EvalCount ?? 0,
             tokensPerSecond);
+        if (recordInteractiveChatPerformance
+            && workloadPriority == OllamaWorkloadPriority.Interactive)
+        {
+            performanceTracker.Record(new OllamaPerformanceSnapshot(
+                model,
+                DateTimeOffset.UtcNow,
+                queueWait.TotalMilliseconds,
+                requestDuration.TotalMilliseconds,
+                timeToFirstToken?.TotalMilliseconds ?? requestDuration.TotalMilliseconds,
+                NanosecondsToMilliseconds(result?.LoadDuration),
+                result?.PromptEvalCount ?? 0,
+                NanosecondsToMilliseconds(result?.PromptEvalDuration),
+                result?.EvalCount ?? 0,
+                tokensPerSecond));
+        }
     }
 
     private static double NanosecondsToMilliseconds(long? nanoseconds) =>

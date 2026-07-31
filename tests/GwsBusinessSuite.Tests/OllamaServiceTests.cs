@@ -87,10 +87,71 @@ public sealed class OllamaServiceTests
         payload.Should().NotContain("\"prompt\"");
     }
 
-    private static OllamaService CreateService(HttpMessageHandler handler, ILogger<OllamaService> logger)
+    [Fact]
+    public async Task GenerateStreamAsync_ShouldCaptureInteractiveChatPerformanceWithoutPromptContent()
+    {
+        var tracker = new OllamaPerformanceTracker();
+        var logger = new RecordingLogger<OllamaService>();
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                {"response":"ok","done":false}
+                {"response":"","done":true,"load_duration":1000000000,"prompt_eval_count":10,"prompt_eval_duration":500000000,"eval_count":20,"eval_duration":1000000000}
+                """)
+        });
+        var service = CreateService(handler, logger, tracker);
+
+        await foreach (var _ in service.GenerateStreamAsync(
+            "sentinelgpt:latest", "system", "private prompt text"))
+        {
+        }
+
+        var snapshot = tracker.GetLatest("sentinelgpt");
+        snapshot.Should().NotBeNull();
+        snapshot!.Model.Should().Be("sentinelgpt:latest");
+        snapshot.LoadMilliseconds.Should().Be(1_000);
+        snapshot.PromptTokens.Should().Be(10);
+        snapshot.OutputTokens.Should().Be(20);
+        snapshot.TokensPerSecond.Should().Be(20);
+        snapshot.ToString().Should().NotContain("private prompt text");
+    }
+
+    [Fact]
+    public async Task GenerateStreamAsync_ShouldNotCaptureBackgroundPerformance()
+    {
+        var scheduler = new OllamaWorkloadScheduler();
+        var tracker = new OllamaPerformanceTracker();
+        var logger = new RecordingLogger<OllamaService>();
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"response":"ok","done":true}""")
+        });
+        var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        var service = new OllamaService(client, scheduler, tracker, logger);
+
+        using (scheduler.UseBackgroundPriority())
+        {
+            await foreach (var _ in service.GenerateStreamAsync(
+                "sentinelgpt", "system", "scheduled work"))
+            {
+            }
+        }
+
+        tracker.GetLatest("sentinelgpt").Should().BeNull();
+    }
+
+    private static OllamaService CreateService(
+        HttpMessageHandler handler,
+        ILogger<OllamaService> logger,
+        OllamaPerformanceTracker? tracker = null)
     {
         var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
-        return new OllamaService(client, new OllamaWorkloadScheduler(), logger);
+        return new OllamaService(
+            client,
+            new OllamaWorkloadScheduler(),
+            tracker ?? new OllamaPerformanceTracker(),
+            logger);
     }
 
     private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler

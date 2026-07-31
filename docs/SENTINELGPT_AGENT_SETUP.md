@@ -204,6 +204,13 @@ load time, first-token time, prompt evaluation, and output tokens per second. To
 these show whether a slow response came from database grounding, queued background work,
 a cold model load, a large prompt, or CPU/GPU generation speed.
 
+Open SentinelGPT settings after a completed reply to see the latest interactive model
+sample without accessing container logs. The compact readout shows model first-token time,
+tokens per second, queue wait, model load, and total Ollama time, followed by a plain-language
+bottleneck hint. Measurements are in-memory and numeric only; prompts, responses, citations,
+and usernames are never stored in the performance tracker. Scheduled/background generations
+do not replace the last chat measurement.
+
 One active chat response is allowed per user. This prevents duplicate model work when a
 user refreshes or double-submits during recovery. A full application/container restart
 still interrupts an in-flight model request, which must be sent again after the app is
