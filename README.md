@@ -35,6 +35,17 @@ dotnet build GwsBusinessSuite.slnx
 dotnet test GwsBusinessSuite.slnx
 ```
 
+For the complete repeatable release gate and a privacy-safe Markdown evidence report:
+
+```bash
+./scripts/verify-release.sh
+./scripts/verify-release.sh --base-url https://admin.example.com --require-clean
+```
+
+The first command performs local build, test, dependency, Compose, and patch checks. The
+second also verifies deployed liveness, readiness, and login endpoints. See
+`docs/RELEASE_READINESS.md` for the authoritative GWS 1.0 acceptance contract.
+
 Native clients are kept in a separate solution so server-only development and CI do not require
 the MAUI workloads:
 

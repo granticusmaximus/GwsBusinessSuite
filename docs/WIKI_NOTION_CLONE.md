@@ -1,5 +1,9 @@
 # Sentinel: Notion-class connected workspace
 
+This document tracks broader capability parity and intentional limitations. The bounded
+Sentinel v1 feature score lives in `SENTINEL_REBUILD.md`; current whole-suite production
+readiness and required evidence live in `RELEASE_READINESS.md`.
+
 Sentinel is the GWS Business Suite's clean-room, capability-level clone of Notion: a connected
 workspace of nested pages, blocks, databases, collaboration, search, templates, permissions,
 and AI-assisted knowledge work. Internal CLR/database names retain the established `Wiki*`

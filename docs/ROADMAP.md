@@ -1,5 +1,10 @@
 # Roadmap
 
+`RELEASE_READINESS.md` is the authoritative GWS Business Suite 1.0 scope, priority, and
+acceptance contract. This roadmap records feature history and longer-term parity work; a
+feature marked delivered here is not production-verified unless its current release evidence
+also passes.
+
 ## Phase 1 ✅
 - Dashboard shell
 - SQLite persistence
@@ -97,7 +102,7 @@
   symmetric NAT: the server mints short-lived coturn REST credentials, both broadcaster
   and viewer receive the same configured ICE pool, and Docker provides an opt-in coturn
   override with automatic production activation when the required `.env` values exist.
-- Sentinel (Notion-class connected workspace) 🚧 — renamed from Knowledge Base/Wiki with
+- Sentinel (Notion-class connected workspace) ✅ v1 / 🚧 broader parity — renamed from Knowledge Base/Wiki with
   `/admin/sentinel` as the canonical route. Delivered foundations include nested block pages,
   DB-snapshot history/diff/restore, `[[Page]]` links, ranked and highlighted workspace search,
   backlinks, per-user favorites/recents, structured person/date mentions with a personal
@@ -179,5 +184,6 @@
   subtree-aware selected-id scope. The connection foundation now also supports Notion OAuth:
   short-lived admin-bound state, encrypted access/refresh tokens, token rotation,
   revoke-before-disconnect, workspace identity, and manual internal/PAT fallback. The staged
-  ground-up workspace rebuild is specified in `docs/SENTINEL_REBUILD.md`; Track A5 progress and
-  coverage reporting and visual-parity Track B remain open.
+  ground-up workspace rebuild and bounded v1 scorecard are specified in
+  `docs/SENTINEL_REBUILD.md`. Broader parity gaps remain in `docs/WIKI_NOTION_CLONE.md`;
+  current whole-suite acceptance is tracked only in `docs/RELEASE_READINESS.md`.

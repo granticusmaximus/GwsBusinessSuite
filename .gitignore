@@ -17,6 +17,7 @@ coverage/
 *.coverage
 *.coveragexml
 .playwright-cli/
+artifacts/
 
 # Local databases and generated state
 *.db

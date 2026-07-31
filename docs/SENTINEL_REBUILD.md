@@ -1,5 +1,9 @@
 # Sentinel rebuild
 
+This document defines Sentinel's bounded Notion-class v1 feature contract. It does not define
+the readiness of the complete GWS Business Suite or replace the current evidence gates in
+`RELEASE_READINESS.md`.
+
 ## Product target
 
 Sentinel is being rebuilt as a clean-room, Notion-class workspace with close functional and
@@ -68,10 +72,12 @@ is not guaranteed to exhaustively enumerate every accessible document. Sentinel 
    are available. Signed, deduplicated Notion webhooks queue immediate refreshes; title/content
    conflicts are reviewed field-by-field; and typed database-row properties and page bodies can
    be pushed explicitly when two-way mode is acknowledged.
-7. **Quality gate — delivered.** Additive migrations, zero-warning Release build, a clean
-   direct/transitive package audit, 744 automated tests, editor browser regressions, real
-   Blazor desktop/390px review, live migration rehearsal, separate liveness/readiness probes,
-   and restore-tested online backups are complete for this release.
+7. **Quality gate — delivered for the recorded Sentinel v1 release.** Additive migrations,
+   zero-warning Release build, a clean direct/transitive package audit, automated tests, editor
+   browser regressions, real Blazor desktop/390px review, live migration rehearsal, separate
+   liveness/readiness probes, and restore-tested online backups formed that release's evidence.
+   Current-suite evidence must be rerun through `RELEASE_READINESS.md`; historical evidence does
+   not remain current merely because later builds still compile.
 
 Each stage is independently shippable. A stage is not complete until its data compatibility,
 tests, documentation, and browser behavior are verified.
@@ -89,10 +95,11 @@ least 90% of its P1 acceptance checks are implemented and verified.
 | Databases | 100% | Properties, persisted filters/sorts/calculations, groups, 11 layouts, templates, peeks, formulas, relations, rollups, history, and typed row write-back |
 | Collaboration and sharing | 100% | Character-level remote selections, automatically rebased anchors, presence, threads, notifications, access levels, public-link expiry/indexing/revoke, and audit fields |
 | Notion connection and sync | 100% | OAuth/token fallback, scoped recursive discovery, incremental jobs, signed webhooks, coverage counters, ZIP restore, guarded page/row push, and field-level conflict review |
-| Quality and migration safety | 100% | Additive migrations, 0-warning Release build, 744 tests, clean dependency audit, desktop/390px browser journeys, live SQLite migration, readiness probes, and restore-tested backups |
+| Quality and migration safety | 100% | Recorded Sentinel v1 release evidence; current-suite verification is governed by `RELEASE_READINESS.md` |
 
-Current weighted v1 readiness: **100%**.
+Recorded Sentinel v1 feature-contract score: **100%**.
 
-This is 100% of Sentinel's versioned v1 acceptance contract, not a claim that an independent
-product implements every feature Notion has ever shipped. Notion account access also remains
-bounded by the pages the user authorizes and by the capabilities of Notion's public API.
+This is 100% of Sentinel's versioned v1 feature contract, not a claim that the current whole
+suite has passed every production gate or that an independent product implements every feature
+Notion has ever shipped. Notion account access also remains bounded by the pages the user
+authorizes and by the capabilities of Notion's public API.
