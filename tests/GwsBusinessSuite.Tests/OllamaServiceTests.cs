@@ -90,20 +90,25 @@ public sealed class OllamaServiceTests
     [Fact]
     public async Task GenerateStreamAsync_ShouldCaptureInteractiveChatPerformanceWithoutPromptContent()
     {
+        string? payload = null;
         var tracker = new OllamaPerformanceTracker();
         var logger = new RecordingLogger<OllamaService>();
-        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        var handler = new RecordingHandler(request =>
         {
-            Content = new StringContent(
+            payload = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
                 """
                 {"response":"ok","done":false}
                 {"response":"","done":true,"load_duration":1000000000,"prompt_eval_count":10,"prompt_eval_duration":500000000,"eval_count":20,"eval_duration":1000000000}
                 """)
+            };
         });
         var service = CreateService(handler, logger, tracker);
 
         await foreach (var _ in service.GenerateStreamAsync(
-            "sentinelgpt:latest", "system", "private prompt text"))
+            "sentinelgpt:latest", "system", "private prompt text", 768))
         {
         }
 
@@ -115,6 +120,7 @@ public sealed class OllamaServiceTests
         snapshot.OutputTokens.Should().Be(20);
         snapshot.TokensPerSecond.Should().Be(20);
         snapshot.ToString().Should().NotContain("private prompt text");
+        payload.Should().Contain("\"options\":{\"num_predict\":768}");
     }
 
     [Fact]

@@ -80,17 +80,50 @@ public sealed class OllamaService(
     // NDJSON: Ollama writes one JSON object per line as generation progresses, with a final
     // {"done":true} line. HttpCompletionOption.ResponseHeadersRead is required so the body is
     // read incrementally rather than buffered whole before this method can start yielding.
-    public async IAsyncEnumerable<string> GenerateStreamAsync(
-        string model, string systemPrompt, string userPrompt, [EnumeratorCancellation] CancellationToken ct = default)
+    public IAsyncEnumerable<string> GenerateStreamAsync(
+        string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
+        GenerateStreamCoreAsync(model, systemPrompt, userPrompt, null, ct);
+
+    public IAsyncEnumerable<string> GenerateStreamAsync(
+        string model,
+        string systemPrompt,
+        string userPrompt,
+        int maxOutputTokens,
+        CancellationToken ct = default)
     {
-        var payload = new
+        if (maxOutputTokens <= 0)
         {
-            model,
-            stream = true,
-            system = systemPrompt,
-            prompt = userPrompt,
-            keep_alive = ModelKeepAlive
-        };
+            throw new ArgumentOutOfRangeException(nameof(maxOutputTokens));
+        }
+
+        return GenerateStreamCoreAsync(model, systemPrompt, userPrompt, maxOutputTokens, ct);
+    }
+
+    private async IAsyncEnumerable<string> GenerateStreamCoreAsync(
+        string model,
+        string systemPrompt,
+        string userPrompt,
+        int? maxOutputTokens,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        object payload = maxOutputTokens is { } outputLimit
+            ? new
+            {
+                model,
+                stream = true,
+                system = systemPrompt,
+                prompt = userPrompt,
+                keep_alive = ModelKeepAlive,
+                options = new { num_predict = outputLimit }
+            }
+            : new
+            {
+                model,
+                stream = true,
+                system = systemPrompt,
+                prompt = userPrompt,
+                keep_alive = ModelKeepAlive
+            };
 
         var workloadPriority = workloadScheduler.CurrentPriority;
         var queueTimer = Stopwatch.StartNew();

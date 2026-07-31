@@ -20,15 +20,18 @@ public sealed class SentinelGptGenerationCoordinatorTests
         var conversationId = Guid.NewGuid();
 
         var started = await coordinator.StartAsync(
-            conversationId, null, "Summarize this long email.", "grant", includeInternet: false, useDeepAnalysis: true);
+            conversationId, null, "Summarize this long email.", "grant", includeInternet: false, useDeepAnalysis: true,
+            maxOutputTokens: SentinelGptResponseBudgets.Concise);
         await sentinel.Started.Task.WaitAsync(TestTimeout);
 
         coordinator.GetActive("grant").Should().Match<SentinelGptGenerationSnapshot>(snapshot =>
             snapshot.Id == started.Id
             && snapshot.ConversationId == conversationId
             && snapshot.UseDeepAnalysis
+            && snapshot.MaxOutputTokens == SentinelGptResponseBudgets.Concise
             && snapshot.Status == SentinelGptGenerationStatuses.Running);
         sentinel.LastUseDeepAnalysis.Should().BeTrue();
+        sentinel.LastMaxOutputTokens.Should().Be(SentinelGptResponseBudgets.Concise);
 
         // No component or request awaits the generation here. Releasing the fake model
         // simulates work continuing while the original browser circuit is disconnected.
@@ -133,6 +136,7 @@ public sealed class SentinelGptGenerationCoordinatorTests
 
         public bool IsInternetConfigured => false;
         public bool? LastUseDeepAnalysis { get; private set; }
+        public int? LastMaxOutputTokens { get; private set; }
 
         public async IAsyncEnumerable<SentinelAiStreamChunk> StreamAgentConversationAsync(
             Guid conversationId,
@@ -141,9 +145,11 @@ public sealed class SentinelGptGenerationCoordinatorTests
             string performedBy,
             bool includeInternet,
             bool useDeepAnalysis,
+            int maxOutputTokens = SentinelGptResponseBudgets.Standard,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             LastUseDeepAnalysis = useDeepAnalysis;
+            LastMaxOutputTokens = maxOutputTokens;
             Started.TrySetResult();
             yield return new SentinelAiStreamChunk(string.Empty, null, "Thinking");
             try

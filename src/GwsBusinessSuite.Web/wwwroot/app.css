@@ -3974,6 +3974,9 @@ audio.wiki-embed-media { max-width: 100%; }
 
 .sentinel-gpt-settings > div:first-child { display: flex; flex-direction: column; }
 .sentinel-gpt-internet-setting { display: flex; flex-direction: column; grid-column: 1 / -1; padding-top: .45rem; border-top: 1px solid #302c29; }
+.sentinel-gpt-response-setting { display: flex; grid-column: 1 / -1; align-items: center; justify-content: space-between; gap: .75rem; padding-top: .45rem; border-top: 1px solid #302c29; }
+.sentinel-gpt-response-setting > div { display: flex; flex-direction: column; min-width: 12rem; }
+.sentinel-gpt-response-setting select { min-width: 9.5rem; }
 .sentinel-gpt-performance-setting { display: flex; grid-column: 1 / -1; align-items: center; justify-content: space-between; gap: .75rem; padding-top: .45rem; border-top: 1px solid #302c29; }
 .sentinel-gpt-performance-setting > div:first-child { display: flex; flex-direction: column; min-width: 12rem; }
 .sentinel-gpt-performance-metrics { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .35rem; }
@@ -4202,6 +4205,8 @@ audio.wiki-embed-media { max-width: 100%; }
     .sentinel-gpt-chat { height: 100%; min-height: 0; }
     .sentinel-gpt-thread { min-height: 0; padding: 1.25rem .75rem; }
     .sentinel-gpt-settings { grid-template-columns: 1fr; }
+    .sentinel-gpt-response-setting { align-items: flex-start; flex-direction: column; }
+    .sentinel-gpt-response-setting select { width: 100%; }
     .sentinel-gpt-performance-setting { align-items: flex-start; flex-direction: column; }
     .sentinel-gpt-performance-metrics { justify-content: flex-start; }
     .sentinel-gpt-assistant-row { max-width: 96%; }

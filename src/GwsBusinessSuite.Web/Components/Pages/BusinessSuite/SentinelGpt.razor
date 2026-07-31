@@ -114,6 +114,17 @@
                     <strong>Internet research</strong>
                     <small>@(SentinelGptService.IsInternetConfigured ? "API key loaded securely on the server" : "Not configured — set OllamaWeb__ApiKey")</small>
                 </div>
+                <div class="sentinel-gpt-response-setting">
+                    <div>
+                        <strong>Response length</strong>
+                        <small>Shorter answers finish faster. Change this for each request.</small>
+                    </div>
+                    <select value="@_maxOutputTokens" @onchange="ChangeResponseBudget" disabled="@_generating" aria-label="Response length">
+                        <option value="@SentinelGptResponseBudgets.Concise">Concise · fastest</option>
+                        <option value="@SentinelGptResponseBudgets.Standard">Standard</option>
+                        <option value="@SentinelGptResponseBudgets.Detailed">Detailed</option>
+                    </select>
+                </div>
                 <div class="sentinel-gpt-performance-setting">
                     <div>
                         <strong>Last response performance</strong>
@@ -363,6 +374,7 @@
     private bool _stoppingGeneration;
     private bool _includeInternet;
     private bool _useDeepAnalysis;
+    private int _maxOutputTokens = SentinelGptResponseBudgets.Standard;
     private Guid? _conversationId;
     private Guid? _activeGenerationId;
     private List<SentinelGptConversationView> _conversations = [];
@@ -536,7 +548,13 @@
             else
             {
                 var generation = await GenerationCoordinator.StartAsync(
-                    _conversationId.Value, null, instruction, _username, _includeInternet, _useDeepAnalysis);
+                    _conversationId.Value,
+                    null,
+                    instruction,
+                    _username,
+                    _includeInternet,
+                    _useDeepAnalysis,
+                    _maxOutputTokens);
                 _activeGenerationId = generation.Id;
                 await MonitorGenerationAsync(generation.Id);
             }
@@ -640,6 +658,7 @@
         _pendingInstruction = snapshot.Instruction;
         _includeInternet = snapshot.IncludeInternet;
         _useDeepAnalysis = snapshot.UseDeepAnalysis;
+        _maxOutputTokens = snapshot.MaxOutputTokens;
         _liveOutput = snapshot.Output;
         _toolActivity = snapshot.Activity;
         RequestThreadScroll();
@@ -721,6 +740,15 @@
     {
         _useDeepAnalysis = !_useDeepAnalysis;
         _error = string.Empty;
+    }
+
+    private void ChangeResponseBudget(ChangeEventArgs args)
+    {
+        if (int.TryParse(args.Value?.ToString(), out var maxOutputTokens)
+            && SentinelGptResponseBudgets.IsSupported(maxOutputTokens))
+        {
+            _maxOutputTokens = maxOutputTokens;
+        }
     }
 
     private async Task ConfirmModelCommandAsync()

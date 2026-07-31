@@ -21,6 +21,7 @@ public sealed record SentinelGptGenerationSnapshot(
     string RequestedBy,
     bool IncludeInternet,
     bool UseDeepAnalysis,
+    int MaxOutputTokens,
     string Status,
     string Output,
     string Activity,
@@ -56,7 +57,8 @@ public sealed class SentinelGptGenerationCoordinator(
         string instruction,
         string requestedBy,
         bool includeInternet,
-        bool useDeepAnalysis)
+        bool useDeepAnalysis,
+        int maxOutputTokens = SentinelGptResponseBudgets.Standard)
     {
         if (conversationId == Guid.Empty)
             throw new ArgumentException("A conversation is required.", nameof(conversationId));
@@ -64,6 +66,8 @@ public sealed class SentinelGptGenerationCoordinator(
             throw new ArgumentException("An instruction is required.", nameof(instruction));
         if (string.IsNullOrWhiteSpace(requestedBy))
             throw new ArgumentException("A requesting user is required.", nameof(requestedBy));
+        if (!SentinelGptResponseBudgets.IsSupported(maxOutputTokens))
+            throw new ArgumentOutOfRangeException(nameof(maxOutputTokens), "Choose a supported response length.");
 
         GenerationState state;
         lock (_startGate)
@@ -89,6 +93,7 @@ public sealed class SentinelGptGenerationCoordinator(
                 requestedBy,
                 includeInternet,
                 useDeepAnalysis,
+                maxOutputTokens,
                 now);
             _jobs[state.Id] = state;
         }
@@ -148,6 +153,7 @@ public sealed class SentinelGptGenerationCoordinator(
                 state.RequestedBy,
                 state.IncludeInternet,
                 state.UseDeepAnalysis,
+                state.MaxOutputTokens,
                 generationToken.Token))
             {
                 state.Apply(chunk, timeProvider.GetUtcNow());
@@ -211,6 +217,7 @@ public sealed class SentinelGptGenerationCoordinator(
             string requestedBy,
             bool includeInternet,
             bool useDeepAnalysis,
+            int maxOutputTokens,
             DateTimeOffset startedAt)
         {
             Id = id;
@@ -220,6 +227,7 @@ public sealed class SentinelGptGenerationCoordinator(
             RequestedBy = requestedBy;
             IncludeInternet = includeInternet;
             UseDeepAnalysis = useDeepAnalysis;
+            MaxOutputTokens = maxOutputTokens;
             StartedAt = startedAt;
             _updatedAt = startedAt;
         }
@@ -231,6 +239,7 @@ public sealed class SentinelGptGenerationCoordinator(
         public string RequestedBy { get; }
         public bool IncludeInternet { get; }
         public bool UseDeepAnalysis { get; }
+        public int MaxOutputTokens { get; }
         public DateTimeOffset StartedAt { get; }
         public CancellationToken CancellationToken => _cancellation.Token;
         public bool IsCancellationRequested => _cancellation.IsCancellationRequested;
@@ -382,6 +391,7 @@ public sealed class SentinelGptGenerationCoordinator(
                     RequestedBy,
                     IncludeInternet,
                     UseDeepAnalysis,
+                    MaxOutputTokens,
                     _status,
                     _output.ToString(),
                     _activity,

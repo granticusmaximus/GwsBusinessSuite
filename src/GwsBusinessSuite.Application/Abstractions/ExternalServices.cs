@@ -26,6 +26,16 @@ public interface IOllamaService
     // response - see SentinelAiService.StreamAsync for the first caller.
     IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default);
 
+    // Applies a per-request output ceiling without changing background callers or older
+    // integrations that only implement the original streaming contract.
+    IAsyncEnumerable<string> GenerateStreamAsync(
+        string model,
+        string systemPrompt,
+        string userPrompt,
+        int maxOutputTokens,
+        CancellationToken ct = default) =>
+        GenerateStreamAsync(model, systemPrompt, userPrompt, ct);
+
     Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default);
     Task PullModelAsync(string model, CancellationToken ct = default);
     Task DeleteModelAsync(string model, CancellationToken ct = default);

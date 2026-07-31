@@ -284,11 +284,13 @@ public sealed class SentinelAiServiceTests
 
         await foreach (var _ in service.StreamAgentConversationAsync(
             Guid.NewGuid(), null, "Improve SentinelGPT performance and security", "grant",
-            includeInternet: false, useDeepAnalysis: false))
+            includeInternet: false, useDeepAnalysis: false,
+            maxOutputTokens: SentinelGptResponseBudgets.Concise))
         {
         }
 
         ollama.RequestedModels.Should().Equal(SentinelGptDefaults.Model);
+        ollama.LastMaxOutputTokens.Should().Be(SentinelGptResponseBudgets.Concise);
     }
 
     [Fact]
@@ -431,6 +433,7 @@ public sealed class SentinelAiServiceTests
         public string LastSystemPrompt { get; private set; } = string.Empty;
         public List<string> PulledModels { get; } = [];
         public List<string> RequestedModels { get; } = [];
+        public int? LastMaxOutputTokens { get; private set; }
 
         public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
         {
@@ -451,6 +454,17 @@ public sealed class SentinelAiServiceTests
                 await Task.Yield();
                 yield return fragment;
             }
+        }
+
+        public IAsyncEnumerable<string> GenerateStreamAsync(
+            string model,
+            string systemPrompt,
+            string userPrompt,
+            int maxOutputTokens,
+            CancellationToken ct = default)
+        {
+            LastMaxOutputTokens = maxOutputTokens;
+            return GenerateStreamAsync(model, systemPrompt, userPrompt, ct);
         }
 
         public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) =>

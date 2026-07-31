@@ -99,6 +99,11 @@ behavior or turn an unsupported claim into a remembered fact.
   and unnecessary fields, and distinct term sets remain isolated.
 - Conversation history and grounding context are bounded before they reach Ollama so long
   chats do not repeatedly re-evaluate an ever-growing prompt.
+- The settings panel exposes **Concise**, **Standard**, and **Detailed** response lengths.
+  They cap each final SentinelGPT answer at 384, 768, or 1,536 generated tokens. Standard
+  is the default; Concise is the fastest option, while Detailed intentionally takes longer.
+  The server-owned generation snapshot retains the selected length through browser refresh
+  and recovery.
 - Local model generation is coordinated inside the web process to match the production
   one-request Ollama limit. Interactive requests are selected before queued scheduled
   news, CJ suggestion, or automation work. A background generation already running is

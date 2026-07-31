@@ -23,6 +23,16 @@ public static class SentinelGptDefaults
     public const int MaxInstructionLength = 32_000;
 }
 
+public static class SentinelGptResponseBudgets
+{
+    public const int Concise = 384;
+    public const int Standard = 768;
+    public const int Detailed = 1_536;
+
+    public static bool IsSupported(int maxOutputTokens) =>
+        maxOutputTokens is Concise or Standard or Detailed;
+}
+
 // A workspace search result actually folded into a run's grounding context - see
 // SentinelAiService.BuildGroundedContextAsync. TargetId/IsDatabase match
 // SentinelSearchResult/SentinelNavigationItem's existing page-or-database pointer shape.
@@ -74,6 +84,7 @@ public interface ISentinelAiService
         string performedBy,
         bool includeInternet,
         bool useDeepAnalysis,
+        int maxOutputTokens = SentinelGptResponseBudgets.Standard,
         CancellationToken cancellationToken = default);
     Task<SentinelGptCommandResult> ExecuteModelCommandAsync(
         Guid conversationId,

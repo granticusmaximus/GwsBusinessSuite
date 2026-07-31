@@ -77,6 +77,7 @@ public sealed class SentinelAiService(
             includeSuiteContext: false,
             includeInternet: false,
             useDeepAnalysis: false,
+            maxOutputTokens: SentinelGptResponseBudgets.Standard,
             cancellationToken: cancellationToken))
         {
             yield return chunk;
@@ -90,6 +91,7 @@ public sealed class SentinelAiService(
         string performedBy,
         bool includeInternet,
         bool useDeepAnalysis,
+        int maxOutputTokens = SentinelGptResponseBudgets.Standard,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         await foreach (var chunk in StreamGroundedConversationAsync(
@@ -101,6 +103,7 @@ public sealed class SentinelAiService(
             includeSuiteContext: true,
             includeInternet: includeInternet,
             useDeepAnalysis: useDeepAnalysis,
+            maxOutputTokens: maxOutputTokens,
             cancellationToken: cancellationToken))
         {
             yield return chunk;
@@ -116,6 +119,7 @@ public sealed class SentinelAiService(
         bool includeSuiteContext,
         bool includeInternet,
         bool useDeepAnalysis,
+        int maxOutputTokens,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (conversationId == Guid.Empty) throw new ArgumentException("A conversation is required.", nameof(conversationId));
@@ -128,6 +132,8 @@ public sealed class SentinelAiService(
                 "Split this document into smaller sections and send them separately.",
                 nameof(instruction));
         }
+        if (!SentinelGptResponseBudgets.IsSupported(maxOutputTokens))
+            throw new ArgumentOutOfRangeException(nameof(maxOutputTokens), "Choose a supported response length.");
 
         var preparationTimer = Stopwatch.StartNew();
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -272,7 +278,7 @@ public sealed class SentinelAiService(
             includeInternet,
             useDeepAnalysis);
 
-        var stream = ollama.GenerateStreamAsync(model, systemPrompt, userPrompt, cancellationToken);
+        var stream = ollama.GenerateStreamAsync(model, systemPrompt, userPrompt, maxOutputTokens, cancellationToken);
         await using var enumerator = stream.GetAsyncEnumerator(cancellationToken);
         while (true)
         {
