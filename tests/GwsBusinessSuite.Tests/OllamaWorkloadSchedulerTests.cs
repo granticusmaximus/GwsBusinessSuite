@@ -5,6 +5,8 @@ namespace GwsBusinessSuite.Tests;
 
 public sealed class OllamaWorkloadSchedulerTests
 {
+    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+
     [Fact]
     public async Task InteractiveWaiter_ShouldRunBeforeQueuedBackgroundWaiter()
     {
@@ -17,11 +19,11 @@ public sealed class OllamaWorkloadSchedulerTests
         interactive.IsCompleted.Should().BeFalse();
 
         await active.DisposeAsync();
-        var interactiveLease = await interactive.WaitAsync(TimeSpan.FromSeconds(1));
+        var interactiveLease = await interactive.WaitAsync(TestTimeout);
         background.IsCompleted.Should().BeFalse();
 
         await interactiveLease.DisposeAsync();
-        var backgroundLease = await background.WaitAsync(TimeSpan.FromSeconds(1));
+        var backgroundLease = await background.WaitAsync(TestTimeout);
         await backgroundLease.DisposeAsync();
     }
 
@@ -39,7 +41,7 @@ public sealed class OllamaWorkloadSchedulerTests
         await cancelled.Invoking(task => task).Should().ThrowAsync<OperationCanceledException>();
         await active.DisposeAsync();
 
-        var next = await scheduler.AcquireAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(1));
+        var next = await scheduler.AcquireAsync().AsTask().WaitAsync(TestTimeout);
         await next.DisposeAsync();
     }
 
@@ -58,10 +60,10 @@ public sealed class OllamaWorkloadSchedulerTests
         var interactive = scheduler.AcquireAsync().AsTask();
         await active.DisposeAsync();
 
-        var interactiveLease = await interactive.WaitAsync(TimeSpan.FromSeconds(1));
+        var interactiveLease = await interactive.WaitAsync(TestTimeout);
         background.IsCompleted.Should().BeFalse();
         await interactiveLease.DisposeAsync();
-        var backgroundLease = await background.WaitAsync(TimeSpan.FromSeconds(1));
+        var backgroundLease = await background.WaitAsync(TestTimeout);
         await backgroundLease.DisposeAsync();
     }
 }

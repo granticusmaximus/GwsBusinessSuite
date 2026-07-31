@@ -17,6 +17,10 @@ public interface IOllamaService
 {
     Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default);
 
+    // Loads a model into memory without asking it to generate user-visible output. Fakes
+    // and integrations that do not manage a local runtime may safely use this no-op default.
+    Task WarmModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+
     // Yields each response token/fragment as Ollama streams it (NDJSON, one JSON object per
     // line), for callers that want to render partial output live rather than await the full
     // response - see SentinelAiService.StreamAsync for the first caller.

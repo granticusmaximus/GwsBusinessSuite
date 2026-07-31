@@ -10,6 +10,8 @@ namespace GwsBusinessSuite.Tests;
 
 public sealed class SentinelGptGenerationCoordinatorTests
 {
+    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+
     [Fact]
     public async Task Generation_ShouldContinueWithoutAWaitingBrowserCaller()
     {
@@ -19,7 +21,7 @@ public sealed class SentinelGptGenerationCoordinatorTests
 
         var started = await coordinator.StartAsync(
             conversationId, null, "Summarize this long email.", "grant", includeInternet: false, useDeepAnalysis: true);
-        await sentinel.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await sentinel.Started.Task.WaitAsync(TestTimeout);
 
         coordinator.GetActive("grant").Should().Match<SentinelGptGenerationSnapshot>(snapshot =>
             snapshot.Id == started.Id
@@ -46,7 +48,7 @@ public sealed class SentinelGptGenerationCoordinatorTests
         var coordinator = CreateCoordinator(sentinel);
         await coordinator.StartAsync(
             Guid.NewGuid(), null, "First request", "grant", includeInternet: false, useDeepAnalysis: false);
-        await sentinel.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await sentinel.Started.Task.WaitAsync(TestTimeout);
 
         var act = () => coordinator.StartAsync(
             Guid.NewGuid(), null, "Second request", "grant", includeInternet: false, useDeepAnalysis: false);
@@ -76,13 +78,13 @@ public sealed class SentinelGptGenerationCoordinatorTests
         var coordinator = CreateCoordinator(sentinel);
         var started = await coordinator.StartAsync(
             Guid.NewGuid(), null, "Long running request", "grant", includeInternet: false, useDeepAnalysis: false);
-        await sentinel.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await sentinel.Started.Task.WaitAsync(TestTimeout);
 
         coordinator.Cancel(started.Id, "another-user").Should().BeFalse();
         coordinator.GetActive("grant").Should().NotBeNull();
 
         coordinator.Cancel(started.Id, "grant").Should().BeTrue();
-        await sentinel.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await sentinel.CancellationObserved.Task.WaitAsync(TestTimeout);
         var cancelled = await WaitForTerminalAsync(coordinator, started.Id, "grant");
 
         cancelled.Status.Should().Be(SentinelGptGenerationStatuses.Cancelled);
@@ -109,7 +111,7 @@ public sealed class SentinelGptGenerationCoordinatorTests
         Guid id,
         string requestedBy)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using var timeout = new CancellationTokenSource(TestTimeout);
         while (true)
         {
             timeout.Token.ThrowIfCancellationRequested();

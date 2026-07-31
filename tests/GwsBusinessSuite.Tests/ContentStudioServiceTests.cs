@@ -75,7 +75,7 @@ public sealed class ContentStudioServiceTests
         Assert.Equal("PendingReview", savedDraft.Status);
         Assert.Equal(1, await db.SeoArticleWorkflowEvents.CountAsync());
         Assert.Equal("Generated", (await db.SeoArticleWorkflowEvents.SingleAsync()).EventType);
-        Assert.Equal("llama3.2", ollama.LastRequestedModel);
+        Assert.Equal("sentinelgpt", ollama.LastRequestedModel);
     }
 
     [Fact]
@@ -97,7 +97,7 @@ public sealed class ContentStudioServiceTests
         });
 
         // The site-configured override takes precedence over the appsettings.json
-        // default ("llama3.2") baked into CreateService's ContentStudioOptions.
+        // default ("sentinelgpt") baked into CreateService's ContentStudioOptions.
         Assert.Equal("mistral", ollama.LastRequestedModel);
     }
 
@@ -598,7 +598,7 @@ public sealed class ContentStudioServiceTests
         IAppDbContextFactory factory,
         IOllamaService ollama)
     {
-        var options = Options.Create(new ContentStudioOptions { Model = "llama3.2" });
+        var options = Options.Create(new ContentStudioOptions());
 
         return new ContentStudioService(
             db,

@@ -65,6 +65,28 @@ public sealed class OllamaServiceTests
         logger.Warnings.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task WarmModelAsync_ShouldSendAnEmptyKeepAliveRequest()
+    {
+        string? payload = null;
+        var logger = new RecordingLogger<OllamaService>();
+        var handler = new RecordingHandler(request =>
+        {
+            payload = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"done":true}""")
+            };
+        });
+        var service = CreateService(handler, logger);
+
+        await service.WarmModelAsync("sentinelgpt");
+
+        payload.Should().Contain("\"model\":\"sentinelgpt\"");
+        payload.Should().Contain("\"keep_alive\":\"30m\"");
+        payload.Should().NotContain("\"prompt\"");
+    }
+
     private static OllamaService CreateService(HttpMessageHandler handler, ILogger<OllamaService> logger)
     {
         var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };

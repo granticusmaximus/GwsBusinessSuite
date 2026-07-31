@@ -48,6 +48,31 @@ public sealed class OllamaService(
         }
     }
 
+    public async Task WarmModelAsync(string model, CancellationToken ct = default)
+    {
+        var payload = new
+        {
+            model,
+            stream = false,
+            keep_alive = ModelKeepAlive
+        };
+
+        var queueTimer = Stopwatch.StartNew();
+        await using var workloadLease = await workloadScheduler.AcquireAsync(ct);
+        queueTimer.Stop();
+        LogQueueWait(model, queueTimer.Elapsed);
+
+        var stopwatch = Stopwatch.StartNew();
+        using var response = await http.PostAsJsonAsync("/api/generate", payload, ct);
+        response.EnsureSuccessStatusCode();
+        stopwatch.Stop();
+        logger.LogInformation(
+            "Warmed Ollama model '{Model}' in {WarmupMs:F0} ms and will retain it for {KeepAlive}.",
+            model,
+            stopwatch.Elapsed.TotalMilliseconds,
+            ModelKeepAlive);
+    }
+
     // NDJSON: Ollama writes one JSON object per line as generation progresses, with a final
     // {"done":true} line. HttpCompletionOption.ResponseHeadersRead is required so the body is
     // read incrementally rather than buffered whole before this method can start yielding.

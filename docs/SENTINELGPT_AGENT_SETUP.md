@@ -30,6 +30,16 @@ The application uses `sentinelgpt` by default when no model override has been se
 Recreating the profile updates its behavior without altering the underlying `llama3.2`
 weights.
 
+The same SentinelGPT profile is also the default for Content Studio, news summaries,
+affiliate suggestions, trend research, and app generation. Reusing one model name avoids
+routine GWS workloads unloading the chat model when Ollama is configured to keep only one
+model in memory. An explicit site model override still takes precedence where supported.
+
+After application startup, a bounded background warmup waits for the configured chat model
+to appear and sends an empty Ollama keep-alive request. It retries while first-run model
+setup is still completing, never blocks application readiness, and runs at background
+priority so an actual chat request can take the model slot first.
+
 ## Qwen and DeepSeek teacher panel
 
 SentinelGPT uses the installed specialist models without pretending their weights have

@@ -100,6 +100,7 @@ public static class DependencyInjection
                 Delay = TimeSpan.FromSeconds(1)
             });
         });
+        services.AddHostedService<OllamaModelWarmupBackgroundService>();
         services.AddHttpClient<IOllamaWebSearchService, OllamaWebSearchService>((serviceProvider, client) =>
         {
             var options = serviceProvider.GetRequiredService<
