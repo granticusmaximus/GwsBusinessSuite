@@ -38,6 +38,10 @@ public sealed record SentinelNotificationView(
     DateTimeOffset CreatedAt,
     bool IsRead);
 
+// A block-relative character range for an active (unresolved) discussion's anchor - used to
+// render an inline highlight over the exact commented text, not just a per-block pin icon.
+public sealed record SentinelDiscussionHighlight(Guid DiscussionId, int Start, int End);
+
 public static class SentinelDiscussionSummary
 {
     public static IReadOnlyDictionary<Guid, int> OpenBlockCounts(
@@ -45,6 +49,16 @@ public static class SentinelDiscussionSummary
         .Where(discussion => !discussion.IsResolved && discussion.BlockId.HasValue)
         .GroupBy(discussion => discussion.BlockId!.Value)
         .ToDictionary(group => group.Key, group => group.Count());
+
+    public static IReadOnlyDictionary<Guid, IReadOnlyList<SentinelDiscussionHighlight>> OpenBlockHighlights(
+        IEnumerable<SentinelDiscussionView> discussions) => discussions
+        .Where(discussion => !discussion.IsResolved && discussion.BlockId.HasValue && discussion.Anchor is not null)
+        .GroupBy(discussion => discussion.BlockId!.Value)
+        .ToDictionary(
+            group => group.Key,
+            group => (IReadOnlyList<SentinelDiscussionHighlight>)group
+                .Select(discussion => new SentinelDiscussionHighlight(discussion.Id, discussion.Anchor!.Start, discussion.Anchor.End))
+                .ToList());
 }
 
 public interface ISentinelCollaborationService

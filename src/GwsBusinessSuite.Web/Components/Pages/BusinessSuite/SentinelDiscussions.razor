@@ -181,6 +181,7 @@
     [Parameter] public string BlocksJson { get; set; } = "[]";
     [Parameter] public EventCallback<Guid> OnOpenPage { get; set; }
     [Parameter] public EventCallback<IReadOnlyDictionary<Guid, int>> OnDiscussionCountsChanged { get; set; }
+    [Parameter] public EventCallback<IReadOnlyDictionary<Guid, IReadOnlyList<SentinelDiscussionHighlight>>> OnDiscussionHighlightsChanged { get; set; }
 
     private static readonly string[] ReactionChoices = ["👍", "❤️", "🎉", "👀", "✅"];
     private List<SentinelDiscussionView> Discussions { get; set; } = new();
