@@ -426,17 +426,40 @@ public sealed class UserManagementServiceTests
         (await service.VerifyMfaAsync(userId, recoveryCode)).Succeeded.Should().BeFalse("recovery codes are one-time use");
     }
 
+    [Fact]
+    public async Task AccountAdministration_ShouldWriteSecurityAuditEventsWithoutPasswords()
+    {
+        using var connection = await OpenConnectionAsync();
+        var audit = new RecordingSecurityAuditService();
+        var service = CreateService(connection, securityAuditService: audit);
+        await service.CreateUserAsync(new CreateUserInput
+        {
+            Username = "jsmith", Password = "correct-horse-battery", Role = AppRoles.Author
+        });
+        var userId = (await service.ListUsersAsync()).Single().Id;
+        await service.ChangeRoleAsync(userId, AppRoles.Contributor);
+        await service.ResetPasswordAsync(userId, "different-correct-horse-2026");
+        await service.ToggleActiveAsync(userId);
+
+        audit.Events.Select(item => item.Action).Should().ContainInOrder(
+            "UserCreated", "UserRoleChanged", "PasswordReset", "UserDeactivated");
+        var serialized = System.Text.Json.JsonSerializer.Serialize(audit.Events);
+        serialized.Should().NotContain("correct-horse-battery").And.NotContain("different-correct-horse-2026");
+    }
+
     private static UserManagementService CreateService(
         SqliteConnection connection,
         ISecretProtector? secretProtector = null,
-        TimeProvider? timeProvider = null) =>
+        TimeProvider? timeProvider = null,
+        GwsBusinessSuite.Application.SecurityAudit.ISecurityAuditService? securityAuditService = null) =>
         new(
             new TestDbContextFactory(connection),
             new PasswordHasher<AppUser>(),
             NullLogger<UserManagementService>.Instance,
             new FixedCurrentUserAccessor("grantwatson"),
             secretProtector,
-            timeProvider);
+            timeProvider,
+            securityAuditService);
 
     private static ApplicationDbContext CreateReadDbContext(SqliteConnection connection) =>
         new(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options);
@@ -477,6 +500,18 @@ public sealed class UserManagementServiceTests
         private DateTimeOffset _now = now;
         public override DateTimeOffset GetUtcNow() => _now;
         public void Advance(TimeSpan value) => _now = _now.Add(value);
+    }
+
+    private sealed class RecordingSecurityAuditService : GwsBusinessSuite.Application.SecurityAudit.ISecurityAuditService
+    {
+        public List<GwsBusinessSuite.Application.SecurityAudit.SecurityAuditInput> Events { get; } = [];
+        public Task<Guid> RecordAsync(GwsBusinessSuite.Application.SecurityAudit.SecurityAuditInput input, CancellationToken cancellationToken = default)
+        {
+            Events.Add(input);
+            return Task.FromResult(Guid.NewGuid());
+        }
+        public Task<GwsBusinessSuite.Application.SecurityAudit.SecurityAuditPage> QueryAsync(GwsBusinessSuite.Application.SecurityAudit.SecurityAuditQuery query, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<GwsBusinessSuite.Application.SecurityAudit.SecurityAuditIntegrityResult> VerifyIntegrityAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private static string GenerateTotp(string base32Secret, DateTimeOffset now)

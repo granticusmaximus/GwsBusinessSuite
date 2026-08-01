@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Users;
+using GwsBusinessSuite.Application.SecurityAudit;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.AspNetCore.Identity;
@@ -19,7 +20,8 @@ public sealed class UserManagementService(
     ILogger<UserManagementService> logger,
     ICurrentUserAccessor? currentUserAccessor = null,
     ISecretProtector? secretProtector = null,
-    TimeProvider? timeProvider = null) : IUserManagementService
+    TimeProvider? timeProvider = null,
+    ISecurityAuditService? securityAuditService = null) : IUserManagementService
 {
     private readonly ICurrentUserAccessor _currentUserAccessor = currentUserAccessor ?? FixedCurrentUserAccessor.Unknown;
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
@@ -78,6 +80,14 @@ public sealed class UserManagementService(
             db.AppUsers.Add(user);
             await db.SaveChangesAsync(cancellationToken);
 
+            if (securityAuditService is not null)
+            {
+                await securityAuditService.RecordAsync(new SecurityAuditInput(
+                    SecurityAuditCategories.AccountAdministration, "UserCreated", SecurityAuditOutcomes.Succeeded,
+                    SecurityAuditSeverities.High, "AppUser", user.Id.ToString(),
+                    new Dictionary<string, string?> { ["role"] = user.Role, ["username"] = user.Username }), cancellationToken);
+            }
+
             return UserManagementResult.Success();
         }
         catch (Exception ex)
@@ -110,10 +120,19 @@ public sealed class UserManagementService(
                 return UserManagementResult.Failure("Cannot change the role of the last Admin account.");
             }
 
+            var priorRole = user.Role;
             user.Role = newRole;
             user.UpdatedAt = DateTimeOffset.UtcNow;
             user.UpdatedBy = performedBy;
             await db.SaveChangesAsync(cancellationToken);
+
+            if (securityAuditService is not null)
+            {
+                await securityAuditService.RecordAsync(new SecurityAuditInput(
+                    SecurityAuditCategories.AccountAdministration, "UserRoleChanged", SecurityAuditOutcomes.Succeeded,
+                    SecurityAuditSeverities.High, "AppUser", user.Id.ToString(),
+                    new Dictionary<string, string?> { ["fromRole"] = priorRole, ["toRole"] = newRole, ["username"] = user.Username }), cancellationToken);
+            }
 
             return UserManagementResult.Success();
         }
@@ -150,6 +169,14 @@ public sealed class UserManagementService(
             user.UpdatedAt = DateTimeOffset.UtcNow;
             user.UpdatedBy = performedBy;
             await db.SaveChangesAsync(cancellationToken);
+
+            if (securityAuditService is not null)
+            {
+                await securityAuditService.RecordAsync(new SecurityAuditInput(
+                    SecurityAuditCategories.AccountAdministration, "PasswordReset", SecurityAuditOutcomes.Succeeded,
+                    SecurityAuditSeverities.High, "AppUser", user.Id.ToString(),
+                    new Dictionary<string, string?> { ["username"] = user.Username }), cancellationToken);
+            }
 
             return UserManagementResult.Success();
         }
@@ -320,6 +347,14 @@ public sealed class UserManagementService(
             user.UpdatedBy = performedBy;
             await db.SaveChangesAsync(cancellationToken);
 
+            if (securityAuditService is not null)
+            {
+                await securityAuditService.RecordAsync(new SecurityAuditInput(
+                    SecurityAuditCategories.AccountAdministration, "AccountUnlocked", SecurityAuditOutcomes.Succeeded,
+                    SecurityAuditSeverities.High, "AppUser", user.Id.ToString(),
+                    new Dictionary<string, string?> { ["username"] = user.Username }), cancellationToken);
+            }
+
             return UserManagementResult.Success();
         }
         catch (Exception ex)
@@ -350,6 +385,16 @@ public sealed class UserManagementService(
             user.UpdatedAt = DateTimeOffset.UtcNow;
             user.UpdatedBy = performedBy;
             await db.SaveChangesAsync(cancellationToken);
+
+            if (securityAuditService is not null)
+            {
+                await securityAuditService.RecordAsync(new SecurityAuditInput(
+                    SecurityAuditCategories.AccountAdministration,
+                    user.IsActive ? "UserActivated" : "UserDeactivated",
+                    SecurityAuditOutcomes.Succeeded, SecurityAuditSeverities.High,
+                    "AppUser", user.Id.ToString(),
+                    new Dictionary<string, string?> { ["username"] = user.Username }), cancellationToken);
+            }
 
             return UserManagementResult.Success();
         }

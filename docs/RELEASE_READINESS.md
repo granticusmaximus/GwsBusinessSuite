@@ -66,10 +66,12 @@ manual entries with generated evidence where practical.
 | Check | Priority | Current evidence | Status |
 | --- | --- | --- | --- |
 | Release solution build | P0 | 0 warnings/errors on 2026-07-31 | Pass |
-| Full automated suite | P0 | 811 passed, 0 failed on 2026-07-31 | Pass |
+| Full automated suite | P0 | 816 passed, 0 failed on 2026-08-01 Release harness rerun | Pass |
 | Direct/transitive NuGet vulnerability audit | P0 | No known vulnerable packages on 2026-07-31 | Pass |
 | Docker Compose rendering | P0 | `docker compose config --quiet` on 2026-07-31 | Pass |
 | SentinelGPT response-length UI | P1 | Authenticated desktop and 390px Playwright smoke on 2026-07-31 | Pass |
+| Mandatory portal MFA | P0 | TOTP/recovery/replay tests plus local browser enrollment and returning-login journeys | Local pass; deployed acceptance required |
+| Security audit ledger | P0 | Hash-chain, secret-metadata rejection, encrypted-network, account-event tests and local admin browser journey | Local pass; deployed acceptance required |
 | Empty and upgraded database migration rehearsal | P0 | Must be rerun by release harness | Not run |
 | Production liveness/readiness | P0 | `https://admin.gwsapp.net/health/live` and `/health/ready` returned 200 on 2026-07-31 | Pass |
 | Backup plus Data Protection key restore | P0 | Requires current restore rehearsal | Not run |

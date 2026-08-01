@@ -19,6 +19,7 @@ using GwsBusinessSuite.Application.LiveShow;
 using GwsBusinessSuite.Application.NewsIntelligence;
 using GwsBusinessSuite.Application.Podcasts;
 using GwsBusinessSuite.Application.Resume;
+using GwsBusinessSuite.Application.SecurityAudit;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Application.SshTerminal;
 using GwsBusinessSuite.Application.Users;
@@ -71,6 +72,10 @@ public static class DependencyInjection
         services.AddScoped<IAppDbContextFactory, AppDbContextFactory>();
         services.AddScoped<IAdminPortalSummaryService, AdminPortalSummaryService>();
         services.AddScoped<ISecretProtector, DataProtectionSecretProtector>();
+        // Non-web hosts and startup probes do not have an authenticated HTTP/circuit
+        // accessor. The web app registers its CurrentUserAccessor afterward and becomes
+        // the effective resolution there; background/minimal hosts safely use "unknown".
+        services.TryAddScoped<ICurrentUserAccessor>(_ => FixedCurrentUserAccessor.Unknown);
         services.AddHttpClient<ICjAffiliateService, CjAffiliateService>();
         services.AddSingleton<OllamaWorkloadScheduler>();
         services.AddSingleton<OllamaPerformanceTracker>();
@@ -139,6 +144,7 @@ public static class DependencyInjection
         services.AddScoped<IContentStudioService, ContentStudioService>();
         services.AddScoped<ICrmService, CrmService>();
         services.AddScoped<IUserManagementService, UserManagementService>();
+        services.AddScoped<ISecurityAuditService, SecurityAuditService>();
         services.AddScoped<IResumePdfService, ResumePdfService>();
         services.AddScoped<IAffiliateSuggestionService, AffiliateSuggestionService>();
         services.AddScoped<IAffiliateAnalyticsService, AffiliateAnalyticsService>();

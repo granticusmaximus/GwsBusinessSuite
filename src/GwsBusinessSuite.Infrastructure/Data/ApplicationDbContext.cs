@@ -105,6 +105,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<AutomationCredential> AutomationCredentials => Set<AutomationCredential>();
     public DbSet<AutomationExecution> AutomationExecutions => Set<AutomationExecution>();
     public DbSet<AutomationNodeExecution> AutomationNodeExecutions => Set<AutomationNodeExecution>();
+    public DbSet<SecurityAuditEvent> SecurityAuditEvents => Set<SecurityAuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -401,6 +402,13 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
 
         modelBuilder.Entity<AppUser>().HasIndex(x => x.Username).IsUnique();
         modelBuilder.Entity<AppUser>().HasIndex(x => x.Role);
+
+        modelBuilder.Entity<SecurityAuditEvent>().HasIndex(x => x.OccurredAtUnixSeconds);
+        modelBuilder.Entity<SecurityAuditEvent>().HasIndex(x => new { x.Category, x.OccurredAtUnixSeconds });
+        modelBuilder.Entity<SecurityAuditEvent>().HasIndex(x => new { x.ActorUsername, x.OccurredAtUnixSeconds });
+        modelBuilder.Entity<SecurityAuditEvent>().HasIndex(x => x.EventHash).IsUnique();
+        modelBuilder.Entity<SecurityAuditEvent>().HasIndex(x => x.ChainSequence).IsUnique();
+        modelBuilder.Entity<SecurityAuditEvent>().Property(x => x.DetailsJson).HasDefaultValue("{}");
 
         modelBuilder.Entity<NewsItem>().HasIndex(x => new { x.TopicId, x.FetchedAtUnixSeconds });
         modelBuilder.Entity<NewsItem>().HasIndex(x => x.PublishedAtUnixSeconds);

@@ -1,0 +1,169 @@
+@page "/admin/security-audit"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using GwsBusinessSuite.Application.SecurityAudit
+@inject ISecurityAuditService SecurityAuditService
+@inject ILogger<SecurityAudit> Logger
+
+<PageTitle>Security Audit · GWS Business Suite</PageTitle>
+
+<div class="page-header d-flex flex-wrap justify-content-between gap-3 align-items-start">
+    <div>
+        <span class="text-uppercase text-secondary small fw-semibold">Security center</span>
+        <h1><i class="bi bi-shield-check me-2 text-primary"></i>Security audit</h1>
+        <p>Append-only evidence for authentication, account administration, protected data access, and security operations.</p>
+    </div>
+    <a class="btn btn-outline-secondary" href="/admin/api/security-audit/export.csv">
+        <i class="bi bi-download me-1"></i> Export CSV
+    </a>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger" role="alert">@_error</div>
+}
+
+<section class="audit-integrity @(Integrity?.IsValid == false ? "invalid" : string.Empty)">
+    <div>
+        <strong>Ledger integrity</strong>
+        @if (Integrity is null)
+        {
+            <span>Not checked</span>
+        }
+        else if (Integrity.IsValid)
+        {
+            <span><i class="bi bi-check-circle-fill"></i> Verified across @Integrity.EventsChecked event(s)</span>
+        }
+        else
+        {
+            <span><i class="bi bi-exclamation-triangle-fill"></i> Verification failed at @Integrity.FirstInvalidEventId</span>
+        }
+    </div>
+    <button class="btn btn-sm btn-outline-secondary" @onclick="VerifyIntegrityAsync" disabled="@_busy">Verify chain</button>
+</section>
+
+<section class="card border-0 shadow-sm mb-3">
+    <div class="card-body audit-filters">
+        <div><label>Search</label><input class="form-control" @bind="_search" placeholder="Action, target, or correlation ID" /></div>
+        <div><label>Category</label><select class="form-select" @bind="_category"><option value="">All categories</option>@foreach (var category in Categories) { <option value="@category">@category</option> }</select></div>
+        <div><label>Outcome</label><select class="form-select" @bind="_outcome"><option value="">All outcomes</option><option>Succeeded</option><option>Failed</option><option>Denied</option></select></div>
+        <button class="btn btn-primary align-self-end" @onclick="ApplyFiltersAsync" disabled="@_busy">Apply</button>
+    </div>
+</section>
+
+<section class="card border-0 shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <strong>Audit events</strong><span class="badge text-bg-secondary">@(Page?.TotalCount ?? 0)</span>
+    </div>
+    @if (_busy && Page is null)
+    {
+        <div class="card-body text-secondary">Loading security events…</div>
+    }
+    else if (Page?.Events.Count is null or 0)
+    {
+        <div class="card-body text-secondary">No audit events match these filters.</div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead><tr><th>Time</th><th>Event</th><th>Actor</th><th>Target</th><th>Outcome</th><th>Evidence</th></tr></thead>
+                <tbody>
+                @foreach (var item in Page!.Events)
+                {
+                    <tr>
+                        <td class="text-nowrap"><strong>@item.OccurredAt.ToLocalTime().ToString("MMM d, h:mm:ss tt")</strong><br><small class="text-secondary">@item.Category</small></td>
+                        <td><strong>@item.Action</strong><br><small class="audit-correlation">@item.CorrelationId</small></td>
+                        <td>@item.ActorUsername</td>
+                        <td>@(item.TargetType ?? "—")<br><small class="text-secondary">@(item.TargetId ?? string.Empty)</small></td>
+                        <td><span class="audit-outcome @item.Outcome.ToLowerInvariant()">@item.Outcome</span><br><small>@item.Severity</small></td>
+                        <td>
+                            @if (item.HasProtectedNetworkContext) { <span title="Encrypted network context retained"><i class="bi bi-lock-fill"></i> Network</span> }
+                            @foreach (var detail in item.Details) { <div><small><strong>@detail.Key:</strong> @detail.Value</small></div> }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+        <div class="card-footer d-flex justify-content-between align-items-center">
+            <button class="btn btn-sm btn-outline-secondary" @onclick="PreviousPageAsync" disabled="@(_busy || Page.Page <= 1)">Previous</button>
+            <span class="small text-secondary">Page @Page.Page of @TotalPages</span>
+            <button class="btn btn-sm btn-outline-secondary" @onclick="NextPageAsync" disabled="@(_busy || Page.Page >= TotalPages)">Next</button>
+        </div>
+    }
+</section>
+
+@code {
+    private static readonly string[] Categories =
+    [
+        SecurityAuditCategories.Authentication, SecurityAuditCategories.AccountAdministration,
+        SecurityAuditCategories.Authorization, SecurityAuditCategories.DataAccess,
+        SecurityAuditCategories.DataLifecycle, SecurityAuditCategories.Integration,
+        SecurityAuditCategories.AiEgress, SecurityAuditCategories.Infrastructure,
+        SecurityAuditCategories.SecurityOperations
+    ];
+    private SecurityAuditPage? Page;
+    private SecurityAuditIntegrityResult? Integrity;
+    private string _search = string.Empty;
+    private string _category = string.Empty;
+    private string _outcome = string.Empty;
+    private string _error = string.Empty;
+    private bool _busy;
+    private int _pageNumber = 1;
+    private int TotalPages => Page is null ? 1 : Math.Max(1, (int)Math.Ceiling(Page.TotalCount / (double)Page.PageSize));
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        await VerifyIntegrityAsync();
+    }
+
+    private async Task ApplyFiltersAsync() { _pageNumber = 1; await LoadAsync(); }
+    private async Task PreviousPageAsync() { _pageNumber--; await LoadAsync(); }
+    private async Task NextPageAsync() { _pageNumber++; await LoadAsync(); }
+
+    private async Task LoadAsync()
+    {
+        _busy = true; _error = string.Empty;
+        try
+        {
+            Page = await SecurityAuditService.QueryAsync(new SecurityAuditQuery(
+                string.IsNullOrWhiteSpace(_category) ? null : _category,
+                string.IsNullOrWhiteSpace(_outcome) ? null : _outcome,
+                Search: string.IsNullOrWhiteSpace(_search) ? null : _search,
+                Page: _pageNumber));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load the security audit ledger.");
+            _error = "The security audit ledger could not be loaded.";
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task VerifyIntegrityAsync()
+    {
+        _busy = true; _error = string.Empty;
+        try { Integrity = await SecurityAuditService.VerifyIntegrityAsync(); }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to verify the security audit chain.");
+            _error = "The security audit chain could not be verified.";
+        }
+        finally { _busy = false; }
+    }
+}
+
+<style>
+    .audit-integrity { display:flex; justify-content:space-between; gap:1rem; align-items:center; padding:1rem; margin-bottom:1rem; border:1px solid #275c42; background:#163327; border-radius:12px; }
+    .audit-integrity div { display:flex; gap:.8rem; flex-wrap:wrap; }
+    .audit-integrity.invalid { border-color:#8c3434; background:#421d1d; }
+    .audit-filters { display:grid; grid-template-columns:minmax(14rem,2fr) 1fr 1fr auto; gap:.8rem; }
+    .audit-filters label { display:block; font-size:.78rem; font-weight:700; margin-bottom:.3rem; color:var(--gws-text-soft); }
+    .audit-correlation { display:block; max-width:18rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--gws-text-soft); }
+    .audit-outcome { display:inline-block; padding:.2rem .5rem; border-radius:999px; font-weight:700; font-size:.75rem; background:#555; }
+    .audit-outcome.succeeded { background:#245a3f; color:#bcebd2; }
+    .audit-outcome.failed,.audit-outcome.denied { background:#692d2d; color:#ffd0d0; }
+    @@media (max-width: 800px) { .audit-filters { grid-template-columns:1fr; } .audit-integrity { align-items:flex-start; flex-direction:column; } }
+</style>

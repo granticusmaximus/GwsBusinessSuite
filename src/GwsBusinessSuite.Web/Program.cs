@@ -11,6 +11,7 @@ using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure;
 using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.Resume;
+using GwsBusinessSuite.Application.SecurityAudit;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Application.Users;
 using GwsBusinessSuite.Application.Wiki;
@@ -163,6 +164,8 @@ builder.Services.AddAuthorization(options =>
 
     options.FallbackPolicy = options.GetPolicy("AdminOnly");
 });
+builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler,
+    AuditingAuthorizationMiddlewareResultHandler>();
 
 builder.Services.AddHealthChecks()
     .AddCheck<GwsBusinessSuite.Web.HealthChecks.DatabaseHealthCheck>(
@@ -173,6 +176,9 @@ builder.Services.AddHealthChecks()
         tags: ["ready"])
     .AddCheck<GwsBusinessSuite.Web.HealthChecks.DatabaseBackupHealthCheck>(
         "backups",
+        tags: ["ready"])
+    .AddCheck<GwsBusinessSuite.Web.HealthChecks.SecurityAuditHealthCheck>(
+        "security-audit",
         tags: ["ready"]);
 
 // HeaderName enables validating JSON API requests (which can't carry a hidden form
@@ -456,6 +462,43 @@ app.MapGet("/admin/api/performance", (
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("public-read");
 
+app.MapGet("/admin/api/security-audit/export.csv", async (
+    HttpContext httpContext,
+    ISecurityAuditService securityAudit,
+    CancellationToken cancellationToken) =>
+{
+    const int pageSize = 200;
+    var pageNumber = 1;
+    var all = new List<SecurityAuditEventView>();
+    SecurityAuditPage page;
+    do
+    {
+        page = await securityAudit.QueryAsync(new SecurityAuditQuery(Page: pageNumber, PageSize: pageSize), cancellationToken);
+        all.AddRange(page.Events);
+        pageNumber++;
+    } while (all.Count < page.TotalCount);
+
+    var csv = new StringBuilder("OccurredAtUtc,Severity,Category,Action,Outcome,Actor,TargetType,TargetId,CorrelationId,HasNetworkContext,Details\r\n");
+    foreach (var item in all)
+    {
+        csv.AppendJoin(',', Csv(item.OccurredAt.UtcDateTime.ToString("O")), Csv(item.Severity), Csv(item.Category),
+            Csv(item.Action), Csv(item.Outcome), Csv(item.ActorUsername), Csv(item.TargetType), Csv(item.TargetId),
+            Csv(item.CorrelationId), Csv(item.HasProtectedNetworkContext ? "Yes" : "No"),
+            Csv(JsonSerializer.Serialize(item.Details)));
+        csv.Append("\r\n");
+    }
+
+    await securityAudit.RecordAsync(new SecurityAuditInput(
+        SecurityAuditCategories.DataAccess, "SecurityAuditExport", SecurityAuditOutcomes.Succeeded,
+        SecurityAuditSeverities.High, "SecurityAuditEvent", null,
+        new Dictionary<string, string?> { ["rowCount"] = all.Count.ToString() },
+        httpContext.Connection.RemoteIpAddress?.ToString()), cancellationToken);
+    return Results.File(Encoding.UTF8.GetBytes(csv.ToString()), "text/csv; charset=utf-8",
+        $"gws-security-audit-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.csv");
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("admin-mutation");
+
 // AllowAnonymous at the connection level - unauthenticated viewers must be able to open
 // this connection to call JoinAsViewer(inviteToken); JoinAsBroadcaster separately checks
 // Context.User's role itself (see LiveShowHub) since the two roles share one hub.
@@ -464,7 +507,8 @@ app.MapHub<LiveShowHub>("/hubs/live-show").AllowAnonymous();
 app.MapPost("/auth/login", async (
     HttpContext httpContext,
     IAntiforgery antiforgery,
-    IUserManagementService userManagementService) =>
+    IUserManagementService userManagementService,
+    ISecurityAuditService securityAudit) =>
 {
     try
     {
@@ -488,6 +532,11 @@ app.MapPost("/auth/login", async (
 
     if (attempt.IsLockedOut)
     {
+        await securityAudit.RecordAsync(new SecurityAuditInput(
+            SecurityAuditCategories.Authentication, "PasswordLogin", SecurityAuditOutcomes.Denied,
+            SecurityAuditSeverities.High, "AppUser", username,
+            new Dictionary<string, string?> { ["reason"] = "AccountLocked" },
+            httpContext.Connection.RemoteIpAddress?.ToString(), username));
         var minutes = Math.Max(1, (int)Math.Ceiling((attempt.LockoutRemaining ?? TimeSpan.Zero).TotalMinutes));
         return Results.LocalRedirect(
             $"/admin/login?error=locked&minutes={minutes}&returnUrl={Uri.EscapeDataString(safeReturn)}");
@@ -495,6 +544,11 @@ app.MapPost("/auth/login", async (
 
     if (!attempt.Succeeded || attempt.User is null)
     {
+        await securityAudit.RecordAsync(new SecurityAuditInput(
+            SecurityAuditCategories.Authentication, "PasswordLogin", SecurityAuditOutcomes.Failed,
+            SecurityAuditSeverities.Warning, "AppUser", username,
+            new Dictionary<string, string?> { ["reason"] = "InvalidCredentials" },
+            httpContext.Connection.RemoteIpAddress?.ToString(), username));
         return Results.LocalRedirect($"/admin/login?error=invalid&returnUrl={Uri.EscapeDataString(safeReturn)}");
     }
 
@@ -511,13 +565,20 @@ app.MapPost("/auth/login", async (
         new ClaimsPrincipal(pendingIdentity),
         new AuthenticationProperties { IsPersistent = false });
 
+    await securityAudit.RecordAsync(new SecurityAuditInput(
+        SecurityAuditCategories.Authentication, "PasswordLogin", SecurityAuditOutcomes.Succeeded,
+        TargetType: "AppUser", TargetId: user.Id.ToString(),
+        Details: new Dictionary<string, string?> { ["nextFactor"] = user.MfaEnabled ? "MfaChallenge" : "MfaEnrollment" },
+        NetworkAddress: httpContext.Connection.RemoteIpAddress?.ToString(), ActorUsername: user.Username));
+
     return Results.LocalRedirect(user.MfaEnabled ? "/admin/login/mfa" : "/admin/login/mfa/setup");
 }).AllowAnonymous().RequireRateLimiting("login");
 
 app.MapPost("/auth/mfa/verify", async (
     HttpContext httpContext,
     IAntiforgery antiforgery,
-    IUserManagementService userManagementService) =>
+    IUserManagementService userManagementService,
+    ISecurityAuditService securityAudit) =>
 {
     if (await ValidateAntiforgeryAsync(httpContext, antiforgery) is not null)
         return Results.LocalRedirect("/admin/login/mfa?error=invalid");
@@ -529,10 +590,22 @@ app.MapPost("/auth/mfa/verify", async (
     var form = await httpContext.Request.ReadFormAsync();
     var result = await userManagementService.VerifyMfaAsync(userId, form["code"].ToString());
     if (!result.Succeeded || result.User is null)
+    {
+        await securityAudit.RecordAsync(new SecurityAuditInput(
+            SecurityAuditCategories.Authentication, "MfaChallenge", SecurityAuditOutcomes.Failed,
+            SecurityAuditSeverities.High, "AppUser", userId.ToString(),
+            NetworkAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
+            ActorUsername: pending.Principal?.Identity?.Name));
         return Results.LocalRedirect("/admin/login/mfa?error=invalid");
+    }
 
     await SignInPortalAsync(httpContext, result.User);
     await httpContext.SignOutAsync(MfaAuthenticationDefaults.PendingScheme);
+    await securityAudit.RecordAsync(new SecurityAuditInput(
+        SecurityAuditCategories.Authentication, "MfaChallenge", SecurityAuditOutcomes.Succeeded,
+        TargetType: "AppUser", TargetId: userId.ToString(),
+        Details: new Dictionary<string, string?> { ["factor"] = result.UsedRecoveryCode ? "RecoveryCode" : "Totp" },
+        NetworkAddress: httpContext.Connection.RemoteIpAddress?.ToString(), ActorUsername: result.User.Username));
     return Results.LocalRedirect(GetPendingReturnUrl(pending));
 }).RequireAuthorization("MfaPending").RequireRateLimiting("login");
 
@@ -595,7 +668,8 @@ app.MapGet("/admin/login/mfa/setup", async (
 app.MapPost("/auth/mfa/enroll", async (
     HttpContext httpContext,
     IAntiforgery antiforgery,
-    IUserManagementService userManagementService) =>
+    IUserManagementService userManagementService,
+    ISecurityAuditService securityAudit) =>
 {
     if (await ValidateAntiforgeryAsync(httpContext, antiforgery) is not null)
         return Results.LocalRedirect("/admin/login/mfa/setup?error=invalid");
@@ -607,10 +681,22 @@ app.MapPost("/auth/mfa/enroll", async (
     var form = await httpContext.Request.ReadFormAsync();
     var result = await userManagementService.CompleteMfaEnrollmentAsync(userId, form["code"].ToString());
     if (!result.Succeeded || result.User is null)
+    {
+        await securityAudit.RecordAsync(new SecurityAuditInput(
+            SecurityAuditCategories.Authentication, "MfaEnrollment", SecurityAuditOutcomes.Failed,
+            SecurityAuditSeverities.High, "AppUser", userId.ToString(),
+            NetworkAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
+            ActorUsername: pending.Principal?.Identity?.Name));
         return Results.LocalRedirect("/admin/login/mfa/setup?error=invalid");
+    }
 
     await SignInPortalAsync(httpContext, result.User);
     await httpContext.SignOutAsync(MfaAuthenticationDefaults.PendingScheme);
+    await securityAudit.RecordAsync(new SecurityAuditInput(
+        SecurityAuditCategories.Authentication, "MfaEnrollment", SecurityAuditOutcomes.Succeeded,
+        TargetType: "AppUser", TargetId: userId.ToString(),
+        Details: new Dictionary<string, string?> { ["recoveryCodeCount"] = result.RecoveryCodes.Count.ToString() },
+        NetworkAddress: httpContext.Connection.RemoteIpAddress?.ToString(), ActorUsername: result.User.Username));
     var returnUrl = GetPendingReturnUrl(pending);
     var encodedCodes = string.Join("", result.RecoveryCodes.Select(code => $"<li><code>{System.Net.WebUtility.HtmlEncode(code)}</code></li>"));
     var encodedReturn = System.Net.WebUtility.HtmlEncode(returnUrl);
@@ -621,8 +707,15 @@ app.MapPost("/auth/mfa/enroll", async (
         """, "text/html; charset=utf-8");
 }).RequireAuthorization("MfaPending").RequireRateLimiting("login");
 
-app.MapGet("/auth/logout", async (HttpContext httpContext) =>
+app.MapGet("/auth/logout", async (HttpContext httpContext, ISecurityAuditService securityAudit) =>
 {
+    var username = httpContext.User.Identity?.Name;
+    if (!string.IsNullOrWhiteSpace(username))
+    {
+        await securityAudit.RecordAsync(new SecurityAuditInput(
+            SecurityAuditCategories.Authentication, "Logout", SecurityAuditOutcomes.Succeeded,
+            NetworkAddress: httpContext.Connection.RemoteIpAddress?.ToString(), ActorUsername: username));
+    }
     await httpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     await httpContext.SignOutAsync(MfaAuthenticationDefaults.PendingScheme);
     return Results.LocalRedirect("/admin/login");
@@ -2547,6 +2640,14 @@ static IResult MfaHtmlPage(
 static string FormatMfaSecret(string secret) =>
     string.Join(' ', Enumerable.Range(0, (secret.Length + 3) / 4)
         .Select(index => secret.Substring(index * 4, Math.Min(4, secret.Length - index * 4))));
+
+static string Csv(string? value)
+{
+    var safe = (value ?? string.Empty).Replace("\r", " ").Replace("\n", " ");
+    var trimmed = safe.TrimStart();
+    if (trimmed.Length > 0 && "=+-@".Contains(trimmed[0])) safe = $"'{safe}";
+    return $"\"{safe.Replace("\"", "\"\"")}\"";
+}
 
 static string NormalizePathBase(string? pathBase)
 {
