@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
 
 namespace GwsBusinessSuite.Application.Automation;
@@ -9,7 +10,13 @@ namespace GwsBusinessSuite.Application.Automation;
 public sealed partial class AutomationNodeRegistry(
     IAutomationHttpClient httpClient,
     IOllamaService? ollama = null,
-    IAppDbContextFactory? dbContextFactory = null) : IAutomationNodeRegistry
+    IAppDbContextFactory? dbContextFactory = null,
+    // Resolved lazily inside ExecuteSetRowPropertyAsync, not injected directly: Wiki.IWikiDatabaseService
+    // depends on IAutomationTriggerService, which depends on IAutomationExecutionService, which
+    // depends on this registry - an eager constructor dependency here would be circular. A scope's
+    // IServiceProvider is safe because by the time a node actually executes, this registry (and
+    // everything above it in that chain) is already fully constructed.
+    IServiceProvider? serviceProvider = null) : IAutomationNodeRegistry
 {
     private static readonly IReadOnlyList<AutomationNodeDefinition> Definitions =
     [
@@ -17,6 +24,7 @@ public sealed partial class AutomationNodeRegistry(
         new("core.webhookTrigger", 1, "Webhook Trigger", "Starts an active workflow from its public webhook path.", "Triggers", "bi-broadcast-pin", true, ["main"], "{\"path\":\"incoming-event\"}"),
         new("core.scheduleTrigger", 1, "Schedule Trigger", "Starts an active workflow at a recurring minute interval.", "Triggers", "bi-clock-fill", true, ["main"], "{\"intervalMinutes\":60}"),
         new("database.rowChangedTrigger", 1, "Database Row Changed", "Starts an active workflow when a row's properties change in a Sentinel database. Paste the database's id (visible in its Sentinel URL) into wikiDatabaseId.", "Triggers", "bi-table", true, ["main"], "{\"wikiDatabaseId\":\"\"}"),
+        new("database.setRowProperty", 1, "Set Database Row Property", "Sets one property on a Sentinel database row. Paste the database, row, and property ids and an optional {{ $json.path }} expression for the value. Never re-triggers a Database Row Changed workflow, so it cannot cause an automation loop - chaining a second workflow off this write is not supported.", "Actions", "bi-pencil-square", false, ["main"], "{\"wikiDatabaseId\":\"\",\"rowId\":\"{{ $json.rowId }}\",\"propertyId\":\"\",\"value\":\"\"}"),
         new("core.set", 1, "Set Fields", "Adds or replaces JSON fields using literal values or expressions.", "Data", "bi-braces", false, ["main"], "{\"values\":{\"message\":\"Hello from GWS\"}}"),
         new("core.if", 1, "If", "Routes an item to the true or false output.", "Flow", "bi-signpost-split-fill", false, ["true", "false"], "{\"left\":\"{{ $json.enabled }}\",\"operator\":\"equals\",\"right\":\"true\"}"),
         new("core.httpRequest", 1, "HTTP Request", "Calls an HTTP API and returns status, headers, and response data.", "Actions", "bi-globe2", false, ["main"], "{\"method\":\"GET\",\"url\":\"https://example.com\",\"headers\":{},\"body\":\"\"}"),
@@ -81,6 +89,7 @@ public sealed partial class AutomationNodeRegistry(
             "core.webhookTrigger" => SingleOutput("main", input),
             "core.scheduleTrigger" => SingleOutput("main", input),
             "database.rowChangedTrigger" => SingleOutput("main", input),
+            "database.setRowProperty" => await ExecuteSetRowPropertyAsync(node, input, cancellationToken),
             "core.set" => ExecuteSet(node, input),
             "core.if" => ExecuteIf(node, input),
             "core.httpRequest" => await ExecuteHttpAsync(node, input, credentialJson, cancellationToken),
@@ -223,6 +232,43 @@ public sealed partial class AutomationNodeRegistry(
         };
         return SingleOutput("main", JsonSerializer.SerializeToElement(output));
     }
+
+    private async Task<AutomationNodeRunResult> ExecuteSetRowPropertyAsync(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        CancellationToken cancellationToken)
+    {
+        var wikiDatabaseService = serviceProvider?.GetService(typeof(IWikiDatabaseService)) as IWikiDatabaseService
+            ?? throw new InvalidOperationException("Database writes are not available to the automation engine.");
+        var parameters = ParseObject(node.ParametersJson, node.Name);
+        var source = RequireObject(input, node.Name);
+
+        var wikiDatabaseId = ParseRequiredGuid(parameters["wikiDatabaseId"]?.GetValue<string>(), node.Name, "wikiDatabaseId");
+        var rowIdText = ResolveText(parameters["rowId"]?.GetValue<string>() ?? string.Empty, input);
+        var rowId = ParseRequiredGuid(rowIdText, node.Name, "rowId");
+        var propertyId = ParseRequiredGuid(parameters["propertyId"]?.GetValue<string>(), node.Name, "propertyId");
+        var value = ResolveText(parameters["value"]?.GetValue<string>() ?? string.Empty, input);
+
+        // "automation-engine" (see WikiDatabaseService.SaveRowAsync) is the actor that skips
+        // re-firing database.rowChangedTrigger - required so this node can never chain into an
+        // automation loop, including its own workflow's trigger on the same database.
+        await wikiDatabaseService.SaveInlineCellAsync(wikiDatabaseId, rowId, propertyId, value, "automation-engine", cancellationToken);
+
+        var output = source.DeepClone().AsObject();
+        output["databaseWrite"] = new JsonObject
+        {
+            ["saved"] = true,
+            ["wikiDatabaseId"] = wikiDatabaseId.ToString(),
+            ["rowId"] = rowId.ToString(),
+            ["propertyId"] = propertyId.ToString()
+        };
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    private static Guid ParseRequiredGuid(string? value, string nodeName, string parameterName) =>
+        Guid.TryParse(value, out var parsed)
+            ? parsed
+            : throw new InvalidOperationException($"{nodeName} requires a valid {parameterName}.");
 
     private static AutomationNodeRunResult ExecuteSplitOut(AutomationNodeSnapshot node, JsonElement input)
     {

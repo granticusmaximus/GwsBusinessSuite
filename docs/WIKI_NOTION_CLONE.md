@@ -159,7 +159,7 @@ capabilities where they fit GWS Business Suite; they are no longer silently excl
 | Area | Delivered now | Required parity work |
 | --- | --- | --- |
 | Blocks | Core and advanced native block vocabulary, including tables/equations/columns/synced blocks/TOC/buttons, plus reusable block templates, and provider-pattern embeds (YouTube/Vimeo/Spotify/Figma/CodePen/Loom render as iframes) | True oEmbed metadata and additional providers |
-| Databases | Eleven view families, expanded property vocabulary, advanced typed formulas, canonical one-way/reciprocal row relations, configurable rollups, filters/sorts/groups, row page bodies with per-view peek modes, linked/inline databases, reusable database templates, and a `database.rowChangedTrigger` node that starts a Workflow Automation when a database's row properties change | Property layouts and a write-back automation action node |
+| Databases | Eleven view families, expanded property vocabulary, advanced typed formulas, canonical one-way/reciprocal row relations, configurable rollups, filters/sorts/groups, row page bodies with per-view peek modes, linked/inline databases, reusable database templates, a `database.rowChangedTrigger` node that starts a Workflow Automation when a database's row properties change, and a `database.setRowProperty` write-back action node | Property layouts |
 | Knowledge graph | `[[Page]]` links, ranked/highlighted workspace search, backlinks, person/date/database-row mentions, a row "Mentioned in" panel, favorites/recents, and per-user saved searches | Graph navigation |
 | Collaboration | Discussions, replies, reactions, notifications, inline highlighted comment anchors, DB-backed cross-instance presence/polling, character-level remote selection indicators, automatically rebased selection anchors, block-level three-way merge, offline draft/reconnect replay, authenticated portal-member roles, granular permissions, and tokenized public sharing | A distributed CRDT/OT engine is an optional scale-out architecture, not part of the single-instance v1 acceptance contract |
 | Presentation | Emoji icon and cover image for pages and database rows alike (cover can be uploaded inline via the cover picker, not just picked from an already-uploaded asset), row-level bounded version history, plus responsive side-peek, center-peek, and full-page database rows with per-view property presentation | Custom icon *image* uploads (icons remain emoji-only), page width/fonts, and reusable style defaults |
@@ -281,9 +281,16 @@ screens.
    no new UI: because this reuses `IAutomationExecutionService.ExecuteAsync` under a new
    `AutomationExecutionModes.DatabaseTrigger` mode, database-triggered runs already show up in
    the automation editor's existing Executions tab alongside manual/webhook/schedule runs.
-   Deliberately NOT done: a write-back *action* node (e.g. "set a database row's property")
-   for the other half of "trigger/action rules" - reacting to Sentinel is delivered, writing
-   back to it from a workflow is not yet.
+   The write-back half is now also delivered (2026-08-01): a new `database.setRowProperty`
+   action node sets one property on a row, completing "trigger/action rules." It always saves
+   as actor `"automation-engine"`, and `SaveRowAsync` never re-fires `database.rowChangedTrigger`
+   for that actor - a bounded, deliberate choice that fully prevents automation loops (including
+   a workflow re-triggering itself) at the cost of not supporting one automation's database
+   write chaining into a second automation via this trigger. Building and testing this node
+   also surfaced and fixed a real, previously-shipped bug: database-triggered executions had
+   silently never run past their trigger node (a missing `AutomationExecutionModes.DatabaseTrigger`
+   case in the mode-to-start-node switch meant they always started from the usually-disconnected
+   manual trigger instead) - see `docs/WORKFLOW_AUTOMATION.md` for detail.
 5. **Real-time collaboration** ✅ (remote cursors) — `SentinelCursorTracker`
    (`SentinelRealtimeCollaboration.cs`) is a new in-memory, process-local singleton tracking
    "which block is each other viewer currently in" per page, keyed by username with a 10s TTL.

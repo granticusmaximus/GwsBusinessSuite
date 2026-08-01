@@ -24,6 +24,23 @@ UI assets, trademarks, node definitions, or enterprise-only implementation detai
 - `AutomationResumeBackgroundService` sweeps for executions whose wait time has elapsed and for
   `Running` executions whose heartbeat has gone stale (an orphaned run from a crashed process),
   resuming both through the same `IAutomationExecutionService.ResumeAsync` path.
+- `database.setRowProperty` (2026-08-01) is the write-back half of `database.rowChangedTrigger`
+  - a workflow can now both react to and update a Sentinel database row. Its `IWikiDatabaseService`
+  dependency is resolved lazily from the execution scope's `IServiceProvider`
+  (`AutomationNodeRegistry`'s constructor takes it, not an eager parameter) because
+  `WikiDatabaseService` depends on `IAutomationTriggerService`, which depends on
+  `IAutomationExecutionService`, which depends back on this registry - an eager dependency
+  would be circular. The write-back always saves as actor `"automation-engine"`, and
+  `WikiDatabaseService.SaveRowAsync` never re-fires `database.rowChangedTrigger` for that
+  actor, so this node can never chain into an automation loop (including a workflow
+  re-triggering itself) - the tradeoff is that no automation may currently chain off another
+  automation's database write through this trigger, full stop.
+  Building this node's test surfaced and fixed a real bug: `AutomationExecutionService.ExecuteAsync`'s
+  mode-to-trigger-type switch had no case for `AutomationExecutionModes.DatabaseTrigger`, so
+  every database-row-changed execution silently started from `core.manualTrigger` (usually
+  disconnected) instead of `database.rowChangedTrigger` - the Execution record showed success,
+  but the workflow's actual configured logic downstream of the database trigger never ran. Fixed
+  by adding the missing switch arm.
 
 ## Capability matrix
 
@@ -32,7 +49,7 @@ UI assets, trademarks, node definitions, or enterprise-only implementation detai
 | Visual graph editor | Initial canvas, palette, inspector, connections, persisted positions | Marquee selection, copy/paste, undo/redo, minimap, sticky notes, keyboard command bar |
 | Workflow lifecycle | Draft editing, validation, immutable publish versions, activate/deactivate | Tags, folders/projects, sharing roles, workflow history diff/restore, import/export/templates |
 | Execution engine | Deterministic DAG execution, branching, labeled-input joins, multi-item fan-out, batching, retries, continue-on-fail, per-node evidence, checkpointed frontier with crash recovery, cooperative cancellation, per-node timeouts | Sub-workflows, partial execution, retry from a failed node |
-| Core nodes | Manual/Webhook/Schedule triggers; Set Fields, If, HTTP Request, Split Out, Batch, Merge, Limit, Sort, Remove Duplicates, Template, Date & Time, No Operation, Stop and Error, Wait, Approval | Code, Execute Workflow, Respond to Webhook |
+| Core nodes | Manual/Webhook/Schedule/Database Row Changed triggers; Set Fields, If, HTTP Request, Split Out, Batch, Merge, Limit, Sort, Remove Duplicates, Template, Date & Time, No Operation, Stop and Error, Wait, Approval, Set Database Row Property | Code, Execute Workflow, Respond to Webhook |
 | Data mapping | JSON items and `{{ $json.path }}` expressions | Full expression editor, node references, item linking, binary data, pinned/mock data |
 | Credentials | Protected credential records and credential references | OAuth2 refresh, credential types, sharing, external secret stores, rotation/audit |
 | Operations | Run list, node logs, timestamps, errors, outputs, cancel, resume, approve/reject | Filtering, retention/pruning, concurrency controls, metrics, OpenTelemetry |

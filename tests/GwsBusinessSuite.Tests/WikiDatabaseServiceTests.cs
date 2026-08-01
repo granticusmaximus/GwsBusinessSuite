@@ -983,6 +983,62 @@ public sealed class WikiDatabaseServiceTests
             .Should().Be(2);
     }
 
+    [Fact]
+    public async Task DatabaseSetRowPropertyNode_ShouldWriteBackTheRowWithoutRetriggeringItsOwnWorkflow()
+    {
+        await using var db = await CreateDbAsync();
+        IWikiDatabaseService? wikiDatabaseService = null;
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), serviceProvider: new SingleServiceProvider(() => wikiDatabaseService));
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executions = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggers = new AutomationTriggerService(db, workflowService, executions, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+        var service = new WikiDatabaseService(db, triggers);
+        wikiDatabaseService = service;
+
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var titleProperty = database.Properties.Single(p => p.Type == WikiDatabasePropertyTypes.Title);
+        var statusProperty = await service.SavePropertyAsync(
+            database.Id, new WikiDatabasePropertyEditor { Name = "Status", Type = WikiDatabasePropertyTypes.Text }, "u");
+
+        var workflow = await workflowService.CreateAsync("Auto-mark synced");
+        var trigger = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Row changed",
+            TypeKey = "database.rowChangedTrigger",
+            PositionX = 120,
+            PositionY = 420,
+            ParametersJson = $"{{\"wikiDatabaseId\":\"{database.Id}\"}}"
+        });
+        var writeBack = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Mark synced",
+            TypeKey = "database.setRowProperty",
+            PositionX = 400,
+            PositionY = 420,
+            ParametersJson = $"{{\"wikiDatabaseId\":\"{database.Id}\",\"rowId\":\"{{{{ $json.rowId }}}}\",\"propertyId\":\"{statusProperty.Id}\",\"value\":\"synced-by-automation\"}}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, trigger.Id, "main", writeBack.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+        await workflowService.SetActiveAsync(workflow.Id, true);
+
+        var row = await service.SaveRowAsync(database.Id, RowWithStatus(titleProperty.Id, "First task"), "u");
+
+        var updatedRow = await db.WikiDatabaseRows.AsNoTracking().SingleAsync(item => item.Id == row.Id);
+        WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(updatedRow.PropertyValuesJson), statusProperty.Id)
+            .Should().Be("synced-by-automation");
+
+        // The write-back node's own save must not re-fire database.rowChangedTrigger on this
+        // same database - otherwise this workflow would trigger itself indefinitely.
+        (await db.AutomationExecutions.AsNoTracking().Where(item => item.WorkflowId == workflow.Id).ToListAsync())
+            .Should().ContainSingle("the write-back save must not spawn a second execution of its own workflow");
+    }
+
+    private sealed class SingleServiceProvider(Func<object?> resolver) : IServiceProvider
+    {
+        public object? GetService(Type serviceType) => serviceType == typeof(IWikiDatabaseService) ? resolver() : null;
+    }
+
     private sealed class FakeHttpClient : IAutomationHttpClient
     {
         public Task<AutomationHttpResponse> SendAsync(AutomationHttpRequest request, CancellationToken cancellationToken = default) =>

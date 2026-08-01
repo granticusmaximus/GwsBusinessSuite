@@ -148,8 +148,12 @@ also passes.
   rather than duplicated) when a row's properties change, gated to active workflows only, with
   per-workflow failure isolation so one broken automation can't block a row save or its
   sibling workflows. Schedules and credentialed integrations needed no new work since the
-  automation engine already covers both generically. A write-back action node (a workflow
-  updating a database row) remains open. "Real-time collaboration" now shows remote cursors:
+  automation engine already covers both generically. A write-back action node (`database.setRowProperty`,
+  a workflow updating a database row) is now also delivered - it always saves as actor
+  `"automation-engine"`, which `SaveRowAsync` never re-triggers automations for, so this can't
+  chain into an automation loop. Its test also caught and fixed a real bug: database-triggered
+  executions had never actually run past their trigger node (a missing `DatabaseTrigger` case
+  in the execution engine's mode-to-start-node switch). "Real-time collaboration" now shows remote cursors:
   an in-memory `SentinelCursorTracker` broadcasts which block each other connected viewer is
   currently in (a colored name-pill, not a character caret), reusing the same process-local
   fan-out pattern discussions/notifications already use rather than adding a SignalR hub.

@@ -851,7 +851,13 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         // Property-only edits (inline cell edits, board drags) and new rows both count as a
         // "row changed" event; a save that only touched the page body/icon/cover does not,
         // since nothing an automation could condition on (property values) actually moved.
-        if (propertyValuesChanged && automationTriggerService is not null)
+        // The automation engine's own write-back node (database.setRowProperty) always saves
+        // as this exact actor string specifically so this check can skip re-firing the trigger -
+        // without it, a workflow whose write-back targets the database its own
+        // database.rowChangedTrigger watches would re-trigger itself forever. This blocks all
+        // automation chaining through this trigger, not just self-loops; a bounded, safe
+        // default over building real recursion-depth tracking for a narrower guarantee.
+        if (propertyValuesChanged && automationTriggerService is not null && performedBy != "automation-engine")
         {
             var triggerPayload = JsonSerializer.Serialize(new { wikiDatabaseId, rowId = row.Id, isNew, values });
             await automationTriggerService.TriggerDatabaseRowChangedAsync(wikiDatabaseId, triggerPayload, cancellationToken);

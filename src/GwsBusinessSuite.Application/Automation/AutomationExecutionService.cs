@@ -55,6 +55,7 @@ public sealed class AutomationExecutionService(
             {
                 AutomationExecutionModes.Webhook => "core.webhookTrigger",
                 AutomationExecutionModes.Schedule => "core.scheduleTrigger",
+                AutomationExecutionModes.DatabaseTrigger => "database.rowChangedTrigger",
                 _ => "core.manualTrigger"
             };
             var startNodes = snapshot.Nodes.Where(node => node.TypeKey == triggerType && !node.IsDisabled).ToList();
