@@ -28,6 +28,16 @@ jobs:
     name: Build & Deploy
     needs: test
     runs-on: ubuntu-latest
+    # Two pushes to main close together (this repo can auto-commit/push in quick succession)
+    # otherwise start two "docker compose up -d --build" runs against the same droplet at once.
+    # Both build independently, but the container recreate step names/renames the same
+    # container, so whichever finishes second hits a Docker "container name already in use"
+    # conflict from the one still finishing - a real observed failure, not hypothetical. Queue
+    # deploys instead of racing them; don't cancel one mid-build/mid-swap, since a cancelled
+    # Actions job doesn't reliably stop the remote SSH script it already started.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
 
     steps:
       - name: SSH into droplet and deploy
