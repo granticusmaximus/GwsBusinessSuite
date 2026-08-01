@@ -50,14 +50,20 @@ jobs:
 
             PREVIOUS_COMMIT=$(git rev-parse HEAD)
 
-            # Newer releases expose a bounded backup/rehearsal command. The source check keeps
-            # the first deployment of that command from accidentally launching a second legacy
-            # web process with an unrecognized argument.
-            if grep -q -- '--backup-create' src/GwsBusinessSuite.Web/Program.cs; then
-              docker compose exec -T gwssuite dotnet GwsBusinessSuite.Web.dll --backup-create
-              docker compose exec -T gwssuite dotnet GwsBusinessSuite.Web.dll --backup-verify
+            # Newer releases expose a bounded backup/rehearsal command. Whether the *running*
+            # container recognizes it can't be reliably inferred from this worktree's checked-out
+            # source (grep-the-file drifted from the live container at least once: a prior deploy
+            # attempt can advance this git checkout via `git reset --hard` below without the
+            # matching `docker compose up -d --build` ever completing, or `restart: always` can
+            # bring the container back from a stale cached image). An unrecognized CLI arg falls
+            # through to this app's normal startup path *inside the already-running container* -
+            # a second Kestrel instance colliding on the same bound port, crashing the deploy.
+            # So: try it and fall back on any failure instead of trusting the file on disk.
+            if docker compose exec -T gwssuite dotnet GwsBusinessSuite.Web.dll --backup-create \
+              && docker compose exec -T gwssuite dotnet GwsBusinessSuite.Web.dll --backup-verify; then
+              :
             else
-              echo "Legacy release detected; relying on its latest scheduled snapshot for this one-time transition."
+              echo "Pre-deploy backup-create/verify did not succeed on the currently running container (older release, or a fresh/incomplete deploy state); relying on its latest scheduled snapshot instead."
               docker compose exec -T gwssuite sh -lc 'ls /app/backups/sentinel-backup-*.zip >/dev/null 2>&1'
             fi
 
