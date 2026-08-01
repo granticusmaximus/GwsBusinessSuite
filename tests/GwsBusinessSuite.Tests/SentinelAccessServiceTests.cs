@@ -48,6 +48,26 @@ public sealed class SentinelAccessServiceTests
     }
 
     [Fact]
+    public async Task RecordShareViewAsync_ShouldIncrementViewCountAndStampLastAccessedAt()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var targetId = Guid.NewGuid();
+        var created = await fixture.Service.CreatePublicShareAsync(targetId, false, null, false, null, "owner");
+        var beforeFirstView = DateTimeOffset.UtcNow;
+
+        await fixture.Service.RecordShareViewAsync(created.Id);
+        await fixture.Service.RecordShareViewAsync(created.Id);
+
+        var entity = await fixture.Db.SentinelPublicShares.SingleAsync(item => item.Id == created.Id);
+        entity.ViewCount.Should().Be(2);
+        entity.LastAccessedAt.Should().NotBeNull();
+        entity.LastAccessedAt!.Value.Should().BeOnOrAfter(beforeFirstView);
+
+        var snapshot = await fixture.Service.GetAccessAsync(targetId, false);
+        snapshot.Shares.Should().ContainSingle().Which.ViewCount.Should().Be(2);
+    }
+
+    [Fact]
     public async Task GetAccessAsync_ShouldOrderPublicSharesNewestFirstOnSqlite()
     {
         await using var fixture = await Fixture.CreateAsync();

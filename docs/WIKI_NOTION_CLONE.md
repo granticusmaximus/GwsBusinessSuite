@@ -76,7 +76,7 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 | Databases — structure | Databases share the page sidebar tree; every row opens as a responsive block-content page with a per-view side-peek, center-peek, or full-page presentation and configurable property visibility/order; row icon, cover image, and bounded version history (20/row, structural diff, revert-as-new-version) match page-level history; linked and inline database blocks reference canonical data without duplication | — |
 | Search & graph | All-token ranked page/block/database-row search with highlighted matches; per-user saved searches; structured and legacy backlinks; per-user favorites/recents; structured page, person, date, and database-row mentions, with a personal mention inbox for people and a "Mentioned in" backlinks panel for rows | Graph visualization |
 | Import/sync | Current `2026-03-11` Notion API, public-connection OAuth with encrypted access/refresh tokens and revocation (plus internal/PAT fallback), signed/deduplicated connection webhooks, data sources, views, comments, subtree-aware selective import with a browsable collapsible page/database picker, recursive template/unsupported-container content recovery, full-page Markdown recovery for unavailable structured content, meeting-note summary/notes/transcript import, incremental job state and content-count diagnostics, soft archival, imported page emoji/cover presentation, visible working child-page links, inline database/board blocks, durable authenticated copies of Notion-hosted files, field-level conflict review, explicitly enabled page and typed database-row pushes, reusable template import from connected free Notion templates or Markdown/CSV/HTML ZIP exports, full-fidelity property mapping (people/files/relation/created-by/last-edited-by/last-edited-time target Sentinel's real typed properties instead of degrading to text, with relation values resolved to local row ids), rich linked column layouts, inline video/audio players, and rich table cell formatting | Formula translation and schema mutation remain intentionally outside the safe v1 write contract |
-| Visibility | Authenticated portal-member roles and per-resource view/comment/edit/full-access grants, plus expiring/revocable/password-protected tokenized public page and database shares | Per-share access-level controls and share auditing |
+| Visibility | Authenticated portal-member roles and per-resource view/comment/edit/full-access grants, plus expiring/revocable/password-protected tokenized public page and database shares with view-count/last-accessed analytics | Per-share access-level controls |
 
 ## Delivery sequence
 
@@ -369,9 +369,19 @@ screens.
    content behind a password prompt via a new `ISentinelAccessService.VerifySharePasswordAsync`
    before `ResolvePublicShareAsync`'s target is loaded, kept deliberately simple (re-prompts on
    every fresh page load - no session/cookie persistence layer was added). Durable Notion-hosted
-   file ingestion is delivered. **Not done**: retyping/renaming already-synced Notion
-   properties, a per-share access-level selector (public shares remain always-read-only), and
-   share view/access analytics.
+   file ingestion is delivered. **Share view analytics** are also now delivered:
+   `SentinelPublicShare.ViewCount`/`LastAccessedAt`, incremented by a new
+   `ISentinelAccessService.RecordShareViewAsync` called once from `SentinelPublicShare.razor`'s
+   `LoadTargetAsync` - i.e. once the visitor actually sees the content, after any password gate
+   clears, so a wrong password guess or a bare metadata resolution is never counted as a view.
+   Shown in `SentinelSharePanel.razor`'s share list as "N views · last viewed …". Known
+   imprecision, deliberately not addressed: Blazor Server's prerender-then-reconnect lifecycle
+   can invoke `OnParametersSetAsync` (and so `LoadTargetAsync`) twice for a single real page
+   load, which would double-count that visit - acceptable for an owner-facing rough view count,
+   not treated as a correctness bug worth a dedup layer. **Not done**: retyping/renaming
+   already-synced Notion properties, and a per-share access-level selector (public shares
+   remain always-read-only) - the latter would mean opening an anonymous public-write surface
+   for comments, a distinctly bigger and more security-sensitive scope than this pass covered.
 9. **Native platform integrations** — platform-appropriate desktop and mobile affordances.
    On macOS this includes an optional persistent Sentinel menu-bar companion with a dedicated
    original Sentinel logo, quick actions to open Sentinel or the main dashboard, refresh
