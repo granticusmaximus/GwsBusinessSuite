@@ -75,6 +75,7 @@ public sealed class GrowthAnalyticsService(
         DateTimeOffset from,
         DateTimeOffset to,
         Guid? segmentId = null,
+        int breakdownLimit = 12,
         CancellationToken cancellationToken = default)
     {
         var fromUnix = from.ToUnixTimeSeconds();
@@ -135,24 +136,24 @@ public sealed class GrowthAnalyticsService(
             RetentionPeriodLabel = retention.PeriodLabel,
             RetentionCohorts = retention.Cohorts,
             Trend = BuildTrend(pageViews, from, to),
-            TopPages = Breakdown(pageViews, item => item.Path),
+            TopPages = Breakdown(pageViews, item => item.Path, breakdownLimit),
             TopSources = Breakdown(pageViews, item =>
                 !string.IsNullOrWhiteSpace(item.Source)
                     ? item.Source
-                    : string.IsNullOrWhiteSpace(item.ReferrerHost) ? "Direct" : item.ReferrerHost),
-            Campaigns = Breakdown(pageViews.Where(item => !string.IsNullOrWhiteSpace(item.Campaign)), item => item.Campaign),
-            Devices = Breakdown(pageViews, item => item.DeviceType),
-            Browsers = Breakdown(pageViews, item => item.BrowserFamily),
+                    : string.IsNullOrWhiteSpace(item.ReferrerHost) ? "Direct" : item.ReferrerHost, breakdownLimit),
+            Campaigns = Breakdown(pageViews.Where(item => !string.IsNullOrWhiteSpace(item.Campaign)), item => item.Campaign, breakdownLimit),
+            Devices = Breakdown(pageViews, item => item.DeviceType, breakdownLimit),
+            Browsers = Breakdown(pageViews, item => item.BrowserFamily, breakdownLimit),
             Countries = Breakdown(
                 pageViews.Where(item =>
                     !string.IsNullOrWhiteSpace(item.CountryCode)
                     || !string.IsNullOrWhiteSpace(item.CountryName)),
-                item => CountryLabel(item)),
+                item => CountryLabel(item), breakdownLimit),
             Regions = Breakdown(
                 pageViews.Where(item =>
                     !string.IsNullOrWhiteSpace(item.RegionCode)
                     || !string.IsNullOrWhiteSpace(item.RegionName)),
-                item => RegionLabel(item)),
+                item => RegionLabel(item), breakdownLimit),
             Goals = goalReport.Goals,
             Funnels = BuildFunnelReport(funnelDefinitions, events)
         };
@@ -575,7 +576,8 @@ public sealed class GrowthAnalyticsService(
 
     private static IReadOnlyList<AnalyticsBreakdownRow> Breakdown(
         IEnumerable<WebAnalyticsEvent> source,
-        Func<WebAnalyticsEvent, string> keySelector)
+        Func<WebAnalyticsEvent, string> keySelector,
+        int take = 12)
     {
         var rows = source.ToList();
         if (rows.Count == 0) return [];
@@ -589,7 +591,7 @@ public sealed class GrowthAnalyticsService(
                 Math.Round(group.Count() * 100m / rows.Count, 1)))
             .OrderByDescending(item => item.Views)
             .ThenBy(item => item.Label)
-            .Take(12)
+            .Take(take)
             .ToList();
     }
 

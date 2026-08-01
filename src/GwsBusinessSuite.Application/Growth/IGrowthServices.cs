@@ -24,6 +24,7 @@ public interface IGrowthAnalyticsService
         DateTimeOffset from,
         DateTimeOffset to,
         Guid? segmentId = null,
+        int breakdownLimit = 12,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<AnalyticsGoalView>> GetGoalsAsync(

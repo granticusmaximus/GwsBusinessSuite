@@ -36,6 +36,10 @@ algorithms.
   request IP exists only long enough for the in-process lookup and is never stored or logged;
   analytics events retain only country/region names and codes. Private, loopback, link-local,
   carrier-grade NAT, and reserved addresses are ignored. Location is approximate.
+- On-demand CSV exports for audience trend, top pages, acquisition sources, campaigns,
+  devices, countries, and regions. Exports honor the selected 7/30/90-day range and saved
+  audience segment while returning up to 1,000 breakdown rows; the dashboard keeps its
+  focused 12-row presentation so adding export depth does not make the workspace noisier.
 - SentinelGPT-assisted, network-specific Facebook, X, and LinkedIn copy with editable
   previews, per-channel character limits, drafts, scheduling, delivery state, and retry.
 - Encrypted social access tokens. Tokens remain on the server and are never returned to the
@@ -51,7 +55,7 @@ rather than represented as one finished checkbox.
 
 ### Analytics phase 2
 
-- CSV export, scheduled email reports, annotations, and comparison periods
+- Scheduled email reports, annotations, and comparison periods
 
 ### Analytics phase 3
 

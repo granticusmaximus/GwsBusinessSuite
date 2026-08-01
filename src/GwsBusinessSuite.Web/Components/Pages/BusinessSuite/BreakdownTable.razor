@@ -1,7 +1,15 @@
 @using GwsBusinessSuite.Application.Growth
 
 <article class="growth-panel breakdown-panel">
-    <div class="panel-heading"><div><span><i class="bi @Icon"></i> @Title</span></div></div>
+    <div class="panel-heading">
+        <div><span><i class="bi @Icon"></i> @Title</span></div>
+        @if (!string.IsNullOrWhiteSpace(ExportUrl))
+        {
+            <a class="quiet-button breakdown-export" href="@ExportUrl" title="Export @Title as CSV" aria-label="Export @Title as CSV" data-enhance-nav="false">
+                <i class="bi bi-download"></i>
+            </a>
+        }
+    </div>
     @if (Rows.Count == 0)
     {
         <p class="breakdown-empty">@EmptyText</p>
@@ -26,4 +34,5 @@
     [Parameter, EditorRequired] public IReadOnlyList<AnalyticsBreakdownRow> Rows { get; set; } = [];
     [Parameter] public string Icon { get; set; } = "bi-bar-chart";
     [Parameter] public string EmptyText { get; set; } = "No data in this period.";
+    [Parameter] public string? ExportUrl { get; set; }
 }

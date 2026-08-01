@@ -28,6 +28,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 using System.IO.Compression;
 using System.Security.Claims;
 using System.Text;
@@ -521,6 +522,75 @@ app.MapGet("/admin/api/security-audit/export.csv", async (
         httpContext.Connection.RemoteIpAddress?.ToString()), cancellationToken);
     return Results.File(Encoding.UTF8.GetBytes(csv.ToString()), "text/csv; charset=utf-8",
         $"gws-security-audit-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.csv");
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("admin-mutation");
+
+app.MapGet("/admin/api/growth/export.csv", async (
+    string section,
+    int days,
+    Guid? segmentId,
+    IGrowthAnalyticsService analyticsService,
+    CancellationToken cancellationToken) =>
+{
+    var normalizedSection = section.Trim();
+    if (normalizedSection is not ("trend" or "topPages" or "topSources" or "campaigns" or "devices" or "countries" or "regions"))
+    {
+        return Results.BadRequest(new { error = "Unknown Growth Studio export section." });
+    }
+
+    var rangeDays = days is 7 or 30 or 90 ? days : 30;
+    var to = DateTimeOffset.UtcNow.AddMinutes(1);
+    var from = DateTimeOffset.UtcNow.AddDays(-rangeDays);
+    var dashboard = await analyticsService.GetDashboardAsync(
+        from,
+        to,
+        segmentId,
+        breakdownLimit: 1000,
+        cancellationToken);
+
+    var csv = new StringBuilder();
+    if (string.Equals(normalizedSection, "trend", StringComparison.Ordinal))
+    {
+        csv.Append("Date,Visitors,PageViews\r\n");
+        foreach (var point in dashboard.Trend)
+        {
+            csv.AppendJoin(',',
+                Csv(point.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
+                Csv(point.Visitors.ToString(CultureInfo.InvariantCulture)),
+                Csv(point.PageViews.ToString(CultureInfo.InvariantCulture)));
+            csv.Append("\r\n");
+        }
+    }
+    else
+    {
+        IReadOnlyList<AnalyticsBreakdownRow> rows = normalizedSection switch
+        {
+            "topPages" => dashboard.TopPages,
+            "topSources" => dashboard.TopSources,
+            "campaigns" => dashboard.Campaigns,
+            "devices" => dashboard.Devices,
+            "countries" => dashboard.Countries,
+            "regions" => dashboard.Regions,
+            _ => []
+        };
+
+        csv.Append("Label,Visitors,Views,Share\r\n");
+        foreach (var row in rows)
+        {
+            csv.AppendJoin(',',
+                Csv(row.Label),
+                Csv(row.Visitors.ToString(CultureInfo.InvariantCulture)),
+                Csv(row.Views.ToString(CultureInfo.InvariantCulture)),
+                Csv(row.Share.ToString(CultureInfo.InvariantCulture)));
+            csv.Append("\r\n");
+        }
+    }
+
+    return Results.File(
+        Encoding.UTF8.GetBytes(csv.ToString()),
+        "text/csv; charset=utf-8",
+        $"gws-growth-{normalizedSection}-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.csv");
 })
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("admin-mutation");

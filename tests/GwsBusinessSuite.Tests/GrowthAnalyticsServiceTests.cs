@@ -120,6 +120,26 @@ public sealed class GrowthAnalyticsServiceTests
     }
 
     [Fact]
+    public async Task GetDashboardAsync_ShouldAllowExportToRaiseBreakdownLimit()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var now = DateTimeOffset.UtcNow;
+        fixture.Db.WebAnalyticsEvents.AddRange(Enumerable.Range(1, 15).Select(index =>
+            Event("pageview", $"visitor-{index}", $"session-{index}", $"/page-{index:D2}", now.AddMinutes(-index))));
+        await fixture.Db.SaveChangesAsync();
+
+        var service = new GrowthAnalyticsService(fixture.Db);
+        var dashboard = await service.GetDashboardAsync(now.AddDays(-1), now.AddMinutes(1));
+        var exportDashboard = await service.GetDashboardAsync(
+            now.AddDays(-1),
+            now.AddMinutes(1),
+            breakdownLimit: 1000);
+
+        dashboard.TopPages.Should().HaveCount(12);
+        exportDashboard.TopPages.Should().HaveCount(15);
+    }
+
+    [Fact]
     public async Task GetDashboardAsync_ShouldAggregateCountryAndRegionWithoutRawAddresses()
     {
         await using var fixture = await Fixture.CreateAsync();

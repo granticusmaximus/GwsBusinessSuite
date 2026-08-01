@@ -32,11 +32,13 @@
             <BreakdownTable Title="Countries"
                             Rows="Dashboard.Countries"
                             Icon="bi-globe2"
-                            EmptyText="Country data will appear with new visits." />
+                            EmptyText="Country data will appear with new visits."
+                            ExportUrl="@ExportUrl("countries")" />
             <BreakdownTable Title="Regions"
                             Rows="Dashboard.Regions"
                             Icon="bi-geo-alt"
-                            EmptyText="Region data will appear when the local database provides it." />
+                            EmptyText="Region data will appear when the local database provides it."
+                            ExportUrl="@ExportUrl("regions")" />
         </div>
     }
 
@@ -48,4 +50,10 @@
 
 @code {
     [Parameter, EditorRequired] public GrowthAnalyticsDashboard Dashboard { get; set; } = new();
+    [Parameter] public int RangeDays { get; set; } = 30;
+    [Parameter] public Guid? SegmentId { get; set; }
+
+    private string ExportUrl(string section) =>
+        $"/admin/api/growth/export.csv?section={section}&days={RangeDays}"
+        + (SegmentId is { } segmentId ? $"&segmentId={segmentId}" : string.Empty);
 }

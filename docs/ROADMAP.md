@@ -77,8 +77,10 @@ also passes.
   scheduling, queue, delivery history, named event/destination conversion goals, and
   ordered funnel/drop-off reporting, saved audience segments, session-scoped report filters,
   new/returning retention cohorts, and privacy-reviewed country/region reporting backed by
-  a locally hosted GeoIP database are delivered. Report exports,
-  social OAuth/media, and engagement imports are staged in
+  a locally hosted GeoIP database are delivered. Range- and segment-aware CSV exports for
+  trend, acquisition, campaign, device, page, country, and region reports are also delivered;
+  scheduled email reports, annotations, comparison periods, social OAuth/media, and
+  engagement imports remain staged in
   `docs/GROWTH_STUDIO.md`.
 - Workflow Automation (n8n-class, clean-room) 🚧 — foundational graph persistence,
   immutable publish versions, protected credential references, execution history, core node

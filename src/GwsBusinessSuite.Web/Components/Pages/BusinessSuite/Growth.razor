@@ -125,7 +125,12 @@
                 <div class="growth-panel trend-panel">
                     <div class="panel-heading">
                         <div><span>Audience trend</span><small>Visitors and page views by day</small></div>
-                        <div class="legend"><i class="views"></i> Views <i class="visitors"></i> Visitors</div>
+                        <div class="trend-heading-actions">
+                            <div class="legend"><i class="views"></i> Views <i class="visitors"></i> Visitors</div>
+                            <a class="breakdown-export" href="@ExportUrl("trend")" title="Export audience trend as CSV" aria-label="Export audience trend as CSV" data-enhance-nav="false">
+                                <i class="bi bi-download"></i>
+                            </a>
+                        </div>
                     </div>
                     <div class="trend-chart" role="img" aria-label="Daily visitors and page views">
                         @foreach (var point in Dashboard.Trend)
@@ -142,13 +147,13 @@
                 </div>
 
                 <div class="insight-grid">
-                    <BreakdownTable Title="Top pages" Rows="Dashboard.TopPages" Icon="bi-file-earmark-text" />
-                    <BreakdownTable Title="Acquisition" Rows="Dashboard.TopSources" Icon="bi-signpost-split" />
-                    <BreakdownTable Title="Campaigns" Rows="Dashboard.Campaigns" Icon="bi-megaphone" EmptyText="UTM-tagged traffic will appear here." />
-                    <BreakdownTable Title="Devices" Rows="Dashboard.Devices" Icon="bi-laptop" />
+                    <BreakdownTable Title="Top pages" Rows="Dashboard.TopPages" Icon="bi-file-earmark-text" ExportUrl="@ExportUrl("topPages")" />
+                    <BreakdownTable Title="Acquisition" Rows="Dashboard.TopSources" Icon="bi-signpost-split" ExportUrl="@ExportUrl("topSources")" />
+                    <BreakdownTable Title="Campaigns" Rows="Dashboard.Campaigns" Icon="bi-megaphone" EmptyText="UTM-tagged traffic will appear here." ExportUrl="@ExportUrl("campaigns")" />
+                    <BreakdownTable Title="Devices" Rows="Dashboard.Devices" Icon="bi-laptop" ExportUrl="@ExportUrl("devices")" />
                 </div>
 
-                <GrowthGeoPanel Dashboard="Dashboard" />
+                <GrowthGeoPanel Dashboard="Dashboard" RangeDays="RangeDays" SegmentId="SelectedSegmentId" />
             }
 
             @if (_showGoalSetup)
@@ -392,6 +397,10 @@
     {
         await Task.WhenAll(LoadAnalyticsAsync(), LoadPublishingAsync());
     }
+
+    private string ExportUrl(string section) =>
+        $"/admin/api/growth/export.csv?section={section}&days={RangeDays}"
+        + (SelectedSegmentId is { } segmentId ? $"&segmentId={segmentId}" : string.Empty);
 
     private async Task LoadAnalyticsAsync()
     {

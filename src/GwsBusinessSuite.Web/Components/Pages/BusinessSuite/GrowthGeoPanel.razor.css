@@ -104,6 +104,30 @@
 .geo-grid ::deep .breakdown-panel .panel-heading {
     padding: .8rem 1rem;
     border-bottom: 1px solid var(--growth-line);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+}
+
+.geo-grid ::deep .breakdown-export {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.9rem;
+    height: 1.9rem;
+    padding: 0;
+    flex: none;
+    border-radius: .55rem;
+    border: 1px solid var(--growth-line);
+    background: var(--growth-panel);
+    color: var(--growth-muted);
+    text-decoration: none;
+}
+
+.geo-grid ::deep .breakdown-export:hover {
+    color: var(--growth-ink);
+    border-color: var(--growth-accent);
 }
 
 .geo-grid ::deep .breakdown-list {
