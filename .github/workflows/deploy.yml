@@ -48,6 +48,19 @@ jobs:
 
             cd "$APP_DIR"
 
+            PREVIOUS_COMMIT=$(git rev-parse HEAD)
+
+            # Newer releases expose a bounded backup/rehearsal command. The source check keeps
+            # the first deployment of that command from accidentally launching a second legacy
+            # web process with an unrecognized argument.
+            if grep -q -- '--backup-create' src/GwsBusinessSuite.Web/Program.cs; then
+              docker compose exec -T gwssuite dotnet GwsBusinessSuite.Web.dll --backup-create
+              docker compose exec -T gwssuite dotnet GwsBusinessSuite.Web.dll --backup-verify
+            else
+              echo "Legacy release detected; relying on its latest scheduled snapshot for this one-time transition."
+              docker compose exec -T gwssuite sh -lc 'ls /app/backups/sentinel-backup-*.zip >/dev/null 2>&1'
+            fi
+
             git fetch origin main
             git checkout main
             git reset --hard origin/main
@@ -77,6 +90,23 @@ jobs:
               if [ "$i" = "24" ]; then
                 echo "Health check failed after deploy (last status: HTTP $status)."
                 docker compose logs --tail=100 gwssuite
+                echo "Rolling application code back to $PREVIOUS_COMMIT without reverting the forward-migrated data volume."
+                git reset --hard "$PREVIOUS_COMMIT"
+                if grep -qE '^TURN_SHARED_SECRET=.{32,}$' .env 2>/dev/null && grep -qE '^TURN_URL_UDP=turn:' .env 2>/dev/null; then
+                  docker compose -f docker-compose.yml -f docker-compose.turn.yml up -d --build --remove-orphans
+                else
+                  docker compose up -d --build --remove-orphans
+                fi
+                rollback_status="000"
+                for rollback_attempt in $(seq 1 24); do
+                  rollback_status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/health/ready || echo "000")
+                  [ "$rollback_status" = "200" ] && break
+                  sleep 5
+                done
+                if [ "$rollback_status" != "200" ]; then
+                  echo "Automatic code rollback also failed. Data was preserved; manual roll-forward is required."
+                  docker compose logs --tail=100 gwssuite
+                fi
                 exit 1
               fi
               sleep 5

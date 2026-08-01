@@ -18,38 +18,72 @@ Sentinel is ready when all of the following are true:
 
 ## Automated backups
 
-Production Compose enables an online SQLite backup at startup and every six hours. Each ZIP
-contains a transactionally consistent `gws-suite.db` plus the ASP.NET Core Data Protection
-keys. Archives are written to the independent `gwssuite-backups` volume and retained for
-30 days. Configure this with:
+Production Compose enables an online SQLite backup at startup and every six hours. Each
+authenticated `.gwsbackup` archive contains a transactionally consistent `gws-suite.db`, the
+matching ASP.NET Core Data Protection key ring, a SHA-256 manifest, and Live Show recordings.
+The archive uses AES-256-CBC encryption followed by HMAC-SHA-256 authentication. Archives are
+written to the independent `gwssuite-backups` volume and retained for 30 days.
+
+GWS accepts an externally managed Base64 32-byte key through `BACKUP_ENCRYPTION_KEY`. When it
+is absent, GWS creates `/app/data/backup-encryption.key` with owner-only permissions. That
+generated key is deliberately excluded from the backup archive and **must be escrowed in a
+separate password manager or secret store**; losing both the data volume and that key makes
+the encrypted backups unrecoverable. Configure this with:
 
 ```text
 Backups__Enabled=true
 Backups__Path=/app/backups
 Backups__DataProtectionKeysPath=/app/data/data-protection-keys
+Backups__EncryptionKeyPath=/app/data/backup-encryption.key
+Backups__EncryptionKey=<Base64 32-byte key from the production secret store>
+Backups__LiveShowRecordingsPath=/app/data/live-show-recordings
 Backups__IntervalHours=6
 Backups__RetentionDays=30
 ```
 
-The application data and backup volumes must also be copied off the droplet by the hosting
+The backup volume must also be copied off the droplet by the hosting
 provider's snapshot/backup facility. An on-host volume protects against bad deploys and
 database corruption; it does not protect against loss of the host.
 
+After the first encrypted rehearsal succeeds and the key has been escrowed, remove legacy
+`sentinel-backup-*.zip` files from the backup volume through a reviewed maintenance change;
+they are not encrypted. Do not remove them before the new archive and escrowed key have both
+been tested.
+
 ## Restore rehearsal
 
-1. Stop writes to the app and copy the chosen archive out of the backup volume.
-2. Extract the archive into a temporary directory.
-3. Run `PRAGMA integrity_check;` against the extracted `gws-suite.db`; the result must be `ok`.
-4. Start the same application version with `ConnectionStrings__DefaultConnection` pointing
-   to the extracted database and `Backups__DataProtectionKeysPath` pointing to the extracted
-   key directory.
-5. Confirm `/health/ready`, sign in, open Sentinel, and validate one encrypted Notion
-   connection without saving it.
-6. Only after the rehearsal succeeds, replace the production database and key directory,
-   then start the production stack.
+Run the automated production-format rehearsal from `/opt/gwssuite`:
+
+```bash
+./scripts/rehearse-restore.sh
+```
+
+The rehearsal creates a fresh online backup, authenticates and decrypts it only inside the
+container's temporary directory, verifies every manifest hash, applies pending migrations to
+the isolated copy, runs `PRAGMA integrity_check`, validates the security-audit hash chain,
+requires MFA on every active administrator, confirms Sentinel pages remain readable, and
+unprotects configured Notion/social/workflow credentials using the restored key ring. It then
+removes the plaintext archive and restored directory. Output contains counts and status only,
+not credentials or private content.
+
+After that automated rehearsal, complete the manual browser portion against an isolated
+container: confirm `/health/ready`, sign in with MFA, open Sentinel, and test one connector
+without saving a mutation. Only then may a backup replace production data.
 
 Never restore the database without its matching Data Protection key ring. Doing so preserves
 content but makes encrypted Notion credentials unreadable.
+
+## Deployment rollback
+
+The deployment workflow records the previously deployed Git commit and creates plus verifies
+an encrypted backup before changing code. If the new release does not become ready, it rebuilds
+the previous commit while leaving the forward-migrated data volume untouched. This avoids
+silently discarding writes made after migration. If the older application cannot tolerate the
+forward-compatible schema, automatic rollback stops and reports that a manual roll-forward is
+required; it never restores an older database automatically.
+
+A database restore is a separate, explicitly approved disaster-recovery action. Do not use it
+as an ordinary application rollback because it can discard valid post-backup writes.
 
 ## Notion connection webhook
 

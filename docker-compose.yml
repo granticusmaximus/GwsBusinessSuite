@@ -27,6 +27,9 @@ services:
       LiveShow__Ice__Turn__Urls__1: ${TURN_URL_TCP:-}
       LiveShow__Ice__Turn__SharedSecret: ${TURN_SHARED_SECRET:-}
       Backups__Enabled: "true"
+      # Optional externally escrowed key. When absent, GWS creates a mode-0600 key in the
+      # data volume; copy that key into a separate password manager before relying on backups.
+      Backups__EncryptionKey: ${BACKUP_ENCRYPTION_KEY:-}
     restart: always
     volumes:
       - gwssuite-data:/app/data

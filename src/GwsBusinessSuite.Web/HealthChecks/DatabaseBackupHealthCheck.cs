@@ -25,6 +25,10 @@ public sealed class DatabaseBackupHealthCheck(
             return Task.FromResult(HealthCheckResult.Unhealthy("No completed backup is available."));
         }
 
+        var readinessProblem = backupService.GetReadinessProblem();
+        if (readinessProblem is not null)
+            return Task.FromResult(HealthCheckResult.Unhealthy(readinessProblem));
+
         var maximumAge = TimeSpan.FromHours(Math.Clamp(_options.IntervalHours, 1, 168) * 2);
         return Task.FromResult(DateTimeOffset.UtcNow - latest <= maximumAge
             ? HealthCheckResult.Healthy($"Latest backup completed at {latest:O}.")

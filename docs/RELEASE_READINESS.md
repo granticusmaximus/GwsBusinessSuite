@@ -66,17 +66,17 @@ manual entries with generated evidence where practical.
 | Check | Priority | Current evidence | Status |
 | --- | --- | --- | --- |
 | Release solution build | P0 | 0 warnings/errors on 2026-07-31 | Pass |
-| Full automated suite | P0 | 819 passed, 0 failed on 2026-08-01 local Release validation | Pass |
+| Full automated suite | P0 | 820 passed, 0 failed on 2026-08-01 local Release validation | Pass |
 | Direct/transitive NuGet vulnerability audit | P0 | No known vulnerable packages on 2026-07-31 | Pass |
 | Docker Compose rendering | P0 | `docker compose config --quiet` on 2026-07-31 | Pass |
 | SentinelGPT response-length UI | P1 | Authenticated desktop and 390px Playwright smoke on 2026-07-31 | Pass |
 | Mandatory portal MFA | P0 | TOTP/recovery/replay tests plus local browser enrollment and returning-login journeys | Local pass; deployed acceptance required |
 | Security audit ledger | P0 | Hash-chain, secret-metadata rejection, encrypted-network, account-event tests and local admin browser journey | Local pass; deployed acceptance required |
 | Privacy and incident operations | P0 | Identity-gated subject export, one-month rights clock, retention preview, incident register, and 72-hour breach clock tests | Local pass; legal policy approval and deployed acceptance required |
-| Empty and upgraded database migration rehearsal | P0 | Must be rerun by release harness | Not run |
+| Empty and upgraded database migration rehearsal | P0 | Startup/migration compatibility tests apply the complete chain and latest migration to isolated SQLite databases | Local pass; deployed database-copy rehearsal required |
 | Production liveness/readiness | P0 | `https://admin.gwsapp.net/health/live` and `/health/ready` returned 200 on 2026-07-31 | Pass |
-| Backup plus Data Protection key restore | P0 | Requires current restore rehearsal | Not run |
-| Deployment rollback | P0 | Requires production-topology rehearsal | Not run |
+| Backup plus Data Protection key restore | P0 | Encrypted authenticated archive, manifest, database/key/recording restore, migration, integrity, MFA, Sentinel, audit-chain, restored-secret, and tamper tests | Local pass; production rehearsal and key escrow required |
+| Deployment rollback | P0 | CI workflow now takes/verifies a pre-deploy backup and rolls code back without reverting the data volume | Implemented; production-topology rehearsal required |
 | Real Notion sync and guarded write-back | P1 | Requires controlled workspace acceptance run | Not run |
 | Real social publish success/failure | P1 | Requires controlled platform destinations | Not run |
 | Live TURN relay from restricted network | P1 | Requires deployed network acceptance run | Not run |

@@ -274,6 +274,31 @@ builder.Services.AddRateLimiter(options =>
 });
 var app = builder.Build();
 
+// Materialize the persisted key ring before the startup backup runs. Without this, a brand-new
+// environment could produce a database snapshot before any cookie/secret operation had forced
+// Data Protection to create its first key.
+_ = app.Services.GetRequiredService<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>()
+    .CreateProtector("GwsBusinessSuite.BackupKeyRingProbe.v1").Protect("key-ring-ready");
+
+if (args is ["--backup-create"])
+{
+    using var backupScope = app.Services.CreateScope();
+    var backupPath = await backupScope.ServiceProvider.GetRequiredService<DatabaseBackupService>().CreateBackupAsync();
+    Console.WriteLine(JsonSerializer.Serialize(new { status = "created", archivePath = backupPath }));
+    return;
+}
+
+if (args is ["--backup-verify"] or ["--backup-verify", _])
+{
+    using var backupScope = app.Services.CreateScope();
+    var backups = backupScope.ServiceProvider.GetRequiredService<DatabaseBackupService>();
+    var verification = args.Length == 2
+        ? await backups.VerifyBackupAsync(args[1])
+        : await backups.VerifyLatestBackupAsync();
+    Console.WriteLine(JsonSerializer.Serialize(verification));
+    return;
+}
+
 var normalizedPathBase = NormalizePathBase(configuredPathBase);
 
 // grantwatson.dev is served by this same app/process (see the RequireHost-gated public

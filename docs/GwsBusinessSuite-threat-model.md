@@ -1,7 +1,7 @@
 # GwsBusinessSuite threat model
 
 **Status:** Active release-security baseline  
-**Reviewed:** 2026-07-31  
+**Reviewed:** 2026-08-01
 **Scope owner:** Grant Watson  
 **Target:** Private GWS deployment for Grant and explicitly invited portal accounts
 
@@ -9,7 +9,7 @@
 
 GwsBusinessSuite is an internet-reachable, single-tenant business operations suite that stores private workspace content, credentials for external integrations, analytics, generated content, and operational deployment data. The intended users are Grant and explicitly invited portal users; it is not a public multi-tenant SaaS product. Employer-confidential information is permitted, so mandatory multi-factor authentication (MFA) is a release requirement.
 
-The repository already contains meaningful protections: hashed passwords and account lockout, role policies with an admin fallback, antiforgery validation, per-IP rate limits, Data Protection-backed secret encryption, bounded uploads/responses, outbound workflow SSRF checks, database backups, and automated build/test/readiness gates. The highest-risk confirmed gap is **TM-001: password-only portal authentication**. A correct password currently creates the full portal cookie without a second factor (`src/GwsBusinessSuite.Web/Program.cs`, `/auth/login`; `src/GwsBusinessSuite.Domain/Entities/CoreEntities.cs`, `AppUser`).
+The repository already contains meaningful protections: mandatory TOTP MFA with recovery codes and replay prevention, hashed passwords and account lockout, role policies with an admin fallback, antiforgery validation, per-IP rate limits, Data Protection-backed secret encryption, bounded uploads/responses, outbound workflow SSRF checks, encrypted restore-tested backups, and automated build/test/readiness gates. The highest remaining risks are privileged host access, confidential-data egress to AI/web providers, incomplete lifecycle/legal operations, and production recovery/key-escrow acceptance.
 
 The security objective is a private-business baseline aligned to the safeguard rigor of the HIPAA Security Rule and the privacy/security duties of GDPR. This document is an engineering threat model, not a statement of HIPAA certification, GDPR compliance, or legal advice. If GWS stores regulated ePHI as a covered entity or business associate, contractual, organizational, risk-analysis, incident-response, and business-associate obligations also apply beyond code.
 
@@ -147,7 +147,7 @@ Not assumed:
 
 | ID | Threat | Preconditions | Impact | Existing controls | Required mitigation | Priority |
 |---|---|---|---|---|---|---|
-| TM-001 | Password-only portal authentication | Password stolen/guessed | Full confidential-data access | Hashing, account lockout, IP limit | Mandatory TOTP enrollment/challenge for all accounts; recovery codes; later WebAuthn/passkeys; MFA tests | **P0 Critical** |
+| TM-001 | Portal authentication bypass or MFA recovery weakness | Password stolen/guessed or recovery material exposed | Full confidential-data access | Mandatory TOTP enrollment/challenge, one-time hashed recovery codes, replay prevention, hashing, account lockout, IP limit, MFA tests | Complete deployed MFA acceptance; add WebAuthn/passkeys and session revocation after credential changes as defense in depth | **P0 Critical (mitigated locally)** |
 | TM-002 | Session theft or insecure direct HTTP access | Cookie observed/stolen | Account takeover | HttpOnly cookie defaults, SameSite Lax, HSTS through HTTPS | Production Secure=Always, HTTPS enforcement at edge/firewall, absolute timeout, revoke sessions after password/MFA changes | **P0 High** |
 | TM-003 | Excessive admin-to-host privilege | Admin/session or web container compromised | Total host/data compromise | Admin authorization, encrypted secrets, action logs, socket mounted read-only | Remove Docker socket from web app; broker allow-listed read operations; constrain SSH/deploy account; step-up auth | **P0 High** |
 | TM-004 | Confidential data sent to external AI research | Web mode used with sensitive prompt | Employer/personal/ePHI disclosure | Explicit web mode, server-held API key, bounded results | Egress warning/consent, redaction/DLP, domain/purpose policy, audit without prompt body, provider data agreement review | **P0 High** |
@@ -157,12 +157,12 @@ Not assumed:
 | TM-008 | Upload/archive/storage abuse | Authenticated uploader or public recording path abused | DoS, storage loss, parser compromise | Per-file bounds and endpoint limits | Aggregate ZIP limits, file-count/ratio limits, signature validation, quotas, malware scanning where warranted | **P1 Medium** |
 | TM-009 | Public ingestion poisoning/privacy overcollection | Anonymous requests | Bad analytics, spam, personal-data liability | Per-IP write limits and validation | Consent/minimization, retention/anonymization, CSP-safe anti-bot option, provenance flags, deletion/export | **P1 Medium** |
 | TM-010 | Third-party JS and dependency compromise | CDN/vendor/package compromised | Tracking, browser/session compromise, malicious deploy | Dependency audit; limited CORS | Strict CSP/nonces, self-host critical assets, SRI where possible, inventory/consent for CJ tracking, pin Actions/images | **P1 High** |
-| TM-011 | Backup/key co-location | Host/volume access | Offline database and secret recovery | Persistent backups and Data Protection | Separate encryption key/control plane, encrypted off-host copy, restore tests, retention and access logs | **P1 High** |
+| TM-011 | Backup/key co-location | Host/volume access | Offline database and secret recovery | Transactional encrypted/authenticated backups, separate backup volume, external-or-excluded encryption key, matching Data Protection keys, recording capture, signed manifest, tamper and isolated-restore tests, retention and readiness checks | Escrow the production encryption key off-host, configure encrypted off-host archive copies, and complete a production restore/access rehearsal | **P1 High (partially mitigated)** |
 | TM-012 | Single-host outage/resource exhaustion | Disk/OOM/model load/host loss | Portal and recovery outage | Health checks, restart policies, model concurrency bounds, backups | Capacity alerts, off-host backups, documented restore/RTO/RPO, rollback and disk-pressure tests | **P1 Medium** |
 
 ## Criticality calibration
 
-- **P0 Critical:** credible path to confidential-data access that violates an explicit launch condition. TM-001 blocks confidential production use until MFA is enforced.
+- **P0 Critical:** credible path to confidential-data access that violates an explicit launch condition. TM-001 remains open only until mandatory MFA completes deployed acceptance.
 - **P0 High:** credible full-account/host compromise, regulated-data disclosure, or absence of essential accountability. Must be resolved or explicitly risk-accepted before the 1.0 release.
 - **P1 High/Medium:** material defense-in-depth, privacy, supply-chain, or availability work required immediately after the P0 gate and before expanding users/data sources.
 - **P2:** low-impact hardening and usability improvements tracked in `docs/RELEASE_READINESS.md` after the main trust boundaries are controlled.
