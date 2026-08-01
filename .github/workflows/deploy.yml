@@ -35,6 +35,13 @@ jobs:
         with:
           host: ${{ secrets.DO_HOST }}
           username: root
+          # appleboy/ssh-action's command_timeout defaults to 10m, which the remote script now
+          # exceeds on a cold/no-cache Docker build alone (dotnet publish ~8m, plus apt-get and
+          # Playwright browser downloads on top) - well before the health-check poll loop or a
+          # rollback attempt even start. Generous ceiling, not a tight budget: covers a slow
+          # from-scratch build plus a full rollback-and-reverify pass if the new release fails
+          # its health check.
+          command_timeout: 40m
           key: ${{ secrets.DO_SSH_KEY }}
           script: |
             set -e
