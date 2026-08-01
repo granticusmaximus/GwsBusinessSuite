@@ -91,15 +91,17 @@ public sealed class NotionSyncBackgroundServiceTests
 
         public async Task<NotionSyncResult> SyncAsync(CancellationToken cancellationToken = default)
         {
-            return await SyncAsync(false, cancellationToken);
+            return await SyncAsync(false, null, cancellationToken);
         }
 
         public async Task<NotionSyncResult> SyncAsync(
             bool forceRefresh,
+            Action<NotionSyncProgress>? onProgress = null,
             CancellationToken cancellationToken = default)
         {
             Syncs++;
             ForceRefreshRequests.Add(forceRefresh);
+            onProgress?.Invoke(new NotionSyncProgress(1, 2));
             Started.TrySetResult();
             await Release.Task.WaitAsync(cancellationToken);
             return new NotionSyncResult(true, "complete", 2, 3, 0);

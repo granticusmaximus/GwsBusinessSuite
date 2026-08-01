@@ -133,12 +133,18 @@ public static class NotionSyncJobStates
     public const string Completed = "completed";
 }
 
+// Total is the count of pages/databases that actually need a content/schema fetch this run
+// (known once the cheap discovery+reconcile pass finishes, before the expensive per-item
+// loop starts) - not the full discovered workspace, most of which is skipped as unchanged.
+public sealed record NotionSyncProgress(int Processed, int Total, string? CurrentItemTitle = null);
+
 public sealed record NotionSyncJobStatus(
     string State,
     string Source,
     DateTimeOffset? StartedAt,
     DateTimeOffset? CompletedAt,
-    NotionSyncResult? Result)
+    NotionSyncResult? Result,
+    NotionSyncProgress? Progress = null)
 {
     public bool IsActive => State is NotionSyncJobStates.Queued or NotionSyncJobStates.Running;
 
@@ -191,7 +197,7 @@ public interface INotionSyncService
     Task<NotionPickerResult> BrowseAsync(string integrationToken, CancellationToken cancellationToken = default);
     Task<NotionValidationResult> SaveSettingsAsync(NotionConnectorSettingsView settings, CancellationToken cancellationToken = default);
     Task<NotionSyncResult> SyncAsync(CancellationToken cancellationToken = default);
-    Task<NotionSyncResult> SyncAsync(bool forceRefresh, CancellationToken cancellationToken = default);
+    Task<NotionSyncResult> SyncAsync(bool forceRefresh, Action<NotionSyncProgress>? onProgress = null, CancellationToken cancellationToken = default);
     Task<NotionSyncResult> PushPageAsync(Guid wikiPageId, CancellationToken cancellationToken = default);
     Task<NotionSyncResult> PushDatabaseRowAsync(Guid wikiDatabaseRowId, CancellationToken cancellationToken = default);
     Task<NotionSyncResult> PushDatabaseSchemaAsync(Guid wikiDatabaseId, CancellationToken cancellationToken = default);

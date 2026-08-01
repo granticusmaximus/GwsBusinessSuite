@@ -1632,6 +1632,21 @@ audio.wiki-embed-media { max-width: 100%; }
 .wiki-tree-row.wiki-tree-archived {
     opacity: 0.55;
 }
+.wiki-tree-row.wiki-tree-drag-over {
+    background: #eef2ff;
+    outline: 2px dashed #6366f1;
+    outline-offset: -2px;
+}
+.wiki-tree-row-menu {
+    position: relative;
+}
+.wiki-tree-row-dropdown {
+    position: absolute;
+    right: 0;
+    top: 100%;
+    z-index: 20;
+    min-width: 9rem;
+}
 .wiki-tree-toggle,
 .wiki-tree-spacer {
     width: 1rem;
@@ -2337,6 +2352,22 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .wiki-tree-row.active {
     background: rgba(245, 158, 11, .12);
     box-shadow: inset 2px 0 0 #f59e0b;
+}
+.sentinel-workspace .wiki-tree-row.wiki-tree-drag-over {
+    background: rgba(245, 158, 11, .1);
+    outline: 2px dashed #f59e0b;
+    outline-offset: -2px;
+}
+.sentinel-workspace .wiki-tree-row-dropdown {
+    background: var(--sentinel-sidebar);
+    border: 1px solid var(--sentinel-border);
+    color: #e7e5e4;
+}
+.sentinel-workspace .wiki-tree-row-dropdown .dropdown-item {
+    color: inherit;
+}
+.sentinel-workspace .wiki-tree-row-dropdown .dropdown-item:hover {
+    background: var(--sentinel-hover);
 }
 
 .sentinel-workspace .wiki-tree-label { color: inherit; font-size: .76rem; }

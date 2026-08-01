@@ -133,7 +133,8 @@ public sealed class NotionSyncBackgroundService(
             // claim nothing changed. Scheduled and webhook runs remain incremental.
             var result = await notionSync.SyncAsync(
                 forceRefresh: source == "manual",
-                cancellationToken);
+                onProgress: source is "manual" or "webhook" ? ReportProgress : null,
+                cancellationToken: cancellationToken);
             if (source is "manual" or "webhook")
             {
                 CompleteStatus(source, result);
@@ -187,6 +188,14 @@ public sealed class NotionSyncBackgroundService(
         lock (_statusLock)
         {
             _status = status;
+        }
+    }
+
+    private void ReportProgress(NotionSyncProgress progress)
+    {
+        lock (_statusLock)
+        {
+            _status = _status with { Progress = progress };
         }
     }
 }

@@ -216,10 +216,11 @@ public sealed class NotionSyncService(
     }
 
     public Task<NotionSyncResult> SyncAsync(CancellationToken cancellationToken = default) =>
-        SyncAsync(forceRefresh: false, cancellationToken);
+        SyncAsync(forceRefresh: false, cancellationToken: cancellationToken);
 
     public async Task<NotionSyncResult> SyncAsync(
         bool forceRefresh,
+        Action<NotionSyncProgress>? onProgress = null,
         CancellationToken cancellationToken = default)
     {
         var settingsRow = await dbContext.NotionConnectorSettings.FirstOrDefaultAsync(cancellationToken);
@@ -459,6 +460,14 @@ public sealed class NotionSyncService(
             }
             await dbContext.SaveChangesAsync(cancellationToken);
 
+            // Progress covers only the items about to actually do network/content work below
+            // (most of a large, mostly-unchanged workspace is skipped in these two loops), so
+            // "N of Total" tracks real remaining work rather than the full discovered count.
+            var totalToProcess = notionPageIdsNeedingContent.Count
+                + notionIdToLocalId.Keys.Count(id => notionIdToKind[id] is "database" or "data_source");
+            var processedCount = 0;
+            onProgress?.Invoke(new NotionSyncProgress(processedCount, totalToProcess));
+
             // 4. Per-page block sync. The first-level child_page/child_database blocks are
             // also the authoritative sibling order for the Notion page tree.
             var childOrderByParentLocalId = new Dictionary<Guid, IReadOnlyList<NotionTreeChild>>();
@@ -485,6 +494,7 @@ public sealed class NotionSyncService(
                     if (pageContent.UsedMarkdownFallback) markdownFallbackPages++;
                     if (pageContent.BlockCount == 0) emptyContentPages++;
                     await SyncPageCommentsAsync(notionId, localId, token, cancellationToken);
+                    onProgress?.Invoke(new NotionSyncProgress(++processedCount, totalToProcess));
                 }
             }
 
@@ -528,6 +538,7 @@ public sealed class NotionSyncService(
                     markdownFallbackPages += databaseContent.MarkdownFallbackPages;
                     emptyContentPages += databaseContent.EmptyContentPages;
                     skippedUnchangedDatabaseRows += databaseContent.SkippedRows;
+                    onProgress?.Invoke(new NotionSyncProgress(++processedCount, totalToProcess));
                 }
             }
 

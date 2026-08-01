@@ -147,6 +147,39 @@ public sealed class NotionSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_ShouldReportIncrementalProgressOnlyForItemsThatActuallySync()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        var editedAt = DateTimeOffset.UtcNow.AddMinutes(-10);
+        fixture.Notion.SearchResults =
+        [
+            Page("page-1", "First", lastEditedAt: editedAt),
+            Page("page-2", "Second", lastEditedAt: editedAt)
+        ];
+        fixture.Notion.BlockChildren["page-1"] = [Json("""{"object":"block","id":"b1","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"One"}]}}""")];
+        fixture.Notion.BlockChildren["page-2"] = [Json("""{"object":"block","id":"b2","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Two"}]}}""")];
+        var reports = new List<NotionSyncProgress>();
+
+        (await fixture.Service.SyncAsync(forceRefresh: false, onProgress: reports.Add)).IsSuccess.Should().BeTrue();
+
+        reports.Should().NotBeEmpty();
+        reports[0].Should().Be(new NotionSyncProgress(0, 2));
+        reports[^1].Should().Be(new NotionSyncProgress(2, 2));
+        reports.Select(report => report.Processed).Should().BeInAscendingOrder();
+
+        reports.Clear();
+        fixture.Notion.SearchResults =
+        [
+            Page("page-1", "First", lastEditedAt: editedAt),
+            Page("page-2", "Second", lastEditedAt: editedAt)
+        ];
+        var unchanged = await fixture.Service.SyncAsync(forceRefresh: false, onProgress: reports.Add);
+
+        unchanged.IsSuccess.Should().BeTrue();
+        reports.Should().ContainSingle(report => report.Total == 0);
+    }
+
+    [Fact]
     public async Task SyncAsync_ShouldSkipBlockAndCommentRequestsForUnchangedPages()
     {
         await using var fixture = await SyncFixture.CreateAsync();

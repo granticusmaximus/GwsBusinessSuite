@@ -263,8 +263,15 @@
                         {
                             var nodeDepth = GetNodeDepth(node);
                             var hasChildren = HasChildren(node.Id);
-                            <div class="wiki-tree-row @(nodeDepth == 0 ? "is-top-level" : string.Empty) @(hasChildren ? "has-children" : string.Empty) @((node.IsDatabase ? SelectedDatabaseId == node.Id : SelectedPageId == node.Id) ? "active" : "") @(node.IsArchived ? "wiki-tree-archived" : "")"
-                                 style="padding-left:@(0.4 + nodeDepth * 1.15)rem;">
+                            <div class="wiki-tree-row @(nodeDepth == 0 ? "is-top-level" : string.Empty) @(hasChildren ? "has-children" : string.Empty) @((node.IsDatabase ? SelectedDatabaseId == node.Id : SelectedPageId == node.Id) ? "active" : "") @(node.IsArchived ? "wiki-tree-archived" : "") @(_dragOverNodeId == node.Id ? "wiki-tree-drag-over" : "")"
+                                 style="padding-left:@(0.4 + nodeDepth * 1.15)rem;"
+                                 draggable="true"
+                                 @ondragstart="() => StartDragNode(node)"
+                                 @ondragend="EndDragNode"
+                                 @ondragenter="() => _dragOverNodeId = node.Id"
+                                 @ondragleave="() => _dragOverNodeId = null"
+                                 @ondragover:preventDefault
+                                 @ondrop="() => DropOnNodeAsync(node)">
                                 @if (hasChildren && string.IsNullOrWhiteSpace(SearchQuery))
                                 {
                                     <button type="button" class="wiki-tree-toggle" @onclick="() => ToggleExpanded(node.Id)"
@@ -297,6 +304,22 @@
                                     <button type="button" class="btn btn-xs btn-link p-0" title="Move down" @onclick="() => MoveNodeAsync(node, 1)" disabled="@IsBusy">
                                         <i class="bi bi-chevron-down"></i>
                                     </button>
+                                    <div class="wiki-tree-row-menu">
+                                        <button type="button" class="btn btn-xs btn-link p-0" title="More actions" @onclick="() => ToggleRowMenu(node.Id)" @onclick:stopPropagation="true" disabled="@IsBusy">
+                                            <i class="bi bi-three-dots-vertical"></i>
+                                        </button>
+                                        @if (_openRowMenuNodeId == node.Id)
+                                        {
+                                            <div class="dropdown-menu show wiki-tree-row-dropdown">
+                                                <button type="button" class="dropdown-item" @onclick="() => DuplicateNodeAsync(node)">
+                                                    <i class="bi bi-copy me-2"></i>Duplicate
+                                                </button>
+                                                <button type="button" class="dropdown-item text-danger" @onclick="() => DeleteNodeAsync(node)">
+                                                    <i class="bi bi-trash me-2"></i>Delete
+                                                </button>
+                                            </div>
+                                        }
+                                    </div>
                                 </div>
                             </div>
                         }
@@ -1126,7 +1149,16 @@
 
                     @if (!string.IsNullOrWhiteSpace(NotionMessage))
                     {
-                        <div class="alert @(NotionMessageIsError ? "alert-danger" : "alert-info") mt-3 mb-0">@NotionMessage</div>
+                        <div class="alert @(NotionMessageIsError ? "alert-danger" : "alert-info") mt-3 mb-0">
+                            @NotionMessage
+                            @if (_notionSyncProgress is { Total: > 0 } progress)
+                            {
+                                <div class="progress mt-2" style="height: 0.5rem;" role="progressbar" aria-valuenow="@progress.Processed" aria-valuemin="0" aria-valuemax="@progress.Total">
+                                    <div class="progress-bar" style="width:@((progress.Processed * 100 / progress.Total))%"></div>
+                                </div>
+                                <div class="small text-secondary mt-1">@progress.Processed of @progress.Total items synced</div>
+                            }
+                        </div>
                     }
                 </div>
                 <div class="modal-footer">
@@ -1201,6 +1233,10 @@
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
     private readonly HashSet<Guid> _expandedPageIds = new();
+    private Guid? _draggedNodeId;
+    private bool _draggedNodeIsDatabase;
+    private Guid? _dragOverNodeId;
+    private Guid? _openRowMenuNodeId;
 
     private bool ShowNotionModal { get; set; }
     private bool ShowNotionToken { get; set; }
@@ -1233,6 +1269,7 @@
     private HashSet<string> ExpandedNotionPickerIds { get; } = new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource _disposeCts = new();
     private bool _isObservingNotionSync;
+    private NotionSyncProgress? _notionSyncProgress;
     private string NotionWebhookUrl =>
         Navigator.ToAbsoluteUri("api/integrations/notion/webhook").ToString();
     private List<NotionSyncConflictView> _notionConflicts = [];
@@ -1339,6 +1376,7 @@
                 NotionMessage = syncStatus.State == NotionSyncJobStates.Queued
                     ? "Notion sync is queued on the server."
                     : "Notion sync is running on the server. You can close this dialog or reconnect without stopping it.";
+                _notionSyncProgress = syncStatus.Progress;
                 _ = ObserveNotionSyncAsync();
             }
             else if (syncStatus.Source == "manual" && syncStatus.Result is { } completedResult)
@@ -1616,6 +1654,7 @@
                 return;
             }
 
+            _notionSyncProgress = null;
             NotionMessage = "Full Notion resync is queued on the server. It will refresh page blocks, database rows, and views even when Notion timestamps are unchanged, and will continue if this browser disconnects.";
             NotionMessageIsError = false;
             await ObserveNotionSyncAsync();
@@ -1664,6 +1703,8 @@
                 NotionMessage = status.State == NotionSyncJobStates.Queued
                     ? "Notion sync is queued on the server."
                     : "Notion sync is running on the server. You can close this dialog or reconnect without stopping it.";
+                _notionSyncProgress = status.Progress;
+                await InvokeAsync(StateHasChanged);
                 await Task.Delay(TimeSpan.FromSeconds(1), _disposeCts.Token);
             }
         }
@@ -2661,6 +2702,115 @@
                 await WikiService.ReorderPageAsync(node.Id, node.ParentId, targetIndex, user);
             }
             await LoadTreeAsync(selectFirstPage: false);
+        });
+    }
+
+    // Mirrors WikiDatabaseEditor.razor's Board view drag pattern (StartDragRow/EndDragRow +
+    // @ondragover:preventDefault/@ondrop) rather than new JS interop - the global
+    // wwwroot/js/dragReorder.js listener (loaded once in App.razor) already satisfies
+    // Chromium's "is this a real drag" dataTransfer.setData requirement for every
+    // draggable="true" element, so no per-row JS is needed here either.
+    private void StartDragNode(WikiTreeNode node)
+    {
+        _draggedNodeId = node.Id;
+        _draggedNodeIsDatabase = node.IsDatabase;
+    }
+
+    private void EndDragNode()
+    {
+        _draggedNodeId = null;
+        _dragOverNodeId = null;
+    }
+
+    private async Task DropOnNodeAsync(WikiTreeNode targetNode)
+    {
+        var draggedId = _draggedNodeId;
+        var draggedIsDatabase = _draggedNodeIsDatabase;
+        _dragOverNodeId = null;
+        _draggedNodeId = null;
+        if (draggedId is not { } nodeId || nodeId == targetNode.Id)
+        {
+            return;
+        }
+
+        await Work(async () =>
+        {
+            var user = await CurrentUserNameAsync();
+            var newSortOrder = AllTreeNodes().Count(n => n.ParentId == targetNode.Id);
+            if (draggedIsDatabase)
+            {
+                await WikiDatabaseService.ReorderDatabaseAsync(nodeId, targetNode.Id, newSortOrder, user);
+            }
+            else
+            {
+                await WikiService.ReorderPageAsync(nodeId, targetNode.Id, newSortOrder, user);
+            }
+            _expandedPageIds.Add(targetNode.Id);
+            await LoadTreeAsync(selectFirstPage: false);
+        });
+    }
+
+    private void ToggleRowMenu(Guid nodeId) =>
+        _openRowMenuNodeId = _openRowMenuNodeId == nodeId ? null : nodeId;
+
+    private async Task DuplicateNodeAsync(WikiTreeNode node)
+    {
+        _openRowMenuNodeId = null;
+        await Work(async () =>
+        {
+            var user = await CurrentUserNameAsync();
+            if (node.IsDatabase)
+            {
+                var duplicate = await WikiDatabaseService.DuplicateDatabaseAsync(node.Id, user);
+                await LoadTreeAsync(selectFirstPage: false);
+                await OpenDatabaseAsync(duplicate.Id);
+                StatusMessage = $"Duplicated '{duplicate.Title}'.";
+            }
+            else
+            {
+                var duplicate = await WikiService.DuplicatePageAsync(node.Id, user);
+                await LoadTreeAsync(selectFirstPage: false);
+                await OpenPageAsync(duplicate.Id);
+                StatusMessage = $"Duplicated '{duplicate.Title}'.";
+            }
+        });
+    }
+
+    private async Task DeleteNodeAsync(WikiTreeNode node)
+    {
+        _openRowMenuNodeId = null;
+        var confirmed = await JS.InvokeAsync<bool>(
+            "confirm",
+            node.IsDatabase
+                ? "Delete this database and all its rows? This cannot be undone."
+                : "Delete this page? This cannot be undone.");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        await Work(async () =>
+        {
+            var user = await CurrentUserNameAsync();
+            if (node.IsDatabase)
+            {
+                await WikiDatabaseService.DeleteDatabaseAsync(node.Id, user);
+                if (SelectedDatabaseId == node.Id)
+                {
+                    SelectedDatabaseId = null;
+                }
+            }
+            else
+            {
+                await WikiService.DeletePageAsync(node.Id, user);
+                if (SelectedPageId == node.Id)
+                {
+                    CreateNewPage();
+                }
+            }
+            StatusMessage = $"Deleted '{node.Title}'.";
+            await LoadTreeAsync(selectFirstPage: false);
+            await LoadWorkspaceNavigationAsync();
         });
     }
 

@@ -146,6 +146,15 @@
 	}
 
 	function openCommand() {
+		// Inside Sentinel, Ctrl/Cmd+K should search Sentinel's own pages/blocks/database
+		// rows (the same ranked search Ctrl/Cmd+Shift+F already opens - see
+		// sentinel-workspace.js's shortcutHandler) rather than this generic palette, which
+		// only ever indexes the static app-wide nav sidebar (commandEntries() below) and so
+		// has nothing to do with the workspace content a Sentinel user is actually in.
+		if (document.querySelector('.sentinel-workspace')) {
+			document.querySelector('.sentinel-global-search')?.click();
+			return;
+		}
 		var elements = commandElements();
 		if (!elements.layer || !elements.input) return;
 		elements.layer.hidden = false;

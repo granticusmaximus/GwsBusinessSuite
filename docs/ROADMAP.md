@@ -183,7 +183,14 @@ also passes.
   render it as a collapsible checkbox tree, and persist checked roots through the existing
   subtree-aware selected-id scope. The connection foundation now also supports Notion OAuth:
   short-lived admin-bound state, encrypted access/refresh tokens, token rotation,
-  revoke-before-disconnect, workspace identity, and manual internal/PAT fallback. The staged
+  revoke-before-disconnect, workspace identity, and manual internal/PAT fallback. Track A5
+  (incremental sync progress) is now also delivered - a manual/webhook sync reports live
+  "N of Total items synced" via a new `NotionSyncProgress` callback threaded through
+  `NotionSyncService.SyncAsync` - completing Track A. Track B (visual/interaction parity) turned
+  out to be mostly already shipped when re-verified against the real code on 2026-08-01; only
+  sidebar drag/reparent + per-row Duplicate/Delete and a Ctrl/Cmd+K that actually searches
+  Sentinel content (rather than only the app-wide static nav) were real gaps, both now closed.
+  See `.claude/plans/generic-napping-axolotl.md` for the item-by-item detail. The staged
   ground-up workspace rebuild and bounded v1 scorecard are specified in
   `docs/SENTINEL_REBUILD.md`. Broader parity gaps remain in `docs/WIKI_NOTION_CLONE.md`;
   current whole-suite acceptance is tracked only in `docs/RELEASE_READINESS.md`.
