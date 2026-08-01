@@ -17,6 +17,21 @@
     {
         <div class="sentinel-public-share-error"><h1>Link unavailable</h1><p>This share link is invalid, expired, or revoked.</p></div>
     }
+    else if (_share.RequiresPassword && !_unlocked)
+    {
+        <div class="sentinel-public-share-error">
+            <h1>Password required</h1>
+            <p>This link is protected. Enter the password to view it.</p>
+            <div class="input-group" style="max-width: 20rem; margin: 0 auto;">
+                <input type="password" class="form-control" @bind="_password" @bind:event="oninput" @onkeydown="OnPasswordKeyDownAsync" placeholder="Password" autofocus />
+                <button type="button" class="btn btn-primary" @onclick="SubmitPasswordAsync" disabled="@_verifying">Unlock</button>
+            </div>
+            @if (_passwordError)
+            {
+                <p class="text-danger mt-2">Incorrect password.</p>
+            }
+        </div>
+    }
     else if (_page is not null)
     {
         @if (!string.IsNullOrWhiteSpace(_page.CoverImageUrl))
@@ -59,16 +74,50 @@
     private WikiDatabase? _database;
     private bool _loading = true;
     private string? _title;
+    private bool _unlocked;
+    private string _password = string.Empty;
+    private bool _passwordError;
+    private bool _verifying;
 
     protected override async Task OnParametersSetAsync()
     {
         _share = await AccessService.ResolvePublicShareAsync(Token);
-        if (_share is not null)
+        if (_share is not null && !_share.RequiresPassword)
         {
-            if (_share.IsDatabase) _database = await WikiDatabaseService.GetDatabaseAsync(_share.TargetId);
-            else _page = await WikiService.GetPageAsync(_share.TargetId);
-            _title = _database?.Title ?? _page?.Title;
+            await LoadTargetAsync();
         }
         _loading = false;
+    }
+
+    private async Task LoadTargetAsync()
+    {
+        if (_share is null) return;
+        if (_share.IsDatabase) _database = await WikiDatabaseService.GetDatabaseAsync(_share.TargetId);
+        else _page = await WikiService.GetPageAsync(_share.TargetId);
+        _title = _database?.Title ?? _page?.Title;
+    }
+
+    private async Task SubmitPasswordAsync()
+    {
+        if (_share is null || string.IsNullOrEmpty(_password)) return;
+        _verifying = true;
+        _passwordError = false;
+        var correct = await AccessService.VerifySharePasswordAsync(_share.Id, _password);
+        _verifying = false;
+        if (correct)
+        {
+            _unlocked = true;
+            _password = string.Empty;
+            await LoadTargetAsync();
+        }
+        else
+        {
+            _passwordError = true;
+        }
+    }
+
+    private async Task OnPasswordKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SubmitPasswordAsync();
     }
 }

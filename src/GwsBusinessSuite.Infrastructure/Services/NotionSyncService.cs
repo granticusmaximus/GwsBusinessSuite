@@ -2494,6 +2494,161 @@ public sealed class NotionSyncService(
         };
     }
 
+    // Pushes locally-created database properties (WikiDatabaseProperty rows with no NotionId
+    // yet) to Notion as brand-new data-source properties. Deliberately does not rename or
+    // retype a property that already exists in Notion - only ever adds - to avoid a local
+    // edit unilaterally clobbering the shape of the user's real Notion workspace, matching
+    // PushPageAsync/PushDatabaseRowAsync's own "never risk corrupting remote data" posture.
+    public async Task<NotionSyncResult> PushDatabaseSchemaAsync(Guid wikiDatabaseId, CancellationToken cancellationToken = default)
+    {
+        var settings = await dbContext.NotionConnectorSettings.FirstOrDefaultAsync(cancellationToken);
+        if (settings is null || settings.SyncDirection != "twoWay" || !settings.AllowTwoWayWrites)
+        {
+            return new(false, "Two-way sync and the write acknowledgement must both be enabled.", 0, 0, 0);
+        }
+
+        var database = await dbContext.WikiDatabases.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == wikiDatabaseId, cancellationToken);
+        if (database?.NotionId is null)
+        {
+            return new(false, "Only databases imported from Notion can push schema changes.", 0, 0, 0);
+        }
+
+        var newProperties = await dbContext.WikiDatabaseProperties
+            .Where(property => property.WikiDatabaseId == wikiDatabaseId
+                && property.NotionId == null
+                && property.Type != WikiDatabasePropertyTypes.Title)
+            .OrderBy(property => property.SortOrder)
+            .ToListAsync(cancellationToken);
+        if (newProperties.Count == 0)
+        {
+            return new(false, "No new local properties to push. Add a property in Sentinel first.", 0, 0, 0);
+        }
+
+        var (token, unreadable) = UnprotectToken(settings.IntegrationToken);
+        if (unreadable || string.IsNullOrWhiteSpace(token))
+        {
+            return new(false, "The Notion token is unavailable. Reconnect first.", 0, 0, 0);
+        }
+
+        try
+        {
+            var remote = await notionService.GetDatabaseAsync(token, database.NotionId, cancellationToken);
+            if (remote is null)
+            {
+                return new(false, "The Notion database could not be retrieved.", 0, 0, 0);
+            }
+
+            if (database.NotionLastEditedAt is { } importedAt
+                && GetLastEditedAt(remote.Value) is { } remoteEditedAt
+                && remoteEditedAt > importedAt)
+            {
+                return new(
+                    false,
+                    "Notion changed this database after its last import. Sync and review the changes before pushing schema.",
+                    0,
+                    0,
+                    0);
+            }
+
+            var remoteNames = remote.Value.TryGetProperty("properties", out var existingProperties)
+                && existingProperties.ValueKind == JsonValueKind.Object
+                    ? existingProperties.EnumerateObject().Select(property => property.Name).ToHashSet(StringComparer.OrdinalIgnoreCase)
+                    : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            var payload = new Dictionary<string, object?>();
+            var pushed = new List<WikiDatabaseProperty>();
+            var skipped = new List<string>();
+            foreach (var property in newProperties)
+            {
+                var mapped = MapDatabasePropertyForCreate(property);
+                if (remoteNames.Contains(property.Name) || mapped is null)
+                {
+                    skipped.Add(property.Name);
+                    continue;
+                }
+                payload[property.Name] = mapped;
+                pushed.Add(property);
+            }
+
+            if (pushed.Count == 0)
+            {
+                return new(
+                    false,
+                    $"Nothing pushed - {skipped.Count} propert{(skipped.Count == 1 ? "y" : "ies")} skipped (name conflict or an unsupported type): {string.Join(", ", skipped)}.",
+                    0,
+                    0,
+                    0);
+            }
+
+            await notionService.UpdateDataSourcePropertiesAsync(token, database.NotionId, payload, cancellationToken);
+
+            var refreshed = await notionService.GetDatabaseAsync(token, database.NotionId, cancellationToken);
+            if (refreshed is { } refreshedSchema
+                && refreshedSchema.TryGetProperty("properties", out var refreshedProperties)
+                && refreshedProperties.ValueKind == JsonValueKind.Object)
+            {
+                var refreshedByName = refreshedProperties.EnumerateObject()
+                    .ToDictionary(property => property.Name, property => property.Value, StringComparer.OrdinalIgnoreCase);
+                var pushedIds = pushed.Select(property => property.Id).ToHashSet();
+                var trackedProperties = await dbContext.WikiDatabaseProperties
+                    .Where(property => pushedIds.Contains(property.Id))
+                    .ToListAsync(cancellationToken);
+                foreach (var property in trackedProperties)
+                {
+                    if (refreshedByName.TryGetValue(property.Name, out var field)
+                        && field.TryGetProperty("id", out var idElement))
+                    {
+                        property.NotionId = idElement.GetString();
+                        property.UpdatedAt = DateTimeOffset.UtcNow;
+                        property.UpdatedBy = "notion-push";
+                    }
+                }
+            }
+
+            var trackedDatabase = await dbContext.WikiDatabases.FirstAsync(item => item.Id == wikiDatabaseId, cancellationToken);
+            trackedDatabase.NotionLastEditedAt = refreshed is { } refreshedForWatermark
+                ? GetLastEditedAt(refreshedForWatermark)
+                : DateTimeOffset.UtcNow;
+            trackedDatabase.UpdatedAt = DateTimeOffset.UtcNow;
+            trackedDatabase.UpdatedBy = "notion-push";
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            var message = skipped.Count == 0
+                ? $"{pushed.Count} propert{(pushed.Count == 1 ? "y" : "ies")} pushed to Notion."
+                : $"{pushed.Count} propert{(pushed.Count == 1 ? "y" : "ies")} pushed; {skipped.Count} skipped (name conflict or an unsupported type): {string.Join(", ", skipped)}.";
+            return new(true, message, 0, pushed.Count, 0);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Unable to push Sentinel database schema {WikiDatabaseId} to Notion", wikiDatabaseId);
+            return new(false, $"Push failed: {ex.Message}", 0, 0, 0);
+        }
+    }
+
+    private static object? MapDatabasePropertyForCreate(WikiDatabaseProperty property)
+    {
+        object[] OptionsPayload() => WikiDatabasePropertyConfig.GetOptions(property)
+            .Select(option => (object)new { name = option.Label, color = string.IsNullOrWhiteSpace(option.Color) ? "default" : option.Color })
+            .ToArray();
+
+        return property.Type switch
+        {
+            WikiDatabasePropertyTypes.Text => new { rich_text = new { } },
+            WikiDatabasePropertyTypes.Url => new { url = new { } },
+            WikiDatabasePropertyTypes.Number => new { number = new { format = "number" } },
+            WikiDatabasePropertyTypes.Checkbox => new { checkbox = new { } },
+            WikiDatabasePropertyTypes.Date => new { date = new { } },
+            WikiDatabasePropertyTypes.Select => new { select = new { options = OptionsPayload() } },
+            WikiDatabasePropertyTypes.MultiSelect => new { multi_select = new { options = OptionsPayload() } },
+            // Relation needs a resolved remote data-source id on the target database, Formula/
+            // Rollup would require translating Notion's own formula syntax (explicitly out of
+            // scope - see docs/WIKI_NOTION_CLONE.md), and Person/Files/Place/CreatedTime have no
+            // schema shape this app can create unilaterally without more remote-side setup.
+            _ => null
+        };
+    }
+
     public async Task<IReadOnlyList<NotionSyncConflictView>> GetPendingConflictsAsync(
         CancellationToken cancellationToken = default)
     {

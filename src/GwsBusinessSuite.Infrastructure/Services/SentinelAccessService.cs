@@ -26,7 +26,7 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
             .ToListAsync(cancellationToken);
         var shares = await dbContext.SentinelPublicShares.AsNoTracking()
             .Where(item => item.TargetId == targetId && item.IsDatabase == isDatabase)
-            .Select(item => new SentinelShareView(item.Id, item.TargetId, item.IsDatabase, null, item.ExpiresAt, item.AllowSearchIndexing, item.RevokedAt != null))
+            .Select(item => new SentinelShareView(item.Id, item.TargetId, item.IsDatabase, null, item.ExpiresAt, item.AllowSearchIndexing, item.RevokedAt != null, item.PasswordHash != null))
             .ToListAsync(cancellationToken);
         // SQLite stores DateTimeOffset as TEXT and cannot translate ORDER BY for it. Keep the
         // bounded resource-share query server-side, then order the already-materialized rows
@@ -71,9 +71,17 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<SentinelShareView> CreatePublicShareAsync(Guid targetId, bool isDatabase, DateTimeOffset? expiresAt, bool allowSearchIndexing, string performedBy, CancellationToken cancellationToken = default)
+    public async Task<SentinelShareView> CreatePublicShareAsync(Guid targetId, bool isDatabase, DateTimeOffset? expiresAt, bool allowSearchIndexing, string? password, string performedBy, CancellationToken cancellationToken = default)
     {
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
+        var hasPassword = !string.IsNullOrWhiteSpace(password);
+        string? passwordSalt = null;
+        string? passwordHash = null;
+        if (hasPassword)
+        {
+            passwordSalt = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+            passwordHash = HashPassword(password!, passwordSalt);
+        }
         var entity = new SentinelPublicShare
         {
             TargetId = targetId,
@@ -81,12 +89,14 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
             TokenHash = HashToken(token),
             ExpiresAt = expiresAt,
             AllowSearchIndexing = allowSearchIndexing,
+            PasswordSalt = passwordSalt,
+            PasswordHash = passwordHash,
             CreatedAt = DateTimeOffset.UtcNow,
             CreatedBy = performedBy
         };
         await dbContext.SentinelPublicShares.AddAsync(entity, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
-        return new SentinelShareView(entity.Id, targetId, isDatabase, token, expiresAt, allowSearchIndexing, false);
+        return new SentinelShareView(entity.Id, targetId, isDatabase, token, expiresAt, allowSearchIndexing, false, hasPassword);
     }
 
     public async Task RevokePublicShareAsync(Guid shareId, string performedBy, CancellationToken cancellationToken = default)
@@ -106,7 +116,15 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
         var item = await dbContext.SentinelPublicShares.AsNoTracking()
             .FirstOrDefaultAsync(item => item.TokenHash == hash && item.RevokedAt == null, cancellationToken);
         if (item is null || item.ExpiresAt is { } expiresAt && expiresAt <= DateTimeOffset.UtcNow) return null;
-        return new SentinelShareView(item.Id, item.TargetId, item.IsDatabase, null, item.ExpiresAt, item.AllowSearchIndexing, false);
+        return new SentinelShareView(item.Id, item.TargetId, item.IsDatabase, null, item.ExpiresAt, item.AllowSearchIndexing, false, item.PasswordHash != null);
+    }
+
+    public async Task<bool> VerifySharePasswordAsync(Guid shareId, string password, CancellationToken cancellationToken = default)
+    {
+        var share = await dbContext.SentinelPublicShares.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == shareId && item.RevokedAt == null, cancellationToken);
+        if (share?.PasswordHash is null || share.PasswordSalt is null) return false;
+        return HashPassword(password, share.PasswordSalt) == share.PasswordHash;
     }
 
     public async Task<bool> CanAccessAsync(Guid targetId, bool isDatabase, string username, string requiredAccessLevel, CancellationToken cancellationToken = default)
@@ -122,4 +140,7 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
     }
 
     private static string HashToken(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
+
+    private static string HashPassword(string password, string saltHex) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(saltHex + password))).ToLowerInvariant();
 }

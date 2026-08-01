@@ -281,6 +281,11 @@ public sealed class SentinelPublicShare : AuditableEntity
     public DateTimeOffset? ExpiresAt { get; set; }
     public bool AllowSearchIndexing { get; set; }
     public DateTimeOffset? RevokedAt { get; set; }
+    // Both null means no password gate. Salted (unlike TokenHash, which hashes an
+    // already-high-entropy random token) because a share password is user-chosen and
+    // low-entropy, so a bare SHA-256 would be rainbow-table-able.
+    public string? PasswordSalt { get; set; }
+    public string? PasswordHash { get; set; }
 }
 
 public sealed class SentinelPresenceLease : AuditableEntity

@@ -115,6 +115,11 @@ public sealed class NotionSyncBackgroundServiceTests
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        public Task<NotionSyncResult> PushDatabaseSchemaAsync(
+            Guid wikiDatabaseId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task ResetWebhookVerificationAsync(CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 

@@ -16,7 +16,7 @@ public sealed class SentinelAccessServiceTests
         await using var fixture = await Fixture.CreateAsync();
         var targetId = Guid.NewGuid();
 
-        var created = await fixture.Service.CreatePublicShareAsync(targetId, false, null, false, "owner");
+        var created = await fixture.Service.CreatePublicShareAsync(targetId, false, null, false, null, "owner");
 
         created.PublicToken.Should().NotBeNullOrWhiteSpace();
         var entity = await fixture.Db.SentinelPublicShares.SingleAsync();
@@ -28,12 +28,32 @@ public sealed class SentinelAccessServiceTests
     }
 
     [Fact]
+    public async Task PublicShare_WithPassword_ShouldRequireTheCorrectPasswordAndNeverStoreItInPlaintext()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var targetId = Guid.NewGuid();
+
+        var created = await fixture.Service.CreatePublicShareAsync(targetId, false, null, false, "hunter2", "owner");
+
+        created.RequiresPassword.Should().BeTrue();
+        var entity = await fixture.Db.SentinelPublicShares.SingleAsync();
+        entity.PasswordHash.Should().NotBeNullOrWhiteSpace();
+        entity.PasswordHash.Should().NotBe("hunter2");
+
+        var resolved = await fixture.Service.ResolvePublicShareAsync(created.PublicToken!);
+        resolved!.RequiresPassword.Should().BeTrue();
+
+        (await fixture.Service.VerifySharePasswordAsync(created.Id, "wrong")).Should().BeFalse();
+        (await fixture.Service.VerifySharePasswordAsync(created.Id, "hunter2")).Should().BeTrue();
+    }
+
+    [Fact]
     public async Task GetAccessAsync_ShouldOrderPublicSharesNewestFirstOnSqlite()
     {
         await using var fixture = await Fixture.CreateAsync();
         var targetId = Guid.NewGuid();
-        var older = await fixture.Service.CreatePublicShareAsync(targetId, false, null, false, "owner");
-        var newer = await fixture.Service.CreatePublicShareAsync(targetId, false, DateTimeOffset.UtcNow.AddDays(1), true, "owner");
+        var older = await fixture.Service.CreatePublicShareAsync(targetId, false, null, false, null, "owner");
+        var newer = await fixture.Service.CreatePublicShareAsync(targetId, false, DateTimeOffset.UtcNow.AddDays(1), true, null, "owner");
         var rows = await fixture.Db.SentinelPublicShares.ToListAsync();
         rows.Single(row => row.Id == older.Id).CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-5);
         rows.Single(row => row.Id == newer.Id).CreatedAt = DateTimeOffset.UtcNow;

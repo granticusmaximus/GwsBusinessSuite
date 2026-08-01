@@ -49,6 +49,8 @@
                         <button type="button" class="btn btn-sm btn-outline-warning w-100" @onclick="CreateShareAsync">Create link</button>
                     </div>
                 </div>
+                <label class="form-label small mb-1 mt-2">Password (optional)</label>
+                <input type="text" class="form-control form-control-sm" @bind="_sharePassword" placeholder="Require a password to view" />
                 <label class="form-check mt-2 small">
                     <input class="form-check-input" type="checkbox" @bind="_allowSearchIndexing" />
                     <span class="form-check-label">Allow search engines to index this page</span>
@@ -65,7 +67,7 @@
             @foreach (var share in _snapshot.Shares.Where(item => !item.IsRevoked))
             {
                 <div class="sentinel-share-entry mt-2">
-                    <span><i class="bi bi-globe2 me-2"></i>Public link</span>
+                    <span><i class="bi bi-globe2 me-2"></i>Public link @if (share.RequiresPassword) { <i class="bi bi-lock-fill ms-1" title="Password protected"></i> }</span>
                     <small>@(share.ExpiresAt?.ToLocalTime().ToString("g") ?? "No expiry")</small>
                     <button type="button" @onclick="() => RevokeShareAsync(share.Id)"><i class="bi bi-slash-circle"></i></button>
                 </div>
@@ -85,6 +87,7 @@
     private string _accessLevel = SentinelAccessLevels.View;
     private string? _newPublicUrl;
     private DateTime? _shareExpiresAt;
+    private string _sharePassword = string.Empty;
     private bool _allowSearchIndexing;
 
     private async Task ToggleAsync()
@@ -113,10 +116,12 @@
     private async Task CreateShareAsync()
     {
         var expiresAt = _shareExpiresAt is { } parsed ? new DateTimeOffset(parsed) : (DateTimeOffset?)null;
-        var share = await AccessService.CreatePublicShareAsync(TargetId, IsDatabase, expiresAt, _allowSearchIndexing,
+        var password = string.IsNullOrWhiteSpace(_sharePassword) ? null : _sharePassword;
+        var share = await AccessService.CreatePublicShareAsync(TargetId, IsDatabase, expiresAt, _allowSearchIndexing, password,
             await CurrentUserAccessor.GetCurrentUsernameAsync());
         _newPublicUrl = Navigation.ToAbsoluteUri($"/sentinel/share/{share.PublicToken}").ToString();
         _shareExpiresAt = null;
+        _sharePassword = string.Empty;
         await LoadAsync();
     }
 

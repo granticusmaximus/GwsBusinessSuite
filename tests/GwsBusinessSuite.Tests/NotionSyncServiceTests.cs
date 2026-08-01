@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using FluentAssertions;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Wiki;
@@ -1132,6 +1133,74 @@ public sealed class NotionSyncServiceTests
     }
 
     [Fact]
+    public async Task PushDatabaseSchemaAsync_ShouldCreateOnlyLocallyAddedPropertiesAndReconcileTheirNotionId()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        var settings = await fixture.Db.NotionConnectorSettings.SingleAsync();
+        settings.SyncDirection = "twoWay";
+        settings.AllowTwoWayWrites = true;
+        var database = new WikiDatabase { Title = "Projects", NotionId = "source-1", CreatedBy = "test" };
+        var title = new WikiDatabaseProperty
+        {
+            WikiDatabaseId = database.Id, Name = "Name", Type = WikiDatabasePropertyTypes.Title,
+            NotionId = "title-property", CreatedBy = "test"
+        };
+        var priority = new WikiDatabaseProperty
+        {
+            WikiDatabaseId = database.Id, Name = "Priority", Type = WikiDatabasePropertyTypes.Select,
+            SortOrder = 1, CreatedBy = "test",
+            ConfigJson = WikiDatabasePropertyConfig.Serialize(
+            [
+                new WikiDatabasePropertyOption("local-1", "High", "red")
+            ])
+        };
+        fixture.Db.WikiDatabases.Add(database);
+        fixture.Db.WikiDatabaseProperties.AddRange(title, priority);
+        await fixture.Db.SaveChangesAsync();
+        fixture.Notion.DatabaseSchemas["source-1"] = Json("""
+            {"last_edited_time":"2026-07-27T18:00:00Z","properties":{"Name":{"id":"title-property","type":"title","title":{}}}}
+            """);
+
+        var result = await fixture.Service.PushDatabaseSchemaAsync(database.Id);
+
+        result.IsSuccess.Should().BeTrue();
+        fixture.Notion.UpdatedDataSourceProperties.Should().ContainSingle(item => item.DataSourceId == "source-1");
+        var payloadJson = JsonSerializer.Serialize(fixture.Notion.UpdatedDataSourceProperties.Single().Properties);
+        payloadJson.Should().Contain("Priority");
+        payloadJson.Should().Contain("select");
+        payloadJson.Should().Contain("High");
+        payloadJson.Should().NotContain("\"Name\"");
+
+        var updatedPriority = await fixture.Db.WikiDatabaseProperties.SingleAsync(item => item.Id == priority.Id);
+        updatedPriority.NotionId.Should().Be("prop-priority");
+        var updatedDatabase = await fixture.Db.WikiDatabases.SingleAsync(item => item.Id == database.Id);
+        updatedDatabase.NotionLastEditedAt.Should().Be(DateTimeOffset.Parse("2026-07-27T18:00:00Z"));
+    }
+
+    [Fact]
+    public async Task PushDatabaseSchemaAsync_ShouldFailWhenEveryLocalPropertyIsAlreadySyncedToNotion()
+    {
+        await using var fixture = await SyncFixture.CreateAsync();
+        var settings = await fixture.Db.NotionConnectorSettings.SingleAsync();
+        settings.SyncDirection = "twoWay";
+        settings.AllowTwoWayWrites = true;
+        var database = new WikiDatabase { Title = "Projects", NotionId = "source-1", CreatedBy = "test" };
+        var title = new WikiDatabaseProperty
+        {
+            WikiDatabaseId = database.Id, Name = "Name", Type = WikiDatabasePropertyTypes.Title,
+            NotionId = "title-property", CreatedBy = "test"
+        };
+        fixture.Db.WikiDatabases.Add(database);
+        fixture.Db.WikiDatabaseProperties.Add(title);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Service.PushDatabaseSchemaAsync(database.Id);
+
+        result.IsSuccess.Should().BeFalse();
+        fixture.Notion.UpdatedDataSourceProperties.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task SyncAsync_ShouldPreserveConcurrentLocalFieldsUntilConflictIsResolved()
     {
         await using var fixture = await SyncFixture.CreateAsync();
@@ -1329,6 +1398,7 @@ public sealed class NotionSyncServiceTests
         public List<string> DatabaseSchemaRequests { get; } = [];
         public List<(string PageId, IReadOnlyDictionary<string, object?> Payload)> UpdatedPages { get; } = [];
         public List<(string BlockId, IReadOnlyList<object> Children)> ReplacedBlockChildren { get; } = [];
+        public List<(string DataSourceId, IReadOnlyDictionary<string, object?> Properties)> UpdatedDataSourceProperties { get; } = [];
 
         public Task<NotionValidationResult> ValidateConnectionAsync(string integrationToken, CancellationToken cancellationToken = default)
         {
@@ -1419,6 +1489,31 @@ public sealed class NotionSyncServiceTests
         public Task ReplaceBlockChildrenAsync(string integrationToken, string blockId, IReadOnlyList<object> children, CancellationToken cancellationToken = default)
         {
             ReplacedBlockChildren.Add((blockId, children));
+            return Task.CompletedTask;
+        }
+
+        // Mirrors real Notion behavior: a PATCH to add properties assigns each a new "id" and
+        // echoes back its "type" from the single key of the submitted shape (e.g. "rich_text",
+        // "select"). Merges into the stored schema so a caller's follow-up GetDatabaseAsync
+        // (used to reconcile NotionId onto the local WikiDatabaseProperty) sees the assigned ids.
+        public Task UpdateDataSourcePropertiesAsync(string integrationToken, string dataSourceId, IReadOnlyDictionary<string, object?> properties, CancellationToken cancellationToken = default)
+        {
+            UpdatedDataSourceProperties.Add((dataSourceId, properties));
+            if (DatabaseSchemas.TryGetValue(dataSourceId, out var schema))
+            {
+                var schemaNode = JsonNode.Parse(schema.GetRawText())!.AsObject();
+                var propertiesNode = schemaNode["properties"] as JsonObject ?? new JsonObject();
+                foreach (var (name, value) in properties)
+                {
+                    var valueNode = JsonNode.Parse(JsonSerializer.Serialize(value))!.AsObject();
+                    var type = valueNode.Select(field => field.Key).First();
+                    valueNode["id"] = $"prop-{name.ToLowerInvariant().Replace(' ', '-')}";
+                    valueNode["type"] = type;
+                    propertiesNode[name] = valueNode;
+                }
+                schemaNode["properties"] = propertiesNode;
+                DatabaseSchemas[dataSourceId] = JsonDocument.Parse(schemaNode.ToJsonString()).RootElement.Clone();
+            }
             return Task.CompletedTask;
         }
     }

@@ -78,6 +78,7 @@ public interface INotionService
     Task<NotionFileDownload> DownloadFileAsync(string fileUrl, CancellationToken cancellationToken = default);
     Task UpdatePageAsync(string integrationToken, string pageId, IReadOnlyDictionary<string, object?> payload, CancellationToken cancellationToken = default);
     Task ReplaceBlockChildrenAsync(string integrationToken, string blockId, IReadOnlyList<object> children, CancellationToken cancellationToken = default);
+    Task UpdateDataSourcePropertiesAsync(string integrationToken, string dataSourceId, IReadOnlyDictionary<string, object?> properties, CancellationToken cancellationToken = default);
 }
 
 public sealed class NotionConnectorSettingsView
@@ -193,6 +194,7 @@ public interface INotionSyncService
     Task<NotionSyncResult> SyncAsync(bool forceRefresh, CancellationToken cancellationToken = default);
     Task<NotionSyncResult> PushPageAsync(Guid wikiPageId, CancellationToken cancellationToken = default);
     Task<NotionSyncResult> PushDatabaseRowAsync(Guid wikiDatabaseRowId, CancellationToken cancellationToken = default);
+    Task<NotionSyncResult> PushDatabaseSchemaAsync(Guid wikiDatabaseId, CancellationToken cancellationToken = default);
     Task ResetWebhookVerificationAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotionSyncConflictView>> GetPendingConflictsAsync(CancellationToken cancellationToken = default);
     Task ResolveConflictAsync(Guid conflictId, string resolution, string resolvedBy, CancellationToken cancellationToken = default);

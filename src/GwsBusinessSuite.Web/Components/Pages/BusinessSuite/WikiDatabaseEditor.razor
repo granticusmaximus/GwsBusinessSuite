@@ -2,6 +2,7 @@
 @using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Domain.Entities
 @inject IWikiDatabaseService WikiDatabaseService
+@inject INotionSyncService NotionSyncService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
 @inject ILogger<WikiDatabaseEditor> Logger
@@ -44,7 +45,19 @@ else
             @if (_showProperties)
             {
                 <div class="wiki-db-property-editor border rounded-3 p-3 mb-3">
-                    <div class="fw-semibold small mb-2">Properties</div>
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                        <div class="fw-semibold small">Properties</div>
+                        @if (!string.IsNullOrWhiteSpace(Database.NotionId) && UnpushedPropertyCount > 0)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-warning" @onclick="PushSchemaToNotionAsync" disabled="@IsBusy">
+                                <i class="bi bi-cloud-arrow-up-fill me-1"></i>Push @UnpushedPropertyCount new propert@(UnpushedPropertyCount == 1 ? "y" : "ies") to Notion
+                            </button>
+                        }
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_schemaPushMessage))
+                    {
+                        <div class="small mb-2 @(_schemaPushSucceeded ? "text-success" : "text-danger")">@_schemaPushMessage</div>
+                    }
                     @foreach (var property in Database.Properties.OrderBy(p => p.SortOrder))
                     {
                         <div class="row g-2 align-items-center mb-2">
@@ -831,6 +844,8 @@ else
     private bool IsBusy;
     private string ErrorMessage = string.Empty;
     private bool _showProperties;
+    private string _schemaPushMessage = string.Empty;
+    private bool _schemaPushSucceeded;
     private Guid? _activeViewId;
     private Guid? _draggedRowId;
     private WikiDatabaseRow? _openRow;
@@ -898,6 +913,8 @@ else
         _ => "text"
     };
     private string FilterValuePlaceholder => FilterNeedsNoValue ? "No value needed" : "Value";
+    private int UnpushedPropertyCount => Database?.Properties.Count(
+        property => property.NotionId is null && property.Type != WikiDatabasePropertyTypes.Title) ?? 0;
     private IReadOnlyList<WikiDatabaseRow> VisibleRows
     {
         get
@@ -1149,6 +1166,17 @@ else
         var user = await CurrentUserNameAsync();
         await WikiDatabaseService.DeletePropertyAsync(WikiDatabaseId, property.Id, user);
         await ReloadAsync();
+    });
+
+    private async Task PushSchemaToNotionAsync() => await Work(async () =>
+    {
+        var result = await NotionSyncService.PushDatabaseSchemaAsync(WikiDatabaseId);
+        _schemaPushSucceeded = result.IsSuccess;
+        _schemaPushMessage = result.Message;
+        if (result.IsSuccess)
+        {
+            await ReloadAsync();
+        }
     });
 
     private async Task AddBoardViewAsync()

@@ -288,6 +288,18 @@ public sealed class NotionService(HttpClient httpClient) : INotionService
         EnsureSuccess(response, body, $"replacing block children for {blockId}");
     }
 
+    public async Task UpdateDataSourcePropertiesAsync(string integrationToken, string dataSourceId, IReadOnlyDictionary<string, object?> properties, CancellationToken cancellationToken = default)
+    {
+        using var response = await SendNotionApiAsync(
+            HttpMethod.Patch,
+            $"data_sources/{Uri.EscapeDataString(dataSourceId)}",
+            integrationToken,
+            JsonSerializer.Serialize(new { properties }),
+            cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        EnsureSuccess(response, body, $"updating data source properties for {dataSourceId}");
+    }
+
     private async Task<NotionPage> PostPageAsync(string integrationToken, string path, Dictionary<string, object?> payload, CancellationToken cancellationToken)
     {
         using var response = await SendNotionApiAsync(

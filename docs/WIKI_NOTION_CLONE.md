@@ -76,7 +76,7 @@ proprietary schemas; public Notion product and API documentation is behavioral r
 | Databases — structure | Databases share the page sidebar tree; every row opens as a responsive block-content page with a per-view side-peek, center-peek, or full-page presentation and configurable property visibility/order; row icon, cover image, and bounded version history (20/row, structural diff, revert-as-new-version) match page-level history; linked and inline database blocks reference canonical data without duplication | — |
 | Search & graph | All-token ranked page/block/database-row search with highlighted matches; per-user saved searches; structured and legacy backlinks; per-user favorites/recents; structured page, person, date, and database-row mentions, with a personal mention inbox for people and a "Mentioned in" backlinks panel for rows | Graph visualization |
 | Import/sync | Current `2026-03-11` Notion API, public-connection OAuth with encrypted access/refresh tokens and revocation (plus internal/PAT fallback), signed/deduplicated connection webhooks, data sources, views, comments, subtree-aware selective import with a browsable collapsible page/database picker, recursive template/unsupported-container content recovery, full-page Markdown recovery for unavailable structured content, meeting-note summary/notes/transcript import, incremental job state and content-count diagnostics, soft archival, imported page emoji/cover presentation, visible working child-page links, inline database/board blocks, durable authenticated copies of Notion-hosted files, field-level conflict review, explicitly enabled page and typed database-row pushes, reusable template import from connected free Notion templates or Markdown/CSV/HTML ZIP exports, full-fidelity property mapping (people/files/relation/created-by/last-edited-by/last-edited-time target Sentinel's real typed properties instead of degrading to text, with relation values resolved to local row ids), rich linked column layouts, inline video/audio players, and rich table cell formatting | Formula translation and schema mutation remain intentionally outside the safe v1 write contract |
-| Visibility | Authenticated portal-member roles and per-resource view/comment/edit/full-access grants, plus expiring/revocable tokenized public page and database shares | Richer public-share controls and auditing |
+| Visibility | Authenticated portal-member roles and per-resource view/comment/edit/full-access grants, plus expiring/revocable/password-protected tokenized public page and database shares | Per-share access-level controls and share auditing |
 
 ## Delivery sequence
 
@@ -163,7 +163,7 @@ capabilities where they fit GWS Business Suite; they are no longer silently excl
 | Knowledge graph | `[[Page]]` links, ranked/highlighted workspace search, backlinks, person/date/database-row mentions, a row "Mentioned in" panel, favorites/recents, and per-user saved searches | Graph navigation |
 | Collaboration | Discussions, replies, reactions, notifications, DB-backed cross-instance presence/polling, character-level remote selection indicators, automatically rebased selection anchors, block-level three-way merge, offline draft/reconnect replay, authenticated portal-member roles, granular permissions, and tokenized public sharing | A distributed CRDT/OT engine is an optional scale-out architecture, not part of the single-instance v1 acceptance contract |
 | Presentation | Emoji icon and cover image for pages and database rows alike (cover can be uploaded inline via the cover picker, not just picked from an already-uploaded asset), row-level bounded version history, plus responsive side-peek, center-peek, and full-page database rows with per-view property presentation | Custom icon *image* uploads (icons remain emoji-only), page width/fonts, and reusable style defaults |
-| Integration | Encrypted OAuth/token connection, current data-source/view/comment API, selective reconciliation, signed deduplicated webhooks, durable authenticated Notion-hosted file ingestion, field-level conflict review, opt-in page and typed database-row writes, and free-template interoperability through connected-workspace sync or bounded Notion ZIP imports | Notion formula translation and remote schema mutation remain intentionally outside the safe v1 write contract |
+| Integration | Encrypted OAuth/token connection, current data-source/view/comment API, selective reconciliation, signed deduplicated webhooks, durable authenticated Notion-hosted file ingestion, field-level conflict review, opt-in page/database-row/new-property writes, and free-template interoperability through connected-workspace sync or bounded Notion ZIP imports | Notion formula translation and retyping/renaming an already-synced remote property remain intentionally outside the safe v1 write contract |
 | AI | Workspace-grounded ask/writing/translation/research/meeting notes/autofill with streamed live output, ranked-search citations, and durable approve/reject runs | Transcription capture and autonomous agents |
 
 Official research baseline: [Notion block API](https://developers.notion.com/reference/block),
@@ -346,8 +346,32 @@ screens.
    steps with human checkpoints between them - every `SentinelAiRun` today is still strictly
    one-shot; the automation engine's `core.wait`/`core.approval` pause-resume pattern is a
    plausible template for this but was not built).
-8. **Sync and sharing hardening** — bidirectional database schema/row writes and richer
-   public-share controls. Durable Notion-hosted file ingestion is delivered.
+8. **Sync and sharing hardening** ✅ (partial) — database schema pushes and password-protected
+   public shares are delivered. `NotionSyncService.PushDatabaseSchemaAsync` (paired with a new
+   `NotionService.UpdateDataSourcePropertiesAsync`, `PATCH data_sources/{id}`) pushes only
+   locally-created properties (`WikiDatabaseProperty` rows with no `NotionId` yet) to Notion as
+   brand-new data-source properties, gated behind the same two-way-write opt-in and
+   remote-last-edit conflict guard as `PushPageAsync`/`PushDatabaseRowAsync`. It deliberately
+   never renames or retypes a property that already exists in Notion - only ever adds - so a
+   local edit can't unilaterally reshape the user's real Notion workspace. Supported types are
+   Text/Url/Number/Checkbox/Date/Select/MultiSelect; Relation (needs a resolved remote
+   data-source id), Formula/Rollup (would need Notion's own formula syntax - see the "Known
+   import limitations" note below), and Person/Files/Place/CreatedTime (no schema shape this
+   app can create unilaterally) are explicitly skipped with a per-property reason surfaced in
+   the result message. After a successful push, Notion's assigned property id is matched back
+   onto the local property by name and stored as its `NotionId`, so a later row-value push can
+   target it. A "Push N new properties to Notion" button appears in the database's Properties
+   panel (`WikiDatabaseEditor.razor`) whenever any exist. **Public shares** gained optional
+   password protection: `SentinelPublicShare.PasswordSalt`/`PasswordHash` (salted, since unlike
+   `TokenHash` - which hashes an already-high-entropy random token - a share password is
+   user-chosen and low-entropy). `SentinelSharePanel.razor`'s "Create link" flow accepts an
+   optional password; the public route (`SentinelPublicShare.razor`) gates page/database
+   content behind a password prompt via a new `ISentinelAccessService.VerifySharePasswordAsync`
+   before `ResolvePublicShareAsync`'s target is loaded, kept deliberately simple (re-prompts on
+   every fresh page load - no session/cookie persistence layer was added). Durable Notion-hosted
+   file ingestion is delivered. **Not done**: retyping/renaming already-synced Notion
+   properties, a per-share access-level selector (public shares remain always-read-only), and
+   share view/access analytics.
 9. **Native platform integrations** — platform-appropriate desktop and mobile affordances.
    On macOS this includes an optional persistent Sentinel menu-bar companion with a dedicated
    original Sentinel logo, quick actions to open Sentinel or the main dashboard, refresh
