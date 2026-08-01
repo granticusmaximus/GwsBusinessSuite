@@ -2115,6 +2115,22 @@
                 _ => ("Notion authorization could not be completed. Try connecting again.", true)
             };
         }
+
+        // Lets the macOS menu-bar companion's "Refresh Workspace Data" action trigger a real
+        // sync (src/GwsBusinessSuite.SentinelMenuBar) without that native client needing its own
+        // authenticated API credentials - it just opens this already-authenticated browser
+        // session with ?syncNow=1, and this reuses the exact same manual-sync path the "Sync
+        // now" button already calls. Also opens the modal (loading NotionSettings first, since
+        // HasNotionConnection depends on it) so the visitor sees sync progress, not a silent
+        // background action.
+        if (query.ContainsKey("syncNow"))
+        {
+            await OpenNotionModalAsync();
+            if (HasNotionConnection)
+            {
+                await SyncNotionNowAsync();
+            }
+        }
     }
 
     [JSInvokable]

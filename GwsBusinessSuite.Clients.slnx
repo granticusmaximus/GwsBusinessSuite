@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/clients/">
     <Project Path="src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj" />
+    <Project Path="src/GwsBusinessSuite.SentinelMenuBar/GwsBusinessSuite.SentinelMenuBar.csproj" />
   </Folder>
 </Solution>

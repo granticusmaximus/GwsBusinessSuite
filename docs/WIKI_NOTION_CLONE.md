@@ -382,11 +382,26 @@ screens.
    already-synced Notion properties, and a per-share access-level selector (public shares
    remain always-read-only) - the latter would mean opening an anonymous public-write surface
    for comments, a distinctly bigger and more security-sensitive scope than this pass covered.
-9. **Native platform integrations** — platform-appropriate desktop and mobile affordances.
-   On macOS this includes an optional persistent Sentinel menu-bar companion with a dedicated
-   original Sentinel logo, quick actions to open Sentinel or the main dashboard, refresh
-   workspace data, and quit the desktop app. The normal Mac app continues to open the complete
-   admin portal; Sentinel remains one workspace inside it.
+9. **Native platform integrations** ✅ (macOS menu-bar companion) — a new
+   `src/GwsBusinessSuite.SentinelMenuBar` project (`net10.0-macos`, added to
+   `GwsBusinessSuite.Clients.slnx`) is a small `LSUIElement` (no Dock icon, no window)
+   `NSStatusItem` app with three actions: Open Sentinel, Open Dashboard, and Refresh Workspace
+   Data - each just opens the system browser at the already-authenticated hosted app
+   (`https://admin.gwsapp.net/admin[/sentinel]`), the same source of truth every other client
+   uses, rather than the native client holding its own credentials. "Refresh" appends
+   `?syncNow=1`, which `Wiki.razor`'s `OnInitializedAsync` now recognizes to auto-trigger the
+   exact same manual-sync path the in-app "Sync now" button already calls - no new
+   authenticated API surface was added for this. The status-bar icon is a placeholder SF Symbol
+   (`shield.lefthalf.filled`, template-rendered for automatic light/dark adaptation) since a
+   dedicated original Sentinel logo is a design asset, not something to invent unilaterally.
+   The normal Mac app (`GwsBusinessSuite.App`) is unchanged and continues to open the complete
+   admin portal; Sentinel remains one workspace inside it. **Not independently verified**: this
+   machine's installed Xcode (27.0) predates every currently-published `.NET for macOS`/
+   `.NET for MacCatalyst` SDK pack (26.0 and 26.5, each pinned to an exact required Xcode
+   version) - confirmed this blocks the *pre-existing* `GwsBusinessSuite.App` MacCatalyst target
+   too, not just this new project, so it's an environment/toolchain gap rather than a defect in
+   either. Build and exercise this once a compatible Xcode is available. Remaining native scope
+   (mobile-specific affordances beyond the existing MAUI shell) stays open.
 
 ## Safety rules
 

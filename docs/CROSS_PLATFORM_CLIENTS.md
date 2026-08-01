@@ -77,6 +77,29 @@ Apple builds must use the Xcode version required by the installed iOS/Mac Cataly
 Windows packaging must run on a Windows build agent; signed iOS/macOS packages require an Apple
 developer identity and provisioning profile.
 
+## Sentinel menu-bar companion (macOS)
+
+`src/GwsBusinessSuite.SentinelMenuBar` is a small, separate `net10.0-macos` app (not part of the
+`GwsBusinessSuite.App` MAUI shell) - a persistent `NSStatusItem` with no Dock icon or window
+(`LSUIElement` in `Info.plist`). It holds no credentials and owns no data: every menu action
+opens the system browser at the already-authenticated hosted app, the same source of truth every
+other client uses. "Open Sentinel" and "Open Dashboard" are plain deep links; "Refresh Workspace
+Data" opens Sentinel with `?syncNow=1`, which `Wiki.razor` recognizes to trigger the same manual
+Notion sync the in-app "Sync now" button calls - no separate authenticated API was added for the
+native client. The status-bar glyph is a placeholder SF Symbol pending a dedicated Sentinel logo.
+
+Build from macOS (requires the `macos` workload: `dotnet workload install macos`):
+
+```bash
+dotnet build src/GwsBusinessSuite.SentinelMenuBar/GwsBusinessSuite.SentinelMenuBar.csproj
+```
+
+As of 2026-08-01 this has not been build-verified on the development Mac: the installed Xcode
+(27.0) is newer than every currently-published `.NET for macOS`/`.NET for MacCatalyst` SDK pack,
+each of which requires an exact Xcode version (26.0 or 26.6). This also already blocks the
+existing MAUI Mac Catalyst target, so it's a toolchain/environment gap, not specific to this
+project - confirm both build once a matching Xcode is installed.
+
 ## Migration beyond the online shell
 
 The shell phase delivers installable clients and synchronized data immediately. Reusing Razor UI
