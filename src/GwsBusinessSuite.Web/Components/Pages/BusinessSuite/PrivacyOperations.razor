@@ -1,0 +1,148 @@
+@page "/admin/privacy-operations"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using GwsBusinessSuite.Application.Privacy
+@inject IPrivacyOperationsService PrivacyService
+@inject ILogger<PrivacyOperations> Logger
+
+<PageTitle>Privacy Operations · GWS Business Suite</PageTitle>
+
+<div class="page-header">
+    <span class="text-uppercase text-secondary small fw-semibold">Security center</span>
+    <h1><i class="bi bi-person-lock me-2 text-primary"></i>Privacy operations</h1>
+    <p>Operational records for data-subject rights, retention review, and security-incident response. This supports—not replaces—legal and compliance review.</p>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_message)) { <div class="alert @(_error ? "alert-danger" : "alert-success")" role="alert">@_message</div> }
+
+@if (Dashboard is null)
+{
+    <div class="card card-body">Loading privacy operations…</div>
+}
+else
+{
+    <div class="privacy-metrics mb-3">
+        <div><span>Open requests</span><strong>@Dashboard.Requests.Count(x => x.CompletedAt is null)</strong></div>
+        <div class="@(Dashboard.OverdueRequestCount > 0 ? "danger" : "")"><span>Overdue requests</span><strong>@Dashboard.OverdueRequestCount</strong></div>
+        <div class="@(Dashboard.NotificationDeadlineCount > 0 ? "warning" : "")"><span>Notification deadlines</span><strong>@Dashboard.NotificationDeadlineCount</strong></div>
+        <div><span>Open incidents</span><strong>@Dashboard.Incidents.Count(x => x.Status != IncidentStatuses.Resolved)</strong></div>
+    </div>
+
+    <div class="privacy-grid">
+        <section class="card border-0 shadow-sm">
+            <div class="card-header"><strong>Data-subject requests</strong></div>
+            <div class="card-body privacy-form">
+                <label>Request type<select class="form-select" @bind="_requestType">@foreach (var type in PrivacyRequestTypes.All) { <option>@type</option> }</select></label>
+                <label>Username or email<input class="form-control" @bind="_subjectIdentifier" maxlength="320" /></label>
+                <label class="wide">Initial notes<input class="form-control" @bind="_requestNotes" maxlength="1000" /></label>
+                <button class="btn btn-primary align-self-end" @onclick="CreateRequestAsync" disabled="@_busy">Record request</button>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0"><thead><tr><th>Request</th><th>Subject</th><th>Due</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+                @foreach (var request in Dashboard.Requests)
+                {
+                    <tr class="@(request.CompletedAt is null && request.DueAt < DateTimeOffset.UtcNow ? "table-danger" : "")">
+                        <td><strong>@request.RequestNumber</strong><br><small>@request.RequestType</small></td>
+                        <td>@request.SubjectIdentifier</td><td>@request.DueAt.ToLocalTime().ToString("MMM d, yyyy")</td><td>@request.Status</td>
+                        <td class="text-nowrap">
+                            @if (request.IdentityVerifiedAt is null) { <button class="btn btn-sm btn-outline-secondary" @onclick="() => VerifyAsync(request.Id)" disabled="@_busy">Verify identity</button> }
+                            @if (request.RequestType == PrivacyRequestTypes.Access && request.IdentityVerifiedAt is not null) { <a class="btn btn-sm btn-outline-primary ms-1" href="@($"/admin/api/privacy/requests/{request.Id}/export")">Export</a> }
+                            @if (request.IdentityVerifiedAt is not null && request.CompletedAt is null)
+                            {
+                                <button class="btn btn-sm btn-outline-secondary ms-1" @onclick="() => ReviewAsync(request.Id)" disabled="@_busy">Review</button>
+                                <button class="btn btn-sm btn-success ms-1" @onclick="() => CompleteAsync(request.Id)" disabled="@_busy">Fulfill</button>
+                                <button class="btn btn-sm btn-outline-danger ms-1" @onclick="() => DenyAsync(request)" disabled="@(_busy || string.IsNullOrWhiteSpace(request.DecisionNotes))" title="Initial notes are required as the denial reason">Deny</button>
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody></table>
+            </div>
+        </section>
+
+        <section class="card border-0 shadow-sm">
+            <div class="card-header"><strong>Security incidents and breach assessment</strong></div>
+            <div class="card-body privacy-form">
+                <label>Title<input class="form-control" @bind="_incidentTitle" maxlength="200" /></label>
+                <label>Severity<select class="form-select" @bind="_incidentSeverity"><option>Low</option><option>Medium</option><option>High</option><option>Critical</option></select></label>
+                <label>Owner<input class="form-control" @bind="_incidentOwner" maxlength="100" /></label>
+                <label class="check"><input type="checkbox" @bind="_personalData" /> Personal data involved</label>
+                <label class="check"><input type="checkbox" @bind="_ephi" /> ePHI involved</label>
+                <label class="wide">Summary<textarea class="form-control" @bind="_incidentSummary" rows="2" maxlength="2000"></textarea></label>
+                <button class="btn btn-danger align-self-end" @onclick="CreateIncidentAsync" disabled="@_busy">Open incident</button>
+            </div>
+            <div class="list-group list-group-flush">
+            @foreach (var incident in Dashboard.Incidents)
+            {
+                <div class="list-group-item privacy-incident">
+                    <div><strong>@incident.IncidentNumber · @incident.Title</strong><br><small>@incident.Severity · @incident.Status · owner: @(string.IsNullOrWhiteSpace(incident.Owner) ? "Unassigned" : incident.Owner)</small></div>
+                    @if (incident.RegulatorNotificationDueAt is not null && incident.RegulatorNotifiedAt is null) { <span class="badge text-bg-warning">72h due @incident.RegulatorNotificationDueAt.Value.ToLocalTime().ToString("MMM d, h:mm tt")</span> }
+                    <div class="incident-controls">
+                        <select class="form-select form-select-sm" value="@incident.RiskAssessment" @onchange="e => SetRisk(incident.Id, e.Value?.ToString())"><option>Pending</option><option>Unlikely</option><option>Likely</option><option>High</option></select>
+                        <select class="form-select form-select-sm" value="@incident.Status" @onchange="e => SetIncidentStatus(incident.Id, e.Value?.ToString())">@foreach (var status in IncidentStatuses.All) { <option>@status</option> }</select>
+                        <label class="check small"><input type="checkbox" checked="@incident.RegulatorNotificationRequired" @onchange="e => SetNotification(incident.Id, (bool)(e.Value ?? false))" /> Notify regulator</label>
+                        <button class="btn btn-sm btn-outline-primary" @onclick="() => SaveAssessmentAsync(incident)" disabled="@_busy">Save assessment</button>
+                    </div>
+                </div>
+            }
+            </div>
+        </section>
+    </div>
+
+    <section class="card border-0 shadow-sm mt-3">
+        <div class="card-header"><strong>Retention register</strong><small class="d-block text-secondary">Eligible counts are previews only. No records are deleted from this screen.</small></div>
+        <div class="table-responsive"><table class="table align-middle mb-0"><thead><tr><th>Data category</th><th>Policy</th><th>Legal basis</th><th>Eligible preview</th><th>Automation</th></tr></thead><tbody>
+        @foreach (var policy in Dashboard.RetentionPolicies)
+        {
+            <tr>
+                <td><strong>@policy.DataCategory</strong><br><small>@policy.Description</small></td>
+                <td><input class="form-control form-control-sm retention-days" type="number" min="1" max="3650" value="@policy.RetentionDays" @onchange="e => SetRetentionDays(policy.Id, e.Value?.ToString())" /> days</td>
+                <td><input class="form-control form-control-sm" value="@policy.LegalBasis" maxlength="500" @onchange="e => _retentionBasis[policy.Id] = e.Value?.ToString() ?? policy.LegalBasis" /></td>
+                <td><span class="badge text-bg-secondary">@policy.EligibleRecordCount</span></td>
+                <td>
+                    <label class="check small"><input type="checkbox" checked="@policy.IsEnabled" @onchange="e => _retentionEnabled[policy.Id] = (bool)(e.Value ?? false)" /> Enabled</label>
+                    <label class="check small"><input type="checkbox" checked="@policy.AutomationApproved" @onchange="e => _retentionAutomation[policy.Id] = (bool)(e.Value ?? false)" /> Approved</label>
+                    <button class="btn btn-sm btn-outline-primary mt-1" @onclick="() => SaveRetentionAsync(policy)" disabled="@_busy">Save</button>
+                </td>
+            </tr>
+        }
+        </tbody></table></div>
+    </section>
+}
+
+@code {
+    private PrivacyDashboard? Dashboard;
+    private bool _busy, _error; private string _message = "";
+    private string _requestType = PrivacyRequestTypes.Access, _subjectIdentifier = "", _requestNotes = "";
+    private string _incidentTitle = "", _incidentSummary = "", _incidentSeverity = "Medium", _incidentOwner = "";
+    private bool _personalData, _ephi;
+    private readonly Dictionary<Guid, string> _risks = [], _statuses = [];
+    private readonly Dictionary<Guid, bool> _notifications = [];
+    private readonly Dictionary<Guid, int> _retentionDays = [];
+    private readonly Dictionary<Guid, string> _retentionBasis = [];
+    private readonly Dictionary<Guid, bool> _retentionEnabled = [], _retentionAutomation = [];
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+    private async Task LoadAsync() { try { Dashboard = await PrivacyService.GetDashboardAsync(); _error = false; } catch (Exception ex) { Fail(ex, "Privacy operations could not be loaded."); } }
+    private async Task CreateRequestAsync() => await RunAsync(async () => { await PrivacyService.CreateRequestAsync(new(_requestType, _subjectIdentifier, _requestNotes)); _subjectIdentifier = _requestNotes = ""; }, "Privacy request recorded.");
+    private async Task VerifyAsync(Guid id) => await RunAsync(() => PrivacyService.VerifyIdentityAsync(id), "Identity verification recorded.");
+    private async Task CompleteAsync(Guid id) => await RunAsync(() => PrivacyService.CompleteRequestAsync(id, PrivacyRequestStatuses.Fulfilled, "Request fulfilled through Privacy Operations."), "Request fulfilled.");
+    private async Task ReviewAsync(Guid id) => await RunAsync(() => PrivacyService.CompleteRequestAsync(id, PrivacyRequestStatuses.InReview, "Request is under review."), "Request moved to review.");
+    private async Task DenyAsync(PrivacyRequestView request) => await RunAsync(() => PrivacyService.CompleteRequestAsync(request.Id, PrivacyRequestStatuses.Denied, request.DecisionNotes), "Request denied with the recorded reason.");
+    private async Task CreateIncidentAsync() => await RunAsync(async () => { await PrivacyService.CreateIncidentAsync(new(_incidentTitle, _incidentSummary, _incidentSeverity, DateTimeOffset.UtcNow, _personalData, _ephi, _personalData ? DateTimeOffset.UtcNow : null, _incidentOwner)); _incidentTitle = _incidentSummary = ""; _personalData = _ephi = false; }, "Security incident opened.");
+    private void SetRisk(Guid id, string? value) => _risks[id] = value ?? "Pending";
+    private void SetIncidentStatus(Guid id, string? value) => _statuses[id] = value ?? IncidentStatuses.Open;
+    private void SetNotification(Guid id, bool value) => _notifications[id] = value;
+    private async Task SaveAssessmentAsync(SecurityIncidentView incident) => await RunAsync(() => PrivacyService.UpdateIncidentAssessmentAsync(incident.Id, _risks.GetValueOrDefault(incident.Id, incident.RiskAssessment), _notifications.GetValueOrDefault(incident.Id, incident.RegulatorNotificationRequired), null, _statuses.GetValueOrDefault(incident.Id, incident.Status)), "Breach assessment saved.");
+    private void SetRetentionDays(Guid id, string? value) { if (int.TryParse(value, out var days)) _retentionDays[id] = days; }
+    private async Task SaveRetentionAsync(RetentionPolicyView policy) => await RunAsync(() => PrivacyService.UpdateRetentionPolicyAsync(policy.Id, _retentionDays.GetValueOrDefault(policy.Id, policy.RetentionDays), _retentionBasis.GetValueOrDefault(policy.Id, policy.LegalBasis), _retentionEnabled.GetValueOrDefault(policy.Id, policy.IsEnabled), _retentionAutomation.GetValueOrDefault(policy.Id, policy.AutomationApproved)), "Retention policy saved. Eligible records remain preview-only.");
+    private async Task RunAsync(Func<Task> action, string success) { _busy = true; _message = ""; try { await action(); await LoadAsync(); _message = success; _error = false; } catch (Exception ex) { Fail(ex, ex is ArgumentException or InvalidOperationException ? ex.Message : "The operation could not be completed."); } finally { _busy = false; } }
+    private void Fail(Exception ex, string message) { Logger.LogError(ex, "Privacy operation failed."); _message = message; _error = true; }
+}
+
+<style>
+    .privacy-metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:.8rem; } .privacy-metrics>div { padding:1rem; background:var(--gws-surface); border:1px solid var(--gws-border); border-radius:12px; display:flex; justify-content:space-between; } .privacy-metrics strong { font-size:1.5rem; } .privacy-metrics .danger { border-color:#a33; } .privacy-metrics .warning { border-color:#a76b00; }
+    .privacy-grid { display:grid; grid-template-columns:1fr 1fr; gap:1rem; align-items:start; } .privacy-form { display:grid; grid-template-columns:repeat(3,1fr); gap:.75rem; } .privacy-form label { font-size:.78rem; font-weight:700; } .privacy-form .wide { grid-column:span 2; } .check { display:flex; gap:.45rem; align-items:center; } .privacy-incident { display:grid; gap:.65rem; } .incident-controls { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; } .incident-controls .form-select { width:auto; min-width:7rem; }
+    .retention-days { width:6rem; display:inline-block; }
+    @@media(max-width:1100px){.privacy-grid{grid-template-columns:1fr}.privacy-metrics{grid-template-columns:repeat(2,1fr)}} @@media(max-width:650px){.privacy-form{grid-template-columns:1fr}.privacy-form .wide{grid-column:auto}.privacy-metrics{grid-template-columns:1fr}}
+</style>

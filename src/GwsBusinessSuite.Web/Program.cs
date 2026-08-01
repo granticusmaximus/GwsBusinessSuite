@@ -11,6 +11,7 @@ using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure;
 using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.Resume;
+using GwsBusinessSuite.Application.Privacy;
 using GwsBusinessSuite.Application.SecurityAudit;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Application.Users;
@@ -495,6 +496,22 @@ app.MapGet("/admin/api/security-audit/export.csv", async (
         httpContext.Connection.RemoteIpAddress?.ToString()), cancellationToken);
     return Results.File(Encoding.UTF8.GetBytes(csv.ToString()), "text/csv; charset=utf-8",
         $"gws-security-audit-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.csv");
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("admin-mutation");
+
+app.MapGet("/admin/api/privacy/requests/{requestId:guid}/export", async (
+    Guid requestId,
+    IPrivacyOperationsService privacy,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var export = await privacy.ExportSubjectDataAsync(requestId, cancellationToken);
+        return Results.File(export.Content, "application/json; charset=utf-8", export.FileName);
+    }
+    catch (KeyNotFoundException) { return Results.NotFound(); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 })
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("admin-mutation");

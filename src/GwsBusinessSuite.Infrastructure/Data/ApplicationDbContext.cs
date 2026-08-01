@@ -106,6 +106,10 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<AutomationExecution> AutomationExecutions => Set<AutomationExecution>();
     public DbSet<AutomationNodeExecution> AutomationNodeExecutions => Set<AutomationNodeExecution>();
     public DbSet<SecurityAuditEvent> SecurityAuditEvents => Set<SecurityAuditEvent>();
+    public DbSet<PrivacyRetentionPolicy> PrivacyRetentionPolicies => Set<PrivacyRetentionPolicy>();
+    public DbSet<PrivacyRequest> PrivacyRequests => Set<PrivacyRequest>();
+    public DbSet<SecurityIncident> SecurityIncidents => Set<SecurityIncident>();
+    public DbSet<SecurityIncidentUpdate> SecurityIncidentUpdates => Set<SecurityIncidentUpdate>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -409,6 +413,15 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<SecurityAuditEvent>().HasIndex(x => x.EventHash).IsUnique();
         modelBuilder.Entity<SecurityAuditEvent>().HasIndex(x => x.ChainSequence).IsUnique();
         modelBuilder.Entity<SecurityAuditEvent>().Property(x => x.DetailsJson).HasDefaultValue("{}");
+        modelBuilder.Entity<PrivacyRetentionPolicy>().HasIndex(x => x.DataCategory).IsUnique();
+        modelBuilder.Entity<PrivacyRequest>().HasIndex(x => x.RequestNumber).IsUnique();
+        modelBuilder.Entity<PrivacyRequest>().HasIndex(x => new { x.Status, x.DueAt });
+        modelBuilder.Entity<SecurityIncident>().HasIndex(x => x.IncidentNumber).IsUnique();
+        modelBuilder.Entity<SecurityIncident>().HasIndex(x => new { x.Status, x.RegulatorNotificationDueAt });
+        modelBuilder.Entity<SecurityIncidentUpdate>()
+            .HasOne(x => x.Incident).WithMany().HasForeignKey(x => x.SecurityIncidentId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<SecurityIncidentUpdate>().HasIndex(x => new { x.SecurityIncidentId, x.CreatedAt });
 
         modelBuilder.Entity<NewsItem>().HasIndex(x => new { x.TopicId, x.FetchedAtUnixSeconds });
         modelBuilder.Entity<NewsItem>().HasIndex(x => x.PublishedAtUnixSeconds);

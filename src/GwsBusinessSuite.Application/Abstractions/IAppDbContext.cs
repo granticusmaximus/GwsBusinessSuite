@@ -86,6 +86,11 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<AutomationCredential> AutomationCredentials { get; }
     DbSet<AutomationExecution> AutomationExecutions { get; }
     DbSet<AutomationNodeExecution> AutomationNodeExecutions { get; }
+    DbSet<SecurityAuditEvent> SecurityAuditEvents { get; }
+    DbSet<PrivacyRetentionPolicy> PrivacyRetentionPolicies { get; }
+    DbSet<PrivacyRequest> PrivacyRequests { get; }
+    DbSet<SecurityIncident> SecurityIncidents { get; }
+    DbSet<SecurityIncidentUpdate> SecurityIncidentUpdates { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     // For multi-step writes that must be all-or-nothing (e.g. AppGenerationService.ApproveAsync

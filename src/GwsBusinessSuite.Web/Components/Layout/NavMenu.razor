@@ -149,6 +149,10 @@
                     <i class="bi bi-shield-check" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Security Audit</span><small>Authentication and access evidence</small></span>
                 </NavLink>
+                <NavLink class="gws-nav-link" href="admin/privacy-operations" title="Privacy Operations">
+                    <i class="bi bi-person-lock" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Privacy Operations</span><small>Requests, retention, and incidents</small></span>
+                </NavLink>
             </div>
         </details>
 
@@ -165,7 +169,7 @@
     private static readonly string[] PublishingPrefixes = ["admin/article", "admin/content-studio", "admin/growth", "admin/app-generation", "admin/media", "admin/pages", "admin/appearance"];
     private static readonly string[] RelationshipPrefixes = ["admin/comments", "admin/crm", "admin/users"];
     private static readonly string[] IntelligencePrefixes = ["admin/news-intelligence", "admin/government-intelligence", "admin/podcasts"];
-    private static readonly string[] OperationsPrefixes = ["admin/automation", "admin/cj-ads", "admin/affiliate", "admin/app-generation-queue", "admin/sentinel-gpt", "admin/sentinel", "admin/wiki", "admin/cms-knowledge", "admin/live-show", "admin/docker", "admin/security-audit"];
+    private static readonly string[] OperationsPrefixes = ["admin/automation", "admin/cj-ads", "admin/affiliate", "admin/app-generation-queue", "admin/sentinel-gpt", "admin/sentinel", "admin/wiki", "admin/cms-knowledge", "admin/live-show", "admin/docker", "admin/security-audit", "admin/privacy-operations"];
 
     private string _role = string.Empty;
     private int _pendingCommentCount;

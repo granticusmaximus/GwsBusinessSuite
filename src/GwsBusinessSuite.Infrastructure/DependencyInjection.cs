@@ -18,6 +18,7 @@ using GwsBusinessSuite.Application.Growth;
 using GwsBusinessSuite.Application.LiveShow;
 using GwsBusinessSuite.Application.NewsIntelligence;
 using GwsBusinessSuite.Application.Podcasts;
+using GwsBusinessSuite.Application.Privacy;
 using GwsBusinessSuite.Application.Resume;
 using GwsBusinessSuite.Application.SecurityAudit;
 using GwsBusinessSuite.Application.Settings;
@@ -145,6 +146,7 @@ public static class DependencyInjection
         services.AddScoped<ICrmService, CrmService>();
         services.AddScoped<IUserManagementService, UserManagementService>();
         services.AddScoped<ISecurityAuditService, SecurityAuditService>();
+        services.AddScoped<IPrivacyOperationsService, PrivacyOperationsService>();
         services.AddScoped<IResumePdfService, ResumePdfService>();
         services.AddScoped<IAffiliateSuggestionService, AffiliateSuggestionService>();
         services.AddScoped<IAffiliateAnalyticsService, AffiliateAnalyticsService>();
