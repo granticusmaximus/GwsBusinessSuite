@@ -35,6 +35,32 @@ public sealed class SentinelCollaborationServiceTests
     }
 
     [Fact]
+    public void OpenBlockHighlights_ShouldOnlyIncludeOpenDiscussionsWithAnAnchor()
+    {
+        var blockId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var anchored = new SentinelDiscussionView(
+            Guid.NewGuid(), Guid.NewGuid(), blockId, false, null, null, now, [],
+            new SentinelDiscussionAnchor("hello", 0, 5));
+        var discussions = new[]
+        {
+            anchored,
+            // Open, but block-level (no anchor) - not a text-range highlight.
+            new SentinelDiscussionView(Guid.NewGuid(), Guid.NewGuid(), blockId, false, null, null, now, []),
+            // Resolved - should never render a highlight even though it has an anchor.
+            new SentinelDiscussionView(
+                Guid.NewGuid(), Guid.NewGuid(), blockId, true, now, "owner", now, [],
+                new SentinelDiscussionAnchor("resolved", 6, 14))
+        };
+
+        var highlights = SentinelDiscussionSummary.OpenBlockHighlights(discussions);
+
+        highlights.Should().ContainSingle().Which.Key.Should().Be(blockId);
+        highlights[blockId].Should().ContainSingle().Which.Should().Be(
+            new SentinelDiscussionHighlight(anchored.Id, 0, 5));
+    }
+
+    [Fact]
     public async Task CreateDiscussionAsync_ShouldAttachToBlockAndNotifyOwnerAndMentionedUser()
     {
         await using var fixture = await Fixture.CreateAsync();

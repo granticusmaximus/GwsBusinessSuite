@@ -26,7 +26,9 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
             .ToListAsync(cancellationToken);
         var shares = await dbContext.SentinelPublicShares.AsNoTracking()
             .Where(item => item.TargetId == targetId && item.IsDatabase == isDatabase)
-            .Select(item => new SentinelShareView(item.Id, item.TargetId, item.IsDatabase, null, item.ExpiresAt, item.AllowSearchIndexing, item.RevokedAt != null, item.PasswordHash != null))
+            .Select(item => new SentinelShareView(
+                item.Id, item.TargetId, item.IsDatabase, null, item.ExpiresAt, item.AllowSearchIndexing,
+                item.RevokedAt != null, item.PasswordHash != null, item.ViewCount, item.LastAccessedAt))
             .ToListAsync(cancellationToken);
         // SQLite stores DateTimeOffset as TEXT and cannot translate ORDER BY for it. Keep the
         // bounded resource-share query server-side, then order the already-materialized rows
@@ -125,6 +127,15 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
             .FirstOrDefaultAsync(item => item.Id == shareId && item.RevokedAt == null, cancellationToken);
         if (share?.PasswordHash is null || share.PasswordSalt is null) return false;
         return HashPassword(password, share.PasswordSalt) == share.PasswordHash;
+    }
+
+    public async Task RecordShareViewAsync(Guid shareId, CancellationToken cancellationToken = default)
+    {
+        var share = await dbContext.SentinelPublicShares.FirstOrDefaultAsync(item => item.Id == shareId, cancellationToken);
+        if (share is null) return;
+        share.ViewCount++;
+        share.LastAccessedAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<bool> CanAccessAsync(Guid targetId, bool isDatabase, string username, string requiredAccessLevel, CancellationToken cancellationToken = default)

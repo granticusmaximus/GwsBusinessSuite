@@ -260,7 +260,7 @@
                 {
                     Discussions = (await CollaborationService.ListDiscussionsAsync(
                         WikiPageId, CurrentUsername, IncludeResolved)).ToList();
-                    await NotifyDiscussionCountsAsync();
+                    await NotifyDiscussionSummaryAsync();
                 }
                 Notifications = (await CollaborationService.ListNotificationsAsync(CurrentUsername)).ToList();
                 StateHasChanged();
@@ -276,13 +276,13 @@
     {
         Discussions = (await CollaborationService.ListDiscussionsAsync(WikiPageId, CurrentUsername, IncludeResolved)).ToList();
         Notifications = (await CollaborationService.ListNotificationsAsync(CurrentUsername)).ToList();
-        await NotifyDiscussionCountsAsync();
+        await NotifyDiscussionSummaryAsync();
     }
 
     private Task LoadDiscussionsAsync() => RunAsync(async () =>
     {
         Discussions = (await CollaborationService.ListDiscussionsAsync(WikiPageId, CurrentUsername, IncludeResolved)).ToList();
-        await NotifyDiscussionCountsAsync();
+        await NotifyDiscussionSummaryAsync();
     });
 
     public async Task FocusBlockAsync(Guid blockId)
@@ -302,8 +302,24 @@
         await JS.InvokeVoidAsync("gwsWikiLinks.scrollIntoView", _discussionRoot);
     }
 
-    private Task NotifyDiscussionCountsAsync() =>
-        OnDiscussionCountsChanged.InvokeAsync(SentinelDiscussionSummary.OpenBlockCounts(Discussions));
+    // Clicking a rendered inline highlight (see wiki-block-editor.js's setDiscussionHighlights)
+    // opens straight to that discussion's block thread - reuses FocusBlockAsync rather than
+    // scrolling to the specific comment card, matching this panel's existing block-granular
+    // focus behavior.
+    public async Task FocusDiscussionAsync(Guid discussionId)
+    {
+        var discussion = Discussions.FirstOrDefault(item => item.Id == discussionId);
+        if (discussion?.BlockId is { } blockId)
+        {
+            await FocusBlockAsync(blockId);
+        }
+    }
+
+    private async Task NotifyDiscussionSummaryAsync()
+    {
+        await OnDiscussionCountsChanged.InvokeAsync(SentinelDiscussionSummary.OpenBlockCounts(Discussions));
+        await OnDiscussionHighlightsChanged.InvokeAsync(SentinelDiscussionSummary.OpenBlockHighlights(Discussions));
+    }
 
     private async Task CreateDiscussionAsync() => await RunAsync(async () =>
     {

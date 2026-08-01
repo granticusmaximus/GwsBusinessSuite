@@ -2925,6 +2925,22 @@ audio.wiki-embed-media { max-width: 100%; }
     pointer-events: none;
 }
 
+/* Clicking inside a highlight always opens its discussion thread rather than placing a text
+   cursor there - matching Notion's own inline-comment behavior (the highlight IS the click
+   target), not an editing limitation. Lower z-index than .wiki-remote-cursor's name pill so an
+   active co-editor's caret stays legible over a commented range. */
+.wiki-discussion-highlight {
+    position: absolute;
+    z-index: 2;
+    border-radius: 2px;
+    background: rgba(245, 158, 11, .22);
+    border-bottom: 2px solid rgba(245, 158, 11, .65);
+    cursor: pointer;
+}
+.wiki-discussion-highlight:hover {
+    background: rgba(245, 158, 11, .34);
+}
+
 .sentinel-workspace .wiki-block[data-block-type="heading_1"] { margin-top: 1.45rem; }
 .sentinel-workspace .wiki-block[data-block-type="heading_2"] { margin-top: 1.15rem; }
 .sentinel-workspace .wiki-block[data-block-type="heading_3"] { margin-top: .8rem; }

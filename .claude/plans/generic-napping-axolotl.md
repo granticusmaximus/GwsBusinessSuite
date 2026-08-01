@@ -27,10 +27,10 @@
   state is short-lived and bound to the signed-in admin, token rotation and revoke/disconnect
   are supported, and manual tokens remain an advanced fallback. Server deployment still needs
   the Notion client id, client secret, and exact callback URI.
-- **Track B (visual and interaction parity) — mostly already done; this status line was stale.**
-  A 2026-08-01 verification against the actual code (not this file's prior claims) found items
-  1, 3, 4, and 5 already fully implemented - see per-item notes below. Only items 2 and 7 had
-  real gaps, both now closed.
+- **Track B (visual and interaction parity) — done.** A 2026-08-01 verification against the
+  actual code (not this file's prior claims) found items 1, 3, 4, and 5 already fully
+  implemented - see per-item notes below. Items 2, 6, and 7 had real gaps; all three are now
+  closed, completing Track B.
 
 ## Track A — Connector and sync fidelity
 
@@ -74,7 +74,22 @@
    .wiki-tree-actions` reveals row actions on hover; a separate always-available (not just
    mobile) desktop collapse toggle already exists (`_workspaceBrowserCollapsed`, Ctrl/Cmd+\\);
    no gap found.
-6. Inline comment highlighting - deliberately deferred, not attempted in this pass.
+6. **Inline comment highlighting — done (2026-08-01).** The offset-capture and anchor-storage
+   machinery already existed (`SentinelDiscussion.AnchorStart`/`AnchorEnd`, populated by the
+   selection-driven "Comment on selection" toolbar button) - what was missing was ever rendering
+   it. Added `SentinelDiscussionSummary.OpenBlockHighlights` (groups open, anchored discussions
+   per block into `SentinelDiscussionHighlight(DiscussionId, Start, End)`) and a parallel
+   `OnDiscussionHighlightsChanged` callback alongside the existing `OnDiscussionCountsChanged`,
+   wired through `Wiki.razor` to a new `wiki-block-editor.js` export, `setDiscussionHighlights`.
+   That function reuses `setRemoteCursors`' exact technique: a non-destructive absolutely
+   positioned overlay `<span>` drawn over the anchor's character range via `Range.getClientRects()`
+   (sibling to the block's contenteditable content, never inserted into it), so a highlight can
+   never leak into serialized page content or need to split/rewrite the underlying rich-text span
+   structure it visually sits over. Clicking a highlight calls a new `OpenDiscussionById`
+   JSInvokable, which opens straight to that discussion's thread (`FocusDiscussionAsync`) -
+   distinct from the existing per-block pin icon, which only opens "the block's discussions"
+   generically. Deliberate tradeoff: clicking inside a highlight always opens its thread rather
+   than placing a text cursor there, matching Notion's own actual inline-comment click behavior.
 7. **Unified Command/Ctrl+K over Sentinel content — done (2026-08-01).** The app-wide Ctrl/Cmd+K
    palette (`app.js`'s `openCommand()`) only ever indexed the static admin nav sidebar
    (`commandEntries()` scrapes `.gws-sidebar .gws-nav-link` anchors) - inside Sentinel it had

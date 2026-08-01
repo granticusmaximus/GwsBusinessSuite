@@ -191,6 +191,56 @@ export function setDiscussionCounts(container, counts) {
     }
 }
 
+// Renders each active (unresolved) discussion's anchor as a highlighted overlay over the
+// exact commented text - same non-destructive "positioned overlay, nothing inserted into the
+// contenteditable DOM" technique setRemoteCursors already uses below, so a highlight can never
+// leak into serialized page content or corrupt the rich-text span structure it visually sits
+// over. Re-applied wherever setDiscussionCounts already is (initial load, block re-render,
+// discussion list changes), since redrawing is exactly as cheap and keeps both in lockstep.
+export function setDiscussionHighlights(container, highlightsByBlockId) {
+    const state = states.get(container);
+    if (!state) return;
+
+    container.querySelectorAll(':scope > .wiki-block > .wiki-discussion-highlight').forEach(el => el.remove());
+    for (const [blockId, highlights] of Object.entries(highlightsByBlockId || {})) {
+        const blockEl = container.querySelector(`:scope > .wiki-block[data-block-id="${cssEscape(blockId)}"]`);
+        const content = blockEl?.querySelector('.wiki-block-content');
+        if (!content) continue;
+
+        for (const highlight of highlights || []) {
+            const start = Number.isInteger(highlight.start) ? Math.max(0, highlight.start) : null;
+            const end = Number.isInteger(highlight.end) ? Math.max(start ?? 0, highlight.end) : start;
+            if (start === null || end === start) continue;
+
+            const startPoint = textPointAtOffset(content, start);
+            const endPoint = textPointAtOffset(content, end);
+            if (!startPoint || !endPoint) continue;
+
+            const range = document.createRange();
+            range.setStart(startPoint.node, startPoint.offset);
+            range.setEnd(endPoint.node, endPoint.offset);
+            if (range.collapsed) continue;
+
+            const blockRect = blockEl.getBoundingClientRect();
+            for (const rect of range.getClientRects()) {
+                if (rect.width <= 0 || rect.height <= 0) continue;
+                const overlay = document.createElement('span');
+                overlay.className = 'wiki-discussion-highlight';
+                overlay.title = 'Open discussion';
+                overlay.style.left = `${rect.left - blockRect.left}px`;
+                overlay.style.top = `${rect.top - blockRect.top}px`;
+                overlay.style.width = `${rect.width}px`;
+                overlay.style.height = `${rect.height}px`;
+                overlay.addEventListener('click', () => {
+                    try { state.dotNetRef.invokeMethodAsync('OpenDiscussionById', highlight.discussionId); }
+                    catch { /* the Blazor circuit may have disconnected */ }
+                });
+                blockEl.appendChild(overlay);
+            }
+        }
+    }
+}
+
 // Clears prior overlays and renders character selections/carets without inserting anything
 // into the contenteditable DOM (so cursor UI can never leak into serialized page content).
 export function setRemoteCursors(container, cursors) {

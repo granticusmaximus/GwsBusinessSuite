@@ -95,6 +95,7 @@
         if (_share.IsDatabase) _database = await WikiDatabaseService.GetDatabaseAsync(_share.TargetId);
         else _page = await WikiService.GetPageAsync(_share.TargetId);
         _title = _database?.Title ?? _page?.Title;
+        await AccessService.RecordShareViewAsync(_share.Id);
     }
 
     private async Task SubmitPasswordAsync()

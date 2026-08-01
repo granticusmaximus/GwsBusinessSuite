@@ -10,7 +10,9 @@ public sealed record SentinelShareView(
     DateTimeOffset? ExpiresAt,
     bool AllowSearchIndexing,
     bool IsRevoked,
-    bool RequiresPassword = false);
+    bool RequiresPassword = false,
+    int ViewCount = 0,
+    DateTimeOffset? LastAccessedAt = null);
 
 public sealed record SentinelAccessSnapshot(
     IReadOnlyList<SentinelPermissionView> Permissions,
@@ -27,5 +29,9 @@ public interface ISentinelAccessService
     // Separate from ResolvePublicShareAsync so a caller can show/gate a password prompt
     // before deciding whether the visitor may see the share's target content at all.
     Task<bool> VerifySharePasswordAsync(Guid shareId, string password, CancellationToken cancellationToken = default);
+    // Called once the visitor actually sees the target content (after any password gate
+    // clears) - separate from ResolvePublicShareAsync so a metadata check or a failed
+    // password attempt is never counted as a view.
+    Task RecordShareViewAsync(Guid shareId, CancellationToken cancellationToken = default);
     Task<bool> CanAccessAsync(Guid targetId, bool isDatabase, string username, string requiredAccessLevel, CancellationToken cancellationToken = default);
 }

@@ -71,6 +71,13 @@
                     <small>@(share.ExpiresAt?.ToLocalTime().ToString("g") ?? "No expiry")</small>
                     <button type="button" @onclick="() => RevokeShareAsync(share.Id)"><i class="bi bi-slash-circle"></i></button>
                 </div>
+                <div class="small text-secondary" style="margin-top:-0.3rem;">
+                    @(share.ViewCount == 1 ? "1 view" : $"{share.ViewCount} views")
+                    @if (share.LastAccessedAt is { } lastAccessedAt)
+                    {
+                        <span>&nbsp;&middot; last viewed @lastAccessedAt.ToLocalTime().ToString("g")</span>
+                    }
+                </div>
             }
         </div>
     }

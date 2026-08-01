@@ -286,6 +286,10 @@ public sealed class SentinelPublicShare : AuditableEntity
     // low-entropy, so a bare SHA-256 would be rainbow-table-able.
     public string? PasswordSalt { get; set; }
     public string? PasswordHash { get; set; }
+    // Incremented once per actual content view (after any password gate is cleared), not per
+    // token resolution - so a wrong password guess or a bare metadata check never counts.
+    public int ViewCount { get; set; }
+    public DateTimeOffset? LastAccessedAt { get; set; }
 }
 
 public sealed class SentinelPresenceLease : AuditableEntity
