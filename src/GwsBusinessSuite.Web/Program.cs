@@ -122,16 +122,13 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
     {
         options.LoginPath = "/admin/login";
         options.AccessDeniedPath = "/admin/access-denied";
-        options.SlidingExpiration = true;
+        // An eight-hour absolute session is predictable and limits the value of a stolen
+        // cookie; normal activity must not silently renew it forever.
+        options.SlidingExpiration = false;
         options.ExpireTimeSpan = TimeSpan.FromHours(8);
-        // SameAsRequest (the framework default) is made explicit here rather than left
-        // implicit: it correctly marks the cookie Secure once UseForwardedHeaders (added
-        // below) surfaces the real scheme via X-Forwarded-Proto behind Cloudflare Tunnel.
-        // Deliberately NOT forced to Always - this container is also reachable over plain
-        // HTTP directly (no TLS termination confirmed in front of it yet as of this
-        // writing), and forcing Secure would make the browser silently drop the cookie
-        // and break login in that case.
-        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        // Production is reachable only through the HTTPS proxy; Compose binds the HTTP
+        // origin to loopback. Authentication cookies must therefore never travel over HTTP.
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
         options.Cookie.SameSite = SameSiteMode.Lax;
     })
     .AddCookie(MfaAuthenticationDefaults.PendingScheme, options =>
@@ -139,7 +136,7 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.Cookie.Name = "GwsBusinessSuite.MfaPending";
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = SameSiteMode.Strict;
-        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
         options.ExpireTimeSpan = TimeSpan.FromMinutes(10);
         options.SlidingExpiration = false;
     });
@@ -538,6 +535,62 @@ app.MapPost("/auth/mfa/verify", async (
     await httpContext.SignOutAsync(MfaAuthenticationDefaults.PendingScheme);
     return Results.LocalRedirect(GetPendingReturnUrl(pending));
 }).RequireAuthorization("MfaPending").RequireRateLimiting("login");
+
+app.MapGet("/admin/login/mfa", (HttpContext httpContext, IAntiforgery antiforgery) =>
+{
+    var token = antiforgery.GetAndStoreTokens(httpContext).RequestToken
+        ?? throw new InvalidOperationException("Unable to issue an antiforgery token.");
+    var error = httpContext.Request.Query["error"].ToString();
+    return MfaHtmlPage(
+        "Verify your identity",
+        "Two-factor verification",
+        "Enter the current code from your authenticator app, or use one of your recovery codes.",
+        "/auth/mfa/verify",
+        token,
+        string.Equals(error, "invalid", StringComparison.OrdinalIgnoreCase)
+            ? "That code is invalid, expired, or was already used."
+            : null,
+        "Authenticator or recovery code",
+        "Verify and sign in");
+}).RequireAuthorization("MfaPending").RequireRateLimiting("public-read");
+
+app.MapGet("/admin/login/mfa/setup", async (
+    HttpContext httpContext,
+    IAntiforgery antiforgery,
+    IUserManagementService userManagementService) =>
+{
+    if (!Guid.TryParse(httpContext.User.FindFirstValue("UserId"), out var userId))
+        return Results.LocalRedirect("/admin/login?error=expired");
+
+    var enrollment = await userManagementService.PrepareMfaEnrollmentAsync(userId);
+    if (enrollment is null)
+        return Results.LocalRedirect("/admin/login?error=expired");
+
+    var token = antiforgery.GetAndStoreTokens(httpContext).RequestToken
+        ?? throw new InvalidOperationException("Unable to issue an antiforgery token.");
+    var secret = System.Net.WebUtility.HtmlEncode(FormatMfaSecret(enrollment.Secret));
+    var uri = System.Net.WebUtility.HtmlEncode(enrollment.AuthenticatorUri);
+    var instructions = $"""
+        <ol><li>Open your password manager or authenticator app and add a time-based one-time password (TOTP).</li>
+        <li>Enter this setup key:<br><code class="secret">{secret}</code></li>
+        <li>Enter the six-digit code it generates.</li></ol>
+        <details><summary>Advanced: authenticator URI</summary><code class="uri">{uri}</code></details>
+        """;
+    var error = httpContext.Request.Query["error"].ToString();
+    return MfaHtmlPage(
+        "Set up two-factor authentication",
+        "Secure your GWS account",
+        "Two-factor authentication is required before confidential portal access is granted.",
+        "/auth/mfa/enroll",
+        token,
+        string.Equals(error, "invalid", StringComparison.OrdinalIgnoreCase)
+            ? "The code did not match. Check your device clock and try a new code."
+            : null,
+        "Authenticator code",
+        "Enable MFA and continue",
+        instructions,
+        numericCodeOnly: true);
+}).RequireAuthorization("MfaPending").RequireRateLimiting("public-read");
 
 app.MapPost("/auth/mfa/enroll", async (
     HttpContext httpContext,
@@ -2462,6 +2515,38 @@ static async Task SignInPortalAsync(HttpContext httpContext, UserView user)
         new ClaimsPrincipal(identity),
         new AuthenticationProperties { IsPersistent = false });
 }
+
+static IResult MfaHtmlPage(
+    string title,
+    string heading,
+    string description,
+    string action,
+    string antiforgeryToken,
+    string? error,
+    string codeLabel,
+    string buttonLabel,
+    string? instructions = null,
+    bool numericCodeOnly = false)
+{
+    static string H(string value) => System.Net.WebUtility.HtmlEncode(value);
+    var errorMarkup = string.IsNullOrWhiteSpace(error)
+        ? string.Empty
+        : $"<div class=\"error\" role=\"alert\">{H(error)}</div>";
+    var inputAttributes = numericCodeOnly
+        ? "inputmode=\"numeric\" pattern=\"[0-9]{6}\" maxlength=\"6\""
+        : "autocomplete=\"one-time-code\"";
+    return Results.Content($$"""
+        <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        <meta name="robots" content="noindex,nofollow"><title>{{H(title)}} · GWS Business Suite</title>
+        <style>:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#100f0e;color:#f4f1ed;font:16px system-ui,-apple-system,sans-serif}.shell{min-height:100vh;display:grid;place-items:center;padding:1.5rem}.card{width:min(42rem,100%);background:#1b1917;border:1px solid #4c4337;border-radius:14px;padding:clamp(1.25rem,4vw,2rem);box-shadow:0 20px 60px #0008}h1{margin:.2rem 0 .5rem;font-size:1.75rem}p{color:#bdb5aa;line-height:1.55}.brand{color:#f5a000;font-weight:800;margin-bottom:1.5rem}.error{background:#4b1717;border:1px solid #a74343;padding:.8rem;border-radius:8px;margin:1rem 0}ol{padding-left:1.3rem}li{margin:.8rem 0;line-height:1.5}code{font-family:ui-monospace,monospace}.secret{display:inline-block;margin-top:.5rem;padding:.7rem;background:#0d0c0b;border-radius:7px;font-size:1.05rem;letter-spacing:.08em;user-select:all}.uri{display:block;overflow-wrap:anywhere;margin:.7rem 0;padding:.7rem;background:#0d0c0b;border-radius:7px}details{margin:1rem 0}label{display:block;font-weight:700;margin:1rem 0 .45rem}input{width:100%;padding:.8rem;border:1px solid #62594d;border-radius:8px;background:#111;color:#fff;font-size:1.15rem}button{width:100%;margin-top:1rem;padding:.8rem;border:0;border-radius:8px;background:#f5a000;color:#111;font-weight:800;font-size:1rem;cursor:pointer}.cancel{display:inline-block;margin-top:1rem;color:#d8cdbf}</style></head>
+        <body><main class="shell"><section class="card"><div class="brand">GWS Business Suite</div><h1>{{H(heading)}}</h1><p>{{H(description)}}</p>{{errorMarkup}}{{instructions}}
+        <form method="post" action="{{H(action)}}"><input type="hidden" name="__RequestVerificationToken" value="{{H(antiforgeryToken)}}"><label for="mfa-code">{{H(codeLabel)}}</label><input id="mfa-code" name="code" {{inputAttributes}} autocomplete="one-time-code" autofocus required><button type="submit">{{H(buttonLabel)}}</button></form><a class="cancel" href="/auth/logout">Cancel sign in</a></section></main></body></html>
+        """, "text/html; charset=utf-8");
+}
+
+static string FormatMfaSecret(string secret) =>
+    string.Join(' ', Enumerable.Range(0, (secret.Length + 3) / 4)
+        .Select(index => secret.Substring(index * 4, Math.Min(4, secret.Length - index * 4))));
 
 static string NormalizePathBase(string? pathBase)
 {

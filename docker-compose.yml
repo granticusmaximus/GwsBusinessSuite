@@ -2,7 +2,9 @@ services:
   gwssuite:
     build: .
     ports:
-      - "80:8080"
+      # The origin is private to the droplet. Cloudflared/reverse proxy reaches it over
+      # loopback; internet clients must use the HTTPS hostname and cannot bypass TLS.
+      - "127.0.0.1:80:8080"
     env_file:
       - path: .env
         required: false
