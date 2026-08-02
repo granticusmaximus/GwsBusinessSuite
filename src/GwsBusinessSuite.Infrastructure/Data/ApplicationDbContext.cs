@@ -84,6 +84,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<AnalyticsSegment> AnalyticsSegments => Set<AnalyticsSegment>();
     public DbSet<AnalyticsSegmentRule> AnalyticsSegmentRules => Set<AnalyticsSegmentRule>();
     public DbSet<AnalyticsAnnotation> AnalyticsAnnotations => Set<AnalyticsAnnotation>();
+    public DbSet<AnalyticsReportSchedule> AnalyticsReportSchedules => Set<AnalyticsReportSchedule>();
     public DbSet<SocialAccount> SocialAccounts => Set<SocialAccount>();
     public DbSet<SocialPost> SocialPosts => Set<SocialPost>();
     public DbSet<SocialPostTarget> SocialPostTargets => Set<SocialPostTarget>();
@@ -390,6 +391,12 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<AnalyticsSegmentRule>().Property(x => x.Value).HasMaxLength(500);
         modelBuilder.Entity<AnalyticsAnnotation>().HasIndex(x => x.OccurredOnUnixSeconds);
         modelBuilder.Entity<AnalyticsAnnotation>().Property(x => x.Note).HasMaxLength(500);
+        modelBuilder.Entity<AnalyticsReportSchedule>().HasIndex(x => new { x.IsActive, x.NextRunAtUnixSeconds });
+        modelBuilder.Entity<AnalyticsReportSchedule>().Property(x => x.Name).HasMaxLength(100);
+        modelBuilder.Entity<AnalyticsReportSchedule>().Property(x => x.RecipientEmail).HasMaxLength(320);
+        modelBuilder.Entity<AnalyticsReportSchedule>().Property(x => x.Frequency).HasMaxLength(16);
+        modelBuilder.Entity<AnalyticsReportSchedule>().Property(x => x.LastStatus).HasMaxLength(16);
+        modelBuilder.Entity<AnalyticsReportSchedule>().Property(x => x.LastError).HasMaxLength(500);
         modelBuilder.Entity<SocialAccount>().HasIndex(x => new { x.Network, x.ExternalAccountId }).IsUnique();
         modelBuilder.Entity<SocialAccount>().Property(x => x.Network).HasMaxLength(24);
         modelBuilder.Entity<SocialPost>().HasIndex(x => new { x.Status, x.ScheduledFor });

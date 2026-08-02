@@ -67,3 +67,19 @@ public interface ISocialPublishingService
     Task<SocialPublishResult> PublishAsync(Guid postId, CancellationToken cancellationToken = default);
     Task PublishDueAsync(CancellationToken cancellationToken = default);
 }
+
+public interface IGrowthReportEmailSender
+{
+    GrowthReportDeliveryConfiguration Configuration { get; }
+    Task SendAsync(GrowthReportEmail email, CancellationToken cancellationToken = default);
+}
+
+public interface IGrowthReportService
+{
+    GrowthReportDeliveryConfiguration DeliveryConfiguration { get; }
+    Task<IReadOnlyList<AnalyticsReportScheduleView>> GetSchedulesAsync(CancellationToken cancellationToken = default);
+    Task<Guid> SaveScheduleAsync(AnalyticsReportScheduleInput input, CancellationToken cancellationToken = default);
+    Task DeleteScheduleAsync(Guid scheduleId, CancellationToken cancellationToken = default);
+    Task SendNowAsync(Guid scheduleId, CancellationToken cancellationToken = default);
+    Task<int> DeliverDueAsync(CancellationToken cancellationToken = default);
+}

@@ -18,6 +18,35 @@ public sealed record AnalyticsBreakdownRow(string Label, int Visitors, int Views
 public sealed record AnalyticsPeriodComparison(decimal PreviousValue, decimal? ChangePercent);
 public sealed record AnalyticsAnnotationInput(Guid? Id, DateOnly Date, string Note);
 public sealed record AnalyticsAnnotationView(Guid Id, DateOnly Date, string Note);
+public sealed record AnalyticsReportScheduleInput(
+    Guid? Id,
+    string Name,
+    string RecipientEmail,
+    string Frequency,
+    int RangeDays,
+    int DeliveryDay,
+    int DeliveryHourUtc,
+    bool IsActive);
+public sealed record AnalyticsReportScheduleView(
+    Guid Id,
+    string Name,
+    string RecipientEmail,
+    string Frequency,
+    int RangeDays,
+    int DeliveryDay,
+    int DeliveryHourUtc,
+    bool IsActive,
+    DateTimeOffset? NextRunAt,
+    DateTimeOffset? LastAttemptAt,
+    DateTimeOffset? LastDeliveredAt,
+    string LastStatus,
+    string LastError);
+public sealed record GrowthReportEmail(
+    string RecipientEmail,
+    string Subject,
+    string PlainTextBody,
+    string HtmlBody);
+public sealed record GrowthReportDeliveryConfiguration(bool IsConfigured, string Message);
 public sealed record AnalyticsGoalInput(
     Guid? Id,
     string Name,

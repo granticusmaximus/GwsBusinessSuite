@@ -1066,6 +1066,40 @@ public sealed class AnalyticsAnnotation : AuditableEntity
     public required string Note { get; set; }
 }
 
+public static class AnalyticsReportFrequencies
+{
+    public const string Weekly = "Weekly";
+    public const string Monthly = "Monthly";
+
+    public static readonly string[] All = [Weekly, Monthly];
+}
+
+public static class AnalyticsReportDeliveryStatuses
+{
+    public const string Never = "Never";
+    public const string Delivered = "Delivered";
+    public const string Failed = "Failed";
+}
+
+// Durable delivery policy for one analytics email recipient. The indexed Unix timestamp
+// keeps background due-work queries provider-safe on SQLite; delivery timestamps remain
+// DateTimeOffset values because they are displayed but never used by a SQL ordering filter.
+public sealed class AnalyticsReportSchedule : AuditableEntity
+{
+    public required string Name { get; set; }
+    public required string RecipientEmail { get; set; }
+    public string Frequency { get; set; } = AnalyticsReportFrequencies.Weekly;
+    public int RangeDays { get; set; } = 7;
+    public int DeliveryDay { get; set; } = 1;
+    public int DeliveryHourUtc { get; set; } = 13;
+    public bool IsActive { get; set; } = true;
+    public long? NextRunAtUnixSeconds { get; set; }
+    public DateTimeOffset? LastAttemptAt { get; set; }
+    public DateTimeOffset? LastDeliveredAt { get; set; }
+    public string LastStatus { get; set; } = AnalyticsReportDeliveryStatuses.Never;
+    public string LastError { get; set; } = string.Empty;
+}
+
 public static class SocialNetworks
 {
     public const string Facebook = "Facebook";
