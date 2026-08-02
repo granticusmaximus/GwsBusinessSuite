@@ -118,6 +118,22 @@ public sealed class GrowthAnalyticsService(
             .Include(item => item.Steps)
             .OrderBy(item => item.Name)
             .ToListAsync(cancellationToken);
+        var annotationFrom = DateOnly.FromDateTime(from.UtcDateTime);
+        var annotationThrough = DateOnly.FromDateTime(to.AddTicks(-1).UtcDateTime);
+        var annotationFromUnix = AnnotationDateToUnix(annotationFrom);
+        var annotationToUnix = AnnotationDateToUnix(annotationThrough.AddDays(1));
+        var annotationRows = await db.AnalyticsAnnotations.AsNoTracking()
+            .Where(item => item.OccurredOnUnixSeconds >= annotationFromUnix
+                && item.OccurredOnUnixSeconds < annotationToUnix)
+            .ToListAsync(cancellationToken);
+        var annotations = annotationRows
+            .OrderBy(item => item.OccurredOnUnixSeconds)
+            .ThenBy(item => item.CreatedAt)
+            .Select(item => new AnalyticsAnnotationView(
+                item.Id,
+                AnnotationDateFromUnix(item.OccurredOnUnixSeconds),
+                item.Note))
+            .ToList();
         var retention = await BuildRetentionAsync(pageViews, from, to, cancellationToken);
 
         return new GrowthAnalyticsDashboard
@@ -168,6 +184,7 @@ public sealed class GrowthAnalyticsService(
                     !string.IsNullOrWhiteSpace(item.RegionCode)
                     || !string.IsNullOrWhiteSpace(item.RegionName)),
                 item => RegionLabel(item), breakdownLimit),
+            Annotations = annotations,
             Goals = goalReport.Goals,
             Funnels = BuildFunnelReport(funnelDefinitions, events)
         };
@@ -416,6 +433,34 @@ public sealed class GrowthAnalyticsService(
         var segment = await db.AnalyticsSegments.FirstOrDefaultAsync(item => item.Id == segmentId, cancellationToken);
         if (segment is null) return;
         db.AnalyticsSegments.Remove(segment);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<Guid> SaveAnnotationAsync(
+        AnalyticsAnnotationInput input,
+        CancellationToken cancellationToken = default)
+    {
+        var note = Clean(input.Note, 500);
+        if (note.Length == 0) throw new ArgumentException("Annotation note is required.", nameof(input));
+
+        var annotation = input.Id is { } id
+            ? await db.AnalyticsAnnotations.FirstOrDefaultAsync(item => item.Id == id, cancellationToken)
+                ?? throw new InvalidOperationException("Annotation no longer exists.")
+            : new AnalyticsAnnotation { Note = note };
+        annotation.OccurredOnUnixSeconds = AnnotationDateToUnix(input.Date);
+        annotation.Note = note;
+        annotation.UpdatedAt = DateTimeOffset.UtcNow;
+        if (input.Id is null) await db.AnalyticsAnnotations.AddAsync(annotation, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        return annotation.Id;
+    }
+
+    public async Task DeleteAnnotationAsync(Guid annotationId, CancellationToken cancellationToken = default)
+    {
+        var annotation = await db.AnalyticsAnnotations
+            .FirstOrDefaultAsync(item => item.Id == annotationId, cancellationToken);
+        if (annotation is null) return;
+        db.AnalyticsAnnotations.Remove(annotation);
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -783,6 +828,12 @@ public sealed class GrowthAnalyticsService(
         var region = string.IsNullOrWhiteSpace(item.RegionName) ? item.RegionCode : item.RegionName;
         return string.IsNullOrWhiteSpace(item.CountryCode) ? region : $"{region}, {item.CountryCode}";
     }
+
+    private static long AnnotationDateToUnix(DateOnly date) =>
+        new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)).ToUnixTimeSeconds();
+
+    private static DateOnly AnnotationDateFromUnix(long unixSeconds) =>
+        DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeSeconds(unixSeconds).UtcDateTime);
 
     private static string NormalizePath(string? value)
     {

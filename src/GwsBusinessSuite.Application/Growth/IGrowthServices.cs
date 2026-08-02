@@ -43,6 +43,8 @@ public interface IGrowthAnalyticsService
     Task<IReadOnlyList<AnalyticsSegmentView>> GetSegmentsAsync(CancellationToken cancellationToken = default);
     Task<Guid> SaveSegmentAsync(AnalyticsSegmentInput input, CancellationToken cancellationToken = default);
     Task DeleteSegmentAsync(Guid segmentId, CancellationToken cancellationToken = default);
+    Task<Guid> SaveAnnotationAsync(AnalyticsAnnotationInput input, CancellationToken cancellationToken = default);
+    Task DeleteAnnotationAsync(Guid annotationId, CancellationToken cancellationToken = default);
 }
 
 public interface ISocialPublishingService

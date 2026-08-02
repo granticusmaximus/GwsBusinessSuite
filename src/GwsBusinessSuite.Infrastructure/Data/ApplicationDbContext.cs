@@ -83,6 +83,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<AnalyticsFunnelStep> AnalyticsFunnelSteps => Set<AnalyticsFunnelStep>();
     public DbSet<AnalyticsSegment> AnalyticsSegments => Set<AnalyticsSegment>();
     public DbSet<AnalyticsSegmentRule> AnalyticsSegmentRules => Set<AnalyticsSegmentRule>();
+    public DbSet<AnalyticsAnnotation> AnalyticsAnnotations => Set<AnalyticsAnnotation>();
     public DbSet<SocialAccount> SocialAccounts => Set<SocialAccount>();
     public DbSet<SocialPost> SocialPosts => Set<SocialPost>();
     public DbSet<SocialPostTarget> SocialPostTargets => Set<SocialPostTarget>();
@@ -387,6 +388,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<AnalyticsSegmentRule>().Property(x => x.Dimension).HasMaxLength(24);
         modelBuilder.Entity<AnalyticsSegmentRule>().Property(x => x.Operator).HasMaxLength(24);
         modelBuilder.Entity<AnalyticsSegmentRule>().Property(x => x.Value).HasMaxLength(500);
+        modelBuilder.Entity<AnalyticsAnnotation>().HasIndex(x => x.OccurredOnUnixSeconds);
+        modelBuilder.Entity<AnalyticsAnnotation>().Property(x => x.Note).HasMaxLength(500);
         modelBuilder.Entity<SocialAccount>().HasIndex(x => new { x.Network, x.ExternalAccountId }).IsUnique();
         modelBuilder.Entity<SocialAccount>().Property(x => x.Network).HasMaxLength(24);
         modelBuilder.Entity<SocialPost>().HasIndex(x => new { x.Status, x.ScheduledFor });

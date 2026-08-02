@@ -1,0 +1,76 @@
+.annotation-manager { display: contents; }
+
+.annotation-manage {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    height: 1.9rem;
+    border: 1px solid var(--growth-line);
+    border-radius: .55rem;
+    background: var(--growth-panel);
+    color: var(--growth-muted);
+    padding: 0 .55rem;
+    font-size: .65rem;
+    font-weight: 750;
+}
+
+.annotation-manage:hover { color: var(--growth-ink); border-color: var(--growth-accent); }
+.annotation-manage b { display: grid; place-items: center; min-width: 1.1rem; height: 1.1rem; border-radius: 999px; background: rgba(245,158,11,.15); color: var(--growth-accent); font-size: .58rem; }
+
+.annotation-drawer {
+    position: fixed;
+    z-index: 24;
+    top: 4.6rem;
+    right: 1rem;
+    bottom: 1rem;
+    width: min(460px, calc(100vw - 2rem));
+    overflow: auto;
+    border: 1px solid rgba(255,255,255,.09);
+    border-radius: 1rem;
+    background: #191714;
+    box-shadow: 0 1.5rem 5rem rgba(0,0,0,.55);
+    color: #f7f3ed;
+    padding: 1rem;
+}
+
+.annotation-drawer header, .annotation-form-heading, .annotation-definition, .annotation-empty {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: .75rem;
+}
+
+.annotation-drawer header { margin-bottom: 1rem; }
+.annotation-drawer header strong, .annotation-drawer header small { display: block; }
+.annotation-drawer header small { margin-top: .15rem; color: #9b958e; font-size: .67rem; }
+.annotation-drawer header button, .annotation-form-heading button, .annotation-definition button { border: 0; background: transparent; color: #9b958e; }
+.annotation-drawer header > button { font-size: 1.4rem; line-height: 1; }
+
+.annotation-message { margin-bottom: .75rem; border: 1px solid rgba(245,158,11,.3); border-radius: .6rem; background: rgba(245,158,11,.08); padding: .65rem .8rem; font-size: .72rem; }
+.annotation-message.error { border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.08); }
+.annotation-list { display: grid; gap: .5rem; }
+.annotation-empty { justify-content: flex-start; border: 1px dashed rgba(255,255,255,.1); border-radius: .65rem; padding: .75rem; }
+.annotation-empty > i { color: #f59e0b; }
+.annotation-empty strong, .annotation-empty small { display: block; }
+.annotation-empty small { margin-top: .15rem; color: #9b958e; font-size: .65rem; line-height: 1.4; }
+
+.annotation-definition { align-items: center; border: 1px solid rgba(255,255,255,.09); border-radius: .65rem; padding: .7rem; }
+.annotation-definition time { flex: none; color: #f59e0b; font-size: .65rem; font-weight: 800; }
+.annotation-definition p { flex: 1; margin: 0; color: #f7f3ed; font-size: .72rem; line-height: 1.4; overflow-wrap: anywhere; }
+.annotation-definition > div { display: flex; }
+.annotation-definition button { padding: .2rem; }
+
+.annotation-form-heading { align-items: center; margin: 1rem 0 .8rem; }
+.annotation-form-heading button { color: #f59e0b; font-size: .68rem; }
+.annotation-drawer label { display: block; color: #9b958e; font-size: .68rem; font-weight: 700; }
+.annotation-drawer input, .annotation-drawer textarea { width: 100%; margin: .25rem 0 .75rem; border: 1px solid rgba(255,255,255,.11); border-radius: .55rem; background: #100f0d; color: #f7f3ed; padding: .58rem .65rem; }
+.annotation-drawer textarea { resize: vertical; }
+.annotation-help { color: #9b958e; font-size: .67rem; line-height: 1.45; }
+.annotation-save { width: 100%; border: 1px solid #f59e0b; border-radius: .55rem; background: #f59e0b; color: #17130c; padding: .55rem .7rem; font-size: .7rem; font-weight: 800; }
+.annotation-save:disabled { opacity: .55; }
+
+@media (max-width: 620px) {
+    .annotation-manage span { display: none; }
+    .annotation-definition { align-items: flex-start; flex-wrap: wrap; }
+    .annotation-definition p { flex-basis: calc(100% - 6rem); }
+}

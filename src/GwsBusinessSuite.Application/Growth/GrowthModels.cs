@@ -16,6 +16,8 @@ public sealed record AnalyticsMetric(string Label, int Value, decimal ChangePerc
 public sealed record AnalyticsPoint(DateOnly Date, int Visitors, int PageViews);
 public sealed record AnalyticsBreakdownRow(string Label, int Visitors, int Views, decimal Share);
 public sealed record AnalyticsPeriodComparison(decimal PreviousValue, decimal? ChangePercent);
+public sealed record AnalyticsAnnotationInput(Guid? Id, DateOnly Date, string Note);
+public sealed record AnalyticsAnnotationView(Guid Id, DateOnly Date, string Note);
 public sealed record AnalyticsGoalInput(
     Guid? Id,
     string Name,
@@ -127,6 +129,7 @@ public sealed class GrowthAnalyticsDashboard
     public IReadOnlyList<AnalyticsBreakdownRow> Browsers { get; init; } = [];
     public IReadOnlyList<AnalyticsBreakdownRow> Countries { get; init; } = [];
     public IReadOnlyList<AnalyticsBreakdownRow> Regions { get; init; } = [];
+    public IReadOnlyList<AnalyticsAnnotationView> Annotations { get; init; } = [];
     public IReadOnlyList<AnalyticsGoalView> Goals { get; init; } = [];
     public IReadOnlyList<AnalyticsFunnelView> Funnels { get; init; } = [];
 }

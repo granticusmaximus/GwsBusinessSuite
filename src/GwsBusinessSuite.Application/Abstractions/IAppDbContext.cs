@@ -64,6 +64,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<AnalyticsFunnelStep> AnalyticsFunnelSteps { get; }
     DbSet<AnalyticsSegment> AnalyticsSegments { get; }
     DbSet<AnalyticsSegmentRule> AnalyticsSegmentRules { get; }
+    DbSet<AnalyticsAnnotation> AnalyticsAnnotations { get; }
     DbSet<SocialAccount> SocialAccounts { get; }
     DbSet<SocialPost> SocialPosts { get; }
     DbSet<SocialPostTarget> SocialPostTargets { get; }

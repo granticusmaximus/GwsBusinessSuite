@@ -1,0 +1,190 @@
+@using GwsBusinessSuite.Application.Growth
+@inject IGrowthAnalyticsService AnalyticsService
+@inject ILogger<GrowthAnnotationManager> Logger
+
+<div class="annotation-manager">
+    <button class="annotation-manage" @onclick="Open" title="Manage annotations in this period">
+        <i class="bi bi-chat-square-text"></i>
+        <span>Annotations</span>
+        @if (Annotations.Count > 0)
+        {
+            <b>@Annotations.Count</b>
+        }
+    </button>
+
+    @if (ShowEditor)
+    {
+        <aside class="annotation-drawer" aria-label="Analytics annotation settings">
+            <header>
+                <div>
+                    <strong>Analytics annotations</strong>
+                    <small>Add business context to dates in the selected report period.</small>
+                </div>
+                <button @onclick="Close" aria-label="Close annotation settings">×</button>
+            </header>
+
+            @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+            {
+                <div class="annotation-message error" role="alert">@ErrorMessage</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(StatusMessage))
+            {
+                <div class="annotation-message" role="status">@StatusMessage</div>
+            }
+
+            <div class="annotation-list">
+                @if (Annotations.Count == 0)
+                {
+                    <div class="annotation-empty">
+                        <i class="bi bi-calendar2-plus"></i>
+                        <span><strong>No annotations in this period.</strong><small>Record a launch, campaign, outage, or other event that explains the trend.</small></span>
+                    </div>
+                }
+                @foreach (var annotation in Annotations.OrderByDescending(item => item.Date))
+                {
+                    <article class="annotation-definition">
+                        <time datetime="@annotation.Date.ToString("yyyy-MM-dd")">@annotation.Date.ToString("MMM d, yyyy")</time>
+                        <p>@annotation.Note</p>
+                        <div>
+                            <button title="Edit annotation" aria-label="@($"Edit annotation from {annotation.Date:MMM d, yyyy}")" @onclick="() => Edit(annotation)">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button title="Delete annotation" aria-label="@($"Delete annotation from {annotation.Date:MMM d, yyyy}")" @onclick="() => DeleteAsync(annotation.Id)">
+                                <i class="bi bi-trash3"></i>
+                            </button>
+                        </div>
+                    </article>
+                }
+            </div>
+
+            <form @onsubmit="SaveAsync" @onsubmit:preventDefault>
+                <div class="annotation-form-heading">
+                    <strong>@(AnnotationId.HasValue ? "Edit annotation" : "New annotation")</strong>
+                    @if (AnnotationId.HasValue)
+                    {
+                        <button type="button" @onclick="ResetForm">Add another</button>
+                    }
+                </div>
+                <label>
+                    Date
+                    <input type="date"
+                           min="@RangeStart.ToString("yyyy-MM-dd")"
+                           max="@RangeEnd.ToString("yyyy-MM-dd")"
+                           @bind="AnnotationDate" />
+                </label>
+                <label>
+                    Note
+                    <textarea @bind="AnnotationNote" maxlength="500" rows="4" placeholder="Homepage launch, campaign started, checkout outage…"></textarea>
+                </label>
+                <p class="annotation-help">Annotations explain the chart without changing analytics totals or visitor history.</p>
+                <button type="submit" class="annotation-save" disabled="@IsBusy">
+                    @(IsBusy ? "Saving…" : AnnotationId.HasValue ? "Save changes" : "Add annotation")
+                </button>
+            </form>
+        </aside>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<AnalyticsAnnotationView> Annotations { get; set; } = [];
+    [Parameter, EditorRequired] public DateOnly RangeStart { get; set; }
+    [Parameter, EditorRequired] public DateOnly RangeEnd { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private bool ShowEditor;
+    private bool IsBusy;
+    private Guid? AnnotationId;
+    private DateTime AnnotationDate;
+    private string AnnotationNote = string.Empty;
+    private string ErrorMessage = string.Empty;
+    private string StatusMessage = string.Empty;
+
+    protected override void OnParametersSet()
+    {
+        if (!AnnotationId.HasValue
+            && (AnnotationDate == default
+                || DateOnly.FromDateTime(AnnotationDate) < RangeStart
+                || DateOnly.FromDateTime(AnnotationDate) > RangeEnd))
+        {
+            AnnotationDate = RangeEnd.ToDateTime(TimeOnly.MinValue);
+        }
+    }
+
+    private void Open()
+    {
+        ResetForm();
+        ShowEditor = true;
+    }
+
+    private void Close()
+    {
+        ShowEditor = false;
+        ResetMessages();
+    }
+
+    private void Edit(AnalyticsAnnotationView annotation)
+    {
+        AnnotationId = annotation.Id;
+        AnnotationDate = annotation.Date.ToDateTime(TimeOnly.MinValue);
+        AnnotationNote = annotation.Note;
+        ResetMessages();
+    }
+
+    private async Task SaveAsync()
+    {
+        IsBusy = true;
+        ResetMessages();
+        try
+        {
+            var date = DateOnly.FromDateTime(AnnotationDate);
+            if (date < RangeStart || date > RangeEnd)
+                throw new ArgumentException("Choose a date inside the selected analytics period.");
+            var wasEditing = AnnotationId.HasValue;
+            await AnalyticsService.SaveAnnotationAsync(new(AnnotationId, date, AnnotationNote));
+            ResetForm();
+            StatusMessage = wasEditing ? "Annotation updated." : "Annotation added to the trend.";
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Growth Studio annotation action failed.");
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task DeleteAsync(Guid id)
+    {
+        IsBusy = true;
+        ResetMessages();
+        try
+        {
+            await AnalyticsService.DeleteAnnotationAsync(id);
+            if (AnnotationId == id) ResetForm();
+            StatusMessage = "Annotation removed. Analytics history was unchanged.";
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Growth Studio annotation deletion failed.");
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void ResetForm()
+    {
+        AnnotationId = null;
+        AnnotationDate = RangeEnd.ToDateTime(TimeOnly.MinValue);
+        AnnotationNote = string.Empty;
+        ResetMessages();
+    }
+
+    private void ResetMessages() => ErrorMessage = StatusMessage = string.Empty;
+}

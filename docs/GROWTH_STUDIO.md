@@ -44,6 +44,9 @@ algorithms.
   average engagement. Each selected 7/30/90-day window is compared with the immediately
   preceding equal-length window, and saved segments are evaluated independently in both
   periods so a current visit cannot make unrelated historical sessions appear comparable.
+- Dated analytics annotations for recording launches, campaigns, outages, and other business
+  context directly against the audience trend. Notes can be created, edited, and removed for
+  the selected reporting window without changing the underlying analytics history.
 - SentinelGPT-assisted, network-specific Facebook, X, and LinkedIn copy with editable
   previews, per-channel character limits, drafts, scheduling, delivery state, and retry.
 - Encrypted social access tokens. Tokens remain on the server and are never returned to the
@@ -59,7 +62,7 @@ rather than represented as one finished checkbox.
 
 ### Analytics phase 2
 
-- Scheduled email reports and annotations
+- Scheduled email reports
 
 ### Analytics phase 3
 

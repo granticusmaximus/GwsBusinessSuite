@@ -86,8 +86,10 @@
 .legend .visitors, .bar.visitors { background: #8f7cff; }
 .trend-chart { height: 220px; display: flex; align-items: stretch; gap: clamp(2px, .45vw, 7px); padding-top: 1.25rem; }
 .trend-day { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; }
-.bars { height: 180px; width: 100%; display: flex; align-items: flex-end; justify-content: center; gap: 2px; border-bottom: 1px solid var(--growth-line); }
+.bars { position: relative; height: 180px; width: 100%; display: flex; align-items: flex-end; justify-content: center; gap: 2px; border-bottom: 1px solid var(--growth-line); }
 .bar { width: min(8px, 42%); min-height: 2px; border-radius: 3px 3px 0 0; opacity: .9; }
+.annotation-marker { position: absolute; z-index: 2; left: 50%; bottom: .25rem; display: grid; place-items: center; width: .9rem; height: .9rem; transform: translateX(-50%); border-radius: 50%; background: #f7f3ed; color: #8b5a08; box-shadow: 0 0 0 2px rgba(16,15,13,.85); font-size: .5rem; }
+.annotation-marker b { position: absolute; top: -.45rem; right: -.45rem; display: grid; place-items: center; min-width: .7rem; height: .7rem; border-radius: 999px; background: var(--growth-accent); color: #17130c; font-size: .45rem; }
 .trend-day small { color: var(--growth-muted); font-size: .58rem; margin-top: .4rem; white-space: nowrap; overflow: hidden; }
 .insight-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; margin-bottom: .9rem; }
 ::deep .breakdown-panel .panel-heading { padding: .9rem 1rem; border-bottom: 1px solid var(--growth-line); display: flex; align-items: center; justify-content: space-between; gap: .75rem; }

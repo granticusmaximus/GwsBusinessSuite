@@ -1057,6 +1057,15 @@ public sealed class AnalyticsSegmentRule : AuditableEntity
     public AnalyticsSegment? AnalyticsSegment { get; set; }
 }
 
+// A dated business-context note overlaid on the analytics trend. The date is normalized to
+// UTC midnight so SQLite can filter and index report windows without provider-specific date
+// conversions. Multiple annotations may intentionally describe different events on one day.
+public sealed class AnalyticsAnnotation : AuditableEntity
+{
+    public long OccurredOnUnixSeconds { get; set; }
+    public required string Note { get; set; }
+}
+
 public static class SocialNetworks
 {
     public const string Facebook = "Facebook";

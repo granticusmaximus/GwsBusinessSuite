@@ -162,6 +162,38 @@ public sealed class GrowthAnalyticsServiceTests
     }
 
     [Fact]
+    public async Task AnnotationManagement_ShouldValidatePersistFilterEditAndDeleteNotes()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var service = new GrowthAnalyticsService(fixture.Db);
+        var launchDate = new DateOnly(2026, 8, 1);
+        var launchId = await service.SaveAnnotationAsync(new(null, launchDate, "  Homepage launch  "));
+        var earlierId = await service.SaveAnnotationAsync(new(null, launchDate.AddDays(-10), "Campaign planning"));
+
+        var dashboard = await service.GetDashboardAsync(
+            new DateTimeOffset(2026, 7, 30, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 8, 3, 0, 0, 0, TimeSpan.Zero));
+
+        dashboard.Annotations.Should().ContainSingle().Which.Should().Be(
+            new AnalyticsAnnotationView(launchId, launchDate, "Homepage launch"));
+        dashboard.Visitors.Should().Be(0);
+        dashboard.PageViews.Should().Be(0);
+
+        await service.SaveAnnotationAsync(new(launchId, launchDate.AddDays(1), "Homepage and pricing launch"));
+        var stored = await fixture.Db.AnalyticsAnnotations.SingleAsync(item => item.Id == launchId);
+        stored.Note.Should().Be("Homepage and pricing launch");
+        stored.OccurredOnUnixSeconds.Should().Be(
+            new DateTimeOffset(2026, 8, 2, 0, 0, 0, TimeSpan.Zero).ToUnixTimeSeconds());
+
+        var invalid = () => service.SaveAnnotationAsync(new(null, launchDate, "   "));
+        await invalid.Should().ThrowAsync<ArgumentException>().WithMessage("*note is required*");
+
+        await service.DeleteAnnotationAsync(earlierId);
+        await service.DeleteAnnotationAsync(launchId);
+        fixture.Db.AnalyticsAnnotations.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task GetDashboardAsync_ShouldAllowExportToRaiseBreakdownLimit()
     {
         await using var fixture = await Fixture.CreateAsync();

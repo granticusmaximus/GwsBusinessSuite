@@ -144,6 +144,10 @@
                         <div><span>Audience trend</span><small>Visitors and page views by day</small></div>
                         <div class="trend-heading-actions">
                             <div class="legend"><i class="views"></i> Views <i class="visitors"></i> Visitors</div>
+                            <GrowthAnnotationManager Annotations="Dashboard.Annotations"
+                                                     RangeStart="AnnotationRangeStart"
+                                                     RangeEnd="AnnotationRangeEnd"
+                                                     OnChanged="ReloadAnalyticsAfterAnnotationChangeAsync" />
                             <a class="breakdown-export" href="@ExportUrl("trend")" title="Export audience trend as CSV" aria-label="Export audience trend as CSV" data-enhance-nav="false">
                                 <i class="bi bi-download"></i>
                             </a>
@@ -156,6 +160,19 @@
                                 <div class="bars">
                                     <span class="bar views" style="@BarHeight(point.PageViews)"></span>
                                     <span class="bar visitors" style="@BarHeight(point.Visitors)"></span>
+                                    @if (AnnotationsFor(point.Date) is { Count: > 0 } annotations)
+                                    {
+                                        <span class="annotation-marker"
+                                              role="img"
+                                              aria-label="@AnnotationLabel(point.Date, annotations)"
+                                              title="@AnnotationTitle(annotations)">
+                                            <i class="bi bi-chat-square-text-fill"></i>
+                                            @if (annotations.Count > 1)
+                                            {
+                                                <b>@annotations.Count</b>
+                                            }
+                                        </span>
+                                    }
                                 </div>
                                 <small>@point.Date.ToString(Dashboard.Trend.Count > 35 ? "MMM" : "M/d")</small>
                             </div>
@@ -450,6 +467,12 @@
         await LoadAnalyticsAsync();
     }
 
+    private async Task ReloadAnalyticsAfterAnnotationChangeAsync()
+    {
+        _analyticsLoaded = false;
+        await LoadAnalyticsAsync();
+    }
+
     private async Task ChangeSegmentAsync(Guid? segmentId)
     {
         SelectedSegmentId = segmentId;
@@ -613,6 +636,14 @@
         : $"{duration.Seconds}s";
     private int TrendMax => Math.Max(1, Dashboard.Trend.Select(item => Math.Max(item.PageViews, item.Visitors)).DefaultIfEmpty(1).Max());
     private string BarHeight(int value) => $"height:{Math.Max(2, value * 100d / TrendMax):0.#}%";
+    private DateOnly AnnotationRangeStart => DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-RangeDays));
+    private DateOnly AnnotationRangeEnd => DateOnly.FromDateTime(DateTime.UtcNow);
+    private List<AnalyticsAnnotationView> AnnotationsFor(DateOnly date) =>
+        Dashboard.Annotations.Where(item => item.Date == date).ToList();
+    private static string AnnotationTitle(IReadOnlyCollection<AnalyticsAnnotationView> annotations) =>
+        string.Join("\n", annotations.Select(item => item.Note));
+    private static string AnnotationLabel(DateOnly date, IReadOnlyCollection<AnalyticsAnnotationView> annotations) =>
+        $"{annotations.Count} analytics annotation{(annotations.Count == 1 ? string.Empty : "s")} on {date:MMMM d}: {string.Join("; ", annotations.Select(item => item.Note))}";
     private string ExternalIdLabel => AccountNetwork switch
     {
         SocialNetworks.Facebook => "Facebook Page ID",
