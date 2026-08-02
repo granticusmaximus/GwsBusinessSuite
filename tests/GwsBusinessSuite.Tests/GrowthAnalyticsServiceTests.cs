@@ -120,6 +120,48 @@ public sealed class GrowthAnalyticsServiceTests
     }
 
     [Fact]
+    public async Task GetDashboardAsync_ShouldCompareHeadlineMetricsWithPreviousEqualPeriod()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var from = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero);
+        var to = from.AddDays(7);
+        fixture.Db.WebAnalyticsEvents.AddRange(
+            Event("pageview", "previous", "previous-session", "/", from.AddDays(-1)),
+            Event("engagement", "previous", "previous-session", "/", from.AddDays(-1).AddMinutes(1), engagement: 30),
+            Event("pageview", "current-a", "current-a-session", "/", from.AddDays(1)),
+            Event("pageview", "current-a", "current-a-session", "/pricing", from.AddDays(1).AddMinutes(1)),
+            Event("engagement", "current-a", "current-a-session", "/pricing", from.AddDays(1).AddMinutes(2), engagement: 60),
+            Event("pageview", "current-b", "current-b-session", "/", from.AddDays(2)),
+            Event("engagement", "current-b", "current-b-session", "/", from.AddDays(2).AddMinutes(1), engagement: 120));
+        await fixture.Db.SaveChangesAsync();
+
+        var dashboard = await new GrowthAnalyticsService(fixture.Db).GetDashboardAsync(from, to);
+
+        dashboard.VisitorsComparison.Should().Be(new AnalyticsPeriodComparison(1, 100));
+        dashboard.PageViewsComparison.Should().Be(new AnalyticsPeriodComparison(1, 200));
+        dashboard.BounceRateComparison.Should().Be(new AnalyticsPeriodComparison(100, -50));
+        dashboard.AverageEngagementComparison.Should().Be(new AnalyticsPeriodComparison(30, 200));
+    }
+
+    [Fact]
+    public async Task GetDashboardAsync_ShouldDescribeNewMetricsWithoutInfiniteChange()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var from = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero);
+        var to = from.AddDays(7);
+        fixture.Db.WebAnalyticsEvents.Add(
+            Event("pageview", "current", "current-session", "/", from.AddDays(1)));
+        await fixture.Db.SaveChangesAsync();
+
+        var dashboard = await new GrowthAnalyticsService(fixture.Db).GetDashboardAsync(from, to);
+
+        dashboard.VisitorsComparison.Should().Be(new AnalyticsPeriodComparison(0, null));
+        dashboard.PageViewsComparison.Should().Be(new AnalyticsPeriodComparison(0, null));
+        dashboard.BounceRateComparison.Should().Be(new AnalyticsPeriodComparison(0, null));
+        dashboard.AverageEngagementComparison.Should().Be(new AnalyticsPeriodComparison(0, 0));
+    }
+
+    [Fact]
     public async Task GetDashboardAsync_ShouldAllowExportToRaiseBreakdownLimit()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -430,6 +472,8 @@ public sealed class GrowthAnalyticsServiceTests
             ]
         });
         fixture.Db.WebAnalyticsEvents.AddRange(
+            Event("pageview", "previous-match", "previous-match-session", "/pricing/legacy", now.AddHours(-36), source: "linkedin"),
+            Event("pageview", "previous-other", "previous-other-session", "/pricing", now.AddHours(-35), source: "email"),
             Event("pageview", "visitor-a", "session-a", "/pricing/team", now.AddMinutes(-12), source: "linkedin"),
             Event("engagement", "visitor-a", "session-a", "/pricing/team", now.AddMinutes(-11), engagement: 24),
             Event("newsletter_signup", "visitor-a", "session-a", "/pricing/team", now.AddMinutes(-10)),
@@ -447,6 +491,7 @@ public sealed class GrowthAnalyticsServiceTests
         dashboard.PageViews.Should().Be(1);
         dashboard.AverageEngagement.Should().Be(TimeSpan.FromSeconds(24));
         dashboard.TopSources.Should().ContainSingle(row => row.Label == "linkedin");
+        dashboard.VisitorsComparison.Should().Be(new AnalyticsPeriodComparison(1, 0));
         dashboard.TotalConversions.Should().Be(1);
         dashboard.OverallConversionRate.Should().Be(100);
         dashboard.Funnels.Should().ContainSingle().Which.CompletionRate.Should().Be(100);

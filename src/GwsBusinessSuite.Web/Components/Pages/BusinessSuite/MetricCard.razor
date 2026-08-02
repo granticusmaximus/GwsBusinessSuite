@@ -1,11 +1,48 @@
+@using GwsBusinessSuite.Application.Growth
+
 <article class="metric-card">
     <span>@Label</span>
     <strong>@Value</strong>
-    <small>@Detail</small>
+    @if (Comparison is not null)
+    {
+        <small class="metric-comparison @ComparisonClass" title="Previous period: @PreviousValue">
+            @if (Comparison.ChangePercent is null)
+            {
+                <i class="bi bi-stars"></i><span>New vs previous period</span>
+            }
+            else
+            {
+                <i class="bi @ComparisonIcon"></i><span>@($"{Comparison.ChangePercent:+0.0;-0.0;0.0}%") vs previous period</span>
+            }
+        </small>
+    }
+    <small class="metric-detail">@Detail</small>
 </article>
 
 @code {
     [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
     [Parameter, EditorRequired] public string Value { get; set; } = string.Empty;
     [Parameter] public string Detail { get; set; } = string.Empty;
+    [Parameter] public AnalyticsPeriodComparison? Comparison { get; set; }
+    [Parameter] public string PreviousValue { get; set; } = string.Empty;
+    [Parameter] public bool LowerIsBetter { get; set; }
+
+    private string ComparisonIcon => Comparison?.ChangePercent switch
+    {
+        > 0 => "bi-arrow-up-right",
+        < 0 => "bi-arrow-down-right",
+        _ => "bi-dash"
+    };
+
+    private string ComparisonClass
+    {
+        get
+        {
+            if (Comparison?.ChangePercent is null or 0) return "neutral";
+            var improved = LowerIsBetter
+                ? Comparison.ChangePercent < 0
+                : Comparison.ChangePercent > 0;
+            return improved ? "improved" : "declined";
+        }
+    }
 }

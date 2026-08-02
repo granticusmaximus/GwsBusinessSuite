@@ -78,9 +78,9 @@ also passes.
   ordered funnel/drop-off reporting, saved audience segments, session-scoped report filters,
   new/returning retention cohorts, and privacy-reviewed country/region reporting backed by
   a locally hosted GeoIP database are delivered. Range- and segment-aware CSV exports for
-  trend, acquisition, campaign, device, page, country, and region reports are also delivered;
-  scheduled email reports, annotations, comparison periods, social OAuth/media, and
-  engagement imports remain staged in
+  trend, acquisition, campaign, device, page, country, and region reports and automatic
+  previous-period comparisons for headline metrics are also delivered; scheduled email
+  reports, annotations, social OAuth/media, and engagement imports remain staged in
   `docs/GROWTH_STUDIO.md`.
 - Workflow Automation (n8n-class, clean-room) 🚧 — foundational graph persistence,
   immutable publish versions, protected credential references, execution history, core node

@@ -40,6 +40,10 @@ algorithms.
   devices, countries, and regions. Exports honor the selected 7/30/90-day range and saved
   audience segment while returning up to 1,000 breakdown rows; the dashboard keeps its
   focused 12-row presentation so adding export depth does not make the workspace noisier.
+- Automatic previous-period comparisons on unique visitors, page views, bounce rate, and
+  average engagement. Each selected 7/30/90-day window is compared with the immediately
+  preceding equal-length window, and saved segments are evaluated independently in both
+  periods so a current visit cannot make unrelated historical sessions appear comparable.
 - SentinelGPT-assisted, network-specific Facebook, X, and LinkedIn copy with editable
   previews, per-channel character limits, drafts, scheduling, delivery state, and retry.
 - Encrypted social access tokens. Tokens remain on the server and are never returned to the
@@ -55,7 +59,7 @@ rather than represented as one finished checkbox.
 
 ### Analytics phase 2
 
-- Scheduled email reports, annotations, and comparison periods
+- Scheduled email reports and annotations
 
 ### Analytics phase 3
 

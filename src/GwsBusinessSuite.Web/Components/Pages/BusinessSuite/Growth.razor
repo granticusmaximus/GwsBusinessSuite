@@ -72,10 +72,27 @@
             else
             {
                 <div class="metric-grid">
-                    <MetricCard Label="Unique visitors" Value="@Dashboard.Visitors.ToString("N0")" Detail="First-party, cookieless" />
-                    <MetricCard Label="Page views" Value="@Dashboard.PageViews.ToString("N0")" Detail="@($"{Dashboard.ViewsPerSession:N2} per session")" />
-                    <MetricCard Label="Bounce rate" Value="@($"{Dashboard.BounceRate:N1}%")" Detail="Single-page sessions" />
-                    <MetricCard Label="Avg. engagement" Value="@FormatDuration(Dashboard.AverageEngagement)" Detail="Active page time" />
+                    <MetricCard Label="Unique visitors"
+                                Value="@Dashboard.Visitors.ToString("N0")"
+                                Detail="First-party, cookieless"
+                                Comparison="Dashboard.VisitorsComparison"
+                                PreviousValue="@Dashboard.VisitorsComparison.PreviousValue.ToString("N0")" />
+                    <MetricCard Label="Page views"
+                                Value="@Dashboard.PageViews.ToString("N0")"
+                                Detail="@($"{Dashboard.ViewsPerSession:N2} per session")"
+                                Comparison="Dashboard.PageViewsComparison"
+                                PreviousValue="@Dashboard.PageViewsComparison.PreviousValue.ToString("N0")" />
+                    <MetricCard Label="Bounce rate"
+                                Value="@($"{Dashboard.BounceRate:N1}%")"
+                                Detail="Single-page sessions"
+                                Comparison="Dashboard.BounceRateComparison"
+                                PreviousValue="@($"{Dashboard.BounceRateComparison.PreviousValue:N1}%")"
+                                LowerIsBetter="true" />
+                    <MetricCard Label="Avg. engagement"
+                                Value="@FormatDuration(Dashboard.AverageEngagement)"
+                                Detail="Active page time"
+                                Comparison="Dashboard.AverageEngagementComparison"
+                                PreviousValue="@FormatDuration(TimeSpan.FromSeconds((double)Dashboard.AverageEngagementComparison.PreviousValue))" />
                 </div>
 
                 <GrowthRetentionPanel Dashboard="Dashboard" />

@@ -15,6 +15,7 @@ public sealed record WebAnalyticsEventInput(
 public sealed record AnalyticsMetric(string Label, int Value, decimal ChangePercent = 0);
 public sealed record AnalyticsPoint(DateOnly Date, int Visitors, int PageViews);
 public sealed record AnalyticsBreakdownRow(string Label, int Visitors, int Views, decimal Share);
+public sealed record AnalyticsPeriodComparison(decimal PreviousValue, decimal? ChangePercent);
 public sealed record AnalyticsGoalInput(
     Guid? Id,
     string Name,
@@ -111,6 +112,10 @@ public sealed class GrowthAnalyticsDashboard
     public int NewVisitors { get; init; }
     public int ReturningVisitors { get; init; }
     public decimal ReturningVisitorRate { get; init; }
+    public AnalyticsPeriodComparison VisitorsComparison { get; init; } = new(0, 0);
+    public AnalyticsPeriodComparison PageViewsComparison { get; init; } = new(0, 0);
+    public AnalyticsPeriodComparison BounceRateComparison { get; init; } = new(0, 0);
+    public AnalyticsPeriodComparison AverageEngagementComparison { get; init; } = new(0, 0);
     public bool GeoLocationConfigured { get; init; }
     public string RetentionPeriodLabel { get; init; } = "Day";
     public IReadOnlyList<AnalyticsRetentionCohort> RetentionCohorts { get; init; } = [];

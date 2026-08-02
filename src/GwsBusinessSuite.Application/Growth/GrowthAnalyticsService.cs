@@ -80,9 +80,17 @@ public sealed class GrowthAnalyticsService(
     {
         var fromUnix = from.ToUnixTimeSeconds();
         var toUnix = to.ToUnixTimeSeconds();
-        var events = await db.WebAnalyticsEvents.AsNoTracking()
-            .Where(item => item.OccurredAtUnixSeconds >= fromUnix && item.OccurredAtUnixSeconds < toUnix)
+        var rangeSeconds = Math.Max(1, toUnix - fromUnix);
+        var comparisonFromUnix = fromUnix - rangeSeconds;
+        var reportEvents = await db.WebAnalyticsEvents.AsNoTracking()
+            .Where(item => item.OccurredAtUnixSeconds >= comparisonFromUnix && item.OccurredAtUnixSeconds < toUnix)
             .ToListAsync(cancellationToken);
+        var events = reportEvents
+            .Where(item => item.OccurredAtUnixSeconds >= fromUnix)
+            .ToList();
+        var comparisonEvents = reportEvents
+            .Where(item => item.OccurredAtUnixSeconds < fromUnix)
+            .ToList();
         if (segmentId is { } selectedSegmentId)
         {
             var segment = await db.AnalyticsSegments.AsNoTracking()
@@ -90,12 +98,16 @@ public sealed class GrowthAnalyticsService(
                 .FirstOrDefaultAsync(item => item.Id == selectedSegmentId, cancellationToken)
                 ?? throw new InvalidOperationException("The selected audience segment no longer exists.");
             events = ApplySegment(events, segment);
+            comparisonEvents = ApplySegment(comparisonEvents, segment);
         }
         var pageViews = events.Where(item => item.EventName == WebAnalyticsEventNames.PageView).ToList();
         var sessions = pageViews.GroupBy(item => item.SessionKey).ToList();
         var sessionKeys = sessions.Select(group => group.Key).ToHashSet(StringComparer.Ordinal);
         var engagement = events.Where(item => item.EventName == WebAnalyticsEventNames.Engagement).ToList();
         var visitors = pageViews.Select(item => item.VisitorKey).Distinct(StringComparer.Ordinal).Count();
+        var bounceRate = BounceRate(sessions);
+        var averageEngagement = AverageEngagement(engagement);
+        var comparisonMetrics = BuildHeadlineMetrics(comparisonEvents);
         var nowCutoff = DateTimeOffset.UtcNow.AddMinutes(-5);
         var goalDefinitions = await db.AnalyticsGoals.AsNoTracking()
             .OrderBy(item => item.Name)
@@ -113,13 +125,9 @@ public sealed class GrowthAnalyticsService(
             Visitors = visitors,
             PageViews = pageViews.Count,
             Sessions = sessions.Count,
-            BounceRate = sessions.Count == 0
-                ? 0
-                : Math.Round(sessions.Count(group => group.Count() == 1) * 100m / sessions.Count, 1),
+            BounceRate = bounceRate,
             ViewsPerSession = sessions.Count == 0 ? 0 : Math.Round(pageViews.Count / (decimal)sessions.Count, 2),
-            AverageEngagement = engagement.Count == 0
-                ? TimeSpan.Zero
-                : TimeSpan.FromSeconds(engagement.Average(item => item.EngagementSeconds)),
+            AverageEngagement = averageEngagement,
             VisitorsNow = pageViews
                 .Where(item => item.CreatedAt >= nowCutoff)
                 .Select(item => item.VisitorKey)
@@ -132,6 +140,12 @@ public sealed class GrowthAnalyticsService(
             NewVisitors = retention.NewVisitors,
             ReturningVisitors = retention.ReturningVisitors,
             ReturningVisitorRate = retention.ReturningVisitorRate,
+            VisitorsComparison = Compare(visitors, comparisonMetrics.Visitors),
+            PageViewsComparison = Compare(pageViews.Count, comparisonMetrics.PageViews),
+            BounceRateComparison = Compare(bounceRate, comparisonMetrics.BounceRate),
+            AverageEngagementComparison = Compare(
+                (decimal)averageEngagement.TotalSeconds,
+                (decimal)comparisonMetrics.AverageEngagement.TotalSeconds),
             GeoLocationConfigured = geoLocationResolver?.IsConfigured == true,
             RetentionPeriodLabel = retention.PeriodLabel,
             RetentionCohorts = retention.Cohorts,
@@ -418,6 +432,35 @@ public sealed class GrowthAnalyticsService(
             .ToHashSet(StringComparer.Ordinal);
         return events.Where(item => matchingSessions.Contains(item.SessionKey)).ToList();
     }
+
+    private static HeadlineMetrics BuildHeadlineMetrics(IReadOnlyCollection<WebAnalyticsEvent> events)
+    {
+        var pageViews = events.Where(item => item.EventName == WebAnalyticsEventNames.PageView).ToList();
+        var sessions = pageViews.GroupBy(item => item.SessionKey).ToList();
+        var engagement = events.Where(item => item.EventName == WebAnalyticsEventNames.Engagement).ToList();
+        return new(
+            pageViews.Select(item => item.VisitorKey).Distinct(StringComparer.Ordinal).Count(),
+            pageViews.Count,
+            BounceRate(sessions),
+            AverageEngagement(engagement));
+    }
+
+    private static decimal BounceRate(IReadOnlyCollection<IGrouping<string, WebAnalyticsEvent>> sessions) =>
+        sessions.Count == 0
+            ? 0
+            : Math.Round(sessions.Count(group => group.Count() == 1) * 100m / sessions.Count, 1);
+
+    private static TimeSpan AverageEngagement(IReadOnlyCollection<WebAnalyticsEvent> engagement) =>
+        engagement.Count == 0
+            ? TimeSpan.Zero
+            : TimeSpan.FromSeconds(engagement.Average(item => item.EngagementSeconds));
+
+    private static AnalyticsPeriodComparison Compare(decimal current, decimal previous) =>
+        new(
+            previous,
+            previous == 0
+                ? current == 0 ? 0 : null
+                : Math.Round((current - previous) * 100m / previous, 1));
 
     private async Task<RetentionReport> BuildRetentionAsync(
         IReadOnlyCollection<WebAnalyticsEvent> pageViews,
@@ -794,4 +837,10 @@ public sealed class GrowthAnalyticsService(
         decimal ReturningVisitorRate,
         string PeriodLabel,
         IReadOnlyList<AnalyticsRetentionCohort> Cohorts);
+
+    private sealed record HeadlineMetrics(
+        int Visitors,
+        int PageViews,
+        decimal BounceRate,
+        TimeSpan AverageEngagement);
 }

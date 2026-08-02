@@ -49,6 +49,12 @@
 ::deep .metric-card { background: linear-gradient(145deg, var(--growth-panel-2), var(--growth-panel)); border: 1px solid var(--growth-line); border-radius: .9rem; padding: 1.1rem; }
 ::deep .metric-card span, ::deep .metric-card small { color: var(--growth-muted); display: block; font-size: .75rem; }
 ::deep .metric-card strong { display: block; font: 650 1.85rem/1.1 Georgia, serif; margin: .55rem 0 .35rem; }
+::deep .metric-card .metric-comparison { display: inline-flex; align-items: center; gap: .3rem; width: fit-content; margin-bottom: .35rem; font-size: .65rem; font-weight: 750; }
+::deep .metric-card .metric-comparison span { color: inherit; font-size: inherit; }
+::deep .metric-card .metric-comparison.improved { color: #86efac; }
+::deep .metric-card .metric-comparison.declined { color: #fca5a5; }
+::deep .metric-card .metric-comparison.neutral { color: var(--growth-muted); }
+::deep .metric-card .metric-detail { font-size: .68rem; }
 .growth-panel { background: var(--growth-panel); border: 1px solid var(--growth-line); border-radius: .9rem; overflow: hidden; }
 .conversion-panel { margin-bottom: .9rem; }
 .conversion-heading { padding: .9rem 1rem; border-bottom: 1px solid var(--growth-line); }
