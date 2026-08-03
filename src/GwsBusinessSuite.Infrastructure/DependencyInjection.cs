@@ -152,6 +152,11 @@ public static class DependencyInjection
         services.AddScoped<IAffiliateAnalyticsService, AffiliateAnalyticsService>();
         services.AddSingleton<IAnalyticsGeoLocationResolver, AnalyticsGeoLocationResolver>();
         services.AddScoped<IGrowthAnalyticsService, GrowthAnalyticsService>();
+        services.AddOptions<GrowthReportEmailOptions>()
+            .Bind(configuration.GetSection(GrowthReportEmailOptions.SectionName));
+        services.AddSingleton<IGrowthReportEmailSender, GrowthReportEmailSender>();
+        services.AddScoped<IGrowthReportService, GrowthReportService>();
+        services.AddHostedService<GrowthReportBackgroundService>();
         services.AddHttpClient<ISocialPublishingService, SocialPublishingService>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);

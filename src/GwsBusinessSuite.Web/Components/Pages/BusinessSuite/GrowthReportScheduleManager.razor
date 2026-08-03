@@ -1,0 +1,208 @@
+@using GwsBusinessSuite.Application.Growth
+@using GwsBusinessSuite.Domain.Entities
+@inject IGrowthReportService ReportService
+@inject ILogger<GrowthReportScheduleManager> Logger
+
+<div class="report-manager">
+    <button class="quiet-button report-manage" @onclick="Open" title="Manage scheduled analytics reports">
+        <i class="bi bi-envelope-paper"></i> Email reports
+        @if (Schedules.Any(item => item.IsActive))
+        {
+            <b>@Schedules.Count(item => item.IsActive)</b>
+        }
+    </button>
+
+    @if (ShowEditor)
+    {
+        <aside class="report-drawer" aria-label="Scheduled analytics email reports">
+            <header>
+                <div><strong>Scheduled email reports</strong><small>Deliver a focused Growth Studio summary on a weekly or monthly cadence.</small></div>
+                <button @onclick="Close" aria-label="Close scheduled reports">×</button>
+            </header>
+
+            <div class="delivery-state @(ReportService.DeliveryConfiguration.IsConfigured ? "ready" : "setup")">
+                <i class="bi @(ReportService.DeliveryConfiguration.IsConfigured ? "bi-check-circle" : "bi-exclamation-circle")"></i>
+                <span><strong>@(ReportService.DeliveryConfiguration.IsConfigured ? "Delivery ready" : "SMTP setup required")</strong><small>@ReportService.DeliveryConfiguration.Message</small></span>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+            {
+                <div class="report-message error" role="alert">@ErrorMessage</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(StatusMessage))
+            {
+                <div class="report-message" role="status">@StatusMessage</div>
+            }
+
+            <div class="report-list">
+                @if (Schedules.Count == 0)
+                {
+                    <div class="report-empty"><i class="bi bi-calendar2-week"></i><span><strong>No report schedules yet.</strong><small>Create one below, then use Send now to verify the configured delivery path.</small></span></div>
+                }
+                @foreach (var schedule in Schedules)
+                {
+                    <article class="report-definition">
+                        <div>
+                            <span class="report-status @schedule.LastStatus.ToLowerInvariant()"></span>
+                            <strong>@schedule.Name</strong>
+                            <small>@schedule.RecipientEmail · @ScheduleLabel(schedule)</small>
+                            <small>@DeliveryLabel(schedule)</small>
+                            @if (schedule.LastDeliveredAt is { } delivered)
+                            {
+                                <small>Last delivered @delivered.ToString("MMM d, yyyy h:mm tt 'UTC'")</small>
+                            }
+                            else if (schedule.LastAttemptAt is { } attempted)
+                            {
+                                <small>Last attempted @attempted.ToString("MMM d, yyyy h:mm tt 'UTC'")</small>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(schedule.LastError))
+                            {
+                                <small class="failure">@schedule.LastError</small>
+                            }
+                        </div>
+                        <div class="report-actions">
+                            <button title="Send report now" aria-label="@($"Send {schedule.Name} now")" disabled="@IsBusy" @onclick="() => SendNowAsync(schedule.Id)"><i class="bi bi-send"></i></button>
+                            <button title="Edit report schedule" aria-label="@($"Edit {schedule.Name}")" @onclick="() => Edit(schedule)"><i class="bi bi-pencil"></i></button>
+                            <button title="Delete report schedule" aria-label="@($"Delete {schedule.Name}")" disabled="@IsBusy" @onclick="() => DeleteAsync(schedule.Id)"><i class="bi bi-trash3"></i></button>
+                        </div>
+                    </article>
+                }
+            </div>
+
+            <form @onsubmit="SaveAsync" @onsubmit:preventDefault>
+                <div class="report-form-heading">
+                    <strong>@(ScheduleId.HasValue ? "Edit schedule" : "New schedule")</strong>
+                    @if (ScheduleId.HasValue) { <button type="button" @onclick="ResetForm">Add another</button> }
+                </div>
+                <label>Name<input required maxlength="100" @bind="Name" placeholder="Weekly Growth summary" /></label>
+                <label>Recipient<input required type="email" maxlength="320" @bind="RecipientEmail" placeholder="name@example.com" /></label>
+                <div class="report-form-grid">
+                    <label>Frequency
+                        <select @bind="Frequency" @bind:after="FrequencyChanged">
+                            <option value="@AnalyticsReportFrequencies.Weekly">Weekly</option>
+                            <option value="@AnalyticsReportFrequencies.Monthly">Monthly</option>
+                        </select>
+                    </label>
+                    <label>Report range
+                        <select @bind="RangeDays"><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option></select>
+                    </label>
+                    <label>@(Frequency == AnalyticsReportFrequencies.Weekly ? "Delivery day" : "Day of month")
+                        <select @bind="DeliveryDay">
+                            @if (Frequency == AnalyticsReportFrequencies.Weekly)
+                            {
+                                @for (var day = 0; day < 7; day++) { <option value="@day">@((DayOfWeek)day)</option> }
+                            }
+                            else
+                            {
+                                @for (var day = 1; day <= 28; day++) { <option value="@day">@Ordinal(day)</option> }
+                            }
+                        </select>
+                    </label>
+                    <label>Delivery time
+                        <select @bind="DeliveryHourUtc">
+                            @for (var hour = 0; hour < 24; hour++) { <option value="@hour">@HourLabel(hour)</option> }
+                        </select>
+                    </label>
+                </div>
+                <label class="report-toggle"><input type="checkbox" @bind="IsActive" /><span><strong>Active schedule</strong><small>Paused schedules keep their delivery history but do not send.</small></span></label>
+                <button type="submit" class="report-save" disabled="@IsBusy">@(IsBusy ? "Saving…" : ScheduleId.HasValue ? "Save changes" : "Create schedule")</button>
+            </form>
+        </aside>
+    }
+</div>
+
+@code {
+    private List<AnalyticsReportScheduleView> Schedules = [];
+    private bool ShowEditor;
+    private bool IsBusy;
+    private Guid? ScheduleId;
+    private string Name = string.Empty;
+    private string RecipientEmail = string.Empty;
+    private string Frequency = AnalyticsReportFrequencies.Weekly;
+    private int RangeDays = 7;
+    private int DeliveryDay = 1;
+    private int DeliveryHourUtc = 13;
+    private bool IsActive = true;
+    private string ErrorMessage = string.Empty;
+    private string StatusMessage = string.Empty;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private void Open() { ResetForm(); ShowEditor = true; }
+    private void Close() { ShowEditor = false; ResetMessages(); }
+    private Task FrequencyChanged()
+    {
+        DeliveryDay = Frequency == AnalyticsReportFrequencies.Weekly ? 1 : Math.Clamp(DeliveryDay, 1, 28);
+        return Task.CompletedTask;
+    }
+
+    private void Edit(AnalyticsReportScheduleView schedule)
+    {
+        ScheduleId = schedule.Id;
+        Name = schedule.Name;
+        RecipientEmail = schedule.RecipientEmail;
+        Frequency = schedule.Frequency;
+        RangeDays = schedule.RangeDays;
+        DeliveryDay = schedule.DeliveryDay;
+        DeliveryHourUtc = schedule.DeliveryHourUtc;
+        IsActive = schedule.IsActive;
+        ResetMessages();
+    }
+
+    private async Task SaveAsync() => await RunAsync(async () =>
+    {
+        var editing = ScheduleId.HasValue;
+        await ReportService.SaveScheduleAsync(new(ScheduleId, Name, RecipientEmail, Frequency, RangeDays, DeliveryDay, DeliveryHourUtc, IsActive));
+        await LoadAsync();
+        ResetForm();
+        StatusMessage = editing ? "Report schedule updated." : "Report schedule created.";
+    }, "saving");
+
+    private async Task SendNowAsync(Guid id) => await RunAsync(async () =>
+    {
+        await ReportService.SendNowAsync(id);
+        await LoadAsync();
+        StatusMessage = "Report delivered through the configured email transport.";
+    }, "sending");
+
+    private async Task DeleteAsync(Guid id) => await RunAsync(async () =>
+    {
+        await ReportService.DeleteScheduleAsync(id);
+        await LoadAsync();
+        if (ScheduleId == id) ResetForm();
+        StatusMessage = "Report schedule removed.";
+    }, "deleting");
+
+    private async Task RunAsync(Func<Task> action, string actionName)
+    {
+        IsBusy = true;
+        ResetMessages();
+        try { await action(); }
+        catch (Exception ex) { Logger.LogError(ex, "Growth report schedule action failed while {Action}.", actionName); ErrorMessage = ex.Message; }
+        finally { IsBusy = false; }
+    }
+
+    private async Task LoadAsync() => Schedules = (await ReportService.GetSchedulesAsync()).ToList();
+    private void ResetForm()
+    {
+        ScheduleId = null; Name = string.Empty; RecipientEmail = string.Empty;
+        Frequency = AnalyticsReportFrequencies.Weekly; RangeDays = 7; DeliveryDay = 1;
+        DeliveryHourUtc = 13; IsActive = true; ResetMessages();
+    }
+    private void ResetMessages() => ErrorMessage = StatusMessage = string.Empty;
+
+    private static string ScheduleLabel(AnalyticsReportScheduleView schedule) => schedule.Frequency == AnalyticsReportFrequencies.Weekly
+        ? $"Every {(DayOfWeek)schedule.DeliveryDay} at {HourLabel(schedule.DeliveryHourUtc)} · {schedule.RangeDays}-day report"
+        : $"Every {Ordinal(schedule.DeliveryDay)} at {HourLabel(schedule.DeliveryHourUtc)} · {schedule.RangeDays}-day report";
+    private static string DeliveryLabel(AnalyticsReportScheduleView schedule) => !schedule.IsActive
+        ? "Paused"
+        : schedule.NextRunAt is { } next ? $"Next {next:MMM d, yyyy h:mm tt} UTC" : "Next delivery pending";
+    private static string HourLabel(int hour) => new DateTime(2000, 1, 1, hour, 0, 0).ToString("h:mm tt 'UTC'");
+    private static string Ordinal(int value)
+    {
+        var suffix = value % 100 is 11 or 12 or 13
+            ? "th"
+            : (value % 10) switch { 1 => "st", 2 => "nd", 3 => "rd", _ => "th" };
+        return $"{value}{suffix}";
+    }
+}

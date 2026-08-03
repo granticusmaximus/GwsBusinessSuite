@@ -47,6 +47,10 @@ algorithms.
 - Dated analytics annotations for recording launches, campaigns, outages, and other business
   context directly against the audience trend. Notes can be created, edited, and removed for
   the selected reporting window without changing the underlying analytics history.
+- Weekly and monthly email reports with selectable 7/30/90-day windows, UTC delivery timing,
+  pause/edit/delete controls, manual proof delivery, last-attempt status, and automatic
+  15-minute retry after transport failures. Reports include headline comparisons, top pages,
+  acquisition sources, and dated annotations without exposing SMTP credentials to the browser.
 - SentinelGPT-assisted, network-specific Facebook, X, and LinkedIn copy with editable
   previews, per-channel character limits, drafts, scheduling, delivery state, and retry.
 - Encrypted social access tokens. Tokens remain on the server and are never returned to the
@@ -62,7 +66,8 @@ rather than represented as one finished checkbox.
 
 ### Analytics phase 2
 
-- Scheduled email reports
+Complete: CSV export, previous-period comparisons, dated annotations, and scheduled email
+reports are delivered.
 
 ### Analytics phase 3
 
@@ -118,3 +123,24 @@ temporarily unavailable.
 The default location is `/app/data/GeoLite2-City.mmdb`. To use another container path, set
 `ANALYTICS_GEOIP_DATABASE_PATH` in the deployment `.env` file. Never commit an MMDB file to
 the repository; `*.mmdb` is ignored.
+
+## Scheduled report email setup
+
+Report schedules can be created while email is unconfigured, but delivery stays disabled and
+Growth Studio shows the missing setup. Add these values to the gitignored production `.env`
+file and restart the app:
+
+```bash
+GrowthReportEmail__Host=smtp.example.com
+GrowthReportEmail__Port=587
+GrowthReportEmail__Security=StartTls
+GrowthReportEmail__Username=replace-with-smtp-username
+GrowthReportEmail__Password=replace-with-smtp-password
+GrowthReportEmail__FromAddress=reports@example.com
+GrowthReportEmail__FromName=GWS Growth Studio
+```
+
+`StartTls` is the secure default for port 587; `SslOnConnect` is available for providers that
+require implicit TLS on port 465. After configuration, use **Send now** from Growth Studio and
+confirm the delivered message before relying on the recurring schedule. Failed scheduled
+attempts retain the error in the schedule and retry after 15 minutes.

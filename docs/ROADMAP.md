@@ -79,9 +79,9 @@ also passes.
   new/returning retention cohorts, and privacy-reviewed country/region reporting backed by
   a locally hosted GeoIP database are delivered. Range- and segment-aware CSV exports for
   trend, acquisition, campaign, device, page, country, and region reports, automatic
-  previous-period comparisons for headline metrics, and dated trend annotations are also
-  delivered; scheduled email reports, social OAuth/media, and engagement imports remain
-  staged in `docs/GROWTH_STUDIO.md`.
+  previous-period comparisons for headline metrics, dated trend annotations, and retryable
+  weekly/monthly email reports are also delivered; social OAuth/media and engagement imports
+  remain staged in `docs/GROWTH_STUDIO.md`.
 - Workflow Automation (n8n-class, clean-room) 🚧 — foundational graph persistence,
   immutable publish versions, protected credential references, execution history, core node
   registry, and visual Blazor editor are tracked in `docs/WORKFLOW_AUTOMATION.md`. Advanced
