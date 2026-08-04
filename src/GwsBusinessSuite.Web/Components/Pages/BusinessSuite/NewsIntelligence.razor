@@ -6,31 +6,35 @@
 @using GwsBusinessSuite.Infrastructure.Services
 @inject INewsIntelligenceService NewsService
 @inject ILogger<NewsIntelligence> Logger
+@inject IJSRuntime JS
 
-<PageTitle>News Intelligence</PageTitle>
+<PageTitle>Media Watch</PageTitle>
 
-<div class="page-header d-flex align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-newspaper me-2 text-primary"></i>News Intelligence</h1>
-        <p class="mb-0">
-            @FeedHeading()
+<main class="media-watch" data-theme="@(_darkMode ? "dark" : "light")">
+<header class="civic-masthead">
+    <div class="masthead-copy">
+        <span class="civic-eyebrow"><i class="bi bi-newspaper"></i> Media Watch</span>
+        <h1>@FeedHeading()</h1>
+        <p>
+            Watched topics, breaking signals, and the wider news pool in one calm feed.
             @if (_feed?.LastRefreshedAt.HasValue == true)
             {
-                <span class="text-muted small">&middot; Updated @TimeAgo(_feed.LastRefreshedAt.Value)</span>
+                <span>&middot; Updated @TimeAgo(_feed.LastRefreshedAt.Value)</span>
             }
         </p>
     </div>
-    <div class="d-flex gap-2">
-        <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2" disabled="@(_refreshing || _refreshingTopNews)" @onclick="RefreshTopNewsOnlyAsync" title="Refresh the shared general news pool behind All News and Breaking News (auto-refreshes every 20 minutes)">
+    <div class="masthead-actions">
+        <CivicWatchThemeToggle IsDark="_darkMode" IsDarkChanged="SetDarkModeAsync" />
+        <button class="civic-refresh" disabled="@(_refreshing || _refreshingTopNews)" @onclick="RefreshTopNewsOnlyAsync" title="Refresh the shared general news pool behind All News and Breaking News (auto-refreshes every 20 minutes)">
             <i class="bi bi-lightning-charge @(_refreshingTopNews ? "gws-spin" : "")"></i>
             <span>@(_refreshingTopNews ? "Refreshing…" : "Refresh All News")</span>
         </button>
-        <button class="btn btn-primary d-inline-flex align-items-center gap-2" disabled="@(_refreshing || _refreshingTopNews)" @onclick="RefreshAllAsync">
+        <button class="civic-refresh civic-refresh-primary" disabled="@(_refreshing || _refreshingTopNews)" @onclick="RefreshAllAsync">
             <i class="bi bi-arrow-clockwise @(_refreshing ? "gws-spin" : "")"></i>
             <span>@(_refreshing ? "Refreshing…" : "Refresh All")</span>
         </button>
     </div>
-</div>
+</header>
 
 <div class="row g-4">
     <div class="col-lg-3">
@@ -246,6 +250,7 @@
         }
     </div>
 </div>
+</main>
 
 @code {
     // ── State ────────────────────────────────────────────────
@@ -273,10 +278,30 @@
     private string _formTopicType = WatchedTopicTypes.Technical;
     private string _formError = string.Empty;
 
+    private const string ThemeStorageKey = "civic-watch-theme";
+    private bool _darkMode;
+
     protected override async Task OnInitializedAsync()
     {
         _refreshStatus = NewsService.GetRefreshStatus();
         await ReloadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        var stored = await JS.InvokeAsync<string?>("localStorage.getItem", ThemeStorageKey);
+        if (stored == "dark")
+        {
+            _darkMode = true;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SetDarkModeAsync(bool isDark)
+    {
+        _darkMode = isDark;
+        await JS.InvokeVoidAsync("localStorage.setItem", ThemeStorageKey, isDark ? "dark" : "light");
     }
 
     // ── Data loading ─────────────────────────────────────────

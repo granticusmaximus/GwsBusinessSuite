@@ -1,0 +1,21 @@
+.floor-status { display: grid; gap: .75rem; }
+.floor-badge { display: inline-flex; align-items: center; gap: .45rem; width: fit-content; padding: .35rem .65rem; border-radius: 99px; background: var(--civic-soft); font-size: .64rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--civic-muted); }
+.floor-badge .dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--civic-muted); }
+.in-session .floor-badge { background: var(--civic-accent-soft); color: var(--civic-accent-strong); }
+.in-session .floor-badge .dot { background: #2e9e6f; box-shadow: 0 0 0 .18rem rgba(46,158,111,.18); }
+
+.floor-note { margin: 0; color: var(--civic-muted); font-size: .72rem; line-height: 1.5; }
+
+.floor-video { position: relative; width: 100%; padding-top: 56.25%; overflow: hidden; border: 1px solid var(--civic-line); border-radius: .75rem; background: #10181b; }
+.floor-video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+.floor-watch-link { display: inline-flex; align-items: center; gap: .5rem; width: fit-content; padding: .55rem .8rem; border: 1px solid var(--civic-line); border-radius: .6rem; background: var(--civic-surface-raised); color: var(--civic-ink); font-size: .72rem; font-weight: 750; text-decoration: none; }
+.floor-watch-link:hover { border-color: var(--civic-accent-strong); color: var(--civic-accent-strong); }
+.floor-watch-link i:first-child { color: var(--civic-accent-strong); }
+.floor-watch-link i:last-child { margin-left: auto; font-size: .66rem; color: var(--civic-muted); }
+
+.floor-transcript { padding: .85rem; border: 1px solid var(--civic-line); border-radius: .7rem; background: var(--civic-soft); }
+.transcript-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; flex-wrap: wrap; color: var(--civic-muted); font-size: .62rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.transcript-head em { font-style: normal; font-weight: 600; }
+.floor-transcript p { margin: .5rem 0; color: var(--civic-ink); font-size: .74rem; line-height: 1.55; }
+.floor-transcript a { color: var(--civic-accent-strong); font-size: .68rem; font-weight: 750; text-decoration: none; }

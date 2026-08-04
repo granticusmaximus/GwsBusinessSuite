@@ -1,0 +1,46 @@
+@using GwsBusinessSuite.Application.GovernmentIntelligence
+
+<div class="floor-status @(Status.InSession ? "in-session" : "recess")">
+    <div class="floor-badge">
+        <span class="dot"></span>
+        <strong>@(Status.InSession ? "Recently in session" : "On recess")</strong>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Status.StatusNote))
+    {
+        <p class="floor-note">@Status.StatusNote</p>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(Status.LiveEmbedUrl))
+    {
+        <div class="floor-video">
+            <iframe src="@Status.LiveEmbedUrl" title="@Chamber floor coverage on C-SPAN" loading="lazy" allowfullscreen></iframe>
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(Status.WatchLinkUrl))
+    {
+        <a class="floor-watch-link" href="@Status.WatchLinkUrl" target="_blank" rel="noopener noreferrer">
+            <i class="bi bi-play-circle"></i>
+            <span>Watch @Chamber floor on C-SPAN</span>
+            <i class="bi bi-arrow-up-right"></i>
+        </a>
+    }
+
+    @if (Status.LatestTranscript is { } transcript)
+    {
+        <div class="floor-transcript">
+            <div class="transcript-head">
+                <span><i class="bi bi-archive"></i> Congressional Record — @transcript.SessionDate.ToString("MMMM d, yyyy")</span>
+                <em>Saved @transcript.FetchedAt.ToString("MMM d, h:mm tt")</em>
+            </div>
+            <p>@transcript.Excerpt</p>
+            <a href="@transcript.SourceUrl" target="_blank" rel="noopener noreferrer">Open official record (PDF) <i class="bi bi-arrow-up-right"></i></a>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public FloorStatus Status { get; set; } = null!;
+    [Parameter] public string Chamber { get; set; } = "Congress";
+}

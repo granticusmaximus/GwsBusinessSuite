@@ -1,0 +1,29 @@
+@using System.Globalization
+@using GwsBusinessSuite.Application.GovernmentIntelligence
+
+@if (Items.Count == 0)
+{
+    <p class="news-empty">No recent @Chamber.ToLowerInvariant() news was returned.</p>
+}
+else
+{
+    <div class="federal-news-list">
+        @foreach (var item in Items)
+        {
+            <a href="@item.Url" target="_blank" rel="noopener noreferrer">
+                <span class="news-date">@FormatDate(item.PublishedAt) · @item.Source</span>
+                <strong>@item.Title</strong>
+                @if (!string.IsNullOrWhiteSpace(item.Description)) { <small>@item.Description</small> }
+                <i class="bi bi-arrow-up-right"></i>
+            </a>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<FederalNewsItem> Items { get; set; } = [];
+    [Parameter] public string Chamber { get; set; } = "Congress";
+
+    private static string FormatDate(DateTimeOffset? value) =>
+        value is null ? "Date unavailable" : value.Value.ToString("MMM d, yyyy", CultureInfo.InvariantCulture);
+}

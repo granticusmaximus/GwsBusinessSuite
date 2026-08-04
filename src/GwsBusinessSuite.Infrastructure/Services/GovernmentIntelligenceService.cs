@@ -6,9 +6,12 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.GovernmentIntelligence;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
@@ -16,8 +19,13 @@ public sealed class GovernmentIntelligenceService(
     HttpClient http,
     IMemoryCache cache,
     ILogger<GovernmentIntelligenceService> logger,
-    ILocalEventsScraperService localEventsScraper) : IGovernmentIntelligenceService
+    ILocalEventsScraperService localEventsScraper,
+    IFederalCivicFeedService federalCivicFeed,
+    IOllamaService ollama,
+    IOptions<ContentStudioOptions> studioOptions) : IGovernmentIntelligenceService
 {
+    private string OllamaModel => studioOptions.Value.Model;
+    private static readonly TimeSpan AiOverviewCacheDuration = TimeSpan.FromDays(7);
     private const string SnapshotCacheKey = "government-intelligence:snapshot";
     private const string CountyHomeUrl = "https://www.houstoncountyga.gov/";
     private const string CountyAnnouncementsUrl = "https://www.houstoncountyga.gov/residents/announcements.cms";
@@ -187,16 +195,20 @@ public sealed class GovernmentIntelligenceService(
         var pressReleases = pressReleaseHtml is null
             ? []
             : ParseGeorgiaPressReleases(pressReleaseHtml).Take(MaxStatePressReleases).ToList();
-        var signedLaws = signedLawHtml is null
+        var signedLawsRaw = signedLawHtml is null
             ? []
             : ParseGeorgiaSignedLaws(signedLawHtml).Take(MaxStateSignedLaws).ToList();
+
+        var signedLaws = await EnrichLawsWithAiOverviewAsync(signedLawsRaw, ct);
+        var houseVotes = await EnrichVotesWithAiOverviewAsync(houseVotesTask.Result, ct);
+        var senateVotes = await EnrichVotesWithAiOverviewAsync(senateVotesTask.Result, ct);
 
         return new StateGovernmentCoverage(
             "This section tracks statewide executive action, signed laws, and official Georgia House and Senate floor votes tied back to the bills moving through the General Assembly.",
             pressReleases,
             signedLaws,
-            houseVotesTask.Result,
-            senateVotesTask.Result,
+            houseVotes,
+            senateVotes,
             [
                 new CivicResourceSection("Governor and Executive Action",
                 [
@@ -214,6 +226,64 @@ public sealed class GovernmentIntelligenceService(
                     new CivicResourceLink("Senate Votes", GeorgiaSenateVotesUrl, "Official Georgia Senate floor-vote archive.")
                 ])
             ]);
+    }
+
+    // Bill/vote text doesn't change once signed or voted, so overviews are cached for a week
+    // rather than regenerated every 15-minute snapshot cycle - keeps Ollama load down and
+    // means a bill only ever gets summarized once. Failures (Ollama unavailable) degrade
+    // gracefully to no overview, mirroring NewsIntelligenceService.BatchSummarizeAsync.
+    private async Task<LegislationDetailBrief?> EnrichWithAiOverviewAsync(LegislationDetailBrief? brief, CancellationToken ct)
+    {
+        if (brief is null || string.IsNullOrWhiteSpace(brief.OfficialUrl))
+        {
+            return brief;
+        }
+
+        var cacheKey = $"government-intelligence:ai-overview:{brief.OfficialUrl}";
+        if (cache.TryGetValue(cacheKey, out string? cachedOverview) && !string.IsNullOrWhiteSpace(cachedOverview))
+        {
+            return brief with { AiOverview = cachedOverview };
+        }
+
+        try
+        {
+            const string system =
+                "You summarize state legislation for a local civic newsletter. Respond with 2-3 plain-language " +
+                "sentences (under 60 words total) explaining what the bill does and why a resident might care. " +
+                "No intro, no closing remarks, no markdown.";
+            var factLines = brief.Facts.Select(f => $"{f.Label}: {f.Value}");
+            var userPrompt = string.Join("\n", new[] { $"Title: {brief.Title}", $"Status: {brief.Status}", $"Summary: {brief.Summary}" }.Concat(factLines));
+
+            var overview = await ollama.GenerateAsync(OllamaModel, system, userPrompt, ct);
+            overview = overview.Trim();
+            if (string.IsNullOrWhiteSpace(overview))
+            {
+                return brief;
+            }
+
+            cache.Set(cacheKey, overview, AiOverviewCacheDuration);
+            return brief with { AiOverview = overview };
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "SentinelGPT overview skipped ({Model} unavailable) for {Url}", OllamaModel, brief.OfficialUrl);
+            return brief;
+        }
+    }
+
+    private async Task<List<LawSummary>> EnrichLawsWithAiOverviewAsync(List<LawSummary> laws, CancellationToken ct)
+    {
+        var enriched = await Task.WhenAll(laws.Select(async law =>
+            law with { Legislation = await EnrichWithAiOverviewAsync(law.Legislation, ct) }));
+        return enriched.ToList();
+    }
+
+    private async Task<List<StateLegislativeVoteSummary>> EnrichVotesWithAiOverviewAsync(
+        IReadOnlyList<StateLegislativeVoteSummary> votes, CancellationToken ct)
+    {
+        var enriched = await Task.WhenAll(votes.Select(async vote =>
+            vote with { Legislation = await EnrichWithAiOverviewAsync(vote.Legislation, ct) }));
+        return enriched.ToList();
     }
 
     private async Task<FederalGovernmentCoverage> BuildFederalCoverageAsync(CancellationToken ct)
@@ -236,7 +306,11 @@ public sealed class GovernmentIntelligenceService(
                     new CivicResourceLink("Senate Roll Call Votes", SenateVotesUrl, "Official Senate roll-call list for the current session."),
                     new CivicResourceLink("House Roll Call Votes", HouseVotesIndexUrl, "Official House votes search and roll-call index.")
                 ])
-            ]);
+            ],
+            federalCivicFeed.GetCachedSenateNewsOrEmpty(),
+            federalCivicFeed.GetCachedHouseNewsOrEmpty(),
+            federalCivicFeed.GetCachedSenateFloorOrEmpty(),
+            federalCivicFeed.GetCachedHouseFloorOrEmpty());
     }
 
     private async Task<IReadOnlyList<ChamberVoteSummary>> LoadSenateVotesAsync(CancellationToken ct)
@@ -1346,7 +1420,13 @@ public sealed class GovernmentIntelligenceService(
             "Live federal vote data could not be loaded.",
             [],
             [],
-            []);
+            [],
+            [],
+            [],
+            EmptyFloorStatus,
+            EmptyFloorStatus);
+
+    private static readonly FloorStatus EmptyFloorStatus = new(false, string.Empty, null, null, null);
 
     private sealed record GeorgiaSessionResponse(
         int Id,

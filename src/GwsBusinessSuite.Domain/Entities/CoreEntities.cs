@@ -1525,3 +1525,19 @@ public sealed class AutomationNodeExecution : AuditableEntity
     public long? FinishedAtUnixSeconds { get; set; }
     public AutomationExecution? Execution { get; set; }
 }
+
+// Congressional Record floor-proceedings text for a single chamber/day, "saved for future
+// reference" per the Civic Watch floor-status feature - official but same-day-delayed, not
+// live-synced captioning. One row per (Chamber, SessionDate); FederalCivicFeedService
+// upserts on its hourly cadence rather than inserting duplicates. SessionDate is stored at
+// UTC midnight - per this app's SQLite/EF Core convention, DateTimeOffset range/order
+// queries can't translate server-side, so any lookup materializes then filters client-side.
+public sealed class CongressionalFloorTranscript : AuditableEntity
+{
+    public required string Chamber { get; set; }
+    public DateTimeOffset SessionDate { get; set; }
+    public required string SourceUrl { get; set; }
+    public required string FullText { get; set; }
+    public string Excerpt { get; set; } = string.Empty;
+    public DateTimeOffset FetchedAt { get; set; } = DateTimeOffset.UtcNow;
+}

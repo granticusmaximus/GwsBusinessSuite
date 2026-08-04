@@ -93,6 +93,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<PrivacyRequest> PrivacyRequests { get; }
     DbSet<SecurityIncident> SecurityIncidents { get; }
     DbSet<SecurityIncidentUpdate> SecurityIncidentUpdates { get; }
+    DbSet<CongressionalFloorTranscript> CongressionalFloorTranscripts { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     // For multi-step writes that must be all-or-nothing (e.g. AppGenerationService.ApproveAsync

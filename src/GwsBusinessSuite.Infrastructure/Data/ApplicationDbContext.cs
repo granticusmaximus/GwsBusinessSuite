@@ -112,6 +112,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<PrivacyRequest> PrivacyRequests => Set<PrivacyRequest>();
     public DbSet<SecurityIncident> SecurityIncidents => Set<SecurityIncident>();
     public DbSet<SecurityIncidentUpdate> SecurityIncidentUpdates => Set<SecurityIncidentUpdate>();
+    public DbSet<CongressionalFloorTranscript> CongressionalFloorTranscripts => Set<CongressionalFloorTranscript>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -469,6 +470,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .HasForeignKey(x => x.SessionId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<LiveShowRecording>().HasIndex(x => x.SessionId);
+
+        modelBuilder.Entity<CongressionalFloorTranscript>().HasIndex(x => new { x.Chamber, x.SessionDate }).IsUnique();
 
         modelBuilder.Entity<PodcastListenProgress>()
             .HasOne<PodcastEpisode>()

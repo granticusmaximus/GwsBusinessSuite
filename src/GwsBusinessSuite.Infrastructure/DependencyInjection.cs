@@ -228,6 +228,15 @@ public static class DependencyInjection
         services.AddHostedService<GovernmentIntelligenceRefreshBackgroundService>();
         services.AddSingleton<ILocalEventsScraperService, LocalEventsScraperService>();
         services.AddHostedService<LocalEventsRefreshBackgroundService>();
+        var congressApiKey = configuration["CongressApi:ApiKey"] is { Length: > 0 } key ? key : "DEMO_KEY";
+        services.AddSingleton(new CongressApiSettings(congressApiKey));
+        services.AddHttpClient<IFederalCivicFeedService, FederalCivicFeedService>(client =>
+        {
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(
+                "Mozilla/5.0 (compatible; GWSuite/1.0; +https://grantwatson.dev)");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddHostedService<FederalCivicRefreshBackgroundService>();
         services.AddHttpClient<IPodcastDirectoryService, PodcastDirectoryService>(client =>
         {
             client.DefaultRequestHeaders.UserAgent.ParseAdd(

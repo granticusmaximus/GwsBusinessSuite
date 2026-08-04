@@ -1,0 +1,10 @@
+.federal-news-list { display: grid; }
+.federal-news-list > a { position: relative; display: grid; gap: .2rem; padding: .8rem 1.5rem .8rem 0; border-top: 1px solid var(--civic-line); color: var(--civic-ink); text-decoration: none; }
+.federal-news-list > a:first-child { padding-top: 0; border-top: 0; }
+.federal-news-list > a:hover strong { color: var(--civic-accent-strong); }
+.federal-news-list .news-date { color: var(--civic-accent); font-size: .6rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.federal-news-list strong { font: 700 .83rem/1.35 Georgia, serif; }
+.federal-news-list small { display: -webkit-box; overflow: hidden; color: var(--civic-muted); font-size: .66rem; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.federal-news-list i { position: absolute; top: .85rem; right: .05rem; color: var(--civic-muted); font-size: .7rem; }
+.federal-news-list > a:first-child i { top: .1rem; }
+.news-empty { margin: 0; color: var(--civic-muted); font-size: .75rem; }

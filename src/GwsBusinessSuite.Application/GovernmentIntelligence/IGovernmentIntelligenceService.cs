@@ -33,7 +33,39 @@ public sealed record FederalGovernmentCoverage(
     string StatusNote,
     IReadOnlyList<ChamberVoteSummary> SenateVotes,
     IReadOnlyList<ChamberVoteSummary> HouseVotes,
-    IReadOnlyList<CivicResourceSection> ResourceSections);
+    IReadOnlyList<CivicResourceSection> ResourceSections,
+    IReadOnlyList<FederalNewsItem> SenateNews,
+    IReadOnlyList<FederalNewsItem> HouseNews,
+    FloorStatus SenateFloor,
+    FloorStatus HouseFloor);
+
+public sealed record FederalNewsItem(
+    string Title,
+    string Url,
+    string? Description,
+    DateTimeOffset? PublishedAt,
+    string Source);
+
+// LiveEmbedUrl is only populated when a response-header check confirmed the source doesn't
+// block iframing (X-Frame-Options/CSP frame-ancestors) - WatchLinkUrl is always present when
+// InSession so the UI always has a working "watch live" path even if embedding isn't possible.
+public sealed record FloorStatus(
+    bool InSession,
+    string StatusNote,
+    string? LiveEmbedUrl,
+    string? WatchLinkUrl,
+    CongressionalTranscriptSummary? LatestTranscript);
+
+// Congressional Record floor-proceedings text - official but same-day-delayed, not
+// live-synced captioning. Excerpt is a short preview; full text lives in
+// CongressionalFloorTranscript, queried separately for the archive/detail view.
+public sealed record CongressionalTranscriptSummary(
+    Guid Id,
+    string Chamber,
+    DateOnly SessionDate,
+    string SourceUrl,
+    string Excerpt,
+    DateTimeOffset FetchedAt);
 
 public sealed record CivicUpdate(
     string Title,
@@ -127,7 +159,10 @@ public sealed record LegislationDetailBrief(
     string OfficialUrl,
     IReadOnlyList<LegislationFact> Facts,
     IReadOnlyList<LegislationLink> Links,
-    IReadOnlyList<LegislationTimelineEntry> Timeline);
+    IReadOnlyList<LegislationTimelineEntry> Timeline,
+    // Null when Ollama is unavailable or hasn't summarized this bill yet - the UI simply
+    // omits the SentinelGPT panel rather than showing an error.
+    string? AiOverview = null);
 
 public sealed record LegislationFact(
     string Label,
