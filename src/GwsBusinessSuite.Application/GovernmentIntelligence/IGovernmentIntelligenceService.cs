@@ -51,14 +51,12 @@ public sealed record FederalNewsItem(
     DateTimeOffset? PublishedAt,
     string Source);
 
-// LiveEmbedUrl is only populated when a response-header check confirmed the source doesn't
-// block iframing (X-Frame-Options/CSP frame-ancestors) - WatchLinkUrl is always present when
-// InSession so the UI always has a working "watch live" path even if embedding isn't possible.
+// LiveEmbedUrl is only populated when InSession - there's nothing live to show otherwise,
+// and the UI renders only the video (no page chrome, no separate "watch" link) when present.
 public sealed record FloorStatus(
     bool InSession,
     string StatusNote,
     string? LiveEmbedUrl,
-    string? WatchLinkUrl,
     CongressionalTranscriptSummary? LatestTranscript);
 
 // Congressional Record floor-proceedings text - official but same-day-delayed, not

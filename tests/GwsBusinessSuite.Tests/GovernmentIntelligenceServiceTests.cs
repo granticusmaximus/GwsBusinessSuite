@@ -479,7 +479,7 @@ public sealed class GovernmentIntelligenceServiceTests
     // stub shape as StubLocalEventsScraperService above.
     private sealed class StubFederalCivicFeedService : IFederalCivicFeedService
     {
-        private static readonly FloorStatus Empty = new(false, string.Empty, null, null, null);
+        private static readonly FloorStatus Empty = new(false, string.Empty, null, null);
 
         public Task RefreshAsync(CancellationToken ct = default) => Task.CompletedTask;
         public IReadOnlyList<FederalNewsItem> GetCachedSenateNewsOrEmpty() => [];

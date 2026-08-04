@@ -39,8 +39,19 @@ public sealed class FederalCivicFeedService(
     // short gap is normal and doesn't mean "out of session"; a longer gap does.
     private static readonly TimeSpan RecentSessionWindow = TimeSpan.FromDays(3);
 
-    private const string CSpanHouseUrl = "https://www.c-span.org/networks/?chan=house";
-    private const string CSpanSenateUrl = "https://www.c-span.org/networks/?chan=senate";
+    // C-SPAN's own page (c-span.org/networks/?channel=c-span[-2]) embeds these same videos
+    // via Brightcove but wraps them in the full site header/nav/ads. This is Brightcove's
+    // own minimal player embed instead - verified with a real browser against the rendered
+    // page's data-bcaccountid/data-bcid attributes (chan=house/senate is not a real
+    // parameter; the actual one is channel=c-span for the House feed and channel=c-span-2
+    // for the Senate feed - confirmed the two resolve to distinct Brightcove video ids,
+    // 6306075540112 vs 6306074571112). Renders as just the video, no page chrome around it.
+    private const string CSpanBrightcoveAccountId = "3162030207001";
+    private const string CSpanBrightcovePlayerId = "2B2qWQJYYM_default";
+    private const string CSpanHouseVideoId = "6306075540112";
+    private const string CSpanSenateVideoId = "6306074571112";
+    private const string CSpanHouseUrl = $"https://players.brightcove.net/{CSpanBrightcoveAccountId}/{CSpanBrightcovePlayerId}/index.html?videoId={CSpanHouseVideoId}";
+    private const string CSpanSenateUrl = $"https://players.brightcove.net/{CSpanBrightcoveAccountId}/{CSpanBrightcovePlayerId}/index.html?videoId={CSpanSenateVideoId}";
 
     public IReadOnlyList<FederalNewsItem> GetCachedSenateNewsOrEmpty() =>
         cache.TryGetValue(SenateNewsCacheKey, out IReadOnlyList<FederalNewsItem>? cached) && cached is not null ? cached : [];
@@ -54,7 +65,7 @@ public sealed class FederalCivicFeedService(
     public FloorStatus GetCachedHouseFloorOrEmpty() =>
         cache.TryGetValue(HouseFloorCacheKey, out FloorStatus? cached) && cached is not null ? cached : EmptyFloorStatus;
 
-    private static readonly FloorStatus EmptyFloorStatus = new(false, string.Empty, null, null, null);
+    private static readonly FloorStatus EmptyFloorStatus = new(false, string.Empty, null, null);
 
     public async Task RefreshAsync(CancellationToken ct = default)
     {
@@ -144,21 +155,22 @@ public sealed class FederalCivicFeedService(
             var senateSummary = senatePdf is null ? null : await UpsertTranscriptAsync("Senate", sessionDate, senatePdf, latestIssue, ct);
             var houseSummary = housePdf is null ? null : await UpsertTranscriptAsync("House", sessionDate, housePdf, latestIssue, ct);
 
+            // Video is only offered when recently in session - otherwise there's nothing
+            // live to show and a stray embed would just display whatever C-SPAN is
+            // replaying on that channel, which reads as misleadingly "live".
             var senateStatus = new FloorStatus(
                 inSession,
-                senatePdf is null
-                    ? "No recent Senate floor activity on record."
-                    : $"Senate floor proceedings on record for {sessionDate:MMMM d, yyyy} (Congressional Record Issue {latestIssue.Issue}).",
-                CSpanSenateUrl,
-                CSpanSenateUrl,
+                inSession
+                    ? $"Senate floor proceedings on record for {sessionDate:MMMM d, yyyy} (Congressional Record Issue {latestIssue.Issue})."
+                    : "The Senate is not currently in session.",
+                inSession ? CSpanSenateUrl : null,
                 senateSummary);
             var houseStatus = new FloorStatus(
                 inSession,
-                housePdf is null
-                    ? "No recent House floor activity on record."
-                    : $"House floor proceedings on record for {sessionDate:MMMM d, yyyy} (Congressional Record Issue {latestIssue.Issue}).",
-                CSpanHouseUrl,
-                CSpanHouseUrl,
+                inSession
+                    ? $"House floor proceedings on record for {sessionDate:MMMM d, yyyy} (Congressional Record Issue {latestIssue.Issue})."
+                    : "The House is not currently in session.",
+                inSession ? CSpanHouseUrl : null,
                 houseSummary);
 
             cache.Set(SenateFloorCacheKey, senateStatus, CacheDuration);

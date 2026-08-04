@@ -11,20 +11,11 @@
         <p class="floor-note">@Status.StatusNote</p>
     }
 
-    @if (!string.IsNullOrWhiteSpace(Status.LiveEmbedUrl))
+    @if (Status.InSession && !string.IsNullOrWhiteSpace(Status.LiveEmbedUrl))
     {
         <div class="floor-video">
-            <iframe src="@Status.LiveEmbedUrl" title="@Chamber floor coverage on C-SPAN" loading="lazy" allowfullscreen></iframe>
+            <iframe src="@Status.LiveEmbedUrl" title="@Chamber floor video feed" loading="lazy" allowfullscreen></iframe>
         </div>
-    }
-
-    @if (!string.IsNullOrWhiteSpace(Status.WatchLinkUrl))
-    {
-        <a class="floor-watch-link" href="@Status.WatchLinkUrl" target="_blank" rel="noopener noreferrer">
-            <i class="bi bi-play-circle"></i>
-            <span>Watch @Chamber floor on C-SPAN</span>
-            <i class="bi bi-arrow-up-right"></i>
-        </a>
     }
 
     @if (Status.LatestTranscript is { } transcript)

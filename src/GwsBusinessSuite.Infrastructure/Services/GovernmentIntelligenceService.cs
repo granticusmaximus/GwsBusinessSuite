@@ -1456,7 +1456,7 @@ public sealed class GovernmentIntelligenceService(
             EmptyFloorStatus,
             EmptyFloorStatus);
 
-    private static readonly FloorStatus EmptyFloorStatus = new(false, string.Empty, null, null, null);
+    private static readonly FloorStatus EmptyFloorStatus = new(false, string.Empty, null, null);
 
     private sealed record GeorgiaSessionResponse(
         int Id,
