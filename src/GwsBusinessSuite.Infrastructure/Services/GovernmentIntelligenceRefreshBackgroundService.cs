@@ -42,6 +42,12 @@ public sealed class GovernmentIntelligenceRefreshBackgroundService(
             var svc = scope.ServiceProvider.GetRequiredService<IGovernmentIntelligenceService>();
             await svc.GetSnapshotAsync(forceRefresh: true, ct);
             logger.LogInformation("Government Intelligence: refresh complete");
+
+            // Off the request path by construction (this only ever runs from this timer),
+            // so it's safe for PopulateAiOverviewsAsync to serialize through the shared
+            // Ollama scheduler at its own pace - see that method's comment for why it must
+            // never be awaited from a page load instead.
+            await svc.PopulateAiOverviewsAsync(ct);
         }
         catch (OperationCanceledException)
         {

@@ -3,6 +3,11 @@ namespace GwsBusinessSuite.Application.GovernmentIntelligence;
 public interface IGovernmentIntelligenceService
 {
     Task<GovernmentIntelligenceSnapshot> GetSnapshotAsync(bool forceRefresh = false, CancellationToken ct = default);
+
+    // Background-only: generates SentinelGPT overviews for Georgia legislation that doesn't
+    // have one cached yet. Must never be called from a page-load path - see the comment on
+    // the implementation in GovernmentIntelligenceService for why.
+    Task PopulateAiOverviewsAsync(CancellationToken ct = default);
 }
 
 public sealed record GovernmentIntelligenceSnapshot(

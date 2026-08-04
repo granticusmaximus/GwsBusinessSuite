@@ -22,10 +22,12 @@ public sealed class GovernmentIntelligenceService(
     ILocalEventsScraperService localEventsScraper,
     IFederalCivicFeedService federalCivicFeed,
     IOllamaService ollama,
+    OllamaWorkloadScheduler ollamaWorkloads,
     IOptions<ContentStudioOptions> studioOptions) : IGovernmentIntelligenceService
 {
     private string OllamaModel => studioOptions.Value.Model;
     private static readonly TimeSpan AiOverviewCacheDuration = TimeSpan.FromDays(7);
+    private static readonly TimeSpan AiOverviewCallTimeout = TimeSpan.FromSeconds(25);
     private const string SnapshotCacheKey = "government-intelligence:snapshot";
     private const string CountyHomeUrl = "https://www.houstoncountyga.gov/";
     private const string CountyAnnouncementsUrl = "https://www.houstoncountyga.gov/residents/announcements.cms";
@@ -199,9 +201,11 @@ public sealed class GovernmentIntelligenceService(
             ? []
             : ParseGeorgiaSignedLaws(signedLawHtml).Take(MaxStateSignedLaws).ToList();
 
-        var signedLaws = await EnrichLawsWithAiOverviewAsync(signedLawsRaw, ct);
-        var houseVotes = await EnrichVotesWithAiOverviewAsync(houseVotesTask.Result, ct);
-        var senateVotes = await EnrichVotesWithAiOverviewAsync(senateVotesTask.Result, ct);
+        // Cache-only, synchronous, no Ollama call here - see the note on PopulateAiOverviewsAsync
+        // below for why a live LLM generation must never sit on this request path.
+        var signedLaws = signedLawsRaw.Select(law => law with { Legislation = AttachCachedAiOverview(law.Legislation) }).ToList();
+        var houseVotes = houseVotesTask.Result.Select(vote => vote with { Legislation = AttachCachedAiOverview(vote.Legislation) }).ToList();
+        var senateVotes = senateVotesTask.Result.Select(vote => vote with { Legislation = AttachCachedAiOverview(vote.Legislation) }).ToList();
 
         return new StateGovernmentCoverage(
             "This section tracks statewide executive action, signed laws, and official Georgia House and Senate floor votes tied back to the bills moving through the General Assembly.",
@@ -228,23 +232,65 @@ public sealed class GovernmentIntelligenceService(
             ]);
     }
 
-    // Bill/vote text doesn't change once signed or voted, so overviews are cached for a week
-    // rather than regenerated every 15-minute snapshot cycle - keeps Ollama load down and
-    // means a bill only ever gets summarized once. Failures (Ollama unavailable) degrade
-    // gracefully to no overview, mirroring NewsIntelligenceService.BatchSummarizeAsync.
-    private async Task<LegislationDetailBrief?> EnrichWithAiOverviewAsync(LegislationDetailBrief? brief, CancellationToken ct)
+    private static string AiOverviewCacheKey(string officialUrl) => $"government-intelligence:ai-overview:{officialUrl}";
+
+    // Pure cache read, no I/O, safe to call inline from the snapshot-build path (mirrors
+    // ILocalEventsScraperService.GetCachedEventsOrEmpty / IFederalCivicFeedService's
+    // GetCached...OrEmpty reads). Never calls Ollama - see PopulateAiOverviewsAsync for why.
+    private LegislationDetailBrief? AttachCachedAiOverview(LegislationDetailBrief? brief)
     {
         if (brief is null || string.IsNullOrWhiteSpace(brief.OfficialUrl))
         {
             return brief;
         }
 
-        var cacheKey = $"government-intelligence:ai-overview:{brief.OfficialUrl}";
-        if (cache.TryGetValue(cacheKey, out string? cachedOverview) && !string.IsNullOrWhiteSpace(cachedOverview))
+        return cache.TryGetValue(AiOverviewCacheKey(brief.OfficialUrl), out string? overview) && !string.IsNullOrWhiteSpace(overview)
+            ? brief with { AiOverview = overview }
+            : brief;
+    }
+
+    // Generates SentinelGPT overviews for any Georgia signed law / state vote that doesn't
+    // have one cached yet, one at a time. This must never run on a page-load request path:
+    // OllamaService.GenerateAsync serializes every call in the app through a single global
+    // OllamaWorkloadScheduler lease (production Ollama only handles one request at a time),
+    // so awaiting a Task.WhenAll fan-out over a whole tab's worth of bills here previously
+    // meant a page load could block for as long as every queued generation took to drain
+    // sequentially - long enough to trip Cloudflare's ~100s origin timeout (524). Only
+    // GovernmentIntelligenceRefreshBackgroundService calls this, off any user's request.
+    public async Task PopulateAiOverviewsAsync(CancellationToken ct)
+    {
+        var snapshot = await GetSnapshotAsync(forceRefresh: false, ct);
+        var briefs = snapshot.State.SignedLegislation.Select(law => law.Legislation)
+            .Concat(snapshot.State.HouseVotes.Select(vote => vote.Legislation))
+            .Concat(snapshot.State.SenateVotes.Select(vote => vote.Legislation))
+            .Where(brief => brief is not null && !string.IsNullOrWhiteSpace(brief.OfficialUrl))
+            .Select(brief => brief!)
+            .GroupBy(brief => brief.OfficialUrl)
+            .Select(group => group.First())
+            .Where(brief => !cache.TryGetValue(AiOverviewCacheKey(brief.OfficialUrl), out string? existing) || string.IsNullOrWhiteSpace(existing))
+            .ToList();
+
+        if (briefs.Count == 0)
         {
-            return brief with { AiOverview = cachedOverview };
+            return;
         }
 
+        // Background priority so this never jumps ahead of an actual interactive AI request
+        // (chat, Content Studio) queued on the same shared scheduler.
+        using var priorityScope = ollamaWorkloads.UseBackgroundPriority();
+        foreach (var brief in briefs)
+        {
+            ct.ThrowIfCancellationRequested();
+            await GenerateAndCacheOverviewAsync(brief, ct);
+        }
+    }
+
+    // Bill/vote text doesn't change once signed or voted, so overviews are cached for a week
+    // rather than regenerated every 15-minute snapshot cycle. Failures (Ollama unavailable,
+    // or a single slow generation) degrade gracefully to no overview rather than stalling
+    // the rest of the sweep, mirroring NewsIntelligenceService.BatchSummarizeAsync.
+    private async Task GenerateAndCacheOverviewAsync(LegislationDetailBrief brief, CancellationToken ct)
+    {
         try
         {
             const string system =
@@ -254,36 +300,20 @@ public sealed class GovernmentIntelligenceService(
             var factLines = brief.Facts.Select(f => $"{f.Label}: {f.Value}");
             var userPrompt = string.Join("\n", new[] { $"Title: {brief.Title}", $"Status: {brief.Status}", $"Summary: {brief.Summary}" }.Concat(factLines));
 
-            var overview = await ollama.GenerateAsync(OllamaModel, system, userPrompt, ct);
-            overview = overview.Trim();
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(AiOverviewCallTimeout);
+            var overview = (await ollama.GenerateAsync(OllamaModel, system, userPrompt, timeoutCts.Token)).Trim();
             if (string.IsNullOrWhiteSpace(overview))
             {
-                return brief;
+                return;
             }
 
-            cache.Set(cacheKey, overview, AiOverviewCacheDuration);
-            return brief with { AiOverview = overview };
+            cache.Set(AiOverviewCacheKey(brief.OfficialUrl), overview, AiOverviewCacheDuration);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "SentinelGPT overview skipped ({Model} unavailable) for {Url}", OllamaModel, brief.OfficialUrl);
-            return brief;
+            logger.LogWarning(ex, "SentinelGPT overview skipped ({Model} unavailable or timed out) for {Url}", OllamaModel, brief.OfficialUrl);
         }
-    }
-
-    private async Task<List<LawSummary>> EnrichLawsWithAiOverviewAsync(List<LawSummary> laws, CancellationToken ct)
-    {
-        var enriched = await Task.WhenAll(laws.Select(async law =>
-            law with { Legislation = await EnrichWithAiOverviewAsync(law.Legislation, ct) }));
-        return enriched.ToList();
-    }
-
-    private async Task<List<StateLegislativeVoteSummary>> EnrichVotesWithAiOverviewAsync(
-        IReadOnlyList<StateLegislativeVoteSummary> votes, CancellationToken ct)
-    {
-        var enriched = await Task.WhenAll(votes.Select(async vote =>
-            vote with { Legislation = await EnrichWithAiOverviewAsync(vote.Legislation, ct) }));
-        return enriched.ToList();
     }
 
     private async Task<FederalGovernmentCoverage> BuildFederalCoverageAsync(CancellationToken ct)

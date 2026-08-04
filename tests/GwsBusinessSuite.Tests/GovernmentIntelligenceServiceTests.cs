@@ -459,6 +459,7 @@ public sealed class GovernmentIntelligenceServiceTests
             new StubLocalEventsScraperService(),
             new StubFederalCivicFeedService(),
             new FakeOllamaService(),
+            new OllamaWorkloadScheduler(),
             Options.Create(new ContentStudioOptions()));
     }
 
