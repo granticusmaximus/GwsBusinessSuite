@@ -1,10 +1,13 @@
 using System.Net;
 using System.Text;
 using FluentAssertions;
+using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.GovernmentIntelligence;
 using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -450,7 +453,13 @@ public sealed class GovernmentIntelligenceServiceTests
         var client = new HttpClient(handler);
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
         return new GovernmentIntelligenceService(
-            client, memoryCache, NullLogger<GovernmentIntelligenceService>.Instance, new StubLocalEventsScraperService());
+            client,
+            memoryCache,
+            NullLogger<GovernmentIntelligenceService>.Instance,
+            new StubLocalEventsScraperService(),
+            new StubFederalCivicFeedService(),
+            new FakeOllamaService(),
+            Options.Create(new ContentStudioOptions()));
     }
 
     // Local Events is populated from the injected scraper, not a URL fetched inside
@@ -462,6 +471,45 @@ public sealed class GovernmentIntelligenceServiceTests
             Task.FromResult<IReadOnlyList<CivicEvent>>([]);
 
         public IReadOnlyList<CivicEvent> GetCachedEventsOrEmpty() => [];
+    }
+
+    // Federal news/floor status come from the injected feed service's own hourly-cached
+    // reads, not from anything BuildFederalCoverageAsync fetches itself - same orthogonal
+    // stub shape as StubLocalEventsScraperService above.
+    private sealed class StubFederalCivicFeedService : IFederalCivicFeedService
+    {
+        private static readonly FloorStatus Empty = new(false, string.Empty, null, null, null);
+
+        public Task RefreshAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public IReadOnlyList<FederalNewsItem> GetCachedSenateNewsOrEmpty() => [];
+        public IReadOnlyList<FederalNewsItem> GetCachedHouseNewsOrEmpty() => [];
+        public FloorStatus GetCachedSenateFloorOrEmpty() => Empty;
+        public FloorStatus GetCachedHouseFloorOrEmpty() => Empty;
+    }
+
+    // Ollama is unavailable in tests - EnrichWithAiOverviewAsync treats an empty response
+    // the same as a failure (no overview added), so existing assertions on
+    // LegislationDetailBrief are unaffected.
+    private sealed class FakeOllamaService : IOllamaService
+    {
+        public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
+            => Task.FromResult(string.Empty);
+
+        public async IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
+
+        public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyCollection<string>>(Array.Empty<string>());
+
+        public Task PullModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task DeleteModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default)
+            => Task.FromResult(string.Empty);
     }
 
     private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler
