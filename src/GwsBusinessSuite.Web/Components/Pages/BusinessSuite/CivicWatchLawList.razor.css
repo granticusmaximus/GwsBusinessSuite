@@ -1,0 +1,4 @@
+.law-list { display: grid; gap: .7rem; }
+.more-laws { margin-top: .8rem; padding-top: .7rem; border-top: 1px solid var(--civic-line); }
+.more-laws > summary { cursor: pointer; color: var(--civic-accent-strong); font-size: .7rem; font-weight: 800; }
+.more-laws[open] > summary { margin-bottom: .7rem; }

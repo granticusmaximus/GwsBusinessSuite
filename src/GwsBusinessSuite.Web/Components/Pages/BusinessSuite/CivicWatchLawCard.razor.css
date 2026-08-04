@@ -1,0 +1,7 @@
+.law-card { padding: .85rem; border: 1px solid var(--civic-line); border-radius: .7rem; background: var(--civic-surface-raised); }
+.law-card > span { color: var(--civic-accent-strong); font-size: .6rem; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; }
+.law-card h3 { margin: .3rem 0 .55rem; color: var(--civic-ink); font: 700 .86rem/1.35 Georgia, serif; }
+.law-card > a { color: var(--civic-accent-strong); font-size: .66rem; font-weight: 800; text-decoration: none; }
+.law-card ::deep details > summary { color: var(--civic-accent-strong); font-size: .68rem; }
+.law-card ::deep details .bg-light { background: var(--civic-soft) !important; }
+.law-card ::deep details .bg-white { background: var(--civic-surface) !important; }

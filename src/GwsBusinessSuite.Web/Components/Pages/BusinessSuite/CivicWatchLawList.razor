@@ -1,0 +1,26 @@
+@using GwsBusinessSuite.Application.GovernmentIntelligence
+
+<div class="law-list">
+    @foreach (var law in Laws.Take(VisibleCount))
+    {
+        <CivicWatchLawCard Law="law" />
+    }
+</div>
+
+@if (Laws.Count > VisibleCount)
+{
+    <details class="more-laws">
+        <summary>Show @(Laws.Count - VisibleCount) more signed laws</summary>
+        <div class="law-list">
+            @foreach (var law in Laws.Skip(VisibleCount))
+            {
+                <CivicWatchLawCard Law="law" />
+            }
+        </div>
+    </details>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<LawSummary> Laws { get; set; } = [];
+    [Parameter] public int VisibleCount { get; set; } = 5;
+}

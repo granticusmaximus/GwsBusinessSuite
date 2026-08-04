@@ -1,0 +1,73 @@
+@using System.Globalization
+@using GwsBusinessSuite.Application.GovernmentIntelligence
+
+@if (Votes.Count == 0)
+{
+    <p class="vote-empty">No federal vote data was returned.</p>
+}
+else
+{
+    <div class="vote-list">
+        @foreach (var vote in Votes)
+        {
+            <article class="vote-card">
+                <div class="vote-meta">
+                    <span>@vote.Chamber roll call @vote.RollCallNumber</span>
+                    <time>@FormatTimestamp(vote.VotedAt)</time>
+                </div>
+                <h3>@(string.IsNullOrWhiteSpace(vote.Measure) ? vote.Title : $"{vote.Measure} · {vote.Title}")</h3>
+                <p>@vote.Question</p>
+                <div class="vote-tally" aria-label="Vote totals">
+                    <span class="result"><strong>@vote.Result</strong></span>
+                    <span class="yea"><strong>@vote.YeaCount</strong> Yea</span>
+                    <span><strong>@vote.NayCount</strong> Nay</span>
+                    @if (vote.PresentCount > 0) { <span><strong>@vote.PresentCount</strong> Present</span> }
+                    @if (vote.NotVotingCount > 0) { <span><strong>@vote.NotVotingCount</strong> Not voting</span> }
+                </div>
+                @if (vote.Votes.Where(member => string.Equals(member.State, "GA", StringComparison.OrdinalIgnoreCase)).ToList() is { Count: > 0 } georgiaVotes)
+                {
+                    <div class="delegation">
+                        <span>Georgia delegation</span>
+                        <div>
+                            @foreach (var member in georgiaVotes)
+                            {
+                                <strong>@member.Name <small>@member.Party · @member.Vote</small></strong>
+                            }
+                        </div>
+                    </div>
+                }
+                <div class="vote-actions">
+                    @if (vote.Votes.Count > 0)
+                    {
+                        <details>
+                            <summary>Full member breakdown</summary>
+                            <div class="vote-table-wrap">
+                                <table>
+                                    <thead><tr><th>Member</th><th>Party</th><th>State</th><th>Vote</th></tr></thead>
+                                    <tbody>
+                                        @foreach (var member in vote.Votes)
+                                        {
+                                            <tr><td>@member.Name</td><td>@member.Party</td><td>@member.State</td><td>@member.Vote</td></tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </details>
+                    }
+                    <a href="@vote.DetailUrl" target="_blank" rel="noopener noreferrer">Official vote detail <i class="bi bi-arrow-up-right"></i></a>
+                </div>
+                @if (vote.Legislation is not null)
+                {
+                    <LegislationBriefPanel Brief="vote.Legislation" SummaryLabel="Legislation brief" />
+                }
+            </article>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<ChamberVoteSummary> Votes { get; set; } = [];
+
+    private static string FormatTimestamp(DateTimeOffset? value) =>
+        value is null ? "Date unavailable" : value.Value.ToString("MMM d, yyyy", CultureInfo.InvariantCulture);
+}

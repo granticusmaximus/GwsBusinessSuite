@@ -1,0 +1,36 @@
+@using GwsBusinessSuite.Application.GovernmentIntelligence
+
+<section class="resource-panel">
+    <header>
+        <div>
+            <span class="resource-eyebrow">Official directory</span>
+            <h2>@Title</h2>
+        </div>
+        <span class="resource-count">@LinkCount links</span>
+    </header>
+    <div class="resource-groups">
+        @foreach (var section in Sections)
+        {
+            <div class="resource-group">
+                <h3>@(section.Title)</h3>
+                @foreach (var link in section.Links)
+                {
+                    <a href="@link.Url" target="_blank" rel="noopener noreferrer">
+                        <span>
+                            <strong>@link.Title</strong>
+                            <small>@link.Description</small>
+                        </span>
+                        <i class="bi bi-arrow-up-right"></i>
+                    </a>
+                }
+            </div>
+        }
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "Official resources";
+    [Parameter, EditorRequired] public IReadOnlyList<CivicResourceSection> Sections { get; set; } = [];
+
+    private int LinkCount => Sections.Sum(section => section.Links.Count);
+}

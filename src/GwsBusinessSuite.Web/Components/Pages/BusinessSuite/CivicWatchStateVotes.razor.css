@@ -1,0 +1,18 @@
+.vote-list { display: grid; gap: .8rem; }
+.vote-card { padding: 1rem; border: 1px solid var(--civic-line); border-radius: .85rem; background: var(--civic-surface-raised); }
+.vote-meta { display: flex; justify-content: space-between; gap: .75rem; color: var(--civic-muted); font-size: .62rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+.vote-card h3 { margin: .45rem 0 .35rem; color: var(--civic-ink); font-size: .92rem; line-height: 1.35; }
+.vote-card > p { margin: 0 0 .7rem; color: var(--civic-muted); font-size: .72rem; line-height: 1.5; }
+.vote-status { margin-bottom: .7rem; color: var(--civic-muted); font-size: .67rem; }
+.vote-tally { display: flex; flex-wrap: wrap; gap: .4rem; }
+.vote-tally span { padding: .35rem .55rem; border-radius: .45rem; background: var(--civic-soft); color: var(--civic-muted); font-size: .64rem; }
+.vote-tally span.yea { background: var(--civic-accent-soft); color: var(--civic-accent-strong); }
+.vote-tally strong { color: var(--civic-ink); }
+.vote-actions { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-top: .8rem; padding-top: .7rem; border-top: 1px solid var(--civic-line); font-size: .68rem; }
+.vote-actions summary { cursor: pointer; font-weight: 750; }
+.vote-actions a { color: var(--civic-accent-strong); font-weight: 750; text-decoration: none; white-space: nowrap; }
+.vote-table-wrap { max-height: 300px; overflow: auto; margin-top: .65rem; }
+.vote-table-wrap table { width: 100%; border-collapse: collapse; font-size: .68rem; }
+.vote-table-wrap th, .vote-table-wrap td { padding: .4rem; border-bottom: 1px solid var(--civic-line); text-align: left; }
+.vote-empty { margin: 0; color: var(--civic-muted); font-size: .75rem; }
+@media (max-width: 600px) { .vote-meta, .vote-actions { align-items: flex-start; flex-direction: column; } }

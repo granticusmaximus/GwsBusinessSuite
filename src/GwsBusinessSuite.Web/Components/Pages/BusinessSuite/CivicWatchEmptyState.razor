@@ -1,0 +1,9 @@
+<div class="empty-state">
+    <i class="bi @Icon"></i>
+    <span>@Message</span>
+</div>
+
+@code {
+    [Parameter] public string Icon { get; set; } = "bi-inbox";
+    [Parameter, EditorRequired] public string Message { get; set; } = string.Empty;
+}

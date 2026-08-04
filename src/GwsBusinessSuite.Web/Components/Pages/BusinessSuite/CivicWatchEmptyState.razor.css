@@ -1,0 +1,2 @@
+.empty-state { display: flex; align-items: center; gap: .7rem; min-height: 5rem; padding: .8rem; border: 1px dashed var(--civic-line); border-radius: .7rem; color: var(--civic-muted); font-size: .73rem; }
+.empty-state i { color: var(--civic-accent); font-size: 1rem; }

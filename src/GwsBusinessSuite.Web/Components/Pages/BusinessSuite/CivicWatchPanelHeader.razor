@@ -1,0 +1,15 @@
+<header class="panel-header">
+    <div class="panel-icon"><i class="bi @Icon"></i></div>
+    <div>
+        <span>@Eyebrow</span>
+        <h2>@Title</h2>
+    </div>
+    <b>@Count</b>
+</header>
+
+@code {
+    [Parameter, EditorRequired] public string Eyebrow { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public int Count { get; set; }
+    [Parameter] public string Icon { get; set; } = "bi-circle";
+}

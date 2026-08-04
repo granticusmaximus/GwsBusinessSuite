@@ -1,0 +1,15 @@
+@using GwsBusinessSuite.Application.GovernmentIntelligence
+
+<article class="law-card">
+    <span>@Law.DocumentNumber</span>
+    <h3>@Law.Title</h3>
+    <a href="@Law.Url" target="_blank" rel="noopener noreferrer">Official signed law <i class="bi bi-arrow-up-right"></i></a>
+    @if (Law.Legislation is not null)
+    {
+        <LegislationBriefPanel Brief="Law.Legislation" SummaryLabel="Legislation brief" />
+    }
+</article>
+
+@code {
+    [Parameter, EditorRequired] public LawSummary Law { get; set; } = default!;
+}
