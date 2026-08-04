@@ -51,6 +51,10 @@ algorithms.
   pause/edit/delete controls, manual proof delivery, last-attempt status, and automatic
   15-minute retry after transport failures. Reports include headline comparisons, top pages,
   acquisition sources, and dated annotations without exposing SMTP credentials to the browser.
+- Entry and exit page reports plus session-level page journeys. Consecutive reloads of the same
+  path are collapsed, common page-to-page transitions and full paths are aggregated, and the
+  selected date range and saved audience segment apply consistently. Only public paths and
+  aggregate counts reach the UI; visitor and session identifiers remain internal.
 - SentinelGPT-assisted, network-specific Facebook, X, and LinkedIn copy with editable
   previews, per-channel character limits, drafts, scheduling, delivery state, and retry.
 - Encrypted social access tokens. Tokens remain on the server and are never returned to the
@@ -71,7 +75,7 @@ reports are delivered.
 
 ### Analytics phase 3
 
-- Entry/exit flow and user-journey reports
+- Entry/exit flow and user-journey reports ✅
 - Revenue/ecommerce events tied to first-party conversion ids
 - Search Console and ad-platform attribution imports
 - Bot and referrer-spam rules with an auditable exclusion log

@@ -102,6 +102,7 @@ public sealed class GrowthAnalyticsService(
         }
         var pageViews = events.Where(item => item.EventName == WebAnalyticsEventNames.PageView).ToList();
         var sessions = pageViews.GroupBy(item => item.SessionKey).ToList();
+        var journeyReport = BuildJourneyReport(pageViews, breakdownLimit);
         var sessionKeys = sessions.Select(group => group.Key).ToHashSet(StringComparer.Ordinal);
         var engagement = events.Where(item => item.EventName == WebAnalyticsEventNames.Engagement).ToList();
         var visitors = pageViews.Select(item => item.VisitorKey).Distinct(StringComparer.Ordinal).Count();
@@ -184,6 +185,10 @@ public sealed class GrowthAnalyticsService(
                     !string.IsNullOrWhiteSpace(item.RegionCode)
                     || !string.IsNullOrWhiteSpace(item.RegionName)),
                 item => RegionLabel(item), breakdownLimit),
+            EntryPages = journeyReport.EntryPages,
+            ExitPages = journeyReport.ExitPages,
+            JourneyTransitions = journeyReport.Transitions,
+            Journeys = journeyReport.Journeys,
             Annotations = annotations,
             Goals = goalReport.Goals,
             Funnels = BuildFunnelReport(funnelDefinitions, events)
@@ -683,6 +688,93 @@ public sealed class GrowthAnalyticsService(
             .ToList();
     }
 
+    private static JourneyReport BuildJourneyReport(
+        IReadOnlyCollection<WebAnalyticsEvent> pageViews,
+        int take)
+    {
+        var sessions = pageViews
+            .GroupBy(item => item.SessionKey, StringComparer.Ordinal)
+            .Select(group =>
+            {
+                var ordered = group
+                    .OrderBy(item => item.OccurredAtUnixSeconds)
+                    .ThenBy(item => item.CreatedAt)
+                    .ThenBy(item => item.Id)
+                    .ToList();
+                var paths = new List<string>();
+                foreach (var pageView in ordered)
+                {
+                    if (paths.Count == 0 || !string.Equals(paths[^1], pageView.Path, StringComparison.Ordinal))
+                        paths.Add(pageView.Path);
+                }
+                return new SessionJourney(group.Key, ordered[0].VisitorKey, paths);
+            })
+            .Where(item => item.Paths.Count > 0)
+            .ToList();
+        if (sessions.Count == 0) return new([], [], [], []);
+
+        var limit = Math.Clamp(take, 1, 1000);
+        var entries = BuildJourneyEndpointBreakdown(sessions, item => item.Paths[0], limit);
+        var exits = BuildJourneyEndpointBreakdown(sessions, item => item.Paths[^1], limit);
+
+        var transitionRows = sessions
+            .SelectMany(session => session.Paths
+                .Zip(session.Paths.Skip(1), (from, to) => new { session.SessionKey, From = from, To = to })
+                .DistinctBy(item => (item.From, item.To)))
+            .ToList();
+        var transitions = transitionRows.Count == 0
+            ? []
+            : transitionRows
+                .GroupBy(item => (item.From, item.To))
+                .Select(group => new AnalyticsJourneyTransition(
+                    group.Key.From,
+                    group.Key.To,
+                    group.Count(),
+                    Math.Round(group.Count() * 100m / transitionRows.Count, 1)))
+                .OrderByDescending(item => item.Sessions)
+                .ThenBy(item => item.FromPath)
+                .ThenBy(item => item.ToPath)
+                .Take(limit)
+                .ToList();
+
+        var journeys = sessions
+            .Select(session =>
+            {
+                var visiblePaths = session.Paths.Take(5).ToList();
+                if (session.Paths.Count > 5) visiblePaths.Add("…");
+                return new { Path = string.Join(" → ", visiblePaths), Steps = session.Paths.Count };
+            })
+            .GroupBy(item => (item.Path, item.Steps))
+            .Select(group => new AnalyticsJourneyRow(
+                group.Key.Path,
+                group.Count(),
+                Math.Round(group.Count() * 100m / sessions.Count, 1),
+                group.Key.Steps))
+            .OrderByDescending(item => item.Sessions)
+            .ThenByDescending(item => item.Steps)
+            .ThenBy(item => item.Path)
+            .Take(limit)
+            .ToList();
+
+        return new(entries, exits, transitions, journeys);
+    }
+
+    private static IReadOnlyList<AnalyticsBreakdownRow> BuildJourneyEndpointBreakdown(
+        IReadOnlyCollection<SessionJourney> sessions,
+        Func<SessionJourney, string> pathSelector,
+        int take) =>
+        sessions
+            .GroupBy(pathSelector, StringComparer.Ordinal)
+            .Select(group => new AnalyticsBreakdownRow(
+                group.Key,
+                group.Select(item => item.VisitorKey).Distinct(StringComparer.Ordinal).Count(),
+                group.Count(),
+                Math.Round(group.Count() * 100m / sessions.Count, 1)))
+            .OrderByDescending(item => item.Views)
+            .ThenBy(item => item.Label)
+            .Take(take)
+            .ToList();
+
     private static GoalReport BuildGoalReport(
         IReadOnlyCollection<AnalyticsGoal> definitions,
         IReadOnlyCollection<WebAnalyticsEvent> events,
@@ -881,6 +973,17 @@ public sealed class GrowthAnalyticsService(
     private sealed record GoalReport(
         IReadOnlyList<AnalyticsGoalView> Goals,
         HashSet<string> ActiveConvertingSessions);
+
+    private sealed record SessionJourney(
+        string SessionKey,
+        string VisitorKey,
+        IReadOnlyList<string> Paths);
+
+    private sealed record JourneyReport(
+        IReadOnlyList<AnalyticsBreakdownRow> EntryPages,
+        IReadOnlyList<AnalyticsBreakdownRow> ExitPages,
+        IReadOnlyList<AnalyticsJourneyTransition> Transitions,
+        IReadOnlyList<AnalyticsJourneyRow> Journeys);
 
     private sealed record RetentionReport(
         int NewVisitors,

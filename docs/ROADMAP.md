@@ -80,8 +80,9 @@ also passes.
   a locally hosted GeoIP database are delivered. Range- and segment-aware CSV exports for
   trend, acquisition, campaign, device, page, country, and region reports, automatic
   previous-period comparisons for headline metrics, dated trend annotations, and retryable
-  weekly/monthly email reports are also delivered; social OAuth/media and engagement imports
-  remain staged in `docs/GROWTH_STUDIO.md`.
+  weekly/monthly email reports are also delivered. Entry/exit page analysis, common
+  page-to-page transitions, and aggregated session journey paths begin analytics phase 3;
+  social OAuth/media and engagement imports remain staged in `docs/GROWTH_STUDIO.md`.
 - Workflow Automation (n8n-class, clean-room) 🚧 — foundational graph persistence,
   immutable publish versions, protected credential references, execution history, core node
   registry, and visual Blazor editor are tracked in `docs/WORKFLOW_AUTOMATION.md`. Advanced

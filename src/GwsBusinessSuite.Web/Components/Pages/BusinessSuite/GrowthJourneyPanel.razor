@@ -1,0 +1,94 @@
+@using GwsBusinessSuite.Application.Growth
+
+<section class="journey-panel">
+    <header>
+        <div>
+            <span>Visitor journeys</span>
+            <small>Where sessions begin, where they leave, and the routes they take between pages</small>
+        </div>
+        <div class="journey-tabs" role="group" aria-label="Journey detail">
+            <button class="@TabClass("transitions")" @onclick="@(() => _activeView = "transitions")">Transitions</button>
+            <button class="@TabClass("paths")" @onclick="@(() => _activeView = "paths")">Full paths</button>
+        </div>
+    </header>
+
+    @if (Dashboard.EntryPages.Count == 0)
+    {
+        <div class="journey-empty">
+            <i class="bi bi-signpost-split"></i>
+            <div>
+                <strong>Journeys appear after page views are collected.</strong>
+                <small>Only aggregated public-page paths are shown; browser and session identifiers stay hidden.</small>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="endpoint-grid">
+            <div>
+                <h3><i class="bi bi-box-arrow-in-right"></i> Entry pages</h3>
+                @foreach (var row in Dashboard.EntryPages.Take(6))
+                {
+                    <div class="endpoint-row">
+                        <strong title="@row.Label">@row.Label</strong>
+                        <span>@row.Views.ToString("N0") <small>@(row.Views == 1 ? "session" : "sessions")</small></span>
+                        <b>@($"{row.Share:N1}%")</b>
+                    </div>
+                }
+            </div>
+            <div>
+                <h3><i class="bi bi-box-arrow-right"></i> Exit pages</h3>
+                @foreach (var row in Dashboard.ExitPages.Take(6))
+                {
+                    <div class="endpoint-row">
+                        <strong title="@row.Label">@row.Label</strong>
+                        <span>@row.Views.ToString("N0") <small>@(row.Views == 1 ? "session" : "sessions")</small></span>
+                        <b>@($"{row.Share:N1}%")</b>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="journey-detail">
+            @if (_activeView == "transitions")
+            {
+                @if (Dashboard.JourneyTransitions.Count == 0)
+                {
+                    <p class="detail-empty">No multi-page sessions in this range yet.</p>
+                }
+                else
+                {
+                    @foreach (var transition in Dashboard.JourneyTransitions.Take(8))
+                    {
+                        <div class="transition-row">
+                            <strong title="@transition.FromPath">@transition.FromPath</strong>
+                            <i class="bi bi-arrow-right"></i>
+                            <strong title="@transition.ToPath">@transition.ToPath</strong>
+                            <span>@transition.Sessions.ToString("N0") <small>@(transition.Sessions == 1 ? "session" : "sessions")</small></span>
+                            <b>@($"{transition.Share:N1}%")</b>
+                        </div>
+                    }
+                }
+            }
+            else
+            {
+                @foreach (var journey in Dashboard.Journeys.Take(8))
+                {
+                    <div class="path-row">
+                        <strong title="@journey.Path">@journey.Path</strong>
+                        <span>@journey.Steps.ToString("N0") <small>@(journey.Steps == 1 ? "step" : "steps")</small></span>
+                        <span>@journey.Sessions.ToString("N0") <small>@(journey.Sessions == 1 ? "session" : "sessions")</small></span>
+                        <b>@($"{journey.Share:N1}%")</b>
+                    </div>
+                }
+            }
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public GrowthAnalyticsDashboard Dashboard { get; set; } = new();
+
+    private string _activeView = "transitions";
+    private string TabClass(string view) => _activeView == view ? "active" : string.Empty;
+}

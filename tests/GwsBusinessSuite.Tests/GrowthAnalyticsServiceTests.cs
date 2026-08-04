@@ -571,6 +571,82 @@ public sealed class GrowthAnalyticsServiceTests
         fixture.Db.WebAnalyticsEvents.Should().ContainSingle();
     }
 
+    [Fact]
+    public async Task GetDashboardAsync_ShouldAggregateOrderedEntryExitTransitionsAndJourneys()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var from = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero);
+        fixture.Db.WebAnalyticsEvents.AddRange(
+            Event("pageview", "visitor-a", "session-a", "/", from.AddMinutes(1)),
+            Event("pageview", "visitor-a", "session-a", "/pricing", from.AddMinutes(2)),
+            Event("pageview", "visitor-a", "session-a", "/pricing", from.AddMinutes(3)),
+            Event("pageview", "visitor-a", "session-a", "/checkout", from.AddMinutes(4)),
+            Event("pageview", "visitor-b", "session-b", "/", from.AddMinutes(5)),
+            Event("pageview", "visitor-b", "session-b", "/pricing", from.AddMinutes(6)),
+            Event("pageview", "visitor-b", "session-b", "/checkout", from.AddMinutes(7)),
+            Event("pageview", "visitor-a", "session-c", "/blog", from.AddMinutes(8)));
+        await fixture.Db.SaveChangesAsync();
+
+        var dashboard = await new GrowthAnalyticsService(fixture.Db)
+            .GetDashboardAsync(from, from.AddDays(1));
+
+        dashboard.EntryPages.Should().Contain(row =>
+            row.Label == "/" && row.Views == 2 && row.Visitors == 2 && row.Share == 66.7m);
+        dashboard.ExitPages.Should().Contain(row =>
+            row.Label == "/checkout" && row.Views == 2 && row.Share == 66.7m);
+        dashboard.JourneyTransitions.Should().BeEquivalentTo(
+            [
+                new AnalyticsJourneyTransition("/", "/pricing", 2, 50m),
+                new AnalyticsJourneyTransition("/pricing", "/checkout", 2, 50m)
+            ],
+            options => options.WithStrictOrdering());
+        dashboard.Journeys.Should().Contain(row =>
+            row.Path == "/ → /pricing → /checkout"
+            && row.Steps == 3
+            && row.Sessions == 2
+            && row.Share == 66.7m);
+    }
+
+    [Fact]
+    public async Task GetDashboardAsync_ShouldApplySegmentsAndLimitsToJourneyAggregates()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var from = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero);
+        var segment = new AnalyticsSegment
+        {
+            Name = "LinkedIn journeys",
+            Rules =
+            [
+                new AnalyticsSegmentRule
+                {
+                    Dimension = AnalyticsSegmentDimensions.Source,
+                    Operator = AnalyticsSegmentOperators.Is,
+                    Value = "linkedin",
+                    SortOrder = 0
+                }
+            ]
+        };
+        fixture.Db.AnalyticsSegments.Add(segment);
+        fixture.Db.WebAnalyticsEvents.AddRange(
+            Event("pageview", "visitor-a", "session-a", "/landing", from.AddMinutes(1), source: "linkedin"),
+            Event("pageview", "visitor-a", "session-a", "/pricing", from.AddMinutes(2)),
+            Event("pageview", "visitor-b", "session-b", "/blog", from.AddMinutes(3), source: "email"),
+            Event("pageview", "visitor-b", "session-b", "/contact", from.AddMinutes(4)));
+        await fixture.Db.SaveChangesAsync();
+
+        var dashboard = await new GrowthAnalyticsService(fixture.Db)
+            .GetDashboardAsync(from, from.AddDays(1), segment.Id, breakdownLimit: 1);
+
+        dashboard.Sessions.Should().Be(1);
+        dashboard.EntryPages.Should().ContainSingle().Which.Label.Should().Be("/landing");
+        dashboard.ExitPages.Should().ContainSingle().Which.Label.Should().Be("/pricing");
+        dashboard.JourneyTransitions.Should().ContainSingle().Which.Should().Be(
+            new AnalyticsJourneyTransition("/landing", "/pricing", 1, 100m));
+        dashboard.Journeys.Should().ContainSingle().Which.Path.Should().Be("/landing → /pricing");
+        typeof(AnalyticsJourneyRow).GetProperties().Select(item => item.Name)
+            .Should().NotContain(["VisitorKey", "SessionKey"]);
+    }
+
     private static WebAnalyticsEvent Event(
         string name,
         string visitor,
