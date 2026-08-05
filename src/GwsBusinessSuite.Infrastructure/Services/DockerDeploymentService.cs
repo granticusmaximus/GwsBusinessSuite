@@ -32,7 +32,7 @@ public sealed class DockerDeploymentService(
         try
         {
             (exitCode, output) = await RunDockerCommandAsync(
-                $"build -t {imageTag} -f \"{fullDockerfilePath}\" \"{contextDirectory}\"",
+                ["build", "-t", imageTag, "-f", fullDockerfilePath, contextDirectory],
                 ct);
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
@@ -46,17 +46,25 @@ public sealed class DockerDeploymentService(
             : $"Docker build failed for '{imageTag}' (exit code {exitCode}).\n{output}";
     }
 
-    private async Task<(int ExitCode, string Output)> RunDockerCommandAsync(string arguments, CancellationToken cancellationToken)
+    // Takes each argument as its own array entry (ArgumentList) rather than a single
+    // pre-formatted command-line string - since UseShellExecute is false there's no shell
+    // to inject into either way, but ArgumentList also means an appName containing a quote
+    // or space can't be misread as extra Docker CLI flags, and callers no longer have to
+    // remember to manually quote paths themselves.
+    private async Task<(int ExitCode, string Output)> RunDockerCommandAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
     {
         var startInfo = new ProcessStartInfo
         {
             FileName = dockerExecutable,
-            Arguments = arguments,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
 
         using var process = new Process { StartInfo = startInfo };
         process.Start();

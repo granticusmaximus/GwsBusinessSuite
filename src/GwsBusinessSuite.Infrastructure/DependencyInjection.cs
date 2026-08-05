@@ -77,7 +77,12 @@ public static class DependencyInjection
         // accessor. The web app registers its CurrentUserAccessor afterward and becomes
         // the effective resolution there; background/minimal hosts safely use "unknown".
         services.TryAddScoped<ICurrentUserAccessor>(_ => FixedCurrentUserAccessor.Unknown);
-        services.AddHttpClient<ICjAffiliateService, CjAffiliateService>();
+        services.AddHttpClient<ICjAffiliateService, CjAffiliateService>(client =>
+        {
+            // Was previously unconfigured (silently inheriting HttpClient's 100s default)
+            // rather than the ~20s bound used elsewhere in this file for third-party calls.
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
         services.AddSingleton<OllamaWorkloadScheduler>();
         services.AddSingleton<OllamaPerformanceTracker>();
         services.AddHttpClient<IOllamaService, OllamaService>((serviceProvider, client) =>
@@ -120,7 +125,12 @@ public static class DependencyInjection
         services.AddMemoryCache();
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<NewsRefreshState>();
-        services.AddHttpClient<ITrendResearchService, TrendResearchService>();
+        services.AddHttpClient<ITrendResearchService, TrendResearchService>(client =>
+        {
+            // Was previously unconfigured (silently inheriting HttpClient's 100s default)
+            // rather than the ~20s bound used elsewhere in this file for third-party calls.
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
         services.AddScoped<IDockerDeploymentService, DockerDeploymentService>();
         services.AddScoped<ICjAdsService, CjAdsService>();
         services.AddScoped<ISiteSettingsService, SiteSettingsService>();

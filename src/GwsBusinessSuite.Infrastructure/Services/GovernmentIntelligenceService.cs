@@ -44,8 +44,14 @@ public sealed class GovernmentIntelligenceService(
     private const string SchoolsNewsUrl = "https://www.hcbe.net/newsmedia";
     private const string GovernorPressReleasesUrl = "https://gov.georgia.gov/press-releases";
     private const string GovernorLegislationUrl = "https://gov.georgia.gov/executive-action/legislation";
-    private const string GovernorSignedLegislationUrl = "https://gov.georgia.gov/executive-action/legislation/signed-legislation/2026";
-    private const string GovernorVetoedLegislationUrl = "https://gov.georgia.gov/executive-action/legislation/vetoed-legislation/2026";
+    // Was hardcoded to "/2026" (and similarly the Congress number/session below) - silently
+    // stale from January onward with no error, just an empty list. Computed instead: Georgia's
+    // legislation-by-year URL just needs the calendar year, and Congress numbering follows a
+    // fixed, known formula (see CurrentCongressNumber), so both stay correct indefinitely.
+    private static string GovernorSignedLegislationUrl =>
+        $"https://gov.georgia.gov/executive-action/legislation/signed-legislation/{CurrentGeorgiaLegislativeYear}";
+    private static string GovernorVetoedLegislationUrl =>
+        $"https://gov.georgia.gov/executive-action/legislation/vetoed-legislation/{CurrentGeorgiaLegislativeYear}";
     private const string GeorgiaGeneralAssemblyUrl = "https://www.legis.ga.gov/";
     private const string GeorgiaApiBaseUrl = "https://www.legis.ga.gov/api/";
     private const string GeorgiaAuthenticationTokenUrl = "https://www.legis.ga.gov/api/authentication/token";
@@ -55,12 +61,15 @@ public sealed class GovernmentIntelligenceService(
     private const string GeorgiaSenateVotesUrl = "https://www.legis.ga.gov/votes/senate";
     private const string GeorgiaLegislationPageUrl = "https://www.legis.ga.gov/legislation/";
     private const string GeorgiaApiObscureKey = "jVEXFFwSu36BwwcP83xYgxLAhLYmKk";
-    private const string SenateSummaryUrl = "https://www.senate.gov/legislative/LIS/roll_call_lists/vote_menu_119_2.xml";
-    private const string SenateVotesUrl = "https://www.senate.gov/legislative/LIS/roll_call_lists/vote_menu_119_2.htm";
-    private const string HouseVotesListUrl = "https://clerk.house.gov/Votes/MemberVotes?CongressNum=119&Session=2nd";
+    private static string SenateSummaryUrl =>
+        $"https://www.senate.gov/legislative/LIS/roll_call_lists/vote_menu_{CurrentCongressNumber}_{CurrentCongressSession}.xml";
+    private static string SenateVotesUrl =>
+        $"https://www.senate.gov/legislative/LIS/roll_call_lists/vote_menu_{CurrentCongressNumber}_{CurrentCongressSession}.htm";
+    private static string HouseVotesListUrl =>
+        $"https://clerk.house.gov/Votes/MemberVotes?CongressNum={CurrentCongressNumber}&Session={CurrentCongressSessionWord}";
     private const string HouseVotesIndexUrl = "https://clerk.house.gov/Votes";
     private const string CongressSearchUrl = "https://www.congress.gov/search?q=%7B%22source%22:%22legislation%22%7D";
-    private const string CongressPublicLawsUrl = "https://www.congress.gov/public-laws/119th-congress";
+    private static string CongressPublicLawsUrl => $"https://www.congress.gov/public-laws/{CurrentCongressOrdinal}-congress";
     private const string AreaLabel = "Kathleen, Houston County, Georgia";
     private const string GeorgiaAccessTokenCacheKey = "government-intelligence:georgia:token";
     private const string GeorgiaCurrentSessionCacheKey = "government-intelligence:georgia:session";
@@ -69,6 +78,30 @@ public sealed class GovernmentIntelligenceService(
     private static readonly TimeSpan SnapshotCacheDuration = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan GeorgiaAccessTokenCacheDuration = TimeSpan.FromMinutes(4);
     private static readonly TimeSpan GeorgiaSessionCacheDuration = TimeSpan.FromHours(6);
+
+    // Congress convenes for a two-year term starting in each odd-numbered year; the 118th
+    // Congress began in 2023, so this formula stays correct indefinitely with nothing to
+    // update by hand. Georgia's legislature follows the same odd/even pattern for its own
+    // "session" concept, but the only place that matters here is the governor's site, which
+    // just wants the plain calendar year.
+    private static int CurrentCongressNumber => 118 + (DateTime.UtcNow.Year - 2023) / 2;
+    private static int CurrentCongressSession => DateTime.UtcNow.Year % 2 == 1 ? 1 : 2;
+    private static string CurrentCongressSessionWord => CurrentCongressSession == 1 ? "1st" : "2nd";
+    private static string CurrentCongressOrdinal => Ordinal(CurrentCongressNumber);
+    private static int CurrentGeorgiaLegislativeYear => DateTime.UtcNow.Year;
+
+    private static string Ordinal(int n) => (n % 100) switch
+    {
+        11 or 12 or 13 => $"{n}th",
+        _ => (n % 10) switch
+        {
+            1 => $"{n}st",
+            2 => $"{n}nd",
+            3 => $"{n}rd",
+            _ => $"{n}th"
+        }
+    };
+
     private const int MaxCountyAnnouncements = 6;
     private const int MaxCountyMeetings = 6;
     private const int MaxStatePressReleases = 8;
@@ -218,8 +251,8 @@ public sealed class GovernmentIntelligenceService(
                 [
                     new CivicResourceLink("Governor Press Releases", GovernorPressReleasesUrl, "Official statewide announcements and executive updates."),
                     new CivicResourceLink("Legislation Overview", GovernorLegislationUrl, "Governor-level signed and vetoed legislation hub."),
-                    new CivicResourceLink("2026 Signed Legislation", GovernorSignedLegislationUrl, "Current-year Georgia bills signed into law."),
-                    new CivicResourceLink("2026 Vetoed Legislation", GovernorVetoedLegislationUrl, "Current-year Georgia vetoes and rejected measures.")
+                    new CivicResourceLink($"{CurrentGeorgiaLegislativeYear} Signed Legislation", GovernorSignedLegislationUrl, "Current-year Georgia bills signed into law."),
+                    new CivicResourceLink($"{CurrentGeorgiaLegislativeYear} Vetoed Legislation", GovernorVetoedLegislationUrl, "Current-year Georgia vetoes and rejected measures.")
                 ]),
                 new CivicResourceSection("Georgia Legislature",
                 [
@@ -397,7 +430,7 @@ public sealed class GovernmentIntelligenceService(
 
     private async Task<ChamberVoteSummary?> LoadSenateVoteAsync(int voteNumber, CancellationToken ct)
     {
-        var xmlUrl = $"https://www.senate.gov/legislative/LIS/roll_call_votes/vote1192/vote_119_2_{voteNumber:00000}.xml";
+        var xmlUrl = $"https://www.senate.gov/legislative/LIS/roll_call_votes/vote{CurrentCongressNumber}{CurrentCongressSession}/vote_{CurrentCongressNumber}_{CurrentCongressSession}_{voteNumber:00000}.xml";
         var xml = await GetStringOrNullAsync(xmlUrl, ct);
         if (string.IsNullOrWhiteSpace(xml))
         {
