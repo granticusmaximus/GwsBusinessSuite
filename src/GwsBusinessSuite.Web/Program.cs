@@ -1059,7 +1059,20 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
 
     return Results.Content(html, "text/html");
 }).AllowAnonymous().RequireRateLimiting("public-read")
-    .CacheOutput(OutputCachePublicContentInvalidator.Tag);
+    // NOT the shared OutputCachePublicContentInvalidator.Tag policy - this route (uniquely
+    // among the ones using that policy) renders different HTML depending on
+    // httpContext.User.Identity.IsAuthenticated (draft visibility, edit-mode overlay), but
+    // the output cache middleware keys purely on URL with no auth-awareness. Caching this
+    // route under the shared policy meant a Contributor merely previewing an unpublished
+    // draft at its real URL could get that draft's content cached and served to the next
+    // anonymous visitor who happened to hit the same URL within the 2-minute window - a real
+    // confidentiality leak, not a hypothetical one. Skipping caching entirely for any
+    // authenticated request closes that; anonymous traffic (the vast majority, and the only
+    // case caching actually helps) is unaffected.
+    .CacheOutput(policy => policy
+        .Expire(TimeSpan.FromMinutes(2))
+        .Tag(OutputCachePublicContentInvalidator.Tag)
+        .With(ctx => ctx.HttpContext.User.Identity?.IsAuthenticated != true));
 
 // Handles "form" widget submissions (see CmsBlockHtmlRenderer's "form" case). Fixed URL
 // per site rather than per page — the submitted page's (possibly nested) full path travels

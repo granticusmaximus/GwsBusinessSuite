@@ -65,7 +65,8 @@ public sealed class PrivacyOperationsService(
         await AuditAsync("PrivacyIdentityVerified", entity.Id, null, cancellationToken);
     }
 
-    public async Task CompleteRequestAsync(Guid requestId, string status, string decisionNotes, CancellationToken cancellationToken = default)
+    public async Task CompleteRequestAsync(Guid requestId, string status, string decisionNotes,
+        bool erasureDataDeletionConfirmed = false, CancellationToken cancellationToken = default)
     {
         if (status is not (PrivacyRequestStatuses.Fulfilled or PrivacyRequestStatuses.Denied or PrivacyRequestStatuses.InReview))
             throw new ArgumentException("Unsupported completion status.");
@@ -73,11 +74,23 @@ public sealed class PrivacyOperationsService(
         if (entity.IdentityVerifiedAt is null) throw new InvalidOperationException("Identity must be verified before a request can be decided.");
         if (status == PrivacyRequestStatuses.Denied && string.IsNullOrWhiteSpace(decisionNotes))
             throw new ArgumentException("A denial reason is required.");
+        // Erasure has no real cascading-deletion implementation anywhere in this app - deletion
+        // happens manually, off-platform. Without this gate, "Fulfilled" was assertable from the
+        // same generic status dropdown used for Access/Correction/Restriction, so the compliance
+        // record could claim data was erased when nothing had actually been deleted.
+        if (entity.RequestType == PrivacyRequestTypes.Erasure && status == PrivacyRequestStatuses.Fulfilled && !erasureDataDeletionConfirmed)
+        {
+            throw new InvalidOperationException(
+                "Erasure requests can only be marked Fulfilled after confirming the subject's data has actually been deleted across all systems.");
+        }
         entity.Status = status; entity.DecisionNotes = decisionNotes.Trim();
         entity.CompletedAt = status is PrivacyRequestStatuses.Fulfilled or PrivacyRequestStatuses.Denied ? UtcNow : null;
         entity.UpdatedAt = UtcNow; entity.UpdatedBy = await currentUser.GetCurrentUsernameAsync(cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
-        await AuditAsync("PrivacyRequestStatusChanged", entity.Id, new Dictionary<string, string?> { ["status"] = status }, cancellationToken);
+        var auditDetails = new Dictionary<string, string?> { ["status"] = status };
+        if (entity.RequestType == PrivacyRequestTypes.Erasure)
+            auditDetails["erasureDataDeletionConfirmed"] = erasureDataDeletionConfirmed.ToString();
+        await AuditAsync("PrivacyRequestStatusChanged", entity.Id, auditDetails, cancellationToken);
     }
 
     public async Task<SubjectDataExport> ExportSubjectDataAsync(Guid requestId, CancellationToken cancellationToken = default)

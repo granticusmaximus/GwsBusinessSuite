@@ -1153,10 +1153,19 @@ function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, s
                 if (updated) renderInlineDatabaseSnapshot(wrapper, state, updated, resetDatabase, activeView?.id);
             }));
     } else {
+        // Every non-board view (List, Calendar, Gallery, Timeline, etc.) renders through this
+        // shared table fallback, so fixing the row-open affordance here covers all of them at
+        // once. Cells stay click-to-edit (createInlineCellEditor); a dedicated leading column
+        // opens the full row page, mirroring what the board's card click already does, rather
+        // than making the whole <tr> clickable and fighting the per-cell editors for clicks.
+        const openRow = rowId => state.dotNetRef.invokeMethodAsync('OpenLinkedDatabaseRow', snapshot.id, rowId);
         const table = document.createElement('table');
         table.className = 'wiki-inline-database-table';
         const thead = document.createElement('thead');
         const headingRow = document.createElement('tr');
+        const openHeading = document.createElement('th');
+        openHeading.className = 'wiki-inline-database-open-column';
+        headingRow.appendChild(openHeading);
         for (const property of snapshot.properties) {
             const heading = document.createElement('th');
             heading.textContent = property.name;
@@ -1169,6 +1178,17 @@ function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, s
         const tbody = document.createElement('tbody');
         for (const row of snapshot.rows) {
             const tableRow = document.createElement('tr');
+            const openCell = document.createElement('td');
+            openCell.className = 'wiki-inline-database-open-column';
+            const openButton = document.createElement('button');
+            openButton.type = 'button';
+            openButton.className = 'wiki-inline-database-open-row';
+            openButton.title = 'Open row';
+            openButton.setAttribute('aria-label', 'Open row');
+            openButton.innerHTML = '<i class="bi bi-arrows-angle-expand"></i>';
+            openButton.addEventListener('click', () => openRow(row.id));
+            openCell.appendChild(openButton);
+            tableRow.appendChild(openCell);
             for (const property of snapshot.properties) {
                 const cell = document.createElement('td');
                 const value = row.cells.find(item => item.propertyId === property.id)?.value || '';

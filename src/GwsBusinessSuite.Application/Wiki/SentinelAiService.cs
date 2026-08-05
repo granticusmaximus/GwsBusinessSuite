@@ -278,8 +278,14 @@ public sealed class SentinelAiService(
             includeInternet,
             useDeepAnalysis);
 
-        var stream = ollama.GenerateStreamAsync(model, systemPrompt, userPrompt, maxOutputTokens, cancellationToken);
-        await using var enumerator = stream.GetAsyncEnumerator(cancellationToken);
+        var timeoutMinutes = settings.OllamaTimeoutMinutesOverride is > 0
+            ? settings.OllamaTimeoutMinutesOverride.Value
+            : SentinelGptDefaults.DefaultTimeoutMinutes;
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(timeoutMinutes));
+
+        var stream = ollama.GenerateStreamAsync(model, systemPrompt, userPrompt, maxOutputTokens, timeoutCts.Token);
+        await using var enumerator = stream.GetAsyncEnumerator(timeoutCts.Token);
         while (true)
         {
             string fragment;
@@ -288,6 +294,11 @@ public sealed class SentinelAiService(
                 if (!await enumerator.MoveNextAsync()) break;
                 fragment = enumerator.Current;
             }
+            // Checks the caller's own token, not timeoutCts's linked one, so a genuine
+            // client disconnect/cancel still rethrows below (nothing useful to save or
+            // yield to a circuit that's gone) while our own CancelAfter firing - or any
+            // other failure - degrades gracefully into a saved "Failed" run instead of an
+            // unhandled exception.
             catch (Exception) when (!cancellationToken.IsCancellationRequested)
             {
                 run.Status = SentinelAiRunStatuses.Failed;
@@ -899,6 +910,13 @@ public sealed class SentinelAiService(
         string groundedContext,
         CancellationToken cancellationToken)
     {
+        // Advisory-only: Deep Analysis already ran the main model, so a slow or hung teacher
+        // model shouldn't hold the single global Ollama lease indefinitely or block the whole
+        // response - bounded independently of the main chat's own timeout, then degraded to
+        // "no advisory available" the same as any other teacher-model failure.
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(2));
+
         try
         {
             var output = await ollama.GenerateAsync(
@@ -906,8 +924,17 @@ public sealed class SentinelAiService(
                 $"{role} Return independent advisory analysis, not the final user-facing answer. " +
                 "Challenge unsupported assumptions, distinguish fact from inference, never claim an action ran, and stay under 650 words.",
                 $"REQUEST:\n{LimitRaw(instruction, 8_000)}\n\nSANITIZED GROUNDED CONTEXT:\n{groundedContext}",
-                cancellationToken);
+                timeoutCts.Token);
             return string.IsNullOrWhiteSpace(output) ? null : LimitRaw(output.Trim(), 7_000);
+        }
+        // Our own CancelAfter firing throws OperationCanceledException too, but only the
+        // caller's original token going into cancellation means the request itself is
+        // actually done (client disconnect/real cancel) - that case still rethrows, since
+        // there's no response left to degrade gracefully into.
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger?.LogWarning("SentinelGPT teacher model {TeacherModel} timed out; continuing without it.", model);
+            return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

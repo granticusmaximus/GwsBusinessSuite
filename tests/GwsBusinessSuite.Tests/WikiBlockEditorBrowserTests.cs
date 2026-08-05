@@ -521,6 +521,93 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
     }
 
     [Fact]
+    public async Task ImportedInlineTable_ShouldOpenRowFromNonBoardView()
+    {
+        // Regression guard: the row-open affordance was originally wired up only for the
+        // Board view (createInlineBoard's card click). Every other view type (List, Gallery,
+        // Calendar, Timeline, ...) renders through the shared generic table fallback in
+        // renderInlineDatabaseSnapshot, which had no way to open a row at all - only inline
+        // cell editing. This exercises that fallback (view type "list") and asserts the
+        // dedicated open-row button reaches the same OpenLinkedDatabaseRow JS-invokable call
+        // the board card uses.
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.SetContentAsync(
+            """<main class="sentinel-workspace"><div id="editor" class="wiki-block-editor"></div></main>""");
+        var stylesPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/app.css"));
+        await page.AddStyleTagAsync(new PageAddStyleTagOptions { Content = await File.ReadAllTextAsync(stylesPath) });
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+
+        var databaseId = Guid.NewGuid();
+        var titlePropertyId = Guid.NewGuid();
+        var rowId = Guid.NewGuid();
+        var blockJson = WikiBlockJson.Serialize(
+        [
+            new WikiBlock(
+                Guid.NewGuid(),
+                WikiBlockTypes.InlineDatabase,
+                0,
+                [],
+                new Dictionary<string, string>
+                {
+                    ["databaseId"] = databaseId.ToString(),
+                    ["databaseTitle"] = "Reading List"
+                })
+        ]);
+        var snapshot = new WikiInlineDatabaseSnapshot(
+            databaseId,
+            "Reading List",
+            "▤",
+            [new WikiInlineDatabaseProperty(titlePropertyId, "Name", WikiDatabasePropertyTypes.Title, false, [])],
+            [
+                new WikiInlineDatabaseRow(
+                    rowId,
+                    [new WikiInlineDatabaseCell(titlePropertyId, "Deep work")])
+            ])
+        {
+            Views = [new WikiInlineDatabaseView(Guid.NewGuid(), "List", WikiDatabaseViewTypes.List, null)]
+        };
+        var payload = JsonSerializer.Serialize(
+            new { blockJson, snapshot },
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+
+        await page.EvaluateAsync(
+            """
+            payloadJson => {
+                const payload = JSON.parse(payloadJson);
+                window.editorCalls = [];
+                window.sentinelBlockEditor.initialize(
+                    document.querySelector('#editor'),
+                    {
+                        invokeMethodAsync: (method, ...args) => {
+                            window.editorCalls.push({ method, args });
+                            return Promise.resolve(method === 'GetInlineDatabase' ? payload.snapshot : null);
+                        }
+                    },
+                    payload.blockJson);
+            }
+            """,
+            payload);
+
+        await Expect(page.Locator(".wiki-inline-database-table")).ToBeVisibleAsync();
+        await Expect(page.Locator(".wiki-inline-database-board")).Not.ToBeVisibleAsync();
+        await page.Locator(".wiki-inline-database-open-row").ClickAsync();
+        var openRowCall = await page.EvaluateAsync<string>(
+            "() => JSON.stringify(window.editorCalls.at(-1))");
+        openRowCall.Should().Contain("OpenLinkedDatabaseRow")
+            .And.Contain(databaseId.ToString())
+            .And.Contain(rowId.ToString());
+    }
+
+    [Fact]
     public async Task NestedBlockActions_ShouldPreserveEntireBranches()
     {
         await using var page = await fixture.Browser.NewPageAsync();

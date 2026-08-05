@@ -21,6 +21,13 @@ public static class SentinelGptDefaults
     // character limit (rather than a token estimate) so the browser and service can
     // enforce the exact same rule before any workspace or model work begins.
     public const int MaxInstructionLength = 32_000;
+
+    // Production Ollama serializes every call in the app through one global lease
+    // (OllamaWorkloadScheduler); IOllamaService's HttpClient otherwise defaults to a 2-hour
+    // timeout, so an unbounded chat call can hold that lease - and block every other
+    // feature's Ollama use - for up to 2 hours. Bounded to a duration a human is actually
+    // willing to sit in a chat waiting for, well under the 2-hour HttpClient ceiling.
+    public const int DefaultTimeoutMinutes = 5;
 }
 
 public static class SentinelGptResponseBudgets

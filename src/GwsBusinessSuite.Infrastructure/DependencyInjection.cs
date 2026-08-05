@@ -179,6 +179,15 @@ public static class DependencyInjection
         {
             client.Timeout = TimeSpan.FromSeconds(30);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-WorkflowAutomation/1.0");
+        }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        {
+            // See AutomationDestinationValidator's own doc comment for why this - in short,
+            // a one-time pre-check on the request URL doesn't cover redirects or survive
+            // DNS-rebinding; validating inside ConnectCallback (on every real TCP connection
+            // this handler makes) does.
+            ConnectCallback = AutomationDestinationValidator.ConnectAsync,
+            AllowAutoRedirect = true,
+            MaxAutomaticRedirections = 5
         });
         services.AddScoped<IAutomationNodeRegistry, AutomationNodeRegistry>();
         services.AddScoped<IAutomationCredentialService, AutomationCredentialService>();

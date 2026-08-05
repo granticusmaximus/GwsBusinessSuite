@@ -50,7 +50,14 @@ else
                             @if (request.IdentityVerifiedAt is not null && request.CompletedAt is null)
                             {
                                 <button class="btn btn-sm btn-outline-secondary ms-1" @onclick="() => ReviewAsync(request.Id)" disabled="@_busy">Review</button>
-                                <button class="btn btn-sm btn-success ms-1" @onclick="() => CompleteAsync(request.Id)" disabled="@_busy">Fulfill</button>
+                                @if (request.RequestType == PrivacyRequestTypes.Erasure)
+                                {
+                                    <label class="check erasure-confirm" title="This app has no automated data-deletion action - deletion happens manually, off-platform. Only check this once the subject's data has actually been removed.">
+                                        <input type="checkbox" checked="@_erasureConfirmations.GetValueOrDefault(request.Id)" @onchange="e => _erasureConfirmations[request.Id] = (bool)e.Value!" />
+                                        Data deleted
+                                    </label>
+                                }
+                                <button class="btn btn-sm btn-success ms-1" @onclick="() => CompleteAsync(request)" disabled="@(_busy || (request.RequestType == PrivacyRequestTypes.Erasure && !_erasureConfirmations.GetValueOrDefault(request.Id)))">Fulfill</button>
                                 <button class="btn btn-sm btn-outline-danger ms-1" @onclick="() => DenyAsync(request)" disabled="@(_busy || string.IsNullOrWhiteSpace(request.DecisionNotes))" title="Initial notes are required as the denial reason">Deny</button>
                             }
                         </td>
@@ -121,12 +128,15 @@ else
     private readonly Dictionary<Guid, int> _retentionDays = [];
     private readonly Dictionary<Guid, string> _retentionBasis = [];
     private readonly Dictionary<Guid, bool> _retentionEnabled = [], _retentionAutomation = [];
+    private readonly Dictionary<Guid, bool> _erasureConfirmations = [];
 
     protected override Task OnInitializedAsync() => LoadAsync();
     private async Task LoadAsync() { try { Dashboard = await PrivacyService.GetDashboardAsync(); _error = false; } catch (Exception ex) { Fail(ex, "Privacy operations could not be loaded."); } }
     private async Task CreateRequestAsync() => await RunAsync(async () => { await PrivacyService.CreateRequestAsync(new(_requestType, _subjectIdentifier, _requestNotes)); _subjectIdentifier = _requestNotes = ""; }, "Privacy request recorded.");
     private async Task VerifyAsync(Guid id) => await RunAsync(() => PrivacyService.VerifyIdentityAsync(id), "Identity verification recorded.");
-    private async Task CompleteAsync(Guid id) => await RunAsync(() => PrivacyService.CompleteRequestAsync(id, PrivacyRequestStatuses.Fulfilled, "Request fulfilled through Privacy Operations."), "Request fulfilled.");
+    private async Task CompleteAsync(PrivacyRequestView request) => await RunAsync(() => PrivacyService.CompleteRequestAsync(
+        request.Id, PrivacyRequestStatuses.Fulfilled, "Request fulfilled through Privacy Operations.",
+        request.RequestType == PrivacyRequestTypes.Erasure && _erasureConfirmations.GetValueOrDefault(request.Id)), "Request fulfilled.");
     private async Task ReviewAsync(Guid id) => await RunAsync(() => PrivacyService.CompleteRequestAsync(id, PrivacyRequestStatuses.InReview, "Request is under review."), "Request moved to review.");
     private async Task DenyAsync(PrivacyRequestView request) => await RunAsync(() => PrivacyService.CompleteRequestAsync(request.Id, PrivacyRequestStatuses.Denied, request.DecisionNotes), "Request denied with the recorded reason.");
     private async Task CreateIncidentAsync() => await RunAsync(async () => { await PrivacyService.CreateIncidentAsync(new(_incidentTitle, _incidentSummary, _incidentSeverity, DateTimeOffset.UtcNow, _personalData, _ephi, _personalData ? DateTimeOffset.UtcNow : null, _incidentOwner)); _incidentTitle = _incidentSummary = ""; _personalData = _ephi = false; }, "Security incident opened.");

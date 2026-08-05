@@ -1,3 +1,17 @@
+/* This studio previously hardcoded a light glass-panel palette (white cards, slate-900
+   text) while every other admin page renders against the app's single permanent dark theme
+   (--gws-*/--bs-* tokens defined globally in wwwroot/app.css - there is no light variant to
+   fall back to anywhere else in the suite). Retheme the studio CHROME onto those tokens.
+   The blue accent is kept (this editor's own identity, distinct from the sidebar's amber
+   accent) but lightened where it sits on dark neutrals so it stays legible.
+
+   Deliberately NOT retouched: .studio-stage-shell's inner .studio-stage-frame /
+   .studio-live-iframe / .studio-stage-browser / .studio-stage-route. Those render an actual
+   mock browser window (traffic-light dots, address pill) wrapped around the real, same-origin
+   CMS page preview - a light frame is correct there since it's mimicking real browser chrome
+   around a real (light-themed) public page, not part of the admin shell's own UI.
+*/
+
 /* ── Studio chrome (shared with previous layout) ─────────────────────────── */
 
 .studio-shell {
@@ -23,7 +37,7 @@
 	letter-spacing: 0.16em;
 	font-size: 0.7rem;
 	font-weight: 700;
-	color: #64748b;
+	color: var(--gws-text-soft);
 }
 
 .studio-header-actions {
@@ -48,16 +62,16 @@
 	align-items: center;
 	padding: 0.45rem 0.8rem;
 	border-radius: 999px;
-	background: #dbeafe;
-	color: #1d4ed8;
+	background: rgba(37, 99, 235, 0.18);
+	color: #93c5fd;
 	font-size: 0.76rem;
 	font-weight: 700;
 }
 
 .studio-pill-subtle {
-	background: rgba(255, 255, 255, 0.88);
-	color: #475569;
-	border: 1px solid rgba(148, 163, 184, 0.18);
+	background: rgba(255, 255, 255, 0.06);
+	color: var(--gws-text-soft);
+	border: 1px solid var(--gws-panel-border);
 }
 
 /* ── Three-column workspace ──────────────────────────────────────────────── */
@@ -72,10 +86,10 @@
 }
 
 .studio-panel {
-	background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.86));
-	border: 1px solid rgba(148, 163, 184, 0.18);
+	background: linear-gradient(180deg, var(--gws-panel-bg), var(--gws-panel-bg-2));
+	border: 1px solid var(--gws-panel-border);
 	border-radius: 28px;
-	box-shadow: 0 20px 44px rgba(15, 23, 42, 0.08);
+	box-shadow: var(--gws-shadow-md);
 	-webkit-backdrop-filter: blur(18px);
 	backdrop-filter: blur(18px);
 	min-height: 0;
@@ -115,13 +129,14 @@
 	margin: 0.3rem 0 0;
 	font-size: 1.08rem;
 	letter-spacing: -0.03em;
+	color: var(--gws-text-strong);
 }
 
 /* ── Tab strip ───────────────────────────────────────────────────────────── */
 
 .studio-tab-strip {
 	display: flex;
-	border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+	border-bottom: 1px solid var(--gws-panel-border);
 }
 
 .studio-tab {
@@ -129,7 +144,7 @@
 	padding: 0.8rem 0.5rem;
 	border: none;
 	background: transparent;
-	color: #64748b;
+	color: var(--gws-text-soft);
 	font-size: 0.82rem;
 	font-weight: 600;
 	transition: color 0.14s, border-bottom-color 0.14s;
@@ -137,8 +152,8 @@
 }
 
 .studio-tab.is-active {
-	color: #1d4ed8;
-	border-bottom-color: #2563eb;
+	color: #93c5fd;
+	border-bottom-color: #3b82f6;
 }
 
 /* ── Widget library ──────────────────────────────────────────────────────── */
@@ -155,8 +170,8 @@
 	gap: 0.85rem;
 	padding: 0.85rem;
 	text-align: left;
-	border: 1px solid rgba(148, 163, 184, 0.18);
-	background: rgba(255, 255, 255, 0.72);
+	border: 1px solid var(--gws-panel-border);
+	background: rgba(255, 255, 255, 0.04);
 	border-radius: 18px;
 	color: inherit;
 	cursor: grab;
@@ -165,8 +180,8 @@
 
 .studio-widget-card:hover {
 	transform: translateY(-1px);
-	box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
-	border-color: rgba(37, 99, 235, 0.28);
+	box-shadow: var(--gws-shadow-md);
+	border-color: rgba(59, 130, 246, 0.4);
 }
 
 .studio-widget-card:active {
@@ -199,10 +214,11 @@
 
 .studio-widget-copy strong {
 	font-size: 0.9rem;
+	color: var(--gws-text-strong);
 }
 
 .studio-widget-copy small {
-	color: #64748b;
+	color: var(--gws-text-soft);
 	font-size: 0.74rem;
 }
 
@@ -228,21 +244,21 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	border: 1px solid rgba(148, 163, 184, 0.28);
-	background: rgba(255, 255, 255, 0.9);
+	border: 1px solid var(--gws-panel-border);
+	background: rgba(255, 255, 255, 0.05);
 	border-radius: 8px;
-	color: #64748b;
+	color: var(--gws-text-soft);
 	font-size: 0.8rem;
 }
 
 .studio-icon-btn:hover {
-	color: #1d4ed8;
-	border-color: rgba(37, 99, 235, 0.35);
+	color: #93c5fd;
+	border-color: rgba(59, 130, 246, 0.45);
 }
 
 .studio-icon-btn.studio-icon-btn-danger:hover {
-	color: #dc2626;
-	border-color: rgba(220, 38, 38, 0.35);
+	color: #fca5a5;
+	border-color: rgba(239, 68, 68, 0.45);
 }
 
 /* ── Layer tree ──────────────────────────────────────────────────────────── */
@@ -264,8 +280,8 @@
 	gap: 0.65rem;
 	padding: 0.7rem 0.8rem;
 	text-align: left;
-	border: 1px solid rgba(148, 163, 184, 0.14);
-	background: rgba(255, 255, 255, 0.72);
+	border: 1px solid var(--gws-panel-border);
+	background: rgba(255, 255, 255, 0.04);
 	border-radius: 16px;
 	color: inherit;
 	transition: border-color 0.14s, background 0.14s;
@@ -278,13 +294,13 @@
 .studio-layer-widget-item {
 	margin-left: 1.2rem;
 	border-radius: 12px;
-	background: rgba(248, 250, 252, 0.9);
+	background: rgba(255, 255, 255, 0.03);
 }
 
 .studio-layer-item.is-active {
-	border-color: rgba(37, 99, 235, 0.38);
-	background: linear-gradient(180deg, rgba(239, 246, 255, 0.94), rgba(255, 255, 255, 0.98));
-	box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+	border-color: rgba(59, 130, 246, 0.5);
+	background: linear-gradient(180deg, rgba(37, 99, 235, 0.2), rgba(37, 99, 235, 0.08));
+	box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
 }
 
 .studio-layer-widget-item {
@@ -297,7 +313,7 @@
 
 .studio-layer-drag-handle {
 	background: transparent;
-	color: #94a3b8;
+	color: var(--gws-text-soft);
 	cursor: grab;
 }
 
@@ -321,15 +337,15 @@
 	justify-content: center;
 	background: none;
 	border: none;
-	color: #94a3b8;
+	color: var(--gws-text-soft);
 	cursor: pointer;
 	border-radius: 6px;
 	font-size: 0.7rem;
 }
 
 .studio-layer-collapse-toggle:hover {
-	background: rgba(148, 163, 184, 0.16);
-	color: #0f172a;
+	background: rgba(255, 255, 255, 0.08);
+	color: var(--gws-text-strong);
 }
 
 .studio-layer-item-main {
@@ -373,11 +389,12 @@
 
 .studio-layer-copy strong {
 	font-size: 0.84rem;
+	color: var(--gws-text-strong);
 }
 
 .studio-layer-copy small {
 	font-size: 0.72rem;
-	color: #64748b;
+	color: var(--gws-text-soft);
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -391,8 +408,8 @@
 	gap: 0.3rem;
 	padding: 0.3rem;
 	border-radius: 999px;
-	background: rgba(255, 255, 255, 0.8);
-	border: 1px solid rgba(148, 163, 184, 0.18);
+	background: rgba(255, 255, 255, 0.05);
+	border: 1px solid var(--gws-panel-border);
 }
 
 .studio-device-button {
@@ -401,7 +418,7 @@
 	border: none;
 	border-radius: 999px;
 	background: transparent;
-	color: #64748b;
+	color: var(--gws-text-soft);
 }
 
 .studio-device-button:disabled {
@@ -412,10 +429,12 @@
 .studio-device-button.is-active {
 	background: linear-gradient(145deg, #0f172a, #2563eb);
 	color: white;
-	box-shadow: 0 10px 20px rgba(37, 99, 235, 0.18);
+	box-shadow: 0 10px 20px rgba(37, 99, 235, 0.28);
 }
 
 /* ── Stage frame ─────────────────────────────────────────────────────────── */
+/* Intentionally light below - this is a mock browser window wrapped around the real,
+   same-origin public-page preview, not admin chrome. See file header note. */
 
 .studio-stage-shell {
 	padding: 0.6rem;
@@ -485,6 +504,10 @@
    (.gws-editable, .gws-editor-selected, etc.) live in CmsBlockHtmlRenderer's
    BuildEditModeScript, not here - this stylesheet only covers the Studio chrome itself. */
 
+/* .canvas-loading / .canvas-empty-state render directly in the dark studio shell (they
+   replace the whole workspace while loading or on a missing page), not inside the light
+   stage frame above, so - unlike that frame - these DO need dark-theme colors. */
+
 .canvas-loading {
 	flex: 1;
 	min-height: 300px;
@@ -505,11 +528,12 @@
 	text-align: center;
 	padding: 3rem 2rem;
 	gap: 0.75rem;
+	color: var(--gws-text-strong);
 }
 
 .canvas-empty-icon {
 	font-size: 3rem;
-	color: #cbd5e1;
+	color: var(--gws-text-soft);
 	margin-bottom: 0.5rem;
 }
 
@@ -525,7 +549,7 @@
 	align-items: center;
 	gap: 0.65rem;
 	padding-bottom: 0.75rem;
-	border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+	border-bottom: 1px solid var(--gws-panel-border);
 }
 
 .studio-global-meta {
@@ -541,8 +565,8 @@
 	align-items: center;
 	padding: 0.25rem 0.6rem;
 	border-radius: 999px;
-	background: rgba(37, 99, 235, 0.12);
-	color: #1d4ed8;
+	background: rgba(37, 99, 235, 0.18);
+	color: #93c5fd;
 	font-size: 0.72rem;
 	font-weight: 700;
 	letter-spacing: 0.04em;
@@ -560,13 +584,13 @@
 }
 
 .studio-richtext-preview {
-	border: 1px solid rgba(148, 163, 184, 0.22);
+	border: 1px solid var(--gws-panel-border);
 	border-radius: 10px;
 	padding: 0.85rem 1rem;
 	font-size: 0.9rem;
 	line-height: 1.7;
-	color: #334155;
-	background: rgba(255, 255, 255, 0.6);
+	color: var(--gws-text-strong);
+	background: rgba(255, 255, 255, 0.03);
 	max-height: 220px;
 	overflow-y: auto;
 }
@@ -580,7 +604,7 @@
 /* ── Publish panel ───────────────────────────────────────────────────────── */
 
 .studio-publish-meta {
-	color: #64748b;
+	color: var(--gws-text-soft);
 	font-size: 0.84rem;
 	margin-bottom: 0.8rem;
 }
@@ -593,10 +617,11 @@
 .studio-change-item {
 	padding: 0.6rem 0.8rem;
 	border-radius: 14px;
-	background: rgba(255, 255, 255, 0.8);
-	border: 1px solid rgba(148, 163, 184, 0.14);
+	background: rgba(255, 255, 255, 0.05);
+	border: 1px solid var(--gws-panel-border);
 	overflow-wrap: anywhere;
 	font-size: 0.8rem;
+	color: var(--gws-text-strong);
 }
 
 /* ── Preview iframe ──────────────────────────────────────────────────────── */
@@ -604,7 +629,7 @@
 .studio-preview-iframe-wrap {
 	border-radius: 14px;
 	overflow: hidden;
-	border: 1px solid rgba(148, 163, 184, 0.18);
+	border: 1px solid var(--gws-panel-border);
 }
 
 .studio-preview-iframe {
@@ -619,9 +644,9 @@
 .studio-empty-card {
 	padding: 1rem;
 	border-radius: 18px;
-	border: 1px dashed rgba(148, 163, 184, 0.28);
-	background: rgba(248, 250, 252, 0.9);
-	color: #64748b;
+	border: 1px dashed var(--gws-panel-border);
+	background: rgba(255, 255, 255, 0.03);
+	color: var(--gws-text-soft);
 	font-size: 0.88rem;
 }
 
@@ -674,9 +699,9 @@
 /* ── Media library picker (widget inspector) ───────────────────────────── */
 .studio-media-picker {
 	padding: 0.75rem;
-	border: 1px solid rgba(148, 163, 184, 0.25);
+	border: 1px solid var(--gws-panel-border);
 	border-radius: 14px;
-	background: rgba(248, 250, 252, 0.9);
+	background: rgba(255, 255, 255, 0.03);
 }
 
 .studio-media-picker-grid {
@@ -687,7 +712,7 @@
 
 .studio-media-picker-item {
 	padding: 0;
-	border: 1px solid rgba(148, 163, 184, 0.3);
+	border: 1px solid var(--gws-panel-border);
 	border-radius: 8px;
 	overflow: hidden;
 	background: none;
@@ -702,5 +727,5 @@
 }
 
 .studio-media-picker-item:hover {
-	border-color: #2563eb;
+	border-color: #3b82f6;
 }

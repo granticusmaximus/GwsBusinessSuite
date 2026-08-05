@@ -92,12 +92,35 @@ public sealed class TrendResearchService(
 
     private async Task<List<TrendSignal>> FetchHackerNewsAsync(string focusArea, CancellationToken cancellationToken)
     {
-        var weekAgo = DateTimeOffset.UtcNow.AddDays(-7).ToUnixTimeSeconds();
+        if (string.IsNullOrWhiteSpace(focusArea))
+        {
+            return await QueryHackerNewsAsync(
+                "https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=20", cancellationToken);
+        }
 
-        var url = string.IsNullOrWhiteSpace(focusArea)
-            ? "https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=20"
-            : $"https://hn.algolia.com/api/v1/search?tags=story&query={Uri.EscapeDataString(focusArea)}&numericFilters={Uri.EscapeDataString($"created_at_i>{weekAgo}")}&hitsPerPage=15";
+        // A specific focus area is a real, but usually narrow, search term - requiring both an
+        // exact match AND a story from just the last 7 days routinely produces zero hits even
+        // for perfectly reasonable terms (verified against the live API: multi-word terms like
+        // "blazor server hosting" return 0 within 7 days). Try the tight recency window first
+        // (keeps results feeling "current" when it can), then widen to 90 days - still relevant,
+        // no longer silently empty - only if that first pass comes back empty.
+        var recentWindow = DateTimeOffset.UtcNow.AddDays(-7).ToUnixTimeSeconds();
+        var recentUrl = $"https://hn.algolia.com/api/v1/search?tags=story&query={Uri.EscapeDataString(focusArea)}" +
+            $"&numericFilters={Uri.EscapeDataString($"created_at_i>{recentWindow}")}&hitsPerPage=15";
+        var recentHits = await QueryHackerNewsAsync(recentUrl, cancellationToken);
+        if (recentHits.Count > 0)
+        {
+            return recentHits;
+        }
 
+        var widerWindow = DateTimeOffset.UtcNow.AddDays(-90).ToUnixTimeSeconds();
+        var widerUrl = $"https://hn.algolia.com/api/v1/search?tags=story&query={Uri.EscapeDataString(focusArea)}" +
+            $"&numericFilters={Uri.EscapeDataString($"created_at_i>{widerWindow}")}&hitsPerPage=15";
+        return await QueryHackerNewsAsync(widerUrl, cancellationToken);
+    }
+
+    private async Task<List<TrendSignal>> QueryHackerNewsAsync(string url, CancellationToken cancellationToken)
+    {
         using var response = await http.GetAsync(url, cancellationToken);
         response.EnsureSuccessStatusCode();
 
@@ -125,10 +148,27 @@ public sealed class TrendResearchService(
         // dev.to tags are single lowercase words with no spaces/punctuation.
         var tagSlug = new string(focusArea.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
 
-        var url = string.IsNullOrWhiteSpace(tagSlug)
-            ? "https://dev.to/api/articles?top=7&per_page=20"
-            : $"https://dev.to/api/articles?top=7&per_page=15&tag={Uri.EscapeDataString(tagSlug)}";
+        if (!string.IsNullOrWhiteSpace(tagSlug))
+        {
+            var tagged = await QueryDevToAsync(
+                $"https://dev.to/api/articles?top=7&per_page=15&tag={Uri.EscapeDataString(tagSlug)}", cancellationToken);
+            if (tagged.Count > 0)
+            {
+                return tagged;
+            }
+        }
 
+        // dev.to's free JSON API only supports exact-tag filtering, not full-text search, so a
+        // multi-word or uncommon focus area (most real ones) will never match a tag - "docker"
+        // matches, "ef core sqlite performance" (concatenated to "efcoresqliteperformance")
+        // never will. Rather than contributing nothing, fall back to dev.to's general top
+        // articles as supporting community signal; the synthesis prompt is already written to
+        // relate general trends back to the requested focus area.
+        return await QueryDevToAsync("https://dev.to/api/articles?top=7&per_page=20", cancellationToken);
+    }
+
+    private async Task<List<TrendSignal>> QueryDevToAsync(string url, CancellationToken cancellationToken)
+    {
         using var response = await http.GetAsync(url, cancellationToken);
         response.EnsureSuccessStatusCode();
 
