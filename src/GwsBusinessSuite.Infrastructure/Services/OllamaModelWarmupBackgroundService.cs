@@ -20,6 +20,10 @@ public sealed class OllamaModelWarmupBackgroundService(
     private static readonly TimeSpan InitialDelay = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(15);
     private const int MaxAttempts = 12;
+    // IOllamaService's HttpClient carries a 2-hour outer timeout by design - bounding each
+    // call here keeps a wedged Ollama from holding the single global OllamaWorkloadScheduler
+    // lease far longer than this retry loop's own cadence would ever need.
+    private static readonly TimeSpan PerCallTimeout = TimeSpan.FromSeconds(30);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -37,7 +41,10 @@ public sealed class OllamaModelWarmupBackgroundService(
                     ? SentinelGptDefaults.Model
                     : settings.OllamaModelOverride;
                 var ollama = scope.ServiceProvider.GetRequiredService<IOllamaService>();
-                var installed = await ollama.ListModelsAsync(stoppingToken);
+
+                using var listTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                listTimeoutCts.CancelAfter(PerCallTimeout);
+                var installed = await ollama.ListModelsAsync(listTimeoutCts.Token);
                 if (!installed.Any(item => ModelNamesMatch(item, model)))
                 {
                     logger.LogInformation(
@@ -48,7 +55,9 @@ public sealed class OllamaModelWarmupBackgroundService(
                 }
                 else
                 {
-                    await ollama.WarmModelAsync(model, stoppingToken);
+                    using var warmTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                    warmTimeoutCts.CancelAfter(PerCallTimeout);
+                    await ollama.WarmModelAsync(model, warmTimeoutCts.Token);
                     return;
                 }
             }

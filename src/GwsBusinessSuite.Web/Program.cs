@@ -312,38 +312,61 @@ using (var scope = app.Services.CreateScope())
 {
     var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<ApplicationDbContext>>();
     await using var dbContext = await dbFactory.CreateDbContextAsync();
+    // Migrations are deliberately NOT caught here - a broken migration means the data layer
+    // itself is inconsistent, and the deploy pipeline's post-deploy health check + automatic
+    // rollback exists specifically to catch a startup failure at this exact point. Letting it
+    // fail loudly is correct.
     await MigrationHistoryCompatibility.NormalizeAsync(dbContext);
     await dbContext.Database.MigrateAsync();
 
-    await EnsureGrantWatsonHomepageAsync(dbContext, app.Configuration, app.Logger);
-    await EnsureAboutPageResumeSectionAsync(dbContext, app.Logger);
-    await EnsureWikiPagesHaveBlocksAsync(dbContext, app.Logger);
-    await EnsureSentinelLearningWorkflowAsync(scope.ServiceProvider, app.Logger);
-
-    if (!await dbContext.AppUsers.AnyAsync())
+    // Everything below is non-essential bootstrapping (default content, workflow templates,
+    // the initial admin account) - a bug in any one step here previously prevented the whole
+    // app, including completely unrelated features, from starting at all. Each step now
+    // degrades independently: log and move on, rather than crash the host.
+    async Task TrySeedStepAsync(string stepName, Func<Task> step)
     {
-        var hasher        = scope.ServiceProvider.GetRequiredService<IPasswordHasher<AppUser>>();
-        var seedUsername  = app.Configuration["AdminAuth:Username"]?.Trim();
-        var seedPassword  = app.Configuration["AdminAuth:Password"];
-
-        if (!string.IsNullOrWhiteSpace(seedUsername) && !string.IsNullOrWhiteSpace(seedPassword))
+        try
         {
-            if (IsWeakSeedPassword(seedPassword, seedUsername, out var weakReason))
-            {
-                app.Logger.LogError(
-                    "Refusing to seed the admin account: AdminAuth:Password {Reason}. " +
-                    "Set a stronger password in configuration and restart.",
-                    weakReason);
-            }
-            else
-            {
-                var admin = new AppUser { Username = seedUsername, Role = AppRoles.Admin, CreatedBy = "system" };
-                admin.PasswordHash = hasher.HashPassword(admin, seedPassword);
-                dbContext.AppUsers.Add(admin);
-                await dbContext.SaveChangesAsync();
-            }
+            await step();
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogError(ex, "Startup seed step '{StepName}' failed; continuing startup without it.", stepName);
         }
     }
+
+    await TrySeedStepAsync(nameof(EnsureGrantWatsonHomepageAsync), () => EnsureGrantWatsonHomepageAsync(dbContext, app.Configuration, app.Logger));
+    await TrySeedStepAsync(nameof(EnsureAboutPageResumeSectionAsync), () => EnsureAboutPageResumeSectionAsync(dbContext, app.Logger));
+    await TrySeedStepAsync(nameof(EnsureWikiPagesHaveBlocksAsync), () => EnsureWikiPagesHaveBlocksAsync(dbContext, app.Logger));
+    await TrySeedStepAsync(nameof(EnsureSentinelLearningWorkflowAsync), () => EnsureSentinelLearningWorkflowAsync(scope.ServiceProvider, app.Logger));
+
+    await TrySeedStepAsync("SeedAdminAccount", async () =>
+    {
+        if (!await dbContext.AppUsers.AnyAsync())
+        {
+            var hasher        = scope.ServiceProvider.GetRequiredService<IPasswordHasher<AppUser>>();
+            var seedUsername  = app.Configuration["AdminAuth:Username"]?.Trim();
+            var seedPassword  = app.Configuration["AdminAuth:Password"];
+
+            if (!string.IsNullOrWhiteSpace(seedUsername) && !string.IsNullOrWhiteSpace(seedPassword))
+            {
+                if (IsWeakSeedPassword(seedPassword, seedUsername, out var weakReason))
+                {
+                    app.Logger.LogError(
+                        "Refusing to seed the admin account: AdminAuth:Password {Reason}. " +
+                        "Set a stronger password in configuration and restart.",
+                        weakReason);
+                }
+                else
+                {
+                    var admin = new AppUser { Username = seedUsername, Role = AppRoles.Admin, CreatedBy = "system" };
+                    admin.PasswordHash = hasher.HashPassword(admin, seedPassword);
+                    dbContext.AppUsers.Add(admin);
+                    await dbContext.SaveChangesAsync();
+                }
+            }
+        }
+    });
 }
 
 // Configure the HTTP request pipeline.

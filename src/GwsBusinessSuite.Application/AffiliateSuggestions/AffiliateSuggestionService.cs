@@ -17,6 +17,12 @@ public sealed class AffiliateSuggestionService(
     private const int MaxSuggestionsPerArticle = 3;
     private const int MaxCandidateOffers = 40;
     private const int MaxArticleBodyChars = 3000;
+    // IOllamaService's HttpClient carries a 2-hour outer timeout by design - this call is
+    // reachable both from CjAdsSyncBackgroundService's scheduled sweep and directly from
+    // AffiliateSuggestions.razor / ArticleEditorDetail.razor button clicks, so without its
+    // own bound a wedged Ollama could hold the single global OllamaWorkloadScheduler lease
+    // for up to 2 hours from a live page click - freezing every AI feature app-wide.
+    private static readonly TimeSpan GenerateSuggestionsTimeout = TimeSpan.FromSeconds(30);
 
     public async Task<GenerateSuggestionsResult> GenerateForArticleAsync(Guid articleId, CancellationToken cancellationToken = default)
     {
@@ -391,7 +397,9 @@ public sealed class AffiliateSuggestionService(
             REASON: <one sentence on why this offer fits this specific article>
             """;
 
-        var raw = (await ollama.GenerateAsync(model, string.Empty, prompt, cancellationToken)).Trim();
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(GenerateSuggestionsTimeout);
+        var raw = (await ollama.GenerateAsync(model, string.Empty, prompt, timeoutCts.Token)).Trim();
         return ParsePicks(raw, candidates);
     }
 

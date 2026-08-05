@@ -31,6 +31,13 @@ public sealed class NewsIntelligenceService(
 
     private const int MaxItemsPerTopic = 30;
     private const int MaxTopNewsItems = 25;
+    // IOllamaService's HttpClient carries a 2-hour outer timeout by design (see
+    // ContentStudioService's per-call CancellationTokenSource pattern) - this call is also
+    // reachable directly from RefreshAllAsync/RefreshTopicAsync/RefreshTopNewsAsync button
+    // clicks on NewsIntelligence.razor, not just the background refresh timers, so without
+    // its own bound a wedged Ollama could hold the single global OllamaWorkloadScheduler
+    // lease for up to 2 hours from a live page click - freezing every AI feature app-wide.
+    private static readonly TimeSpan BatchSummarizeTimeout = TimeSpan.FromSeconds(60);
     private const int NewsItemTtlHours = 24;
     private const int MaxConcurrentRefreshes = 3;
     private static readonly SemaphoreSlim WriteLock = new(1, 1);
@@ -733,7 +740,9 @@ public sealed class NewsIntelligenceService(
                 "sentence under 20 words that captures what matters. Respond only with a numbered list " +
                 "matching the input order. No intro, no closing remarks.";
 
-            var raw = await ollama.GenerateAsync(OllamaModel, system, string.Join("\n", input), ct);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(BatchSummarizeTimeout);
+            var raw = await ollama.GenerateAsync(OllamaModel, system, string.Join("\n", input), timeoutCts.Token);
             return ParseNumberedList(raw, articles.Count);
         }
         catch (Exception ex)
