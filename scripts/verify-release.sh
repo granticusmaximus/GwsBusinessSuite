@@ -4,6 +4,7 @@ set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 base_url=""
+public_base_url=""
 output_path=""
 require_clean=false
 skip_tests=false
@@ -15,17 +16,26 @@ usage() {
 
 # Usage:
 #   ./scripts/verify-release.sh [--base-url https://admin.example.com]
-#       [--output artifacts/release-readiness/report.md] [--require-clean]
-#       [--install-playwright-deps] [--skip-tests]
+#       [--public-base-url https://example.com] [--output artifacts/release-readiness/report.md]
+#       [--require-clean] [--install-playwright-deps] [--skip-tests]
 #
-# Runs privacy-safe local release gates and, when --base-url is supplied, deployed endpoint
-# checks. The Markdown report contains statuses and durations only; command output remains in
-# an automatically removed temporary directory and is printed only when a check fails.
+# Runs privacy-safe local release gates and, when --base-url/--public-base-url are supplied,
+# deployed endpoint checks. --base-url hits the admin app's own health/login surface;
+# --public-base-url is a separate host (this app serves a second, unauthenticated public site
+# by Host header - see Program.cs's IsPublicHost) and exercises real page-rendering (CMS/wiki
+# content) rather than just a health probe, so a broken feature deep in the app that doesn't
+# happen to touch DB/Ollama/backup health checks still has a chance of being caught here. The
+# Markdown report contains statuses and durations only; command output remains in an
+# automatically removed temporary directory and is printed only when a check fails.
 
 while (($# > 0)); do
   case "$1" in
     --base-url)
       base_url="${2:-}"
+      shift 2
+      ;;
+    --public-base-url)
+      public_base_url="${2:-}"
       shift 2
       ;;
     --output)
@@ -61,6 +71,15 @@ if [[ -n "$base_url" ]]; then
   if [[ ! "$base_url" =~ ^https:// ]] \
       && [[ ! "$base_url" =~ ^http://(127\.0\.0\.1|localhost)(:[0-9]+)?$ ]]; then
     echo "--base-url must use HTTPS unless it targets localhost." >&2
+    exit 2
+  fi
+fi
+
+if [[ -n "$public_base_url" ]]; then
+  public_base_url="${public_base_url%/}"
+  if [[ ! "$public_base_url" =~ ^https:// ]] \
+      && [[ ! "$public_base_url" =~ ^http://(127\.0\.0\.1|localhost)(:[0-9]+)?$ ]]; then
+    echo "--public-base-url must use HTTPS unless it targets localhost." >&2
     exit 2
   fi
 fi
@@ -159,10 +178,19 @@ else
   printf '| Deployed login surface | NOT RUN | 0s |\n' >>"$rows_file"
 fi
 
+if [[ -n "$public_base_url" ]]; then
+  # Deliberately not a /health endpoint - the public site is routed by Host header to an
+  # entirely separate code path (CMS page lookup + render), so this actually exercises a real
+  # feature rather than a liveness probe that would pass even if that path were broken.
+  run_check "Deployed public homepage" check_http_200 "$public_base_url/"
+else
+  printf '| Deployed public homepage | NOT RUN | 0s |\n' >>"$rows_file"
+fi
+
 overall="PASS"
 if ((failed != 0)); then
   overall="FAIL"
-elif [[ "$skip_tests" == true || -z "$base_url" ]]; then
+elif [[ "$skip_tests" == true || -z "$base_url" || -z "$public_base_url" ]]; then
   overall="PARTIAL"
 fi
 
@@ -175,6 +203,7 @@ cat >"$output_path" <<EOF
 - Working tree: **$worktree_state**
 - Overall: **$overall**
 - Deployed target: $(if [[ -n "$base_url" ]]; then printf '`%s`' "$base_url"; else printf 'Not supplied'; fi)
+- Deployed public target: $(if [[ -n "$public_base_url" ]]; then printf '`%s`' "$public_base_url"; else printf 'Not supplied'; fi)
 
 The report intentionally contains no command output, credentials, prompts, imported content,
 or private application data. Failed command output was shown only in the invoking terminal.

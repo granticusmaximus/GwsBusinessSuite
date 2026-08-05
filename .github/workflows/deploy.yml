@@ -40,6 +40,11 @@ jobs:
       cancel-in-progress: false
 
     steps:
+      # Needed for the post-deploy verification step below (./scripts/verify-release.sh) -
+      # the SSH step doesn't touch the runner's own filesystem at all, it only opens a remote
+      # shell on the droplet, so nothing before this checked the repo out locally.
+      - uses: actions/checkout@v7
+
       - name: SSH into droplet and deploy
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -137,3 +142,20 @@ jobs:
 
             # Clean up dangling images to save disk space
             docker image prune -f
+
+      # The SSH step above only checks http://localhost/health/ready *from inside the
+      # droplet* - it can't see DNS, Cloudflare, or TLS termination, and it only proves the
+      # container is up, not that any specific feature actually works (see the 2026-08
+      # incident where a page could 524 from the outside while every internal health signal
+      # stayed green). This runs from the Actions runner instead, over the real public
+      # internet path, and checks the public site's homepage - a genuinely separate,
+      # unauthenticated feature (CMS page render), not another health probe. It can't trigger
+      # the SSH step's own rollback (that already completed by the time this runs), but a
+      # failure here still fails the workflow and is visible immediately rather than silently.
+      - name: Verify the live deployment from the outside
+        run: >-
+          ./scripts/verify-release.sh
+          --skip-tests
+          --base-url https://admin.gwsapp.net
+          --public-base-url https://grantwatson.dev
+          --output "$GITHUB_STEP_SUMMARY"

@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.Net;
+using System.Text;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Domain.Entities;
@@ -13,6 +16,111 @@ namespace GwsBusinessSuite.Tests;
 
 public sealed class NewsIntelligenceServiceTests
 {
+    // Regression guard for a real incident: BatchSummarizeAsync's Ollama call had no timeout
+    // of its own, relying on IOllamaService's HttpClient's 2-hour default - and this method is
+    // reachable directly from RefreshAllAsync/RefreshTopicAsync/RefreshTopNewsAsync button
+    // clicks on NewsIntelligence.razor, not just the background refresh timers. A wedged
+    // Ollama could hold the single global OllamaWorkloadScheduler lease for up to 2 hours from
+    // a live page click, freezing every AI feature app-wide - the same mechanism that caused a
+    // production 524 elsewhere. This intentionally runs a real ~60s clock (the production
+    // bound) rather than a shortened one, to prove actual behavior, not just that some
+    // CancellationToken object got created.
+    // Uses an explicit WaitAsync(...) below rather than [Fact(Timeout=...)] - xunit v2's
+    // Timeout attribute doesn't reliably abort a hung async Task across all runners, whereas
+    // WaitAsync genuinely throws if RefreshTopicAsync doesn't complete in time.
+    [Fact]
+    public async Task RefreshTopicAsync_WhenOllamaHangsIndefinitely_StillCompletesWithinTheBoundedTimeout()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var topic = new WatchedTopic
+        {
+            Name = "Python",
+            Keywords = "python",
+            ColorHex = "#2563eb",
+            TopicType = WatchedTopicTypes.General // routes through Google News RSS, not Hacker News
+        };
+        db.WatchedTopics.Add(topic);
+        await db.SaveChangesAsync();
+
+        var handler = new RecordingHandler(request =>
+        {
+            var url = request.RequestUri!.AbsoluteUri;
+            return url.Contains("news.google.com", StringComparison.OrdinalIgnoreCase)
+                ? new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(SampleGoogleNewsRss, Encoding.UTF8, "application/rss+xml")
+                }
+                : new HttpResponseMessage(HttpStatusCode.InternalServerError);
+        });
+        var ollama = new HangingOllamaService();
+        var service = CreateService(factory, new HttpClient(handler), ollama);
+
+        var stopwatch = Stopwatch.StartNew();
+        await service.RefreshTopicAsync(topic.Id).WaitAsync(TimeSpan.FromSeconds(80));
+        stopwatch.Stop();
+
+        Assert.True(ollama.WasCancelled, "the bounded per-call timeout should have cancelled the hung generation");
+        Assert.True(
+            stopwatch.Elapsed < TimeSpan.FromSeconds(80),
+            $"RefreshTopicAsync should bound its own Ollama call (~60s) rather than hang toward the HttpClient's 2-hour default; took {stopwatch.Elapsed}.");
+    }
+
+    private const string SampleGoogleNewsRss = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0"><channel>
+          <title>Google News - python</title>
+          <item>
+            <title>Python 4.0 announced - Example Times</title>
+            <link>https://example.com/python-4</link>
+            <pubDate>Wed, 05 Aug 2026 12:00:00 GMT</pubDate>
+            <description>A short description.</description>
+          </item>
+        </channel></rss>
+        """;
+
+    private sealed class HangingOllamaService : IOllamaService
+    {
+        public bool WasCancelled { get; private set; }
+
+        public async Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
+        {
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                WasCancelled = true;
+                throw;
+            }
+
+            return string.Empty;
+        }
+
+        public async IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
+
+        public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyCollection<string>>(Array.Empty<string>());
+
+        public Task PullModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task DeleteModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default) =>
+            Task.FromResult(string.Empty);
+    }
+
+    private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(responseFactory(request));
+    }
+
+
     [Fact]
     public async Task GetFeedAsync_WithNullTopicId_ReturnsTopAndTopicArticlesTogether()
     {
@@ -175,15 +283,18 @@ public sealed class NewsIntelligenceServiceTests
         Assert.Equal(WatchedTopicTypes.Technical, updated.TopicType);
     }
 
-    private static NewsIntelligenceService CreateService(IAppDbContextFactory factory)
+    private static NewsIntelligenceService CreateService(IAppDbContextFactory factory) =>
+        CreateService(factory, new HttpClient(), new FakeOllamaService());
+
+    private static NewsIntelligenceService CreateService(IAppDbContextFactory factory, HttpClient httpClient, IOllamaService ollama)
     {
         var options = Options.Create(new ContentStudioOptions { Model = "llama3.2" });
 
         return new NewsIntelligenceService(
             factory,
-            new FakeOllamaService(),
+            ollama,
             options,
-            new HttpClient(),
+            httpClient,
             new MemoryCache(new MemoryCacheOptions()),
             new NewsRefreshState(),
             NullLogger<NewsIntelligenceService>.Instance);

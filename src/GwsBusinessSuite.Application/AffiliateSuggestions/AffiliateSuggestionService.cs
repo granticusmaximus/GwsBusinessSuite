@@ -399,8 +399,19 @@ public sealed class AffiliateSuggestionService(
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(GenerateSuggestionsTimeout);
-        var raw = (await ollama.GenerateAsync(model, string.Empty, prompt, timeoutCts.Token)).Trim();
-        return ParsePicks(raw, candidates);
+        try
+        {
+            var raw = (await ollama.GenerateAsync(model, string.Empty, prompt, timeoutCts.Token)).Trim();
+            return ParsePicks(raw, candidates);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Only our own bound fired, not the caller's token - degrade gracefully (no
+            // picks for this article) rather than surface this as a hard failure, mirroring
+            // NewsIntelligenceService.BatchSummarizeAsync's Ollama-unavailable handling.
+            logger.LogWarning("Affiliate offer selection skipped (Ollama unavailable or timed out) for article {ArticleId}", article.Id);
+            return [];
+        }
     }
 
     private static List<(AffiliateOffer Offer, string Reasoning)> ParsePicks(string raw, List<AffiliateOffer> candidates)

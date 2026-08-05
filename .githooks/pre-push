@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Runs the same build+test gate CI uses (scripts/verify-release.sh) before letting a push
+# through. This exists because a real incident shipped this way: a constructor change broke
+# an existing test locally, wasn't caught before push, and only surfaced when CI failed on
+# the already-pushed commit. The tool to catch it locally already existed; it just wasn't
+# part of the push path. This hook is what makes it part of the push path.
+#
+# One-time setup per clone (hooks live in .git/hooks, which git never tracks, so this file
+# living here in the repo does nothing until a clone points git at it):
+#   git config core.hooksPath .githooks
+set -uo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root" || exit 1
+
+if [ ! -x scripts/verify-release.sh ]; then
+    echo "pre-push: scripts/verify-release.sh not found or not executable - skipping local verification." >&2
+    exit 0
+fi
+
+echo "pre-push: running scripts/verify-release.sh (build + full test suite) before allowing the push..."
+./scripts/verify-release.sh
+status=$?
+
+if [ "$status" -ne 0 ]; then
+    echo "" >&2
+    echo "pre-push: verify-release.sh failed (exit $status) - push blocked." >&2
+    echo "Fix the failure above, or in a genuine emergency: git push --no-verify" >&2
+fi
+
+exit "$status"

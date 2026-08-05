@@ -291,7 +291,72 @@ public sealed class AffiliateSuggestionServiceTests
         group.Suggestions.Select(s => s.AdvertiserName).Should().ContainInOrder("First", "Second");
     }
 
-    private static AffiliateSuggestionService CreateService(ApplicationDbContext db, FakeOllamaService ollama) =>
+    // Regression guard for a real incident: the Ollama call inside GenerateForArticleAsync had
+    // no timeout of its own, relying on IOllamaService's HttpClient's 2-hour default - and this
+    // method is reachable both from CjAdsSyncBackgroundService's scheduled sweep AND directly
+    // from AffiliateSuggestions.razor / ArticleEditorDetail.razor button clicks. A wedged
+    // Ollama could hold the single global OllamaWorkloadScheduler lease for up to 2 hours from
+    // a live page click, freezing every AI feature app-wide. This intentionally runs the real
+    // ~30s production bound rather than a shortened one, to prove actual behavior.
+    [Fact]
+    public async Task GenerateForArticleAsync_WhenOllamaHangsIndefinitely_StillCompletesWithinTheBoundedTimeout()
+    {
+        await using var db = await CreateDbAsync();
+        var article = await CreateArticleAsync(db, "Best Standing Desks");
+        await CreateOfferAsync(db, "adv-1", "Acme Desks", "Standing Desk Pro");
+
+        var ollama = new HangingOllamaService();
+        var service = CreateService(db, ollama);
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var result = await service.GenerateForArticleAsync(article.Id).WaitAsync(TimeSpan.FromSeconds(50));
+        stopwatch.Stop();
+
+        ollama.WasCancelled.Should().BeTrue("the bounded per-call timeout should have cancelled the hung generation");
+        stopwatch.Elapsed.Should().BeLessThan(
+            TimeSpan.FromSeconds(50),
+            "GenerateForArticleAsync should bound its own Ollama call (~30s) rather than hang toward the HttpClient's 2-hour default");
+        result.IsSuccess.Should().BeTrue("a timed-out generation should degrade to zero suggestions, not a hard failure");
+        result.SuggestionsCreated.Should().Be(0);
+    }
+
+    private sealed class HangingOllamaService : GwsBusinessSuite.Application.Abstractions.IOllamaService
+    {
+        public bool WasCancelled { get; private set; }
+
+        public async Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
+        {
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                WasCancelled = true;
+                throw;
+            }
+
+            return string.Empty;
+        }
+
+        public async IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
+
+        public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyCollection<string>>(Array.Empty<string>());
+
+        public Task PullModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task DeleteModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default) =>
+            Task.FromResult(string.Empty);
+    }
+
+    private static AffiliateSuggestionService CreateService(ApplicationDbContext db, GwsBusinessSuite.Application.Abstractions.IOllamaService ollama) =>
         new(db, ollama, Options.Create(new ContentStudioOptions { Model = "llama3.2" }), NullLogger<AffiliateSuggestionService>.Instance);
 
     private static async Task<Article> CreateArticleAsync(ApplicationDbContext db, string title, string body = "Some body content.")
