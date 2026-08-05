@@ -351,6 +351,7 @@
         @if (SelectedDatabaseId is { } openDatabaseId)
         {
             <WikiDatabaseEditor WikiDatabaseId="openDatabaseId"
+                                InitialOpenRowId="_pendingOpenRowId"
                                 OnChanged="() => LoadTreeAsync(selectFirstPage: false)"
                                 OnDuplicated="OpenDuplicatedDatabaseAsync"
                                 OnOpenPage="OpenPageAsync" />
@@ -1210,6 +1211,7 @@
     private WikiPageEditorModel Editor { get; set; } = new();
     private Guid? SelectedPageId { get; set; }
     private Guid? SelectedDatabaseId { get; set; }
+    private Guid? _pendingOpenRowId;
     private string SelectedDatabaseTitle => SelectedDatabaseId is { } databaseId
         ? WikiDatabases.FirstOrDefault(database => database.Id == databaseId)?.Title ?? string.Empty
         : string.Empty;
@@ -1902,6 +1904,21 @@
     {
         if (Guid.TryParse(databaseId, out var id) && WikiDatabases.Any(database => database.Id == id))
         {
+            await OpenDatabaseAsync(id);
+            StateHasChanged();
+        }
+    }
+
+    // Wired to inline Kanban card clicks (see wiki-block-editor.js's createInlineBoard) so a
+    // card opens its own row detail instead of just the parent database - previously every
+    // card click reused OpenLinkedDatabase, which has no row parameter at all.
+    [JSInvokable]
+    public async Task OpenLinkedDatabaseRow(string databaseId, string rowId)
+    {
+        if (Guid.TryParse(databaseId, out var id) && Guid.TryParse(rowId, out var parsedRowId)
+            && WikiDatabases.Any(database => database.Id == id))
+        {
+            _pendingOpenRowId = parsedRowId;
             await OpenDatabaseAsync(id);
             StateHasChanged();
         }

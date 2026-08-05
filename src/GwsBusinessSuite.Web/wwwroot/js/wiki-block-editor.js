@@ -1132,7 +1132,7 @@ function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, s
         scroller.appendChild(createInlineBoard(
             snapshot,
             boardGroupByPropertyId,
-            () => state.dotNetRef.invokeMethodAsync('OpenLinkedDatabase', snapshot.id),
+            rowId => state.dotNetRef.invokeMethodAsync('OpenLinkedDatabaseRow', snapshot.id, rowId),
             async (rowId, optionId, newSortOrder) => {
                 const updated = await state.dotNetRef.invokeMethodAsync(
                     'MoveInlineDatabaseRow',
@@ -1206,7 +1206,7 @@ function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, s
     }
 }
 
-function createInlineBoard(snapshot, groupByPropertyId, openDatabase, moveRow, addTask) {
+function createInlineBoard(snapshot, groupByPropertyId, openRow, moveRow, addTask) {
     const board = document.createElement('div');
     board.className = 'wiki-inline-database-board';
     const groupProperty = snapshot.properties.find(property => property.id === groupByPropertyId);
@@ -1298,7 +1298,7 @@ function createInlineBoard(snapshot, groupByPropertyId, openDatabase, moveRow, a
                 board.querySelectorAll('.wiki-inline-board-column').forEach(item =>
                     item.classList.remove('is-drop-target', 'is-saving'));
             });
-            card.addEventListener('click', openDatabase);
+            card.addEventListener('click', () => openRow(row.id));
             cards.appendChild(card);
         }
         column.appendChild(cards);

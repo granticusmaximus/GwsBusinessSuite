@@ -407,6 +407,7 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
         var databaseId = Guid.NewGuid();
         var titlePropertyId = Guid.NewGuid();
         var statusPropertyId = Guid.NewGuid();
+        var rowId = Guid.NewGuid();
         var blockJson = WikiBlockJson.Serialize(
         [
             new WikiBlock(
@@ -439,7 +440,7 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
             ],
             [
                 new WikiInlineDatabaseRow(
-                    Guid.NewGuid(),
+                    rowId,
                     [
                         new WikiInlineDatabaseCell(titlePropertyId, "Review workflow"),
                         new WikiInlineDatabaseCell(statusPropertyId, "doing")
@@ -481,9 +482,11 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
         await Expect(page.Locator(".wiki-inline-board-status").Nth(1)).ToHaveAttributeAsync("data-color", "blue");
         await Expect(page.Locator(".wiki-inline-board-card")).ToHaveTextAsync("Review workflow");
         await page.Locator(".wiki-inline-board-card").ClickAsync();
-        (await page.EvaluateAsync<string>(
-            "() => window.editorCalls.at(-1).method"))
-            .Should().Be("OpenLinkedDatabase");
+        var openRowCall = await page.EvaluateAsync<string>(
+            "() => JSON.stringify(window.editorCalls.at(-1))");
+        openRowCall.Should().Contain("OpenLinkedDatabaseRow")
+            .And.Contain(databaseId.ToString())
+            .And.Contain(rowId.ToString());
 
         var columns = page.Locator(".wiki-inline-board-column");
         var emptyColumnBox = await columns.Nth(0).BoundingBoxAsync();

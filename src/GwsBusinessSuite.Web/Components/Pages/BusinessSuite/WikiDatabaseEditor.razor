@@ -819,6 +819,11 @@ else
     [Parameter] public EventCallback OnChanged { get; set; }
     [Parameter] public EventCallback<Guid> OnDuplicated { get; set; }
     [Parameter] public EventCallback<Guid> OnOpenPage { get; set; }
+    // Set by a caller (e.g. Wiki.razor when a wiki-embedded inline Kanban card is clicked)
+    // to open straight to a specific row's detail panel instead of just the database.
+    [Parameter] public Guid? InitialOpenRowId { get; set; }
+
+    private Guid? _appliedInitialOpenRowId;
 
     private static readonly IReadOnlyList<string> AddablePropertyTypes =
     [
@@ -933,6 +938,12 @@ else
         {
             _activeViewId = null;
             await ReloadAsync();
+        }
+
+        if (InitialOpenRowId is { } rowId && rowId != _appliedInitialOpenRowId)
+        {
+            _appliedInitialOpenRowId = rowId;
+            OpenRowById(rowId);
         }
     }
 
