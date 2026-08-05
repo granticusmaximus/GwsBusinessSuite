@@ -130,6 +130,15 @@ public static class DependencyInjection
             // Was previously unconfigured (silently inheriting HttpClient's 100s default)
             // rather than the ~20s bound used elsewhere in this file for third-party calls.
             client.Timeout = TimeSpan.FromSeconds(20);
+
+            // dev.to's API returns 403 for any request with no User-Agent header at all -
+            // confirmed against the live API (curl with the header stripped entirely also
+            // gets 403; adding any real UA gets 200). HttpClient sends no default User-Agent,
+            // unlike curl/browsers, so every dev.to call from this service was silently
+            // failing with 403 (caught and logged as a warning, contributing zero signals)
+            // regardless of focus area - not the narrow-filter issue the HN/dev.to fallback
+            // logic elsewhere in TrendResearchService addresses.
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-ContentStudio/1.0");
         });
         services.AddScoped<IDockerDeploymentService, DockerDeploymentService>();
         services.AddScoped<ICjAdsService, CjAdsService>();

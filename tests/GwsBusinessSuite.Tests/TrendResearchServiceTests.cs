@@ -2,8 +2,11 @@ using System.Net;
 using System.Text;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.ContentStudio;
+using GwsBusinessSuite.Infrastructure;
 using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -11,6 +14,37 @@ namespace GwsBusinessSuite.Tests;
 
 public sealed class TrendResearchServiceTests
 {
+    // Regression guard for a real finding: dev.to's API returns 403 for any request with no
+    // User-Agent header at all (confirmed against the live API - curl with the header
+    // stripped entirely also gets 403, any real UA gets 200). HttpClient sends no default
+    // User-Agent, unlike curl/browsers, so every dev.to call was silently failing with 403 -
+    // caught and logged as a warning in GatherSignalsAsync, contributing zero signals -
+    // regardless of focus area, until DependencyInjection.cs set one explicitly. This checks
+    // the actual DI-registered HttpClient, not just the service class, since the header lives
+    // in the AddHttpClient configuration delegate, not in TrendResearchService itself.
+    [Fact]
+    public void TrendResearchHttpClient_ShouldSendANonEmptyUserAgent()
+    {
+        var services = new ServiceCollection();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:DefaultConnection"] = "Data Source=:memory:"
+            })
+            .Build();
+        services.AddInfrastructure(configuration);
+
+        using var provider = services.BuildServiceProvider();
+        // AddHttpClient<TClient, TImplementation> names the underlying named client after
+        // TClient (the interface), not TImplementation - confirmed by trial: naming it after
+        // the implementation type silently returns an unconfigured default HttpClient instead
+        // of failing loudly, which is exactly how this assertion first went wrong while
+        // writing this test.
+        var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(ITrendResearchService));
+
+        Assert.NotEmpty(client.DefaultRequestHeaders.UserAgent);
+    }
+
     // Regression guard for a real finding: a specific focus area (e.g. "blazor server
     // hosting") requires an exact Hacker News keyword match within the last 7 days AND an
     // exact single-word dev.to tag - verified against the live APIs, most realistic
