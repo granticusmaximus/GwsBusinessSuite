@@ -100,15 +100,8 @@
 .civic-panel ::deep details > summary { color: var(--civic-accent-strong); font-size: .68rem; }
 .civic-panel ::deep details .bg-light { background: var(--civic-soft) !important; }
 .civic-panel ::deep details .bg-white { background: var(--civic-surface) !important; }
-.civic-panel ::deep .legislation-brief, .civic-panel ::deep .legislation-brief dt, .civic-panel ::deep .legislation-brief dd,
-.civic-panel ::deep .legislation-brief h5, .civic-panel ::deep .legislation-brief p, .civic-panel ::deep .legislation-brief strong { color: var(--civic-ink); }
-.civic-panel ::deep .legislation-brief .text-secondary { color: var(--civic-muted) !important; }
-.civic-panel ::deep .legislation-brief.border-top { border-color: var(--civic-line) !important; }
-.civic-panel ::deep .legislation-brief .border { border-color: var(--civic-line) !important; }
-.civic-panel ::deep .legislation-brief .btn-outline-dark { border-color: var(--civic-line); color: var(--civic-ink); }
-.civic-panel ::deep .sentinelgpt-overview { background: var(--civic-accent-soft); border: 1px solid var(--civic-line); }
-.civic-panel ::deep .sentinelgpt-overview span { color: var(--civic-accent-strong); }
-.civic-panel ::deep .sentinelgpt-overview p { color: var(--civic-ink); }
+/* LegislationBriefPanel now carries its own scoped CSS (with fallback values) instead of
+   relying entirely on being styled from here - see LegislationBriefPanel.razor.css. */
 
 /* ── Dark mode ──────────────────────────────────────────────
    First theme toggle in the app - Civic Watch is otherwise the one

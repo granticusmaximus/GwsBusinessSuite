@@ -17,6 +17,12 @@ window.gwsCmsBuilderBridge = (function () {
         _dotNetRef = dotNetRef;
         _boundHandler = handleMessage;
         window.addEventListener('message', _boundHandler);
+        // This is one of only two global keydown listeners in the app - the other is
+        // sentinel-workspace.js's shortcutHandler (registered on document, so it runs before
+        // this one, since document precedes window in the bubble phase). Only ever mounted
+        // on different pages today (Canvas Studio vs. Wiki) so there's no live collision, and
+        // key combos don't currently overlap (this one: Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z,
+        // Cmd/Ctrl+Y) - re-check both before assuming they'll coexist cleanly if that changes.
         window.addEventListener('keydown', handleKeydown);
         _boundParentDragOver = function (event) {
             // Events inside the iframe belong to its document. Receiving dragover here

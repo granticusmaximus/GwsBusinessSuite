@@ -1,3 +1,9 @@
+// This is one of only two global keydown listeners in the app - the other is
+// cms-builder-bridge.js's handleKeydown (registered on window, so it runs after this one,
+// which is on document). They're only ever mounted on different pages today (Wiki vs. Canvas
+// Studio) so there's no live collision, and their key combos don't currently overlap (this
+// one: Cmd/Ctrl+Shift+F, Cmd/Ctrl+\, Escape) - but if the two features are ever mounted
+// together, re-check both for overlapping bindings before assuming they'll coexist cleanly.
 let shortcutHandler = null;
 let searchInput = null;
 
