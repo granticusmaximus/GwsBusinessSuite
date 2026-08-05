@@ -39,19 +39,15 @@ public sealed class FederalCivicFeedService(
     // short gap is normal and doesn't mean "out of session"; a longer gap does.
     private static readonly TimeSpan RecentSessionWindow = TimeSpan.FromDays(3);
 
-    // C-SPAN's own page (c-span.org/networks/?channel=c-span[-2]) embeds these same videos
-    // via Brightcove but wraps them in the full site header/nav/ads. This is Brightcove's
-    // own minimal player embed instead - verified with a real browser against the rendered
-    // page's data-bcaccountid/data-bcid attributes (chan=house/senate is not a real
-    // parameter; the actual one is channel=c-span for the House feed and channel=c-span-2
-    // for the Senate feed - confirmed the two resolve to distinct Brightcove video ids,
-    // 6306075540112 vs 6306074571112). Renders as just the video, no page chrome around it.
-    private const string CSpanBrightcoveAccountId = "3162030207001";
-    private const string CSpanBrightcovePlayerId = "2B2qWQJYYM_default";
-    private const string CSpanHouseVideoId = "6306075540112";
-    private const string CSpanSenateVideoId = "6306074571112";
-    private const string CSpanHouseUrl = $"https://players.brightcove.net/{CSpanBrightcoveAccountId}/{CSpanBrightcovePlayerId}/index.html?videoId={CSpanHouseVideoId}";
-    private const string CSpanSenateUrl = $"https://players.brightcove.net/{CSpanBrightcoveAccountId}/{CSpanBrightcovePlayerId}/index.html?videoId={CSpanSenateVideoId}";
+    // C-SPAN was tried first (both its own page and Brightcove's minimal player embed) but
+    // its live channel requires cable/satellite TV-provider sign-in (Brightcove's catalog API
+    // returns error_code SOURCES_RESTRICTED / TVE_AUTH) - confirmed with a real browser, not
+    // fixable by any embed technique. The Clerk of the House's own live-video API below is
+    // the real replacement: official, CORS-open, no auth wall, verified working end to end.
+    // No equivalent was found for the Senate (their old floor.senate.gov webcast domain no
+    // longer resolves), so the Senate panel never gets a video - see RefreshFloorStatusAsync.
+    private const string HouseLatestFloorUrl = "https://liveproxy-azapp-prod-eastus2-003.azurewebsites.net/latest/floor";
+    private const string HouseBroadcastEventsBaseUrl = "https://liveproxy-azapp-prod-eastus2-003.azurewebsites.net/broadcastevents/";
 
     public IReadOnlyList<FederalNewsItem> GetCachedSenateNewsOrEmpty() =>
         cache.TryGetValue(SenateNewsCacheKey, out IReadOnlyList<FederalNewsItem>? cached) && cached is not null ? cached : [];
@@ -155,22 +151,27 @@ public sealed class FederalCivicFeedService(
             var senateSummary = senatePdf is null ? null : await UpsertTranscriptAsync("Senate", sessionDate, senatePdf, latestIssue, ct);
             var houseSummary = housePdf is null ? null : await UpsertTranscriptAsync("House", sessionDate, housePdf, latestIssue, ct);
 
-            // Video is only offered when recently in session - otherwise there's nothing
-            // live to show and a stray embed would just display whatever C-SPAN is
-            // replaying on that channel, which reads as misleadingly "live".
+            // Senate has no confirmed working live-video source (see the constants comment
+            // above), so its status leans entirely on the Congressional-Record-recency
+            // heuristic and never gets a LiveEmbedUrl.
             var senateStatus = new FloorStatus(
                 inSession,
                 inSession
                     ? $"Senate floor proceedings on record for {sessionDate:MMMM d, yyyy} (Congressional Record Issue {latestIssue.Issue})."
                     : "The Senate is not currently in session.",
-                inSession ? CSpanSenateUrl : null,
+                null,
                 senateSummary);
+
+            // House gets a more precise, authoritative in-session signal from its own live
+            // broadcast API (see GetHouseLiveVideoAsync) instead of the Record-recency
+            // heuristic - it can tell us "live right now", not just "recently sat".
+            var (houseIsLive, houseHlsUrl) = await GetHouseLiveVideoAsync(ct);
             var houseStatus = new FloorStatus(
-                inSession,
-                inSession
-                    ? $"House floor proceedings on record for {sessionDate:MMMM d, yyyy} (Congressional Record Issue {latestIssue.Issue})."
+                houseIsLive,
+                houseIsLive
+                    ? "The House is currently live on the floor."
                     : "The House is not currently in session.",
-                inSession ? CSpanHouseUrl : null,
+                houseHlsUrl,
                 houseSummary);
 
             cache.Set(SenateFloorCacheKey, senateStatus, CacheDuration);
@@ -179,6 +180,41 @@ public sealed class FederalCivicFeedService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Federal Civic Feed: floor status refresh failed");
+        }
+    }
+
+    // Two calls: /latest/floor resolves to the most recent legislative day (so we don't have
+    // to guess "today" vs. "last session day" ourselves), then /broadcastevents/{day} carries
+    // the actual isLiveBroadcast flag plus HLS/DASH stream URLs for that day's broadcast.
+    // Both are official Clerk-of-the-House endpoints, unauthenticated, CORS-open on the
+    // stream URLs themselves (verified) - this is what live.house.gov's own player calls.
+    private async Task<(bool IsLive, string? HlsUrl)> GetHouseLiveVideoAsync(CancellationToken ct)
+    {
+        try
+        {
+            var floor = await http.GetFromJsonAsync<HouseFloorDay>(HouseLatestFloorUrl, JsonOptions, ct);
+            if (string.IsNullOrWhiteSpace(floor?.Id))
+            {
+                return (false, null);
+            }
+
+            var events = await http.GetFromJsonAsync<List<HouseBroadcastEvent>>(HouseBroadcastEventsBaseUrl + floor.Id, JsonOptions, ct);
+            var latest = events?.FirstOrDefault();
+            var isLive = string.Equals(latest?.IsLiveBroadcast, "True", StringComparison.OrdinalIgnoreCase);
+            if (!isLive)
+            {
+                return (false, null);
+            }
+
+            var hlsUrl = latest?.Asset?.Files?.FirstOrDefault(f =>
+                string.Equals(f.Type, "HLS", StringComparison.OrdinalIgnoreCase) &&
+                f.Url is not null && f.Url.Contains("/east/", StringComparison.OrdinalIgnoreCase))?.Url;
+            return (true, hlsUrl);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Federal Civic Feed: House live video check failed");
+            return (false, null);
         }
     }
 
@@ -261,4 +297,16 @@ public sealed class FederalCivicFeedService(
     private sealed record CongressionalRecordSection([property: JsonPropertyName("PDF")] List<CongressionalRecordPdf>? Pdf);
 
     private sealed record CongressionalRecordPdf([property: JsonPropertyName("Url")] string? Url);
+
+    private sealed record HouseFloorDay([property: JsonPropertyName("_id")] string? Id);
+
+    private sealed record HouseBroadcastEvent(
+        [property: JsonPropertyName("isLiveBroadcast")] string? IsLiveBroadcast,
+        [property: JsonPropertyName("asset")] HouseBroadcastAsset? Asset);
+
+    private sealed record HouseBroadcastAsset([property: JsonPropertyName("files")] List<HouseBroadcastFile>? Files);
+
+    private sealed record HouseBroadcastFile(
+        [property: JsonPropertyName("type")] string? Type,
+        [property: JsonPropertyName("url")] string? Url);
 }

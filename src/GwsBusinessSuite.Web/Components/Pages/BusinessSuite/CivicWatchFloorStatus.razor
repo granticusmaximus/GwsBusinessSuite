@@ -1,9 +1,11 @@
 @using GwsBusinessSuite.Application.GovernmentIntelligence
+@implements IAsyncDisposable
+@inject IJSRuntime JS
 
 <div class="floor-status @(Status.InSession ? "in-session" : "recess")">
     <div class="floor-badge">
         <span class="dot"></span>
-        <strong>@(Status.InSession ? "Recently in session" : "On recess")</strong>
+        <strong>@(Status.InSession ? "In session" : "Not in session")</strong>
     </div>
 
     @if (!string.IsNullOrWhiteSpace(Status.StatusNote))
@@ -14,7 +16,7 @@
     @if (Status.InSession && !string.IsNullOrWhiteSpace(Status.LiveEmbedUrl))
     {
         <div class="floor-video">
-            <iframe src="@Status.LiveEmbedUrl" title="@Chamber floor video feed" loading="lazy" allowfullscreen></iframe>
+            <video @ref="_videoRef" controls playsinline title="@Chamber floor video feed"></video>
         </div>
     }
 
@@ -34,4 +36,38 @@
 @code {
     [Parameter, EditorRequired] public FloorStatus Status { get; set; } = null!;
     [Parameter] public string Chamber { get; set; } = "Congress";
+
+    private ElementReference _videoRef;
+    private string? _attachedUrl;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        var targetUrl = Status.InSession ? Status.LiveEmbedUrl : null;
+        if (targetUrl == _attachedUrl)
+        {
+            return;
+        }
+
+        _attachedUrl = targetUrl;
+        if (string.IsNullOrWhiteSpace(targetUrl))
+        {
+            await JS.InvokeVoidAsync("civicWatchVideo.detach", _videoRef);
+        }
+        else
+        {
+            await JS.InvokeVoidAsync("civicWatchVideo.attach", _videoRef, targetUrl);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("civicWatchVideo.detach", _videoRef);
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit already gone - nothing to clean up client-side.
+        }
+    }
 }
