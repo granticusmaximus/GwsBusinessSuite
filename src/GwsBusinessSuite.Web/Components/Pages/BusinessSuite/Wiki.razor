@@ -1,16 +1,18 @@
 @page "/admin/wiki"
 @page "/admin/sentinel"
 @rendermode InteractiveServer
-@attribute [Authorize(Policy = "AdminOnly")]
+@attribute [Authorize(Policy = "ContentAccess")]
 @implements IAsyncDisposable
 @using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Domain.Entities
 @using System.Text.Json
+@using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.WebUtilities
 @inject IWikiService WikiService
 @inject IWikiDatabaseService WikiDatabaseService
 @inject ISentinelWorkspaceService SentinelWorkspaceService
+@inject ISentinelAccessService SentinelAccessService
 @inject INotionSyncService NotionSyncService
 @inject INotionSyncCoordinator NotionSyncCoordinator
 @inject INotionOAuthService NotionOAuthService
@@ -352,6 +354,7 @@
         {
             <WikiDatabaseEditor WikiDatabaseId="openDatabaseId"
                                 InitialOpenRowId="_pendingOpenRowId"
+                                CanEdit="_canEditOpenDatabase"
                                 OnChanged="() => LoadTreeAsync(selectFirstPage: false)"
                                 OnDuplicated="OpenDuplicatedDatabaseAsync"
                                 OnOpenPage="OpenPageAsync" />
@@ -1206,12 +1209,25 @@
 @code {
     private const int MaxHistoryDisplay = 20;
 
+    // This route was Admin-only until per-resource Sentinel sharing (SentinelAccessService)
+    // needed somewhere for Author/Contributor accounts to actually apply - see
+    // OpenPageAsync/SavePageAsync/OpenDatabaseAsync for the per-resource checks that gate what
+    // a non-Admin can view/edit now that the route itself admits them. Admins keep unrestricted
+    // access, matching every other admin-gated page in this app - they are not subject to
+    // SentinelResourcePermission grants.
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    private bool _isAdmin = true;
+
+    private async Task<bool> CanAccessPageOrDatabaseAsync(Guid targetId, bool isDatabase, string requiredLevel) =>
+        _isAdmin || await SentinelAccessService.CanAccessAsync(targetId, isDatabase, CurrentUsername, requiredLevel);
+
     private List<WikiPage> WikiPages { get; set; } = new();
     private List<WikiDatabase> WikiDatabases { get; set; } = new();
     private WikiPageEditorModel Editor { get; set; } = new();
     private Guid? SelectedPageId { get; set; }
     private Guid? SelectedDatabaseId { get; set; }
     private Guid? _pendingOpenRowId;
+    private bool _canEditOpenDatabase = true;
     private string SelectedDatabaseTitle => SelectedDatabaseId is { } databaseId
         ? WikiDatabases.FirstOrDefault(database => database.Id == databaseId)?.Title ?? string.Empty
         : string.Empty;
@@ -2103,6 +2119,11 @@
     protected override async Task OnInitializedAsync()
     {
         CurrentUsername = await CurrentUserNameAsync();
+        if (AuthState is not null)
+        {
+            var authState = await AuthState;
+            _isAdmin = authState.User.IsInRole(AppRoles.Admin);
+        }
         CursorTracker.Moved += HandleCursorsMoved;
         await LoadTreeAsync(selectFirstPage: false);
         await LoadWorkspaceNavigationAsync();
@@ -2423,6 +2444,13 @@
 
     private async Task OpenDatabaseAsync(Guid wikiDatabaseId)
     {
+        if (!await CanAccessPageOrDatabaseAsync(wikiDatabaseId, isDatabase: true, SentinelAccessLevels.View))
+        {
+            ErrorMessage = "You don't have access to this Sentinel database.";
+            return;
+        }
+        _canEditOpenDatabase = await CanAccessPageOrDatabaseAsync(wikiDatabaseId, isDatabase: true, SentinelAccessLevels.Edit);
+
         _mobileWorkspaceNavOpen = false;
         ExpandAncestorPath(wikiDatabaseId);
         await DeactivateBlockEditorAsync();
@@ -2477,6 +2505,12 @@
     {
         try
         {
+            if (!await CanAccessPageOrDatabaseAsync(wikiPageId, isDatabase: false, SentinelAccessLevels.View))
+            {
+                ErrorMessage = "You don't have access to this Sentinel page.";
+                return;
+            }
+
             var page = await WikiService.GetPageAsync(wikiPageId);
             if (page is null)
             {
@@ -2583,6 +2617,17 @@
 
         try
         {
+            // Only existing pages have a SentinelResourcePermission row to check - a brand new
+            // page has no target to grant/deny access to yet, so creating one is unrestricted
+            // (matches how a Contributor is free to create pages, just not edit ones they were
+            // never given Edit access to).
+            if (Editor.WikiPageId is { } existingPageId
+                && !await CanAccessPageOrDatabaseAsync(existingPageId, isDatabase: false, SentinelAccessLevels.Edit))
+            {
+                ErrorMessage = "You don't have permission to edit this Sentinel page.";
+                return;
+            }
+
             // The block editor owns its live DOM and reports changes on a short debounce.
             // An explicit Save can legitimately arrive before that callback, especially after
             // a toolbar action, so capture synchronously before writing the server snapshot.

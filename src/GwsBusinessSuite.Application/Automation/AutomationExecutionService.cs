@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace GwsBusinessSuite.Application.Automation;
 
@@ -11,7 +12,8 @@ public sealed class AutomationExecutionService(
     IAutomationWorkflowService workflowService,
     IAutomationNodeRegistry nodeRegistry,
     IAutomationCredentialService credentialService,
-    TimeProvider timeProvider) : IAutomationExecutionService
+    TimeProvider timeProvider,
+    ILogger<AutomationExecutionService>? logger = null) : IAutomationExecutionService
 {
     // A single stuck node step (e.g. a slow HTTP call) holds the heartbeat still without
     // crashing the process. The threshold must clear the longest a legitimate node can run —
@@ -87,6 +89,35 @@ public sealed class AutomationExecutionService(
         return await RunToCompletionAsync(execution, snapshot, () =>
         {
             var frontier = DeserializeFrontier(execution.PendingStateJson);
+
+            // A null WaitingNodeId here means this is NOT a genuine core.wait/core.approval
+            // resume (those always set it) - it's the orphan-recovery sweep (AutomationTriggerService
+            // .ResumeDueWaitsAsync) picking up a "Running" execution whose heartbeat went stale,
+            // most likely a crash. The frontier reloaded below reflects the last periodic
+            // checkpoint (see RunLoopAsync's CheckpointStepInterval/CheckpointTimeInterval), so
+            // any node between that checkpoint and the crash already ran once for real before
+            // this resume replays it. Only worth a warning when a non-idempotent node (a real
+            // HTTP call or DB write) sits in that replay window - most orphan resumes replay
+            // pure data/flow nodes, where a second run is harmless.
+            if (execution.WaitingNodeId is null)
+            {
+                var nonIdempotentNodeIds = frontier.Queue
+                    .Select(work => snapshot.Nodes.FirstOrDefault(node => node.Id == work.NodeId))
+                    .Where(node => node is not null && nodeRegistry.Find(node.TypeKey)?.IsIdempotent == false)
+                    .Select(node => node!.Name)
+                    .Distinct()
+                    .ToList();
+                if (nonIdempotentNodeIds.Count > 0)
+                {
+                    logger?.LogWarning(
+                        "Execution {ExecutionId} for workflow {WorkflowId} is resuming after an apparent crash " +
+                        "(stale heartbeat) with a non-idempotent node still in its replay frontier: {NodeNames}. " +
+                        "That node's side effect (HTTP call or database write) may have already run once before " +
+                        "the crash and will now run again.",
+                        execution.Id, execution.WorkflowId, string.Join(", ", nonIdempotentNodeIds));
+                }
+            }
+
             if (execution.WaitingNodeId is { } waitingNodeId)
             {
                 var waitingInput = JsonDocument.Parse(
@@ -199,6 +230,18 @@ public sealed class AutomationExecutionService(
         return await LoadExecutionAsync(execution.Id, CancellationToken.None);
     }
 
+    // Checkpointing after every single step meant a large fan-out (see AutomationNodeRegistry
+    // .ExecuteSplitOut) re-serialized the entire remaining frontier to the DB on every one of
+    // its items - O(n^2) CPU/DB-write work for an n-item array. Checkpointing on a cadence
+    // instead bounds that cost. Trade-off: on a process crash (not a handled exception - those
+    // still persist final state via RunToCompletionAsync's catch blocks) between two periodic
+    // checkpoints, the orphan-resume sweep replays from the last checkpoint, so up to
+    // CheckpointStepInterval steps' worth of already-completed work can re-run. That widens
+    // (doesn't newly introduce) the at-least-once duplicate-execution window already covered
+    // by each node's IsIdempotent tagging - see ExecuteNodeWithEvidenceAsync.
+    private const int CheckpointStepInterval = 25;
+    private static readonly TimeSpan CheckpointTimeInterval = TimeSpan.FromSeconds(5);
+
     private async Task<bool> RunLoopAsync(
         AutomationExecution execution,
         AutomationWorkflowSnapshot snapshot,
@@ -211,6 +254,8 @@ public sealed class AutomationExecutionService(
             group => group.Key,
             group => group.Select(connection => connection.TargetInput).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
         var steps = 0;
+        var stepsSinceCheckpoint = 0;
+        var lastCheckpointAt = timeProvider.GetUtcNow();
 
         while (frontier.Queue.TryDequeue(out var work))
         {
@@ -231,7 +276,11 @@ public sealed class AutomationExecutionService(
                 nodeInput = TryBuildMergedInput(node.Id, work.TargetInput, work.Input, incomingPorts, frontier.MergeBuffers);
                 if (nodeInput.ValueKind == JsonValueKind.Undefined)
                 {
-                    await CheckpointAsync(execution, frontier, cancellationToken);
+                    if (await MaybeCheckpointAsync(execution, frontier, ++stepsSinceCheckpoint, lastCheckpointAt, cancellationToken))
+                    {
+                        stepsSinceCheckpoint = 0;
+                        lastCheckpointAt = timeProvider.GetUtcNow();
+                    }
                     continue;
                 }
             }
@@ -252,10 +301,25 @@ public sealed class AutomationExecutionService(
                 }
             }
 
-            await CheckpointAsync(execution, frontier, cancellationToken);
+            if (await MaybeCheckpointAsync(execution, frontier, ++stepsSinceCheckpoint, lastCheckpointAt, cancellationToken))
+            {
+                stepsSinceCheckpoint = 0;
+                lastCheckpointAt = timeProvider.GetUtcNow();
+            }
         }
 
         return false;
+    }
+
+    private async Task<bool> MaybeCheckpointAsync(
+        AutomationExecution execution, Frontier frontier, int stepsSinceCheckpoint, DateTimeOffset lastCheckpointAt, CancellationToken cancellationToken)
+    {
+        if (stepsSinceCheckpoint < CheckpointStepInterval && timeProvider.GetUtcNow() - lastCheckpointAt < CheckpointTimeInterval)
+        {
+            return false;
+        }
+        await CheckpointAsync(execution, frontier, cancellationToken);
+        return true;
     }
 
     private async Task<bool> IsCanceledExternallyAsync(Guid executionId, CancellationToken cancellationToken)

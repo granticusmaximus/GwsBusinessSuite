@@ -555,6 +555,41 @@ public sealed class WikiDatabaseServiceTests
             WikiPropertyValues.ParseObject(reloaded!.Rows.Single().PropertyValuesJson), status.Id).Should().Be("done");
     }
 
+    [Theory]
+    [InlineData(WikiDatabasePropertyTypes.Relation)]
+    [InlineData(WikiDatabasePropertyTypes.Person)]
+    [InlineData(WikiDatabasePropertyTypes.Files)]
+    public async Task SaveInlineCellAsync_ShouldRejectArrayShapedPropertyTypes(string propertyType)
+    {
+        // Regression guard for a real finding: this method's value parameter is always a
+        // single scalar string, but Relation/Person/Files are JSON-array-shaped
+        // (WikiPropertyValues.SetRelation/SetPerson/SetFiles). Falling through to the switch's
+        // default SetText(...) branch used to silently overwrite the array with a plain
+        // string - every reader (dependent rollups, reciprocal relation sync, the row detail
+        // panel) then read the property back as empty, with no error anywhere. This must throw
+        // instead of silently corrupting the row, matching how CreatedTime/Formula/Rollup
+        // (the other properties this method already refuses to touch) behave.
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var relatedDatabaseId = propertyType == WikiDatabasePropertyTypes.Relation
+            ? (await service.CreateDatabaseAsync("Related", null, "u")).Id
+            : (Guid?)null;
+        var property = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Linked",
+            Type = propertyType,
+            RelatedDatabaseId = relatedDatabaseId
+        }, "u");
+        var row = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        var action = async () => await service.SaveInlineCellAsync(database.Id, row.Id, property.Id, "some-scalar-value", "editor");
+
+        await action.Should().ThrowAsync<InvalidOperationException>();
+        var reloaded = await service.GetDatabaseAsync(database.Id);
+        reloaded!.Rows.Single().PropertyValuesJson.Should().NotContain("some-scalar-value");
+    }
+
     [Fact]
     public async Task AddInlineRowAsync_ShouldCreateCanonicalDatabaseRow()
     {

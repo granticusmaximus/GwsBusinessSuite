@@ -4,7 +4,7 @@
 
 .wiki-db-board-column {
     flex: 0 0 260px;
-    background: #f6f7f9;
+    background: var(--gws-body-bg, #f6f7f9);
     border-radius: 0.5rem;
     padding: 0.6rem;
     min-height: 120px;
@@ -15,8 +15,8 @@
 }
 
 .wiki-db-board-card {
-    background: #fff;
-    border: 1px solid #e5e7eb;
+    background: var(--gws-panel-bg-2, #fff);
+    border: 1px solid var(--gws-panel-border, #e5e7eb);
     border-radius: 0.4rem;
     padding: 0.5rem 0.6rem;
     margin-bottom: 0.5rem;

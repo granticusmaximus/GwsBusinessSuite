@@ -5,6 +5,7 @@ using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GwsBusinessSuite.Tests;
@@ -273,6 +274,39 @@ public sealed class AutomationWorkflowTests
         execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
         execution.Nodes.Count(node => node.NodeTypeKey == "core.template").Should().Be(3);
         execution.OutputJson.Should().Contain("Hello Katherine");
+    }
+
+    [Fact]
+    public async Task SplitOut_ShouldFailRatherThanFanOutBeyondTheSafetyCap()
+    {
+        // Regression guard for a real finding: unlike core.batch/core.limit (which already
+        // clamp their size parameters), splitOut had no ceiling at all - each output item
+        // becomes its own queued execution step, and every step re-serialized the entire
+        // remaining frontier to the DB, an O(n^2) blowup for a large array. Failing loudly here
+        // (rather than silently truncating, which would quietly drop rows from a "process every
+        // item" workflow) is the fix.
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Oversized fan-out");
+        var split = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Each row",
+            TypeKey = "core.splitOut",
+            PositionX = 350,
+            PositionY = 180,
+            ParametersJson = "{\"field\":\"rows\"}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", split.Id);
+        await workflowService.PublishAsync(workflow.Id, "Oversized version");
+
+        var oversizedArray = string.Join(',', Enumerable.Range(0, 2_001).Select(i => $"{{\"n\":{i}}}"));
+        var execution = await executionService.ExecuteAsync(workflow.Id, $"{{\"rows\":[{oversizedArray}]}}");
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Failed);
+        execution.ErrorMessage.Should().Contain("2001").And.Contain("core.batch");
     }
 
     [Fact]
@@ -596,6 +630,64 @@ public sealed class AutomationWorkflowTests
     }
 
     [Fact]
+    public async Task ResumeDueWaitsAsync_ShouldWarnWhenReplayingANonIdempotentNode()
+    {
+        // Regression guard for a real finding: orphan-recovery resumes a "Running" execution
+        // from its last checkpointed frontier, which can point at a node that already ran once
+        // for real before the crash (see AutomationExecutionService.RunLoopAsync's checkpoint-
+        // cadence comment). Replaying a pure data node like core.set is harmless; replaying a
+        // real side effect (HTTP call, DB write - tagged IsIdempotent: false on their
+        // AutomationNodeDefinition) is not. This asserts the warning fires for the latter,
+        // distinguishing it from the harmless case the existing orphan-recovery test above
+        // already covers with a core.set node.
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var timeProvider = new FakeTimeProvider();
+        var workflowService = new AutomationWorkflowService(db, registry, timeProvider);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), timeProvider);
+        var recordingLogger = new RecordingLogger<AutomationExecutionService>();
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, timeProvider, recordingLogger);
+        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, timeProvider, NullLogger<AutomationTriggerService>.Instance);
+        var workflow = await workflowService.CreateAsync("Orphan replay of a real side effect");
+        var trigger = workflow.Nodes.Single();
+        var writeNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Write row property", TypeKey = "database.setRowProperty", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"wikiDatabaseId\":\"" + Guid.NewGuid() + "\",\"rowId\":\"" + Guid.NewGuid() + "\",\"propertyId\":\"" + Guid.NewGuid() + "\",\"value\":\"x\"}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, trigger.Id, "main", writeNode.Id);
+        var version = await workflowService.PublishAsync(workflow.Id, "Orphan replay version");
+
+        var frontierJson = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            Queue = new[] { new { NodeId = writeNode.Id, Input = System.Text.Json.JsonSerializer.SerializeToElement(new { }), TargetInput = "main" } },
+            MergeBuffers = Array.Empty<object>(),
+            LastOutput = System.Text.Json.JsonSerializer.SerializeToElement(new { })
+        });
+        var staleExecution = new AutomationExecution
+        {
+            WorkflowId = workflow.Id,
+            WorkflowVersion = version,
+            Mode = AutomationExecutionModes.Manual,
+            Status = AutomationExecutionStatuses.Running,
+            InputJson = "{}",
+            StartedAt = timeProvider.GetUtcNow(),
+            StartedAtUnixSeconds = timeProvider.GetUtcNow().ToUnixTimeSeconds(),
+            HeartbeatAtUnixSeconds = timeProvider.GetUtcNow().ToUnixTimeSeconds(),
+            PendingStateJson = frontierJson,
+            CreatedBy = "test"
+        };
+        db.AutomationExecutions.Add(staleExecution);
+        await db.SaveChangesAsync();
+
+        timeProvider.UtcNow = timeProvider.UtcNow.AddMinutes(20);
+        await triggerService.ResumeDueWaitsAsync();
+
+        recordingLogger.Warnings.Should().ContainSingle(warning =>
+            warning.Contains("Write row property") && warning.Contains(staleExecution.Id.ToString()));
+    }
+
+    [Fact]
     public async Task Resume_ShouldUseTheWorkflowVersionTheExecutionStartedOn()
     {
         await using var db = await CreateDbAsync();
@@ -713,6 +805,25 @@ public sealed class AutomationWorkflowTests
         var db = new ApplicationDbContext(options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<string> Warnings { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Warning)
+            {
+                Warnings.Add(formatter(state, exception));
+            }
+        }
     }
 
     private sealed class FakeHttpClient : IAutomationHttpClient

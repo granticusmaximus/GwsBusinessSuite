@@ -146,21 +146,83 @@ window.liveShow = {
 		}
 	},
 
+	// Previously each ondataavailable event fired its own uncoordinated fetch() with no
+	// try/catch, retry, or ordering guarantee. MediaRecorder fires ondataavailable on its own
+	// 3s timer regardless of whether the previous handler invocation (or its fetch) has
+	// finished - a slow or failed upload didn't pause the timer, so a retry or a merely-slow
+	// request could easily land after a later chunk's, and a failed request just silently
+	// dropped that chunk forever. The recording file is raw-concatenated bytes in arrival
+	// order (see LiveShowService.AppendRecordingChunkAsync), so either problem corrupts
+	// everything after it. Fixed by queuing chunks with a sequence number and draining the
+	// queue strictly one at a time - the next upload never starts until the current one has
+	// either succeeded or exhausted its retries - plus a server-side sequence check
+	// (recording-chunk's `sequence` param) that can at least detect a gap it can't prevent
+	// (e.g. a chunk still lost after every retry).
+	_uploadQueue: [],
+	_uploadPumpRunning: false,
+	_nextChunkSequence: 0,
+	hadRecordingUploadFailure: false,
+
 	_startRecording(sessionId) {
 		this.recordingStartedAt = Date.now();
+		this._uploadQueue = [];
+		this._uploadPumpRunning = false;
+		this._nextChunkSequence = 0;
+		this.hadRecordingUploadFailure = false;
 		this.mediaRecorder = new MediaRecorder(this.stream, { mimeType: "video/webm" });
 
-		this.mediaRecorder.ondataavailable = async (event) => {
+		this.mediaRecorder.ondataavailable = (event) => {
 			if (event.data && event.data.size > 0) {
-				await fetch(`/admin/api/live-show/${sessionId}/recording-chunk`, {
-					method: "POST",
-					headers: { "Content-Type": "application/octet-stream" },
-					body: event.data,
-				});
+				this._uploadQueue.push({ sequence: this._nextChunkSequence++, blob: event.data });
+				this._pumpUploadQueue(sessionId);
 			}
 		};
 
 		this.mediaRecorder.start(3000);
+	},
+
+	async _pumpUploadQueue(sessionId) {
+		if (this._uploadPumpRunning) return;
+		this._uploadPumpRunning = true;
+		try {
+			while (this._uploadQueue.length > 0) {
+				const chunk = this._uploadQueue[0];
+				const uploaded = await this._uploadChunkWithRetry(sessionId, chunk);
+				if (!uploaded) {
+					// Retries exhausted for this chunk - drop it (there's nothing left to try)
+					// but keep draining the queue so one bad chunk doesn't also block every
+					// chunk recorded after it, and flag the failure so the broadcaster UI can
+					// warn that this recording may have a gap.
+					this.hadRecordingUploadFailure = true;
+				}
+				this._uploadQueue.shift();
+			}
+		} finally {
+			this._uploadPumpRunning = false;
+		}
+	},
+
+	async _uploadChunkWithRetry(sessionId, chunk) {
+		const maxAttempts = 3;
+		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+			try {
+				const response = await fetch(
+					`/admin/api/live-show/${sessionId}/recording-chunk?sequence=${chunk.sequence}`,
+					{
+						method: "POST",
+						headers: { "Content-Type": "application/octet-stream" },
+						body: chunk.blob,
+					}
+				);
+				if (response.ok) return true;
+			} catch {
+				// network error - fall through to retry/backoff below
+			}
+			if (attempt < maxAttempts) {
+				await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+			}
+		}
+		return false;
 	},
 
 	async stopBroadcast() {
@@ -169,6 +231,14 @@ window.liveShow = {
 				this.mediaRecorder.onstop = resolve;
 				this.mediaRecorder.stop();
 			});
+		}
+
+		// mediaRecorder.stop() fires one last ondataavailable for the final partial chunk, but
+		// that handler only enqueues it - the pump uploads it asynchronously, unawaited. Without
+		// this wait, finalize-recording below could run before the last (or any still-queued
+		// earlier) chunk actually finished uploading, truncating the file.
+		while (this._uploadPumpRunning || this._uploadQueue.length > 0) {
+			await new Promise((resolve) => setTimeout(resolve, 100));
 		}
 
 		const durationSeconds = this.recordingStartedAt

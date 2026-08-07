@@ -1116,6 +1116,13 @@ public static class SocialPostStatuses
     public const string Published = "Published";
     public const string PartiallyPublished = "PartiallyPublished";
     public const string Failed = "Failed";
+
+    // A target-level status: this attempt failed but hasn't exhausted its retries yet, so the
+    // owning post's overall Status stays Scheduled and the scheduler will pick it up again once
+    // NextRetryAt elapses. Only after retries are exhausted does a target become permanently
+    // Failed. There is no equivalent post-level status - a post with any RetryPending target
+    // reports as Scheduled.
+    public const string RetryPending = "RetryPending";
 }
 
 // One encrypted server-side credential per social identity/page. ExternalAccountId is a
@@ -1150,8 +1157,28 @@ public sealed class SocialPostTarget : AuditableEntity
     public string Status { get; set; } = SocialPostStatuses.Draft;
     public string ExternalPostId { get; set; } = string.Empty;
     public string ErrorMessage { get; set; } = string.Empty;
+    public int RetryCount { get; set; }
+    public DateTimeOffset? NextRetryAt { get; set; }
     public SocialPost? SocialPost { get; set; }
     public SocialAccount? SocialAccount { get; set; }
+}
+
+public static class SocialPostAlertSeverity
+{
+    public const string Warning = "Warning";
+    public const string Error = "Error";
+}
+
+// Mirrors DockerHealthAlert's shape/read-tracking so NotificationBell can show both alert
+// kinds through the same list/unread-count/mark-read surface. A dedicated table (rather than
+// reusing DockerHealthAlert) because ContainerName isn't a meaningful field for a social post.
+public sealed class SocialPostAlert : AuditableEntity
+{
+    public Guid SocialPostId { get; set; }
+    public string PostTitle { get; set; } = string.Empty;
+    public string Severity { get; set; } = SocialPostAlertSeverity.Error;
+    public string Message { get; set; } = string.Empty;
+    public bool IsRead { get; set; }
 }
 
 // Best-effort import of CJ's own commission/transaction ledger for revenue reporting -

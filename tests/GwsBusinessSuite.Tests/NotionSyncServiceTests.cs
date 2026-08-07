@@ -607,6 +607,43 @@ public sealed class NotionSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_ShouldSkipAPageThatFailsUnrecoverablyAndStillImportTheOthers()
+    {
+        // Regression guard for a real finding: a single malformed page/block previously threw
+        // straight out of the per-page loop, aborting every page and database still left to
+        // sync in that pass - and since the sync watermark (settingsRow.LastSyncedAt) was only
+        // set on the try block's full success path, the SAME bad page kept aborting every
+        // future sync too. This asserts one bad page no longer takes down the whole run: the
+        // good page still imports, the overall result still reports success, and the failure
+        // is surfaced via FailedItems/the message rather than silently disappearing.
+        await using var fixture = await SyncFixture.CreateAsync();
+        fixture.Notion.SearchResults = [Page("bad-page", "Broken"), Page("good-page", "Fine")];
+        fixture.Notion.UnrecoverableBlockFailures.Add("bad-page");
+        fixture.Notion.BlockChildren["good-page"] =
+        [
+            Json("""
+                {"object":"block","id":"paragraph-1","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Survives the bad page"}]}}
+                """)
+        ];
+
+        var result = await fixture.Service.SyncAsync();
+
+        result.IsSuccess.Should().BeTrue();
+        result.FailedItems.Should().Be(1);
+        result.Message.Should().Contain("1 item failed to import");
+        var pages = await fixture.Db.WikiPages.ToListAsync();
+        pages.Should().ContainSingle(page => page.NotionId == "good-page");
+        var goodPage = pages.Single(page => page.NotionId == "good-page");
+        WikiBlockJson.ParseBlocks(goodPage.BlocksJson).Should().ContainSingle(block => block.PlainText == "Survives the bad page");
+
+        // The watermark must advance despite the failure, or every future sync would keep
+        // hitting the same bad page and never make progress on anything after it.
+        var settings = await fixture.Service.GetSettingsAsync();
+        settings.Should().NotBeNull();
+        settings!.LastSyncedAt.Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task SyncAsync_ShouldKeepPageContentWhenOptionalCommentsReturn404()
     {
         await using var fixture = await SyncFixture.CreateAsync();
@@ -1417,6 +1454,12 @@ public sealed class NotionSyncServiceTests
         public IReadOnlyList<JsonElement> SearchResults { get; set; } = [];
         public Dictionary<string, IReadOnlyList<JsonElement>> BlockChildren { get; } = new();
         public HashSet<string> MissingBlockChildren { get; } = [];
+        // Distinct from MissingBlockChildren (a 404, which SyncPageBlocksAsync already
+        // recovers from via the markdown-fallback endpoint) - this simulates a genuinely
+        // unrecoverable failure (a malformed response, a transient 500, anything not
+        // specifically pattern-matched by that recovery path) to exercise the per-item
+        // isolation in NotionSyncService.SyncAsync's page/database loops.
+        public HashSet<string> UnrecoverableBlockFailures { get; } = [];
         public Dictionary<string, NotionMarkdownPage> MarkdownPages { get; } = new();
         public Dictionary<string, JsonElement> DatabaseSchemas { get; } = new();
         public Dictionary<string, IReadOnlyList<JsonElement>> DatabaseRows { get; } = new();
@@ -1450,6 +1493,8 @@ public sealed class NotionSyncServiceTests
         public Task<NotionPage> GetBlockChildrenAsync(string integrationToken, string blockId, string? cursor, CancellationToken cancellationToken = default)
         {
             BlockChildrenRequests.Add(blockId);
+            if (UnrecoverableBlockFailures.Contains(blockId))
+                return Task.FromException<NotionPage>(new InvalidOperationException("Simulated unrecoverable Notion API failure."));
             return MissingBlockChildren.Contains(blockId)
                 ? Task.FromException<NotionPage>(new HttpRequestException(
                     "Not found.",

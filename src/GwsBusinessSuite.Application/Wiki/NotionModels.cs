@@ -123,7 +123,12 @@ public sealed record NotionSyncResult(
     int Discovered = 0,
     int Skipped = 0,
     int EmptyContent = 0,
-    int ContentBlocks = 0);
+    int ContentBlocks = 0,
+    // A page or database that threw while syncing is now logged and skipped rather than
+    // aborting the whole run (and, with it, the sync watermark - see NotionSyncService.SyncAsync)
+    // - this surfaces that something was skipped so it isn't silently invisible to whoever
+    // triggered the sync, even though the run as a whole still reports success.
+    int FailedItems = 0);
 
 public static class NotionSyncJobStates
 {

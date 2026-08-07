@@ -24,10 +24,10 @@ public sealed partial class AutomationNodeRegistry(
         new("core.webhookTrigger", 1, "Webhook Trigger", "Starts an active workflow from its public webhook path.", "Triggers", "bi-broadcast-pin", true, ["main"], "{\"path\":\"incoming-event\"}"),
         new("core.scheduleTrigger", 1, "Schedule Trigger", "Starts an active workflow at a recurring minute interval.", "Triggers", "bi-clock-fill", true, ["main"], "{\"intervalMinutes\":60}"),
         new("database.rowChangedTrigger", 1, "Database Row Changed", "Starts an active workflow when a row's properties change in a Sentinel database. Paste the database's id (visible in its Sentinel URL) into wikiDatabaseId.", "Triggers", "bi-table", true, ["main"], "{\"wikiDatabaseId\":\"\"}"),
-        new("database.setRowProperty", 1, "Set Database Row Property", "Sets one property on a Sentinel database row. Paste the database, row, and property ids and an optional {{ $json.path }} expression for the value. Never re-triggers a Database Row Changed workflow, so it cannot cause an automation loop - chaining a second workflow off this write is not supported.", "Actions", "bi-pencil-square", false, ["main"], "{\"wikiDatabaseId\":\"\",\"rowId\":\"{{ $json.rowId }}\",\"propertyId\":\"\",\"value\":\"\"}"),
+        new("database.setRowProperty", 1, "Set Database Row Property", "Sets one property on a Sentinel database row. Paste the database, row, and property ids and an optional {{ $json.path }} expression for the value. Never re-triggers a Database Row Changed workflow, so it cannot cause an automation loop - chaining a second workflow off this write is not supported.", "Actions", "bi-pencil-square", false, ["main"], "{\"wikiDatabaseId\":\"\",\"rowId\":\"{{ $json.rowId }}\",\"propertyId\":\"\",\"value\":\"\"}", IsIdempotent: false),
         new("core.set", 1, "Set Fields", "Adds or replaces JSON fields using literal values or expressions.", "Data", "bi-braces", false, ["main"], "{\"values\":{\"message\":\"Hello from GWS\"}}"),
         new("core.if", 1, "If", "Routes an item to the true or false output.", "Flow", "bi-signpost-split-fill", false, ["true", "false"], "{\"left\":\"{{ $json.enabled }}\",\"operator\":\"equals\",\"right\":\"true\"}"),
-        new("core.httpRequest", 1, "HTTP Request", "Calls an HTTP API and returns status, headers, and response data.", "Actions", "bi-globe2", false, ["main"], "{\"method\":\"GET\",\"url\":\"https://example.com\",\"headers\":{},\"body\":\"\"}"),
+        new("core.httpRequest", 1, "HTTP Request", "Calls an HTTP API and returns status, headers, and response data.", "Actions", "bi-globe2", false, ["main"], "{\"method\":\"GET\",\"url\":\"https://example.com\",\"headers\":{},\"body\":\"\"}", IsIdempotent: false),
         new("core.splitOut", 1, "Split Out", "Emits one item for each value in an array field.", "Data", "bi-distribute-vertical", false, ["main"], "{\"field\":\"items\",\"includeSource\":false}"),
         new("core.batch", 1, "Batch Items", "Groups an input array into smaller batches.", "Flow", "bi-collection", false, ["main"], "{\"field\":\"items\",\"batchSize\":10}"),
         new("core.merge", 1, "Merge", "Waits for labeled inputs and combines them into one item.", "Flow", "bi-bezier2", false, ["main"], "{}"),
@@ -270,6 +270,15 @@ public sealed partial class AutomationNodeRegistry(
             ? parsed
             : throw new InvalidOperationException($"{nodeName} requires a valid {parameterName}.");
 
+    // Unlike core.batch/core.limit (which already clamp their size parameters), splitOut had
+    // no ceiling at all: each output item becomes its own queued execution step, and every
+    // step re-serializes the *entire remaining frontier* to the DB (AutomationExecutionService
+    // .RunLoopAsync's checkpoint) - an ordinary large array turned into O(n^2) CPU/DB-write
+    // work with no malice required. A silent truncation would quietly drop items from a
+    // "process every row" workflow, which is worse than failing loudly, so this throws with an
+    // actionable fix (chunk through core.batch first) rather than truncating.
+    private const int MaxSplitOutItems = 2_000;
+
     private static AutomationNodeRunResult ExecuteSplitOut(AutomationNodeSnapshot node, JsonElement input)
     {
         var root = ParseObject(node.ParametersJson, node.Name);
@@ -277,6 +286,12 @@ public sealed partial class AutomationNodeRegistry(
         var source = RequireObject(input, node.Name);
         var array = ResolveNode(source, field) as JsonArray
             ?? throw new InvalidOperationException($"{node.Name} expected '{field}' to be an array.");
+        if (array.Count > MaxSplitOutItems)
+        {
+            throw new InvalidOperationException(
+                $"{node.Name} would fan out into {array.Count} items, which exceeds the {MaxSplitOutItems:N0} item safety limit. " +
+                "Insert a core.batch node before this one to process the array in smaller chunks instead.");
+        }
         var includeSource = root["includeSource"]?.GetValue<bool>() ?? false;
         var items = new List<JsonElement>();
         foreach (var value in array)

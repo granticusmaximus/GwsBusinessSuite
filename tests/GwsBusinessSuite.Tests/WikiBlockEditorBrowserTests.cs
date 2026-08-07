@@ -607,6 +607,100 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
             .And.Contain(rowId.ToString());
     }
 
+    [Theory]
+    [InlineData(WikiDatabasePropertyTypes.Relation)]
+    [InlineData(WikiDatabasePropertyTypes.Person)]
+    [InlineData(WikiDatabasePropertyTypes.Files)]
+    public async Task ImportedInlineTable_ShouldRenderRelationPersonAndFilesAsReadOnly(string propertyType)
+    {
+        // Regression guard for a real finding: this cell editor only ever special-cased
+        // checkbox/select and fell through to a plain text <input> for everything else,
+        // including Relation/Person/Files - array-shaped properties where a scalar string save
+        // silently corrupted the row (every reader, including dependent rollups and reciprocal
+        // relation sync, then read the property back as empty). Until the real array-shaped
+        // pickers exist, these three render read-only (matching property.isReadOnly) instead
+        // of offering a control that quietly loses data.
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.SetContentAsync(
+            """<main class="sentinel-workspace"><div id="editor" class="wiki-block-editor"></div></main>""");
+        var stylesPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/app.css"));
+        await page.AddStyleTagAsync(new PageAddStyleTagOptions { Content = await File.ReadAllTextAsync(stylesPath) });
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+
+        var databaseId = Guid.NewGuid();
+        var titlePropertyId = Guid.NewGuid();
+        var linkedPropertyId = Guid.NewGuid();
+        var rowId = Guid.NewGuid();
+        var blockJson = WikiBlockJson.Serialize(
+        [
+            new WikiBlock(
+                Guid.NewGuid(),
+                WikiBlockTypes.InlineDatabase,
+                0,
+                [],
+                new Dictionary<string, string>
+                {
+                    ["databaseId"] = databaseId.ToString(),
+                    ["databaseTitle"] = "Projects"
+                })
+        ]);
+        var snapshot = new WikiInlineDatabaseSnapshot(
+            databaseId,
+            "Projects",
+            "▤",
+            [
+                new WikiInlineDatabaseProperty(titlePropertyId, "Name", WikiDatabasePropertyTypes.Title, false, []),
+                new WikiInlineDatabaseProperty(linkedPropertyId, "Linked", propertyType, false, [])
+            ],
+            [
+                new WikiInlineDatabaseRow(
+                    rowId,
+                    [
+                        new WikiInlineDatabaseCell(titlePropertyId, "Q1 Launch"),
+                        new WikiInlineDatabaseCell(linkedPropertyId, "raw-value")
+                    ])
+            ])
+        {
+            Views = [new WikiInlineDatabaseView(Guid.NewGuid(), "List", WikiDatabaseViewTypes.List, null)]
+        };
+        var payload = JsonSerializer.Serialize(
+            new { blockJson, snapshot },
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+
+        await page.EvaluateAsync(
+            """
+            payloadJson => {
+                const payload = JSON.parse(payloadJson);
+                window.editorCalls = [];
+                window.sentinelBlockEditor.initialize(
+                    document.querySelector('#editor'),
+                    {
+                        invokeMethodAsync: (method, ...args) => {
+                            window.editorCalls.push({ method, args });
+                            return Promise.resolve(method === 'GetInlineDatabase' ? payload.snapshot : null);
+                        }
+                    },
+                    payload.blockJson);
+            }
+            """,
+            payload);
+
+        var linkedCell = page.Locator(".wiki-inline-database-table tbody tr td").Nth(2);
+        await Expect(linkedCell.Locator(".wiki-inline-cell-readonly")).ToBeVisibleAsync();
+        await Expect(linkedCell.Locator("input, select")).Not.ToBeVisibleAsync();
+        var calls = await page.EvaluateAsync<string>("() => JSON.stringify(window.editorCalls)");
+        calls.Should().NotContain("SaveInlineDatabaseCell");
+    }
+
     [Fact]
     public async Task NestedBlockActions_ShouldPreserveEntireBranches()
     {

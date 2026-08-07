@@ -523,6 +523,22 @@ else
                                                 <span class="badge text-bg-light border me-1">@text</span>
                                             }
                                         }
+                                        @* Drag-and-drop (above) has no keyboard equivalent - a card could never be
+                                           moved between columns without a mouse. A plain <select> is fully
+                                           keyboard/screen-reader operable with no custom widget needed. The
+                                           "No status" column's real OptionId is "" (WikiDatabaseViewLogic
+                                           .GroupForBoard), same as an unset <select> - MovePlaceholderValue is a
+                                           value no real option can ever have, so the two stay distinguishable. *@
+                                        <select class="form-select form-select-sm wiki-db-board-card-move mt-2"
+                                                aria-label="@($"Move \"{GetText(row, titleProperty) ?? "Untitled"}\" to another column")"
+                                                @onchange="e => MoveRowToOptionAsync(row, groupByProperty, (string)e.Value!)"
+                                                disabled="@IsBusy">
+                                            <option value="@MovePlaceholderValue" selected>Move to&hellip;</option>
+                                            @foreach (var target in groups.Where(candidate => candidate.OptionId != group.OptionId))
+                                            {
+                                                <option value="@target.OptionId">@target.Label</option>
+                                            }
+                                        </select>
                                     </div>
                                 }
                                 <button type="button" class="btn btn-sm btn-link" @onclick="() => AddRowToGroupAsync(groupByProperty, group.OptionId)" disabled="@IsBusy">
@@ -822,6 +838,12 @@ else
     // Set by a caller (e.g. Wiki.razor when a wiki-embedded inline Kanban card is clicked)
     // to open straight to a specific row's detail panel instead of just the database.
     [Parameter] public Guid? InitialOpenRowId { get; set; }
+    // Defaults true so callers that don't pass it (there are none today besides Wiki.razor,
+    // but a default here still matters for anything added later) get the pre-existing
+    // unrestricted behavior rather than silently locking themselves out. Wiki.razor computes
+    // the real value from SentinelAccessService before rendering this component - see
+    // OpenDatabaseAsync.
+    [Parameter] public bool CanEdit { get; set; } = true;
 
     private Guid? _appliedInitialOpenRowId;
 
@@ -990,6 +1012,14 @@ else
         ErrorMessage = string.Empty;
         try
         {
+            // Covers the large majority of this component's mutations (property/view/row
+            // edits all route through Work) in one place rather than checking CanEdit
+            // individually in every method - see the Parameter's own comment for where this
+            // value comes from.
+            if (!CanEdit)
+            {
+                throw new UnauthorizedAccessException("You don't have permission to edit this Sentinel database.");
+            }
             await action();
         }
         catch (Exception ex)
@@ -1576,6 +1606,28 @@ else
         {
             var user = await CurrentUserNameAsync();
             await WikiDatabaseService.MoveRowAsync(WikiDatabaseId, rowId, groupByProperty.Id, string.IsNullOrEmpty(optionId) ? null : optionId, int.MaxValue, user);
+            await ReloadAsync();
+        });
+    }
+
+    // A value no real Select option can ever have (see the <select>'s own comment), used to
+    // tell "nothing chosen yet" apart from the "No status" column, whose real OptionId is "".
+    private const string MovePlaceholderValue = "__wiki-db-board-move-placeholder__";
+
+    // Keyboard/screen-reader equivalent of DropOnColumnAsync's drag-and-drop - same underlying
+    // move (append to the end of the target column), just triggered from the per-card <select>
+    // instead of a drop event.
+    private async Task MoveRowToOptionAsync(WikiDatabaseRow row, WikiDatabaseProperty groupByProperty, string optionId)
+    {
+        if (optionId == MovePlaceholderValue)
+        {
+            return;
+        }
+
+        await Work(async () =>
+        {
+            var user = await CurrentUserNameAsync();
+            await WikiDatabaseService.MoveRowAsync(WikiDatabaseId, row.Id, groupByProperty.Id, string.IsNullOrEmpty(optionId) ? null : optionId, int.MaxValue, user);
             await ReloadAsync();
         });
     }

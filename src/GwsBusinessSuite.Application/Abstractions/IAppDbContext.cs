@@ -69,6 +69,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<SocialAccount> SocialAccounts { get; }
     DbSet<SocialPost> SocialPosts { get; }
     DbSet<SocialPostTarget> SocialPostTargets { get; }
+    DbSet<SocialPostAlert> SocialPostAlerts { get; }
     DbSet<AppUser> AppUsers { get; }
     DbSet<WatchedTopic> WatchedTopics { get; }
     DbSet<NewsItem> NewsItems { get; }

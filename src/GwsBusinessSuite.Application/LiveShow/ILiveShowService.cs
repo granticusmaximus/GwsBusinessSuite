@@ -16,7 +16,12 @@ public interface ILiveShowService
     // order it's called - see LiveShowRecording's doc comment for why raw concatenation
     // reconstructs a valid file. Chunks must be applied sequentially per session (the
     // caller endpoint is expected to await each upload before sending the next).
-    Task AppendRecordingChunkAsync(Guid sessionId, Stream chunkStream, CancellationToken cancellationToken = default);
+    // sequence is the chunk's 0-based position as the browser recorded it (see liveShow.js's
+    // upload queue) - not a strict correctness requirement (chunks still append in arrival
+    // order regardless), but it lets a gap from a chunk that failed every client-side retry be
+    // detected and logged instead of silently producing a corrupted recording with no signal
+    // anything went wrong.
+    Task AppendRecordingChunkAsync(Guid sessionId, Stream chunkStream, int sequence, CancellationToken cancellationToken = default);
 
     Task FinalizeRecordingAsync(Guid sessionId, int durationSeconds, CancellationToken cancellationToken = default);
 

@@ -257,6 +257,24 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit           = 0,
             }));
 
+    // Was previously sharing "public-write" (5 requests/5 minutes) - a budget sized for
+    // spam-prone form submissions, not for /api/analytics/events firing ~1-2 times per page a
+    // visitor navigates to (pageview + an engagement beacon on pagehide). Any visitor viewing
+    // 3+ pages tripped it, and public-analytics.js's fetch().catch(() => {}) swallowed the
+    // resulting 429 with no signal - dashboards were systematically undercounting exactly the
+    // most engaged traffic. Sized the same as "public-read" (120/min): this is read-adjacent,
+    // organic browsing traffic, not a spam-prone write surface.
+    options.AddPolicy("analytics-ingest", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                Window               = TimeSpan.FromMinutes(1),
+                PermitLimit          = 120,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit           = 0,
+            }));
+
     // Only the login page wants a redirect on rejection; API-shaped endpoints should get
     // a plain 429 instead of being bounced to an HTML page.
     options.OnRejected = (context, _) =>
@@ -1464,7 +1482,7 @@ app.MapPost("/api/analytics/events", async (
     {
         return Results.BadRequest();
     }
-}).RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-write");
+}).RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("analytics-ingest");
 
 // Public-facing affiliate click-tracking redirect: records a click against the
 // placement, then forwards to its real CJ tracking URL. Rendered article markup links
@@ -1832,15 +1850,19 @@ app.MapGet("/media/{id:guid}/thumb", async (Guid id, IMediaLibraryService mediaL
     return content is null ? Results.NotFound() : Results.Bytes(content.Value.Content, content.Value.ContentType);
 }).AllowAnonymous().RequireRateLimiting("public-read");
 
-// Raw request body is one MediaRecorder chunk (see liveShow.js's ondataavailable), appended
-// to the session's on-disk recording file in the order the browser calls this - the browser
-// awaits each POST before sending the next, so there's no need to buffer/reorder here.
+// Raw request body is one MediaRecorder chunk (see liveShow.js's upload queue), appended to
+// the session's on-disk recording file in the order this endpoint receives them - the
+// browser's own queue uploads strictly one chunk at a time (never starts the next until the
+// current one settles), so there's no need to buffer/reorder here. `sequence` is that queue's
+// position for the chunk, used only to detect (not correct) a gap - see
+// LiveShowService.AppendRecordingChunkAsync.
 app.MapPost("/admin/api/live-show/{sessionId:guid}/recording-chunk", async (
     Guid sessionId,
+    int sequence,
     HttpRequest request,
     ILiveShowService liveShowService) =>
 {
-    await liveShowService.AppendRecordingChunkAsync(sessionId, request.Body);
+    await liveShowService.AppendRecordingChunkAsync(sessionId, request.Body, sequence);
     return Results.Ok();
 }).RequireAuthorization("AdminOnly").RequireRateLimiting("live-show-chunk");
 

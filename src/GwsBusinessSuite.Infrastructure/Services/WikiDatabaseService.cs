@@ -1107,6 +1107,21 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         {
             throw new InvalidOperationException("Computed properties are read-only.");
         }
+        // This method's `value` parameter is always a single string - fine for the scalar
+        // types the switch below handles, but Relation/Person/Files are JSON-array-shaped
+        // (see WikiPropertyValues.SetRelation/SetPerson/SetFiles) and every reader (dependent
+        // rollups, reciprocal relation sync, the row detail panel) expects an array, not a
+        // scalar. Silently falling through to the switch's `default: SetText(...)` branch used
+        // to save a plain string here, which those readers then silently read back as empty -
+        // no error, no visible sign the edit did nothing real. The inline embed's cell editor
+        // (wiki-block-editor.js) no longer offers an editable control for these three types for
+        // the same reason; this is the server-side half of that fix, in case anything else ever
+        // calls this method directly.
+        if (property.Type is WikiDatabasePropertyTypes.Relation or WikiDatabasePropertyTypes.Person or WikiDatabasePropertyTypes.Files)
+        {
+            throw new InvalidOperationException(
+                $"{property.Type} properties can't be edited from this inline view yet - open the row to edit it.");
+        }
 
         var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
         switch (property.Type)

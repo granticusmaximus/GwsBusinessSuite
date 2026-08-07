@@ -63,12 +63,20 @@
             navigator.sendBeacon("/api/analytics/events", new Blob([body], { type: "application/json" }));
             return;
         }
+        // fetch() only rejects on a network-level failure, not a non-2xx response - a 429
+        // (rate limited) or 5xx would otherwise disappear silently with zero signal, same as
+        // an actual network error. console.warn is deliberately the ceiling here: this is a
+        // best-effort visitor-facing beacon, not a page feature worth surfacing a UI error for.
         fetch("/api/analytics/events", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body,
             credentials: "omit",
             keepalive: true
+        }).then((response) => {
+            if (!response.ok) {
+                console.warn(`gwsAnalytics: event "${eventName}" was not recorded (HTTP ${response.status}).`);
+            }
         }).catch(() => {});
     };
 

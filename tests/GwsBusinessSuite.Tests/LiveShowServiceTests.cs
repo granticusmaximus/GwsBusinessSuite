@@ -73,7 +73,7 @@ public sealed class LiveShowServiceTests : IDisposable
         await using var db = await CreateDbAsync();
         var service = CreateService(db);
         var session = await service.StartSessionAsync("My Show");
-        await service.AppendRecordingChunkAsync(session.Id, new MemoryStream(Encoding.UTF8.GetBytes("partial")));
+        await service.AppendRecordingChunkAsync(session.Id, new MemoryStream(Encoding.UTF8.GetBytes("partial")), 0);
 
         await service.HandleBroadcasterDisconnectedAsync(session.Id);
 
@@ -101,7 +101,7 @@ public sealed class LiveShowServiceTests : IDisposable
         await using var db = await CreateDbAsync();
         var service = CreateService(db);
         var session = await service.StartSessionAsync("My Show");
-        await service.AppendRecordingChunkAsync(session.Id, new MemoryStream(Encoding.UTF8.GetBytes("data")));
+        await service.AppendRecordingChunkAsync(session.Id, new MemoryStream(Encoding.UTF8.GetBytes("data")), 0);
 
         await service.FinalizeRecordingAsync(session.Id, 10);
         await service.FinalizeRecordingAsync(session.Id, 20);
@@ -200,8 +200,8 @@ public sealed class LiveShowServiceTests : IDisposable
 
         var chunk1 = Encoding.UTF8.GetBytes("hello ");
         var chunk2 = Encoding.UTF8.GetBytes("world");
-        await service.AppendRecordingChunkAsync(session.Id, new MemoryStream(chunk1));
-        await service.AppendRecordingChunkAsync(session.Id, new MemoryStream(chunk2));
+        await service.AppendRecordingChunkAsync(session.Id, new MemoryStream(chunk1), 0);
+        await service.AppendRecordingChunkAsync(session.Id, new MemoryStream(chunk2), 1);
         await service.FinalizeRecordingAsync(session.Id, durationSeconds: 42);
 
         var recordings = await service.ListRecordingsAsync();
@@ -247,20 +247,63 @@ public sealed class LiveShowServiceTests : IDisposable
         var service = CreateService(db);
 
         var older = await service.StartSessionAsync("Older Show");
-        await service.AppendRecordingChunkAsync(older.Id, new MemoryStream(Encoding.UTF8.GetBytes("a")));
+        await service.AppendRecordingChunkAsync(older.Id, new MemoryStream(Encoding.UTF8.GetBytes("a")), 0);
         await service.FinalizeRecordingAsync(older.Id, 5);
         var olderRecording = (await db.LiveShowRecordings.FirstAsync(r => r.SessionId == older.Id));
         olderRecording.CreatedAt = DateTimeOffset.UtcNow.AddHours(-1);
         await db.SaveChangesAsync();
 
         var newer = await service.StartSessionAsync("Newer Show");
-        await service.AppendRecordingChunkAsync(newer.Id, new MemoryStream(Encoding.UTF8.GetBytes("b")));
+        await service.AppendRecordingChunkAsync(newer.Id, new MemoryStream(Encoding.UTF8.GetBytes("b")), 0);
         await service.FinalizeRecordingAsync(newer.Id, 5);
 
         var recordings = await service.ListRecordingsAsync();
         recordings.Should().HaveCount(2);
         recordings[0].SessionTitle.Should().Be("Newer Show");
         recordings[1].SessionTitle.Should().Be("Older Show");
+    }
+
+    [Fact]
+    public async Task AppendRecordingChunkAsync_ShouldWarnOnceOnAGapAndResyncToTheArrivingSequence()
+    {
+        // Regression guard for a real finding: chunk uploads previously had no try/catch,
+        // retry, or ordering guarantee at all - a dropped chunk silently corrupted the rest of
+        // the recording with no signal anything went wrong. The client-side fix (liveShow.js's
+        // upload queue) prevents most of that; this covers the server-side backstop for a
+        // chunk that still fails every client retry - a gap in `sequence` should be logged
+        // (not silently accepted) so it's at least discoverable, and the tracker should resync
+        // to whatever actually arrived rather than warning forever about the same gap.
+        await using var db = await CreateDbAsync();
+        var logger = new RecordingLogger<LiveShowService>();
+        var service = new LiveShowService(db, _recordingsPath, logger: logger);
+        var session = await service.StartSessionAsync("My Show");
+
+        await service.AppendRecordingChunkAsync(session.Id, new MemoryStream(Encoding.UTF8.GetBytes("a")), 0);
+        // sequence 1 (the chunk that would have filled the gap) never arrives - it exhausted
+        // its client-side retries and was dropped.
+        await service.AppendRecordingChunkAsync(session.Id, new MemoryStream(Encoding.UTF8.GetBytes("c")), 2);
+        await service.AppendRecordingChunkAsync(session.Id, new MemoryStream(Encoding.UTF8.GetBytes("d")), 3);
+
+        logger.Warnings.Should().ContainSingle(w => w.Contains("expected 1") && w.Contains("got 2"));
+    }
+
+    private sealed class RecordingLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
+    {
+        public List<string> Warnings { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == Microsoft.Extensions.Logging.LogLevel.Warning)
+            {
+                Warnings.Add(formatter(state, exception));
+            }
+        }
     }
 
     private LiveShowService CreateService(ApplicationDbContext db) => new(db, _recordingsPath);

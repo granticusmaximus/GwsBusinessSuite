@@ -37,6 +37,43 @@ public sealed class DatabaseBackupServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetReadinessProblemAsync_ShouldDetectATruncatedBackup_EvenThoughItsHeaderIsStillValid()
+    {
+        // Regression guard for a real finding: the health check previously only verified the
+        // archive's 8-byte magic header (BackupArchive.HasHeader), not real integrity - a crash
+        // mid-encryption (or any other truncation) leaves a file that still starts with a valid
+        // header but is missing part of its ciphertext and/or its trailing HMAC tag, and that
+        // still reported Healthy. This simulates exactly that: a real, valid backup truncated
+        // after the fact (header intact, tail cut off) should now be flagged.
+        var fixture = await CreateFixtureAsync();
+        var archivePath = await fixture.Service.CreateBackupAsync();
+        (await fixture.Service.GetReadinessProblemAsync()).Should().BeNull("a freshly created backup should verify cleanly");
+
+        var bytes = await File.ReadAllBytesAsync(archivePath);
+        await File.WriteAllBytesAsync(archivePath, bytes[..(bytes.Length - 20)]);
+
+        var problem = await fixture.Service.GetReadinessProblemAsync();
+
+        problem.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task CreateBackupAsync_ShouldNotLeaveATempFileBehindOnSuccess()
+    {
+        // Regression guard for the write-temp-then-atomic-rename fix: EncryptAsync now writes
+        // to a sibling .tmp path and only renames it onto the real archive path once both the
+        // ciphertext and its HMAC tag are fully written - a crash before that rename previously
+        // could leave a partially-written file sitting at the exact path GetLatestBackupPath's
+        // directory scan discovers as "the latest backup".
+        var fixture = await CreateFixtureAsync();
+
+        var archivePath = await fixture.Service.CreateBackupAsync();
+
+        Directory.EnumerateFiles(Path.GetDirectoryName(archivePath)!, "*.tmp").Should().BeEmpty();
+        fixture.Service.GetLatestBackupPath().Should().Be(archivePath);
+    }
+
+    [Fact]
     public async Task Verify_ShouldRejectAuthenticatedArchiveAfterSingleByteTampering()
     {
         var fixture = await CreateFixtureAsync();

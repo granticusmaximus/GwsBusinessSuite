@@ -213,6 +213,17 @@ public sealed record SocialPostTargetView(
     string Content,
     string Status,
     string ExternalPostId,
-    string ErrorMessage);
+    string ErrorMessage,
+    int RetryCount,
+    DateTimeOffset? NextRetryAt);
 
 public sealed record SocialPublishResult(bool IsSuccess, string Message);
+
+public sealed record SocialPostAlertView(
+    Guid Id,
+    Guid SocialPostId,
+    string PostTitle,
+    string Severity,
+    string Message,
+    bool IsRead,
+    DateTimeOffset CreatedAt);

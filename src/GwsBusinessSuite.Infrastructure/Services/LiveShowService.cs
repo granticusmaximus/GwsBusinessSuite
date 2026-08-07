@@ -4,6 +4,7 @@ using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.LiveShow;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
@@ -15,9 +16,11 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 public sealed class LiveShowService(
     IAppDbContext dbContext,
     string recordingsRootPath,
-    ICurrentUserAccessor? currentUserAccessor = null) : ILiveShowService
+    ICurrentUserAccessor? currentUserAccessor = null,
+    ILogger<LiveShowService>? logger = null) : ILiveShowService
 {
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> WriteLocks = new();
+    private static readonly ConcurrentDictionary<Guid, int> NextExpectedChunkSequence = new();
     private static readonly TimeSpan InviteLifetime = TimeSpan.FromHours(6);
 
     private readonly ICurrentUserAccessor _currentUserAccessor = currentUserAccessor ?? FixedCurrentUserAccessor.Unknown;
@@ -114,12 +117,28 @@ public sealed class LiveShowService(
             .ToList();
     }
 
-    public async Task AppendRecordingChunkAsync(Guid sessionId, Stream chunkStream, CancellationToken cancellationToken = default)
+    public async Task AppendRecordingChunkAsync(Guid sessionId, Stream chunkStream, int sequence, CancellationToken cancellationToken = default)
     {
         var writeLock = WriteLocks.GetOrAdd(sessionId, _ => new SemaphoreSlim(1, 1));
         await writeLock.WaitAsync(cancellationToken);
         try
         {
+            // Doesn't prevent or reorder anything by itself - the browser's own upload queue
+            // (liveShow.js) is what keeps chunks in order and retries transient failures. This
+            // is the backstop for the case that queue can't fix: a chunk that failed every
+            // client-side retry. Appending still happens either way (a gap is still better than
+            // losing the rest of the recording too), but the gap is now a logged, discoverable
+            // fact instead of a silently corrupted file.
+            var expected = NextExpectedChunkSequence.GetOrAdd(sessionId, 0);
+            if (sequence != expected)
+            {
+                logger?.LogWarning(
+                    "Live Show session {SessionId} recording chunk arrived out of sequence (expected {Expected}, got {Actual}) - " +
+                    "the recording likely has a gap around this point.",
+                    sessionId, expected, sequence);
+            }
+            NextExpectedChunkSequence[sessionId] = Math.Max(expected, sequence + 1);
+
             Directory.CreateDirectory(recordingsRootPath);
             var filePath = GetFilePath(sessionId);
             await using var fileStream = new FileStream(filePath, FileMode.Append, FileAccess.Write, FileShare.None);
@@ -174,6 +193,7 @@ public sealed class LiveShowService(
         finally
         {
             WriteLocks.TryRemove(sessionId, out _);
+            NextExpectedChunkSequence.TryRemove(sessionId, out _);
         }
     }
 

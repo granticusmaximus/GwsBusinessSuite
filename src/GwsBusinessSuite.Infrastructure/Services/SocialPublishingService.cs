@@ -14,8 +14,16 @@ public sealed class SocialPublishingService(
     ISecretProtector secretProtector,
     IOllamaService ollama,
     HttpClient http,
-    ILogger<SocialPublishingService> logger) : ISocialPublishingService
+    ILogger<SocialPublishingService> logger,
+    SocialPublishingNotifier? notifier = null) : ISocialPublishingService
 {
+    // A blind retry can't fix the common root cause (an expired OAuth token needs a human to
+    // reconnect the account), but it does recover transient failures (a network blip, a brief
+    // rate limit) without waiting for someone to notice and click Retry manually. Fixed delay
+    // rather than exponential backoff - simplicity over precision for a 3-attempt ceiling.
+    private const int MaxRetryAttempts = 3;
+    private static readonly TimeSpan RetryDelay = TimeSpan.FromMinutes(15);
+
     public async Task<IReadOnlyList<SocialAccountView>> GetAccountsAsync(CancellationToken cancellationToken = default) =>
         await db.SocialAccounts.AsNoTracking()
             .OrderBy(item => item.Network)
@@ -177,8 +185,15 @@ public sealed class SocialPublishingService(
 
         post.Status = SocialPostStatuses.Publishing;
         await db.SaveChangesAsync(cancellationToken);
-        var successes = 0;
-        foreach (var target in post.Targets.Where(item => item.Status != SocialPostStatuses.Published))
+        var now = DateTimeOffset.UtcNow;
+        // Manual "Retry" clicks re-run every non-Published target immediately; the scheduler's
+        // automatic passes (PublishDueAsync) only include RetryPending targets whose backoff
+        // has actually elapsed - both call this same method, so that distinction lives in which
+        // targets are still eligible here rather than in two separate code paths.
+        var eligible = post.Targets.Where(item =>
+            item.Status != SocialPostStatuses.Published
+            && (item.Status != SocialPostStatuses.RetryPending || item.NextRetryAt is null || item.NextRetryAt <= now));
+        foreach (var target in eligible)
         {
             try
             {
@@ -189,34 +204,114 @@ public sealed class SocialPublishingService(
                 target.ExternalPostId = await PublishTargetAsync(account, target.Content, token, cancellationToken);
                 target.Status = SocialPostStatuses.Published;
                 target.ErrorMessage = string.Empty;
+                target.NextRetryAt = null;
                 account.LastPublishedAt = DateTimeOffset.UtcNow;
-                successes++;
             }
             catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException)
             {
-                logger.LogWarning(ex, "Social publishing failed for target {TargetId} on {Network}.", target.Id, target.Network);
-                target.Status = SocialPostStatuses.Failed;
                 target.ErrorMessage = ex.Message.Length <= 500 ? ex.Message : ex.Message[..500];
+                target.RetryCount++;
+                if (target.RetryCount < MaxRetryAttempts)
+                {
+                    logger.LogWarning(ex,
+                        "Social publishing failed for target {TargetId} on {Network} (attempt {Attempt} of {MaxAttempts}); will retry.",
+                        target.Id, target.Network, target.RetryCount, MaxRetryAttempts);
+                    target.Status = SocialPostStatuses.RetryPending;
+                    target.NextRetryAt = now.Add(RetryDelay);
+                }
+                else
+                {
+                    logger.LogError(ex,
+                        "Social publishing permanently failed for target {TargetId} on {Network} after {Attempts} attempts.",
+                        target.Id, target.Network, target.RetryCount);
+                    target.Status = SocialPostStatuses.Failed;
+                    target.NextRetryAt = null;
+                    await RaiseAlertAsync(post, target, cancellationToken);
+                }
             }
         }
 
-        post.PublishedAt = successes > 0 ? DateTimeOffset.UtcNow : null;
-        post.Status = successes == post.Targets.Count
+        var publishedCount = post.Targets.Count(item => item.Status == SocialPostStatuses.Published);
+        var retryPendingCount = post.Targets.Count(item => item.Status == SocialPostStatuses.RetryPending);
+        if (publishedCount > 0 && post.PublishedAt is null) post.PublishedAt = DateTimeOffset.UtcNow;
+        post.Status = publishedCount == post.Targets.Count
             ? SocialPostStatuses.Published
-            : successes > 0 ? SocialPostStatuses.PartiallyPublished : SocialPostStatuses.Failed;
+            : retryPendingCount > 0
+                ? SocialPostStatuses.Scheduled
+                : publishedCount > 0 ? SocialPostStatuses.PartiallyPublished : SocialPostStatuses.Failed;
         await db.SaveChangesAsync(cancellationToken);
-        return new(successes == post.Targets.Count, $"{successes} of {post.Targets.Count} destinations published.");
+        return new(publishedCount == post.Targets.Count, $"{publishedCount} of {post.Targets.Count} destinations published.");
     }
 
     public async Task PublishDueAsync(CancellationToken cancellationToken = default)
     {
         var now = DateTimeOffset.UtcNow;
+        // SQLite/EF Core can't translate DateTimeOffset range filters server-side - materialize
+        // the (small, scheduled-only) candidate set first and filter client-side, same pattern
+        // used throughout this app.
         var posts = await db.SocialPosts.AsNoTracking()
-            .Where(item => item.Status == SocialPostStatuses.Scheduled && item.ScheduledFor != null)
+            .Where(item => item.Status == SocialPostStatuses.Scheduled)
+            .Include(item => item.Targets)
             .ToListAsync(cancellationToken);
-        foreach (var post in posts.Where(item => item.ScheduledFor <= now))
+        var due = posts.Where(item =>
+            (item.ScheduledFor is { } scheduledFor && scheduledFor <= now)
+            || item.Targets.Any(target => target.Status == SocialPostStatuses.RetryPending
+                && (target.NextRetryAt is null || target.NextRetryAt <= now)));
+        foreach (var post in due)
             await PublishAsync(post.Id, cancellationToken);
     }
+
+    private async Task RaiseAlertAsync(SocialPost post, SocialPostTarget target, CancellationToken cancellationToken)
+    {
+        var alert = new SocialPostAlert
+        {
+            SocialPostId = post.Id,
+            PostTitle = post.Title,
+            Severity = SocialPostAlertSeverity.Error,
+            Message = $"{target.Network} post \"{post.Title}\" failed after {target.RetryCount} attempts: {target.ErrorMessage}"
+        };
+        db.SocialPostAlerts.Add(alert);
+        await db.SaveChangesAsync(cancellationToken);
+        notifier?.Publish(ToAlertView(alert));
+    }
+
+    public async Task<IReadOnlyList<SocialPostAlertView>> ListAlertsAsync(bool unreadOnly, CancellationToken cancellationToken = default)
+    {
+        var query = db.SocialPostAlerts.AsNoTracking().AsQueryable();
+        if (unreadOnly) query = query.Where(item => !item.IsRead);
+        var alerts = await query.ToListAsync(cancellationToken);
+        return alerts.OrderByDescending(item => item.CreatedAt).Take(50).Select(ToAlertView).ToList();
+    }
+
+    public async Task MarkAlertReadAsync(Guid alertId, CancellationToken cancellationToken = default)
+    {
+        var alert = await db.SocialPostAlerts.FirstOrDefaultAsync(item => item.Id == alertId, cancellationToken);
+        if (alert is null) return;
+        alert.IsRead = true;
+        alert.UpdatedAt = DateTimeOffset.UtcNow;
+        alert.UpdatedBy = "system";
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task MarkAllAlertsReadAsync(CancellationToken cancellationToken = default)
+    {
+        var unread = await db.SocialPostAlerts.Where(item => !item.IsRead).ToListAsync(cancellationToken);
+        if (unread.Count == 0) return;
+        var now = DateTimeOffset.UtcNow;
+        foreach (var alert in unread)
+        {
+            alert.IsRead = true;
+            alert.UpdatedAt = now;
+            alert.UpdatedBy = "system";
+        }
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<int> CountUnreadAlertsAsync(CancellationToken cancellationToken = default) =>
+        await db.SocialPostAlerts.CountAsync(item => !item.IsRead, cancellationToken);
+
+    private static SocialPostAlertView ToAlertView(SocialPostAlert alert) => new(
+        alert.Id, alert.SocialPostId, alert.PostTitle, alert.Severity, alert.Message, alert.IsRead, alert.CreatedAt);
 
     private async Task<string> PublishTargetAsync(
         SocialAccount account,
@@ -331,5 +426,7 @@ public sealed class SocialPublishingService(
             target.Content,
             target.Status,
             target.ExternalPostId,
-            target.ErrorMessage)).ToList());
+            target.ErrorMessage,
+            target.RetryCount,
+            target.NextRetryAt)).ToList());
 }

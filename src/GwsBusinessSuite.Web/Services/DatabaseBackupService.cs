@@ -130,21 +130,30 @@ public sealed class DatabaseBackupService(
         : Directory.EnumerateFiles(_options.Path, $"gws-backup-*{ArchiveExtension}")
             .OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
 
-    public string? GetReadinessProblem()
+    public async Task<string?> GetReadinessProblemAsync(CancellationToken cancellationToken = default)
     {
         var latest = GetLatestBackupPath();
         if (latest is null) return "No encrypted GWS backup is available.";
-        if (!BackupArchive.HasHeader(latest)) return "The latest backup does not have an authenticated GWS archive header.";
         if (!Directory.Exists(_options.DataProtectionKeysPath)
             || !Directory.EnumerateFiles(_options.DataProtectionKeysPath, "*", SearchOption.AllDirectories).Any())
             return "The matching Data Protection key ring is unavailable.";
+        byte[] key;
         try
         {
-            if (!string.IsNullOrWhiteSpace(_options.EncryptionKey)) _ = BackupArchive.ParseKey(_options.EncryptionKey);
-            else if (File.Exists(_options.EncryptionKeyPath)) _ = BackupArchive.ParseKey(File.ReadAllText(_options.EncryptionKeyPath));
+            if (!string.IsNullOrWhiteSpace(_options.EncryptionKey)) key = BackupArchive.ParseKey(_options.EncryptionKey);
+            else if (File.Exists(_options.EncryptionKeyPath)) key = BackupArchive.ParseKey(File.ReadAllText(_options.EncryptionKeyPath));
             else return "The backup encryption key is unavailable.";
         }
         catch (InvalidOperationException ex) { return ex.Message; }
+
+        // Was previously just an 8-byte magic-header check - real enough to catch a wrong file
+        // entirely, not real enough to catch a crash-mid-write truncated one, which still
+        // starts with a valid header and so still reported Healthy. This verifies the whole
+        // file's HMAC authentication tag instead (see BackupArchive.VerifyAuthenticationTagAsync)
+        // - cheap enough to run on every health-check poll, unlike the full restore-and-migrate
+        // VerifyBackupAsync pipeline, but a real cryptographic integrity check across every byte.
+        if (!await BackupArchive.VerifyAuthenticationTagAsync(latest, key, cancellationToken))
+            return "The latest backup failed authentication tag verification (it may be truncated or corrupted).";
         return null;
     }
 

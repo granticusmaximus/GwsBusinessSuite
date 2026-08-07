@@ -245,6 +245,7 @@ public sealed class NotionSyncService(
             var emptyContentPages = 0;
             var skippedUnchangedPages = 0;
             var skippedUnchangedDatabaseRows = 0;
+            var failedItemCount = 0;
             var previousSuccessfulSyncAt = settingsRow.LastSyncedAt;
 
             // 1. Flat discovery pass - every page/database the integration can see.
@@ -481,19 +482,33 @@ public sealed class NotionSyncService(
                         continue;
                     }
 
-                    var pageContent = await SyncPageBlocksAsync(
-                        notionId,
-                        localId,
-                        token,
-                        notionIdToRemoteEditedAt[notionId],
-                        notionIdToLocalId,
-                        databaseContainerToLocalIds,
-                        cancellationToken);
-                    childOrderByParentLocalId[localId] = pageContent.TreeChildren;
-                    contentBlocks += pageContent.BlockCount;
-                    if (pageContent.UsedMarkdownFallback) markdownFallbackPages++;
-                    if (pageContent.BlockCount == 0) emptyContentPages++;
-                    await SyncPageCommentsAsync(notionId, localId, token, cancellationToken);
+                    // A single malformed page/block previously threw straight out of this
+                    // loop, aborting every page and database still left to sync in this pass -
+                    // and since the sync watermark (settingsRow.LastSyncedAt) is only set on
+                    // the try block's full success path below, the SAME bad page would keep
+                    // aborting the run again on every future sync too. Isolating it here so one
+                    // bad item degrades only itself.
+                    try
+                    {
+                        var pageContent = await SyncPageBlocksAsync(
+                            notionId,
+                            localId,
+                            token,
+                            notionIdToRemoteEditedAt[notionId],
+                            notionIdToLocalId,
+                            databaseContainerToLocalIds,
+                            cancellationToken);
+                        childOrderByParentLocalId[localId] = pageContent.TreeChildren;
+                        contentBlocks += pageContent.BlockCount;
+                        if (pageContent.UsedMarkdownFallback) markdownFallbackPages++;
+                        if (pageContent.BlockCount == 0) emptyContentPages++;
+                        await SyncPageCommentsAsync(notionId, localId, token, cancellationToken);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        logger.LogWarning(ex, "Notion sync could not import page {NotionPageId}; skipping it for this run.", notionId);
+                        failedItemCount++;
+                    }
                     onProgress?.Invoke(new NotionSyncProgress(++processedCount, totalToProcess));
                 }
             }
@@ -519,25 +534,33 @@ public sealed class NotionSyncService(
                     {
                         notionDatabaseContainerId = notionId;
                     }
-                    var databaseContent = await SyncDatabaseSchemaAndRowsAsync(
-                        notionId,
-                        notionDatabaseContainerId,
-                        localId,
-                        token,
-                        notionDatabaseIdsNeedingSchema.Contains(notionId),
-                        notionIdToRemoteEditedAt[notionId],
-                        forceRefresh || newNotionDatabaseIds.Contains(notionId)
-                            ? null
-                            : previousSuccessfulSyncAt,
-                        forceRefresh,
-                        cancellationToken);
-                    imported += databaseContent.Imported;
-                    updated += databaseContent.Updated;
-                    archived += databaseContent.Archived;
-                    contentBlocks += databaseContent.ContentBlocks;
-                    markdownFallbackPages += databaseContent.MarkdownFallbackPages;
-                    emptyContentPages += databaseContent.EmptyContentPages;
-                    skippedUnchangedDatabaseRows += databaseContent.SkippedRows;
+                    try
+                    {
+                        var databaseContent = await SyncDatabaseSchemaAndRowsAsync(
+                            notionId,
+                            notionDatabaseContainerId,
+                            localId,
+                            token,
+                            notionDatabaseIdsNeedingSchema.Contains(notionId),
+                            notionIdToRemoteEditedAt[notionId],
+                            forceRefresh || newNotionDatabaseIds.Contains(notionId)
+                                ? null
+                                : previousSuccessfulSyncAt,
+                            forceRefresh,
+                            cancellationToken);
+                        imported += databaseContent.Imported;
+                        updated += databaseContent.Updated;
+                        archived += databaseContent.Archived;
+                        contentBlocks += databaseContent.ContentBlocks;
+                        markdownFallbackPages += databaseContent.MarkdownFallbackPages;
+                        emptyContentPages += databaseContent.EmptyContentPages;
+                        skippedUnchangedDatabaseRows += databaseContent.SkippedRows;
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        logger.LogWarning(ex, "Notion sync could not import database {NotionDatabaseId}; skipping it for this run.", notionId);
+                        failedItemCount++;
+                    }
                     onProgress?.Invoke(new NotionSyncProgress(++processedCount, totalToProcess));
                 }
             }
@@ -588,6 +611,11 @@ public sealed class NotionSyncService(
             {
                 message += $" Skipped {skippedUnchangedDatabaseRows} unchanged database row{(skippedUnchangedDatabaseRows == 1 ? string.Empty : "s")}.";
             }
+            if (failedItemCount > 0)
+            {
+                message += $" {failedItemCount} item{(failedItemCount == 1 ? string.Empty : "s")} failed to import and " +
+                    $"{(failedItemCount == 1 ? "was" : "were")} skipped - see the server log for details.";
+            }
 
             return new NotionSyncResult(
                 true,
@@ -598,7 +626,8 @@ public sealed class NotionSyncService(
                 discovered.Count,
                 skippedUnchangedPages + skippedUnchangedDatabaseRows,
                 emptyContentPages,
-                contentBlocks);
+                contentBlocks,
+                failedItemCount);
         }
         catch (DbUpdateException ex)
         {

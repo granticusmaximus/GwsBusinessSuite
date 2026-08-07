@@ -1391,10 +1391,21 @@ function createInlineCellEditor(state, databaseId, rowId, property, value, onSav
         } catch { /* the Blazor circuit or mutation may have failed */ }
     };
 
-    if (property.isReadOnly) {
+    // Relation/Person/Files are JSON-array-shaped (see WikiPropertyValues.SetRelation/
+    // SetPerson/SetFiles) - this editor only ever produces a single scalar string, which
+    // silently corrupted them (SaveInlineDatabaseCell's default branch wrote that string over
+    // the array; every reader - dependent rollups, reciprocal relation sync, the row panel -
+    // then read the property back as empty, no error shown). Building the real array-shaped
+    // editors (a relation search-and-link picker, a person picker, a file upload flow) inline
+    // is real, separate work - until then this treats them as read-only, matching
+    // property.isReadOnly below, rather than offering a control that quietly loses data.
+    if (property.isReadOnly || property.type === 'relation' || property.type === 'person' || property.type === 'files') {
         const readOnly = document.createElement('span');
         readOnly.className = 'wiki-inline-cell-readonly';
         readOnly.textContent = value;
+        if (!property.isReadOnly) {
+            readOnly.title = 'Open the row to edit this property.';
+        }
         return readOnly;
     }
 

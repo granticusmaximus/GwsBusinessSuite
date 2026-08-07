@@ -181,6 +181,7 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(30);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-SocialPublisher/1.0");
         });
+        services.AddSingleton<SocialPublishingNotifier>();
         services.AddHostedService<SocialPublishingBackgroundService>();
         services.AddScoped<IAffiliateRotationService, AffiliateRotationService>();
         services.AddScoped<IAppGenerationService, AppGenerationService>();

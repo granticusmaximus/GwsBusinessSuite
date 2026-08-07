@@ -66,6 +66,14 @@ public interface ISocialPublishingService
         CancellationToken cancellationToken = default);
     Task<SocialPublishResult> PublishAsync(Guid postId, CancellationToken cancellationToken = default);
     Task PublishDueAsync(CancellationToken cancellationToken = default);
+
+    // Mirrors IDockerHealthService's alert surface exactly so NotificationBell can merge both
+    // sources through the same shape - see SocialPostAlert for why this is a separate table
+    // rather than reusing DockerHealthAlert.
+    Task<IReadOnlyList<SocialPostAlertView>> ListAlertsAsync(bool unreadOnly, CancellationToken cancellationToken = default);
+    Task MarkAlertReadAsync(Guid alertId, CancellationToken cancellationToken = default);
+    Task MarkAllAlertsReadAsync(CancellationToken cancellationToken = default);
+    Task<int> CountUnreadAlertsAsync(CancellationToken cancellationToken = default);
 }
 
 public interface IGrowthReportEmailSender

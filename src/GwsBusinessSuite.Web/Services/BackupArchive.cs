@@ -23,14 +23,6 @@ internal static class BackupArchive
         catch (FormatException) { throw new InvalidOperationException("The backup encryption key must be a Base64-encoded 32-byte value."); }
     }
 
-    public static bool HasHeader(string path)
-    {
-        if (!File.Exists(path)) return false;
-        using var input = File.OpenRead(path);
-        var header = new byte[Magic.Length];
-        return input.Read(header) == header.Length && header.SequenceEqual(Magic);
-    }
-
     public static async Task<BackupManifest> CreateManifestAsync(string root, string timestamp, CancellationToken cancellationToken)
     {
         var files = new List<BackupManifestFile>();
@@ -67,20 +59,80 @@ internal static class BackupArchive
 
     public static async Task EncryptAsync(string sourcePath, string destinationPath, byte[] masterKey, CancellationToken cancellationToken)
     {
-        var keys = SHA512.HashData(masterKey); var encryptionKey = keys[..32]; var macKey = keys[32..];
-        var iv = RandomNumberGenerator.GetBytes(16);
-        await using (var output = new FileStream(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
+        // Writes to a sibling .tmp path and only renames it onto destinationPath once both the
+        // ciphertext and its trailing HMAC tag are fully written and flushed. Previously this
+        // wrote destinationPath directly across two separate steps (the ciphertext, then a
+        // second re-open in Append mode for the tag) - a crash or kill between/during those
+        // steps left a partially-written file sitting at the exact path GetLatestBackupPath's
+        // directory scan discovers, so a genuinely broken backup could still be "found" as the
+        // latest one. File.Move within the same directory is atomic on both the filesystems
+        // this app targets (ext4/overlay in the container, APFS in local dev) - readers only
+        // ever see either the old state (file absent) or the fully-written new one, never a
+        // partial write, and an interrupted attempt just leaves an orphaned .tmp file that the
+        // gws-backup-*{ArchiveExtension} glob never matches.
+        var tempPath = $"{destinationPath}.tmp";
+        try
         {
-            await output.WriteAsync(Magic, cancellationToken); await output.WriteAsync(iv, cancellationToken);
-            using var aes = Aes.Create(); aes.Key = encryptionKey; aes.IV = iv; aes.Mode = CipherMode.CBC; aes.Padding = PaddingMode.PKCS7;
-            await using var crypto = new CryptoStream(output, aes.CreateEncryptor(), CryptoStreamMode.Write, true);
-            await using var input = File.OpenRead(sourcePath); await input.CopyToAsync(crypto, cancellationToken); await crypto.FlushFinalBlockAsync(cancellationToken);
+            var keys = SHA512.HashData(masterKey); var encryptionKey = keys[..32]; var macKey = keys[32..];
+            var iv = RandomNumberGenerator.GetBytes(16);
+            await using (var output = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
+            {
+                await output.WriteAsync(Magic, cancellationToken); await output.WriteAsync(iv, cancellationToken);
+                using var aes = Aes.Create(); aes.Key = encryptionKey; aes.IV = iv; aes.Mode = CipherMode.CBC; aes.Padding = PaddingMode.PKCS7;
+                await using var crypto = new CryptoStream(output, aes.CreateEncryptor(), CryptoStreamMode.Write, true);
+                await using var input = File.OpenRead(sourcePath); await input.CopyToAsync(crypto, cancellationToken); await crypto.FlushFinalBlockAsync(cancellationToken);
+            }
+            byte[] tag;
+            using (var hmac = new HMACSHA256(macKey)) await using (var input = File.OpenRead(tempPath)) tag = await hmac.ComputeHashAsync(input, cancellationToken);
+            await using (var append = new FileStream(tempPath, FileMode.Append, FileAccess.Write, FileShare.None, 81920, true))
+                await append.WriteAsync(tag, cancellationToken);
+            CryptographicOperations.ZeroMemory(keys);
+
+            File.Move(tempPath, destinationPath);
         }
-        byte[] tag;
-        using (var hmac = new HMACSHA256(macKey)) await using (var input = File.OpenRead(destinationPath)) tag = await hmac.ComputeHashAsync(input, cancellationToken);
-        await using var append = new FileStream(destinationPath, FileMode.Append, FileAccess.Write, FileShare.None, 81920, true);
-        await append.WriteAsync(tag, cancellationToken);
-        CryptographicOperations.ZeroMemory(keys);
+        finally
+        {
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+        }
+    }
+
+    // Verifies the whole-file HMAC authentication tag without decrypting the ciphertext -
+    // cheap enough (one streaming hash pass) to run on every health-check poll, unlike
+    // DecryptAsync's full decrypt+extract+manifest-verify+migrate+integrity_check pipeline
+    // (VerifyBackupAsync). Catches exactly the failure the 8-byte-magic-header-only check
+    // couldn't: a truncated or otherwise corrupted file that still happens to start with a
+    // valid header.
+    public static async Task<bool> VerifyAuthenticationTagAsync(string path, byte[] masterKey, CancellationToken cancellationToken)
+    {
+        var keys = SHA512.HashData(masterKey);
+        try
+        {
+            var macKey = keys[32..];
+            var info = new FileInfo(path);
+            if (!info.Exists || info.Length < Magic.Length + 16 + 32) return false;
+
+            byte[] magic = new byte[Magic.Length], storedTag = new byte[32];
+            await using (var input = File.OpenRead(path))
+            {
+                await input.ReadExactlyAsync(magic, cancellationToken);
+            }
+            if (!magic.SequenceEqual(Magic)) return false;
+
+            using var hmac = new HMACSHA256(macKey);
+            await using var authenticated = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+            var computedTag = await ComputePrefixHashAsync(hmac, authenticated, info.Length - storedTag.Length, cancellationToken);
+
+            await using (var tagReader = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                tagReader.Seek(-storedTag.Length, SeekOrigin.End);
+                await tagReader.ReadExactlyAsync(storedTag, cancellationToken);
+            }
+            return CryptographicOperations.FixedTimeEquals(storedTag, computedTag);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(keys);
+        }
     }
 
     public static async Task DecryptAsync(string sourcePath, string destinationPath, byte[] masterKey, CancellationToken cancellationToken)

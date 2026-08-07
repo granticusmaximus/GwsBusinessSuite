@@ -107,7 +107,14 @@ public sealed record AutomationNodeDefinition(
     string IconClass,
     bool IsTrigger,
     IReadOnlyList<string> Outputs,
-    string DefaultParametersJson);
+    string DefaultParametersJson,
+    // Whether re-running this node type with the same input is safe. Defaults true (every
+    // pure data/flow node genuinely is); core.httpRequest and database.setRowProperty are the
+    // only two with a real external side effect and are tagged false at their definitions.
+    // Consulted by AutomationExecutionService.ResumeAsync's orphan-recovery path, which can
+    // replay a work item whose node already ran once before a crash - see the checkpoint-
+    // cadence comment on AutomationExecutionService.RunLoopAsync for why that window exists.
+    bool IsIdempotent = true);
 
 public sealed class AutomationNodeEditor
 {
