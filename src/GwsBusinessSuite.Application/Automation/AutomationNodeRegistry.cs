@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
+using Microsoft.EntityFrameworkCore;
 
 namespace GwsBusinessSuite.Application.Automation;
 
@@ -81,6 +82,7 @@ public sealed partial class AutomationNodeRegistry(
         AutomationNodeSnapshot node,
         JsonElement input,
         string? credentialJson,
+        string? workflowOwnerUsername = null,
         CancellationToken cancellationToken = default)
     {
         return node.TypeKey switch
@@ -89,7 +91,7 @@ public sealed partial class AutomationNodeRegistry(
             "core.webhookTrigger" => SingleOutput("main", input),
             "core.scheduleTrigger" => SingleOutput("main", input),
             "database.rowChangedTrigger" => SingleOutput("main", input),
-            "database.setRowProperty" => await ExecuteSetRowPropertyAsync(node, input, cancellationToken),
+            "database.setRowProperty" => await ExecuteSetRowPropertyAsync(node, input, workflowOwnerUsername, cancellationToken),
             "core.set" => ExecuteSet(node, input),
             "core.if" => ExecuteIf(node, input),
             "core.httpRequest" => await ExecuteHttpAsync(node, input, credentialJson, cancellationToken),
@@ -236,6 +238,7 @@ public sealed partial class AutomationNodeRegistry(
     private async Task<AutomationNodeRunResult> ExecuteSetRowPropertyAsync(
         AutomationNodeSnapshot node,
         JsonElement input,
+        string? workflowOwnerUsername,
         CancellationToken cancellationToken)
     {
         var wikiDatabaseService = serviceProvider?.GetService(typeof(IWikiDatabaseService)) as IWikiDatabaseService
@@ -248,6 +251,17 @@ public sealed partial class AutomationNodeRegistry(
         var rowId = ParseRequiredGuid(rowIdText, node.Name, "rowId");
         var propertyId = ParseRequiredGuid(parameters["propertyId"]?.GetValue<string>(), node.Name, "propertyId");
         var value = ResolveText(parameters["value"]?.GetValue<string>() ?? string.Empty, input);
+
+        // This node can write to ANY Sentinel database/row by id, with no ownership or scoping
+        // check - previously contained only by both Automation and Wiki being AdminOnly routes
+        // (an Admin using this node could already do the same edit directly). Wiki now admits
+        // Author/Contributor accounts too (SentinelAccessService.CanAccessAsync gates what they
+        // can open/edit there), so this node needed the same real check rather than continuing
+        // to bypass it - an Admin-authored workflow still has unrestricted access (Admins
+        // aren't subject to SentinelResourcePermission grants anywhere else either), but a
+        // Contributor's workflow is now held to the same per-resource Edit access they'd need
+        // through the Wiki UI itself.
+        await EnsureCanEditDatabaseAsync(wikiDatabaseId, workflowOwnerUsername, node.Name, cancellationToken);
 
         // "automation-engine" (see WikiDatabaseService.SaveRowAsync) is the actor that skips
         // re-firing database.rowChangedTrigger - required so this node can never chain into an
@@ -269,6 +283,38 @@ public sealed partial class AutomationNodeRegistry(
         Guid.TryParse(value, out var parsed)
             ? parsed
             : throw new InvalidOperationException($"{nodeName} requires a valid {parameterName}.");
+
+    // Admins bypass SentinelResourcePermission everywhere else in the app (Wiki.razor's
+    // CanAccessPageOrDatabaseAsync does the same _isAdmin short-circuit), so this mirrors that
+    // rather than introducing a second, different access model for automation specifically.
+    private async Task EnsureCanEditDatabaseAsync(
+        Guid wikiDatabaseId, string? workflowOwnerUsername, string nodeName, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(workflowOwnerUsername))
+        {
+            throw new InvalidOperationException($"{nodeName} could not determine the workflow's owner to check database access.");
+        }
+
+        var factory = dbContextFactory
+            ?? throw new InvalidOperationException($"{nodeName} cannot verify database access without database access itself.");
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var isAdmin = await db.AppUsers.AsNoTracking()
+            .AnyAsync(user => user.Username == workflowOwnerUsername && user.Role == AppRoles.Admin, cancellationToken);
+        if (isAdmin)
+        {
+            return;
+        }
+
+        var accessService = serviceProvider?.GetService(typeof(ISentinelAccessService)) as ISentinelAccessService
+            ?? throw new InvalidOperationException($"{nodeName} cannot verify database access right now.");
+        var canEdit = await accessService.CanAccessAsync(
+            wikiDatabaseId, isDatabase: true, workflowOwnerUsername, SentinelAccessLevels.Edit, cancellationToken);
+        if (!canEdit)
+        {
+            throw new InvalidOperationException(
+                $"{nodeName} cannot write to this database - '{workflowOwnerUsername}' (this workflow's owner) does not have Edit access to it.");
+        }
+    }
 
     // Unlike core.batch/core.limit (which already clamp their size parameters), splitOut had
     // no ceiling at all: each output item becomes its own queued execution step, and every
@@ -436,10 +482,26 @@ public sealed partial class AutomationNodeRegistry(
 
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         AddHeaders(headers, root["headers"] as JsonObject, input);
+        // Node evidence (AutomationNodeExecution.OutputJson) stores this method's return value
+        // verbatim, at-rest-unencrypted, visible in the Automation UI's execution history. A
+        // credential's decrypted header VALUES are real secrets - an endpoint that reflects
+        // request headers back (an echo/debug endpoint, or just a misconfigured API) would
+        // otherwise leak them straight into that plaintext history, undoing the point of
+        // encrypting the credential in the first place. Collected here so the response can be
+        // scanned for them below, regardless of whether they show up in its body or headers.
+        var credentialSecretValues = new List<string>();
         if (!string.IsNullOrWhiteSpace(credentialJson))
         {
             var credential = ParseObject(credentialJson, "Credential");
             AddHeaders(headers, credential["headers"] as JsonObject, input);
+            if (credential["headers"] is JsonObject credentialHeaders)
+            {
+                foreach (var pair in credentialHeaders)
+                {
+                    if (pair.Value is JsonValue value && value.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text))
+                        credentialSecretValues.Add(ResolveText(text, input));
+                }
+            }
         }
         var body = root["body"] is JsonValue bodyValue && bodyValue.TryGetValue<string>(out var bodyText)
             ? ResolveText(bodyText, input)
@@ -456,7 +518,30 @@ public sealed partial class AutomationNodeRegistry(
             ["body"] = parsedBody,
             ["headers"] = JsonSerializer.SerializeToNode(response.Headers)
         };
-        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+        var cloned = JsonSerializer.SerializeToElement(output).Clone();
+
+        // Outputs (real data flow to downstream nodes) stays unredacted - a legitimate
+        // workflow could genuinely need an unredacted value from the response (e.g. a
+        // refreshed token a downstream node re-uses). DisplayOutputJson (what actually gets
+        // persisted to AutomationNodeExecution.OutputJson, at rest, visible in the execution
+        // history UI) is the only thing redacted - see the credentialSecretValues comment
+        // above for why this is necessary at all.
+        var displayOutputJson = credentialSecretValues.Count == 0
+            ? cloned.GetRawText()
+            : RedactSecrets(cloned.GetRawText(), credentialSecretValues);
+        return new AutomationNodeRunResult(
+            new Dictionary<string, IReadOnlyList<JsonElement>>(StringComparer.OrdinalIgnoreCase) { ["main"] = [cloned] },
+            displayOutputJson);
+    }
+
+    private static string RedactSecrets(string text, IReadOnlyList<string> secrets)
+    {
+        foreach (var secret in secrets)
+        {
+            if (text.Contains(secret, StringComparison.Ordinal))
+                text = text.Replace(secret, "[redacted]", StringComparison.Ordinal);
+        }
+        return text;
     }
 
     private static void AddHeaders(Dictionary<string, string> destination, JsonObject? source, JsonElement input)

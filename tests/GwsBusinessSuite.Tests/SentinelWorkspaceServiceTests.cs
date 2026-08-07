@@ -1,5 +1,6 @@
 using FluentAssertions;
 using GwsBusinessSuite.Application.Wiki;
+using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.Data.Sqlite;
@@ -243,6 +244,54 @@ public sealed class SentinelWorkspaceServiceTests
         var mentions = await sentinel.GetRowMentionsAsync(database.Id, row.Id);
 
         mentions.Should().ContainSingle(mention => mention.SourcePageTitle == "Status update");
+    }
+
+    [Fact]
+    public async Task GetBacklinksAsync_ShouldFindTheTargetPage_EvenWhenItsRowIsBeyondTheScanCap()
+    {
+        // Regression guard for the search/backlinks unbounded-table-scan fix: GetBacklinksAsync
+        // now caps how many WikiPages rows it scans for links, but must still resolve the
+        // *target* page itself via a direct lookup rather than by finding it inside that capped
+        // scan - otherwise a workspace with more pages than the cap would see backlinks silently
+        // stop resolving for its older pages.
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = await CreateDbAsync(connection);
+        var wiki = new WikiService(db);
+        var sentinel = new SentinelWorkspaceService(db, TimeProvider.System);
+        var targetId = Guid.NewGuid();
+
+        var source = await wiki.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Source page",
+            BlocksJson = WikiBlockJson.Serialize([
+                new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0,
+                    [new WikiRichTextSpan("Open the target", Link: $"wikilink:{targetId}")],
+                    new Dictionary<string, string>())])
+        }, "u");
+
+        db.WikiPages.AddRange(Enumerable.Range(0, 2000).Select(i => new WikiPage
+        {
+            Id = Guid.NewGuid(),
+            Title = $"Filler {i}",
+            Slug = $"filler-{i}",
+            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedBy = "u"
+        }));
+        await db.SaveChangesAsync();
+        db.WikiPages.Add(new WikiPage
+        {
+            Id = targetId,
+            Title = "Target page",
+            Slug = "target-page",
+            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedBy = "u"
+        });
+        await db.SaveChangesAsync();
+
+        var backlinks = await sentinel.GetBacklinksAsync(targetId);
+
+        backlinks.Should().ContainSingle(link => link.SourcePageTitle == source.Title);
     }
 
     [Fact]

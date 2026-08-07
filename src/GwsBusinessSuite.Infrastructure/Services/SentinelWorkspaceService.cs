@@ -8,6 +8,15 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 
 public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvider timeProvider) : ISentinelWorkspaceService
 {
+    // Every call here loads full row content (BlocksJson/PropertyValuesJson blobs, not just
+    // a title) into memory, and search re-runs this on every keystroke of live search. These
+    // caps are a circuit breaker against that growing unbounded as a workspace scales, not a
+    // pagination UX - once a workspace has more matches/pages than the cap, results/backlinks
+    // become best-effort rather than exhaustive, which is an acceptable tradeoff against the
+    // alternative of every search loading the entire workspace's content into memory.
+    private const int MaxSearchCandidatesPerType = 500;
+    private const int MaxScanPages = 2000;
+
     public async Task<IReadOnlyList<SentinelSearchResult>> SearchAsync(
         string query,
         int maxResults = 25,
@@ -39,10 +48,11 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
                     || row.BlocksJson.ToLower().Contains(loweredTerm)));
         }
 
-        var pages = await pageQuery.ToListAsync(cancellationToken);
+        var pages = await pageQuery.Take(MaxSearchCandidatesPerType).ToListAsync(cancellationToken);
         var databases = await databaseQuery
             .Include(database => database.Properties)
             .Include(database => database.Rows)
+            .Take(MaxSearchCandidatesPerType)
             .ToListAsync(cancellationToken);
 
         var results = new List<SentinelSearchResult>();
@@ -104,8 +114,8 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
         Guid targetPageId,
         CancellationToken cancellationToken = default)
     {
-        var pages = await dbContext.WikiPages.AsNoTracking().ToListAsync(cancellationToken);
-        var target = pages.FirstOrDefault(page => page.Id == targetPageId);
+        var target = await dbContext.WikiPages.AsNoTracking()
+            .FirstOrDefaultAsync(page => page.Id == targetPageId, cancellationToken);
         if (target is null)
         {
             return [];
@@ -114,6 +124,7 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
         var expectedLink = $"wikilink:{targetPageId}";
         var legacyLink = $"[[{target.Title}]]";
         var backlinks = new List<SentinelBacklink>();
+        var pages = await dbContext.WikiPages.AsNoTracking().Take(MaxScanPages).ToListAsync(cancellationToken);
 
         foreach (var source in pages.Where(page => page.Id != targetPageId))
         {
@@ -151,7 +162,7 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
         // written inside another row's page body is not, matching that existing limitation
         // rather than quietly having two different backlink scan depths in the same app.
         var expectedLink = $"rowmention:{wikiDatabaseId}:{rowId}";
-        var pages = await dbContext.WikiPages.AsNoTracking().ToListAsync(cancellationToken);
+        var pages = await dbContext.WikiPages.AsNoTracking().Take(MaxScanPages).ToListAsync(cancellationToken);
         var mentions = new List<SentinelBacklink>();
 
         foreach (var page in pages)
@@ -401,6 +412,7 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
     {
         var expectedLink = $"usermention:{NormalizeUsername(username)}";
         var pages = await dbContext.WikiPages.AsNoTracking()
+            .Take(MaxScanPages)
             .ToListAsync(cancellationToken);
         pages = pages.OrderByDescending(page => page.UpdatedAt ?? page.CreatedAt).ToList();
         var mentions = new List<SentinelMention>();

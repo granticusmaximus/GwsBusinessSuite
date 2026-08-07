@@ -162,6 +162,29 @@ public sealed class GrowthAnalyticsServiceTests
     }
 
     [Fact]
+    public async Task GetDashboardAsync_ShouldClampAnOversizedRequestedRangeInsteadOfScanningItInFull()
+    {
+        // Regression guard: unlike AffiliateAnalytics, this dashboard can't safely cap the
+        // number of rows it fetches without corrupting its aggregate numbers, so the fix bounds
+        // the *range width* instead. A page view from 2 years ago must not be pulled in just
+        // because a caller asked for an unbounded "from"/"to" - the effective window is capped
+        // to MaxDashboardRangeDays (400, matching the Web analytics retention policy).
+        await using var fixture = await Fixture.CreateAsync();
+        var to = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero);
+        var from = to.AddYears(-2);
+        fixture.Db.WebAnalyticsEvents.Add(
+            Event("pageview", "ancient", "ancient-session", "/old", to.AddDays(-500)));
+        fixture.Db.WebAnalyticsEvents.Add(
+            Event("pageview", "recent", "recent-session", "/new", to.AddDays(-5)));
+        await fixture.Db.SaveChangesAsync();
+
+        var dashboard = await new GrowthAnalyticsService(fixture.Db).GetDashboardAsync(from, to);
+
+        dashboard.Visitors.Should().Be(1);
+        dashboard.TopPages.Should().ContainSingle().Which.Label.Should().Be("/new");
+    }
+
+    [Fact]
     public async Task AnnotationManagement_ShouldValidatePersistFilterEditAndDeleteNotes()
     {
         await using var fixture = await Fixture.CreateAsync();

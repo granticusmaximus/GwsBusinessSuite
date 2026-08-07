@@ -348,18 +348,17 @@ public sealed class CjAdsService(
             MaxResults: settings.MaxResults), cancellationToken);
 
         var normalizedAdvertiserId = NormalizeAdvertiserId(advertiserId, advertiserName);
-        var existingCatalogOffers = await db.AffiliateOffers
-            .Where(x => x.Network == NetworkName && x.AdvertiserId == normalizedAdvertiserId && x.LinkName != x.AdvertiserId)
-            .ToListAsync(cancellationToken);
 
-        if (existingCatalogOffers.Count > 0)
-        {
-            db.AffiliateOffers.RemoveRange(existingCatalogOffers);
-        }
-
+        // Build the replacement offers first and only clear the existing catalog once we know
+        // there's something real to replace it with. Previously this deleted the advertiser's
+        // whole existing catalog unconditionally, before ever checking whether the fetch
+        // parsed anything - a schema-drift response (HTTP 200, unexpected shape) that parses
+        // to zero links silently emptied a real catalog with nothing to show for it. An
+        // advertiser's catalog genuinely going to zero real links is rare enough that it's
+        // safer to leave the stale (but real) data in place and require a deliberate action,
+        // rather than have an ordinary parsing hiccup wipe it automatically.
         var now = DateTimeOffset.UtcNow;
-        var imported = 0;
-
+        var newOffers = new List<AffiliateOffer>();
         foreach (var link in fetched.Links)
         {
             var trackingUrl = string.IsNullOrWhiteSpace(link.ClickUrl) ? link.DestinationUrl : link.ClickUrl;
@@ -368,7 +367,7 @@ public sealed class CjAdsService(
                 continue;
             }
 
-            await db.AffiliateOffers.AddAsync(new AffiliateOffer
+            newOffers.Add(new AffiliateOffer
             {
                 Network = NetworkName,
                 AdvertiserId = normalizedAdvertiserId,
@@ -380,18 +379,29 @@ public sealed class CjAdsService(
                 PromotionEndsAt = link.PromotionEndDate,
                 CreatedAt = now,
                 CreatedBy = "cj-link-sync"
-            }, cancellationToken);
-            imported += 1;
+            });
         }
 
-        await db.SaveChangesAsync(cancellationToken);
+        if (newOffers.Count > 0)
+        {
+            var existingCatalogOffers = await db.AffiliateOffers
+                .Where(x => x.Network == NetworkName && x.AdvertiserId == normalizedAdvertiserId && x.LinkName != x.AdvertiserId)
+                .ToListAsync(cancellationToken);
+            if (existingCatalogOffers.Count > 0)
+            {
+                db.AffiliateOffers.RemoveRange(existingCatalogOffers);
+            }
+            await db.AffiliateOffers.AddRangeAsync(newOffers, cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+        }
 
+        var imported = newOffers.Count;
         return new CjLinkSyncResult
         {
             IsSuccess = true,
             Message = imported > 0
                 ? $"Synced {imported} links for {advertiserName}."
-                : fetched.Message,
+                : $"{fetched.Message} The existing catalog for {advertiserName} was left unchanged.",
             Imported = imported,
             Updated = 0,
             Offers = await GetOffersForAdvertiserAsync(normalizedAdvertiserId, advertiserName, cancellationToken)
@@ -539,6 +549,8 @@ public sealed class CjAdsService(
                     Currency = record.Currency,
                     EventDate = record.EventDate,
                     PostingDate = record.PostingDate,
+                    CreatedAt = now,
+                    CreatedAtUnixSeconds = now.ToUnixTimeSeconds(),
                     CreatedBy = "cj-commission-sync"
                 }, cancellationToken);
             }

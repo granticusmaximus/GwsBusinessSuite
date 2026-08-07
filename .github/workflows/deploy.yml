@@ -86,7 +86,13 @@ jobs:
               :
             else
               echo "Pre-deploy backup-create/verify did not succeed on the currently running container (older release, or a fresh/incomplete deploy state); relying on its latest scheduled snapshot instead."
-              docker compose exec -T gwssuite sh -lc 'ls /app/backups/sentinel-backup-*.zip >/dev/null 2>&1'
+              # Real naming convention is gws-backup-{timestamp}.gwsbackup (DatabaseBackupService
+              # .CreateBackupAsync) - this previously used the wrong glob (sentinel-backup-*.zip),
+              # which never matched anything, so this safety-net check always failed. Under this
+              # script's `set -e`, that meant the fallback existing specifically to avoid
+              # aborting the deploy could itself abort the deploy - the one path where the check
+              # is most needed (no fresh backup was just verified).
+              docker compose exec -T gwssuite sh -lc 'ls /app/backups/gws-backup-*.gwsbackup >/dev/null 2>&1'
             fi
 
             git fetch origin main

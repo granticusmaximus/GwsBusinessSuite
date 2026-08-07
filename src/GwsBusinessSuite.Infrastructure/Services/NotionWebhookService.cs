@@ -44,19 +44,42 @@ public sealed class NotionWebhookService(
                     return new(409, "Connect a Notion workspace before verifying its webhook.");
                 }
 
-                // Verification is one-time. Without this guard, an anonymous caller could
-                // overwrite the signing secret and turn valid future events into a denial
-                // of service after an administrator had completed setup.
-                if (!string.IsNullOrWhiteSpace(settings.WebhookVerificationToken))
+                // Verification is one-time. The read-then-write shape this used to have (check
+                // WebhookVerificationToken is empty, then SaveChangesAsync separately) had a
+                // real race window: two concurrent anonymous requests each carrying a different
+                // verification_token could both pass the empty check before either committed,
+                // so whichever's SaveChangesAsync landed last would win - an anonymous caller
+                // racing the real Notion verification click could poison the signing secret
+                // with their own token instead of Notion's. ExecuteUpdateAsync compiles to a
+                // single atomic `UPDATE ... WHERE WebhookVerificationToken IS NULL OR = ''`
+                // statement; the database itself serializes the two requests, and only the one
+                // whose WHERE clause still matches at commit time actually writes anything.
+                var now = DateTimeOffset.UtcNow;
+                var protectedToken = secretProtector.Protect(verificationToken);
+                var rowsUpdated = await dbContext.NotionConnectorSettings
+                    .Where(item => item.Id == settings.Id
+                        && (item.WebhookVerificationToken == null || item.WebhookVerificationToken == string.Empty))
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(item => item.WebhookVerificationToken, protectedToken)
+                        .SetProperty(item => item.WebhookVerificationReceivedAt, now)
+                        .SetProperty(item => item.UpdatedAt, now)
+                        .SetProperty(item => item.UpdatedBy, "notion-webhook"),
+                        cancellationToken);
+                if (rowsUpdated == 0)
                 {
                     return new(409, "The Notion webhook is already verified.");
                 }
 
-                settings.WebhookVerificationToken = secretProtector.Protect(verificationToken);
-                settings.WebhookVerificationReceivedAt = DateTimeOffset.UtcNow;
-                settings.UpdatedAt = DateTimeOffset.UtcNow;
-                settings.UpdatedBy = "notion-webhook";
-                await dbContext.SaveChangesAsync(cancellationToken);
+                // ExecuteUpdateAsync writes straight to the database, bypassing EF's change
+                // tracker entirely - the `settings` instance already loaded above (and its
+                // identity-map entry, which anything else resolving this same tracked entity
+                // within the current scope would receive) would otherwise keep reporting the
+                // pre-update value even though the row itself is now correct.
+                if (dbContext is DbContext efContext)
+                {
+                    await efContext.Entry(settings).ReloadAsync(cancellationToken);
+                }
+
                 logger.LogInformation("Notion webhook verification token received and protected");
                 return new(200, "Verification token received.");
             }

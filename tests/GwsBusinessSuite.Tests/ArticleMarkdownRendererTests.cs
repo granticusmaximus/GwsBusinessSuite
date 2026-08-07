@@ -171,6 +171,32 @@ public sealed class ArticleMarkdownRendererTests
     }
 
     [Fact]
+    public void RenderPreviewHtml_ShouldEscapeRawHtmlInTheBody_ButStillRenderTheAdCardMarkup()
+    {
+        // Regression guard: the article editor's preview pane can be showing an AI-suggested
+        // draft (SentinelAiPanel/SentinelGPT), whose prompt context can include externally
+        // scraped trend text. RenderPreviewHtml must escape any literal HTML that ends up in
+        // the body itself, while still rendering the ad-card markup this same call injects.
+        var placement = new ArticleAffiliatePlacement
+        {
+            SlotToken = "{{CJ_AD_preview}}",
+            AdvertiserName = "Acme Tools",
+            LinkName = "Shop the sale",
+            TrackingUrl = "https://example.com/track"
+        };
+
+        var rendered = ArticleMarkdownRenderer.RenderPreviewHtml(
+            "Intro.\n\n{{CJ_AD_preview}}\n\n<script>alert(document.cookie)</script>\n\nMore.",
+            [placement]);
+
+        Assert.DoesNotContain("<script>", rendered);
+        Assert.Contains("&lt;script&gt;", rendered);
+        Assert.Contains("Sponsored Pick:", rendered);
+        Assert.Contains("Shop the sale", rendered);
+        Assert.DoesNotContain("{{CJ_AD_preview}}", rendered);
+    }
+
+    [Fact]
     public void GenerateSlotToken_ShouldProduceUniqueCjAdTokens()
     {
         var first = ArticleMarkdownRenderer.GenerateSlotToken();

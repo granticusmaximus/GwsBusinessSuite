@@ -123,10 +123,33 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
 
     public async Task<bool> VerifySharePasswordAsync(Guid shareId, string password, CancellationToken cancellationToken = default)
     {
-        var share = await dbContext.SentinelPublicShares.AsNoTracking()
+        var share = await dbContext.SentinelPublicShares
             .FirstOrDefaultAsync(item => item.Id == shareId && item.RevokedAt == null, cancellationToken);
         if (share?.PasswordHash is null || share.PasswordSalt is null) return false;
-        return HashPassword(password, share.PasswordSalt) == share.PasswordHash;
+
+        var now = DateTimeOffset.UtcNow;
+        if (share.PasswordLockedUntil is { } lockedUntil && lockedUntil > now)
+        {
+            return false;
+        }
+
+        var isCorrect = VerifyPassword(password, share.PasswordSalt, share.PasswordHash);
+        if (isCorrect)
+        {
+            share.FailedPasswordAttempts = 0;
+            share.PasswordLockedUntil = null;
+        }
+        else
+        {
+            share.FailedPasswordAttempts++;
+            if (share.FailedPasswordAttempts >= MaxFailedPasswordAttempts)
+            {
+                share.PasswordLockedUntil = now.Add(PasswordLockoutDuration);
+                share.FailedPasswordAttempts = 0;
+            }
+        }
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return isCorrect;
     }
 
     public async Task RecordShareViewAsync(Guid shareId, CancellationToken cancellationToken = default)
@@ -150,8 +173,44 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
         return access is not null && AccessRanks.GetValueOrDefault(access, -1) >= requiredRank;
     }
 
+    private const int MaxFailedPasswordAttempts = 5;
+    private static readonly TimeSpan PasswordLockoutDuration = TimeSpan.FromMinutes(15);
+    private const int Pbkdf2Iterations = 210_000;
+    private const int Pbkdf2HashLengthBytes = 32;
+    private const string Pbkdf2Prefix = "pbkdf2:";
+
     private static string HashToken(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
 
-    private static string HashPassword(string password, string saltHex) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(saltHex + password))).ToLowerInvariant();
+    // Every new share password is stretched with PBKDF2-SHA256 (unlike TokenHash above, which
+    // hashes an already-high-entropy random token and doesn't need stretching). A share
+    // password is user-chosen and low-entropy, so the previous bare SHA-256(salt+password) was
+    // crackable at GPU speed once a hash leaked.
+    private static string HashPassword(string password, string saltHex)
+    {
+        var salt = Convert.FromHexString(saltHex);
+        var hash = Rfc2898DeriveBytes.Pbkdf2(Encoding.UTF8.GetBytes(password), salt, Pbkdf2Iterations, HashAlgorithmName.SHA256, Pbkdf2HashLengthBytes);
+        return $"{Pbkdf2Prefix}{Pbkdf2Iterations}:{Convert.ToHexString(hash).ToLowerInvariant()}";
+    }
+
+    // Shares created before this fix stored a bare SHA-256(salt+password) hex digest with no
+    // prefix. Verify against that legacy format too so existing share links don't suddenly stop
+    // working; HashPassword above always writes the PBKDF2 format for every new/changed share.
+    private static bool VerifyPassword(string password, string saltHex, string storedHash)
+    {
+        if (storedHash.StartsWith(Pbkdf2Prefix, StringComparison.Ordinal))
+        {
+            var parts = storedHash[Pbkdf2Prefix.Length..].Split(':', 2);
+            if (parts.Length != 2 || !int.TryParse(parts[0], out var iterations))
+            {
+                return false;
+            }
+
+            var salt = Convert.FromHexString(saltHex);
+            var computed = Rfc2898DeriveBytes.Pbkdf2(Encoding.UTF8.GetBytes(password), salt, iterations, HashAlgorithmName.SHA256, Pbkdf2HashLengthBytes);
+            return CryptographicOperations.FixedTimeEquals(computed, Convert.FromHexString(parts[1]));
+        }
+
+        var legacyHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(saltHex + password))).ToLowerInvariant();
+        return CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(legacyHash), Encoding.UTF8.GetBytes(storedHash));
+    }
 }

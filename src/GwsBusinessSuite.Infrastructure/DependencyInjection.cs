@@ -166,6 +166,7 @@ public static class DependencyInjection
         services.AddScoped<IUserManagementService, UserManagementService>();
         services.AddScoped<ISecurityAuditService, SecurityAuditService>();
         services.AddScoped<IPrivacyOperationsService, PrivacyOperationsService>();
+        services.AddHostedService<PrivacyRetentionPurgeBackgroundService>();
         services.AddScoped<IResumePdfService, ResumePdfService>();
         services.AddScoped<IAffiliateSuggestionService, AffiliateSuggestionService>();
         services.AddScoped<IAffiliateAnalyticsService, AffiliateAnalyticsService>();

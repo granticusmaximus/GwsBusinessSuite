@@ -25,6 +25,7 @@ using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.EntityFrameworkCore;
@@ -1465,10 +1466,37 @@ app.MapPost("/blog/{slug}/comments", async (
 // First-party, cookieless public-site analytics. The collector deliberately receives no
 // authentication cookie and the service persists neither IP addresses nor raw user agents.
 app.MapPost("/api/analytics/events", async (
-    WebAnalyticsEventInput input,
     HttpContext context,
     IGrowthAnalyticsService analyticsService) =>
 {
+    // A real beacon payload here is a handful of short strings - Kestrel's ~28MB default
+    // request body size (meant for uploads) has no business being reachable from this
+    // anonymous, unauthenticated endpoint. Must be set before the body is read, so this has
+    // to happen ahead of - not inside - model binding, which is why the parameter below is
+    // HttpContext rather than an implicitly-bound WebAnalyticsEventInput.
+    var maxBodySizeFeature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
+    if (maxBodySizeFeature is { IsReadOnly: false })
+    {
+        maxBodySizeFeature.MaxRequestBodySize = 16 * 1024;
+    }
+
+    WebAnalyticsEventInput? input;
+    try
+    {
+        input = await context.Request.ReadFromJsonAsync<WebAnalyticsEventInput>(context.RequestAborted);
+    }
+    catch (Exception) when (!context.RequestAborted.IsCancellationRequested)
+    {
+        // Covers both malformed JSON and a body that exceeded MaxRequestBodySize above
+        // (Kestrel throws BadHttpRequestException for the latter).
+        return Results.BadRequest();
+    }
+
+    if (input is null)
+    {
+        return Results.BadRequest();
+    }
+
     try
     {
         await analyticsService.RecordAsync(

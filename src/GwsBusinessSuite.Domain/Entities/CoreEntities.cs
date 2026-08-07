@@ -286,6 +286,11 @@ public sealed class SentinelPublicShare : AuditableEntity
     // low-entropy, so a bare SHA-256 would be rainbow-table-able.
     public string? PasswordSalt { get; set; }
     public string? PasswordHash { get; set; }
+    // Lockout against brute-forcing a user-chosen password on this anonymous, unauthenticated
+    // endpoint. FailedPasswordAttempts resets to 0 on a correct guess or once a lockout is
+    // applied; PasswordLockedUntil blocks all further attempts (right or wrong) until it lapses.
+    public int FailedPasswordAttempts { get; set; }
+    public DateTimeOffset? PasswordLockedUntil { get; set; }
     // Incremented once per actual content view (after any password gate is cleared), not per
     // token resolution - so a wrong password guess or a bare metadata check never counts.
     public int ViewCount { get; set; }
@@ -953,6 +958,13 @@ public sealed class ArticleAffiliateClick : AuditableEntity
     public string AdvertiserId { get; set; } = string.Empty;
     public string AdvertiserName { get; set; } = string.Empty;
     public string TrackingUrl { get; set; } = string.Empty;
+
+    // SQLite/EF Core can't translate a DateTimeOffset range filter or ORDER BY server-side
+    // (see AffiliateAnalyticsService's own comment on this) - this shadow column exists
+    // specifically so the analytics dashboard's click query can bound itself with a real,
+    // SQL-pushed-down Where+OrderByDescending+Take instead of loading every click row this
+    // site has ever recorded into memory.
+    public long CreatedAtUnixSeconds { get; set; }
 }
 
 public static class WebAnalyticsEventNames
@@ -1198,6 +1210,10 @@ public sealed class CjCommissionRecord : AuditableEntity
     public string Currency { get; set; } = "USD";
     public DateTimeOffset? EventDate { get; set; }
     public DateTimeOffset? PostingDate { get; set; }
+
+    // See ArticleAffiliateClick.CreatedAtUnixSeconds - same shadow-column reason, so the
+    // analytics dashboard's commission query can bound itself at the SQL level too.
+    public long CreatedAtUnixSeconds { get; set; }
 }
 
 public static class ArticleAffiliateSuggestionStatuses

@@ -1122,6 +1122,17 @@ public sealed class NotionSyncService(
         if (!pageContent.ContentUnavailable)
         {
             var blocksJson = WikiBlockJson.Serialize(pageContent.Blocks);
+            // NotionLastEditedAt is this page's watermark - concurrentLocalEdit below only
+            // fires when remoteEditedAt is newer than it, i.e. "this is a remote change we
+            // haven't accounted for yet". Previously the watermark advanced unconditionally
+            // whenever content was available, even when a conflict was detected and content
+            // was deliberately NOT applied - so the very next sync pass would see this same
+            // remote edit as "already accounted for" (remoteEditedAt no longer > the
+            // now-advanced watermark), silently fall through to the else branch, and overwrite
+            // whatever the user had since edited locally, without the conflict ever actually
+            // being resolved. Only advance it when content genuinely ends up matching what was
+            // just imported - never while a conflict is left pending.
+            var contentMatchesImport = true;
             if (!string.Equals(page.BlocksJson, blocksJson, StringComparison.Ordinal))
             {
                 var concurrentLocalEdit = remoteEditedAt is { } remoteTimestamp
@@ -1137,6 +1148,7 @@ public sealed class NotionSyncService(
                         blocksJson,
                         remoteEditedAt!.Value,
                         cancellationToken);
+                    contentMatchesImport = false;
                 }
                 else
                 {
@@ -1144,7 +1156,10 @@ public sealed class NotionSyncService(
                     page.ContentVersion++;
                 }
             }
-            page.NotionLastEditedAt = remoteEditedAt;
+            if (contentMatchesImport)
+            {
+                page.NotionLastEditedAt = remoteEditedAt;
+            }
         }
         if (IsNotionActor(page.UpdatedBy)
             || !await dbContext.NotionSyncConflicts.AnyAsync(

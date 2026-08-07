@@ -298,6 +298,121 @@ public sealed class WikiDatabaseServiceTests
     }
 
     [Fact]
+    public async Task GetDatabaseAsync_ShouldResolveChainedRollupsTwoHopsDeep()
+    {
+        // Regression guard: GetDatabaseAsync used to only pre-fetch databases directly related
+        // to the one being loaded. A rollup-of-a-rollup needs the *second* hop's own related
+        // database resolved too, or evaluating it fails with "#REF! Related database missing".
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+
+        var invoices = await service.CreateDatabaseAsync("Invoices", null, "u");
+        var invoiceTitle = invoices.Properties.Single(property => property.Type == WikiDatabasePropertyTypes.Title);
+        var amount = await service.SavePropertyAsync(invoices.Id,
+            new WikiDatabasePropertyEditor { Name = "Amount", Type = WikiDatabasePropertyTypes.Number }, "u");
+        var invoiceValues = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(invoiceValues, invoiceTitle.Id, "INV-001");
+        WikiPropertyValues.SetNumber(invoiceValues, amount.Id, 100m);
+        var invoice = await service.SaveRowAsync(invoices.Id,
+            new WikiDatabaseRowEditor { Values = invoiceValues.ToDictionary(item => item.Key, item => item.Value) }, "u");
+
+        // Clients -> Invoices, rolling up Amount (this is the first, directly-related hop).
+        var clients = await service.CreateDatabaseAsync("Clients", null, "u");
+        var invoiceRelation = await service.SavePropertyAsync(clients.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Invoices", Type = WikiDatabasePropertyTypes.Relation, RelatedDatabaseId = invoices.Id
+        }, "u");
+        var revenue = await service.SavePropertyAsync(clients.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Revenue", Type = WikiDatabasePropertyTypes.Rollup,
+            RelationPropertyId = invoiceRelation.Id, RollupPropertyId = amount.Id,
+            RollupAggregation = WikiDatabaseRollupAggregations.Sum
+        }, "u");
+        var clientValues = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetMultiSelect(clientValues, invoiceRelation.Id, [invoice.Id.ToString()]);
+        var client = await service.SaveRowAsync(clients.Id,
+            new WikiDatabaseRowEditor { Values = clientValues.ToDictionary(item => item.Key, item => item.Value) }, "u");
+
+        // Regions -> Clients, rolling up Revenue - which is itself a Rollup, so resolving this
+        // needs Invoices (the second hop, only related to Clients, not directly to Regions).
+        var regions = await service.CreateDatabaseAsync("Regions", null, "u");
+        var clientRelation = await service.SavePropertyAsync(regions.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Clients", Type = WikiDatabasePropertyTypes.Relation, RelatedDatabaseId = clients.Id
+        }, "u");
+        var totalRevenue = await service.SavePropertyAsync(regions.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Total revenue", Type = WikiDatabasePropertyTypes.Rollup,
+            RelationPropertyId = clientRelation.Id, RollupPropertyId = revenue.Id,
+            RollupAggregation = WikiDatabaseRollupAggregations.Sum
+        }, "u");
+        var regionValues = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetMultiSelect(regionValues, clientRelation.Id, [client.Id.ToString()]);
+        await service.SaveRowAsync(regions.Id,
+            new WikiDatabaseRowEditor { Values = regionValues.ToDictionary(item => item.Key, item => item.Value) }, "u");
+
+        var computed = await service.GetDatabaseAsync(regions.Id);
+
+        var computedValues = WikiPropertyValues.ParseObject(computed!.Rows.Single().PropertyValuesJson);
+        WikiPropertyValues.GetComputedValue(computedValues, totalRevenue.Id).Should().Be(100m);
+        WikiPropertyValues.GetDisplayText(
+            computed.Properties.Single(property => property.Id == totalRevenue.Id),
+            computedValues,
+            computed.Rows.Single().CreatedAt).Should().NotContain("#REF!");
+    }
+
+    [Fact]
+    public async Task MoveRowAsync_ShouldRejectAGroupByPropertyThatIsNotASelectType()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Board", null, "u");
+        var titleProperty = database.Properties.Single(property => property.Type == WikiDatabasePropertyTypes.Title);
+        var row = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        var act = async () => await service.MoveRowAsync(database.Id, row.Id, titleProperty.Id, "anything", 0, "u");
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Select property*");
+    }
+
+    [Fact]
+    public async Task MoveRowAsync_ShouldRejectAGroupOptionIdThatDoesNotExistOnTheProperty()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Board", null, "u");
+        var statusProperty = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Status", Type = WikiDatabasePropertyTypes.Select,
+            Options = [new WikiDatabasePropertyOption("todo", "To Do", "#ccc")]
+        }, "u");
+        var row = await service.SaveRowAsync(database.Id, RowWithStatus(statusProperty.Id, "todo"), "u");
+
+        var act = async () => await service.MoveRowAsync(database.Id, row.Id, statusProperty.Id, "no-such-option", 0, "u");
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*group option*");
+    }
+
+    [Fact]
+    public async Task MoveRowAsync_ShouldRejectAGroupByPropertyIdFromAnotherDatabase()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Board", null, "u");
+        var otherDatabase = await service.CreateDatabaseAsync("Other", null, "u");
+        var otherSelect = await service.SavePropertyAsync(otherDatabase.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Status", Type = WikiDatabasePropertyTypes.Select,
+            Options = [new WikiDatabasePropertyOption("todo", "To Do", "#ccc")]
+        }, "u");
+        var row = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        var act = async () => await service.MoveRowAsync(database.Id, row.Id, otherSelect.Id, "todo", 0, "u");
+
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+    }
+
+    [Fact]
     public async Task SavePropertyAsync_ShouldCreateAPairedReciprocalRelation()
     {
         await using var db = await CreateDbAsync();
@@ -1023,13 +1138,28 @@ public sealed class WikiDatabaseServiceTests
     {
         await using var db = await CreateDbAsync();
         IWikiDatabaseService? wikiDatabaseService = null;
-        var registry = new AutomationNodeRegistry(new FakeHttpClient(), serviceProvider: new SingleServiceProvider(() => wikiDatabaseService));
+        var dbContextFactoryOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(db.Database.GetDbConnection())
+            .Options;
+        var registry = new AutomationNodeRegistry(
+            new FakeHttpClient(),
+            dbContextFactory: new FakeAppDbContextFactory(dbContextFactoryOptions),
+            serviceProvider: new SingleServiceProvider(() => wikiDatabaseService));
         var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
         var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
         var executions = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
         var triggers = new AutomationTriggerService(db, workflowService, executions, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
         var service = new WikiDatabaseService(db, triggers);
         wikiDatabaseService = service;
+
+        // database.setRowProperty now checks that the workflow's own owner has Edit access to
+        // the target database (see AutomationNodeRegistry.EnsureCanEditDatabaseAsync) - an
+        // Admin bypasses that check the same way Admins bypass SentinelResourcePermission
+        // everywhere else, which is what this test's automation write-back relies on.
+        // AutomationWorkflowService.CreateAsync hardcodes CreatedBy to "user", not the "u"
+        // used elsewhere in this test as the acting username for row saves.
+        db.AppUsers.Add(new AppUser { Username = "user", Role = AppRoles.Admin, PasswordHash = "hash" });
+        await db.SaveChangesAsync();
 
         var database = await service.CreateDatabaseAsync("Tasks", null, "u");
         var titleProperty = database.Properties.Single(p => p.Type == WikiDatabasePropertyTypes.Title);
@@ -1069,9 +1199,128 @@ public sealed class WikiDatabaseServiceTests
             .Should().ContainSingle("the write-back save must not spawn a second execution of its own workflow");
     }
 
+    [Fact]
+    public async Task DatabaseSetRowPropertyNode_ShouldRejectWritesFromANonAdminOwnerWithoutSentinelEditAccess()
+    {
+        // Regression guard for a real finding: this node could write to any Sentinel
+        // database/row by id with no ownership or scoping check at all - a non-Admin workflow
+        // owner could edit a database they have no Sentinel access to, bypassing the same
+        // per-resource Edit check the Wiki UI itself enforces for them.
+        await using var db = await CreateDbAsync();
+        IWikiDatabaseService? wikiDatabaseService = null;
+        var dbContextFactoryOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(db.Database.GetDbConnection())
+            .Options;
+        var accessService = new SentinelAccessService(db);
+        var registry = new AutomationNodeRegistry(
+            new FakeHttpClient(),
+            dbContextFactory: new FakeAppDbContextFactory(dbContextFactoryOptions),
+            serviceProvider: new AutomationServiceProvider(() => wikiDatabaseService, accessService));
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executions = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggers = new AutomationTriggerService(db, workflowService, executions, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+        var service = new WikiDatabaseService(db, triggers);
+        wikiDatabaseService = service;
+
+        // "user" (AutomationWorkflowService.CreateAsync's hardcoded workflow owner) has no
+        // AppUsers row at all here, so it's neither an Admin nor holds any Sentinel grant.
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var titleProperty = database.Properties.Single(p => p.Type == WikiDatabasePropertyTypes.Title);
+        var statusProperty = await service.SavePropertyAsync(
+            database.Id, new WikiDatabasePropertyEditor { Name = "Status", Type = WikiDatabasePropertyTypes.Text }, "u");
+        var row = await service.SaveRowAsync(database.Id, RowWithStatus(titleProperty.Id, "First task"), "u");
+
+        var workflow = await workflowService.CreateAsync("Unauthorized write");
+        var writeBack = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Mark synced",
+            TypeKey = "database.setRowProperty",
+            PositionX = 400,
+            PositionY = 420,
+            ParametersJson = $"{{\"wikiDatabaseId\":\"{database.Id}\",\"rowId\":\"{row.Id}\",\"propertyId\":\"{statusProperty.Id}\",\"value\":\"synced-by-automation\"}}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", writeBack.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var execution = await executions.ExecuteAsync(workflow.Id, "{}");
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Failed);
+        execution.ErrorMessage.Should().Contain("does not have Edit access");
+        var reloadedRow = await db.WikiDatabaseRows.AsNoTracking().SingleAsync(item => item.Id == row.Id);
+        WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(reloadedRow.PropertyValuesJson), statusProperty.Id)
+            .Should().BeNull("the unauthorized write must not have applied");
+    }
+
+    [Fact]
+    public async Task DatabaseSetRowPropertyNode_ShouldAllowWritesFromANonAdminOwnerWithExplicitEditAccess()
+    {
+        await using var db = await CreateDbAsync();
+        IWikiDatabaseService? wikiDatabaseService = null;
+        var dbContextFactoryOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(db.Database.GetDbConnection())
+            .Options;
+        var accessService = new SentinelAccessService(db);
+        var registry = new AutomationNodeRegistry(
+            new FakeHttpClient(),
+            dbContextFactory: new FakeAppDbContextFactory(dbContextFactoryOptions),
+            serviceProvider: new AutomationServiceProvider(() => wikiDatabaseService, accessService));
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executions = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggers = new AutomationTriggerService(db, workflowService, executions, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+        var service = new WikiDatabaseService(db, triggers);
+        wikiDatabaseService = service;
+
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var titleProperty = database.Properties.Single(p => p.Type == WikiDatabasePropertyTypes.Title);
+        var statusProperty = await service.SavePropertyAsync(
+            database.Id, new WikiDatabasePropertyEditor { Name = "Status", Type = WikiDatabasePropertyTypes.Text }, "u");
+        var row = await service.SaveRowAsync(database.Id, RowWithStatus(titleProperty.Id, "First task"), "u");
+
+        // Grant "user" (the hardcoded workflow owner) real Edit access to this specific
+        // database, matching exactly what a Contributor would need through the Wiki Share
+        // panel to edit it directly.
+        await accessService.SetPermissionAsync(database.Id, isDatabase: true, "user", SentinelAccessLevels.Edit, "admin");
+
+        var workflow = await workflowService.CreateAsync("Authorized write");
+        var writeBack = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Mark synced",
+            TypeKey = "database.setRowProperty",
+            PositionX = 400,
+            PositionY = 420,
+            ParametersJson = $"{{\"wikiDatabaseId\":\"{database.Id}\",\"rowId\":\"{row.Id}\",\"propertyId\":\"{statusProperty.Id}\",\"value\":\"synced-by-automation\"}}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", writeBack.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var execution = await executions.ExecuteAsync(workflow.Id, "{}");
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        var reloadedRow = await db.WikiDatabaseRows.AsNoTracking().SingleAsync(item => item.Id == row.Id);
+        WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(reloadedRow.PropertyValuesJson), statusProperty.Id)
+            .Should().Be("synced-by-automation");
+    }
+
     private sealed class SingleServiceProvider(Func<object?> resolver) : IServiceProvider
     {
         public object? GetService(Type serviceType) => serviceType == typeof(IWikiDatabaseService) ? resolver() : null;
+    }
+
+    private sealed class AutomationServiceProvider(Func<object?> wikiDatabaseServiceResolver, ISentinelAccessService accessService) : IServiceProvider
+    {
+        public object? GetService(Type serviceType) =>
+            serviceType == typeof(IWikiDatabaseService) ? wikiDatabaseServiceResolver()
+            : serviceType == typeof(ISentinelAccessService) ? accessService
+            : null;
+    }
+
+    private sealed class FakeAppDbContextFactory(DbContextOptions<ApplicationDbContext> options)
+        : GwsBusinessSuite.Application.Abstractions.IAppDbContextFactory
+    {
+        public Task<GwsBusinessSuite.Application.Abstractions.IAppDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<GwsBusinessSuite.Application.Abstractions.IAppDbContext>(new ApplicationDbContext(options));
     }
 
     private sealed class FakeHttpClient : IAutomationHttpClient

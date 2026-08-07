@@ -49,10 +49,17 @@ public interface IAutomationNodeRegistry
 {
     IReadOnlyList<AutomationNodeDefinition> ListDefinitions();
     AutomationNodeDefinition? Find(string typeKey, int version = 1);
+    // workflowOwnerUsername is the workflow's own creator (AutomationWorkflow.CreatedBy),
+    // resolved once per execution by AutomationExecutionService - not "whoever is currently
+    // interacting with the app" (scheduled/webhook triggers have no live user at all). Only
+    // consulted by node types that write to a resource with its own separate access model
+    // (currently database.setRowProperty, against SentinelAccessService) - see
+    // AutomationNodeRegistry.ExecuteSetRowPropertyAsync.
     Task<AutomationNodeRunResult> ExecuteAsync(
         AutomationNodeSnapshot node,
         JsonElement input,
         string? credentialJson,
+        string? workflowOwnerUsername = null,
         CancellationToken cancellationToken = default);
 }
 

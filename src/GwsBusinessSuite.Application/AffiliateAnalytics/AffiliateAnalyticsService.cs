@@ -66,6 +66,7 @@ public sealed class AffiliateAnalyticsService(IAppDbContext db, IMemoryCache cac
         {
             cache.Set(dedupeCacheKey, true, ClickDedupeWindow);
 
+            var now = DateTimeOffset.UtcNow;
             await db.ArticleAffiliateClicks.AddAsync(new ArticleAffiliateClick
             {
                 ArticleId = articleId,
@@ -73,6 +74,8 @@ public sealed class AffiliateAnalyticsService(IAppDbContext db, IMemoryCache cac
                 AdvertiserId = advertiserId,
                 AdvertiserName = advertiserName,
                 TrackingUrl = trackingUrl,
+                CreatedAt = now,
+                CreatedAtUnixSeconds = now.ToUnixTimeSeconds(),
                 CreatedBy = "affiliate-click-redirect"
             }, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
@@ -81,10 +84,24 @@ public sealed class AffiliateAnalyticsService(IAppDbContext db, IMemoryCache cac
         return string.IsNullOrWhiteSpace(trackingUrl) ? null : trackingUrl;
     }
 
+    // Both this table and CjCommissionRecords grow with every affiliate click/commission this
+    // site has ever recorded - previously loaded in full on every dashboard view, with no date
+    // bound and no row cap. CreatedAtUnixSeconds (a shadow column - SQLite/EF Core can't push
+    // a DateTimeOffset range filter to SQL, see the note further down) lets this bound both
+    // queries at the SQL level: recent-first, capped at MaxDashboardRows. A dashboard showing
+    // "the last 90 days, up to 5,000 rows" is the actually useful view anyway - nobody scrolls
+    // through years of raw click history looking for a trend.
+    private static readonly TimeSpan DashboardWindow = TimeSpan.FromDays(90);
+    private const int MaxDashboardRows = 5_000;
+
     public async Task<AffiliateAnalyticsDashboard> GetDashboardAsync(CancellationToken cancellationToken = default)
     {
+        var cutoffUnixSeconds = DateTimeOffset.UtcNow.Subtract(DashboardWindow).ToUnixTimeSeconds();
         var clicks = await db.ArticleAffiliateClicks
             .AsNoTracking()
+            .Where(c => c.CreatedAtUnixSeconds >= cutoffUnixSeconds)
+            .OrderByDescending(c => c.CreatedAtUnixSeconds)
+            .Take(MaxDashboardRows)
             .ToListAsync(cancellationToken);
 
         var articleIds = clicks.Select(c => c.ArticleId).Distinct().ToList();
@@ -122,6 +139,9 @@ public sealed class AffiliateAnalyticsService(IAppDbContext db, IMemoryCache cac
 
         var commissions = await db.CjCommissionRecords
             .AsNoTracking()
+            .Where(c => c.CreatedAtUnixSeconds >= cutoffUnixSeconds)
+            .OrderByDescending(c => c.CreatedAtUnixSeconds)
+            .Take(MaxDashboardRows)
             .ToListAsync(cancellationToken);
 
         var revenueByAdvertiser = commissions

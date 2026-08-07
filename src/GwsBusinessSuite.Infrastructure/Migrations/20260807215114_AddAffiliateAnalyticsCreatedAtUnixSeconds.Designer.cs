@@ -3,6 +3,7 @@ using System;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GwsBusinessSuite.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260807215114_AddAffiliateAnalyticsCreatedAtUnixSeconds")]
+    partial class AddAffiliateAnalyticsCreatedAtUnixSeconds
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
@@ -3890,9 +3893,6 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.Property<DateTimeOffset?>("ExpiresAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("FailedPasswordAttempts")
-                        .HasColumnType("INTEGER");
-
                     b.Property<bool>("IsDatabase")
                         .HasColumnType("INTEGER");
 
@@ -3900,9 +3900,6 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("PasswordHash")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset?>("PasswordLockedUntil")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("PasswordSalt")
@@ -5311,40 +5308,10 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .WithMany()
                         .HasForeignKey("CategoryId")
                         .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("GwsBusinessSuite.Domain.Entities.CmsSite", null)
-                        .WithMany()
-                        .HasForeignKey("SiteId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.CmsPageCategory", b =>
-                {
-                    b.HasOne("GwsBusinessSuite.Domain.Entities.CmsSite", null)
-                        .WithMany()
-                        .HasForeignKey("SiteId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.CmsPageRevision", b =>
-                {
-                    b.HasOne("GwsBusinessSuite.Domain.Entities.CmsPage", null)
-                        .WithMany()
-                        .HasForeignKey("PageId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.Comment", b =>
                 {
-                    b.HasOne("GwsBusinessSuite.Domain.Entities.Article", null)
-                        .WithMany()
-                        .HasForeignKey("ArticleId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
                     b.HasOne("GwsBusinessSuite.Domain.Entities.Comment", null)
                         .WithMany()
                         .HasForeignKey("ParentCommentId")
@@ -5356,15 +5323,6 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.HasOne("GwsBusinessSuite.Domain.Entities.Contact", null)
                         .WithMany()
                         .HasForeignKey("ContactId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.GlobalBlock", b =>
-                {
-                    b.HasOne("GwsBusinessSuite.Domain.Entities.CmsSite", null)
-                        .WithMany()
-                        .HasForeignKey("SiteId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

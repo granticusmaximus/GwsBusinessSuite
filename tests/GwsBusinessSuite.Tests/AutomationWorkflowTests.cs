@@ -576,6 +576,48 @@ public sealed class AutomationWorkflowTests
     }
 
     [Fact]
+    public async Task HttpNode_ShouldRedactCredentialValuesFromStoredEvidence_ButNotFromLiveOutput()
+    {
+        // Regression guard for a real finding: node evidence (AutomationNodeExecution
+        // .OutputJson) stores the HTTP node's response verbatim, at rest unencrypted, visible
+        // in the Automation UI's execution history. An endpoint that reflects request headers
+        // back (an echo/debug endpoint, or just a misconfigured API) previously leaked a
+        // decrypted credential straight into that plaintext history, undoing the point of
+        // encrypting it at rest at all. The fix redacts credential values from what gets
+        // stored as evidence, but must NOT redact them from the live Outputs a downstream node
+        // actually consumes (execution.OutputJson here) - a legitimate workflow could need an
+        // unredacted value from the response, e.g. a refreshed token a later node re-uses.
+        await using var db = await CreateDbAsync();
+        var httpClient = new EchoingHttpClient();
+        var registry = new AutomationNodeRegistry(httpClient);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var credentialId = await credentials.SaveAsync(
+            null, "Echo API", "generic",
+            "{\"headers\":{\"Authorization\":\"Bearer super-secret-token\"}}");
+        var workflow = await workflowService.CreateAsync("Echo call");
+        var trigger = workflow.Nodes.Single();
+        var httpNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Call echo endpoint", TypeKey = "core.httpRequest", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"method\":\"GET\",\"url\":\"https://example.com/echo\"}",
+            CredentialId = credentialId
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, trigger.Id, "main", httpNode.Id);
+        await workflowService.PublishAsync(workflow.Id, "Echo version");
+
+        var execution = await executionService.ExecuteAsync(workflow.Id, "{}");
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        var storedEvidence = execution.Nodes.Single(node => node.NodeTypeKey == "core.httpRequest").OutputJson;
+        storedEvidence.Should().NotContain("super-secret-token");
+        storedEvidence.Should().Contain("[redacted]");
+        execution.OutputJson.Should().Contain("super-secret-token",
+            "downstream nodes must still see the real response value - only stored evidence is redacted");
+    }
+
+    [Fact]
     public async Task ResumeDueWaitsAsync_ShouldRecoverAnOrphanedRunningExecution()
     {
         await using var db = await CreateDbAsync();
@@ -835,6 +877,15 @@ public sealed class AutomationWorkflowTests
             if (Delay > TimeSpan.Zero) await Task.Delay(Delay, cancellationToken);
             return new AutomationHttpResponse(200, "{}", new Dictionary<string, string>());
         }
+    }
+
+    // Simulates a debug/echo endpoint (or a misconfigured API) reflecting request headers -
+    // including whatever credential header the node injected - back in the response body.
+    private sealed class EchoingHttpClient : IAutomationHttpClient
+    {
+        public Task<AutomationHttpResponse> SendAsync(AutomationHttpRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new AutomationHttpResponse(
+                200, System.Text.Json.JsonSerializer.Serialize(new { receivedHeaders = request.Headers }), new Dictionary<string, string>()));
     }
 
     private sealed class FakeSecretProtector : ISecretProtector

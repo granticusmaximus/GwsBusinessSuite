@@ -9,7 +9,6 @@
 @using GwsBusinessSuite.Application.Settings
 @using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Infrastructure.Data
-@using Markdig
 @using Microsoft.EntityFrameworkCore
 @using System.Text.RegularExpressions
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
@@ -449,10 +448,6 @@ else
             ? new List<AffiliateOffer>()
             : AllOffers.Where(x => x.AdvertiserId == SelectedAdvertiserId).OrderBy(x => x.LinkName).ToList();
 
-    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
-        .UseAdvancedExtensions()
-        .Build();
-
     private string RenderedBodyHtml
     {
         get
@@ -462,8 +457,11 @@ else
                 return "<p class=\"text-secondary mb-0\">Nothing to preview yet.</p>";
             }
 
-            var resolvedMarkdown = ArticleMarkdownRenderer.Render(BodyMarkdown, Placements);
-            return Markdown.ToHtml(resolvedMarkdown, Pipeline);
+            // RenderPreviewHtml (not Render) specifically because this preview can render
+            // AI-suggested body content (SentinelAiPanel/SentinelGPT), whose prompt context
+            // can include externally scraped trend text - see its doc comment for why raw
+            // HTML in the body is escaped while the ad-card markup still renders normally.
+            return ArticleMarkdownRenderer.RenderPreviewHtml(BodyMarkdown, Placements);
         }
     }
 

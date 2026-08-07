@@ -74,6 +74,61 @@ public sealed class PrivacyOperationsServiceTests
         await approveAuditDeletion.Should().ThrowAsync<InvalidOperationException>().WithMessage("*cannot be approved*");
     }
 
+    [Fact]
+    public async Task PurgeEligibleRecordsAsync_ShouldOnlyDeleteCategoriesThatAreBothEnabledAndApproved()
+    {
+        // Regression guard: the Privacy dashboard's retention policy/eligible-count preview
+        // used to be entirely display-only - nothing ever actually purged expired rows. Both
+        // "Enabled" and "Approved" must be true (each defaults to false/false on every seeded
+        // policy) before a category is touched; everything else must survive untouched.
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Db.WebAnalyticsEvents.Add(new WebAnalyticsEvent
+        {
+            EventName = "pageview", VisitorKey = "visitor", SessionKey = "session", Path = "/",
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-500),
+            OccurredAtUnixSeconds = DateTimeOffset.UtcNow.AddDays(-500).ToUnixTimeSeconds()
+        });
+        fixture.Db.FormSubmissions.Add(new FormSubmission
+        {
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-1000)
+        });
+        await fixture.Db.SaveChangesAsync();
+
+        var dashboardBefore = await fixture.Service.GetDashboardAsync();
+        var webAnalyticsPolicy = dashboardBefore.RetentionPolicies.Single(x => x.DataCategory == "Web analytics");
+        await fixture.Service.UpdateRetentionPolicyAsync(
+            webAnalyticsPolicy.Id, webAnalyticsPolicy.RetentionDays, webAnalyticsPolicy.LegalBasis,
+            enabled: true, automationApproved: true);
+        // "Form submissions" is left at its seeded defaults (Enabled=true, Approved=false).
+
+        var deleted = await fixture.Service.PurgeEligibleRecordsAsync();
+
+        deleted.Should().Be(1);
+        (await fixture.Db.WebAnalyticsEvents.CountAsync()).Should().Be(0);
+        (await fixture.Db.FormSubmissions.CountAsync()).Should().Be(1, "Form submissions was never approved for automated deletion");
+        (await fixture.Db.SecurityAuditEvents.CountAsync(x => x.Action == "RetentionPurgeExecuted")).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task PurgeEligibleRecordsAsync_ShouldLeaveRecentRecordsAlone()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Db.WebAnalyticsEvents.Add(new WebAnalyticsEvent
+        {
+            EventName = "pageview", VisitorKey = "visitor", SessionKey = "session", Path = "/",
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-1),
+            OccurredAtUnixSeconds = DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeSeconds()
+        });
+        await fixture.Db.SaveChangesAsync();
+        var policy = (await fixture.Service.GetDashboardAsync()).RetentionPolicies.Single(x => x.DataCategory == "Web analytics");
+        await fixture.Service.UpdateRetentionPolicyAsync(policy.Id, policy.RetentionDays, policy.LegalBasis, true, true);
+
+        var deleted = await fixture.Service.PurgeEligibleRecordsAsync();
+
+        deleted.Should().Be(0);
+        (await fixture.Db.WebAnalyticsEvents.CountAsync()).Should().Be(1);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;

@@ -97,7 +97,7 @@ else
     </div>
 
     <section class="card border-0 shadow-sm mt-3">
-        <div class="card-header"><strong>Retention register</strong><small class="d-block text-secondary">Eligible counts are previews only. No records are deleted from this screen.</small></div>
+        <div class="card-header"><strong>Retention register</strong><small class="d-block text-secondary">This screen never deletes anything directly. A category is only purged automatically, once a day, when both "Enabled" and "Approved" are checked and saved.</small></div>
         <div class="table-responsive"><table class="table align-middle mb-0"><thead><tr><th>Data category</th><th>Policy</th><th>Legal basis</th><th>Eligible preview</th><th>Automation</th></tr></thead><tbody>
         @foreach (var policy in Dashboard.RetentionPolicies)
         {
@@ -145,7 +145,19 @@ else
     private void SetNotification(Guid id, bool value) => _notifications[id] = value;
     private async Task SaveAssessmentAsync(SecurityIncidentView incident) => await RunAsync(() => PrivacyService.UpdateIncidentAssessmentAsync(incident.Id, _risks.GetValueOrDefault(incident.Id, incident.RiskAssessment), _notifications.GetValueOrDefault(incident.Id, incident.RegulatorNotificationRequired), null, _statuses.GetValueOrDefault(incident.Id, incident.Status)), "Breach assessment saved.");
     private void SetRetentionDays(Guid id, string? value) { if (int.TryParse(value, out var days)) _retentionDays[id] = days; }
-    private async Task SaveRetentionAsync(RetentionPolicyView policy) => await RunAsync(() => PrivacyService.UpdateRetentionPolicyAsync(policy.Id, _retentionDays.GetValueOrDefault(policy.Id, policy.RetentionDays), _retentionBasis.GetValueOrDefault(policy.Id, policy.LegalBasis), _retentionEnabled.GetValueOrDefault(policy.Id, policy.IsEnabled), _retentionAutomation.GetValueOrDefault(policy.Id, policy.AutomationApproved)), "Retention policy saved. Eligible records remain preview-only.");
+    private async Task SaveRetentionAsync(RetentionPolicyView policy)
+    {
+        var willAutomate = _retentionEnabled.GetValueOrDefault(policy.Id, policy.IsEnabled)
+            && _retentionAutomation.GetValueOrDefault(policy.Id, policy.AutomationApproved);
+        await RunAsync(() => PrivacyService.UpdateRetentionPolicyAsync(policy.Id,
+            _retentionDays.GetValueOrDefault(policy.Id, policy.RetentionDays),
+            _retentionBasis.GetValueOrDefault(policy.Id, policy.LegalBasis),
+            _retentionEnabled.GetValueOrDefault(policy.Id, policy.IsEnabled),
+            _retentionAutomation.GetValueOrDefault(policy.Id, policy.AutomationApproved)),
+            willAutomate
+                ? "Retention policy saved. Expired records in this category will be purged automatically."
+                : "Retention policy saved. Eligible records remain preview-only until both Enabled and Approved are checked.");
+    }
     private async Task RunAsync(Func<Task> action, string success) { _busy = true; _message = ""; try { await action(); await LoadAsync(); _message = success; _error = false; } catch (Exception ex) { Fail(ex, ex is ArgumentException or InvalidOperationException ? ex.Message : "The operation could not be completed."); } finally { _busy = false; } }
     private void Fail(Exception ex, string message) { Logger.LogError(ex, "Privacy operation failed."); _message = message; _error = true; }
 }

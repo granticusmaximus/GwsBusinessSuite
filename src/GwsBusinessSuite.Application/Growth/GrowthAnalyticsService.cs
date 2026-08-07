@@ -11,6 +11,23 @@ public sealed class GrowthAnalyticsService(
     private static readonly HashSet<string> ReservedEvents =
         new([WebAnalyticsEventNames.PageView, WebAnalyticsEventNames.Engagement], StringComparer.OrdinalIgnoreCase);
 
+    // Every reporting query below pulls the full matching WebAnalyticsEvents range into memory
+    // (Trend/Breakdown/Funnel/Goal aggregation all run in-process over the materialized list) -
+    // there's no row cap the way AffiliateAnalytics has, because capping rows here would
+    // silently corrupt the aggregate numbers rather than just shorten a list. Clamping the
+    // *range width* instead keeps the query genuinely bounded without that correctness risk.
+    // 400 days matches the "Web analytics" PrivacyRetentionPolicy default, so this also never
+    // asks for more history than the stated retention policy keeps around anyway.
+    private const int MaxDashboardRangeDays = 400;
+
+    private static (long FromUnix, long ToUnix) ClampRange(DateTimeOffset from, DateTimeOffset to)
+    {
+        var toUnix = to.ToUnixTimeSeconds();
+        var fromUnix = from.ToUnixTimeSeconds();
+        var minFromUnix = toUnix - (long)TimeSpan.FromDays(MaxDashboardRangeDays).TotalSeconds;
+        return (Math.Max(fromUnix, minFromUnix), toUnix);
+    }
+
     public async Task RecordAsync(
         WebAnalyticsEventInput input,
         string? userAgent,
@@ -78,8 +95,7 @@ public sealed class GrowthAnalyticsService(
         int breakdownLimit = 12,
         CancellationToken cancellationToken = default)
     {
-        var fromUnix = from.ToUnixTimeSeconds();
-        var toUnix = to.ToUnixTimeSeconds();
+        var (fromUnix, toUnix) = ClampRange(from, to);
         var rangeSeconds = Math.Max(1, toUnix - fromUnix);
         var comparisonFromUnix = fromUnix - rangeSeconds;
         var reportEvents = await db.WebAnalyticsEvents.AsNoTracking()
@@ -200,8 +216,7 @@ public sealed class GrowthAnalyticsService(
         DateTimeOffset to,
         CancellationToken cancellationToken = default)
     {
-        var fromUnix = from.ToUnixTimeSeconds();
-        var toUnix = to.ToUnixTimeSeconds();
+        var (fromUnix, toUnix) = ClampRange(from, to);
         var events = await db.WebAnalyticsEvents.AsNoTracking()
             .Where(item => item.OccurredAtUnixSeconds >= fromUnix && item.OccurredAtUnixSeconds < toUnix)
             .ToListAsync(cancellationToken);
@@ -270,8 +285,7 @@ public sealed class GrowthAnalyticsService(
         DateTimeOffset to,
         CancellationToken cancellationToken = default)
     {
-        var fromUnix = from.ToUnixTimeSeconds();
-        var toUnix = to.ToUnixTimeSeconds();
+        var (fromUnix, toUnix) = ClampRange(from, to);
         var events = await db.WebAnalyticsEvents.AsNoTracking()
             .Where(item => item.OccurredAtUnixSeconds >= fromUnix && item.OccurredAtUnixSeconds < toUnix)
             .ToListAsync(cancellationToken);

@@ -408,8 +408,12 @@
         _configuredModel = _settings.OllamaModelOverride ?? SentinelGptDefaults.Model;
         _lastPerformance = PerformanceTracker.GetLatest(_configuredModel);
         await Task.WhenAll(CheckConnectionAsync(), LoadConversationsAsync());
+        // A user's one active generation slot is shared with the inline SentinelAiPanel used
+        // elsewhere in the app (both go through the same coordinator so they can't run two
+        // Ollama requests at once). Only resume it here if it's actually a chat exchange - an
+        // active panel action has no ConversationId and isn't something this page can render.
         var activeGeneration = GenerationCoordinator.GetActive(_username);
-        if (activeGeneration is not null)
+        if (activeGeneration is { ConversationId: not null })
         {
             ApplyGenerationSnapshot(activeGeneration);
             _generating = true;

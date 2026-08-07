@@ -512,11 +512,89 @@ public sealed class CjAdsServiceTests
         result.AdvertisersFailed.Should().Be(0);
     }
 
-    private static CjAdsService CreateService(ApplicationDbContext db, ISecretProtector secretProtector)
+    [Fact]
+    public async Task SyncLinksForAdvertiserAsync_ShouldNotWipeExistingCatalog_WhenFetchReturnsZeroLinks()
+    {
+        // Regression guard for a real finding: this previously deleted the advertiser's whole
+        // existing link catalog unconditionally, before ever checking whether the fetch parsed
+        // anything - a schema-drift response (HTTP 200, unexpected shape) that parses to zero
+        // links silently emptied a real catalog with nothing to show for it. The fix defers
+        // deletion until there's a real replacement to swap in.
+        await using var db = await CreateDbAsync();
+        db.AffiliateOffers.Add(new GwsBusinessSuite.Domain.Entities.AffiliateOffer
+        {
+            Network = "CJ",
+            AdvertiserId = "adv-1",
+            AdvertiserName = "Advertiser One",
+            LinkName = "Existing real catalog link",
+            TrackingUrl = "https://example.com/existing",
+            RelationshipStatus = "joined",
+            CreatedBy = "test"
+        });
+        await db.SaveChangesAsync();
+
+        var cjAffiliateService = new FakeCjAffiliateService { Links = Array.Empty<CjLinkRecord>(), LinksMessage = "No links returned." };
+        var service = CreateService(db, new FakeSecretProtector(), cjAffiliateService);
+        await service.SaveConnectorSettingsAsync(new CjConnectorSettingsView
+        {
+            DeveloperKey = "dev-key",
+            PublisherId = "publisher",
+            WebsiteId = "website-1"
+        });
+
+        var result = await service.SyncLinksForAdvertiserAsync("adv-1", "Advertiser One");
+
+        result.Imported.Should().Be(0);
+        result.Message.Should().Contain("left unchanged");
+        var remaining = await db.AffiliateOffers.Where(x => x.AdvertiserId == "adv-1" && x.LinkName != x.AdvertiserId).ToListAsync();
+        remaining.Should().ContainSingle(x => x.LinkName == "Existing real catalog link",
+            "the existing catalog must survive a fetch that parsed zero links");
+    }
+
+    [Fact]
+    public async Task SyncLinksForAdvertiserAsync_ShouldReplaceExistingCatalog_WhenFetchReturnsRealLinks()
+    {
+        await using var db = await CreateDbAsync();
+        db.AffiliateOffers.Add(new GwsBusinessSuite.Domain.Entities.AffiliateOffer
+        {
+            Network = "CJ",
+            AdvertiserId = "adv-1",
+            AdvertiserName = "Advertiser One",
+            LinkName = "Stale link",
+            TrackingUrl = "https://example.com/stale",
+            RelationshipStatus = "joined",
+            CreatedBy = "test"
+        });
+        await db.SaveChangesAsync();
+
+        var cjAffiliateService = new FakeCjAffiliateService
+        {
+            Links =
+            [
+                new CjLinkRecord("link-1", "adv-1", "Advertiser One", "Fresh link", "text", "desc",
+                    "https://cj.example.com/click", "https://example.com/dest", "text link", null)
+            ]
+        };
+        var service = CreateService(db, new FakeSecretProtector(), cjAffiliateService);
+        await service.SaveConnectorSettingsAsync(new CjConnectorSettingsView
+        {
+            DeveloperKey = "dev-key",
+            PublisherId = "publisher",
+            WebsiteId = "website-1"
+        });
+
+        var result = await service.SyncLinksForAdvertiserAsync("adv-1", "Advertiser One");
+
+        result.Imported.Should().Be(1);
+        var remaining = await db.AffiliateOffers.Where(x => x.AdvertiserId == "adv-1" && x.LinkName != x.AdvertiserId).ToListAsync();
+        remaining.Should().ContainSingle(x => x.LinkName == "Fresh link");
+    }
+
+    private static CjAdsService CreateService(ApplicationDbContext db, ISecretProtector secretProtector, ICjAffiliateService? cjAffiliateService = null)
     {
         return new CjAdsService(
             db,
-            new FakeCjAffiliateService(),
+            cjAffiliateService ?? new FakeCjAffiliateService(),
             secretProtector,
             NullLogger<CjAdsService>.Instance);
     }
@@ -563,6 +641,8 @@ public sealed class CjAdsServiceTests
         private readonly IReadOnlyCollection<CjPartnerRecord> partners;
         private readonly bool isCompleteRoster;
         public IReadOnlyCollection<CjCommissionFetchRecord> Commissions { get; set; } = Array.Empty<CjCommissionFetchRecord>();
+        public IReadOnlyCollection<CjLinkRecord> Links { get; set; } = Array.Empty<CjLinkRecord>();
+        public string LinksMessage { get; set; } = "ok";
 
         public FakeCjAffiliateService()
             : this(Array.Empty<CjPartnerRecord>())
@@ -587,7 +667,7 @@ public sealed class CjAdsServiceTests
 
         public Task<CjLinkFetchResult> FetchLinksAsync(CjLinkFetchRequest request, CancellationToken ct = default)
         {
-            return Task.FromResult(new CjLinkFetchResult(Array.Empty<CjLinkRecord>(), "ok"));
+            return Task.FromResult(new CjLinkFetchResult(Links, LinksMessage));
         }
 
         public Task<CjCommissionFetchResult> FetchCommissionsAsync(CjConnectionRequest request, CancellationToken ct = default)

@@ -187,6 +187,85 @@ public sealed class PrivacyOperationsService(
     private PrivacyRetentionPolicy Policy(string category, string description, int days, string basis) =>
         new() { DataCategory = category, Description = description, RetentionDays = days, LegalBasis = basis, AutomationApproved = false, IsEnabled = true, CreatedBy = "system" };
 
+    public async Task<int> PurgeEligibleRecordsAsync(CancellationToken cancellationToken = default)
+    {
+        var policies = await db.PrivacyRetentionPolicies.AsNoTracking()
+            .Where(x => x.IsEnabled && x.AutomationApproved)
+            .ToListAsync(cancellationToken);
+
+        var totalDeleted = 0;
+        foreach (var policy in policies)
+        {
+            var cutoff = UtcNow.AddDays(-policy.RetentionDays);
+            var deleted = await PurgeCategoryAsync(policy.DataCategory, cutoff, cancellationToken);
+            if (deleted == 0) continue;
+
+            totalDeleted += deleted;
+            await AuditAsync("RetentionPurgeExecuted", policy.Id, new Dictionary<string, string?>
+            {
+                ["category"] = policy.DataCategory,
+                ["deletedCount"] = deleted.ToString(),
+                ["retentionDays"] = policy.RetentionDays.ToString(),
+                ["cutoff"] = cutoff.ToString("O")
+            }, cancellationToken);
+        }
+
+        return totalDeleted;
+    }
+
+    private async Task<int> PurgeCategoryAsync(string category, DateTimeOffset cutoff, CancellationToken cancellationToken)
+    {
+        switch (category)
+        {
+            case "Web analytics":
+                // WebAnalyticsEvent has an indexed OccurredAtUnixSeconds shadow column
+                // specifically because SQLite/EF Core can't translate a server-side range
+                // filter on a DateTimeOffset column - see the other categories below for the
+                // materialize-then-filter fallback this table doesn't need.
+                var cutoffUnix = cutoff.ToUnixTimeSeconds();
+                var expiredEvents = await db.WebAnalyticsEvents
+                    .Where(x => x.OccurredAtUnixSeconds < cutoffUnix)
+                    .ToListAsync(cancellationToken);
+                if (expiredEvents.Count == 0) return 0;
+                db.WebAnalyticsEvents.RemoveRange(expiredEvents);
+                await db.SaveChangesAsync(cancellationToken);
+                return expiredEvents.Count;
+
+            case "Form submissions":
+                return await PurgeByCreatedAtAsync(db.FormSubmissions, cutoff, cancellationToken);
+
+            case "Comments":
+                return await PurgeByCreatedAtAsync(db.Comments, cutoff, cancellationToken);
+
+            default:
+                // "Security audit" (and any future category) never reaches here for automated
+                // deletion: UpdateRetentionPolicyAsync refuses to set AutomationApproved for
+                // "Security audit", and PurgeEligibleRecordsAsync only calls this for
+                // automation-approved policies.
+                return 0;
+        }
+    }
+
+    // SQLite/EF Core can't translate a server-side range filter on a DateTimeOffset column, and
+    // these two categories have no Unix-seconds shadow column (unlike WebAnalyticsEvent) - so,
+    // same as CountEligibleAsync below, this materializes CreatedAt to filter client-side, then
+    // deletes only the matching rows by Id rather than re-fetching/removing full entities twice.
+    private async Task<int> PurgeByCreatedAtAsync<T>(
+        Microsoft.EntityFrameworkCore.DbSet<T> set, DateTimeOffset cutoff, CancellationToken cancellationToken)
+        where T : GwsBusinessSuite.Domain.Common.AuditableEntity
+    {
+        var candidates = await set.AsNoTracking()
+            .Select(x => new { x.Id, x.CreatedAt })
+            .ToListAsync(cancellationToken);
+        var expiredIds = candidates.Where(x => x.CreatedAt < cutoff).Select(x => x.Id).ToHashSet();
+        if (expiredIds.Count == 0) return 0;
+
+        var expiredRows = await set.Where(x => expiredIds.Contains(x.Id)).ToListAsync(cancellationToken);
+        set.RemoveRange(expiredRows);
+        await db.SaveChangesAsync(cancellationToken);
+        return expiredRows.Count;
+    }
+
     private async Task<int> CountEligibleAsync(PrivacyRetentionPolicy policy, CancellationToken cancellationToken)
     {
         var cutoff = UtcNow.AddDays(-policy.RetentionDays);

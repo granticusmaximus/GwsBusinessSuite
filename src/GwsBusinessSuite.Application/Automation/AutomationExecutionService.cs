@@ -248,6 +248,16 @@ public sealed class AutomationExecutionService(
         Frontier frontier,
         CancellationToken cancellationToken)
     {
+        // Resolved once per run (not per node) and threaded down to nodes that need to check
+        // the workflow owner's own Sentinel access rather than acting with unrestricted power -
+        // see ExecuteSetRowPropertyAsync's ownership/scoping check for why this matters: a
+        // workflow author could otherwise write to any Sentinel database regardless of who
+        // owns it.
+        var workflowOwnerUsername = await db.AutomationWorkflows.AsNoTracking()
+            .Where(item => item.Id == execution.WorkflowId)
+            .Select(item => item.CreatedBy)
+            .FirstOrDefaultAsync(cancellationToken);
+
         var nodesById = snapshot.Nodes.ToDictionary(node => node.Id);
         var outgoing = snapshot.Connections.GroupBy(connection => connection.SourceNodeId).ToDictionary(group => group.Key, group => group.ToList());
         var incomingPorts = snapshot.Connections.GroupBy(connection => connection.TargetNodeId).ToDictionary(
@@ -287,7 +297,7 @@ public sealed class AutomationExecutionService(
 
             var result = node.IsDisabled
                 ? SingleItemResult("main", nodeInput)
-                : await ExecuteNodeWithEvidenceAsync(execution, node, nodeInput, cancellationToken);
+                : await ExecuteNodeWithEvidenceAsync(execution, node, nodeInput, workflowOwnerUsername, cancellationToken);
             var latestItem = result.Outputs.Values.SelectMany(items => items).LastOrDefault();
             if (latestItem.ValueKind != JsonValueKind.Undefined) frontier.LastOutput = latestItem.Clone();
 
@@ -386,6 +396,7 @@ public sealed class AutomationExecutionService(
         AutomationExecution execution,
         AutomationNodeSnapshot node,
         JsonElement input,
+        string? workflowOwnerUsername,
         CancellationToken cancellationToken)
     {
         var maxAttempts = node.RetryOnFail ? Math.Clamp(node.MaxTries, 1, 10) : 1;
@@ -414,8 +425,8 @@ public sealed class AutomationExecutionService(
                     ? await credentialService.GetDecryptedDataAsync(node.CredentialId.Value, cancellationToken)
                     : null;
                 var result = node.TimeoutMs > 0
-                    ? await ExecuteWithTimeoutAsync(node, input, credentialJson, cancellationToken)
-                    : await nodeRegistry.ExecuteAsync(node, input, credentialJson, cancellationToken);
+                    ? await ExecuteWithTimeoutAsync(node, input, credentialJson, workflowOwnerUsername, cancellationToken)
+                    : await nodeRegistry.ExecuteAsync(node, input, credentialJson, workflowOwnerUsername, cancellationToken);
                 var finishedAt = timeProvider.GetUtcNow();
                 evidence.Status = AutomationExecutionStatuses.Succeeded;
                 evidence.OutputJson = result.DisplayOutputJson;
@@ -452,6 +463,7 @@ public sealed class AutomationExecutionService(
         AutomationNodeSnapshot node,
         JsonElement input,
         string? credentialJson,
+        string? workflowOwnerUsername,
         CancellationToken cancellationToken)
     {
         var timeoutMs = Math.Clamp(node.TimeoutMs, 100, 600_000);
@@ -459,7 +471,7 @@ public sealed class AutomationExecutionService(
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token);
         try
         {
-            return await nodeRegistry.ExecuteAsync(node, input, credentialJson, linked.Token);
+            return await nodeRegistry.ExecuteAsync(node, input, credentialJson, workflowOwnerUsername, linked.Token);
         }
         catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {

@@ -48,6 +48,48 @@ public sealed class SentinelAccessServiceTests
     }
 
     [Fact]
+    public async Task VerifySharePasswordAsync_ShouldHashWithPbkdf2AndStillVerifyLegacySha256Shares()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var targetId = Guid.NewGuid();
+        var created = await fixture.Service.CreatePublicShareAsync(targetId, false, null, false, "hunter2", "owner");
+
+        var entity = await fixture.Db.SentinelPublicShares.SingleAsync(item => item.Id == created.Id);
+        entity.PasswordHash.Should().StartWith("pbkdf2:", "new shares must be stretched, not bare SHA-256");
+
+        // Simulate a share created before this fix, which stored a bare
+        // SHA-256(salt+password) hex digest with no algorithm prefix.
+        var legacySalt = entity.PasswordSalt!;
+        entity.PasswordHash = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(legacySalt + "legacy-pass"))).ToLowerInvariant();
+        await fixture.Db.SaveChangesAsync();
+
+        (await fixture.Service.VerifySharePasswordAsync(created.Id, "legacy-pass")).Should().BeTrue();
+        (await fixture.Service.VerifySharePasswordAsync(created.Id, "wrong")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task VerifySharePasswordAsync_ShouldLockOutAfterRepeatedWrongGuessesEvenWithTheCorrectPasswordLater()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var targetId = Guid.NewGuid();
+        var created = await fixture.Service.CreatePublicShareAsync(targetId, false, null, false, "hunter2", "owner");
+
+        for (var i = 0; i < 5; i++)
+        {
+            (await fixture.Service.VerifySharePasswordAsync(created.Id, "wrong")).Should().BeFalse();
+        }
+
+        // The 5th wrong guess should have tripped the lockout, so even the correct password
+        // is rejected until the lockout window elapses.
+        (await fixture.Service.VerifySharePasswordAsync(created.Id, "hunter2")).Should().BeFalse();
+
+        var entity = await fixture.Db.SentinelPublicShares.SingleAsync(item => item.Id == created.Id);
+        entity.PasswordLockedUntil.Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task RecordShareViewAsync_ShouldIncrementViewCountAndStampLastAccessedAt()
     {
         await using var fixture = await Fixture.CreateAsync();

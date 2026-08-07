@@ -1,7 +1,10 @@
+@implements IAsyncDisposable
 @using GwsBusinessSuite.Application.Abstractions
 @using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Domain.Entities
+@using GwsBusinessSuite.Web.Services
 @inject ISentinelAiService SentinelAiService
+@inject SentinelGptGenerationCoordinator GenerationCoordinator
 @inject ICurrentUserAccessor CurrentUserAccessor
 
 <div class="sentinel-ai-panel">
@@ -23,6 +26,10 @@
                     @if (_running) { <span class="spinner-border spinner-border-sm me-1"></span> }
                     Generate
                 </button>
+                @if (_running)
+                {
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="StopGeneration">Stop</button>
+                }
                 <span class="small text-danger">@_error</span>
             </div>
             @if (_running && _liveOutput.Length > 0)
@@ -80,14 +87,21 @@
         (SentinelAiActions.Rewrite, "Rewrite"), (SentinelAiActions.Translate, "Translate"),
         (SentinelAiActions.Research, "Research"), (SentinelAiActions.MeetingNotes, "Meeting notes")
     ];
+    // Owns only the polling loop's lifetime, not the generation itself - the coordinator keeps
+    // the actual Ollama request running server-side even after this component (and its circuit)
+    // is gone, matching the pattern already used by SentinelGpt.razor's chat page.
+    private readonly CancellationTokenSource _componentLifetime = new();
     private bool _open;
     private bool _running;
+    private bool _stoppingGeneration;
     private string _action = SentinelAiActions.Ask;
     private string _instruction = string.Empty;
     private string _error = string.Empty;
     private string _liveOutput = string.Empty;
     private SentinelAiRunView? _current;
     private List<SentinelAiRunView> _runs = [];
+    private Guid? _activeGenerationId;
+    private string _username = string.Empty;
 
     private string InstructionPlaceholder => _action switch
     {
@@ -97,6 +111,25 @@
         SentinelAiActions.Research => "What should SentinelGPT investigate across the workspace?",
         _ => "Ask about this page or the wider workspace…"
     };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+
+        // Resume an in-flight generation this panel started before a page refresh or a
+        // reconnected circuit - the coordinator kept it running the whole time.
+        var active = GenerationCoordinator.GetActive(_username);
+        if (active is { ConversationId: null })
+        {
+            _open = true;
+            _running = true;
+            _activeGenerationId = active.Id;
+            _action = active.Action ?? _action;
+            _instruction = active.Instruction;
+            _liveOutput = active.Output;
+            _ = InvokeAsync(() => MonitorGenerationAsync(active.Id));
+        }
+    }
 
     private async Task ToggleAsync()
     {
@@ -110,35 +143,94 @@
         _error = string.Empty;
         _liveOutput = string.Empty;
         _current = null;
+
+        Guid generationId;
         try
         {
-            var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
-            await foreach (var chunk in SentinelAiService.StreamAsync(WikiPageId, _action, _instruction, user))
+            var generation = await GenerationCoordinator.StartActionAsync(WikiPageId, _action, _instruction, _username);
+            generationId = generation.Id;
+            _activeGenerationId = generationId;
+        }
+        catch (InvalidOperationException ex)
+        {
+            _error = ex.Message;
+            _running = false;
+            return;
+        }
+
+        await MonitorGenerationAsync(generationId);
+    }
+
+    private async Task MonitorGenerationAsync(Guid generationId)
+    {
+        try
+        {
+            while (true)
             {
-                if (chunk.CompletedRun is not null)
+                _componentLifetime.Token.ThrowIfCancellationRequested();
+                var snapshot = GenerationCoordinator.Get(generationId, _username);
+                if (snapshot is null)
                 {
-                    _current = chunk.CompletedRun;
-                    _runs.Insert(0, _current);
+                    _error = "The active SentinelGPT response is no longer available.";
+                    return;
                 }
-                else
+
+                _liveOutput = snapshot.Output;
+
+                if (snapshot.Status == SentinelGptGenerationStatuses.Failed)
                 {
-                    _liveOutput += chunk.Delta;
+                    _error = snapshot.Error ?? "SentinelGPT generation failed.";
+                    return;
                 }
-                StateHasChanged();
+
+                if (snapshot.Status == SentinelGptGenerationStatuses.Cancelled)
+                {
+                    return;
+                }
+
+                if (snapshot.Status == SentinelGptGenerationStatuses.Completed)
+                {
+                    if (snapshot.CompletedRun is { } completed)
+                    {
+                        _current = completed;
+                        _runs.Insert(0, completed);
+                    }
+                    return;
+                }
+
+                await InvokeAsync(StateHasChanged);
+                await Task.Delay(100, _componentLifetime.Token);
             }
         }
-        catch (Exception ex) { _error = ex.Message; }
+        catch (OperationCanceledException) when (_componentLifetime.IsCancellationRequested)
+        {
+            // The component was disposed (navigation, tab close, lost circuit). The
+            // server-owned coordinator intentionally keeps generating.
+        }
         finally
         {
             _running = false;
             _liveOutput = string.Empty;
+            _activeGenerationId = null;
+            if (!_componentLifetime.IsCancellationRequested)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
         }
+    }
+
+    private void StopGeneration()
+    {
+        if (_activeGenerationId is not { } generationId || _stoppingGeneration) return;
+        _stoppingGeneration = true;
+        GenerationCoordinator.Cancel(generationId, _username);
+        _stoppingGeneration = false;
     }
 
     private async Task ApproveAndInsertAsync()
     {
         if (_current is null) return;
-        await SentinelAiService.ReviewAsync(_current.Id, true, await CurrentUserAccessor.GetCurrentUsernameAsync());
+        await SentinelAiService.ReviewAsync(_current.Id, true, _username);
         await OnInsert.InvokeAsync(_current.Output);
         _current = null;
     }
@@ -146,7 +238,14 @@
     private async Task RejectAsync()
     {
         if (_current is null) return;
-        await SentinelAiService.ReviewAsync(_current.Id, false, await CurrentUserAccessor.GetCurrentUsernameAsync());
+        await SentinelAiService.ReviewAsync(_current.Id, false, _username);
         _current = null;
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _componentLifetime.Cancel();
+        _componentLifetime.Dispose();
+        return ValueTask.CompletedTask;
     }
 }

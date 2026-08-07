@@ -1329,6 +1329,89 @@ public sealed class NotionSyncServiceTests
         (await fixture.Service.GetPendingConflictsAsync()).Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task SyncAsync_ShouldKeepDetectingAnUnresolvedConflictAcrossRepeatedSyncPasses()
+    {
+        // Regression guard for a real finding: NotionLastEditedAt (the watermark
+        // concurrent-edit detection compares against) previously advanced unconditionally
+        // whenever remote content was available, even when a conflict was detected and local
+        // content was deliberately left untouched. That meant a SECOND sync pass no longer saw
+        // the same remote edit as "unaccounted for" (the watermark had already caught up to
+        // it), silently fell through to the normal apply path, and would have overwritten
+        // local content that was never actually reconciled - the conflict was never resolved,
+        // it just stopped being detected. This runs three sync passes with the conflict never
+        // resolved in between and asserts local content survives all of them, the conflict
+        // record's local snapshot reflects the latest local edit each time (not frozen at the
+        // first detection), and exactly one pending conflict exists throughout (updated in
+        // place, not duplicated).
+        await using var fixture = await SyncFixture.CreateAsync();
+        var firstEdit = DateTimeOffset.Parse("2026-07-27T18:00:00Z");
+        fixture.Notion.SearchResults = [Page("page-1", "Baseline", lastEditedAt: firstEdit)];
+        fixture.Notion.BlockChildren["page-1"] =
+        [
+            Json("""{"id":"block-1","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Remote baseline"}]}}""")
+        ];
+        (await fixture.Service.SyncAsync()).IsSuccess.Should().BeTrue();
+        var page = await fixture.Db.WikiPages.SingleAsync(item => item.NotionId == "page-1");
+
+        void SetLocalContent(string text)
+        {
+            page.BlocksJson = WikiBlockJson.Serialize(
+            [
+                new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0, [new WikiRichTextSpan(text)], new Dictionary<string, string>())
+            ]);
+            page.UpdatedBy = "grant";
+            page.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        SetLocalContent("Local edit 1");
+        await fixture.Db.SaveChangesAsync();
+
+        var remoteEdit = firstEdit.AddMinutes(10);
+        fixture.Notion.SearchResults = [Page("page-1", "Baseline", lastEditedAt: remoteEdit)];
+        fixture.Notion.BlockChildren["page-1"] =
+        [
+            Json("""{"id":"block-1","type":"paragraph","has_children":false,"paragraph":{"rich_text":[{"plain_text":"Notion content"}]}}""")
+        ];
+
+        // Pass 1: conflict detected.
+        (await fixture.Service.SyncAsync()).IsSuccess.Should().BeTrue();
+        await fixture.Db.Entry(page).ReloadAsync();
+        WikiBlockJson.ParseBlocks(page.BlocksJson).Single().PlainText.Should().Be("Local edit 1");
+        var firstPassConflict = (await fixture.Service.GetPendingConflictsAsync()).Single(c => c.FieldName == "content");
+
+        // User keeps editing locally while the conflict sits unresolved.
+        SetLocalContent("Local edit 2");
+        await fixture.Db.SaveChangesAsync();
+
+        // Pass 2: same unresolved remote edit - must still be detected, not silently applied.
+        (await fixture.Service.SyncAsync()).IsSuccess.Should().BeTrue();
+        await fixture.Db.Entry(page).ReloadAsync();
+        WikiBlockJson.ParseBlocks(page.BlocksJson).Single().PlainText.Should().Be("Local edit 2",
+            "the still-unresolved conflict must not let Notion's content silently overwrite the newer local edit");
+        var conflictsAfterPass2 = await fixture.Service.GetPendingConflictsAsync();
+        conflictsAfterPass2.Where(c => c.FieldName == "content").Should().ContainSingle(
+            "the conflict must be updated in place across repeated passes, not duplicated");
+        var secondPassConflict = conflictsAfterPass2.Single(c => c.FieldName == "content");
+        secondPassConflict.Id.Should().Be(firstPassConflict.Id);
+        secondPassConflict.LocalValueJson.Should().Contain("Local edit 2",
+            "the conflict's local snapshot must track the latest local edit, not stay frozen at the first detection");
+
+        // Pass 3: still unresolved - content must still survive a third pass.
+        SetLocalContent("Local edit 3");
+        await fixture.Db.SaveChangesAsync();
+        (await fixture.Service.SyncAsync()).IsSuccess.Should().BeTrue();
+        await fixture.Db.Entry(page).ReloadAsync();
+        WikiBlockJson.ParseBlocks(page.BlocksJson).Single().PlainText.Should().Be("Local edit 3");
+
+        // Resolving now must apply cleanly.
+        var finalConflict = (await fixture.Service.GetPendingConflictsAsync()).Single(c => c.FieldName == "content");
+        await fixture.Service.ResolveConflictAsync(finalConflict.Id, NotionConflictResolutions.UseNotion, "grant");
+        await fixture.Db.Entry(page).ReloadAsync();
+        WikiBlockJson.ParseBlocks(page.BlocksJson).Single().PlainText.Should().Be("Notion content");
+        (await fixture.Service.GetPendingConflictsAsync()).Should().BeEmpty();
+    }
+
     private static JsonElement Page(
         string id,
         string title,

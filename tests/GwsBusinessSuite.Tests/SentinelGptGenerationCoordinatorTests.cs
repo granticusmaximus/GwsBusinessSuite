@@ -96,6 +96,50 @@ public sealed class SentinelGptGenerationCoordinatorTests
         coordinator.Cancel(started.Id, "grant").Should().BeFalse();
     }
 
+    [Fact]
+    public async Task StartActionAsync_ShouldRunOutsideAConversationAndSurviveWithoutAWaitingCaller()
+    {
+        // Regression guard for routing SentinelAiPanel through the coordinator: the panel's
+        // quick-action flow (Ask/Summarize/...) has no conversation, unlike the chat page's
+        // StartAsync, but must still run as a circuit-independent, poll-able job.
+        var sentinel = new ControllableSentinelAiService();
+        var coordinator = CreateCoordinator(sentinel);
+        var wikiPageId = Guid.NewGuid();
+
+        var started = await coordinator.StartActionAsync(wikiPageId, SentinelAiActions.Summarize, "Summarize this page.", "grant");
+        await sentinel.Started.Task.WaitAsync(TestTimeout);
+
+        started.ConversationId.Should().BeNull();
+        started.Action.Should().Be(SentinelAiActions.Summarize);
+        sentinel.LastAction.Should().Be(SentinelAiActions.Summarize);
+
+        sentinel.Release.TrySetResult();
+        var completed = await WaitForTerminalAsync(coordinator, started.Id, "grant");
+
+        completed.Status.Should().Be(SentinelGptGenerationStatuses.Completed);
+        completed.Output.Should().Be("Recovered response.");
+        completed.CompletedRun!.WikiPageId.Should().Be(wikiPageId);
+    }
+
+    [Fact]
+    public async Task StartActionAsync_AndStartAsync_ShouldShareTheSameOneJobPerUserGate()
+    {
+        // The whole point of routing the panel through the shared coordinator is protecting
+        // the single Ollama instance from two concurrent requests by the same user, whichever
+        // surface (chat page or inline panel) they came from.
+        var sentinel = new ControllableSentinelAiService();
+        var coordinator = CreateCoordinator(sentinel);
+        await coordinator.StartActionAsync(Guid.NewGuid(), SentinelAiActions.Ask, "Quick question", "grant");
+        await sentinel.Started.Task.WaitAsync(TestTimeout);
+
+        var act = () => coordinator.StartAsync(
+            Guid.NewGuid(), null, "Chat message", "grant", includeInternet: false, useDeepAnalysis: false);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*already generating*");
+        sentinel.Release.TrySetResult();
+    }
+
     private static SentinelGptGenerationCoordinator CreateCoordinator(
         ControllableSentinelAiService sentinel)
     {
@@ -179,13 +223,44 @@ public sealed class SentinelGptGenerationCoordinatorTests
                     []));
         }
 
-        public IAsyncEnumerable<SentinelAiStreamChunk> StreamAsync(
+        public string? LastAction { get; private set; }
+
+        public async IAsyncEnumerable<SentinelAiStreamChunk> StreamAsync(
             Guid? wikiPageId,
             string action,
             string instruction,
             string performedBy,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            LastAction = action;
+            Started.TrySetResult();
+            yield return new SentinelAiStreamChunk(string.Empty, null, "Thinking");
+            try
+            {
+                await Release.Task.WaitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                CancellationObserved.TrySetResult();
+                throw;
+            }
+            yield return new SentinelAiStreamChunk("Recovered ", null);
+            yield return new SentinelAiStreamChunk("response.", null);
+            yield return new SentinelAiStreamChunk(
+                string.Empty,
+                new SentinelAiRunView(
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    wikiPageId,
+                    action,
+                    instruction,
+                    "Recovered response.",
+                    "completed",
+                    SentinelGptDefaults.Model,
+                    performedBy,
+                    DateTimeOffset.UtcNow,
+                    []));
+        }
 
         public IAsyncEnumerable<SentinelAiStreamChunk> StreamConversationAsync(
             Guid conversationId,

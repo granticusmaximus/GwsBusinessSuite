@@ -36,24 +36,53 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
             return null;
         }
 
-        var relatedDatabaseIds = database.Properties
-            .Where(property => property.Type == WikiDatabasePropertyTypes.Relation)
-            .Select(property => WikiDatabasePropertyConfig.Parse(property).RelatedDatabaseId)
-            .Where(id => id.HasValue && id.Value != wikiDatabaseId)
-            .Select(id => id!.Value)
-            .Distinct()
-            .ToList();
-        var relatedDatabases = relatedDatabaseIds.Count == 0
-            ? []
-            : await dbContext.WikiDatabases.AsNoTracking()
-                .Where(item => relatedDatabaseIds.Contains(item.Id))
+        var relatedDatabases = await LoadRelatedDatabasesTransitivelyAsync(database, cancellationToken);
+
+        WikiDatabaseComputation.Materialize(database, relatedDatabases);
+        return database;
+    }
+
+    // A rollup can aggregate another database's own Rollup property (rollup-of-a-rollup), which
+    // needs THAT database's own related databases resolved too - so this has to keep following
+    // Relation properties transitively, not stop at directly-related databases, or a two-hop
+    // chain fails to resolve with "#REF! Related database missing". visitedDatabaseIds also
+    // protects against a relation cycle (A relates to B, B relates back to A) turning this into
+    // an infinite fetch loop.
+    private async Task<Dictionary<Guid, WikiDatabase>> LoadRelatedDatabasesTransitivelyAsync(
+        WikiDatabase database, CancellationToken cancellationToken)
+    {
+        var visitedDatabaseIds = new HashSet<Guid> { database.Id };
+        var relatedDatabases = new Dictionary<Guid, WikiDatabase>();
+        var frontier = RelatedDatabaseIds(database, visitedDatabaseIds);
+
+        while (frontier.Count > 0)
+        {
+            var batch = await dbContext.WikiDatabases.AsNoTracking()
+                .Where(item => frontier.Contains(item.Id))
                 .Include(item => item.Properties)
                 .Include(item => item.Rows)
                 .ToListAsync(cancellationToken);
+            foreach (var related in batch)
+            {
+                relatedDatabases[related.Id] = related;
+            }
 
-        WikiDatabaseComputation.Materialize(database, relatedDatabases.ToDictionary(item => item.Id));
-        return database;
+            frontier = batch
+                .SelectMany(related => RelatedDatabaseIds(related, visitedDatabaseIds))
+                .Distinct()
+                .ToList();
+        }
+
+        return relatedDatabases;
     }
+
+    private static List<Guid> RelatedDatabaseIds(WikiDatabase database, HashSet<Guid> visitedDatabaseIds) =>
+        database.Properties
+            .Where(property => property.Type == WikiDatabasePropertyTypes.Relation)
+            .Select(property => WikiDatabasePropertyConfig.Parse(property).RelatedDatabaseId)
+            .Where(id => id.HasValue && visitedDatabaseIds.Add(id.Value))
+            .Select(id => id!.Value)
+            .ToList();
 
     public async Task<WikiDatabase> CreateDatabaseAsync(
         string title,
@@ -1175,6 +1204,25 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         string performedBy,
         CancellationToken cancellationToken = default)
     {
+        // Unlike SaveInlineCellAsync's sibling validation, this used to trust groupByPropertyId
+        // and newGroupOptionId outright - a malformed client call could overwrite an arbitrary
+        // property (including Title or a Relation, neither of which is a valid Kanban column)
+        // with a raw string, or set an option id that doesn't exist on the property at all.
+        // Board views are only ever grouped by a Select property (see AddBoardViewAsync), so
+        // that's the one type this accepts.
+        var groupByProperty = await dbContext.WikiDatabaseProperties.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == groupByPropertyId && item.WikiDatabaseId == wikiDatabaseId, cancellationToken)
+            ?? throw new KeyNotFoundException("The group-by property no longer exists.");
+        if (groupByProperty.Type != WikiDatabasePropertyTypes.Select)
+        {
+            throw new InvalidOperationException("Rows can only be grouped and moved by a Select property.");
+        }
+        if (newGroupOptionId is not null
+            && !WikiDatabasePropertyConfig.GetOptions(groupByProperty).Any(option => option.Id == newGroupOptionId))
+        {
+            throw new InvalidOperationException("The target group option no longer exists.");
+        }
+
         var row = await dbContext.WikiDatabaseRows.FirstOrDefaultAsync(item => item.Id == rowId && item.WikiDatabaseId == wikiDatabaseId, cancellationToken)
             ?? throw new InvalidOperationException("The row no longer exists.");
 

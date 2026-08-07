@@ -15,8 +15,9 @@ public static class SentinelGptGenerationStatuses
 
 public sealed record SentinelGptGenerationSnapshot(
     Guid Id,
-    Guid ConversationId,
+    Guid? ConversationId,
     Guid? WikiPageId,
+    string? Action,
     string Instruction,
     string RequestedBy,
     bool IncludeInternet,
@@ -69,7 +70,60 @@ public sealed class SentinelGptGenerationCoordinator(
         if (!SentinelGptResponseBudgets.IsSupported(maxOutputTokens))
             throw new ArgumentOutOfRangeException(nameof(maxOutputTokens), "Choose a supported response length.");
 
-        GenerationState state;
+        var state = Enqueue(
+            conversationId,
+            wikiPageId,
+            action: null,
+            instruction,
+            requestedBy,
+            includeInternet,
+            useDeepAnalysis,
+            maxOutputTokens);
+        return Task.FromResult(state.Snapshot());
+    }
+
+    /// <summary>
+    /// Same shared, circuit-independent generation slot as <see cref="StartAsync"/>, for the
+    /// single-shot action panel (Ask/Summarize/Rewrite/...) instead of a full agent
+    /// conversation. Sharing one coordinator - and its one-active-job-per-user gate - across
+    /// both entry points is what actually protects the single Ollama instance from two
+    /// concurrent requests from the same user, whichever surface they came from.
+    /// </summary>
+    public Task<SentinelGptGenerationSnapshot> StartActionAsync(
+        Guid? wikiPageId,
+        string action,
+        string instruction,
+        string requestedBy)
+    {
+        if (string.IsNullOrWhiteSpace(action))
+            throw new ArgumentException("An action is required.", nameof(action));
+        if (string.IsNullOrWhiteSpace(instruction))
+            throw new ArgumentException("An instruction is required.", nameof(instruction));
+        if (string.IsNullOrWhiteSpace(requestedBy))
+            throw new ArgumentException("A requesting user is required.", nameof(requestedBy));
+
+        var state = Enqueue(
+            conversationId: null,
+            wikiPageId,
+            action.Trim(),
+            instruction,
+            requestedBy,
+            includeInternet: false,
+            useDeepAnalysis: false,
+            SentinelGptResponseBudgets.Standard);
+        return Task.FromResult(state.Snapshot());
+    }
+
+    private GenerationState Enqueue(
+        Guid? conversationId,
+        Guid? wikiPageId,
+        string? action,
+        string instruction,
+        string requestedBy,
+        bool includeInternet,
+        bool useDeepAnalysis,
+        int maxOutputTokens)
+    {
         lock (_startGate)
         {
             PruneCompleted();
@@ -85,10 +139,11 @@ public sealed class SentinelGptGenerationCoordinator(
             }
 
             var now = timeProvider.GetUtcNow();
-            state = new GenerationState(
+            var state = new GenerationState(
                 Guid.NewGuid(),
                 conversationId,
                 wikiPageId,
+                action,
                 instruction.Trim(),
                 requestedBy,
                 includeInternet,
@@ -96,12 +151,12 @@ public sealed class SentinelGptGenerationCoordinator(
                 maxOutputTokens,
                 now);
             _jobs[state.Id] = state;
-        }
 
-        _ = Task.Run(
-            () => RunAsync(state, applicationLifetime.ApplicationStopping),
-            CancellationToken.None);
-        return Task.FromResult(state.Snapshot());
+            _ = Task.Run(
+                () => RunAsync(state, applicationLifetime.ApplicationStopping),
+                CancellationToken.None);
+            return state;
+        }
     }
 
     public SentinelGptGenerationSnapshot? Get(Guid id, string requestedBy)
@@ -146,15 +201,23 @@ public sealed class SentinelGptGenerationCoordinator(
         {
             await using var scope = scopeFactory.CreateAsyncScope();
             var sentinelGpt = scope.ServiceProvider.GetRequiredService<ISentinelAiService>();
-            await foreach (var chunk in sentinelGpt.StreamAgentConversationAsync(
-                state.ConversationId,
-                state.WikiPageId,
-                state.Instruction,
-                state.RequestedBy,
-                state.IncludeInternet,
-                state.UseDeepAnalysis,
-                state.MaxOutputTokens,
-                generationToken.Token))
+            var stream = state.ConversationId is { } conversationId
+                ? sentinelGpt.StreamAgentConversationAsync(
+                    conversationId,
+                    state.WikiPageId,
+                    state.Instruction,
+                    state.RequestedBy,
+                    state.IncludeInternet,
+                    state.UseDeepAnalysis,
+                    state.MaxOutputTokens,
+                    generationToken.Token)
+                : sentinelGpt.StreamAsync(
+                    state.WikiPageId,
+                    state.Action!,
+                    state.Instruction,
+                    state.RequestedBy,
+                    generationToken.Token);
+            await foreach (var chunk in stream)
             {
                 state.Apply(chunk, timeProvider.GetUtcNow());
             }
@@ -211,8 +274,9 @@ public sealed class SentinelGptGenerationCoordinator(
 
         public GenerationState(
             Guid id,
-            Guid conversationId,
+            Guid? conversationId,
             Guid? wikiPageId,
+            string? action,
             string instruction,
             string requestedBy,
             bool includeInternet,
@@ -223,6 +287,7 @@ public sealed class SentinelGptGenerationCoordinator(
             Id = id;
             ConversationId = conversationId;
             WikiPageId = wikiPageId;
+            Action = action;
             Instruction = instruction;
             RequestedBy = requestedBy;
             IncludeInternet = includeInternet;
@@ -233,8 +298,9 @@ public sealed class SentinelGptGenerationCoordinator(
         }
 
         public Guid Id { get; }
-        public Guid ConversationId { get; }
+        public Guid? ConversationId { get; }
         public Guid? WikiPageId { get; }
+        public string? Action { get; }
         public string Instruction { get; }
         public string RequestedBy { get; }
         public bool IncludeInternet { get; }
@@ -387,6 +453,7 @@ public sealed class SentinelGptGenerationCoordinator(
                     Id,
                     ConversationId,
                     WikiPageId,
+                    Action,
                     Instruction,
                     RequestedBy,
                     IncludeInternet,

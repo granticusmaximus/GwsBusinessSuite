@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.RegularExpressions;
 using GwsBusinessSuite.Domain.Entities;
+using Markdig;
 
 namespace GwsBusinessSuite.Application.Articles;
 
@@ -15,6 +16,11 @@ public static class ArticleMarkdownRenderer
 {
     private static readonly Regex OrphanTokenPattern = new(@"\{\{CJ_AD_[A-Za-z0-9_]+\}\}", RegexOptions.Compiled);
 
+    private static readonly MarkdownPipeline PreviewPipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .DisableHtml()
+        .Build();
+
     public readonly record struct AffiliatePlacementMarkup(
         string SlotToken,
         string AdvertiserName,
@@ -27,6 +33,20 @@ public static class ArticleMarkdownRenderer
 
     public static string Render(string markdown, IReadOnlyList<ArticleAffiliatePlacement> placements)
         => Render(markdown, placements.Select(ToMarkup).ToArray());
+
+    /// <summary>
+    /// Renders body markdown to HTML for admin preview surfaces (the article editor's live
+    /// preview, which can be showing an AI-suggested draft from SentinelAiPanel/SentinelGPT).
+    /// Unlike Render() above, the markdown is turned into HTML - with raw HTML passthrough
+    /// disabled - *before* ad-card tokens are substituted, not after. That means any literal
+    /// HTML actually typed/suggested in the body (including anything an AI response echoed
+    /// from externally scraped content) comes out escaped instead of executing as live markup,
+    /// while the {{CJ_AD_*}} tokens still survive the render pass as plain text (curly braces
+    /// have no Markdown/HTML meaning) and get swapped for the real, locally-built ad-card
+    /// markup exactly as before.
+    /// </summary>
+    public static string RenderPreviewHtml(string markdown, IReadOnlyList<ArticleAffiliatePlacement> placements)
+        => Render(Markdown.ToHtml(markdown, PreviewPipeline), placements);
 
     public static string Render(
         string markdown,

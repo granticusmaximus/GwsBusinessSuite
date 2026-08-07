@@ -267,8 +267,27 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .WithMany()
             .HasForeignKey(x => x.CategoryId)
             .OnDelete(DeleteBehavior.SetNull);
+        // CmsPage/CmsPageCategory/GlobalBlock.SiteId had no FK to CmsSite at all - deleting a
+        // site orphaned its entire page tree, categories, and global blocks with no DB-level
+        // integrity or cascade path. Cascade matches how deleting a site is actually meant to
+        // work (it takes its whole tree with it), not a soft "leave the orphans behind" default.
+        modelBuilder.Entity<CmsPage>()
+            .HasOne<CmsSite>()
+            .WithMany()
+            .HasForeignKey(x => x.SiteId)
+            .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<CmsPageCategory>().HasIndex(x => new { x.SiteId, x.Slug }).IsUnique();
+        modelBuilder.Entity<CmsPageCategory>()
+            .HasOne<CmsSite>()
+            .WithMany()
+            .HasForeignKey(x => x.SiteId)
+            .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<GlobalBlock>().HasIndex(x => new { x.SiteId, x.Kind, x.Name });
+        modelBuilder.Entity<GlobalBlock>()
+            .HasOne<CmsSite>()
+            .WithMany()
+            .HasForeignKey(x => x.SiteId)
+            .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<FormSubmission>().HasIndex(x => new { x.PageId, x.CreatedAt });
         modelBuilder.Entity<Comment>().HasIndex(x => new { x.ArticleId, x.Status });
         modelBuilder.Entity<Comment>()
@@ -276,9 +295,23 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .WithMany()
             .HasForeignKey(x => x.ParentCommentId)
             .OnDelete(DeleteBehavior.SetNull);
+        // Comment.ArticleId had no FK to Article - deleting an article orphaned its comments
+        // with no cascade or DB-level integrity.
+        modelBuilder.Entity<Comment>()
+            .HasOne<Article>()
+            .WithMany()
+            .HasForeignKey(x => x.ArticleId)
+            .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<DockerHealthAlert>().HasIndex(x => new { x.ContainerName, x.IsRead });
         modelBuilder.Entity<DockerActionLog>().HasIndex(x => new { x.ContainerName, x.CreatedAt });
         modelBuilder.Entity<CmsPageRevision>().HasIndex(x => new { x.PageId, x.RevisionNumber }).IsUnique();
+        // CmsPageRevision.PageId had no FK to CmsPage - deleting a page orphaned its revision
+        // history with no cascade or DB-level integrity.
+        modelBuilder.Entity<CmsPageRevision>()
+            .HasOne<CmsPage>()
+            .WithMany()
+            .HasForeignKey(x => x.PageId)
+            .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<SeoArticleDraft>().HasIndex(x => x.Status);
         modelBuilder.Entity<SeoArticleAffiliatePlacement>()
             .HasOne(x => x.Draft)
@@ -345,9 +378,13 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<ArticleAffiliateClick>().HasIndex(x => new { x.PlacementId, x.CreatedAt });
         modelBuilder.Entity<ArticleAffiliateClick>().HasIndex(x => new { x.AdvertiserId, x.CreatedAt });
+        // Backs AffiliateAnalyticsService.GetDashboardAsync's bounded recent-window query -
+        // see CreatedAtUnixSeconds's own comment on ArticleAffiliateClick.
+        modelBuilder.Entity<ArticleAffiliateClick>().HasIndex(x => x.CreatedAtUnixSeconds);
 
         modelBuilder.Entity<CjCommissionRecord>().HasIndex(x => x.ExternalId).IsUnique();
         modelBuilder.Entity<CjCommissionRecord>().HasIndex(x => x.AdvertiserId);
+        modelBuilder.Entity<CjCommissionRecord>().HasIndex(x => x.CreatedAtUnixSeconds);
 
         modelBuilder.Entity<WebAnalyticsEvent>().HasIndex(x => new { x.OccurredAtUnixSeconds, x.EventName });
         modelBuilder.Entity<WebAnalyticsEvent>().HasIndex(x => new { x.SessionKey, x.OccurredAtUnixSeconds });
