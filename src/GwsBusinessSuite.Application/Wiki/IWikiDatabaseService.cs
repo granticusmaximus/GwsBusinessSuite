@@ -12,6 +12,7 @@ public interface IWikiDatabaseService
     Task<WikiDatabaseTemplateSnapshot> CreateTemplateSnapshotAsync(Guid wikiDatabaseId, CancellationToken cancellationToken = default);
     Task<WikiDatabase> CreateDatabaseFromTemplateAsync(WikiDatabaseTemplateSnapshot snapshot, Guid? parentWikiPageId, string performedBy, CancellationToken cancellationToken = default);
     Task<WikiDatabase> RenameDatabaseAsync(Guid wikiDatabaseId, string title, string? icon, string performedBy, CancellationToken cancellationToken = default);
+    Task<WikiDatabase> SetDatabaseLockAsync(Guid wikiDatabaseId, bool isLocked, string performedBy, CancellationToken cancellationToken = default);
 
     // Soft-delete: unlike TrashPageAsync, this does not cascade to the database's rows - they
     // stay physically untouched and are simply hidden transitively because the database itself
@@ -25,6 +26,11 @@ public interface IWikiDatabaseService
     Task DeletePropertyAsync(Guid wikiDatabaseId, Guid propertyId, string performedBy, CancellationToken cancellationToken = default);
 
     Task<WikiDatabaseRow> SaveRowAsync(Guid wikiDatabaseId, WikiDatabaseRowEditor editor, string performedBy, CancellationToken cancellationToken = default);
+    Task<WikiDatabaseCsvImportResult> ImportCsvAsync(Guid wikiDatabaseId, string csv, string performedBy, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<WikiDatabaseRowTemplate>> ListRowTemplatesAsync(Guid wikiDatabaseId, CancellationToken cancellationToken = default);
+    Task<WikiDatabaseRowTemplate> CreateRowTemplateFromRowAsync(Guid wikiDatabaseId, Guid sourceRowId, string name, string performedBy, CancellationToken cancellationToken = default);
+    Task<WikiDatabaseRow> CreateRowFromTemplateAsync(Guid wikiDatabaseId, Guid templateId, Guid? parentRowId, string performedBy, CancellationToken cancellationToken = default);
+    Task DeleteRowTemplateAsync(Guid wikiDatabaseId, Guid templateId, CancellationToken cancellationToken = default);
 
     // Row-level soft-delete, independent of TrashDatabaseAsync - for trashing a single row
     // without trashing the whole database. Reference cleanup (removing this row from other
@@ -34,6 +40,9 @@ public interface IWikiDatabaseService
     Task RestoreRowAsync(Guid wikiDatabaseId, Guid rowId, string performedBy, CancellationToken cancellationToken = default);
     Task DeleteRowPermanentlyAsync(Guid wikiDatabaseId, Guid rowId, string performedBy, CancellationToken cancellationToken = default);
     Task<WikiInlineDatabaseSnapshot?> GetInlineDatabaseAsync(Guid wikiDatabaseId, CancellationToken cancellationToken = default);
+    // A linked database is a live projection of one canonical saved view. It reuses the
+    // source rows (edits write through) while applying that view's shared filters and sorts.
+    Task<WikiInlineDatabaseSnapshot?> GetLinkedDatabaseAsync(Guid wikiDatabaseId, Guid? viewId, CancellationToken cancellationToken = default);
     Task<WikiInlineDatabaseSnapshot> AddInlineRowAsync(Guid wikiDatabaseId, string performedBy, CancellationToken cancellationToken = default);
     Task<WikiInlineDatabaseSnapshot> AddInlineBoardRowAsync(Guid wikiDatabaseId, Guid groupByPropertyId, string? groupOptionId, string? title, string performedBy, CancellationToken cancellationToken = default);
     Task<WikiInlineDatabaseSnapshot> SaveInlineCellAsync(Guid wikiDatabaseId, Guid rowId, Guid propertyId, string? value, string performedBy, CancellationToken cancellationToken = default);
@@ -46,9 +55,29 @@ public interface IWikiDatabaseService
     Task<WikiDatabaseView> SaveViewAsync(Guid wikiDatabaseId, Guid? viewId, string name, string type, WikiDatabaseViewConfig config, string performedBy, CancellationToken cancellationToken = default);
     Task DeleteViewAsync(Guid wikiDatabaseId, Guid viewId, string performedBy, CancellationToken cancellationToken = default);
 
+    // Personal view overrides: a user's own Filters/Sorts/FilterGroup layered on top of a
+    // shared WikiDatabaseView without changing what other users see. Every other view setting
+    // (grouping, page property order, etc.) always comes from the shared view.
+    Task<WikiDatabaseViewConfig?> GetPersonalViewOverrideAsync(Guid viewId, string username, CancellationToken cancellationToken = default);
+    Task<WikiDatabaseViewConfig> SavePersonalViewOverrideAsync(Guid viewId, WikiDatabaseViewConfig overrideConfig, string username, CancellationToken cancellationToken = default);
+    Task ClearPersonalViewOverrideAsync(Guid viewId, string username, CancellationToken cancellationToken = default);
+
     // Bounded DB-snapshot history for a row's page body (WikiDatabaseRowRevision), mirroring
     // IWikiService's page history members exactly.
     Task<IReadOnlyList<WikiRevisionView>> GetRowHistoryAsync(Guid rowId, CancellationToken cancellationToken = default);
     Task<string?> GetRowStructuralDiffAsync(Guid rowId, Guid fromRevisionId, Guid toRevisionId, CancellationToken cancellationToken = default);
     Task<WikiDatabaseRow> RevertRowToRevisionAsync(Guid wikiDatabaseId, Guid rowId, Guid revisionId, string performedBy, CancellationToken cancellationToken = default);
+}
+
+public sealed record WikiDatabaseCsvImportResult(
+    int RowsImported,
+    int RowsSkipped,
+    int PropertiesCreated,
+    IReadOnlyList<string> Warnings);
+
+public static class WikiDatabaseCsvImportLimits
+{
+    public const int MaxFileBytes = 5 * 1024 * 1024;
+    public const int MaxRows = 10_000;
+    public const int MaxColumns = 200;
 }

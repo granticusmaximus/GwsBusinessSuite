@@ -131,17 +131,145 @@ public sealed class SentinelAccessServiceTests
     public async Task CanAccess_ShouldApplyPermissionRanksAndOwnerOverride()
     {
         await using var fixture = await Fixture.CreateAsync();
-        var targetId = Guid.NewGuid();
-        await fixture.Service.SetPermissionAsync(targetId, false, "editor", SentinelAccessLevels.Edit, "owner");
+        var target = AddPage(fixture, "Target");
+        await fixture.Service.SetPermissionAsync(target.Id, false, "editor", SentinelAccessLevels.Edit, "owner");
         fixture.Db.SentinelWorkspaceMembers.Add(new SentinelWorkspaceMember
         {
             Username = "owner", Role = SentinelWorkspaceRoles.Owner, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = "system"
         });
         await fixture.Db.SaveChangesAsync();
 
-        (await fixture.Service.CanAccessAsync(targetId, false, "editor", SentinelAccessLevels.Comment)).Should().BeTrue();
-        (await fixture.Service.CanAccessAsync(targetId, false, "editor", SentinelAccessLevels.FullAccess)).Should().BeFalse();
+        (await fixture.Service.CanAccessAsync(target.Id, false, "editor", SentinelAccessLevels.Comment)).Should().BeTrue();
+        (await fixture.Service.CanAccessAsync(target.Id, false, "editor", SentinelAccessLevels.FullAccess)).Should().BeFalse();
         (await fixture.Service.CanAccessAsync(Guid.NewGuid(), true, "owner", SentinelAccessLevels.FullAccess)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CanAccess_ShouldInheritNearestPagePermissionForNestedPagesAndDatabases()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var root = AddPage(fixture, "Root");
+        var child = AddPage(fixture, "Child", root.Id);
+        var grandchild = AddPage(fixture, "Grandchild", child.Id);
+        var database = AddDatabase(fixture, "Cases", grandchild.Id);
+        await fixture.Db.SaveChangesAsync();
+        await fixture.Service.SetPermissionAsync(root.Id, false, "member", SentinelAccessLevels.Edit, "owner");
+
+        (await fixture.Service.CanAccessAsync(grandchild.Id, false, "member", SentinelAccessLevels.Edit)).Should().BeTrue();
+        (await fixture.Service.CanAccessAsync(grandchild.Id, false, "member", SentinelAccessLevels.FullAccess)).Should().BeFalse();
+        (await fixture.Service.CanAccessAsync(database.Id, true, "member", SentinelAccessLevels.Comment)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CanAccess_ShouldLetDirectChildPermissionsNarrowInheritedAccess()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var root = AddPage(fixture, "Root");
+        var child = AddPage(fixture, "Child", root.Id);
+        var grandchild = AddPage(fixture, "Grandchild", child.Id);
+        var database = AddDatabase(fixture, "Cases", child.Id);
+        await fixture.Db.SaveChangesAsync();
+        await fixture.Service.SetPermissionAsync(root.Id, false, "member", SentinelAccessLevels.FullAccess, "owner");
+        await fixture.Service.SetPermissionAsync(child.Id, false, "member", SentinelAccessLevels.View, "owner");
+        await fixture.Service.SetPermissionAsync(database.Id, true, "member", SentinelAccessLevels.Comment, "owner");
+
+        (await fixture.Service.CanAccessAsync(child.Id, false, "member", SentinelAccessLevels.View)).Should().BeTrue();
+        (await fixture.Service.CanAccessAsync(child.Id, false, "member", SentinelAccessLevels.Comment)).Should().BeFalse();
+        (await fixture.Service.CanAccessAsync(grandchild.Id, false, "member", SentinelAccessLevels.View)).Should().BeTrue();
+        (await fixture.Service.CanAccessAsync(grandchild.Id, false, "member", SentinelAccessLevels.Comment)).Should().BeFalse();
+        (await fixture.Service.CanAccessAsync(database.Id, true, "member", SentinelAccessLevels.Comment)).Should().BeTrue();
+        (await fixture.Service.CanAccessAsync(database.Id, true, "member", SentinelAccessLevels.Edit)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CanAccess_ShouldFailClosedForCyclicOrMissingAncestorChains()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var cycleA = AddPage(fixture, "Cycle A");
+        var cycleB = AddPage(fixture, "Cycle B", cycleA.Id);
+        cycleA.ParentWikiPageId = cycleB.Id;
+
+        var missingParentId = Guid.NewGuid();
+        var brokenParent = AddPage(fixture, "Broken parent", missingParentId);
+        var brokenChild = AddPage(fixture, "Broken child", brokenParent.Id);
+        var brokenDatabase = AddDatabase(fixture, "Broken database", brokenParent.Id);
+        var missingTargetId = Guid.NewGuid();
+        await fixture.Db.SaveChangesAsync();
+
+        // These tempting grants are encountered during traversal, but neither malformed chain
+        // reaches a real root, so neither may authorize a descendant.
+        await fixture.Service.SetPermissionAsync(cycleB.Id, false, "member", SentinelAccessLevels.FullAccess, "owner");
+        await fixture.Service.SetPermissionAsync(brokenParent.Id, false, "member", SentinelAccessLevels.FullAccess, "owner");
+        await fixture.Service.SetPermissionAsync(missingTargetId, false, "member", SentinelAccessLevels.FullAccess, "owner");
+
+        (await fixture.Service.CanAccessAsync(cycleA.Id, false, "member", SentinelAccessLevels.View)).Should().BeFalse();
+        (await fixture.Service.CanAccessAsync(brokenChild.Id, false, "member", SentinelAccessLevels.View)).Should().BeFalse();
+        (await fixture.Service.CanAccessAsync(brokenDatabase.Id, true, "member", SentinelAccessLevels.View)).Should().BeFalse();
+        (await fixture.Service.CanAccessAsync(missingTargetId, false, "member", SentinelAccessLevels.View)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CanAccess_ShouldHonorDirectPermissionBeforeInspectingBrokenAncestry()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var child = AddPage(fixture, "Direct child", Guid.NewGuid());
+        var database = AddDatabase(fixture, "Direct database", child.Id);
+        await fixture.Db.SaveChangesAsync();
+        await fixture.Service.SetPermissionAsync(child.Id, false, "member", SentinelAccessLevels.View, "owner");
+        await fixture.Service.SetPermissionAsync(database.Id, true, "member", SentinelAccessLevels.Edit, "owner");
+
+        (await fixture.Service.CanAccessAsync(child.Id, false, "member", SentinelAccessLevels.View)).Should().BeTrue();
+        (await fixture.Service.CanAccessAsync(database.Id, true, "member", SentinelAccessLevels.Edit)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetAccessibleTargets_ShouldResolveMixedTreeInOneBatch()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var root = AddPage(fixture, "Root");
+        var inheritedChild = AddPage(fixture, "Inherited", root.Id);
+        var narrowedChild = AddPage(fixture, "Narrowed", root.Id);
+        var unrelated = AddPage(fixture, "Unrelated");
+        var inheritedDatabase = AddDatabase(fixture, "Inherited database", inheritedChild.Id);
+        await fixture.Db.SaveChangesAsync();
+        await fixture.Service.SetPermissionAsync(root.Id, false, "member", SentinelAccessLevels.Edit, "owner");
+        await fixture.Service.SetPermissionAsync(narrowedChild.Id, false, "member", SentinelAccessLevels.View, "owner");
+
+        var inheritedPageTarget = new SentinelAccessTarget(inheritedChild.Id, IsDatabase: false);
+        var narrowedPageTarget = new SentinelAccessTarget(narrowedChild.Id, IsDatabase: false);
+        var unrelatedPageTarget = new SentinelAccessTarget(unrelated.Id, IsDatabase: false);
+        var inheritedDatabaseTarget = new SentinelAccessTarget(inheritedDatabase.Id, IsDatabase: true);
+        var missingTarget = new SentinelAccessTarget(Guid.NewGuid(), IsDatabase: false);
+
+        var accessible = await fixture.Service.GetAccessibleTargetsAsync(
+            [inheritedPageTarget, narrowedPageTarget, unrelatedPageTarget, inheritedDatabaseTarget, missingTarget, inheritedPageTarget],
+            "member",
+            SentinelAccessLevels.Edit);
+
+        accessible.Should().BeEquivalentTo([inheritedPageTarget, inheritedDatabaseTarget]);
+    }
+
+    private static WikiPage AddPage(Fixture fixture, string title, Guid? parentWikiPageId = null)
+    {
+        var page = new WikiPage
+        {
+            Title = title,
+            Slug = $"{title.ToLowerInvariant().Replace(' ', '-')}-{Guid.NewGuid():N}",
+            ParentWikiPageId = parentWikiPageId
+        };
+        fixture.Db.WikiPages.Add(page);
+        return page;
+    }
+
+    private static WikiDatabase AddDatabase(Fixture fixture, string title, Guid? parentWikiPageId = null)
+    {
+        var database = new WikiDatabase
+        {
+            Title = title,
+            ParentWikiPageId = parentWikiPageId
+        };
+        fixture.Db.WikiDatabases.Add(database);
+        return database;
     }
 
     private sealed class Fixture : IAsyncDisposable

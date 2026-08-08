@@ -389,6 +389,13 @@ public static class WikiDatabasePropertyTypes
     // incoming values) - its ConfigJson instead names an Automation workflow to run on click.
     // Wired to actually invoke that workflow in the Automation phase of this build-out.
     public const string Button = "button";
+    // Auto-assigned once at row creation (never re-assigned on edit), scoped to the database:
+    // stored as a plain Number value, optionally rendered with a prefix - see
+    // WikiDatabasePropertyConfiguration.UniqueIdPrefix.
+    public const string UniqueId = "uniqueId";
+    // User-togglable "Verified"/"Not verified" stamp carrying who verified it and when -
+    // see WikiVerificationState.
+    public const string Verification = "verification";
 }
 
 public static class WikiDatabaseStatusGroups
@@ -434,9 +441,13 @@ public sealed class WikiDatabase : AuditableEntity
     // database does not touch its rows; they're hidden transitively because the database
     // itself is excluded from normal loads, and reappear automatically on restore.
     public DateTimeOffset? TrashedAt { get; set; }
+    // A structural lock mirrors Notion's database lock: rows remain editable and can be added,
+    // while shared schema, view, metadata, and row-template mutations are rejected server-side.
+    public bool IsLocked { get; set; }
     public ICollection<WikiDatabaseProperty> Properties { get; set; } = new List<WikiDatabaseProperty>();
     public ICollection<WikiDatabaseRow> Rows { get; set; } = new List<WikiDatabaseRow>();
     public ICollection<WikiDatabaseView> Views { get; set; } = new List<WikiDatabaseView>();
+    public ICollection<WikiDatabaseRowTemplate> RowTemplates { get; set; } = new List<WikiDatabaseRowTemplate>();
 }
 
 public sealed class WikiDatabaseProperty : AuditableEntity
@@ -480,8 +491,26 @@ public sealed class WikiDatabaseRow : AuditableEntity
     // the parent WikiDatabase's own TrashedAt, for trashing a single row without trashing the
     // whole database.
     public DateTimeOffset? TrashedAt { get; set; }
+    // Sub-items: a row nested under another row in the SAME database, distinct from Relation
+    // (which links rows across two properties/databases). Null means top-level. The database
+    // relationship uses ON DELETE SET NULL so deleting a parent promotes its children to roots.
+    public Guid? ParentRowId { get; set; }
     public WikiDatabase? WikiDatabase { get; set; }
     public ICollection<WikiDatabaseRowRevision> Revisions { get; set; } = new List<WikiDatabaseRowRevision>();
+}
+
+// A reusable starting state for new rows in one database. Property IDs remain those of the
+// owning database; materialization filters stale/system-managed keys before SaveRowAsync.
+public sealed class WikiDatabaseRowTemplate : AuditableEntity
+{
+    public Guid WikiDatabaseId { get; set; }
+    public required string Name { get; set; }
+    public required string NormalizedName { get; set; }
+    public string BlocksJson { get; set; } = "[]";
+    public string DefaultPropertyValuesJson { get; set; } = "{}";
+    public string? Icon { get; set; }
+    public string? CoverImageUrl { get; set; }
+    public WikiDatabase? WikiDatabase { get; set; }
 }
 
 // Bounded DB-snapshot history for a row's page body, mirroring WikiPageRevision exactly
@@ -511,6 +540,17 @@ public sealed class WikiDatabaseView : AuditableEntity
     public string ConfigJson { get; set; } = "{}";
     public string? NotionId { get; set; }
     public WikiDatabase? WikiDatabase { get; set; }
+}
+
+// Per-user filter/sort override layered on top of a shared WikiDatabaseView, mirroring how
+// SentinelNavigationEntry overlays per-user state on a shared target without touching it.
+// Only Filters/Sorts/FilterGroup from ConfigJson are read back out at merge time - every other
+// view setting (grouping, page property order, etc.) always stays shared.
+public sealed class WikiDatabaseViewPersonalization : AuditableEntity
+{
+    public Guid WikiDatabaseViewId { get; set; }
+    public required string Username { get; set; }
+    public string ConfigJson { get; set; } = "{}";
 }
 
 public static class CmsFontPairings

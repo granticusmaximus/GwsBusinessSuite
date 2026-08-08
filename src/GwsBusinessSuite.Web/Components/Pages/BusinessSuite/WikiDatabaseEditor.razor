@@ -22,16 +22,26 @@ else
     <div class="card border-0 shadow-sm">
         <div class="wiki-db-header card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
             <div class="wiki-db-title d-flex align-items-center gap-2 flex-grow-1 min-w-0">
-                <input class="form-control form-control-sm text-center" style="width:3rem;" @bind="_titleIcon" @bind:after="SaveMetadataAsync" maxlength="4" placeholder="🗄️" />
-                <input class="form-control form-control-sm fw-semibold" @bind="_title" @bind:after="SaveMetadataAsync" />
+                <input class="form-control form-control-sm text-center" style="width:3rem;" @bind="_titleIcon" @bind:after="SaveMetadataAsync" maxlength="4" placeholder="🗄️" disabled="@(IsBusy || Database.IsLocked || !CanEdit)" />
+                <input class="form-control form-control-sm fw-semibold" @bind="_title" @bind:after="SaveMetadataAsync" disabled="@(IsBusy || Database.IsLocked || !CanEdit)" />
             </div>
             <div class="wiki-db-actions d-flex gap-2 flex-shrink-0">
                 <SentinelSharePanel TargetId="Database.Id" IsDatabase="true" TargetName="Database.Title" />
                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="DuplicateDatabaseAsync" disabled="@IsBusy">
                     <i class="bi bi-copy me-1"></i>Duplicate
                 </button>
-                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _showProperties = !_showProperties" disabled="@IsBusy">
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _showRowTemplates = !_showRowTemplates" disabled="@IsBusy">
+                    <i class="bi bi-file-earmark-plus me-1"></i>Templates@(RowTemplates.Count > 0 ? $" ({RowTemplates.Count})" : "")
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _showCsvImport = !_showCsvImport" disabled="@IsBusy" title="Append rows from a CSV file">
+                    <i class="bi bi-filetype-csv me-1"></i>Import
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _showProperties = !_showProperties" disabled="@(IsBusy || Database.IsLocked)">
                     <i class="bi bi-list-columns-reverse me-1"></i>Properties
+                </button>
+                <button type="button" class="btn btn-sm @(Database.IsLocked ? "btn-secondary" : "btn-outline-secondary")" @onclick="ToggleDatabaseLockAsync" disabled="@(IsBusy || !CanEdit)"
+                        title="@(Database.IsLocked ? "Unlock shared structure and view settings" : "Lock shared structure while keeping rows editable")">
+                    <i class="bi @(Database.IsLocked ? "bi-lock-fill" : "bi-unlock") me-1"></i>@(Database.IsLocked ? "Unlock" : "Lock")
                 </button>
                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ToggleTrashedRowsAsync" disabled="@IsBusy" title="Trashed rows">
                     <i class="bi bi-trash3 me-1"></i>Trash@(TrashedRows.Count > 0 ? $" ({TrashedRows.Count})" : "")
@@ -45,6 +55,114 @@ else
             @if (!string.IsNullOrWhiteSpace(ErrorMessage))
             {
                 <div class="alert alert-danger py-2 small">@ErrorMessage</div>
+            }
+            @if (Database.IsLocked)
+            {
+                <div class="alert alert-secondary py-2 small d-flex align-items-center gap-2">
+                    <i class="bi bi-lock-fill" aria-hidden="true"></i>
+                    <span>Database structure is locked. Rows remain editable; unlock to change properties, shared views, metadata, or row templates.</span>
+                </div>
+            }
+
+            @if (_showRowTemplates)
+            {
+                <div class="wiki-db-row-template-editor border rounded-3 p-3 mb-3">
+                    <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+                        <div>
+                            <div class="fw-semibold small">Row templates</div>
+                            <div class="small text-secondary">Save an existing row's page content and reusable properties as a starting point.</div>
+                        </div>
+                    </div>
+                    @if (Database.Rows.Count == 0)
+                    {
+                        <div class="alert alert-light border small mb-0">Create and customize a row before saving your first template.</div>
+                    }
+                    else
+                    {
+                        <div class="row g-2 align-items-end mb-3">
+                            <div class="col-lg-4">
+                                <label class="form-label small text-secondary mb-1">Template name</label>
+                                <input class="form-control form-control-sm" @bind="_newRowTemplateName" maxlength="120" placeholder="Standard task" disabled="@(IsBusy || !CanEdit)" />
+                            </div>
+                            <div class="col-lg-5">
+                                <label class="form-label small text-secondary mb-1">Use this row as the source</label>
+                                <select class="form-select form-select-sm" @bind="_rowTemplateSourceRowId" disabled="@(IsBusy || !CanEdit)">
+                                    @foreach (var row in Database.Rows.OrderBy(row => row.SortOrder))
+                                    {
+                                        <option value="@row.Id">@GetDatabaseRowTitle(Database, row)</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-lg-3 d-grid">
+                                <button type="button" class="btn btn-sm btn-primary" @onclick="CreateRowTemplateAsync"
+                                        disabled="@(IsBusy || !CanEdit || Database.IsLocked || string.IsNullOrWhiteSpace(_newRowTemplateName) || _rowTemplateSourceRowId is null)">
+                                    <i class="bi bi-plus-lg me-1"></i>Save template
+                                </button>
+                            </div>
+                        </div>
+                    }
+
+                    @if (RowTemplates.Count == 0)
+                    {
+                        <div class="small text-secondary">No row templates yet.</div>
+                    }
+                    else
+                    {
+                        <div class="list-group list-group-flush border rounded-3 overflow-hidden">
+                            @foreach (var template in RowTemplates)
+                            {
+                                <div class="list-group-item d-flex align-items-center justify-content-between gap-3 py-2">
+                                    <div class="d-flex align-items-center gap-2 min-w-0">
+                                        <span aria-hidden="true">@(string.IsNullOrWhiteSpace(template.Icon) ? "📄" : template.Icon)</span>
+                                        <span class="small fw-semibold text-truncate">@template.Name</span>
+                                    </div>
+                                    <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => AddRowFromTemplateAsync(template.Id)" disabled="@(IsBusy || !CanEdit)">
+                                            <i class="bi bi-plus-lg me-1"></i>New row
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-link text-danger text-decoration-none" @onclick="() => DeleteRowTemplateAsync(template.Id)" disabled="@(IsBusy || !CanEdit || Database.IsLocked)" title="Delete template">
+                                            <i class="bi bi-trash"></i><span class="visually-hidden">Delete @template.Name</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (_showCsvImport)
+            {
+                <div class="wiki-db-csv-import border rounded-3 p-3 mb-3">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-lg-8">
+                            <div class="fw-semibold small">Import CSV rows</div>
+                            <div class="small text-secondary mb-2">The first column becomes the Title. Matching headers reuse existing properties; new headers become Text properties. Existing rows are never replaced.</div>
+                            <InputFile OnChange="ImportCsvAsync" accept=".csv,text/csv" class="form-control form-control-sm" disabled="@(IsBusy || !CanEdit)" />
+                        </div>
+                        <div class="col-lg-4 small text-secondary">
+                            UTF-8 CSV, up to 5 MB. Computed and system-managed properties are skipped.@(Database.IsLocked ? " Because this database is locked, every header after Title must match an existing property." : string.Empty)
+                        </div>
+                    </div>
+                    @if (_csvImportResult is { } result)
+                    {
+                        <div class="alert alert-success py-2 small mt-3 mb-0">
+                            Imported <strong>@result.RowsImported</strong> row(s), skipped <strong>@result.RowsSkipped</strong>, and created <strong>@result.PropertiesCreated</strong> propert@(result.PropertiesCreated == 1 ? "y" : "ies").
+                        </div>
+                        @if (result.Warnings.Count > 0)
+                        {
+                            <details class="mt-2 small">
+                                <summary>@result.Warnings.Count import warning@(result.Warnings.Count == 1 ? "" : "s")</summary>
+                                <ul class="mb-0 mt-1">
+                                    @foreach (var warning in result.Warnings.Take(20))
+                                    {
+                                        <li>@warning</li>
+                                    }
+                                </ul>
+                            </details>
+                        }
+                    }
+                </div>
             }
 
             @if (_showProperties)
@@ -128,6 +246,15 @@ else
                                             </select>
                                         </div>
                                     </div>
+                                </div>
+                            }
+                            @if (property.Type == WikiDatabasePropertyTypes.UniqueId)
+                            {
+                                <div class="col-md-4">
+                                    <label class="form-label small text-secondary mb-1">Prefix (optional)</label>
+                                    <input class="form-control form-control-sm" placeholder="TASK-" maxlength="10"
+                                           value="@WikiDatabasePropertyConfig.Parse(property).UniqueIdPrefix"
+                                           @onchange="e => SetUniqueIdPrefixAsync(property, e.Value?.ToString() ?? string.Empty)" disabled="@IsBusy" />
                                 </div>
                             }
                             <div class="col-md-1 text-end">
@@ -305,6 +432,10 @@ else
                                     }
                                 </select>
                             }
+                            else if (_newPropertyType == WikiDatabasePropertyTypes.UniqueId)
+                            {
+                                <input class="form-control form-control-sm mb-2" placeholder="Prefix (optional, e.g. TASK-)" maxlength="10" @bind="_newUniqueIdPrefix" />
+                            }
                             <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddPropertyAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(_newPropertyName))">
                                 <i class="bi bi-plus-lg me-1"></i>Add property
                             </button>
@@ -344,35 +475,35 @@ else
                 @foreach (var view in Database.Views.OrderBy(v => v.SortOrder))
                 {
                     <li class="nav-item">
-                        <button type="button" class="nav-link @(view.Id == _activeViewId ? "active" : "")" @onclick="() => _activeViewId = view.Id">
+                        <button type="button" class="nav-link @(view.Id == _activeViewId ? "active" : "")" @onclick="() => SelectViewAsync(view.Id)">
                             <i class="bi @ViewIcon(view.Type) me-1"></i>@view.Name
                         </button>
                     </li>
                 }
                 <li class="nav-item">
-                    <button type="button" class="nav-link text-secondary" @onclick="AddBoardViewAsync" disabled="@IsBusy" title="Add a Board view grouped by a Select property">
+                    <button type="button" class="nav-link text-secondary" @onclick="AddBoardViewAsync" disabled="@(IsBusy || Database.IsLocked)" title="Add a Board view grouped by a Select property">
                         <i class="bi bi-plus-lg me-1"></i>Board
                     </button>
                 </li>
                 <li class="nav-item">
-                    <button type="button" class="nav-link text-secondary" @onclick="AddListViewAsync" disabled="@IsBusy">
+                    <button type="button" class="nav-link text-secondary" @onclick="AddListViewAsync" disabled="@(IsBusy || Database.IsLocked)">
                         <i class="bi bi-plus-lg me-1"></i>List
                     </button>
                 </li>
                 <li class="nav-item">
-                    <button type="button" class="nav-link text-secondary" @onclick="AddGalleryViewAsync" disabled="@IsBusy">
+                    <button type="button" class="nav-link text-secondary" @onclick="AddGalleryViewAsync" disabled="@(IsBusy || Database.IsLocked)">
                         <i class="bi bi-plus-lg me-1"></i>Gallery
                     </button>
                 </li>
                 <li class="nav-item">
-                    <button type="button" class="nav-link text-secondary" @onclick="AddCalendarViewAsync" disabled="@IsBusy" title="Add a Calendar view using a Date property">
+                    <button type="button" class="nav-link text-secondary" @onclick="AddCalendarViewAsync" disabled="@(IsBusy || Database.IsLocked)" title="Add a Calendar view using a Date property">
                         <i class="bi bi-plus-lg me-1"></i>Calendar
                     </button>
                 </li>
                 @foreach (var advancedView in AdvancedViewOptions)
                 {
                     <li class="nav-item">
-                        <button type="button" class="nav-link text-secondary" @onclick="() => AddAdvancedViewAsync(advancedView.Type, advancedView.Name)" disabled="@IsBusy">
+                        <button type="button" class="nav-link text-secondary" @onclick="() => AddAdvancedViewAsync(advancedView.Type, advancedView.Name)" disabled="@(IsBusy || Database.IsLocked)">
                             <i class="bi bi-plus-lg me-1"></i>@advancedView.Name
                         </button>
                     </li>
@@ -495,6 +626,15 @@ else
                             </div>
                         </div>
 
+                        <div class="form-check form-switch mt-3">
+                            <input class="form-check-input" type="checkbox" id="personal-filters-toggle" role="switch"
+                                   checked="@HasPersonalOverride" disabled="@IsBusy"
+                                   @onchange="e => ((bool)(e.Value ?? false) ? EnablePersonalFiltersAsync() : DisablePersonalFiltersAsync())" />
+                            <label class="form-check-label small" for="personal-filters-toggle">
+                                Personalize filters &amp; sort <span class="text-secondary">(only visible to you - everyone else keeps seeing the shared version)</span>
+                            </label>
+                        </div>
+
                         <div class="fw-semibold small mt-3 mb-2">Filters</div>
                         @foreach (var filter in ActiveViewConfig?.Filters ?? [])
                         {
@@ -550,6 +690,28 @@ else
                                         @onclick="AddFilterAsync" disabled="@(IsBusy || _filterPropertyId == Guid.Empty)">Add</button>
                             </div>
                         </div>
+
+                        <details class="mt-3">
+                            <summary class="small fw-semibold">
+                                Advanced filters (AND/OR groups)
+                                @if (ActiveViewConfig?.FilterGroup is { IsEmpty: false })
+                                {
+                                    <span class="badge text-bg-primary ms-1">Active</span>
+                                }
+                            </summary>
+                            <div class="mt-2">
+                                <p class="small text-secondary">When an advanced filter group has any conditions or nested groups, it replaces the simple filters above.</p>
+                                <WikiDatabaseFilterGroupEditor Group="@(ActiveViewConfig?.FilterGroup ?? WikiDatabaseFilterGroup.Empty)"
+                                                                Properties="FilterableProperties" IsBusy="IsBusy" Depth="0"
+                                                                GroupChanged="UpdateFilterGroupAsync" />
+                                @if (ActiveViewConfig?.FilterGroup is { IsEmpty: false })
+                                {
+                                    <button type="button" class="btn btn-sm btn-link text-danger px-0" @onclick="ClearFilterGroupAsync" disabled="@IsBusy">
+                                        Clear advanced filters
+                                    </button>
+                                }
+                            </div>
+                        </details>
 
                         <div class="fw-semibold small mt-3 mb-2">Sorts</div>
                         @foreach (var sort in ActiveViewConfig?.Sorts ?? [])
@@ -659,7 +821,7 @@ else
                 else
                 {
                     var calendarRows = WikiDatabaseViewLogic.ApplyFilters(
-                        Database.Rows.ToList(), Database.Properties.ToList(), ActiveViewConfig?.Filters ?? []);
+                        Database.Rows.ToList(), Database.Properties.ToList(), ActiveViewConfig?.Filters ?? [], ActiveViewConfig?.FilterGroup);
                     calendarRows = WikiDatabaseViewLogic.ApplySort(
                         calendarRows, Database.Properties.ToList(), ActiveViewConfig?.Sorts ?? []);
                     var calendar = WikiDatabaseViewLogic.BuildCalendarMonth(calendarRows, dateProperty, _calendarMonth);
@@ -756,6 +918,7 @@ else
             {
                 <SentinelDatabaseAdvancedView Database="Database" View="advancedView"
                                               Config="@(ActiveViewConfig ?? WikiDatabaseViewConfig.Empty)"
+                                              CanEdit="CanEdit"
                                               OnOpenRow="OpenRowById" OnChanged="AdvancedViewChangedAsync" />
             }
             else
@@ -772,8 +935,9 @@ else
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var row in VisibleRows)
+                            @foreach (var rowDisplay in TableRows)
                             {
+                                var row = rowDisplay.Row;
                                 <tr>
                                     @foreach (var property in Database.Properties.OrderBy(p => p.SortOrder))
                                     {
@@ -781,6 +945,24 @@ else
                                             @switch (property.Type)
                                             {
                                                 case WikiDatabasePropertyTypes.Title:
+                                                    <div class="d-flex align-items-center gap-1" style="padding-left:@(rowDisplay.Depth * 1.25)rem">
+                                                        @if (rowDisplay.HasChildren)
+                                                        {
+                                                            <button type="button" class="btn btn-xs btn-link p-0 flex-shrink-0"
+                                                                    @onclick="() => ToggleSubItems(row.Id)"
+                                                                    aria-label="@(_collapsedSubItemRowIds.Contains(row.Id) ? "Expand sub-items" : "Collapse sub-items")"
+                                                                    title="@(_collapsedSubItemRowIds.Contains(row.Id) ? "Expand sub-items" : "Collapse sub-items")">
+                                                                <i class="bi @(_collapsedSubItemRowIds.Contains(row.Id) ? "bi-chevron-right" : "bi-chevron-down")"></i>
+                                                            </button>
+                                                        }
+                                                        else if (rowDisplay.Depth > 0)
+                                                        {
+                                                            <i class="bi bi-arrow-return-right text-secondary small flex-shrink-0" aria-hidden="true"></i>
+                                                        }
+                                                        <input class="form-control form-control-sm" value="@GetText(row, property)" disabled="@IsBusy"
+                                                               @onchange="e => SetTextAsync(row, property, e.Value?.ToString())" />
+                                                    </div>
+                                                    break;
                                                 case WikiDatabasePropertyTypes.Text:
                                                 case WikiDatabasePropertyTypes.Url:
                                                     <input class="form-control form-control-sm" value="@GetText(row, property)" disabled="@IsBusy"
@@ -889,12 +1071,28 @@ else
                                                         @buttonLabel
                                                     </button>
                                                     break;
+                                                case WikiDatabasePropertyTypes.UniqueId:
+                                                    <span class="small text-secondary">@WikiPropertyValues.GetDisplayText(property, WikiPropertyValues.ParseObject(row.PropertyValuesJson), row.CreatedAt)</span>
+                                                    break;
+                                                case WikiDatabasePropertyTypes.Verification:
+                                                    var verification = WikiPropertyValues.GetVerification(WikiPropertyValues.ParseObject(row.PropertyValuesJson), property.Id);
+                                                    var isVerified = verification.Status == WikiVerificationState.Verified;
+                                                    <button type="button" class="btn btn-sm @(isVerified ? "btn-success" : "btn-outline-secondary")" disabled="@IsBusy"
+                                                            title="@(isVerified ? $"Verified by {verification.VerifiedBy}" : "Mark as verified")"
+                                                            @onclick="() => SetVerificationAsync(row, property, !isVerified)">
+                                                        <i class="bi @(isVerified ? "bi-patch-check-fill" : "bi-patch-check")"></i>
+                                                        @(isVerified ? "Verified" : "Not verified")
+                                                    </button>
+                                                    break;
                                             }
                                         </td>
                                     }
                                     <td>
                                         <div class="d-flex align-items-center gap-2">
                                             <button type="button" class="btn btn-xs btn-link p-0" @onclick="() => OpenRow(row)" disabled="@IsBusy">Open</button>
+                                            <button type="button" class="btn btn-xs btn-link p-0" @onclick="() => AddSubItemAsync(row)" disabled="@IsBusy" title="Add a row nested beneath this one">
+                                                <i class="bi bi-node-plus me-1"></i>Sub-item
+                                            </button>
                                             <button type="button" class="btn btn-xs btn-link text-danger p-0" @onclick="() => TrashRowAsync(row)" disabled="@IsBusy" title="Move to Trash">
                                                 <i class="bi bi-x-lg"></i>
                                             </button>
@@ -978,7 +1176,8 @@ else
         WikiDatabasePropertyTypes.Phone, WikiDatabasePropertyTypes.Person, WikiDatabasePropertyTypes.Files,
         WikiDatabasePropertyTypes.Place, WikiDatabasePropertyTypes.Formula, WikiDatabasePropertyTypes.Relation,
         WikiDatabasePropertyTypes.Rollup, WikiDatabasePropertyTypes.Button, WikiDatabasePropertyTypes.CreatedTime,
-        WikiDatabasePropertyTypes.LastEditedTime, WikiDatabasePropertyTypes.CreatedBy, WikiDatabasePropertyTypes.LastEditedBy
+        WikiDatabasePropertyTypes.LastEditedTime, WikiDatabasePropertyTypes.CreatedBy, WikiDatabasePropertyTypes.LastEditedBy,
+        WikiDatabasePropertyTypes.UniqueId, WikiDatabasePropertyTypes.Verification
     ];
     private static readonly IReadOnlyList<(string Type, string Name)> AdvancedViewOptions =
     [
@@ -996,13 +1195,20 @@ else
     private bool IsBusy;
     private string ErrorMessage = string.Empty;
     private bool _showProperties;
+    private bool _showRowTemplates;
+    private bool _showCsvImport;
     private bool _showTrashedRows;
     private List<WikiDatabaseRow> TrashedRows { get; set; } = new();
+    private List<WikiDatabaseRowTemplate> RowTemplates { get; set; } = new();
+    private string _newRowTemplateName = string.Empty;
+    private Guid? _rowTemplateSourceRowId;
+    private WikiDatabaseCsvImportResult? _csvImportResult;
     private string _schemaPushMessage = string.Empty;
     private bool _schemaPushSucceeded;
     private Guid? _activeViewId;
     private Guid? _draggedRowId;
     private WikiDatabaseRow? _openRow;
+    private readonly HashSet<Guid> _collapsedSubItemRowIds = [];
     private string _title = string.Empty;
     private string _titleIcon = string.Empty;
     private string _newPropertyName = string.Empty;
@@ -1013,6 +1219,7 @@ else
     private string _newReciprocalPropertyName = string.Empty;
     private string _newButtonLabel = "Run";
     private Guid? _newAutomationWorkflowId;
+    private string _newUniqueIdPrefix = string.Empty;
     private List<WikiDatabase> _databaseChoices = [];
     private List<AutomationWorkflowSummary> _workflowChoices = [];
     private readonly Dictionary<Guid, WikiDatabase> _relatedDatabases = [];
@@ -1025,7 +1232,20 @@ else
 
     private WikiDatabaseView? ActiveView =>
         Database?.Views.FirstOrDefault(v => v.Id == _activeViewId) ?? Database?.Views.OrderBy(v => v.SortOrder).FirstOrDefault();
-    private WikiDatabaseViewConfig? ActiveViewConfig => ActiveView is null ? null : WikiDatabaseViewConfigJson.Parse(ActiveView.ConfigJson);
+    // Personal overrides only ever replace Filters/Sorts/FilterGroup - every other view setting
+    // (grouping, page property order, calculations, etc.) always comes from the shared config.
+    private WikiDatabaseViewConfig? ActiveViewConfig => ActiveView is null
+        ? null
+        : _personalOverride is { } personal
+            ? WikiDatabaseViewConfigJson.Parse(ActiveView.ConfigJson) with
+            {
+                Filters = personal.Filters,
+                Sorts = personal.Sorts,
+                FilterGroup = personal.FilterGroup
+            }
+            : WikiDatabaseViewConfigJson.Parse(ActiveView.ConfigJson);
+    private WikiDatabaseViewConfig? _personalOverride;
+    private bool HasPersonalOverride => _personalOverride is not null;
     private string ActiveOpenPageMode => ActiveView is null
         ? WikiDatabaseOpenPageModes.SidePeek
         : WikiDatabaseOpenPageModes.Resolve(ActiveViewConfig?.OpenPageMode, ActiveView.Type);
@@ -1079,10 +1299,68 @@ else
             if (Database is null) return [];
             var config = ActiveViewConfig ?? WikiDatabaseViewConfig.Empty;
             var filtered = WikiDatabaseViewLogic.ApplyFilters(
-                Database.Rows.ToList(), Database.Properties.ToList(), config.Filters);
+                Database.Rows.ToList(), Database.Properties.ToList(), config.Filters, config.FilterGroup);
             return WikiDatabaseViewLogic.ApplySort(filtered, Database.Properties.ToList(), config.Sorts);
         }
     }
+    private IReadOnlyList<SubItemRowDisplay> TableRows
+    {
+        get
+        {
+            var rows = VisibleRows;
+            if (rows.Count == 0)
+            {
+                return [];
+            }
+
+            var rowIds = rows.Select(row => row.Id).ToHashSet();
+            var childrenByParent = rows
+                .Where(row => row.ParentRowId is { } parentRowId && rowIds.Contains(parentRowId))
+                .GroupBy(row => row.ParentRowId!.Value)
+                .ToDictionary(group => group.Key, group => group.ToList());
+            var result = new List<SubItemRowDisplay>(rows.Count);
+            var visited = new HashSet<Guid>();
+
+            foreach (var root in rows.Where(row => row.ParentRowId is null || !rowIds.Contains(row.ParentRowId.Value)))
+            {
+                AppendSubItemRow(root, 0, childrenByParent, visited, result);
+            }
+
+            // The service rejects cycles, but keep malformed legacy/imported data visible
+            // rather than losing it from the table if a cycle ever reaches storage.
+            foreach (var unvisited in rows.Where(row => !visited.Contains(row.Id)))
+            {
+                AppendSubItemRow(unvisited, 0, childrenByParent, visited, result);
+            }
+            return result;
+        }
+    }
+
+    private void AppendSubItemRow(
+        WikiDatabaseRow row,
+        int depth,
+        IReadOnlyDictionary<Guid, List<WikiDatabaseRow>> childrenByParent,
+        HashSet<Guid> visited,
+        List<SubItemRowDisplay> result)
+    {
+        if (!visited.Add(row.Id))
+        {
+            return;
+        }
+
+        var hasChildren = childrenByParent.TryGetValue(row.Id, out var children) && children.Count > 0;
+        result.Add(new SubItemRowDisplay(row, depth, hasChildren));
+        if (!hasChildren || _collapsedSubItemRowIds.Contains(row.Id))
+        {
+            return;
+        }
+        foreach (var child in children!)
+        {
+            AppendSubItemRow(child, depth + 1, childrenByParent, visited, result);
+        }
+    }
+
+    private sealed record SubItemRowDisplay(WikiDatabaseRow Row, int Depth, bool HasChildren);
 
     protected override async Task OnParametersSetAsync()
     {
@@ -1100,6 +1378,41 @@ else
     }
 
     private Task<string> CurrentUserNameAsync() => CurrentUserAccessor.GetCurrentUsernameAsync();
+
+    private async Task LoadPersonalOverrideAsync()
+    {
+        _personalOverride = ActiveView is null
+            ? null
+            : await WikiDatabaseService.GetPersonalViewOverrideAsync(ActiveView.Id, await CurrentUserNameAsync());
+    }
+
+    private async Task SelectViewAsync(Guid viewId)
+    {
+        _activeViewId = viewId;
+        await LoadPersonalOverrideAsync();
+    }
+
+    private async Task EnablePersonalFiltersAsync()
+    {
+        if (ActiveView is not { } activeView) return;
+        await Work(async () =>
+        {
+            var user = await CurrentUserNameAsync();
+            var shared = WikiDatabaseViewConfigJson.Parse(activeView.ConfigJson);
+            _personalOverride = await WikiDatabaseService.SavePersonalViewOverrideAsync(
+                activeView.Id, shared, user);
+        });
+    }
+
+    private async Task DisablePersonalFiltersAsync()
+    {
+        if (ActiveView is not { } activeView) return;
+        await Work(async () =>
+        {
+            await WikiDatabaseService.ClearPersonalViewOverrideAsync(activeView.Id, await CurrentUserNameAsync());
+            _personalOverride = null;
+        });
+    }
 
     private async Task ReloadAsync()
     {
@@ -1125,6 +1438,12 @@ else
                     ? WikiDatabasePropertyConfig.GetOptions(SelectedFilterProperty).FirstOrDefault()?.Id ?? string.Empty
                     : string.Empty;
                 TrashedRows = (await WikiDatabaseService.ListTrashedRowsAsync(WikiDatabaseId)).ToList();
+                RowTemplates = (await WikiDatabaseService.ListRowTemplatesAsync(WikiDatabaseId)).ToList();
+                if (_rowTemplateSourceRowId is null || Database.Rows.All(row => row.Id != _rowTemplateSourceRowId))
+                {
+                    _rowTemplateSourceRowId = Database.Rows.OrderBy(row => row.SortOrder).FirstOrDefault()?.Id;
+                }
+                await LoadPersonalOverrideAsync();
             }
         }
         catch (Exception ex)
@@ -1171,6 +1490,16 @@ else
         await WikiDatabaseService.RenameDatabaseAsync(WikiDatabaseId, _title, _titleIcon, user);
         await ReloadAsync();
         await OnChanged.InvokeAsync();
+    });
+
+    private async Task ToggleDatabaseLockAsync() => await Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        await WikiDatabaseService.SetDatabaseLockAsync(WikiDatabaseId, !Database!.IsLocked, user);
+        _showProperties = false;
+        _showRowTemplates = false;
+        _showCsvImport = false;
+        await ReloadAsync();
     });
 
     private async Task DeleteDatabaseAsync()
@@ -1249,7 +1578,8 @@ else
                     ? _newReciprocalPropertyName
                     : null,
                 ButtonLabel = _newPropertyType == WikiDatabasePropertyTypes.Button ? _newButtonLabel : null,
-                AutomationWorkflowId = _newPropertyType == WikiDatabasePropertyTypes.Button ? _newAutomationWorkflowId : null
+                AutomationWorkflowId = _newPropertyType == WikiDatabasePropertyTypes.Button ? _newAutomationWorkflowId : null,
+                UniqueIdPrefix = _newPropertyType == WikiDatabasePropertyTypes.UniqueId ? _newUniqueIdPrefix : null
             };
             if (_newPropertyType == WikiDatabasePropertyTypes.Rollup)
             {
@@ -1268,6 +1598,7 @@ else
             _newReciprocalPropertyName = string.Empty;
             _newButtonLabel = "Run";
             _newAutomationWorkflowId = null;
+            _newUniqueIdPrefix = string.Empty;
             await ReloadAsync();
         });
     }
@@ -1353,6 +1684,14 @@ else
     {
         var editor = CreatePropertyEditor(property);
         editor.AutomationWorkflowId = Guid.TryParse(rawWorkflowId, out var workflowId) ? workflowId : null;
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, await CurrentUserNameAsync());
+        await ReloadAsync();
+    });
+
+    private async Task SetUniqueIdPrefixAsync(WikiDatabaseProperty property, string prefix) => await Work(async () =>
+    {
+        var editor = CreatePropertyEditor(property);
+        editor.UniqueIdPrefix = prefix;
         await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, await CurrentUserNameAsync());
         await ReloadAsync();
     });
@@ -1462,6 +1801,7 @@ else
             var view = await WikiDatabaseService.SaveViewAsync(WikiDatabaseId, null, "Board", WikiDatabaseViewTypes.Board, config, user);
             await ReloadAsync();
             _activeViewId = view.Id;
+            _personalOverride = null;
         });
     }
 
@@ -1471,6 +1811,7 @@ else
         var view = await WikiDatabaseService.SaveViewAsync(WikiDatabaseId, null, name, type, WikiDatabaseViewConfig.Empty, user);
         await ReloadAsync();
         _activeViewId = view.Id;
+        _personalOverride = null;
     });
 
     private Task AddListViewAsync() => AddSimpleViewAsync(WikiDatabaseViewTypes.List, "List");
@@ -1502,10 +1843,31 @@ else
         await Work(async () =>
         {
             var user = await CurrentUserNameAsync();
-            var config = new WikiDatabaseViewConfig([], [], preferredProperty?.Id.ToString());
+            WikiDatabaseProperty? dependencyProperty = null;
+            if (type == WikiDatabaseViewTypes.Timeline)
+            {
+                dependencyProperty = Database?.Properties.FirstOrDefault(property =>
+                    property.Type == WikiDatabasePropertyTypes.Relation
+                    && property.Name.Equals("Depends on", StringComparison.OrdinalIgnoreCase)
+                    && WikiDatabasePropertyConfig.Parse(property).RelatedDatabaseId == WikiDatabaseId);
+                dependencyProperty ??= await WikiDatabaseService.SavePropertyAsync(
+                    WikiDatabaseId,
+                    new WikiDatabasePropertyEditor
+                    {
+                        Name = "Depends on",
+                        Type = WikiDatabasePropertyTypes.Relation,
+                        RelatedDatabaseId = WikiDatabaseId,
+                        ReciprocalRelationEnabled = false
+                    },
+                    user);
+            }
+            var config = new WikiDatabaseViewConfig(
+                [], [], preferredProperty?.Id.ToString(),
+                DependencyPropertyId: dependencyProperty?.Id.ToString());
             var view = await WikiDatabaseService.SaveViewAsync(WikiDatabaseId, null, name, type, config, user);
             await ReloadAsync();
             _activeViewId = view.Id;
+            _personalOverride = null;
         });
     }
 
@@ -1526,6 +1888,7 @@ else
                 WikiDatabaseId, null, "Calendar", WikiDatabaseViewTypes.Calendar, config, user);
             await ReloadAsync();
             _activeViewId = view.Id;
+            _personalOverride = null;
             ShowCurrentCalendarMonth();
         });
     }
@@ -1536,6 +1899,79 @@ else
         await WikiDatabaseService.SaveRowAsync(WikiDatabaseId, new WikiDatabaseRowEditor(), user);
         await ReloadAsync();
     });
+
+    private async Task CreateRowTemplateAsync() => await Work(async () =>
+    {
+        if (_rowTemplateSourceRowId is not { } sourceRowId)
+        {
+            throw new InvalidOperationException("Choose a source row for the template.");
+        }
+
+        var user = await CurrentUserNameAsync();
+        await WikiDatabaseService.CreateRowTemplateFromRowAsync(
+            WikiDatabaseId, sourceRowId, _newRowTemplateName, user);
+        _newRowTemplateName = string.Empty;
+        await ReloadAsync();
+    });
+
+    private async Task AddRowFromTemplateAsync(Guid templateId, Guid? parentRowId = null) => await Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        var created = await WikiDatabaseService.CreateRowFromTemplateAsync(
+            WikiDatabaseId, templateId, parentRowId, user);
+        if (parentRowId is { } parentId)
+        {
+            _collapsedSubItemRowIds.Remove(parentId);
+        }
+        await ReloadAsync();
+        OpenRowById(created.Id);
+    });
+
+    private async Task DeleteRowTemplateAsync(Guid templateId) => await Work(async () =>
+    {
+        await WikiDatabaseService.DeleteRowTemplateAsync(WikiDatabaseId, templateId);
+        await ReloadAsync();
+    });
+
+    private async Task ImportCsvAsync(InputFileChangeEventArgs args)
+    {
+        const long maxCsvBytes = WikiDatabaseCsvImportLimits.MaxFileBytes;
+        if (args.File.Size > maxCsvBytes)
+        {
+            ErrorMessage = $"CSV files are limited to {maxCsvBytes / 1024 / 1024} MB.";
+            return;
+        }
+
+        await Work(async () =>
+        {
+            await using var stream = args.File.OpenReadStream(maxCsvBytes);
+            using var reader = new StreamReader(stream, detectEncodingFromByteOrderMarks: true);
+            var csv = await reader.ReadToEndAsync();
+            var user = await CurrentUserNameAsync();
+            _csvImportResult = await WikiDatabaseService.ImportCsvAsync(WikiDatabaseId, csv, user);
+            await ReloadAsync();
+            await OnChanged.InvokeAsync();
+        });
+    }
+
+    private async Task AddSubItemAsync(WikiDatabaseRow parent) => await Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        await WikiDatabaseService.SaveRowAsync(WikiDatabaseId, new WikiDatabaseRowEditor
+        {
+            ParentRowId = parent.Id
+        }, user);
+        _collapsedSubItemRowIds.Remove(parent.Id);
+        await ReloadAsync();
+    });
+
+    private void ToggleSubItems(Guid rowId)
+    {
+        if (!_collapsedSubItemRowIds.Add(rowId))
+        {
+            _collapsedSubItemRowIds.Remove(rowId);
+        }
+    }
 
     private async Task AddRowOnDateAsync(WikiDatabaseProperty dateProperty, DateOnly date) => await Work(async () =>
     {
@@ -1663,6 +2099,31 @@ else
         });
     }
 
+    // Filters/Sorts/FilterGroup specifically: when this view is personalized, mutations write
+    // to this user's own override instead of the shared WikiDatabaseView every other user sees.
+    // Every other config aspect (grouping, page property order, etc.) always goes through
+    // UpdateActiveViewConfigAsync above and stays shared.
+    private async Task UpdateFilterSortConfigAsync(Func<WikiDatabaseViewConfig, WikiDatabaseViewConfig> update)
+    {
+        if (ActiveView is not { } activeView)
+        {
+            return;
+        }
+
+        if (!HasPersonalOverride)
+        {
+            await UpdateActiveViewConfigAsync(update);
+            return;
+        }
+
+        await Work(async () =>
+        {
+            var updatedConfig = update(ActiveViewConfig ?? WikiDatabaseViewConfig.Empty);
+            _personalOverride = await WikiDatabaseService.SavePersonalViewOverrideAsync(
+                activeView.Id, updatedConfig, await CurrentUserNameAsync());
+        });
+    }
+
     private async Task RenameActiveViewAsync(string name)
     {
         if (ActiveView is not { } activeView || string.IsNullOrWhiteSpace(name)) return;
@@ -1702,7 +2163,7 @@ else
             ? _filterOperator
             : FilterOperators[0].Value;
         var filterValue = FilterNeedsNoValue ? string.Empty : _filterValue.Trim();
-        await UpdateActiveViewConfigAsync(config => config with
+        await UpdateFilterSortConfigAsync(config => config with
         {
             Filters = config.Filters.Concat(
                 [new WikiDatabaseFilter(property.Id.ToString(), filterOperator, filterValue)]).ToList()
@@ -1714,15 +2175,21 @@ else
     }
 
     private Task RemoveFilterAsync(WikiDatabaseFilter filter) =>
-        UpdateActiveViewConfigAsync(config => config with
+        UpdateFilterSortConfigAsync(config => config with
         {
             Filters = config.Filters.Where(candidate => candidate != filter).ToList()
         });
 
+    private Task UpdateFilterGroupAsync(WikiDatabaseFilterGroup updated) =>
+        UpdateFilterSortConfigAsync(config => config with { FilterGroup = updated });
+
+    private Task ClearFilterGroupAsync() =>
+        UpdateFilterSortConfigAsync(config => config with { FilterGroup = null });
+
     private async Task AddSortAsync()
     {
         if (_sortPropertyId == Guid.Empty) return;
-        await UpdateActiveViewConfigAsync(config => config with
+        await UpdateFilterSortConfigAsync(config => config with
         {
             Sorts = config.Sorts
                 .Where(sort => sort.PropertyId != _sortPropertyId.ToString())
@@ -1732,7 +2199,7 @@ else
     }
 
     private Task RemoveSortAsync(WikiDatabaseSort sort) =>
-        UpdateActiveViewConfigAsync(config => config with
+        UpdateFilterSortConfigAsync(config => config with
         {
             Sorts = config.Sorts.Where(candidate => candidate != sort).ToList()
         });
@@ -1863,13 +2330,35 @@ else
         var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
         mutate(values);
         var user = await CurrentUserNameAsync();
-        var editor = new WikiDatabaseRowEditor { Id = row.Id, Values = values.ToDictionary(kv => kv.Key, kv => kv.Value) };
+        var editor = new WikiDatabaseRowEditor
+        {
+            Id = row.Id,
+            ParentRowId = row.ParentRowId,
+            Values = values.ToDictionary(kv => kv.Key, kv => kv.Value)
+        };
         await WikiDatabaseService.SaveRowAsync(WikiDatabaseId, editor, user);
         await ReloadAsync();
     });
 
     private Task SetTextAsync(WikiDatabaseRow row, WikiDatabaseProperty property, string? value) =>
         SaveRowValueAsync(row, values => WikiPropertyValues.SetText(values, property.Id, value));
+
+    private async Task SetVerificationAsync(WikiDatabaseRow row, WikiDatabaseProperty property, bool verified) => await Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+        WikiPropertyValues.SetVerification(values, property.Id, verified
+            ? new WikiVerificationState(WikiVerificationState.Verified, user, DateTimeOffset.UtcNow)
+            : WikiVerificationState.NotVerified);
+        var editor = new WikiDatabaseRowEditor
+        {
+            Id = row.Id,
+            ParentRowId = row.ParentRowId,
+            Values = values.ToDictionary(kv => kv.Key, kv => kv.Value)
+        };
+        await WikiDatabaseService.SaveRowAsync(WikiDatabaseId, editor, user);
+        await ReloadAsync();
+    });
 
     private Task SetNumberAsync(WikiDatabaseRow row, WikiDatabaseProperty property, string? raw) =>
         SaveRowValueAsync(row, values => WikiPropertyValues.SetNumber(values, property.Id, decimal.TryParse(raw, out var number) ? number : null));
@@ -1966,7 +2455,8 @@ else
             RollupPropertyId = config.RollupPropertyId,
             RollupAggregation = config.RollupAggregation,
             AutomationWorkflowId = config.AutomationWorkflowId,
-            ButtonLabel = config.ButtonLabel
+            ButtonLabel = config.ButtonLabel,
+            UniqueIdPrefix = config.UniqueIdPrefix
         };
     }
 

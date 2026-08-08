@@ -19,7 +19,8 @@ public sealed class SentinelAiService(
     ISentinelWorkspaceService workspaceService,
     IMemoryCache cache,
     IOllamaWebSearchService? webSearchService = null,
-    ILogger<SentinelAiService>? logger = null) : ISentinelAiService
+    ILogger<SentinelAiService>? logger = null,
+    ISentinelAccessService? accessService = null) : ISentinelAiService
 {
     private static readonly HashSet<string> AllowedActions =
     [
@@ -139,7 +140,8 @@ public sealed class SentinelAiService(
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var settings = await siteSettings.GetSettingsAsync(cancellationToken);
         var model = string.IsNullOrWhiteSpace(settings.OllamaModelOverride) ? SentinelGptDefaults.Model : settings.OllamaModelOverride;
-        var (sentinelContext, citations) = await BuildGroundedContextAsync(db, wikiPageId, instruction, cancellationToken);
+        var (sentinelContext, citations) = await BuildGroundedContextAsync(
+            db, wikiPageId, instruction, performedBy, cancellationToken);
         var context = new StringBuilder(sentinelContext);
 
         if (includeSuiteContext)
@@ -522,7 +524,11 @@ public sealed class SentinelAiService(
     // The current page (if any) is always pinned first regardless of whether it matches the
     // instruction's search terms, since asking about the open page shouldn't depend on that.
     private async Task<(string Context, List<SentinelAiCitation> Citations)> BuildGroundedContextAsync(
-        IAppDbContext db, Guid? pageId, string instruction, CancellationToken cancellationToken)
+        IAppDbContext db,
+        Guid? pageId,
+        string instruction,
+        string performedBy,
+        CancellationToken cancellationToken)
     {
         var builder = new StringBuilder();
         var citations = new List<SentinelAiCitation>();
@@ -530,7 +536,13 @@ public sealed class SentinelAiService(
 
         if (pageId is { } pinnedPageId)
         {
-            var pinnedPage = await db.WikiPages.AsNoTracking().FirstOrDefaultAsync(page => page.Id == pinnedPageId, cancellationToken);
+            var canViewPinnedPage = accessService is null
+                || await accessService.CanAccessAsync(
+                    pinnedPageId, false, performedBy, SentinelAccessLevels.View, cancellationToken);
+            var pinnedPage = canViewPinnedPage
+                ? await db.WikiPages.AsNoTracking().FirstOrDefaultAsync(
+                    page => page.Id == pinnedPageId, cancellationToken)
+                : null;
             if (pinnedPage is not null)
             {
                 AppendPage(builder, pinnedPage);
@@ -539,7 +551,8 @@ public sealed class SentinelAiService(
             }
         }
 
-        var results = await workspaceService.SearchAsync(instruction, maxResults: 6, cancellationToken);
+        var results = await workspaceService.SearchAsync(
+            instruction, performedBy, maxResults: 6, cancellationToken: cancellationToken);
         foreach (var result in results)
         {
             if (!citedIds.Add(result.Id)) continue;

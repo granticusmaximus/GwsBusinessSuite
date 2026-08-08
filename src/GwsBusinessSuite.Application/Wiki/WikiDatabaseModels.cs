@@ -19,9 +19,21 @@ public sealed record WikiDatabasePropertyConfiguration(
     // Button property only: which Automation workflow a click runs, and the label shown on
     // the button (falls back to the property's own Name when blank).
     Guid? AutomationWorkflowId = null,
-    string? ButtonLabel = null)
+    string? ButtonLabel = null,
+    // UniqueId property only: optional short prefix shown before the number (e.g. "TASK-42").
+    string? UniqueIdPrefix = null)
 {
     public static WikiDatabasePropertyConfiguration Empty { get; } = new([], null, null, null, null, null, null);
+}
+
+// Verification property value shape - stored as a compact JSON string in the row's scalar
+// storage slot for that property (WikiPropertyValues.SetVerification/GetVerification).
+public sealed record WikiVerificationState(string Status, string? VerifiedBy, DateTimeOffset? VerifiedAt)
+{
+    public const string Verified = "verified";
+    public const string None = "none";
+
+    public static WikiVerificationState NotVerified { get; } = new(None, null, null);
 }
 
 public static class WikiDatabaseRollupAggregations
@@ -48,6 +60,23 @@ public static class WikiDatabaseRollupAggregations
 public sealed record WikiDatabaseFilter(string PropertyId, string Operator, string Value);
 
 public sealed record WikiDatabaseSort(string PropertyId, string Direction);
+
+// A nested AND/OR filter tree, mirroring Notion's filter-group builder. Kept as a separate,
+// optional field alongside the legacy flat WikiDatabaseFilter list (rather than replacing it)
+// so already-saved views' ConfigJson keeps parsing unchanged - when FilterGroup is null or
+// empty, WikiDatabaseViewLogic.ApplyFilters falls back to the flat implicit-AND Filters list.
+public sealed record WikiDatabaseFilterGroup(
+    string Combinator,
+    IReadOnlyList<WikiDatabaseFilter> Conditions,
+    IReadOnlyList<WikiDatabaseFilterGroup> Groups)
+{
+    public const string And = "and";
+    public const string Or = "or";
+
+    public static WikiDatabaseFilterGroup Empty { get; } = new(And, [], []);
+
+    public bool IsEmpty => Conditions.Count == 0 && Groups.Count == 0;
+}
 
 public static class WikiDatabaseOpenPageModes
 {
@@ -77,9 +106,11 @@ public sealed record WikiDatabaseViewConfig(
     string? OpenPageMode = null,
     IReadOnlyList<string>? PagePropertyOrder = null,
     IReadOnlyList<string>? HiddenPagePropertyIds = null,
-    IReadOnlyDictionary<string, string>? Calculations = null)
+    IReadOnlyDictionary<string, string>? Calculations = null,
+    WikiDatabaseFilterGroup? FilterGroup = null,
+    string? DependencyPropertyId = null)
 {
-    public static WikiDatabaseViewConfig Empty { get; } = new([], [], null, null, [], [], new Dictionary<string, string>());
+    public static WikiDatabaseViewConfig Empty { get; } = new([], [], null, null, [], [], new Dictionary<string, string>(), null, null);
 }
 
 public static class WikiDatabasePagePresentation
@@ -163,7 +194,9 @@ public static class WikiDatabaseViewConfigJson
                     parsed.OpenPageMode,
                     parsed.PagePropertyOrder ?? [],
                     parsed.HiddenPagePropertyIds ?? [],
-                    parsed.Calculations ?? new Dictionary<string, string>());
+                    parsed.Calculations ?? new Dictionary<string, string>(),
+                    parsed.FilterGroup,
+                    parsed.DependencyPropertyId);
         }
         catch (JsonException) { return WikiDatabaseViewConfig.Empty; }
     }
@@ -189,11 +222,16 @@ public sealed class WikiDatabasePropertyEditor
     public string? RollupAggregation { get; set; }
     public Guid? AutomationWorkflowId { get; set; }
     public string? ButtonLabel { get; set; }
+    public string? UniqueIdPrefix { get; set; }
 }
 
 public sealed class WikiDatabaseRowEditor
 {
     public Guid? Id { get; set; }
+    // Unlike the nullable page-content fields below, null is an explicit value here: it makes
+    // the row a root item. Callers editing an existing child must therefore carry its current
+    // ParentRowId forward unless they deliberately want to promote it.
+    public Guid? ParentRowId { get; set; }
     // Null means preserve the existing page body during a property-only edit.
     public string? BlocksJson { get; set; }
     // Same null-preserves convention as BlocksJson above - a property-only save (e.g.
@@ -256,6 +294,22 @@ public static class WikiPropertyValues
     public static void SetDate(JsonObject values, Guid propertyId, DateTimeOffset? value) =>
         values[propertyId.ToString()] = value?.ToString("O");
 
+    public static WikiVerificationState GetVerification(JsonObject values, Guid propertyId)
+    {
+        if (!values.TryGetPropertyValue(propertyId.ToString(), out var node) || node is null)
+        {
+            return WikiVerificationState.NotVerified;
+        }
+        try
+        {
+            return JsonSerializer.Deserialize<WikiVerificationState>(node.GetValue<string>(), Options) ?? WikiVerificationState.NotVerified;
+        }
+        catch (JsonException) { return WikiVerificationState.NotVerified; }
+    }
+
+    public static void SetVerification(JsonObject values, Guid propertyId, WikiVerificationState state) =>
+        values[propertyId.ToString()] = JsonSerializer.Serialize(state, Options);
+
     public static IReadOnlyList<string> GetMultiSelect(JsonObject values, Guid propertyId) =>
         values.TryGetPropertyValue(propertyId.ToString(), out var node) && node is JsonArray array
             ? array.Select(item => item?.GetValue<string>() ?? string.Empty).ToList()
@@ -296,6 +350,12 @@ public static class WikiPropertyValues
             WikiDatabasePropertyTypes.Button => string.IsNullOrWhiteSpace(WikiDatabasePropertyConfig.Parse(property).ButtonLabel)
                 ? property.Name
                 : WikiDatabasePropertyConfig.Parse(property).ButtonLabel!,
+            WikiDatabasePropertyTypes.UniqueId => GetNumber(values, property.Id) is { } uniqueIdNumber
+                ? $"{WikiDatabasePropertyConfig.Parse(property).UniqueIdPrefix}{uniqueIdNumber:0}"
+                : string.Empty,
+            WikiDatabasePropertyTypes.Verification => GetVerification(values, property.Id) is { Status: WikiVerificationState.Verified } verified
+                ? $"✓ Verified{(string.IsNullOrWhiteSpace(verified.VerifiedBy) ? "" : $" by {verified.VerifiedBy}")}"
+                : "Not verified",
             _ => GetText(values, property.Id) ?? string.Empty
         };
 
@@ -348,7 +408,7 @@ public static class WikiDatabasePropertyConfig
                     parsed.Options ?? [], parsed.FormulaExpression, parsed.RelatedDatabaseId,
                     parsed.ReciprocalPropertyId, parsed.RelationPropertyId,
                     parsed.RollupPropertyId, parsed.RollupAggregation,
-                    parsed.AutomationWorkflowId, parsed.ButtonLabel);
+                    parsed.AutomationWorkflowId, parsed.ButtonLabel, parsed.UniqueIdPrefix);
         }
         catch (JsonException) { return WikiDatabasePropertyConfiguration.Empty; }
     }
@@ -369,7 +429,8 @@ public static class WikiDatabasePropertyConfig
             configuration.RollupPropertyId,
             configuration.RollupAggregation,
             configuration.AutomationWorkflowId,
-            configuration.ButtonLabel), WikiPropertyValues.Options);
+            configuration.ButtonLabel,
+            configuration.UniqueIdPrefix), WikiPropertyValues.Options);
 
     private sealed record PropertyConfigDto(
         IReadOnlyList<WikiDatabasePropertyOption>? Options,
@@ -380,7 +441,8 @@ public static class WikiDatabasePropertyConfig
         Guid? RollupPropertyId = null,
         string? RollupAggregation = null,
         Guid? AutomationWorkflowId = null,
-        string? ButtonLabel = null);
+        string? ButtonLabel = null,
+        string? UniqueIdPrefix = null);
 }
 
 // Pure, DB-free filter/sort/group logic over an already-loaded row list - same split as
@@ -391,15 +453,29 @@ public static class WikiDatabaseViewLogic
     public static IReadOnlyList<WikiDatabaseRow> ApplyFilters(
         IReadOnlyList<WikiDatabaseRow> rows,
         IReadOnlyList<WikiDatabaseProperty> properties,
-        IReadOnlyList<WikiDatabaseFilter> filters)
+        IReadOnlyList<WikiDatabaseFilter> filters,
+        WikiDatabaseFilterGroup? filterGroup = null)
     {
+        var propertiesById = properties.ToDictionary(p => p.Id);
+
+        if (filterGroup is { IsEmpty: false } group)
+        {
+            return rows.Where(row => MatchesGroup(row, propertiesById, group)).ToList();
+        }
+
         if (filters.Count == 0)
         {
             return rows;
         }
 
-        var propertiesById = properties.ToDictionary(p => p.Id);
         return rows.Where(row => filters.All(filter => MatchesFilter(row, propertiesById, filter))).ToList();
+    }
+
+    private static bool MatchesGroup(WikiDatabaseRow row, IReadOnlyDictionary<Guid, WikiDatabaseProperty> propertiesById, WikiDatabaseFilterGroup group)
+    {
+        var results = group.Conditions.Select(condition => MatchesFilter(row, propertiesById, condition))
+            .Concat(group.Groups.Select(nested => MatchesGroup(row, propertiesById, nested)));
+        return group.Combinator == WikiDatabaseFilterGroup.Or ? results.Any(matched => matched) : results.All(matched => matched);
     }
 
     private static bool MatchesFilter(WikiDatabaseRow row, IReadOnlyDictionary<Guid, WikiDatabaseProperty> propertiesById, WikiDatabaseFilter filter)
@@ -427,7 +503,8 @@ public static class WikiDatabaseViewLogic
                     _ => true
                 }
                 : false,
-            WikiDatabasePropertyTypes.Select => string.Equals(WikiPropertyValues.GetText(values, propertyId), filter.Value, StringComparison.Ordinal),
+            WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.Status =>
+                string.Equals(WikiPropertyValues.GetText(values, propertyId), filter.Value, StringComparison.Ordinal),
             WikiDatabasePropertyTypes.Checkbox => WikiPropertyValues.GetCheckbox(values, propertyId) == (filter.Operator == "isChecked"),
             WikiDatabasePropertyTypes.Date => WikiPropertyValues.GetDate(values, propertyId) is { } date && DateTimeOffset.TryParse(filter.Value, out var targetDate)
                 ? filter.Operator switch
@@ -623,6 +700,84 @@ public static class WikiDatabaseViewLogic
             .ToList();
     }
 
+    public static WikiDatabaseTimelineSchedule BuildTimelineSchedule(
+        IReadOnlyList<WikiDatabaseRow> rows,
+        WikiDatabaseProperty dateProperty,
+        WikiDatabaseProperty? dependencyProperty = null)
+    {
+        if (dateProperty.Type != WikiDatabasePropertyTypes.Date)
+        {
+            throw new ArgumentException("Timeline views require a Date property.", nameof(dateProperty));
+        }
+        if (dependencyProperty is not null && dependencyProperty.Type != WikiDatabasePropertyTypes.Relation)
+        {
+            throw new ArgumentException("Timeline dependencies require a Relation property.", nameof(dependencyProperty));
+        }
+
+        var items = rows
+            .Select(row =>
+            {
+                var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+                var date = WikiPropertyValues.GetDate(values, dateProperty.Id) is { } storedDate
+                    ? new DateOnly?(DateOnly.FromDateTime(storedDate.ToLocalTime().DateTime))
+                    : null;
+                IReadOnlyList<Guid> dependencies = dependencyProperty is null
+                    ? Array.Empty<Guid>()
+                    : WikiPropertyValues.GetMultiSelect(values, dependencyProperty.Id)
+                        .Select(value => Guid.TryParse(value, out var rowId) ? new Guid?(rowId) : null)
+                        .Where(rowId => rowId.HasValue)
+                        .Select(rowId => rowId!.Value)
+                        .Distinct()
+                        .ToList();
+                return new WikiDatabaseTimelineItem(row, date, dependencies);
+            })
+            .OrderBy(item => item.Date is null)
+            .ThenBy(item => item.Date)
+            .ThenBy(item => item.Row.SortOrder)
+            .ToList();
+        var datedItems = items.Where(item => item.Date.HasValue).ToList();
+
+        return new WikiDatabaseTimelineSchedule(
+            datedItems.FirstOrDefault()?.Date,
+            datedItems.LastOrDefault()?.Date,
+            datedItems,
+            items.Where(item => item.Date is null).ToList());
+    }
+
+    public static void EnsureAcyclicTimelineDependencies(
+        Guid changedRowId,
+        IReadOnlyDictionary<Guid, IReadOnlyList<Guid>> dependenciesByRow)
+    {
+        var visiting = new HashSet<Guid>();
+        var visited = new HashSet<Guid>();
+
+        void Visit(Guid rowId)
+        {
+            if (!visiting.Add(rowId))
+            {
+                throw new InvalidOperationException("Timeline dependencies cannot contain a cycle.");
+            }
+            if (visited.Contains(rowId))
+            {
+                visiting.Remove(rowId);
+                return;
+            }
+
+            if (dependenciesByRow.TryGetValue(rowId, out var dependencies))
+            {
+                foreach (var dependencyRowId in dependencies)
+                {
+                    Visit(dependencyRowId);
+                }
+            }
+
+            visiting.Remove(rowId);
+            visited.Add(rowId);
+        }
+
+        Visit(changedRowId);
+    }
+
     public static IReadOnlyList<WikiDatabaseChartBucket> BuildChart(
         IReadOnlyList<WikiDatabaseRow> rows,
         WikiDatabaseProperty property)
@@ -656,6 +811,17 @@ public sealed record WikiDatabaseCalendarMonth(
 
 public sealed record WikiDatabaseTimelineGroup(DateOnly? Date, IReadOnlyList<WikiDatabaseRow> Rows);
 
+public sealed record WikiDatabaseTimelineItem(
+    WikiDatabaseRow Row,
+    DateOnly? Date,
+    IReadOnlyList<Guid> DependsOnRowIds);
+
+public sealed record WikiDatabaseTimelineSchedule(
+    DateOnly? StartDate,
+    DateOnly? EndDate,
+    IReadOnlyList<WikiDatabaseTimelineItem> DatedItems,
+    IReadOnlyList<WikiDatabaseTimelineItem> UndatedItems);
+
 public sealed record WikiDatabaseChartBucket(string Label, int Count);
 
 public sealed record WikiInlineDatabaseProperty(
@@ -683,4 +849,5 @@ public sealed record WikiInlineDatabaseSnapshot(
     IReadOnlyList<WikiInlineDatabaseRow> Rows)
 {
     public IReadOnlyList<WikiInlineDatabaseView> Views { get; init; } = [];
+    public bool CanEdit { get; init; } = true;
 }

@@ -48,10 +48,10 @@ public sealed class SentinelWorkspaceServiceTests
             Values = values.ToDictionary(pair => pair.Key, pair => pair.Value)
         }, "u");
 
-        var pageResults = await sentinel.SearchAsync("blue switch");
-        var databaseResults = await sentinel.SearchAsync("Northstar");
-        var databasePageResults = await sentinel.SearchAsync("Decision log");
-        var attachmentResults = await sentinel.SearchAsync("Quarterly plan");
+        var pageResults = await sentinel.SearchAsync("blue switch", "u");
+        var databaseResults = await sentinel.SearchAsync("Northstar", "u");
+        var databasePageResults = await sentinel.SearchAsync("Decision log", "u");
+        var attachmentResults = await sentinel.SearchAsync("Quarterly plan", "u");
 
         pageResults.Should().ContainSingle(result => !result.IsDatabase && result.Title == "Operations" && result.MatchKind == "Page content");
         databaseResults.Should().ContainSingle(result => result.IsDatabase && result.Title == "Projects" && result.MatchKind == "Database content");
@@ -85,7 +85,7 @@ public sealed class SentinelWorkspaceServiceTests
                     new Dictionary<string, string> { ["content"] = "See [[Runbook]] before deploying." })])
         }, "u");
 
-        var backlinks = await sentinel.GetBacklinksAsync(target.Id);
+        var backlinks = await sentinel.GetBacklinksAsync(target.Id, "u");
 
         backlinks.Select(link => link.SourcePageTitle).Should().BeEquivalentTo("Structured source", "Legacy source");
     }
@@ -108,7 +108,7 @@ public sealed class SentinelWorkspaceServiceTests
         }, "u");
         await wiki.SavePageAsync(new WikiPageEditorModel { Title = "Deployment Notes" }, "u");
 
-        var results = await sentinel.SearchAsync("deployment blue");
+        var results = await sentinel.SearchAsync("deployment blue", "u");
 
         results.Should().ContainSingle(result => result.Title == "Deployment Runbook");
         results[0].MatchedTerms.Should().Equal("deployment", "blue");
@@ -158,8 +158,8 @@ public sealed class SentinelWorkspaceServiceTests
                     [new WikiRichTextSpan("@Grant", Link: "usermention:grant")], new Dictionary<string, string>())])
         }, "u");
 
-        var people = await sentinel.SearchMentionSuggestionsAsync("gra");
-        var dates = await sentinel.SearchMentionSuggestionsAsync("tom");
+        var people = await sentinel.SearchMentionSuggestionsAsync("gra", "u");
+        var dates = await sentinel.SearchMentionSuggestionsAsync("tom", "u");
         var mentions = await sentinel.GetMentionsAsync("GRANT");
 
         people.Should().ContainSingle(item => item.Kind == "user" && item.Value == "Grant");
@@ -213,7 +213,7 @@ public sealed class SentinelWorkspaceServiceTests
             Values = values.ToDictionary(pair => pair.Key, pair => pair.Value)
         }, "u");
 
-        var suggestions = await sentinel.SearchMentionSuggestionsAsync("northstar");
+        var suggestions = await sentinel.SearchMentionSuggestionsAsync("northstar", "u");
 
         suggestions.Should().ContainSingle(item =>
             item.Kind == "row" && item.Value == $"{database.Id}:{row.Id}" && item.Label == "Northstar migration");
@@ -241,7 +241,7 @@ public sealed class SentinelWorkspaceServiceTests
         }, "u");
         await wiki.SavePageAsync(new WikiPageEditorModel { Title = "Unrelated page" }, "u");
 
-        var mentions = await sentinel.GetRowMentionsAsync(database.Id, row.Id);
+        var mentions = await sentinel.GetRowMentionsAsync(database.Id, row.Id, "u");
 
         mentions.Should().ContainSingle(mention => mention.SourcePageTitle == "Status update");
     }
@@ -289,9 +289,86 @@ public sealed class SentinelWorkspaceServiceTests
         });
         await db.SaveChangesAsync();
 
-        var backlinks = await sentinel.GetBacklinksAsync(targetId);
+        var backlinks = await sentinel.GetBacklinksAsync(targetId, "u");
 
         backlinks.Should().ContainSingle(link => link.SourcePageTitle == source.Title);
+    }
+
+    [Fact]
+    public async Task WorkspaceDiscovery_ShouldExcludePagesAndDatabasesTheRequesterCannotView()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = await CreateDbAsync(connection);
+        var wiki = new WikiService(db);
+        var databases = new WikiDatabaseService(db);
+        var access = new SentinelAccessService(db);
+        var sentinel = new SentinelWorkspaceService(db, TimeProvider.System, access);
+
+        var target = await wiki.SavePageAsync(new WikiPageEditorModel { Title = "Target" }, "u");
+        var allowedPage = await wiki.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Allowed classified source",
+            BlocksJson = WikiBlockJson.Serialize([
+                new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0,
+                    [
+                        new WikiRichTextSpan("classified @member", Link: "usermention:member"),
+                        new WikiRichTextSpan(" target", Link: $"wikilink:{target.Id}")
+                    ], new Dictionary<string, string>())])
+        }, "u");
+        var deniedPage = await wiki.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Denied classified source",
+            BlocksJson = WikiBlockJson.Serialize([
+                new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0,
+                    [
+                        new WikiRichTextSpan("classified @member", Link: "usermention:member"),
+                        new WikiRichTextSpan(" target", Link: $"wikilink:{target.Id}")
+                    ], new Dictionary<string, string>())])
+        }, "u");
+        var allowedDatabase = await databases.CreateDatabaseAsync("Allowed projects", null, "u");
+        var deniedDatabase = await databases.CreateDatabaseAsync("Denied projects", null, "u");
+        foreach (var database in new[] { allowedDatabase, deniedDatabase })
+        {
+            var title = database.Properties.Single(property => property.Type == WikiDatabasePropertyTypes.Title);
+            var values = new System.Text.Json.Nodes.JsonObject();
+            WikiPropertyValues.SetText(values, title.Id, "Classified milestone");
+            await databases.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+            {
+                Values = values.ToDictionary(item => item.Key, item => item.Value)
+            }, "u");
+        }
+
+        await access.SetPermissionAsync(target.Id, false, "member", SentinelAccessLevels.View, "owner");
+        await access.SetPermissionAsync(allowedPage.Id, false, "member", SentinelAccessLevels.View, "owner");
+        await access.SetPermissionAsync(allowedDatabase.Id, true, "member", SentinelAccessLevels.View, "owner");
+        db.SentinelNavigationEntries.AddRange(
+            new SentinelNavigationEntry
+            {
+                Username = "member", TargetId = allowedPage.Id, IsDatabase = false,
+                LastOpenedAt = DateTimeOffset.UtcNow, CreatedBy = "member"
+            },
+            new SentinelNavigationEntry
+            {
+                Username = "member", TargetId = deniedPage.Id, IsDatabase = false,
+                LastOpenedAt = DateTimeOffset.UtcNow.AddMinutes(-1), CreatedBy = "member"
+            });
+        await db.SaveChangesAsync();
+
+        var search = await sentinel.SearchAsync("classified", "member");
+        var backlinks = await sentinel.GetBacklinksAsync(target.Id, "member");
+        var mentions = await sentinel.GetMentionsAsync("member");
+        var rowSuggestions = await sentinel.SearchMentionSuggestionsAsync("classified", "member");
+        var navigation = await sentinel.GetNavigationAsync("member");
+
+        search.Should().Contain(result => result.Id == allowedPage.Id && !result.IsDatabase);
+        search.Should().Contain(result => result.Id == allowedDatabase.Id && result.IsDatabase);
+        search.Should().NotContain(result => result.Id == deniedPage.Id || result.Id == deniedDatabase.Id);
+        backlinks.Should().ContainSingle(link => link.SourcePageId == allowedPage.Id);
+        mentions.Should().ContainSingle(mention => mention.SourcePageId == allowedPage.Id);
+        rowSuggestions.Should().ContainSingle(suggestion =>
+            suggestion.Kind == "row" && suggestion.Description.Contains(allowedDatabase.Title));
+        navigation.Recents.Should().ContainSingle(item => item.Id == allowedPage.Id);
     }
 
     [Fact]

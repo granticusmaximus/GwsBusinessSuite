@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using GwsBusinessSuite.Application.Wiki;
 
@@ -9,6 +10,7 @@ public sealed class WikiBlockHtmlRendererTests
     public void RenderBlock_ShouldRenderLinkedDatabaseReferenceWithoutCopyingDatabaseContent()
     {
         var databaseId = Guid.NewGuid();
+        var viewId = Guid.NewGuid();
         var block = new WikiBlock(
             Guid.NewGuid(),
             WikiBlockTypes.LinkedDatabase,
@@ -17,14 +19,18 @@ public sealed class WikiBlockHtmlRendererTests
             new Dictionary<string, string>
             {
                 ["databaseId"] = databaseId.ToString(),
-                ["databaseTitle"] = "Projects <2026>"
+                ["databaseTitle"] = "Projects <2026>",
+                ["databaseViewId"] = viewId.ToString(),
+                ["databaseViewName"] = "Open & urgent"
             });
 
         var html = WikiBlockHtmlRenderer.RenderBlock(block);
 
         html.Should().Contain("class=\"wiki-linked-database\"");
         html.Should().Contain($"data-database-id=\"{databaseId}\"");
+        html.Should().Contain($"data-database-view-id=\"{viewId}\"");
         html.Should().Contain("Projects &lt;2026&gt;");
+        html.Should().Contain("Open &amp; urgent");
         html.Should().Contain("margin-left:1.5rem");
         html.Should().NotContain("<2026>");
     }
@@ -111,6 +117,62 @@ public sealed class WikiBlockHtmlRendererTests
 
         html.Should().Contain("wiki-table-of-contents").And.Contain("Release plan").And.Contain("href=\"#sentinel-heading-1");
         html.Should().Contain("id=\"sentinel-heading-1");
+    }
+
+    [Fact]
+    public void RenderPage_ShouldPreserveNestedBulletedAndNumberedListStructure()
+    {
+        var blocks = new[]
+        {
+            TextBlock(WikiBlockTypes.BulletedListItem, "Parent", 0),
+            TextBlock(WikiBlockTypes.BulletedListItem, "Child A", 1),
+            TextBlock(WikiBlockTypes.NumberedListItem, "Step one", 2),
+            TextBlock(WikiBlockTypes.NumberedListItem, "Step two", 2),
+            TextBlock(WikiBlockTypes.BulletedListItem, "Child B", 1),
+            TextBlock(WikiBlockTypes.BulletedListItem, "Sibling", 0),
+            TextBlock(WikiBlockTypes.Paragraph, "After", 0)
+        };
+
+        var html = WikiBlockHtmlRenderer.RenderPage(blocks);
+
+        html.Should().Be(
+            "<ul class=\"wiki-list wiki-bulleted-list\">"
+            + "<li class=\"wiki-list-item\">Parent"
+            + "<ul class=\"wiki-list wiki-bulleted-list\">"
+            + "<li class=\"wiki-list-item\">Child A"
+            + "<ol class=\"wiki-list wiki-numbered-list\">"
+            + "<li class=\"wiki-list-item\">Step one</li>"
+            + "<li class=\"wiki-list-item\">Step two</li>"
+            + "</ol></li>"
+            + "<li class=\"wiki-list-item\">Child B</li>"
+            + "</ul></li>"
+            + "<li class=\"wiki-list-item\">Sibling</li>"
+            + "</ul><p>After</p>");
+    }
+
+    [Fact]
+    public void RenderPage_ShouldPlaceIndentedDescendantsInsideTheirToggleDetails()
+    {
+        var blocks = new[]
+        {
+            TextBlock(WikiBlockTypes.Toggle, "Sources", 0),
+            TextBlock(WikiBlockTypes.Paragraph, "Hidden source", 1),
+            TextBlock(WikiBlockTypes.Toggle, "More", 1),
+            TextBlock(WikiBlockTypes.Paragraph, "Nested source", 2),
+            TextBlock(WikiBlockTypes.Paragraph, "Always visible", 0)
+        };
+
+        var html = WikiBlockHtmlRenderer.RenderPage(blocks);
+
+        html.Should().Be(
+            "<details class=\"wiki-toggle\"><summary>Sources</summary>"
+            + "<div class=\"wiki-toggle-content\" style=\"margin-left:1.5rem\">"
+            + "<p>Hidden source</p>"
+            + "<details class=\"wiki-toggle\"><summary>More</summary>"
+            + "<div class=\"wiki-toggle-content\" style=\"margin-left:1.5rem\"><p>Nested source</p></div>"
+            + "</details></div></details>"
+            + "<p>Always visible</p>");
+        html.Should().NotContain("<details open");
     }
 
     [Theory]
@@ -201,4 +263,61 @@ public sealed class WikiBlockHtmlRendererTests
             .Should().Contain("href=\"#\"")
             .And.NotContain("javascript:");
     }
+
+    [Fact]
+    public void RenderBlock_ShouldRenderInteractiveTabsWithEncodedLabelsAndRichText()
+    {
+        var tabs = new[]
+        {
+            new WikiTab("Overview <script>", [new WikiRichTextSpan("Summary", Bold: true)]),
+            new WikiTab("Evidence", [new WikiRichTextSpan("Source", Link: "https://example.com/source")])
+        };
+        var block = new WikiBlock(
+            Guid.NewGuid(),
+            WikiBlockTypes.Tab,
+            1,
+            [],
+            new Dictionary<string, string>
+            {
+                ["tabsJson"] = JsonSerializer.Serialize(tabs, WikiBlockJson.Options)
+            });
+
+        var html = WikiBlockHtmlRenderer.RenderBlock(block);
+
+        WikiBlockTypes.All.Should().Contain(WikiBlockTypes.Tab);
+        html.Should().Contain("class=\"wiki-tabs\"");
+        html.Should().Contain("Overview &lt;script&gt;").And.NotContain("<script>");
+        html.Should().Contain("<b>Summary</b>");
+        html.Should().Contain("href=\"https://example.com/source\"");
+        html.Should().Contain("type=\"radio\"").And.Contain(" checked");
+        html.Should().Contain("role=\"region\"");
+        html.Should().Contain("margin-left:1.5rem");
+        html.Split("class=\"wiki-tab-panel\"").Should().HaveCount(3);
+        WikiBlockHtmlRenderer.PlainTextPreview(block).Should().Contain("Overview <script>: Summary");
+    }
+
+    [Fact]
+    public void RenderBlock_ShouldFallBackToPlainTextTabsWhenStructuredPropsAreInvalid()
+    {
+        var block = new WikiBlock(
+            Guid.NewGuid(),
+            WikiBlockTypes.Tab,
+            0,
+            [new WikiRichTextSpan("First pane ||| Second <pane>")],
+            new Dictionary<string, string> { ["tabsJson"] = "not-json" });
+
+        var html = WikiBlockHtmlRenderer.RenderBlock(block);
+
+        html.Should().Contain("Tab 1").And.Contain("First pane");
+        html.Should().Contain("Tab 2").And.Contain("Second &lt;pane&gt;");
+        html.Should().NotContain("Second <pane>");
+    }
+
+    private static WikiBlock TextBlock(string type, string text, int indentLevel) =>
+        new(
+            Guid.NewGuid(),
+            type,
+            indentLevel,
+            [new WikiRichTextSpan(text)],
+            new Dictionary<string, string>());
 }

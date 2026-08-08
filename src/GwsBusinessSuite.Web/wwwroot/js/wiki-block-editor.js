@@ -15,6 +15,7 @@ const MAX_PERSISTED_HISTORY_CHARS = 1_500_000;
 const MAX_PERSISTED_DRAFT_CHARS = 1_500_000;
 const MAX_DRAFT_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 let suggestionMenuSequence = 0;
+let tabEditorSequence = 0;
 
 const BLOCK_TYPES = [
     { type: 'paragraph', label: 'Text', icon: '¶', group: 'Basic blocks', description: 'Start writing with plain text.', keywords: 'paragraph' },
@@ -33,6 +34,7 @@ const BLOCK_TYPES = [
     { type: 'button', label: 'Button', icon: '▣', group: 'Advanced blocks', description: 'Add a prominent action.', keywords: 'action link' },
     { type: 'synced_block', label: 'Synced block', icon: '↻', group: 'Advanced blocks', description: 'Reuse synchronized content.', keywords: 'reusable' },
     { type: 'columns', label: 'Columns', icon: '▥', group: 'Advanced blocks', description: 'Lay content out side by side.', keywords: 'layout' },
+    { type: 'tab', label: 'Tabs', icon: '▤', group: 'Advanced blocks', description: 'Organize content into switchable tabs.', keywords: 'tabbed container panes' },
     { type: 'image', label: 'Image', icon: '🖼', group: 'Media', description: 'Upload or link to an image.', keywords: 'photo picture' },
     { type: 'embed', label: 'Embed link', icon: '🔗', group: 'Media', description: 'Embed content from another site.', keywords: 'video url' },
     { type: 'linked_database', label: 'Linked database', icon: '▦', group: 'Data', description: 'Show an existing database view.', keywords: 'data view' },
@@ -408,6 +410,8 @@ function createBlockElement(block, state) {
         el.dataset.databaseId = (block.props && block.props.databaseId) || '';
         el.dataset.databaseTitle = (block.props && block.props.databaseTitle) || '';
         el.dataset.databaseIcon = (block.props && block.props.databaseIcon) || '';
+        el.dataset.databaseViewId = (block.props && block.props.databaseViewId) || '';
+        el.dataset.databaseViewName = (block.props && block.props.databaseViewName) || '';
     }
     applyIndentStyle(el);
 
@@ -502,6 +506,11 @@ function createBlockBody(block, state) {
 
     if (block.type === 'columns') {
         body.appendChild(createColumnsBody(block, state));
+        return body;
+    }
+
+    if (block.type === 'tab') {
+        body.appendChild(createTabsBody(block, state));
         return body;
     }
 
@@ -743,6 +752,211 @@ function refreshColumnControls(wrapper) {
     if (add) add.disabled = columns.length >= 5;
 }
 
+function createTabsBody(block, state) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'wiki-tabs-editor';
+
+    const tabList = document.createElement('div');
+    tabList.className = 'wiki-tab-list';
+    tabList.setAttribute('role', 'tablist');
+    tabList.setAttribute('aria-label', 'Tabs');
+
+    const panels = document.createElement('div');
+    panels.className = 'wiki-tab-editor-panels';
+
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'wiki-tab-add';
+    add.setAttribute('aria-label', 'Add tab');
+    add.textContent = '+ Add tab';
+
+    const parseTabs = () => {
+        try {
+            const parsed = JSON.parse((block.props && block.props.tabsJson) || '[]');
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                return parsed.map((tab, index) => ({
+                    title: String(tab && tab.title || `Tab ${index + 1}`),
+                    richText: Array.isArray(tab && tab.richText) ? tab.richText : []
+                }));
+            }
+        } catch { /* use the plain-text fallback below */ }
+
+        const text = (block.richText || []).map(span => span.text || '').join('');
+        const fallback = text
+            ? text.split('|||').map(value => value.trim())
+            : ['', ''];
+        return fallback.map((value, index) => ({
+            title: `Tab ${index + 1}`,
+            richText: value ? [{ text: value }] : []
+        }));
+    };
+
+    const activateTab = tabId => {
+        for (const trigger of tabList.querySelectorAll(':scope > .wiki-tab-trigger')) {
+            const active = trigger.dataset.tabId === tabId;
+            trigger.classList.toggle('is-active', active);
+            trigger.setAttribute('aria-selected', active ? 'true' : 'false');
+            trigger.tabIndex = active ? 0 : -1;
+        }
+        for (const panel of panels.querySelectorAll(':scope > .wiki-tab-editor-panel')) {
+            const active = panel.dataset.tabId === tabId;
+            panel.classList.toggle('is-active', active);
+            panel.hidden = !active;
+        }
+        wrapper.dataset.activeTabId = tabId;
+    };
+
+    const renderTab = value => {
+        // The editor can also run in a non-secure about:blank test/document context where
+        // crypto.randomUUID is unavailable, so use a module-local DOM identity here. The id
+        // is transient UI state; persisted tab identity is its ordered title/content pair.
+        const tabId = `tab-${++tabEditorSequence}`;
+        const triggerId = `wiki-tab-${block.id}-${tabId}`;
+        const panelId = `${triggerId}-panel`;
+
+        const trigger = document.createElement('button');
+        trigger.type = 'button';
+        trigger.className = 'wiki-tab-trigger';
+        trigger.dataset.tabId = tabId;
+        trigger.id = triggerId;
+        trigger.setAttribute('role', 'tab');
+        trigger.setAttribute('aria-controls', panelId);
+        trigger.addEventListener('click', () => activateTab(tabId));
+        trigger.addEventListener('keydown', event => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+            event.preventDefault();
+            const triggers = [...tabList.querySelectorAll(':scope > .wiki-tab-trigger')];
+            const currentIndex = triggers.indexOf(trigger);
+            const nextIndex = event.key === 'ArrowLeft'
+                ? (currentIndex - 1 + triggers.length) % triggers.length
+                : (currentIndex + 1) % triggers.length;
+            activateTab(triggers[nextIndex].dataset.tabId);
+            triggers[nextIndex].focus();
+        });
+
+        const panel = document.createElement('section');
+        panel.className = 'wiki-tab-editor-panel';
+        panel.dataset.tabId = tabId;
+        panel.id = panelId;
+        panel.setAttribute('role', 'tabpanel');
+        panel.setAttribute('aria-labelledby', triggerId);
+
+        const toolbar = document.createElement('div');
+        toolbar.className = 'wiki-tab-controls';
+        const title = document.createElement('input');
+        title.type = 'text';
+        title.className = 'wiki-tab-title';
+        title.setAttribute('aria-label', 'Tab name');
+        title.maxLength = 80;
+        title.value = value.title || '';
+        title.addEventListener('input', () => {
+            refreshTabControls(wrapper);
+            scheduleNotify(state);
+        });
+
+        const moveLeft = document.createElement('button');
+        moveLeft.type = 'button';
+        moveLeft.setAttribute('aria-label', 'Move tab left');
+        moveLeft.title = 'Move tab left';
+        moveLeft.textContent = '←';
+        moveLeft.addEventListener('click', () => {
+            const previousTrigger = trigger.previousElementSibling;
+            const previousPanel = panel.previousElementSibling;
+            if (!previousTrigger?.classList.contains('wiki-tab-trigger')
+                || !previousPanel?.classList.contains('wiki-tab-editor-panel')) return;
+            tabList.insertBefore(trigger, previousTrigger);
+            panels.insertBefore(panel, previousPanel);
+            refreshTabControls(wrapper);
+            notifyChanged(state);
+        });
+
+        const moveRight = document.createElement('button');
+        moveRight.type = 'button';
+        moveRight.setAttribute('aria-label', 'Move tab right');
+        moveRight.title = 'Move tab right';
+        moveRight.textContent = '→';
+        moveRight.addEventListener('click', () => {
+            const nextTrigger = trigger.nextElementSibling;
+            const nextPanel = panel.nextElementSibling;
+            if (!nextTrigger?.classList.contains('wiki-tab-trigger')
+                || !nextPanel?.classList.contains('wiki-tab-editor-panel')) return;
+            tabList.insertBefore(nextTrigger, trigger);
+            panels.insertBefore(nextPanel, panel);
+            refreshTabControls(wrapper);
+            notifyChanged(state);
+        });
+
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.setAttribute('aria-label', 'Remove tab');
+        remove.title = 'Remove tab';
+        remove.textContent = '×';
+        remove.addEventListener('click', () => {
+            const triggers = [...tabList.querySelectorAll(':scope > .wiki-tab-trigger')];
+            if (triggers.length <= 2) return;
+            const wasActive = wrapper.dataset.activeTabId === tabId;
+            const index = triggers.indexOf(trigger);
+            trigger.remove();
+            panel.remove();
+            refreshTabControls(wrapper);
+            if (wasActive) {
+                const remaining = [...tabList.querySelectorAll(':scope > .wiki-tab-trigger')];
+                activateTab(remaining[Math.min(index, remaining.length - 1)].dataset.tabId);
+            }
+            notifyChanged(state);
+        });
+
+        const content = document.createElement('div');
+        content.className = 'wiki-block-content wiki-tab-content';
+        content.contentEditable = 'true';
+        content.dataset.placeholder = 'Type in this tab';
+        content.innerHTML = htmlFromRichText(Array.isArray(value.richText) ? value.richText : []);
+        content.addEventListener('input', () => scheduleNotify(state));
+
+        toolbar.append(title, moveLeft, moveRight, remove);
+        panel.append(toolbar, content);
+        tabList.insertBefore(trigger, add);
+        panels.appendChild(panel);
+        return tabId;
+    };
+
+    add.addEventListener('click', () => {
+        if (tabList.querySelectorAll(':scope > .wiki-tab-trigger').length >= 8) return;
+        const count = tabList.querySelectorAll(':scope > .wiki-tab-trigger').length;
+        const tabId = renderTab({ title: `Tab ${count + 1}`, richText: [] });
+        refreshTabControls(wrapper);
+        activateTab(tabId);
+        panels.querySelector(`:scope > .wiki-tab-editor-panel[data-tab-id="${tabId}"] .wiki-tab-title`)?.focus();
+        notifyChanged(state);
+    });
+
+    tabList.appendChild(add);
+    wrapper.append(tabList, panels);
+    const values = parseTabs();
+    while (values.length < 2) values.push({ title: `Tab ${values.length + 1}`, richText: [] });
+    const firstTabId = values.map(renderTab)[0];
+    refreshTabControls(wrapper);
+    activateTab(firstTabId);
+    return wrapper;
+}
+
+function refreshTabControls(wrapper) {
+    const tabList = wrapper.querySelector(':scope > .wiki-tab-list');
+    const panels = wrapper.querySelector(':scope > .wiki-tab-editor-panels');
+    if (!tabList || !panels) return;
+
+    const triggers = [...tabList.querySelectorAll(':scope > .wiki-tab-trigger')];
+    triggers.forEach((trigger, index) => {
+        const panel = panels.querySelector(`:scope > .wiki-tab-editor-panel[data-tab-id="${trigger.dataset.tabId}"]`);
+        const title = panel?.querySelector('.wiki-tab-title');
+        trigger.textContent = title?.value.trim() || `Tab ${index + 1}`;
+        panel?.querySelector('[aria-label="Move tab left"]')?.toggleAttribute('disabled', index === 0);
+        panel?.querySelector('[aria-label="Move tab right"]')?.toggleAttribute('disabled', index === triggers.length - 1);
+        panel?.querySelector('[aria-label="Remove tab"]')?.toggleAttribute('disabled', triggers.length <= 2);
+    });
+    tabList.querySelector(':scope > .wiki-tab-add')?.toggleAttribute('disabled', triggers.length >= 8);
+}
+
 function parseTableRows(block) {
     try {
         const richRows = JSON.parse((block.props && block.props.tableJson) || '[]');
@@ -938,14 +1152,30 @@ function renderMediaPreview(preview, type, url, fileName = '', mediaKind = '') {
     preview.appendChild(link);
 }
 
+function inlineViewIcon(type) {
+    switch (type) {
+        case 'board': return 'bi-kanban';
+        case 'calendar': return 'bi-calendar3';
+        case 'gallery': return 'bi-grid';
+        case 'timeline': return 'bi-calendar-range';
+        case 'chart': return 'bi-bar-chart';
+        case 'form': return 'bi-ui-checks';
+        case 'list': return 'bi-list-ul';
+        default: return 'bi-table';
+    }
+}
+
 function createLinkedDatabaseBody(block, state) {
     const wrapper = document.createElement('div');
     wrapper.className = 'wiki-linked-database-editor';
     const isInline = block.type === 'inline_database';
     wrapper.classList.toggle('is-inline', isInline);
+    wrapper.classList.toggle('is-live-view', !isInline);
     let databaseId = (block.props && block.props.databaseId) || '';
     let databaseTitle = (block.props && block.props.databaseTitle) || '';
     let databaseIcon = (block.props && block.props.databaseIcon) || '';
+    let databaseViewId = (block.props && block.props.databaseViewId) || '';
+    let databaseViewName = (block.props && block.props.databaseViewName) || '';
     let searchGeneration = 0;
 
     const syncBlockDataset = () => {
@@ -954,6 +1184,142 @@ function createLinkedDatabaseBody(block, state) {
         blockEl.dataset.databaseId = databaseId;
         blockEl.dataset.databaseTitle = databaseTitle;
         blockEl.dataset.databaseIcon = databaseIcon;
+        blockEl.dataset.databaseViewId = databaseViewId;
+        blockEl.dataset.databaseViewName = databaseViewName;
+    };
+
+    const clearSource = () => {
+        databaseId = '';
+        databaseTitle = '';
+        databaseIcon = '';
+        databaseViewId = '';
+        databaseViewName = '';
+        syncBlockDataset();
+        render();
+        notifyChanged(state);
+    };
+
+    const clearView = () => {
+        databaseViewId = '';
+        databaseViewName = '';
+        syncBlockDataset();
+        render();
+        notifyChanged(state);
+    };
+
+    const renderViewChooser = () => {
+        wrapper.innerHTML = '<div class="wiki-inline-database-loading">Loading saved views…</div>';
+        state.dotNetRef.invokeMethodAsync('GetInlineDatabase', databaseId).then(snapshot => {
+            wrapper.innerHTML = '';
+            if (!snapshot) {
+                const unavailable = document.createElement('div');
+                unavailable.className = 'wiki-inline-database-error';
+                unavailable.textContent = 'This database is unavailable or you no longer have access.';
+                const changeSource = document.createElement('button');
+                changeSource.type = 'button';
+                changeSource.className = 'wiki-linked-database-change';
+                changeSource.textContent = 'Change source';
+                changeSource.addEventListener('click', clearSource);
+                wrapper.append(unavailable, changeSource);
+                return;
+            }
+
+            const chooser = document.createElement('div');
+            chooser.className = 'wiki-linked-view-chooser';
+            const heading = document.createElement('div');
+            heading.className = 'wiki-linked-view-chooser-heading';
+            const label = document.createElement('strong');
+            label.textContent = `Choose a view from ${snapshot.title}`;
+            const changeSource = document.createElement('button');
+            changeSource.type = 'button';
+            changeSource.className = 'wiki-linked-database-change';
+            changeSource.textContent = 'Change source';
+            changeSource.addEventListener('click', clearSource);
+            heading.append(label, changeSource);
+            chooser.appendChild(heading);
+
+            const views = document.createElement('div');
+            views.className = 'wiki-linked-view-options';
+            for (const view of snapshot.views || []) {
+                const option = document.createElement('button');
+                option.type = 'button';
+                option.className = 'wiki-linked-view-option';
+                option.innerHTML = `<i class="bi ${inlineViewIcon(view.type)}" aria-hidden="true"></i>`;
+                const name = document.createElement('span');
+                name.textContent = view.name || view.type;
+                option.appendChild(name);
+                option.addEventListener('click', () => {
+                    databaseViewId = view.id;
+                    databaseViewName = view.name || view.type;
+                    syncBlockDataset();
+                    render();
+                    notifyChanged(state);
+                });
+                views.appendChild(option);
+            }
+            if (!snapshot.views || snapshot.views.length === 0) {
+                const empty = document.createElement('span');
+                empty.className = 'wiki-linked-database-empty';
+                empty.textContent = 'This database has no saved views.';
+                views.appendChild(empty);
+            }
+            chooser.appendChild(views);
+            wrapper.appendChild(chooser);
+        }).catch(() => {
+            wrapper.innerHTML = '<div class="wiki-inline-database-error">Unable to load saved views.</div>';
+        });
+    };
+
+    const renderLinkedView = () => {
+        wrapper.innerHTML = '<div class="wiki-inline-database-loading">Loading linked view…</div>';
+        state.dotNetRef.invokeMethodAsync('GetLinkedDatabase', databaseId, databaseViewId).then(snapshot => {
+            if (!snapshot) {
+                wrapper.innerHTML = '';
+                const unavailable = document.createElement('div');
+                unavailable.className = 'wiki-inline-database-error';
+                unavailable.textContent = `${databaseViewName || 'This view'} is no longer available.`;
+                const actions = document.createElement('div');
+                actions.className = 'wiki-inline-database-actions';
+                const changeView = document.createElement('button');
+                changeView.type = 'button';
+                changeView.textContent = 'Choose another view';
+                changeView.addEventListener('click', clearView);
+                const changeSource = document.createElement('button');
+                changeSource.type = 'button';
+                changeSource.textContent = 'Change source';
+                changeSource.addEventListener('click', clearSource);
+                actions.append(changeView, changeSource);
+                wrapper.append(unavailable, actions);
+                return;
+            }
+
+            const selectedView = (snapshot.views || [])[0];
+            if (selectedView) {
+                databaseViewName = selectedView.name || selectedView.type;
+                syncBlockDataset();
+            }
+            renderInlineDatabaseSnapshot(wrapper, state, snapshot, clearSource, selectedView?.id || databaseViewId, {
+                isLinked: true,
+                allowCreate: false,
+                changeView: clearView,
+                saveCell: async (rowId, propertyId, nextValue) => {
+                    const saved = await state.dotNetRef.invokeMethodAsync(
+                        'SaveInlineDatabaseCell', databaseId, rowId, propertyId, nextValue);
+                    return saved
+                        ? state.dotNetRef.invokeMethodAsync('GetLinkedDatabase', databaseId, databaseViewId)
+                        : null;
+                },
+                moveRow: async (rowId, groupByPropertyId, optionId, newSortOrder) => {
+                    const moved = await state.dotNetRef.invokeMethodAsync(
+                        'MoveInlineDatabaseRow', databaseId, rowId, groupByPropertyId, optionId || null, newSortOrder);
+                    return moved
+                        ? state.dotNetRef.invokeMethodAsync('GetLinkedDatabase', databaseId, databaseViewId)
+                        : null;
+                }
+            });
+        }).catch(() => {
+            wrapper.innerHTML = '<div class="wiki-inline-database-error">Unable to load this linked view.</div>';
+        });
     };
 
     const render = () => {
@@ -961,49 +1327,14 @@ function createLinkedDatabaseBody(block, state) {
         if (databaseId) {
             wrapper.classList.add('has-database');
             if (isInline) {
-                renderInlineDatabase(wrapper, state, databaseId, () => {
-                    databaseId = '';
-                    databaseTitle = '';
-                    databaseIcon = '';
-                    syncBlockDataset();
-                    render();
-                    notifyChanged(state);
-                });
+                renderInlineDatabase(wrapper, state, databaseId, clearSource);
                 return;
             }
-            const card = document.createElement('button');
-            card.type = 'button';
-            card.className = 'wiki-linked-database-card';
-            card.title = `Open ${databaseTitle || 'linked database'}`;
-
-            const icon = document.createElement('span');
-            icon.className = 'wiki-linked-database-icon';
-            icon.textContent = databaseIcon || '▦';
-            const label = document.createElement('span');
-            label.className = 'wiki-linked-database-label';
-            label.textContent = databaseTitle || 'Linked database';
-            const arrow = document.createElement('span');
-            arrow.className = 'wiki-linked-database-arrow';
-            arrow.textContent = '↗';
-            card.append(icon, label, arrow);
-            card.addEventListener('click', () => {
-                try { state.dotNetRef.invokeMethodAsync('OpenLinkedDatabase', databaseId); }
-                catch { /* the Blazor circuit may have disconnected */ }
-            });
-
-            const change = document.createElement('button');
-            change.type = 'button';
-            change.className = 'wiki-linked-database-change';
-            change.textContent = 'Change';
-            change.addEventListener('click', () => {
-                databaseId = '';
-                databaseTitle = '';
-                databaseIcon = '';
-                syncBlockDataset();
-                render();
-                notifyChanged(state);
-            });
-            wrapper.append(card, change);
+            if (!databaseViewId) {
+                renderViewChooser();
+                return;
+            }
+            renderLinkedView();
             return;
         }
 
@@ -1013,7 +1344,7 @@ function createLinkedDatabaseBody(block, state) {
         const input = document.createElement('input');
         input.type = 'search';
         input.className = 'form-control form-control-sm';
-        input.placeholder = isInline ? 'Search databases to show inline…' : 'Search databases to link…';
+        input.placeholder = isInline ? 'Search databases to show inline…' : 'Search databases for a linked view…';
         input.setAttribute('aria-label', 'Search Sentinel databases');
         const results = document.createElement('div');
         results.className = 'wiki-linked-database-results';
@@ -1036,6 +1367,8 @@ function createLinkedDatabaseBody(block, state) {
                         databaseId = suggestion.id;
                         databaseTitle = suggestion.title;
                         databaseIcon = suggestion.icon || '';
+                        databaseViewId = '';
+                        databaseViewName = '';
                         syncBlockDataset();
                         render();
                         notifyChanged(state);
@@ -1077,10 +1410,11 @@ function renderInlineDatabase(wrapper, state, databaseId, resetDatabase) {
     });
 }
 
-function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, selectedViewId = null) {
+function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, selectedViewId = null, options = {}) {
     wrapper.innerHTML = '';
     const views = snapshot.views || [];
     const activeView = views.find(view => view.id === selectedViewId) || views[0] || null;
+    const canEdit = snapshot.canEdit !== false;
     const selectProperties = (snapshot.properties || [])
         .filter(property => property.type === 'select');
     const boardGroupByPropertyId = activeView?.groupByPropertyId
@@ -1097,6 +1431,12 @@ function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, s
     const identityTitle = document.createElement('strong');
     identityTitle.textContent = snapshot.title;
     identity.append(identityIcon, identityTitle);
+    if (options.isLinked && activeView) {
+        const viewName = document.createElement('span');
+        viewName.className = 'wiki-linked-view-badge';
+        viewName.textContent = activeView.name || activeView.type;
+        identity.appendChild(viewName);
+    }
     identity.addEventListener('click', () => state.dotNetRef.invokeMethodAsync('OpenLinkedDatabase', snapshot.id));
 
     const headerActions = document.createElement('div');
@@ -1109,7 +1449,15 @@ function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, s
     change.type = 'button';
     change.textContent = 'Change source';
     change.addEventListener('click', resetDatabase);
-    headerActions.append(open, change);
+    headerActions.appendChild(open);
+    if (options.changeView) {
+        const changeView = document.createElement('button');
+        changeView.type = 'button';
+        changeView.textContent = 'Change view';
+        changeView.addEventListener('click', options.changeView);
+        headerActions.appendChild(changeView);
+    }
+    headerActions.appendChild(change);
     header.append(identity, headerActions);
 
     const viewTabs = document.createElement('div');
@@ -1121,7 +1469,7 @@ function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, s
         tab.classList.toggle('is-active', view.id === activeView?.id);
         tab.textContent = view.name || view.type;
         tab.addEventListener('click', () =>
-            renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, view.id));
+            renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, view.id, options));
         viewTabs.appendChild(tab);
     }
 
@@ -1129,29 +1477,27 @@ function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, s
     scroller.className = 'wiki-inline-database-scroller';
     const isBoard = activeView?.type === 'board' && boardGroupByPropertyId;
     if (isBoard) {
+        const moveRow = options.moveRow || (async (rowId, propertyId, optionId, newSortOrder) =>
+            state.dotNetRef.invokeMethodAsync(
+                'MoveInlineDatabaseRow', snapshot.id, rowId, propertyId, optionId || null, newSortOrder));
         scroller.appendChild(createInlineBoard(
             snapshot,
             boardGroupByPropertyId,
             rowId => state.dotNetRef.invokeMethodAsync('OpenLinkedDatabaseRow', snapshot.id, rowId),
             async (rowId, optionId, newSortOrder) => {
-                const updated = await state.dotNetRef.invokeMethodAsync(
-                    'MoveInlineDatabaseRow',
-                    snapshot.id,
-                    rowId,
-                    boardGroupByPropertyId,
-                    optionId || null,
-                    newSortOrder);
-                if (updated) renderInlineDatabaseSnapshot(wrapper, state, updated, resetDatabase, activeView?.id);
+                const updated = await moveRow(rowId, boardGroupByPropertyId, optionId, newSortOrder);
+                if (updated) renderInlineDatabaseSnapshot(wrapper, state, updated, resetDatabase, activeView?.id, options);
             },
-            async (optionId, title) => {
+            options.allowCreate === false || !canEdit ? null : async (optionId, title) => {
                 const updated = await state.dotNetRef.invokeMethodAsync(
                     'AddInlineBoardTask',
                     snapshot.id,
                     boardGroupByPropertyId,
                     optionId || null,
                     title);
-                if (updated) renderInlineDatabaseSnapshot(wrapper, state, updated, resetDatabase, activeView?.id);
-            }));
+                if (updated) renderInlineDatabaseSnapshot(wrapper, state, updated, resetDatabase, activeView?.id, options);
+            },
+            canEdit));
     } else {
         // Every non-board view (List, Calendar, Gallery, Timeline, etc.) renders through this
         // shared table fallback, so fixing the row-open affordance here covers all of them at
@@ -1192,9 +1538,17 @@ function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, s
             for (const property of snapshot.properties) {
                 const cell = document.createElement('td');
                 const value = row.cells.find(item => item.propertyId === property.id)?.value || '';
-                cell.appendChild(createInlineCellEditor(state, snapshot.id, row.id, property, value, updated => {
-                    if (updated) renderInlineDatabaseSnapshot(wrapper, state, updated, resetDatabase, activeView?.id);
-                }));
+                cell.appendChild(createInlineCellEditor(
+                    state,
+                    snapshot.id,
+                    row.id,
+                    property,
+                    value,
+                    updated => {
+                        if (updated) renderInlineDatabaseSnapshot(wrapper, state, updated, resetDatabase, activeView?.id, options);
+                    },
+                    options.saveCell,
+                    canEdit));
                 tableRow.appendChild(cell);
             }
             tbody.appendChild(tableRow);
@@ -1204,9 +1558,9 @@ function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, s
     }
 
     wrapper.append(header);
-    if (views.length > 0) wrapper.append(viewTabs);
+    if (views.length > 0 && !options.isLinked) wrapper.append(viewTabs);
     wrapper.append(scroller);
-    if (!isBoard) {
+    if (!isBoard && options.allowCreate !== false && canEdit) {
         const footer = document.createElement('div');
         footer.className = 'wiki-inline-database-footer';
         const addRow = document.createElement('button');
@@ -1216,7 +1570,7 @@ function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, s
             addRow.disabled = true;
             try {
                 const updated = await state.dotNetRef.invokeMethodAsync('AddInlineDatabaseRow', snapshot.id);
-                if (updated) renderInlineDatabaseSnapshot(wrapper, state, updated, resetDatabase, activeView?.id);
+                if (updated) renderInlineDatabaseSnapshot(wrapper, state, updated, resetDatabase, activeView?.id, options);
             } finally {
                 addRow.disabled = false;
             }
@@ -1226,7 +1580,7 @@ function renderInlineDatabaseSnapshot(wrapper, state, snapshot, resetDatabase, s
     }
 }
 
-function createInlineBoard(snapshot, groupByPropertyId, openRow, moveRow, addTask) {
+function createInlineBoard(snapshot, groupByPropertyId, openRow, moveRow, addTask, canEdit = true) {
     const board = document.createElement('div');
     board.className = 'wiki-inline-database-board';
     const groupProperty = snapshot.properties.find(property => property.id === groupByPropertyId);
@@ -1258,38 +1612,40 @@ function createInlineBoard(snapshot, groupByPropertyId, openRow, moveRow, addTas
 
         const cards = document.createElement('div');
         cards.className = 'wiki-inline-board-cards';
-        cards.addEventListener('dragover', event => {
-            event.preventDefault();
-            if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-            column.classList.add('is-drop-target');
-        });
-        cards.addEventListener('dragleave', event => {
-            if (!cards.contains(event.relatedTarget)) column.classList.remove('is-drop-target');
-        });
-        cards.addEventListener('drop', async event => {
-            event.preventDefault();
-            column.classList.remove('is-drop-target');
-            const rowId = event.dataTransfer?.getData('text/plain');
-            if (!rowId) return;
-
-            const targetCards = [...cards.querySelectorAll('.wiki-inline-board-card:not(.is-dragging)')];
-            const targetIndex = targetCards.findIndex(card => {
-                const rect = card.getBoundingClientRect();
-                return event.clientY < rect.top + (rect.height / 2);
+        if (canEdit) {
+            cards.addEventListener('dragover', event => {
+                event.preventDefault();
+                if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+                column.classList.add('is-drop-target');
             });
-            column.classList.add('is-saving');
-            try {
-                await moveRow(rowId, option.id, targetIndex < 0 ? targetCards.length : targetIndex);
-            } finally {
-                column.classList.remove('is-saving');
-            }
-        });
+            cards.addEventListener('dragleave', event => {
+                if (!cards.contains(event.relatedTarget)) column.classList.remove('is-drop-target');
+            });
+            cards.addEventListener('drop', async event => {
+                event.preventDefault();
+                column.classList.remove('is-drop-target');
+                const rowId = event.dataTransfer?.getData('text/plain');
+                if (!rowId) return;
+
+                const targetCards = [...cards.querySelectorAll('.wiki-inline-board-card:not(.is-dragging)')];
+                const targetIndex = targetCards.findIndex(card => {
+                    const rect = card.getBoundingClientRect();
+                    return event.clientY < rect.top + (rect.height / 2);
+                });
+                column.classList.add('is-saving');
+                try {
+                    await moveRow(rowId, option.id, targetIndex < 0 ? targetCards.length : targetIndex);
+                } finally {
+                    column.classList.remove('is-saving');
+                }
+            });
+        }
 
         for (const row of rows) {
             const card = document.createElement('button');
             card.type = 'button';
             card.className = 'wiki-inline-board-card';
-            card.draggable = true;
+            card.draggable = canEdit;
             card.dataset.rowId = row.id;
             const title = document.createElement('strong');
             title.textContent = row.cells.find(cell => cell.propertyId === titleProperty?.id)?.value || 'Untitled';
@@ -1323,11 +1679,12 @@ function createInlineBoard(snapshot, groupByPropertyId, openRow, moveRow, addTas
         }
         column.appendChild(cards);
 
-        const newTask = document.createElement('button');
-        newTask.type = 'button';
-        newTask.className = 'wiki-inline-board-new-task';
-        newTask.innerHTML = '<span aria-hidden="true">+</span> New task';
-        newTask.addEventListener('click', () => {
+        if (addTask) {
+            const newTask = document.createElement('button');
+            newTask.type = 'button';
+            newTask.className = 'wiki-inline-board-new-task';
+            newTask.innerHTML = '<span aria-hidden="true">+</span> New task';
+            newTask.addEventListener('click', () => {
             newTask.hidden = true;
             const composer = document.createElement('div');
             composer.className = 'wiki-inline-board-composer';
@@ -1375,18 +1732,21 @@ function createInlineBoard(snapshot, groupByPropertyId, openRow, moveRow, addTas
             composer.append(input, actions);
             column.insertBefore(composer, newTask);
             input.focus();
-        });
-        column.appendChild(newTask);
+            });
+            column.appendChild(newTask);
+        }
         board.appendChild(column);
     }
     return board;
 }
 
-function createInlineCellEditor(state, databaseId, rowId, property, value, onSaved) {
+function createInlineCellEditor(state, databaseId, rowId, property, value, onSaved, saveCell = null, canEdit = true) {
     const commit = async nextValue => {
         try {
-            const updated = await state.dotNetRef.invokeMethodAsync(
-                'SaveInlineDatabaseCell', databaseId, rowId, property.id, nextValue);
+            const updated = saveCell
+                ? await saveCell(rowId, property.id, nextValue)
+                : await state.dotNetRef.invokeMethodAsync(
+                    'SaveInlineDatabaseCell', databaseId, rowId, property.id, nextValue);
             onSaved(updated);
         } catch { /* the Blazor circuit or mutation may have failed */ }
     };
@@ -1399,11 +1759,13 @@ function createInlineCellEditor(state, databaseId, rowId, property, value, onSav
     // editors (a relation search-and-link picker, a person picker, a file upload flow) inline
     // is real, separate work - until then this treats them as read-only, matching
     // property.isReadOnly below, rather than offering a control that quietly loses data.
-    if (property.isReadOnly || property.type === 'relation' || property.type === 'person' || property.type === 'files') {
+    if (!canEdit || property.isReadOnly || property.type === 'relation' || property.type === 'person' || property.type === 'files') {
         const readOnly = document.createElement('span');
         readOnly.className = 'wiki-inline-cell-readonly';
         readOnly.textContent = value;
-        if (!property.isReadOnly) {
+        if (!canEdit) {
+            readOnly.title = 'You have view-only access to this database.';
+        } else if (!property.isReadOnly) {
             readOnly.title = 'Open the row to edit this property.';
         }
         return readOnly;
@@ -2432,6 +2794,14 @@ function serializeBlock(blockEl) {
             [...blockEl.querySelectorAll(':scope > .wiki-block-body .wiki-column-content')]
                 .map(column => richTextFromNode(column)));
     }
+    if (type === 'tab') {
+        props.tabsJson = JSON.stringify(
+            [...blockEl.querySelectorAll(':scope > .wiki-block-body .wiki-tab-editor-panel')]
+                .map((panel, index) => ({
+                    title: panel.querySelector('.wiki-tab-title')?.value.trim() || `Tab ${index + 1}`,
+                    richText: richTextFromNode(panel.querySelector('.wiki-tab-content'))
+                })));
+    }
     if (type === 'image' || type === 'embed') {
         props.url = blockEl.dataset.url || '';
         if (blockEl.dataset.fileName) props.fileName = blockEl.dataset.fileName;
@@ -2442,6 +2812,8 @@ function serializeBlock(blockEl) {
         props.databaseId = blockEl.dataset.databaseId || '';
         props.databaseTitle = blockEl.dataset.databaseTitle || '';
         props.databaseIcon = blockEl.dataset.databaseIcon || '';
+        props.databaseViewId = blockEl.dataset.databaseViewId || '';
+        props.databaseViewName = blockEl.dataset.databaseViewName || '';
     }
 
     const contentEl = blockEl.querySelector('.wiki-block-content');
@@ -2451,6 +2823,15 @@ function serializeBlock(blockEl) {
             ? [{
                 text: [...blockEl.querySelectorAll(':scope > .wiki-block-body .wiki-column-content')]
                     .map(column => column.textContent.trim())
+                    .join(' ||| ')
+            }]
+        : type === 'tab'
+            ? [{
+                text: [...blockEl.querySelectorAll(':scope > .wiki-block-body .wiki-tab-editor-panel')]
+                    .map((panel, index) => {
+                        const title = panel.querySelector('.wiki-tab-title')?.value.trim() || `Tab ${index + 1}`;
+                        return `${title}: ${panel.querySelector('.wiki-tab-content')?.textContent.trim() || ''}`;
+                    })
                     .join(' ||| ')
             }]
         : contentEl ? richTextFromNode(contentEl) : [];

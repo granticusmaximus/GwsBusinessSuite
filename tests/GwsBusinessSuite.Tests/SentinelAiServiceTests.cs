@@ -74,6 +74,53 @@ public sealed class SentinelAiServiceTests
     }
 
     [Fact]
+    public async Task StreamAsync_ShouldNotGroundOnDeniedSearchResultsOrADeniedPinnedPage()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var wiki = new WikiService(db);
+        var allowed = await wiki.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Allowed runbook",
+            BlocksJson = WikiBlockJson.Serialize([
+                new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0,
+                    [new WikiRichTextSpan("The blue switch is approved context.")], new Dictionary<string, string>())])
+        }, "u");
+        var denied = await wiki.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Denied runbook",
+            BlocksJson = WikiBlockJson.Serialize([
+                new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0,
+                    [new WikiRichTextSpan("SECRET-PIN blue switch must stay hidden.")], new Dictionary<string, string>())])
+        }, "u");
+        var access = new SentinelAccessService(db);
+        await access.SetPermissionAsync(allowed.Id, false, "member", SentinelAccessLevels.View, "owner");
+        var ollama = new FakeStreamingOllamaService(["Grounded answer."]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options),
+            ollama,
+            new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System, access),
+            CreateCache(),
+            accessService: access);
+
+        SentinelAiRunView? completed = null;
+        await foreach (var chunk in service.StreamAsync(
+            denied.Id, SentinelAiActions.Ask, "blue switch", "member"))
+        {
+            completed ??= chunk.CompletedRun;
+        }
+
+        ollama.LastUserPrompt.Should().Contain("approved context");
+        ollama.LastUserPrompt.Should().NotContain("SECRET-PIN");
+        completed!.Citations.Should().ContainSingle(citation => citation.TargetId == allowed.Id);
+        completed.Citations.Should().NotContain(citation => citation.TargetId == denied.Id);
+    }
+
+    [Fact]
     public async Task StreamAsync_ShouldSaveAFailedRun_WhenOllamaTimesOutMidStream()
     {
         // Regression guard: a real timeout (the linked timeoutCts's CancelAfter firing after

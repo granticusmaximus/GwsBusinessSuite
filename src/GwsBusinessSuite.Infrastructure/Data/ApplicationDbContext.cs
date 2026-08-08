@@ -46,8 +46,10 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<WikiDatabase> WikiDatabases => Set<WikiDatabase>();
     public DbSet<WikiDatabaseProperty> WikiDatabaseProperties => Set<WikiDatabaseProperty>();
     public DbSet<WikiDatabaseRow> WikiDatabaseRows => Set<WikiDatabaseRow>();
+    public DbSet<WikiDatabaseRowTemplate> WikiDatabaseRowTemplates => Set<WikiDatabaseRowTemplate>();
     public DbSet<WikiDatabaseRowRevision> WikiDatabaseRowRevisions => Set<WikiDatabaseRowRevision>();
     public DbSet<WikiDatabaseView> WikiDatabaseViews => Set<WikiDatabaseView>();
+    public DbSet<WikiDatabaseViewPersonalization> WikiDatabaseViewPersonalizations => Set<WikiDatabaseViewPersonalization>();
     public DbSet<CmsSite> CmsSites => Set<CmsSite>();
     public DbSet<CmsPage> CmsPages => Set<CmsPage>();
     public DbSet<CmsPageCategory> CmsPageCategories => Set<CmsPageCategory>();
@@ -236,8 +238,23 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .HasForeignKey(x => x.WikiDatabaseId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<WikiDatabaseRow>()
+            .HasOne<WikiDatabaseRow>()
+            .WithMany()
+            .HasForeignKey(x => x.ParentRowId)
+            .OnDelete(DeleteBehavior.SetNull);
+        modelBuilder.Entity<WikiDatabaseRow>()
             .Property(x => x.BlocksJson)
             .HasDefaultValue("[]");
+        modelBuilder.Entity<WikiDatabaseRowTemplate>()
+            .HasOne(x => x.WikiDatabase)
+            .WithMany(x => x.RowTemplates)
+            .HasForeignKey(x => x.WikiDatabaseId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<WikiDatabaseRowTemplate>()
+            .HasIndex(x => new { x.WikiDatabaseId, x.NormalizedName })
+            .IsUnique();
+        modelBuilder.Entity<WikiDatabaseRowTemplate>().Property(x => x.Name).HasMaxLength(120);
+        modelBuilder.Entity<WikiDatabaseRowTemplate>().Property(x => x.NormalizedName).HasMaxLength(120);
         modelBuilder.Entity<WikiDatabaseView>()
             .HasOne(x => x.WikiDatabase)
             .WithMany(x => x.Views)
@@ -253,6 +270,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<WikiDatabaseRow>().HasIndex(x => new { x.WikiDatabaseId, x.SortOrder });
         modelBuilder.Entity<WikiDatabaseView>().HasIndex(x => new { x.WikiDatabaseId, x.SortOrder });
         modelBuilder.Entity<WikiDatabaseView>().HasIndex(x => x.NotionId);
+        modelBuilder.Entity<WikiDatabaseViewPersonalization>()
+            .HasIndex(x => new { x.WikiDatabaseViewId, x.Username })
+            .IsUnique();
         // Non-unique: manually authored pages/databases/rows/properties have a null NotionId.
         modelBuilder.Entity<WikiPage>().HasIndex(x => x.NotionId);
         modelBuilder.Entity<WikiDatabase>().HasIndex(x => x.NotionId);

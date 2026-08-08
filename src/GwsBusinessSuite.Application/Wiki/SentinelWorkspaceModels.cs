@@ -47,11 +47,13 @@ public interface ISentinelWorkspaceService
 {
     Task<IReadOnlyList<SentinelSearchResult>> SearchAsync(
         string query,
+        string username,
         int maxResults = 25,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<SentinelBacklink>> GetBacklinksAsync(
         Guid targetPageId,
+        string username,
         CancellationToken cancellationToken = default);
 
     Task<SentinelNavigationState> GetNavigationAsync(
@@ -73,6 +75,7 @@ public interface ISentinelWorkspaceService
 
     Task<IReadOnlyList<SentinelMentionSuggestion>> SearchMentionSuggestionsAsync(
         string query,
+        string username,
         int maxResults = 8,
         CancellationToken cancellationToken = default);
 
@@ -86,6 +89,7 @@ public interface ISentinelWorkspaceService
     Task<IReadOnlyList<SentinelBacklink>> GetRowMentionsAsync(
         Guid wikiDatabaseId,
         Guid rowId,
+        string username,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<SentinelSavedSearchView>> ListSavedSearchesAsync(

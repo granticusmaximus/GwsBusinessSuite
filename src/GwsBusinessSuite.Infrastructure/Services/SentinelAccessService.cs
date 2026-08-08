@@ -163,14 +163,130 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
 
     public async Task<bool> CanAccessAsync(Guid targetId, bool isDatabase, string username, string requiredAccessLevel, CancellationToken cancellationToken = default)
     {
-        if (!AccessRanks.TryGetValue(requiredAccessLevel, out var requiredRank)) return false;
-        var member = await dbContext.SentinelWorkspaceMembers.AsNoTracking().FirstOrDefaultAsync(item => item.Username == username, cancellationToken);
-        if (member?.Role == SentinelWorkspaceRoles.Owner) return true;
-        var access = await dbContext.SentinelResourcePermissions.AsNoTracking()
-            .Where(item => item.TargetId == targetId && item.IsDatabase == isDatabase && item.Username == username)
-            .Select(item => item.AccessLevel)
-            .FirstOrDefaultAsync(cancellationToken);
-        return access is not null && AccessRanks.GetValueOrDefault(access, -1) >= requiredRank;
+        var target = new SentinelAccessTarget(targetId, isDatabase);
+        var accessibleTargets = await GetAccessibleTargetsAsync(
+            [target],
+            username,
+            requiredAccessLevel,
+            cancellationToken);
+        return accessibleTargets.Contains(target);
+    }
+
+    public async Task<IReadOnlySet<SentinelAccessTarget>> GetAccessibleTargetsAsync(
+        IReadOnlyCollection<SentinelAccessTarget> targets,
+        string username,
+        string requiredAccessLevel,
+        CancellationToken cancellationToken = default)
+    {
+        if (!AccessRanks.TryGetValue(requiredAccessLevel, out var requiredRank) || targets.Count == 0)
+        {
+            return new HashSet<SentinelAccessTarget>();
+        }
+
+        var distinctTargets = targets.ToHashSet();
+        var isOwner = await dbContext.SentinelWorkspaceMembers.AsNoTracking()
+            .AnyAsync(
+                item => item.Username == username && item.Role == SentinelWorkspaceRoles.Owner,
+                cancellationToken);
+        if (isOwner)
+        {
+            // Preserve the existing owner override: owners have full access independently of
+            // resource-specific permissions (including during create/delete transition windows).
+            return distinctTargets;
+        }
+
+        // The batch API is intended for full workspace tree/search filtering. Loading these small
+        // projections once avoids an N+1 query per target and gives the resolver enough information
+        // to validate the entire ancestry chain before trusting an inherited permission.
+        var pageNodes = await dbContext.WikiPages.AsNoTracking()
+            .Select(item => new { item.Id, item.ParentWikiPageId })
+            .ToListAsync(cancellationToken);
+        var databaseNodes = await dbContext.WikiDatabases.AsNoTracking()
+            .Select(item => new { item.Id, item.ParentWikiPageId })
+            .ToListAsync(cancellationToken);
+        var permissionRows = await dbContext.SentinelResourcePermissions.AsNoTracking()
+            .Where(item => item.Username == username)
+            .Select(item => new { item.TargetId, item.IsDatabase, item.AccessLevel })
+            .ToListAsync(cancellationToken);
+
+        var pageParents = pageNodes.ToDictionary(item => item.Id, item => item.ParentWikiPageId);
+        var databaseParents = databaseNodes.ToDictionary(item => item.Id, item => item.ParentWikiPageId);
+        var accessByTarget = permissionRows.ToDictionary(
+            item => new SentinelAccessTarget(item.TargetId, item.IsDatabase),
+            item => item.AccessLevel);
+
+        var accessibleTargets = new HashSet<SentinelAccessTarget>();
+        foreach (var target in distinctTargets)
+        {
+            var effectiveAccess = ResolveEffectiveAccess(target, pageParents, databaseParents, accessByTarget);
+            if (effectiveAccess is not null
+                && AccessRanks.GetValueOrDefault(effectiveAccess, -1) >= requiredRank)
+            {
+                accessibleTargets.Add(target);
+            }
+        }
+
+        return accessibleTargets;
+    }
+
+    private static string? ResolveEffectiveAccess(
+        SentinelAccessTarget target,
+        IReadOnlyDictionary<Guid, Guid?> pageParents,
+        IReadOnlyDictionary<Guid, Guid?> databaseParents,
+        IReadOnlyDictionary<SentinelAccessTarget, string> accessByTarget)
+    {
+        Guid? parentPageId;
+        var visitedPageIds = new HashSet<Guid>();
+        if (target.IsDatabase)
+        {
+            if (!databaseParents.TryGetValue(target.TargetId, out parentPageId))
+            {
+                return null;
+            }
+        }
+        else
+        {
+            if (!pageParents.TryGetValue(target.TargetId, out parentPageId))
+            {
+                return null;
+            }
+
+            // Including the target detects a parent chain that loops back to the child itself.
+            visitedPageIds.Add(target.TargetId);
+        }
+
+        // Direct target permission is authoritative. In particular, an explicit view grant on a
+        // child narrows an inherited edit/full-access grant from its parent.
+        if (accessByTarget.TryGetValue(target, out var directAccess))
+        {
+            return directAccess;
+        }
+
+        var ancestorPageIds = new List<Guid>();
+        while (parentPageId is { } currentPageId)
+        {
+            if (!visitedPageIds.Add(currentPageId)
+                || !pageParents.TryGetValue(currentPageId, out parentPageId))
+            {
+                // Do not accept a grant encountered before discovering malformed ancestry. The
+                // whole inheritance path must terminate at a real root before it is trusted.
+                return null;
+            }
+
+            ancestorPageIds.Add(currentPageId);
+        }
+
+        foreach (var ancestorPageId in ancestorPageIds)
+        {
+            if (accessByTarget.TryGetValue(new SentinelAccessTarget(ancestorPageId, IsDatabase: false), out var inheritedAccess))
+            {
+                // Nearest explicit ancestor wins, including a weaker level than a more distant
+                // ancestor. Unknown/corrupt levels are returned and subsequently rank as denied.
+                return inheritedAccess;
+            }
+        }
+
+        return null;
     }
 
     private const int MaxFailedPasswordAttempts = 5;

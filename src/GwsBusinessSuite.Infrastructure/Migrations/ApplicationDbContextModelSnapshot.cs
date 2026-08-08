@@ -4794,6 +4794,9 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.Property<string>("Icon")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("IsLocked")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTimeOffset?>("NotionArchivedAt")
                         .HasColumnType("TEXT");
 
@@ -4925,6 +4928,9 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.Property<DateTimeOffset?>("NotionLastEditedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ParentRowId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("PropertyValuesJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -4950,6 +4956,8 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .IsUnique();
 
                     b.HasIndex("NotionId");
+
+                    b.HasIndex("ParentRowId");
 
                     b.HasIndex("TrashedAt");
 
@@ -5005,6 +5013,60 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.ToTable("WikiDatabaseRowRevisions");
                 });
 
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.WikiDatabaseRowTemplate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BlocksJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CoverImageUrl")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DefaultPropertyValuesJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Icon")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("WikiDatabaseId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WikiDatabaseId", "NormalizedName")
+                        .IsUnique();
+
+                    b.ToTable("WikiDatabaseRowTemplates");
+                });
+
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.WikiDatabaseView", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5052,6 +5114,44 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.HasIndex("WikiDatabaseId", "SortOrder");
 
                     b.ToTable("WikiDatabaseViews");
+                });
+
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.WikiDatabaseViewPersonalization", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConfigJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("WikiDatabaseViewId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WikiDatabaseViewId", "Username")
+                        .IsUnique();
+
+                    b.ToTable("WikiDatabaseViewPersonalizations");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.WikiPage", b =>
@@ -5561,6 +5661,11 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.WikiDatabaseRow", b =>
                 {
+                    b.HasOne("GwsBusinessSuite.Domain.Entities.WikiDatabaseRow", null)
+                        .WithMany()
+                        .HasForeignKey("ParentRowId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("GwsBusinessSuite.Domain.Entities.WikiDatabase", "WikiDatabase")
                         .WithMany("Rows")
                         .HasForeignKey("WikiDatabaseId")
@@ -5579,6 +5684,17 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("WikiDatabaseRow");
+                });
+
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.WikiDatabaseRowTemplate", b =>
+                {
+                    b.HasOne("GwsBusinessSuite.Domain.Entities.WikiDatabase", "WikiDatabase")
+                        .WithMany("RowTemplates")
+                        .HasForeignKey("WikiDatabaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("WikiDatabase");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.WikiDatabaseView", b =>
@@ -5664,6 +5780,8 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.WikiDatabase", b =>
                 {
                     b.Navigation("Properties");
+
+                    b.Navigation("RowTemplates");
 
                     b.Navigation("Rows");
 

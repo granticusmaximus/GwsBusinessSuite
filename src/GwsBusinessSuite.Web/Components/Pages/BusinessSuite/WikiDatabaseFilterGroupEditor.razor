@@ -1,0 +1,186 @@
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+
+<div class="sentinel-filter-group @(Depth > 0 ? "sentinel-filter-group-nested border rounded-2 p-2 mb-2" : "")">
+    <div class="d-flex align-items-center gap-2 mb-2">
+        <div class="btn-group btn-group-sm" role="group">
+            <button type="button" class="btn @(Group.Combinator == WikiDatabaseFilterGroup.And ? "btn-primary" : "btn-outline-primary")"
+                    @onclick="() => SetCombinatorAsync(WikiDatabaseFilterGroup.And)" disabled="@IsBusy">AND</button>
+            <button type="button" class="btn @(Group.Combinator == WikiDatabaseFilterGroup.Or ? "btn-primary" : "btn-outline-primary")"
+                    @onclick="() => SetCombinatorAsync(WikiDatabaseFilterGroup.Or)" disabled="@IsBusy">OR</button>
+        </div>
+        @if (Depth > 0)
+        {
+            <button type="button" class="btn btn-sm btn-link text-danger ms-auto" @onclick="() => OnRemove.InvokeAsync()" disabled="@IsBusy">
+                Remove group
+            </button>
+        }
+    </div>
+
+    @foreach (var condition in Group.Conditions)
+    {
+        <div class="d-flex align-items-center gap-2 mb-1 small">
+            <span class="badge text-bg-light border">@PropertyName(condition.PropertyId)</span>
+            <span>@OperatorLabel(condition.Operator)</span>
+            @if (!string.IsNullOrWhiteSpace(condition.Value))
+            {
+                <strong>@ValueLabel(condition)</strong>
+            }
+            <button type="button" class="btn btn-xs btn-link text-danger ms-auto"
+                    @onclick="() => RemoveConditionAsync(condition)" disabled="@IsBusy">Remove</button>
+        </div>
+    }
+
+    @foreach (var nested in Group.Groups)
+    {
+        <WikiDatabaseFilterGroupEditor Group="nested" Properties="Properties" IsBusy="IsBusy" Depth="Depth + 1"
+                                        GroupChanged="updated => ReplaceNestedGroupAsync(nested, updated)"
+                                        OnRemove="() => RemoveNestedGroupAsync(nested)" />
+    }
+
+    <div class="row g-2 align-items-end mt-1">
+        <div class="col-md-4">
+            <select class="form-select form-select-sm" @bind="_conditionPropertyId">
+                @foreach (var property in Properties)
+                {
+                    <option value="@property.Id">@property.Name</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-3">
+            <select class="form-select form-select-sm" @bind="_conditionOperator">
+                @foreach (var conditionOperator in ConditionOperators)
+                {
+                    <option value="@conditionOperator.Value">@conditionOperator.Label</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-3">
+            @if (SelectedConditionProperty?.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.Status)
+            {
+                <select class="form-select form-select-sm" @bind="_conditionValue">
+                    @foreach (var option in WikiDatabasePropertyConfig.GetOptions(SelectedConditionProperty))
+                    {
+                        <option value="@option.Id">@option.Label</option>
+                    }
+                </select>
+            }
+            else
+            {
+                <input class="form-control form-control-sm" type="@ConditionValueInputType" @bind="_conditionValue"
+                       disabled="@ConditionNeedsNoValue" placeholder="Value" />
+            }
+        </div>
+        <div class="col-md-2">
+            <button type="button" class="btn btn-sm btn-outline-primary w-100"
+                    @onclick="AddConditionAsync" disabled="@(IsBusy || _conditionPropertyId == Guid.Empty)">+ Condition</button>
+        </div>
+    </div>
+    <button type="button" class="btn btn-sm btn-link px-0 mt-1" @onclick="AddNestedGroupAsync" disabled="@IsBusy">
+        <i class="bi bi-plus-lg me-1"></i>Add nested group
+    </button>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public WikiDatabaseFilterGroup Group { get; set; } = WikiDatabaseFilterGroup.Empty;
+    [Parameter, EditorRequired] public IReadOnlyList<WikiDatabaseProperty> Properties { get; set; } = [];
+    [Parameter] public bool IsBusy { get; set; }
+    [Parameter] public int Depth { get; set; }
+    [Parameter] public EventCallback<WikiDatabaseFilterGroup> GroupChanged { get; set; }
+    [Parameter] public EventCallback OnRemove { get; set; }
+
+    private Guid _conditionPropertyId;
+    private string _conditionOperator = "contains";
+    private string _conditionValue = string.Empty;
+
+    protected override void OnParametersSet()
+    {
+        if (_conditionPropertyId == Guid.Empty || Properties.All(property => property.Id != _conditionPropertyId))
+        {
+            _conditionPropertyId = Properties.FirstOrDefault()?.Id ?? Guid.Empty;
+        }
+    }
+
+    private WikiDatabaseProperty? SelectedConditionProperty => Properties.FirstOrDefault(property => property.Id == _conditionPropertyId);
+
+    private IReadOnlyList<(string Value, string Label)> ConditionOperators => SelectedConditionProperty?.Type switch
+    {
+        WikiDatabasePropertyTypes.Checkbox =>
+            [("isChecked", "Is checked"), ("isNotChecked", "Is not checked")],
+        WikiDatabasePropertyTypes.Number or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup =>
+            [("equals", "Equals"), ("greaterThan", "Greater than"), ("lessThan", "Less than")],
+        WikiDatabasePropertyTypes.Date =>
+            [("equals", "Is"), ("before", "Before"), ("after", "After")],
+        WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.Status =>
+            [("equals", "Is")],
+        _ => [("contains", "Contains"), ("equals", "Equals")]
+    };
+
+    private bool ConditionNeedsNoValue => SelectedConditionProperty?.Type == WikiDatabasePropertyTypes.Checkbox;
+
+    private string ConditionValueInputType => SelectedConditionProperty?.Type switch
+    {
+        WikiDatabasePropertyTypes.Number or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup => "number",
+        WikiDatabasePropertyTypes.Date => "date",
+        _ => "text"
+    };
+
+    private async Task AddConditionAsync()
+    {
+        if (SelectedConditionProperty is not { } property)
+        {
+            return;
+        }
+
+        var supportedOperators = ConditionOperators.Select(item => item.Value).ToHashSet(StringComparer.Ordinal);
+        var conditionOperator = supportedOperators.Contains(_conditionOperator) ? _conditionOperator : ConditionOperators[0].Value;
+        var conditionValue = ConditionNeedsNoValue ? string.Empty : _conditionValue.Trim();
+        var condition = new WikiDatabaseFilter(property.Id.ToString(), conditionOperator, conditionValue);
+        await GroupChanged.InvokeAsync(Group with { Conditions = [.. Group.Conditions, condition] });
+        _conditionValue = string.Empty;
+    }
+
+    private Task RemoveConditionAsync(WikiDatabaseFilter condition) =>
+        GroupChanged.InvokeAsync(Group with { Conditions = Group.Conditions.Where(candidate => candidate != condition).ToList() });
+
+    private Task SetCombinatorAsync(string combinator) =>
+        GroupChanged.InvokeAsync(Group with { Combinator = combinator });
+
+    private Task AddNestedGroupAsync() =>
+        GroupChanged.InvokeAsync(Group with { Groups = [.. Group.Groups, WikiDatabaseFilterGroup.Empty] });
+
+    private Task ReplaceNestedGroupAsync(WikiDatabaseFilterGroup previous, WikiDatabaseFilterGroup updated) =>
+        GroupChanged.InvokeAsync(Group with
+        {
+            Groups = Group.Groups.Select(candidate => ReferenceEquals(candidate, previous) ? updated : candidate).ToList()
+        });
+
+    private Task RemoveNestedGroupAsync(WikiDatabaseFilterGroup target) =>
+        GroupChanged.InvokeAsync(Group with { Groups = Group.Groups.Where(candidate => !ReferenceEquals(candidate, target)).ToList() });
+
+    private string PropertyName(string propertyId) =>
+        Properties.FirstOrDefault(property => property.Id.ToString() == propertyId)?.Name ?? "Missing property";
+
+    private string ValueLabel(WikiDatabaseFilter filter)
+    {
+        var property = Properties.FirstOrDefault(candidate => candidate.Id.ToString() == filter.PropertyId);
+        if (property?.Type is not (WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.Status))
+        {
+            return filter.Value;
+        }
+        return WikiDatabasePropertyConfig.GetOptions(property)
+            .FirstOrDefault(option => option.Id == filter.Value)?.Label ?? filter.Value;
+    }
+
+    private static string OperatorLabel(string filterOperator) => filterOperator switch
+    {
+        "isChecked" => "is checked",
+        "isNotChecked" => "is not checked",
+        "greaterThan" => "is greater than",
+        "lessThan" => "is less than",
+        "before" => "is before",
+        "after" => "is after",
+        "contains" => "contains",
+        _ => "is"
+    };
+}

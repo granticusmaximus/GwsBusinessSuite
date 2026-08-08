@@ -1962,25 +1962,36 @@
         Task.FromResult(WikiMarkdownHelper.SearchLinkSuggestions(query, WikiPages));
 
     [JSInvokable]
-    public Task<IReadOnlyList<LinkedDatabaseSuggestion>> SearchLinkedDatabaseSuggestions(string query)
+    public async Task<IReadOnlyList<LinkedDatabaseSuggestion>> SearchLinkedDatabaseSuggestions(string query)
     {
         var normalized = query.Trim();
-        IReadOnlyList<LinkedDatabaseSuggestion> suggestions = WikiDatabases
+        var candidates = WikiDatabases
             .Where(database => database.NotionArchivedAt is null
                 && (normalized.Length == 0 || database.Title.Contains(normalized, StringComparison.OrdinalIgnoreCase)))
             .OrderBy(database => database.Title, StringComparer.OrdinalIgnoreCase)
-            .Take(10)
-            .Select(database => new LinkedDatabaseSuggestion(
+            .ToList();
+        var suggestions = new List<LinkedDatabaseSuggestion>();
+        foreach (var database in candidates)
+        {
+            if (!await CanAccessPageOrDatabaseAsync(database.Id, isDatabase: true, SentinelAccessLevels.View))
+            {
+                continue;
+            }
+            suggestions.Add(new LinkedDatabaseSuggestion(
                 database.Id,
                 database.Title,
-                string.IsNullOrWhiteSpace(database.Icon) ? "▦" : database.Icon))
-            .ToList();
-        return Task.FromResult(suggestions);
+                string.IsNullOrWhiteSpace(database.Icon) ? "▦" : database.Icon));
+            if (suggestions.Count == 10)
+            {
+                break;
+            }
+        }
+        return suggestions;
     }
 
     [JSInvokable]
     public Task<IReadOnlyList<SentinelMentionSuggestion>> SearchMentionSuggestions(string query) =>
-        SentinelWorkspaceService.SearchMentionSuggestionsAsync(query);
+        SentinelWorkspaceService.SearchMentionSuggestionsAsync(query, CurrentUsername);
 
     [JSInvokable]
     public async Task NavigateToWikiPageId(string pageId)
@@ -2009,7 +2020,8 @@
     public async Task OpenLinkedDatabaseRow(string databaseId, string rowId)
     {
         if (Guid.TryParse(databaseId, out var id) && Guid.TryParse(rowId, out var parsedRowId)
-            && WikiDatabases.Any(database => database.Id == id))
+            && WikiDatabases.Any(database => database.Id == id)
+            && await CanAccessPageOrDatabaseAsync(id, isDatabase: true, SentinelAccessLevels.View))
         {
             _pendingOpenRowId = parsedRowId;
             await OpenDatabaseAsync(id);
@@ -2018,15 +2030,45 @@
     }
 
     [JSInvokable]
-    public Task<WikiInlineDatabaseSnapshot?> GetInlineDatabase(string databaseId) =>
-        Guid.TryParse(databaseId, out var id)
-            ? WikiDatabaseService.GetInlineDatabaseAsync(id)
-            : Task.FromResult<WikiInlineDatabaseSnapshot?>(null);
+    public async Task<WikiInlineDatabaseSnapshot?> GetInlineDatabase(string databaseId)
+    {
+        if (!Guid.TryParse(databaseId, out var id)
+            || !await CanAccessPageOrDatabaseAsync(id, isDatabase: true, SentinelAccessLevels.View))
+        {
+            return null;
+        }
+        var snapshot = await WikiDatabaseService.GetInlineDatabaseAsync(id);
+        return snapshot is null
+            ? null
+            : snapshot with
+            {
+                CanEdit = await CanAccessPageOrDatabaseAsync(id, isDatabase: true, SentinelAccessLevels.Edit)
+            };
+    }
+
+    [JSInvokable]
+    public async Task<WikiInlineDatabaseSnapshot?> GetLinkedDatabase(string databaseId, string databaseViewId)
+    {
+        if (!Guid.TryParse(databaseId, out var id)
+            || !Guid.TryParse(databaseViewId, out var viewId)
+            || !await CanAccessPageOrDatabaseAsync(id, isDatabase: true, SentinelAccessLevels.View))
+        {
+            return null;
+        }
+        var snapshot = await WikiDatabaseService.GetLinkedDatabaseAsync(id, viewId);
+        return snapshot is null
+            ? null
+            : snapshot with
+            {
+                CanEdit = await CanAccessPageOrDatabaseAsync(id, isDatabase: true, SentinelAccessLevels.Edit)
+            };
+    }
 
     [JSInvokable]
     public async Task<WikiInlineDatabaseSnapshot?> AddInlineDatabaseRow(string databaseId)
     {
-        if (!Guid.TryParse(databaseId, out var id))
+        if (!Guid.TryParse(databaseId, out var id)
+            || !await CanAccessPageOrDatabaseAsync(id, isDatabase: true, SentinelAccessLevels.Edit))
         {
             return null;
         }
@@ -2042,7 +2084,8 @@
         string? title)
     {
         if (!Guid.TryParse(databaseId, out var parsedDatabaseId)
-            || !Guid.TryParse(groupByPropertyId, out var parsedGroupByPropertyId))
+            || !Guid.TryParse(groupByPropertyId, out var parsedGroupByPropertyId)
+            || !await CanAccessPageOrDatabaseAsync(parsedDatabaseId, isDatabase: true, SentinelAccessLevels.Edit))
         {
             return null;
         }
@@ -2065,7 +2108,8 @@
     {
         if (!Guid.TryParse(databaseId, out var parsedDatabaseId)
             || !Guid.TryParse(rowId, out var parsedRowId)
-            || !Guid.TryParse(groupByPropertyId, out var parsedGroupByPropertyId))
+            || !Guid.TryParse(groupByPropertyId, out var parsedGroupByPropertyId)
+            || !await CanAccessPageOrDatabaseAsync(parsedDatabaseId, isDatabase: true, SentinelAccessLevels.Edit))
         {
             return null;
         }
@@ -2089,7 +2133,8 @@
     {
         if (!Guid.TryParse(databaseId, out var parsedDatabaseId)
             || !Guid.TryParse(rowId, out var parsedRowId)
-            || !Guid.TryParse(propertyId, out var parsedPropertyId))
+            || !Guid.TryParse(propertyId, out var parsedPropertyId)
+            || !await CanAccessPageOrDatabaseAsync(parsedDatabaseId, isDatabase: true, SentinelAccessLevels.Edit))
         {
             return null;
         }
@@ -2317,7 +2362,7 @@
         if (SelectedDatabaseId is null && !_blockEditorInitialized)
         {
             _blockEditorRef ??= DotNetObjectReference.Create(this);
-            _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=6");
+            _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=8");
             await _blockEditorModule.InvokeVoidAsync(
                 "initialize",
                 _blockEditorContainer,
@@ -2409,7 +2454,7 @@
         IsSearchBusy = true;
         try
         {
-            var results = (await SentinelWorkspaceService.SearchAsync(query)).ToList();
+            var results = (await SentinelWorkspaceService.SearchAsync(query, CurrentUsername)).ToList();
             if (string.Equals(SearchQuery.Trim(), query, StringComparison.Ordinal))
             {
                 WorkspaceSearchResults = results;
@@ -2485,6 +2530,30 @@
             WikiDatabases = (await WikiDatabaseService.ListDatabasesAsync()).ToList();
             TrashedPages = (await WikiService.ListTrashedPagesAsync()).ToList();
             TrashedDatabases = (await WikiDatabaseService.ListTrashedDatabasesAsync()).ToList();
+            if (!_isAdmin)
+            {
+                var visibleTargets = await SentinelAccessService.GetAccessibleTargetsAsync(
+                    WikiPages.Select(page => new SentinelAccessTarget(page.Id, IsDatabase: false))
+                        .Concat(WikiDatabases.Select(database => new SentinelAccessTarget(database.Id, IsDatabase: true)))
+                        .ToList(),
+                    CurrentUsername,
+                    SentinelAccessLevels.View);
+                WikiPages = WikiPages.Where(page => visibleTargets.Contains(
+                    new SentinelAccessTarget(page.Id, IsDatabase: false))).ToList();
+                WikiDatabases = WikiDatabases.Where(database => visibleTargets.Contains(
+                    new SentinelAccessTarget(database.Id, IsDatabase: true))).ToList();
+
+                var manageableTrashTargets = await SentinelAccessService.GetAccessibleTargetsAsync(
+                    TrashedPages.Select(page => new SentinelAccessTarget(page.Id, IsDatabase: false))
+                        .Concat(TrashedDatabases.Select(database => new SentinelAccessTarget(database.Id, IsDatabase: true)))
+                        .ToList(),
+                    CurrentUsername,
+                    SentinelAccessLevels.FullAccess);
+                TrashedPages = TrashedPages.Where(page => manageableTrashTargets.Contains(
+                    new SentinelAccessTarget(page.Id, IsDatabase: false))).ToList();
+                TrashedDatabases = TrashedDatabases.Where(database => manageableTrashTargets.Contains(
+                    new SentinelAccessTarget(database.Id, IsDatabase: true))).ToList();
+            }
             if (selectFirstPage && WikiPages.Count > 0)
             {
                 await OpenPageAsync(WikiPages[0].Id);
@@ -2500,16 +2569,29 @@
     private void OpenTrashModal() => ShowTrashModal = true;
     private void CloseTrashModal() => ShowTrashModal = false;
 
-    private async Task RestoreTrashedPageAsync(Guid wikiPageId) => await Work(async () =>
+    private async Task RestoreTrashedPageAsync(Guid wikiPageId)
     {
-        var user = await CurrentUserNameAsync();
-        await WikiService.RestorePageAsync(wikiPageId, user);
-        StatusMessage = "Restored from Trash.";
-        await LoadTreeAsync(selectFirstPage: false);
-    });
+        if (!await CanAccessPageOrDatabaseAsync(wikiPageId, false, SentinelAccessLevels.FullAccess))
+        {
+            ErrorMessage = "You don't have permission to restore this Sentinel page.";
+            return;
+        }
+        await Work(async () =>
+        {
+            var user = await CurrentUserNameAsync();
+            await WikiService.RestorePageAsync(wikiPageId, user);
+            StatusMessage = "Restored from Trash.";
+            await LoadTreeAsync(selectFirstPage: false);
+        });
+    }
 
     private async Task DeleteTrashedPagePermanentlyAsync(Guid wikiPageId)
     {
+        if (!await CanAccessPageOrDatabaseAsync(wikiPageId, isDatabase: false, SentinelAccessLevels.FullAccess))
+        {
+            ErrorMessage = "You don't have permission to permanently delete this Sentinel page.";
+            return;
+        }
         var confirmed = await JS.InvokeAsync<bool>("confirm", "Permanently delete this page? This cannot be undone.");
         if (!confirmed) return;
 
@@ -2522,16 +2604,29 @@
         });
     }
 
-    private async Task RestoreTrashedDatabaseAsync(Guid wikiDatabaseId) => await Work(async () =>
+    private async Task RestoreTrashedDatabaseAsync(Guid wikiDatabaseId)
     {
-        var user = await CurrentUserNameAsync();
-        await WikiDatabaseService.RestoreDatabaseAsync(wikiDatabaseId, user);
-        StatusMessage = "Restored from Trash.";
-        await LoadTreeAsync(selectFirstPage: false);
-    });
+        if (!await CanAccessPageOrDatabaseAsync(wikiDatabaseId, isDatabase: true, SentinelAccessLevels.FullAccess))
+        {
+            ErrorMessage = "You don't have permission to restore this Sentinel database.";
+            return;
+        }
+        await Work(async () =>
+        {
+            var user = await CurrentUserNameAsync();
+            await WikiDatabaseService.RestoreDatabaseAsync(wikiDatabaseId, user);
+            StatusMessage = "Restored from Trash.";
+            await LoadTreeAsync(selectFirstPage: false);
+        });
+    }
 
     private async Task DeleteTrashedDatabasePermanentlyAsync(Guid wikiDatabaseId)
     {
+        if (!await CanAccessPageOrDatabaseAsync(wikiDatabaseId, isDatabase: true, SentinelAccessLevels.FullAccess))
+        {
+            ErrorMessage = "You don't have permission to permanently delete this Sentinel database.";
+            return;
+        }
         var confirmed = await JS.InvokeAsync<bool>(
             "confirm", "Permanently delete this database and all its rows? This cannot be undone.");
         if (!confirmed) return;
@@ -2677,7 +2772,7 @@
             try
             {
                 await LoadHistoryAsync(page.Id);
-                Backlinks = (await SentinelWorkspaceService.GetBacklinksAsync(page.Id)).ToList();
+                Backlinks = (await SentinelWorkspaceService.GetBacklinksAsync(page.Id, CurrentUsername)).ToList();
                 await SentinelWorkspaceService.RecordOpenedAsync(CurrentUsername, page.Id, false);
                 await LoadWorkspaceNavigationAsync();
             }
@@ -2788,7 +2883,7 @@
             PageConflict = null;
             await LoadTreeAsync(selectFirstPage: false);
             await LoadHistoryAsync(saved.Id);
-            Backlinks = (await SentinelWorkspaceService.GetBacklinksAsync(saved.Id)).ToList();
+            Backlinks = (await SentinelWorkspaceService.GetBacklinksAsync(saved.Id, CurrentUsername)).ToList();
             await SentinelWorkspaceService.RecordOpenedAsync(CurrentUsername, saved.Id, false);
             await LoadWorkspaceNavigationAsync();
         }
@@ -2854,6 +2949,11 @@
     {
         if (SelectedPageId is not { } wikiPageId)
         {
+            return;
+        }
+        if (!await CanAccessPageOrDatabaseAsync(wikiPageId, isDatabase: false, SentinelAccessLevels.FullAccess))
+        {
+            ErrorMessage = "You don't have permission to move this Sentinel page to Trash.";
             return;
         }
 
@@ -3008,6 +3108,12 @@
     private async Task DeleteNodeAsync(WikiTreeNode node)
     {
         _openRowMenuNodeId = null;
+        if (!await CanAccessPageOrDatabaseAsync(
+                node.Id, node.IsDatabase, SentinelAccessLevels.FullAccess))
+        {
+            ErrorMessage = $"You don't have permission to move this Sentinel {(node.IsDatabase ? "database" : "page")} to Trash.";
+            return;
+        }
         var confirmed = await JS.InvokeAsync<bool>(
             "confirm",
             node.IsDatabase
@@ -3138,7 +3244,7 @@
             PageConflict = null;
             await LoadTreeAsync(selectFirstPage: false);
             await LoadHistoryAsync(wikiPageId);
-            Backlinks = (await SentinelWorkspaceService.GetBacklinksAsync(wikiPageId)).ToList();
+            Backlinks = (await SentinelWorkspaceService.GetBacklinksAsync(wikiPageId, CurrentUsername)).ToList();
             await LoadWorkspaceNavigationAsync();
         }
         catch (Exception ex)

@@ -31,6 +31,7 @@ public static class WikiBlockTypes
     public const string Button = "button";
     public const string SyncedBlock = "synced_block";
     public const string Columns = "columns";
+    public const string Tab = "tab";
     // Legacy content carried over from the old single-Markdown-string wiki by the one-time
     // backfill (WikiMarkdownBackfillService) - rendered through the existing Markdig
     // pipeline unchanged, so pre-existing pages keep their content verbatim rather than
@@ -41,7 +42,7 @@ public static class WikiBlockTypes
     [
         Paragraph, Heading1, Heading2, Heading3, BulletedListItem, NumberedListItem,
         ToDo, Toggle, Quote, Callout, Code, Divider, Image, Embed, LinkedDatabase, InlineDatabase,
-        Table, Equation, Breadcrumb, TableOfContents, Button, SyncedBlock, Columns, Markdown
+        Table, Equation, Breadcrumb, TableOfContents, Button, SyncedBlock, Columns, Tab, Markdown
     ];
 
     public static bool IsListItem(string type) => type is BulletedListItem or NumberedListItem;
@@ -56,6 +57,12 @@ public sealed record WikiRichTextSpan(
     string? Link = null,
     string? TextColor = null,
     string? BackgroundColor = null);
+
+// A named pane inside a Tab block. Tab blocks keep these in Props["tabsJson"] so each
+// label travels with its rich-text content when tabs are reordered in the browser editor.
+public sealed record WikiTab(
+    string Title,
+    IReadOnlyList<WikiRichTextSpan> RichText);
 
 public sealed record WikiBlock(
     Guid Id,

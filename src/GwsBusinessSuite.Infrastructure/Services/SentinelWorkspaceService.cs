@@ -6,7 +6,10 @@ using System.Text.RegularExpressions;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
-public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvider timeProvider) : ISentinelWorkspaceService
+public sealed class SentinelWorkspaceService(
+    IAppDbContext dbContext,
+    TimeProvider timeProvider,
+    ISentinelAccessService? accessService = null) : ISentinelWorkspaceService
 {
     // Every call here loads full row content (BlocksJson/PropertyValuesJson blobs, not just
     // a title) into memory, and search re-runs this on every keystroke of live search. These
@@ -19,6 +22,7 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
 
     public async Task<IReadOnlyList<SentinelSearchResult>> SearchAsync(
         string query,
+        string username,
         int maxResults = 25,
         CancellationToken cancellationToken = default)
     {
@@ -54,6 +58,18 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
             .Include(database => database.Rows)
             .Take(MaxSearchCandidatesPerType)
             .ToListAsync(cancellationToken);
+        var accessibleTargets = await GetAccessibleTargetsAsync(
+            pages.Select(page => new SentinelAccessTarget(page.Id, IsDatabase: false))
+                .Concat(databases.Select(database => new SentinelAccessTarget(database.Id, IsDatabase: true))),
+            username,
+            SentinelAccessLevels.View,
+            cancellationToken);
+        pages = pages
+            .Where(page => accessibleTargets.Contains(new SentinelAccessTarget(page.Id, IsDatabase: false)))
+            .ToList();
+        databases = databases
+            .Where(database => accessibleTargets.Contains(new SentinelAccessTarget(database.Id, IsDatabase: true)))
+            .ToList();
 
         var results = new List<SentinelSearchResult>();
         foreach (var page in pages)
@@ -112,8 +128,13 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
 
     public async Task<IReadOnlyList<SentinelBacklink>> GetBacklinksAsync(
         Guid targetPageId,
+        string username,
         CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessTargetAsync(targetPageId, false, username, cancellationToken))
+        {
+            return [];
+        }
         var target = await dbContext.WikiPages.AsNoTracking()
             .FirstOrDefaultAsync(page => page.Id == targetPageId, cancellationToken);
         if (target is null)
@@ -125,6 +146,13 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
         var legacyLink = $"[[{target.Title}]]";
         var backlinks = new List<SentinelBacklink>();
         var pages = await dbContext.WikiPages.AsNoTracking().Take(MaxScanPages).ToListAsync(cancellationToken);
+        var accessibleTargets = await GetAccessibleTargetsAsync(
+            pages.Select(page => new SentinelAccessTarget(page.Id, IsDatabase: false)),
+            username,
+            SentinelAccessLevels.View,
+            cancellationToken);
+        pages = pages.Where(page => accessibleTargets.Contains(
+            new SentinelAccessTarget(page.Id, IsDatabase: false))).ToList();
 
         foreach (var source in pages.Where(page => page.Id != targetPageId))
         {
@@ -155,14 +183,26 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
     public async Task<IReadOnlyList<SentinelBacklink>> GetRowMentionsAsync(
         Guid wikiDatabaseId,
         Guid rowId,
+        string username,
         CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessTargetAsync(wikiDatabaseId, true, username, cancellationToken))
+        {
+            return [];
+        }
         // Same scan scope as GetBacklinksAsync (WikiPages only, not other rows' bodies) -
         // a page-mentions-page or page-mentions-row link is found; a row-mentions-row link
         // written inside another row's page body is not, matching that existing limitation
         // rather than quietly having two different backlink scan depths in the same app.
         var expectedLink = $"rowmention:{wikiDatabaseId}:{rowId}";
         var pages = await dbContext.WikiPages.AsNoTracking().Take(MaxScanPages).ToListAsync(cancellationToken);
+        var accessibleTargets = await GetAccessibleTargetsAsync(
+            pages.Select(page => new SentinelAccessTarget(page.Id, IsDatabase: false)),
+            username,
+            SentinelAccessLevels.View,
+            cancellationToken);
+        pages = pages.Where(page => accessibleTargets.Contains(
+            new SentinelAccessTarget(page.Id, IsDatabase: false))).ToList();
         var mentions = new List<SentinelBacklink>();
 
         foreach (var page in pages)
@@ -245,6 +285,13 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
             .Where(entry => entry.Username == normalizedUser)
             .ToListAsync(cancellationToken);
         entries = entries.OrderByDescending(entry => entry.LastOpenedAt).ToList();
+        var accessibleTargets = await GetAccessibleTargetsAsync(
+            entries.Select(entry => new SentinelAccessTarget(entry.TargetId, entry.IsDatabase)),
+            username,
+            SentinelAccessLevels.View,
+            cancellationToken);
+        entries = entries.Where(entry => accessibleTargets.Contains(
+            new SentinelAccessTarget(entry.TargetId, entry.IsDatabase))).ToList();
         var pages = await dbContext.WikiPages.AsNoTracking()
             .Where(page => entries.Select(entry => entry.TargetId).Contains(page.Id))
             .ToDictionaryAsync(page => page.Id, cancellationToken);
@@ -290,6 +337,10 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
         CancellationToken cancellationToken = default)
     {
         var normalizedUser = NormalizeUsername(username);
+        if (!await CanAccessTargetAsync(targetId, isDatabase, username, cancellationToken))
+        {
+            throw new UnauthorizedAccessException("You don't have access to this Sentinel item.");
+        }
         var entry = await FindNavigationEntryAsync(normalizedUser, targetId, isDatabase, cancellationToken);
         var now = timeProvider.GetUtcNow();
         if (entry is null)
@@ -321,6 +372,10 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
         CancellationToken cancellationToken = default)
     {
         var normalizedUser = NormalizeUsername(username);
+        if (!await CanAccessTargetAsync(targetId, isDatabase, username, cancellationToken))
+        {
+            throw new UnauthorizedAccessException("You don't have access to this Sentinel item.");
+        }
         var entry = await FindNavigationEntryAsync(normalizedUser, targetId, isDatabase, cancellationToken);
         var now = timeProvider.GetUtcNow();
         if (entry is null)
@@ -350,6 +405,7 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
 
     public async Task<IReadOnlyList<SentinelMentionSuggestion>> SearchMentionSuggestionsAsync(
         string query,
+        string username,
         int maxResults = 8,
         CancellationToken cancellationToken = default)
     {
@@ -384,6 +440,13 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
                 .Include(database => database.Properties)
                 .Include(database => database.Rows)
                 .ToListAsync(cancellationToken);
+            var accessibleTargets = await GetAccessibleTargetsAsync(
+                databases.Select(database => new SentinelAccessTarget(database.Id, IsDatabase: true)),
+                username,
+                SentinelAccessLevels.View,
+                cancellationToken);
+            databases = databases.Where(database => accessibleTargets.Contains(
+                new SentinelAccessTarget(database.Id, IsDatabase: true))).ToList();
             foreach (var database in databases)
             {
                 var titleProperty = database.Properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Title);
@@ -414,6 +477,13 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
         var pages = await dbContext.WikiPages.AsNoTracking()
             .Take(MaxScanPages)
             .ToListAsync(cancellationToken);
+        var accessibleTargets = await GetAccessibleTargetsAsync(
+            pages.Select(page => new SentinelAccessTarget(page.Id, IsDatabase: false)),
+            username,
+            SentinelAccessLevels.View,
+            cancellationToken);
+        pages = pages.Where(page => accessibleTargets.Contains(
+            new SentinelAccessTarget(page.Id, IsDatabase: false))).ToList();
         pages = pages.OrderByDescending(page => page.UpdatedAt ?? page.CreatedAt).ToList();
         var mentions = new List<SentinelMention>();
         foreach (var page in pages)
@@ -474,6 +544,27 @@ public sealed class SentinelWorkspaceService(IAppDbContext dbContext, TimeProvid
         var preview = singleLine.Substring(start, length);
         return $"{(start > 0 ? "…" : string.Empty)}{preview}{(start + length < singleLine.Length ? "…" : string.Empty)}";
     }
+
+    private async Task<IReadOnlySet<SentinelAccessTarget>> GetAccessibleTargetsAsync(
+        IEnumerable<SentinelAccessTarget> targets,
+        string username,
+        string requiredAccessLevel,
+        CancellationToken cancellationToken)
+    {
+        var distinctTargets = targets.Distinct().ToList();
+        return accessService is null
+            ? distinctTargets.ToHashSet()
+            : await accessService.GetAccessibleTargetsAsync(
+                distinctTargets, username, requiredAccessLevel, cancellationToken);
+    }
+
+    private async Task<bool> CanAccessTargetAsync(
+        Guid targetId,
+        bool isDatabase,
+        string username,
+        CancellationToken cancellationToken) => accessService is null
+            || await accessService.CanAccessAsync(
+                targetId, isDatabase, username, SentinelAccessLevels.View, cancellationToken);
 
     private Task<SentinelNavigationEntry?> FindNavigationEntryAsync(
         string username, Guid targetId, bool isDatabase, CancellationToken cancellationToken) =>

@@ -10,12 +10,9 @@ namespace GwsBusinessSuite.Application.Wiki;
 // The editor's own contenteditable DOM is owned and rendered client-side by
 // wiki-block-editor.js, so authored pages do not need a second preview surface.
 //
-// Deliberately flat: each block renders independently with a margin-left proportional to
-// IndentLevel rather than stitching runs of list-item/toggle blocks into real nested
-// <ul>/<ol>/<details> trees. That would need a stateful container-stack algorithm keyed off
-// indent-level transitions: real but non-trivial to get right, and this app's Wiki has no
-// public-facing view yet (admin-only, preview-only) where the semantic-HTML difference
-// matters. Indent-based visual nesting reads the same to an author previewing their page.
+// RenderBlock remains useful for independent previews, while RenderPage interprets the flat,
+// ordered IndentLevel representation as a hierarchy. Public shares therefore receive semantic
+// list markup and real toggle ownership instead of a collection of visually indented siblings.
 public static class WikiBlockHtmlRenderer
 {
     private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
@@ -124,6 +121,7 @@ public static class WikiBlockHtmlRenderer
             WikiBlockTypes.Button => $"<a class=\"wiki-button\" href=\"{WebUtility.HtmlEncode(GetSafeLink(block.Props.GetValueOrDefault("url")) ?? "#")}\">{content}</a>",
             WikiBlockTypes.SyncedBlock => $"<div class=\"wiki-synced-block\"{indentStyle}>{content}</div>",
             WikiBlockTypes.Columns => RenderColumns(block, indentStyle),
+            WikiBlockTypes.Tab => RenderTabs(block, indentStyle),
             // Legacy content from the pre-block-editor wiki still uses [[Page Title]] syntax,
             // so it's routed through the same resolver the old single-Markdown-string editor
             // used - new blocks link via RichTextSpan.Link instead and never hit this path.
@@ -142,20 +140,201 @@ public static class WikiBlockHtmlRenderer
             .ToList();
         var headingAnchors = headings.ToDictionary(item => item.Block.Id, item => item.Anchor);
 
-        return string.Concat(blocks.Select(block =>
+        var builder = new StringBuilder();
+        RenderNodes(
+            builder,
+            BuildRenderTree(blocks),
+            headings,
+            headingAnchors,
+            pagesForWikiLinks,
+            indentOffset: 0);
+        return builder.ToString();
+    }
+
+    private static IReadOnlyList<RenderNode> BuildRenderTree(IReadOnlyList<WikiBlock> blocks)
+    {
+        var roots = new List<RenderNode>();
+        var ancestorStack = new Stack<RenderNode>();
+
+        foreach (var block in blocks)
         {
-            if (block.Type == WikiBlockTypes.TableOfContents)
+            var indent = GetIndent(block);
+            while (ancestorStack.Count > 0 && GetIndent(ancestorStack.Peek().Block) >= indent)
             {
-                var links = string.Concat(headings.Select(item =>
-                    $"<a class=\"level-{item.Block.Type[^1]}\" href=\"#{item.Anchor}\">{RenderRichText(item.Block.RichText)}</a>"));
-                return $"<nav class=\"wiki-table-of-contents\">{links}</nav>";
+                ancestorStack.Pop();
             }
 
-            var rendered = RenderBlock(block, pagesForWikiLinks);
-            if (!headingAnchors.TryGetValue(block.Id, out var anchor)) return rendered;
-            var openingTagEnd = rendered.IndexOf('>');
-            return openingTagEnd < 0 ? rendered : rendered.Insert(openingTagEnd, $" id=\"{anchor}\"");
-        }));
+            var node = new RenderNode(block);
+            if (ancestorStack.TryPeek(out var parent))
+            {
+                parent.Children.Add(node);
+            }
+            else
+            {
+                roots.Add(node);
+            }
+
+            ancestorStack.Push(node);
+        }
+
+        return roots;
+    }
+
+    private static void RenderNodes(
+        StringBuilder builder,
+        IReadOnlyList<RenderNode> nodes,
+        IReadOnlyList<(WikiBlock Block, string Anchor)> headings,
+        IReadOnlyDictionary<Guid, string> headingAnchors,
+        IReadOnlyList<WikiPage>? pagesForWikiLinks,
+        int indentOffset)
+    {
+        for (var index = 0; index < nodes.Count;)
+        {
+            var node = nodes[index];
+            if (WikiBlockTypes.IsListItem(node.Block.Type))
+            {
+                index = RenderList(
+                    builder,
+                    nodes,
+                    index,
+                    headings,
+                    headingAnchors,
+                    pagesForWikiLinks,
+                    indentOffset);
+                continue;
+            }
+
+            if (node.Block.Type == WikiBlockTypes.Toggle)
+            {
+                RenderToggle(
+                    builder,
+                    node,
+                    headings,
+                    headingAnchors,
+                    pagesForWikiLinks,
+                    indentOffset);
+            }
+            else
+            {
+                builder.Append(RenderPageBlock(node.Block, headings, headingAnchors, pagesForWikiLinks, indentOffset));
+                if (node.Children.Count > 0)
+                {
+                    // Only list items and toggles are structural containers. Descendants of any
+                    // other block remain visual siblings and retain their authored indentation.
+                    RenderNodes(
+                        builder,
+                        node.Children,
+                        headings,
+                        headingAnchors,
+                        pagesForWikiLinks,
+                        indentOffset);
+                }
+            }
+
+            index++;
+        }
+    }
+
+    private static int RenderList(
+        StringBuilder builder,
+        IReadOnlyList<RenderNode> nodes,
+        int startIndex,
+        IReadOnlyList<(WikiBlock Block, string Anchor)> headings,
+        IReadOnlyDictionary<Guid, string> headingAnchors,
+        IReadOnlyList<WikiPage>? pagesForWikiLinks,
+        int indentOffset)
+    {
+        var listType = nodes[startIndex].Block.Type;
+        var tagName = listType == WikiBlockTypes.NumberedListItem ? "ol" : "ul";
+        var cssClass = listType == WikiBlockTypes.NumberedListItem
+            ? "wiki-list wiki-numbered-list"
+            : "wiki-list wiki-bulleted-list";
+        var effectiveIndent = Math.Max(0, GetIndent(nodes[startIndex].Block) - indentOffset);
+        var indentStyle = effectiveIndent > 0 ? $" style=\"margin-left:{effectiveIndent * 1.5}rem\"" : string.Empty;
+
+        builder.Append('<').Append(tagName).Append(" class=\"").Append(cssClass).Append('"').Append(indentStyle).Append('>');
+        var index = startIndex;
+        while (index < nodes.Count && nodes[index].Block.Type == listType)
+        {
+            var node = nodes[index];
+            builder.Append("<li class=\"wiki-list-item\">").Append(RenderRichText(node.Block.RichText));
+            if (node.Children.Count > 0)
+            {
+                RenderNodes(
+                    builder,
+                    node.Children,
+                    headings,
+                    headingAnchors,
+                    pagesForWikiLinks,
+                    GetIndent(node.Block) + 1);
+            }
+            builder.Append("</li>");
+            index++;
+        }
+        builder.Append("</").Append(tagName).Append('>');
+        return index;
+    }
+
+    private static void RenderToggle(
+        StringBuilder builder,
+        RenderNode node,
+        IReadOnlyList<(WikiBlock Block, string Anchor)> headings,
+        IReadOnlyDictionary<Guid, string> headingAnchors,
+        IReadOnlyList<WikiPage>? pagesForWikiLinks,
+        int indentOffset)
+    {
+        var effectiveIndent = Math.Max(0, GetIndent(node.Block) - indentOffset);
+        var indentStyle = effectiveIndent > 0 ? $" style=\"margin-left:{effectiveIndent * 1.5}rem\"" : string.Empty;
+
+        builder.Append("<details class=\"wiki-toggle\"").Append(indentStyle).Append("><summary>")
+            .Append(RenderRichText(node.Block.RichText))
+            .Append("</summary>");
+        if (node.Children.Count > 0)
+        {
+            builder.Append("<div class=\"wiki-toggle-content\" style=\"margin-left:1.5rem\">");
+            RenderNodes(
+                builder,
+                node.Children,
+                headings,
+                headingAnchors,
+                pagesForWikiLinks,
+                GetIndent(node.Block) + 1);
+            builder.Append("</div>");
+        }
+        builder.Append("</details>");
+    }
+
+    private static string RenderPageBlock(
+        WikiBlock block,
+        IReadOnlyList<(WikiBlock Block, string Anchor)> headings,
+        IReadOnlyDictionary<Guid, string> headingAnchors,
+        IReadOnlyList<WikiPage>? pagesForWikiLinks,
+        int indentOffset)
+    {
+        if (block.Type == WikiBlockTypes.TableOfContents)
+        {
+            var links = string.Concat(headings.Select(item =>
+                $"<a class=\"level-{item.Block.Type[^1]}\" href=\"#{item.Anchor}\">{RenderRichText(item.Block.RichText)}</a>"));
+            return $"<nav class=\"wiki-table-of-contents\">{links}</nav>";
+        }
+
+        var effectiveIndent = Math.Max(0, GetIndent(block) - indentOffset);
+        var rendered = RenderBlock(block with { IndentLevel = effectiveIndent }, pagesForWikiLinks);
+        if (!headingAnchors.TryGetValue(block.Id, out var anchor))
+        {
+            return rendered;
+        }
+
+        var openingTagEnd = rendered.IndexOf('>');
+        return openingTagEnd < 0 ? rendered : rendered.Insert(openingTagEnd, $" id=\"{anchor}\"");
+    }
+
+    private static int GetIndent(WikiBlock block) => Math.Max(0, block.IndentLevel);
+
+    private sealed class RenderNode(WikiBlock block)
+    {
+        public WikiBlock Block { get; } = block;
+        public List<RenderNode> Children { get; } = [];
     }
 
     // A short single-line preview of a block's content, used by the sidebar tree and by the
@@ -170,6 +349,7 @@ public static class WikiBlockHtmlRenderer
             WikiBlockTypes.Embed => block.Props.GetValueOrDefault("url", "[embed]"),
             WikiBlockTypes.LinkedDatabase => block.Props.GetValueOrDefault("databaseTitle", "[linked database]"),
             WikiBlockTypes.InlineDatabase => block.Props.GetValueOrDefault("databaseTitle", "[inline database]"),
+            WikiBlockTypes.Tab => PlainTextTabs(block),
             _ => block.PlainText
         };
         text = text.Replace('\n', ' ').Trim();
@@ -216,9 +396,17 @@ public static class WikiBlockHtmlRenderer
     {
         var databaseId = block.Props.GetValueOrDefault("databaseId", string.Empty);
         var title = block.Props.GetValueOrDefault("databaseTitle", "Linked database");
+        var databaseViewId = block.Props.GetValueOrDefault("databaseViewId", string.Empty);
+        var databaseViewName = block.Props.GetValueOrDefault("databaseViewName", string.Empty);
         var cssClass = isInline ? "wiki-linked-database wiki-inline-database" : "wiki-linked-database";
-        return $"<div class=\"{cssClass}\" data-database-id=\"{WebUtility.HtmlEncode(databaseId)}\"{indentStyle}>"
-            + $"<span aria-hidden=\"true\">▦</span><span>{WebUtility.HtmlEncode(title)}</span></div>";
+        var viewAttribute = string.IsNullOrWhiteSpace(databaseViewId)
+            ? string.Empty
+            : $" data-database-view-id=\"{WebUtility.HtmlEncode(databaseViewId)}\"";
+        var viewLabel = !isInline && !string.IsNullOrWhiteSpace(databaseViewName)
+            ? $"<span class=\"wiki-linked-database-view\"> · {WebUtility.HtmlEncode(databaseViewName)}</span>"
+            : string.Empty;
+        return $"<div class=\"{cssClass}\" data-database-id=\"{WebUtility.HtmlEncode(databaseId)}\"{viewAttribute}{indentStyle}>"
+            + $"<span aria-hidden=\"true\">▦</span><span>{WebUtility.HtmlEncode(title)}{viewLabel}</span></div>";
     }
 
     private static string RenderTable(WikiBlock block, string indentStyle)
@@ -287,6 +475,61 @@ public static class WikiBlockHtmlRenderer
             + string.Concat(columns.Select(column => $"<div>{WebUtility.HtmlEncode(column).Replace("\n", "<br />")}</div>"))
             + "</div>";
     }
+
+    private static string RenderTabs(WikiBlock block, string indentStyle)
+    {
+        var tabs = ParseTabs(block);
+        var groupName = $"wiki-tabs-{block.Id:N}";
+        var renderedTabs = string.Concat(tabs.Select((tab, index) =>
+        {
+            var inputId = $"{groupName}-{index + 1}";
+            var title = string.IsNullOrWhiteSpace(tab.Title) ? $"Tab {index + 1}" : tab.Title.Trim();
+            var selected = index == 0 ? " checked" : string.Empty;
+            return $"<input class=\"wiki-tab-toggle\" type=\"radio\" name=\"{groupName}\" id=\"{inputId}\"{selected} />"
+                + $"<label class=\"wiki-tab-label\" id=\"{inputId}-label\" for=\"{inputId}\">{WebUtility.HtmlEncode(title)}</label>"
+                + $"<section class=\"wiki-tab-panel\" role=\"region\" aria-labelledby=\"{inputId}-label\">{RenderRichText(tab.RichText)}</section>";
+        }));
+
+        // The native radio controls make the read-only renderer interactive without inline
+        // script. CSS shows only the panel paired with the selected radio button.
+        return $"<div class=\"wiki-tabs-container\"{indentStyle}>"
+            + $"<div class=\"wiki-tabs\" style=\"--wiki-tab-count:{tabs.Count}\">{renderedTabs}</div></div>";
+    }
+
+    private static IReadOnlyList<WikiTab> ParseTabs(WikiBlock block)
+    {
+        if (block.Props.TryGetValue("tabsJson", out var tabsJson))
+        {
+            try
+            {
+                var tabs = JsonSerializer.Deserialize<List<WikiTab>>(tabsJson, WikiBlockJson.Options);
+                if (tabs is { Count: > 0 })
+                {
+                    return tabs.Select((tab, index) => new WikiTab(
+                            string.IsNullOrWhiteSpace(tab.Title) ? $"Tab {index + 1}" : tab.Title,
+                            tab.RichText ?? []))
+                        .ToList();
+                }
+            }
+            catch (JsonException)
+            {
+                // Fall through to the plain-text representation written for compatibility.
+            }
+        }
+
+        var contents = block.PlainText.Split("|||", StringSplitOptions.TrimEntries);
+        if (contents.Length == 0 || (contents.Length == 1 && contents[0].Length == 0))
+        {
+            contents = [string.Empty, string.Empty];
+        }
+
+        return contents.Select((content, index) =>
+                new WikiTab($"Tab {index + 1}", [new WikiRichTextSpan(content)]))
+            .ToList();
+    }
+
+    private static string PlainTextTabs(WikiBlock block) => string.Join(" | ", ParseTabs(block)
+        .Select(tab => $"{tab.Title}: {string.Concat(tab.RichText.Select(span => span.Text))}"));
 }
 
 public static class WikiRichTextColors

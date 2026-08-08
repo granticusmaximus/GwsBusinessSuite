@@ -110,6 +110,112 @@ public sealed class WikiDatabaseViewLogicTests
     }
 
     [Fact]
+    public void ApplyFilters_OrGroup_ShouldMatchRowsSatisfyingEitherCondition()
+    {
+        var pointsProperty = NewProperty(WikiDatabasePropertyTypes.Number);
+        var lowRow = RowWithNumber(pointsProperty.Id, 1m);
+        var midRow = RowWithNumber(pointsProperty.Id, 5m);
+        var highRow = RowWithNumber(pointsProperty.Id, 10m);
+        var rows = new[] { lowRow, midRow, highRow };
+        var group = new WikiDatabaseFilterGroup(
+            WikiDatabaseFilterGroup.Or,
+            [
+                new WikiDatabaseFilter(pointsProperty.Id.ToString(), "lessThan", "2"),
+                new WikiDatabaseFilter(pointsProperty.Id.ToString(), "greaterThan", "8")
+            ],
+            []);
+
+        var filtered = WikiDatabaseViewLogic.ApplyFilters(rows, [pointsProperty], [], group);
+
+        filtered.Should().BeEquivalentTo([lowRow, highRow]);
+    }
+
+    [Fact]
+    public void ApplyFilters_NestedAndOrGroups_ShouldCombineAcrossLevels()
+    {
+        // (Points > 5) AND (Text contains "urgent" OR Text contains "blocked")
+        var pointsProperty = NewProperty(WikiDatabasePropertyTypes.Number);
+        var textProperty = NewProperty(WikiDatabasePropertyTypes.Text);
+        var properties = new[] { pointsProperty, textProperty };
+
+        WikiDatabaseRow MakeRow(decimal points, string text)
+        {
+            var row = RowWithNumber(pointsProperty.Id, points);
+            var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+            WikiPropertyValues.SetText(values, textProperty.Id, text);
+            row.PropertyValuesJson = WikiPropertyValues.Serialize(values);
+            return row;
+        }
+
+        var matchesBoth = MakeRow(10m, "urgent fix");
+        var lowPointsButUrgent = MakeRow(3m, "urgent fix");
+        var highPointsNoKeyword = MakeRow(10m, "routine task");
+        var rows = new[] { matchesBoth, lowPointsButUrgent, highPointsNoKeyword };
+
+        var group = new WikiDatabaseFilterGroup(
+            WikiDatabaseFilterGroup.And,
+            [new WikiDatabaseFilter(pointsProperty.Id.ToString(), "greaterThan", "5")],
+            [
+                new WikiDatabaseFilterGroup(
+                    WikiDatabaseFilterGroup.Or,
+                    [
+                        new WikiDatabaseFilter(textProperty.Id.ToString(), "contains", "urgent"),
+                        new WikiDatabaseFilter(textProperty.Id.ToString(), "contains", "blocked")
+                    ],
+                    [])
+            ]);
+
+        var filtered = WikiDatabaseViewLogic.ApplyFilters(rows, properties, [], group);
+
+        filtered.Should().BeEquivalentTo([matchesBoth]);
+    }
+
+    [Fact]
+    public void ApplyFilters_EmptyFilterGroup_ShouldFallBackToFlatFilters()
+    {
+        var pointsProperty = NewProperty(WikiDatabasePropertyTypes.Number);
+        var rows = new[] { RowWithNumber(pointsProperty.Id, 3m), RowWithNumber(pointsProperty.Id, 8m) };
+
+        var filtered = WikiDatabaseViewLogic.ApplyFilters(
+            rows, [pointsProperty], [new WikiDatabaseFilter(pointsProperty.Id.ToString(), "greaterThan", "5")], WikiDatabaseFilterGroup.Empty);
+
+        filtered.Should().ContainSingle();
+        WikiPropertyValues.GetNumber(WikiPropertyValues.ParseObject(filtered[0].PropertyValuesJson), pointsProperty.Id).Should().Be(8m);
+    }
+
+    [Fact]
+    public void ViewConfigJson_ShouldRoundTripFilterGroup()
+    {
+        var propertyId = Guid.NewGuid().ToString();
+        var group = new WikiDatabaseFilterGroup(
+            WikiDatabaseFilterGroup.Or,
+            [new WikiDatabaseFilter(propertyId, "contains", "a")],
+            [new WikiDatabaseFilterGroup(WikiDatabaseFilterGroup.And, [new WikiDatabaseFilter(propertyId, "equals", "b")], [])]);
+        var serialized = WikiDatabaseViewConfigJson.Serialize(new WikiDatabaseViewConfig([], [], null, FilterGroup: group));
+
+        var parsed = WikiDatabaseViewConfigJson.Parse(serialized);
+
+        parsed.FilterGroup.Should().NotBeNull();
+        parsed.FilterGroup!.Combinator.Should().Be(WikiDatabaseFilterGroup.Or);
+        parsed.FilterGroup.Conditions.Should().ContainSingle();
+        parsed.FilterGroup.Groups.Should().ContainSingle();
+        parsed.FilterGroup.Groups[0].Combinator.Should().Be(WikiDatabaseFilterGroup.And);
+    }
+
+    [Fact]
+    public void ViewConfigJson_ShouldRoundTripTimelineDependencyProperty()
+    {
+        var dependencyPropertyId = Guid.NewGuid().ToString();
+        var serialized = WikiDatabaseViewConfigJson.Serialize(
+            new WikiDatabaseViewConfig([], [], null, DependencyPropertyId: dependencyPropertyId));
+
+        var parsed = WikiDatabaseViewConfigJson.Parse(serialized);
+
+        parsed.DependencyPropertyId.Should().Be(dependencyPropertyId);
+        WikiDatabaseViewConfigJson.Parse("{}").DependencyPropertyId.Should().BeNull();
+    }
+
+    [Fact]
     public void ApplySort_Number_Descending_ShouldOrderHighestFirst()
     {
         var pointsProperty = NewProperty(WikiDatabasePropertyTypes.Number);
@@ -250,6 +356,54 @@ public sealed class WikiDatabaseViewLogicTests
 
         timeline.Select(group => group.Date).Should().Equal(new DateOnly(2026, 7, 21), new DateOnly(2026, 7, 22), null);
         timeline[^1].Rows.Should().ContainSingle().Which.Should().BeSameAs(undated);
+    }
+
+    [Fact]
+    public void BuildTimelineSchedule_ShouldOrderDatedRowsAndExposeDependenciesAndUndatedRows()
+    {
+        var dateProperty = NewProperty(WikiDatabasePropertyTypes.Date);
+        var dependencyProperty = NewProperty(WikiDatabasePropertyTypes.Relation);
+        var first = RowWithDate(dateProperty.Id, new DateOnly(2026, 7, 21));
+        var second = RowWithDate(dateProperty.Id, new DateOnly(2026, 7, 23));
+        var undated = RowWithDate(dateProperty.Id, null);
+        var secondValues = WikiPropertyValues.ParseObject(second.PropertyValuesJson);
+        WikiPropertyValues.SetMultiSelect(secondValues, dependencyProperty.Id, [first.Id.ToString(), first.Id.ToString(), "invalid"]);
+        second.PropertyValuesJson = WikiPropertyValues.Serialize(secondValues);
+
+        var schedule = WikiDatabaseViewLogic.BuildTimelineSchedule(
+            [second, undated, first], dateProperty, dependencyProperty);
+
+        schedule.StartDate.Should().Be(new DateOnly(2026, 7, 21));
+        schedule.EndDate.Should().Be(new DateOnly(2026, 7, 23));
+        schedule.DatedItems.Select(item => item.Row).Should().Equal(first, second);
+        schedule.DatedItems[1].DependsOnRowIds.Should().Equal(first.Id);
+        schedule.UndatedItems.Should().ContainSingle().Which.Row.Should().BeSameAs(undated);
+    }
+
+    [Fact]
+    public void EnsureAcyclicTimelineDependencies_ShouldRejectIndirectCycleButAllowBranches()
+    {
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+        var third = Guid.NewGuid();
+        IReadOnlyDictionary<Guid, IReadOnlyList<Guid>> valid = new Dictionary<Guid, IReadOnlyList<Guid>>
+        {
+            [first] = [second, third],
+            [second] = [third],
+            [third] = []
+        };
+        IReadOnlyDictionary<Guid, IReadOnlyList<Guid>> cyclic = new Dictionary<Guid, IReadOnlyList<Guid>>
+        {
+            [first] = [second],
+            [second] = [third],
+            [third] = [first]
+        };
+
+        var validAction = () => WikiDatabaseViewLogic.EnsureAcyclicTimelineDependencies(first, valid);
+        var cyclicAction = () => WikiDatabaseViewLogic.EnsureAcyclicTimelineDependencies(first, cyclic);
+
+        validAction.Should().NotThrow();
+        cyclicAction.Should().Throw<InvalidOperationException>().WithMessage("*cycle*");
     }
 
     [Fact]

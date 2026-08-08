@@ -1,0 +1,2018 @@
+THE   COMPLETE     FIELD    GUIDE                                        EDITION   2026.1
+
+
+
+
+                                                            / type a command…
+
+
+
+
+Notion
+The Complete Field Guide
+A step-by-step manual to the all-in-one workspace — from
+your first empty page to autonomous AI agents, databases,
+and the wider Calendar, Mail, and Sites ecosystem.
+
+
+
+FORMAT                   LEVEL                 SCOPE
+
+Illustrated handbook     Beginner → Advanced   13 parts · ~60 pages
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                       1
+ /   FRONT MATTER · HOW TO READ THIS GUIDE
+
+
+
+ A note before you begin
+ This handbook is built the way Notion is built — in blocks. Each instruction is a
+ stackable card you can follow in order or read on its own. Learn the visual grammar
+ below and the rest reads effortlessly.
+
+ The step block
+ Numbered instructions appear as cards with a six-dot handle — the same drag handle you'll meet
+ throughout Notion. Follow them top to bottom.
+
+
+     ⠿   1    Read the bold instruction first. The bold clause tells you the single action to take; the
+              rest explains why and what to expect.
+
+
+     ⠿   2    Watch for interface cues. Keys look like   Ctrl   / , slash-commands look like
+               /callout , and database fields look like Status .
+
+
+
+ The five callouts
+ Coloured notes use Notion's own block-colour palette. Each colour always means the same thing:
+
+     NOTE — ORIENTATION
+
+     Context, definitions, and "what this is" background. Safe to skim once you're fluent.
+
+
+     TIP — DO IT FASTER
+
+     A shortcut, a smarter default, or a habit that compounds over time.
+
+
+     WATCH OUT — EASY TO TRIP ON
+
+     A common mistake or a setting that behaves differently than people expect.
+
+
+     IMPORTANT — DON'T SKIP
+
+     Something with consequences: data, permissions, sharing, or irreversible actions.
+
+
+     PRO MOVE — ADVANCED
+
+     Power-user territory: relations, formulas, automations, agents, and the API edge.
+
+
+
+     ABOUT THIS EDITION
+
+     This is an independent, original field guide — not affiliated with, authorised by, or endorsed by
+     Notion Labs, Inc. All diagrams are original illustrations, not product screenshots. Notion changes
+     almost weekly, so labels, prices, and AI model names drift; where a detail moves often (pricing
+     and AI credits especially), the text flags it. Always confirm current specifics at notion.com.
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                         2
+ /    CONTENTS
+
+
+
+ What's inside
+ FOUNDATIONS
+
+
+ 00      Orientation The mental model: blocks, pages, databases, workspace
+
+ 01      Getting started Account, apps, workspace, and the interface tour
+
+ 02      Pages & the block editor The slash menu, the handle, nesting, columns
+
+ 03      Writing & formatting Every text block and inline style
+
+ 04      Media & embeds Images, files, bookmarks, and 500+ embeds
+
+
+ DATABASES — THE ENGINE
+
+
+ 05      Databases I — foundations Data sources, rows as pages, every property type
+
+ 06      Databases II — views Table, board, timeline, calendar, list, gallery, chart, form
+
+ 07      Databases III — power features Filters, relations, rollups, formulas, dependencies
+
+
+ WORKING TOGETHER & INTELLIGENCE
+
+
+ 08      Collaboration & sharing Permissions, teamspaces, comments, history
+
+ 09      Templates & reuse Built-ins, the gallery, and your own templates
+
+ 10      Notion AI Q&A, writer, autofill, meeting notes, agents
+
+ 11      Automations & the developer edge Database automations, buttons, API, workers
+
+ 12      The wider ecosystem Calendar, Mail, Sites, Forms, Web Clipper, offline
+
+
+ REFERENCE
+
+
+ R1      Keyboard shortcuts The ones worth memorising
+
+ R2      Slash-command reference Grouped by what you're making
+
+ R3      Glossary & quick-start checklist Plain-language definitions and a one-page setup
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                             3
+ PART    ZERO
+
+
+
+
+ 00
+ Orientation
+ Before any button, the model. Notion feels overwhelming until one
+ idea clicks — then it feels obvious. This part hands you that idea.
+
+
+
+
+ → What Notion actually is                      → Where databases fit
+
+ → The four nested ideas                        → Who it's for
+
+ → Blocks are the atom                          → How the pieces connect
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                          4
+ 00    · ORIENTATION
+
+
+
+ One idea that makes the rest obvious
+ N        otion is a single, flexible surface that replaces a stack of separate apps —
+          documents, wikis, notes, tasks, spreadsheets, and lightweight project tools —
+ by giving them all the same building material. Learn that material once and every
+ corner of the product starts to feel familiar.
+
+ Most tools force a choice up front: a document goes here, a spreadsheet there, a task list
+ elsewhere. Notion dissolves those walls — a meeting note can hold a live task table; a project
+ database can open into a full design doc. The reason it works is a strict hierarchy of just four nested
+ ideas.
+
+
+
+
+             WO R KS P AC E
+
+
+                TEAMSPACE                                           PERSONAL & SHARED PAGES
+
+
+                   PAGE
+
+
+                      BLOCKS
+
+
+
+
+                        ▤ an embedded database
+
+
+
+
+             The nesting doll: a workspace holds teamspaces and pages; pages hold blocks; some blocks are databases.
+
+
+ A    The four nested ideas
+ IDEA                                  WHAT IT IS
+
+
+ Workspace                             Your whole account world — everything you and your team can see. You can
+                                       belong to several (e.g. personal and work).
+
+ Teamspace / space                     A section of a workspace for a team or topic, with its own membership and
+                                       home. Personal pages live alongside these.
+
+ Page                                  The document. Every page can contain other pages, giving you infinite
+                                       nesting — this is your wiki structure.
+
+ Block                                 The atom. A line of text, a heading, an image, a to-do, an entire database —
+                                       each is a block you can move, restyle, or turn into something else.
+
+
+      NOTE
+
+      If you remember one sentence, make it this: a page is a stack of blocks, and a database is a
+      special block that organises many pages.
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                                      5
+ 00    · ORIENTATION
+
+
+ B    Blocks are the atom
+ A block is the smallest thing you can create and rearrange. Type a sentence — that's a block. Press
+  Enter     — a new block. What makes blocks powerful is that any block can become almost any other
+ block through a single command, Turn into. A paragraph becomes a heading, a to-do, a toggle, or a
+ callout without retyping a word.
+
+
+
+
+               ＋            A block of text you can drag, restyle, or transform.
+
+              ＋ add below
+                  ⠿ drag / open menu
+
+
+
+
+        The block controls that appear on hover: ＋ inserts a new block; the six-dot ⠿ handle drags it or opens its full menu.
+
+
+ Because everything is a block, the same three gestures work everywhere in Notion:
+
+      Slash to create. Type         /   anywhere and pick what to insert — heading, table, image, database,
+      anything.
+      Handle to manage. Hover, grab the ⠿ handle, and drag to reorder, or click it to duplicate, delete,
+      colour, comment, or Turn into.
+      Drag to arrange. Drop a block beside another to create side-by-side columns; drop it onto a
+      page to nest it.
+
+
+ C    Where databases fit
+ A database is the one block that changes how you think. Instead of writing information into prose,
+ you store each item as its own page inside a structured collection, then view that collection as a
+ table, a board, a calendar, and more — all backed by the same underlying data. A task list, a CRM, a
+ content calendar, and a bug tracker are all just databases with different columns and views.
+
+      TIP
+
+      Beginners often over-use plain checklists where a database would serve them for years. If you'll
+      ever want to filter, sort, group, or see it as a calendar, make it a database from the start (Part 05).
+
+
+ D    Who this is for
+ Notion scales from a single sticky-note replacement to a 1,000-person company wiki. This guide
+ follows that arc: Parts 00–04 make you comfortable, Parts 05–07 make you capable, and Parts 08–
+ 12 make you dangerous. Read linearly the first time; use the reference section forever after.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                                               6
+ PART    ONE
+
+
+
+
+ 01
+ Getting started
+ From zero to a workspace you recognise. Create an account, install
+ the apps, and learn every region of the interface so nothing later
+ feels unfamiliar.
+
+
+
+
+ → Create your account                         → Name your workspace
+
+ → Plans at a glance                           → The interface tour
+
+ → Install the apps                            → Settings you'll actually use
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                               7
+ 01      · GETTING STARTED
+
+
+
+ Your first ten minutes
+ Signing up takes under a minute. The goal of this part isn't just an account — it's a
+ mental map of where everything lives so the rest of the book lands in place.
+
+ A    Create your account
+
+     ⠿     1   Go to notion.com and choose "Get Notion free." You can sign up with a Google
+               account, an Apple account, or any email address.
+
+
+     ⠿     2   Confirm your email. If you used an email address, Notion sends a temporary login
+               code — paste it to continue. This is also how you'll sign in later on new devices.
+
+
+     ⠿     3   Answer the "what will you use Notion for?" prompt honestly. Your choices (personal,
+               team, school) pre-load a few starter pages and templates. They're only suggestions
+               — nothing is locked in.
+
+
+     ⠿     4   Decide solo or team now, or later. If you invite teammates by email during setup you'll
+               start on a collaborative workspace; skip it to stay personal. You can switch either way
+               afterwards.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                        8
+ 01     · GETTING STARTED
+
+
+ B    Plans at a glance
+ Notion has a genuinely usable free tier. Paid plans mostly raise limits and add administration, and
+ Notion AI is layered on separately.
+
+ PLAN           BEST FOR          ADDS OVER THE TIER BELOW
+
+
+ Free           Individuals       Unlimited pages & blocks for yourself; a capped number of guest
+                                  collaborators; 7-day page history.
+
+ Plus           Small teams       More guests, unlimited file uploads, 30-day history, and small-team sharing.
+
+ Business       Growing           SAML SSO, private teamspaces, bulk export, advanced page analytics, longer
+                companies         history.
+
+ Enterprise     Large orgs        Advanced security & provisioning (SCIM), audit log, workspace-wide controls,
+                                  custom data residency, and dedicated support.
+
+
+      WATCH OUT — PRICES MOVE
+
+      Exact seat prices, AI add-on pricing, and which feature sits on which tier all change regularly.
+      Treat the column above as shape, not gospel, and check notion.com/pricing before you commit
+      budget.
+
+
+ C    Install the apps
+ Notion runs anywhere, and edits sync in real time across all of it.
+
+
+      DESKTOP                                                 MOBILE
+
+      macOS & Windows                                         iOS & Android
+      A dedicated app that's faster than the browser          Full editing, quick capture, share-sheet clipping,
+      and supports global quick-capture. Download             and offline pages. Get it from the App Store or
+      from notion.com/desktop.                                Google Play.
+
+
+
+      WEB                                                     COMPANIONS
+
+      Any browser                                             Calendar & Mail
+      The complete product, no install. Best for a quick      Separate apps that plug into the same account
+      session on someone else's machine.                      — covered in Part 12.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                                  9
+ 01     · GETTING STARTED
+
+
+ D    The interface, region by region
+ Almost the entire product lives in three columns. Learn their names now and every later instruction
+ ("open the sidebar," "check the peek panel") will be unambiguous.
+
+
+
+
+                                                                    ⭐ ⋯ Share
+                                              📔 My tasks
+               ＠ Your workspace ▾             ◂ ▸ Home / My tasks
+
+               🔍 Search
+               🏠 Home
+               📥 Inbox
+               🤖 Notion AI
+               TEAMSPACES
+
+               ▸   📁 Engineering                 ▤ a database view lives inside the page
+               ▸   📁 Marketing
+               PRIVATE
+
+               ▸ 📄 My tasks
+               ▸ 📔 Journal
+
+
+
+               ⚙ Settings 🗑 Trash
+              ① Sidebar                                       ② Editor / page                      ③ Top bar & Share
+
+
+
+
+      The three regions you'll name constantly: the sidebar (navigation), the editor (the open page), and the top bar (breadcrumb,
+                                               favourite, share, and the ⋯ page menu).
+
+ REGION                                 WHAT LIVES THERE
+
+
+ ① Sidebar                              Workspace switcher, Search, Home, Inbox (your notifications), the AI entry
+                                        point, your teamspaces, private pages, plus Settings and Trash at the bottom.
+                                        Collapse it with Ctrl \\ for focus.
+
+ ② Editor                               The page you're editing — the block canvas. This is where 90% of your time
+                                        goes.
+
+ ③ Top bar                              The breadcrumb trail (click any ancestor to jump up), the          ⭐
+                                                                                                  favourite star,
+                                        the Share button, comments, updates, and the ⋯ menu holding page-wide
+                                        options (lock, full width, export, move, and more).
+
+ Peek panel                             When you open a database row, it slides in as a "peek" over the current page
+                                        so you keep your place. Open it fully any time.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                                                    10
+ 01    · GETTING STARTED
+
+
+ E    Settings you'll actually touch
+      My account / My settings — appearance (light, dark, system), your name and photo, and
+      language.
+      My notifications — decide what reaches your Inbox, email, and mobile.
+      Connections — link Slack, Google Drive, GitHub, and more so they appear inside pages.
+      People — invite members and guests, and (on paid plans) manage groups and teamspaces.
+
+      TIP
+
+      Ctrl   K    (or Cmd K ) is your teleporter: search-and-jump to any page by name from anywhere.
+      It's the single fastest habit to build on day one.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                      11
+ PART    TWO
+
+
+
+
+ 02
+ Pages & the block editor
+ The heart of Notion. Master the slash menu, the block handle,
+ nesting, and columns, and you can build any layout you can picture.
+
+
+
+
+ → Create & nest pages                        → Move, nest & indent
+
+ → The slash menu                             → Columns & layout
+
+ → The block handle menu                      → Page dressing: icon, cover, width
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                   12
+ 02      · PAGES & THE BLOCK EDITOR
+
+
+
+ Creating and shaping pages
+ A page starts as a blank line and a blinking cursor. From there, two controls do nearly
+ everything: the slash menu creates, and the handle manages.
+
+ A    Create a page — four ways
+
+     ⠿     1   From the sidebar, hover a section and click ＋. The new page appears nested under
+               that section. This is how you build your wiki tree.
+
+
+     ⠿     2   Inside any page, type /page and press Enter . This creates a sub-page nested
+               inside the current one — the core of infinite nesting.
+
+
+     ⠿     3   Press Ctrl    N   in the desktop app for a brand-new top-level page, or use ＋ New
+               page at the bottom of the sidebar.
+
+
+     ⠿     4   Give it a title and an optional icon. Type the title on the first line. Hover above it to
+               reveal Add icon, Add cover, and Add comment.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                          13
+ 02    · PAGES & THE BLOCK EDITOR
+
+
+ B    The slash menu — your creation palette
+ Type       /   and a searchable menu appears with every block type. Keep typing to filter: /h1 for a big
+ heading, /todo for a checkbox, /table for a database. Press                 Enter   to insert the top match. You
+ rarely need the mouse.
+
+      NOTE
+
+      The slash menu is grouped: Basic blocks, Media, Database, Advanced blocks, and AI. The full
+      grouped list is in Reference R2 at the back.
+
+
+ C    The block handle menu
+ Hover any block, grab the ⠿ handle, and either drag it or click to open its menu. This one menu is
+ where most editing power hides:
+
+ ACTION                            WHAT IT DOES
+
+
+ Turn into                         Transform the block into another type without retyping — paragraph →
+                                   heading → to-do → callout, and so on.
+
+ Turn into page                    Promote the block to its own sub-page, moving its content inside.
+
+ Copy link to block                Get a deep link that jumps straight to this exact block.
+
+ Duplicate                          Ctrl   D — clone the block directly below.
+
+ Move to                           Send the block (and its children) to another page entirely.
+
+ Comment                           Attach a threaded comment to just this block.
+
+ Color                             Set text colour or a full-block background from Notion's palette.
+
+ Delete                             Del — remove the block.
+
+
+
+      TIP
+
+      Select several blocks at once by clicking and dragging across them (or Shift -clicking), then
+      apply Turn into, Color, or Move to to all of them together.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                              14
+ 02      · PAGES & THE BLOCK EDITOR
+
+
+ D    Nesting, indenting, and moving
+         Indent a block under another with          Tab ; outdent with Shift         Tab . This builds nested lists and
+         toggles.
+         Reorder by dragging the handle up or down; a blue guide-line shows where it will land.
+         Nest a page inside a page by dragging one page onto another in the sidebar.
+
+
+ E    Columns and layout
+ Notion pages are single-column by default, but you can place blocks side by side to build
+ dashboards and richer layouts.
+
+
+     ⠿      1       Drag a block's handle to the right edge of another block. When a vertical blue guide
+                    appears, drop it — the two now sit in side-by-side columns.
+
+
+     ⠿      2       Add more columns by dragging additional blocks alongside, or start from /columns
+                    and choose how many.
+
+
+     ⠿      3       Resize by dragging the grey divider between columns to change their relative
+                    widths.
+
+
+
+
+                    COLUMN 1                        COLUMN 2                        COLUMN 3
+
+
+
+
+                Drag blocks beside each other to form columns — the foundation of any Notion dashboard or home page.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                                      15
+ 02     · PAGES & THE BLOCK EDITOR
+
+
+ F    Dressing a page
+ ELEMENT                      HOW & WHY
+
+
+ Icon                         Add icon above the title. Pick an emoji, a custom uploaded image, or a built-
+                              in line icon. Icons show in the sidebar and make pages scannable.
+
+ Cover                        Add cover for a banner image — a gallery, an upload, an Unsplash search, or
+                              a link. Reposition with Change cover.
+
+ Full width                   In the ⋯ menu, toggle Full width so content uses the whole page — better for
+                              wide database tables.
+
+ Small text / Font            The ⋯ menu offers Small text and a choice of Default, Serif, or Mono page
+                              fonts.
+
+ Lock                         Lock page prevents accidental edits to structure while still allowing
+                              comments.
+
+ Favourite                    The   ⭐ star pins the page to a Favourites group at the top of your sidebar.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                             16
+ PART    THREE
+
+
+
+
+ 03
+ Writing & formatting
+ Every text block, every inline style, and the Markdown shortcuts that
+ let you format without ever leaving the keyboard.
+
+
+
+
+ → Text, headings & lists                     → Inline styling & mentions
+
+ → Callouts, quotes & toggles                 → Structural blocks
+
+ → Code & equations                           → Markdown shortcuts
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                           17
+ 03     · WRITING & FORMATTING
+
+
+
+ The writer's toolkit
+ Notion's editor is a full writing environment. Here is the complete inventory of text
+ blocks, grouped by what they're for, with the command that summons each.
+
+ A    Text & structure
+ BLOCK           COMMAND              USE IT FOR
+
+
+ Text             /text               The default paragraph. Just start typing.
+
+ Heading 1–3      /h1 · /h2 ·         Section titles. Headings can be made toggleable to collapse everything
+                  /h3                 beneath them.
+
+ Bulleted list    /bullet             Unordered points. Type -       Space to start one instantly.
+
+ Numbered list    /number             Ordered steps. Type 1.       Space to start; supports letters and Roman
+                                      numerals too.
+
+ To-do list       /todo               Checkboxes. Type [] to start. Check to strike through.
+
+ Toggle list      /toggle             A collapsible ▸ triangle hiding nested content — great for FAQs and long
+                                      pages.
+
+ Quote            /quote              An indented, emphasised passage.
+
+ Divider          /divider            A horizontal rule. Type --- to insert one.
+
+
+ B    Emphasis blocks
+ Two blocks exist purely to make information stand out — you've been reading them all book.
+
+      CALLOUT
+
+      A callout ( /callout ) pairs an icon with a coloured background to flag something. Change its
+      icon and colour from the block handle.
+
+
+      Callout — /callout . Icon + coloured box, exactly like the notes in this guide.
+      Toggle — collapse detail behind a heading or a line so long pages stay scannable.
+
+
+ C    Code & math
+      Code block — /code . Syntax highlighting for ~70 languages (from bash to rust ), plus
+        mermaid for rendered diagrams. Set the language from the dropdown in the block's top-left,
+      and use its Copy button.
+      Block equation — /equation . Full KaTeX/LaTeX rendering for display maths.
+      Inline equation —    Ctrl   Shift   E   or type   $$   to drop maths inside a sentence.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                                18
+ 03     · WRITING & FORMATTING
+
+
+ D    Inline styling
+ Select any text to reveal a floating toolbar, or use keyboard shortcuts. Styles stack freely.
+
+ STYLE                    SHORTCUT                    MARKDOWN
+
+
+ Bold                      Ctrl    B                  Wrap in **
+
+ Italic                    Ctrl    I                  Wrap in *
+
+ Underline                 Ctrl    U                  —
+
+ Strikethrough             Ctrl    Shift   S          Wrap in ~~
+
+ Inline code               Ctrl    E                  Wrap in `
+
+ Link                      Ctrl    K                  Paste a URL onto selected text
+
+ Colour / highlight       via toolbar                 Text colour or background from the palette
+
+
+ E    Mentions & the @ menu
+ Type     @   anywhere to summon the mention menu — one of Notion's most connective features.
+
+ @ a person                       Notifies them and links their profile — assign work or pull someone into a
+                                  discussion.
+
+ @ a page                         Creates a live link to another page; hover to preview it. This is how pages
+                                  cross-reference each other.
+
+ @ a date                         Inserts a date, optionally with a reminder that pings you in your Inbox.
+
+ @ a database                     Links or embeds a collection inline.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                               19
+ 03    · WRITING & FORMATTING
+
+
+ F    Structural & advanced blocks
+ BLOCK               COMMAND            PURPOSE
+
+
+ Table of contents    /toc              Auto-generated, clickable outline from your headings.
+
+ Breadcrumb           /breadcrumb       Shows the page's location in the hierarchy.
+
+ Simple table         /table            A plain grid for quick, un-structured tabular text — distinct from a
+                     (simple)           database.
+
+ Synced block         /synced           Content mirrored across many pages; edit once, updates
+                                        everywhere.
+
+ Button               /button           A click that runs an action sequence — add a page, set properties,
+                                        open a link (Part 11).
+
+ Columns              /columns          Side-by-side layout, 2–5 columns.
+
+
+      PRO MOVE — SYNCED BLOCKS
+
+      Put your team's "current sprint goals" in a synced block, then paste it into every project page.
+      Update the original and all copies change in lockstep — no more stale duplicates.
+
+
+      TIP — WRITE IN MARKDOWN
+
+      If you already think in Markdown, just type it. # Space makes a heading, >            Space   a toggle,
+        " a quote, [] a to-do, ``` a code block. Notion converts on the fly.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                               20
+ PART    FOUR
+
+
+
+
+ 04
+ Media & embeds
+ Pages aren't just text. Bring in images, video, files, and live embeds
+ from hundreds of other tools.
+
+
+
+
+ → Images & galleries                           → Embeds from other apps
+
+ → Video, audio & files                         → Google Drive & connections
+
+ → Bookmarks & link previews                    → The /html block
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                              21
+ 04     · MEDIA & EMBEDS
+
+
+
+ Rich content in a page
+ Everything here is inserted the same way — / , pick the block, then upload, paste a
+ link, or drag a file straight onto the page.
+
+ A    Files & media blocks
+ BLOCK             COMMAND        NOTES
+
+
+ Image              /image        Upload, paste, drag in, or Unsplash. Resize by dragging edges; add a
+                                  caption; set as full-width.
+
+ Video              /video        Upload a file or paste a YouTube/Vimeo link to play inline.
+
+ Audio              /audio        Upload clips (mp3, wav, m4a, ogg) with an inline player.
+
+ File               /file         Attach any document for download — contracts, assets, spreadsheets.
+
+ PDF                /pdf          Embed a PDF that renders and scrolls inside the page.
+
+ Web bookmark       /bookmark     A visual link card with title, description, and thumbnail.
+
+
+      WATCH OUT — UPLOAD LIMITS
+
+      The Free plan caps individual uploads at a modest size; paid plans lift this to unlimited. Large
+      video files are usually better linked than uploaded.
+
+
+ B    Embeds — live windows into other tools
+ The embed block ( /embed ) turns a pasted link into an interactive, live view of the source — not just
+ a screenshot. When you paste certain links, Notion offers to Create embed automatically.
+
+        Figma, Miro, Framer — live design and whiteboard canvases.
+        Google Maps, Google Drive files, Google Docs/Sheets/Slides — viewable inline.
+        Loom, YouTube, Vimeo — playable video.
+        GitHub Gists, CodePen, Typeform, Tweets — and hundreds more via the embed service.
+
+
+ C    Link previews & connections
+ When you connect an app under Settings → Connections, pasting one of its links produces a rich
+ link preview that shows live metadata (a Jira ticket's status, a GitHub PR's state) rather than a bare
+ URL.
+
+      PRO MOVE — THE /HTML BLOCK
+
+      Paste or upload raw HTML and Notion renders it in a sandboxed frame — handy for custom
+      widgets and interactive snippets an ordinary embed can't show.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                         22
+ PART    FIVE
+
+
+
+
+ 05
+ Databases I — foundations
+ The single most important skill in Notion. Understand what a
+ database really is, then meet every column type you can build one
+ from.
+
+
+
+
+ → Database vs. page                          → Rows are pages
+
+ → Data sources explained                     → Every property type
+
+ → Create your first database                 → Choosing the right type
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                         23
+ 05    · DATABASES I
+
+
+
+ What a database really is
+ A        database is a collection of pages that all share the same set of properties.
+          Every row is a full Notion page you can open and write inside; every column is
+ a property that adds structured, filterable data to that page. That dual nature — page
+ and record at once — is what makes Notion databases special.
+
+
+
+             DATABASE ▸ holds one or more DATA SOURCES ▸ each a table of PAGES
+
+
+               Name (title)                Status                 Assignee                  Due              Priority
+
+
+               📄 Draft launch post          In progress           ◍ Priya                   Jun 14            High
+
+
+               📄 Record demo video          To do                 ◍ Sam                     Jun 18            Medium
+
+
+               📄 Update pricing page        Done                  ◍ Priya                   Jun 09            High
+
+
+
+
+               ↳ Click any row to open it as a full page — with its own blocks, sub-tasks, and discussion.
+
+
+
+
+ A database in Table view. Columns are properties; each row opens as a page. The same rows can be shown as a board, calendar, or
+                                                            gallery.
+
+
+      NOTE — DATA SOURCES
+
+      Modern Notion splits a database (the container) from its data source (the actual table of rows
+      and its schema). Most databases have one data source; advanced setups can hold several.
+      You'll mostly notice this when connecting to the API or linking data — day to day, "database" and
+      "the table" feel like the same thing.
+
+
+ A    Inline vs. full-page
+      Inline database — /table view (or board, calendar…) drops a database inside the current
+      page, alongside other blocks. Best for a task table on a project page.
+      Full-page database — /database full page makes the database its own page. Best for a
+      master collection (all tasks, all clients) you'll view many ways.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                                            24
+ 05      · DATABASES I
+
+
+ B    Create your first database
+
+     ⠿     1   Type /table view and press Enter . Choose + New database when prompted
+               (rather than linking an existing one).
+
+
+     ⠿     2   Name it and rename the first column. The first column is always the Name (title) —
+               the one field every row must have. Click the header to rename it.
+
+
+     ⠿     3   Add a property with the ＋ at the end of the header row. Pick a type (see the table
+               opposite), name it, and it becomes a new column.
+
+
+     ⠿     4   Add rows with ＋ New at the bottom. Each row is a page — hover it and click Open to
+               write inside.
+
+
+      NOTE
+
+      Rows are pages, so a database row can hold anything a page can — sub-tasks, a full spec,
+      comments — while its properties keep it structured and filterable.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                   25
+ 05     · DATABASES I
+
+
+ C    Every property (column) type
+ The right type unlocks the right behaviour — a real date feeds a calendar; a real number can be
+ summed. The full set:
+
+ PROPERTY                                  STORES / DOES
+
+
+  Title                                    The mandatory name of each row; always links to the page.
+                                           Exactly one per database.
+
+  Text                                     Free-form rich text — notes, descriptions.
+
+  Number                                   Numeric values with formats: plain, currency, percent, or a
+                                           progress bar/ring.
+
+  Select                                   One option from a coloured, reusable list (e.g. a category).
+
+  Multi-select                             Several tags at once from a shared list.
+
+  Status                                   A select tuned for workflow, grouped into To-do / In-progress /
+                                           Complete buckets.
+
+  Date                                     A date or range, with optional time and reminders. Powers
+                                           calendar & timeline views.
+
+  Person                                   One or more workspace members — assignees, owners.
+
+  Files & media                            Attachments and images stored on the row.
+
+  Checkbox                                 A simple true/false toggle.
+
+  URL · Email · Phone                      Typed contact fields that become clickable links.
+
+  Relation                                 Links rows to rows in another database — the key to connected
+                                           data (Part 07).
+
+  Rollup                                   Aggregates data from related rows — count, sum, latest date,
+                                           and more.
+
+  Formula                                  Computes a value from other properties using Notion's formula
+                                           language.
+
+  Created time · Created by                Auto-stamped when the row is made.
+
+  Last edited time · Last edited by        Auto-updated on every change.
+
+  ID                                       An auto-incrementing unique identifier (e.g. TASK-104 ), great
+                                           for tickets.
+
+  Button                                   Runs an action right from the row — add a related item, update a
+                                           status.
+
+  Place                                    A location/address field (newer; support still expanding).
+
+
+       TIP
+
+       Reach for Status over Select for anything with stages — it groups a board automatically.
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                             26
+ PART    SIX
+
+
+
+
+ 06
+ Databases II — views
+ One set of data, many lenses. A single database can be a table, a
+ Kanban board, a calendar, and a gallery at the same time — each
+ saved as a view.
+
+
+
+
+ → What a view is                             → Per-view settings
+
+ → The eight view types                       → Charts & forms
+
+ → Adding & switching views                   → Choosing a default
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                    27
+ 06     · DATABASES II
+
+
+
+ Eight ways to see the same data
+ A view is a saved lens over your data — its own layout, filters, and sorts. The rows
+ never change; only how you look at them does. Add as many views as you like and
+ switch with the tabs along the top.
+
+
+
+
+             Table                           Board                           Timeline                        Calendar
+
+
+
+
+             List                            Gallery                         Chart                           Form
+
+
+
+
+            All eight views read from the same rows — switch freely; filters and sorts are saved per view.
+
+
+
+
+                          The view gallery. Same database, eight lenses — pick the one that fits the moment.
+
+ VIEW          SHOWS DATA AS                                    REACH FOR IT WHEN
+
+
+ Table         Rows & columns (a spreadsheet)                   You want to see or edit many fields at once.
+
+ Board         Kanban cards in columns                          Tracking things through stages (grouped by Status ).
+
+ Timeline      Horizontal bars across dates                     Planning schedules with dependencies (a Gantt chart).
+
+ Calendar      Items on a month/week grid                       Anything driven by dates — content, events, deadlines.
+
+ List          A clean, minimal stack of titles                 Reading lists, docs, notes — low visual noise.
+
+ Gallery       Image-forward cards                              Moodboards, people, products — anything visual.
+
+ Chart         Bar, line, or donut graphs                       Summarising counts and sums for a dashboard.
+
+ Form          A fillable form that adds rows                   Collecting submissions from anyone, no account needed.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                                        28
+ 06      · DATABASES II
+
+
+ A    Add and manage views
+
+     ⠿      1      Click the ＋ beside the view tabs at the top-left of any database, then pick a layout.
+
+
+
+     ⠿      2      Name the view for what it shows — "By assignee," "This week," "Done." Good
+                   names make a database self-explanatory.
+
+
+     ⠿      3      Duplicate a view to branch off a variant, or drag tabs to reorder. The left-most view is
+                   the default others see first.
+
+
+ B    Per-view controls
+ Every view has its own Filter, Sort, and Group settings (opened from the options in the top-right of
+ the database). Because they're per-view, a "My tasks" filter on one tab never disturbs the full list on
+ another. Full mechanics are in Part 07.
+
+ Properties                         Show, hide, and reorder which columns/fields appear in this view.
+
+ Filter                             Limit which rows appear (e.g. Status is not Done).
+
+ Sort                               Order rows by one or more properties.
+
+ Group                              Cluster rows under headers (a board groups by Status ; a table can group
+                                    by Assignee ).
+
+ Layout                             View-specific options — card size in gallery, calendar-by property, page-
+                                    open behaviour.
+
+
+ C    Charts & forms in depth
+         Chart view turns a database into a live bar, line, or donut graph — group by a property, choose a
+         measure (count or sum), and drop it on a dashboard page. It updates as data changes.
+         Form view gives you a shareable form whose responses land as new rows. Configure which
+         questions appear, mark some required, and share the link with people who don't even use
+         Notion.
+
+      PRO MOVE — ONE DATABASE, A WHOLE APP
+
+      A single "Projects" database viewed as a board for the team, a calendar for planning, a chart for
+      the exec dashboard, and a form for intake is a small application. You didn't write any code —
+      you chose views.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                               29
+ PART    SEVEN
+
+
+
+
+ 07
+ Databases III — power
+ features
+ Where Notion becomes a relational, computed system: filters that
+ stack, databases that talk to each other, rollups that summarise, and
+ formulas that calculate.
+
+
+
+
+ → Advanced filters                            → Rollups
+
+ → Sorts & groups                              → Formulas
+
+ → Relations                                   → Sub-items & dependencies
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                           30
+ 07      · DATABASES III
+
+
+
+ From a table to a system
+ These five features — filters, relations, rollups, formulas, and dependencies — are
+ what separate a pretty list from a tool your whole team runs on.
+
+ A    Filters that stack
+ Open Filter and add a condition; add more and combine them with And / Or. Advanced filters let
+ you nest groups — e.g. (Status is not Done) and (Assignee is Me or Priority is High).
+
+
+      TIP
+
+      A view filtered to Assignee = Me and Status ≠ Done, sorted by Due , is the only to-do list most
+      people need. Build it once, favourite it, live in it.
+
+
+ B    Relations — databases that talk
+ A Relation links rows across two databases. Connect Tasks to Projects and each task carries its
+ project; each project can list its tasks.
+
+
+     ⠿      1   Add a property, choose Relation , and pick the database to link to.
+
+
+
+     ⠿      2   Decide one-way or two-way. A two-way (dual) relation shows the connection on
+                both databases automatically.
+
+
+     ⠿      3   On a row, click the relation cell and search for the related page to link them.
+
+
+
+
+                 Tasks                                                             Projects
+                                                    relation
+
+
+
+
+                                                ↩ Rollup pulls summary data back across this bridge (e.g. "% of tasks done").
+
+
+
+
+                      Relations connect two databases; rollups then summarise across the connection.
+
+
+ C    Rollups — summarise across a relation
+ A Rollup reaches through a relation and aggregates. On Projects, roll up the related Tasks to show
+ Count (how many), Percent checked (progress), or the latest Due date. Configure it by choosing
+ the relation, the target property, and the calculation.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                                               31
+ 07    · DATABASES III
+
+
+ D    Formulas — computed columns
+ A Formula property calculates a value from other properties using Notion's formula language,
+ which works with text, numbers, booleans, dates, and lists. Type a property's name to reference it;
+ combine with functions and operators.
+
+ GOAL                 FORMULA SKETCH
+
+
+ Days until due        dateBetween(Due, now(), "days")
+
+ Flag overdue          if(Due < now() and Status != "Done", "⚠ Overdue", "")
+
+ Full label            Name + " — " + Status
+
+
+      WATCH OUT
+
+      Formulas can only read other properties on the same row (plus rolled-up related data); they can't
+      write back or change other rows. For that, use automations or buttons (Part 11).
+
+
+ E    Sub-items & dependencies
+      Sub-items — enable in database options to nest rows inside rows (a task with sub-tasks),
+      expandable with a ▸ triangle right in the table.
+      Dependencies — in a timeline view, connect tasks so one starts after another finishes; shifting a
+      date can shift the chain.
+
+
+ F    Templates, linked views & locking
+      Row templates — click the ▾ beside New to define a starter layout for new rows (e.g. every
+      meeting note pre-filled with Agenda / Notes / Actions).
+      Linked database — /linked view of database shows an existing database somewhere else,
+      with its own filters, without duplicating data.
+      Lock database — prevent accidental structural edits while still allowing data entry.
+
+      PRO MOVE — THE CONNECTED WORKSPACE
+
+      Relate Tasks → Projects → Goals → Team members, then roll up progress at every level. You've
+      built a live company operating system where updating one checkbox ripples all the way to the
+      leadership dashboard.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                         32
+ PART    EIGHT
+
+
+
+
+ 08
+ Collaboration & sharing
+ Notion is multiplayer by design. Control exactly who sees what, work
+ together in real time, and never lose a version.
+
+
+
+
+ → Share a page                                 → Teamspaces
+
+ → Permission levels                            → Comments & mentions
+
+ → Members, guests & groups                     → History, suggestions & analytics
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                    33
+ 08      · COLLABORATION
+
+
+
+ Working with other people
+ Sharing in Notion is granular: you can open a whole workspace to a company or a
+ single page to one outside client. The Share button in the top bar is where it all
+ begins.
+
+ A    Share a page
+
+     ⠿      1    Open the page and click Share. You'll see two tabs: Share (invite specific people)
+                 and Publish (put it on the web).
+
+
+     ⠿      2    Invite by name or email and set their access level. They receive a notification and
+                 the page appears in their sidebar.
+
+
+     ⠿      3    Or use "Publish" to generate a public link (this is the basis of Notion Sites — Part 12),
+                 with options for search-engine indexing and duplication.
+
+
+      IMPORTANT — PERMISSIONS INHERIT
+
+      Sub-pages inherit access from their parent unless you override them. Sharing a top-level page
+      shares everything beneath it. Check the parent before assuming a page is private.
+
+
+ B    The permission levels
+
+ Full access                      Edit content and re-share with others.
+
+ Can edit                         Edit content, but not manage sharing.
+
+ Can comment                      Read and leave comments; no edits.
+
+ Can view                         Read only.
+
+
+ C    Members, guests & groups
+         Members — full people in your workspace (billed per seat on paid plans).
+         Guests — outside collaborators given access to specific pages only, not the whole workspace.
+         Ideal for clients and contractors.
+         Groups — named sets of members (e.g. "Design") you can grant access to in one move, on
+         paid plans.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                            34
+ 08    · COLLABORATION
+
+
+ D    Teamspaces
+ A teamspace is a section of the workspace for a team or department, with its own members, home
+ page, and permission defaults. Visibility comes in three flavours:
+
+ Open                           Everyone in the workspace can find and join.
+
+ Closed                         Everyone can see it exists and request to join, but content is members-only.
+
+ Private                        Invisible to non-members entirely (paid plans).
+
+
+ E    Comments, mentions & discussions
+      Page comments — general discussion at the top of a page.
+      Inline comments — select any text and click the     💬 to anchor a comment to that exact phrase;
+      resolve it when done.
+      @mentions — pull a person, page, or date into a comment or the body; people get notified in
+      their Inbox.
+      Reactions & threads — reply within a comment to keep conversations tidy.
+
+
+ F    Suggestions, history & analytics
+
+ Suggestion mode                Propose edits as tracked suggestions others can accept or reject — like a
+                                document's "suggesting" mode.
+
+ Page history                   The ⋯ menu → Page history shows past versions you can preview and
+                                restore. How far back depends on your plan.
+
+ Page analytics                 See views and unique visitors per page (detail scales with plan) — useful for
+                                wikis.
+
+ Updates / following            Follow a page to be notified of changes; the Updates panel logs recent
+                                activity.
+
+
+      TIP
+
+      Everyone editing a page sees each other's coloured cursors live. There's no "save" button —
+      changes sync instantly and are captured in history, so you can always roll back.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                               35
+ PART     NINE
+
+
+
+
+ 09
+ Templates & reuse
+ Never build the same page twice. Use Notion's library, the
+ community gallery, and your own reusable templates to move at
+ speed.
+
+
+
+
+ → Built-in templates                         → Database row templates
+
+ → The template gallery                       → Template buttons
+
+ → Duplicating anything                       → Good template habits
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                        36
+ 09      · TEMPLATES
+
+
+
+ Build once, reuse forever
+ Templates turn a good page you built into a starting point you can stamp out again
+ and again — for yourself or an entire community.
+
+ A    Use a built-in or gallery template
+
+     ⠿      1   Click Templates at the bottom of the sidebar (or when a new page is empty) to
+                browse Notion's built-in library — habit trackers, meeting notes, roadmaps, and
+                more.
+
+
+     ⠿      2   Visit the online Template Gallery / Marketplace for thousands of free and paid
+                community templates. Click Duplicate to drop one into your workspace.
+
+
+     ⠿      3   Make it yours. A duplicated template is just ordinary pages and databases — rename,
+                delete, and restructure freely.
+
+
+ B    Duplicate anything
+ Any page becomes a rough template on the spot: open its ⋯ menu and choose Duplicate — great
+ for "copy last week's notes and edit."
+
+
+ C    Database row templates
+ The most powerful kind. Instead of a blank row, define a starter layout so every new entry begins
+ pre-structured.
+
+
+     ⠿      1   In a database, click the ▾ next to the New button and choose + New template.
+
+
+
+     ⠿      2   Design the template page — headings, a to-do checklist, pre-set properties.
+                Everything you add appears on each new row created from it.
+
+
+     ⠿      3   Optionally set it as the default so hitting New always uses it. You can keep several
+                templates (e.g. "Bug," "Feature," "Chore").
+
+
+ D    Template buttons
+ A button block ( /button ) can insert a pre-defined set of blocks wherever it lives — a lightweight
+ template for repeating checklists inside a single page.
+
+      TIP
+
+      The third time you re-create the same structure, stop and make it a template. Two minutes now
+      pays back on every future use.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                      37
+ PART    TEN
+
+
+
+
+ 10
+ Notion AI
+ An intelligence layer woven through the workspace — it can write
+ with you, answer questions from your own pages, fill databases,
+ take meeting notes, and act on your behalf.
+
+
+
+
+ → Turning AI on                               → AI autofill
+
+ → Q&A & enterprise search                     → Meeting notes
+
+ → The AI writer                               → Agents & custom agents
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                         38
+ 10    · NOTION AI
+
+
+
+ Your workspace, now intelligent
+ Unlike a standalone chatbot, Notion AI can see the pages and databases you give it
+ access to — so its answers are grounded in your work, not the open internet alone.
+
+      WATCH OUT — THE FASTEST-MOVING AREA
+
+      Notion AI's exact features, model choices, credit costs, and which plan includes what change
+      more often than anything else in the product. Everything below is the stable shape; verify current
+      specifics at notion.com before relying on pricing or model names.
+
+
+ A    Get to it
+ Press Ctrl J (or Cmd J ) anywhere, click the AI entry in the sidebar, or type             Space   on an empty
+ line to start an AI prompt. Admins enable or restrict AI at the workspace level.
+
+
+ B    Ask your workspace (Q&A & search)
+      Q&A — ask a natural-language question ("What did we decide about pricing?") and get an
+      answer drawn from your pages, with citations linking to the source pages.
+      Enterprise Search — on higher tiers, the same question can search connected apps too (Slack,
+      Google Drive, GitHub, Jira and more), returning one answer with sources.
+
+
+ C    The AI writer & editor
+ Select text or start on a blank line to get writing help:
+
+ Draft & continue               Generate a first draft, brainstorm, or continue writing from a prompt.
+
+ Transform                      Make longer / shorter, change tone, simplify, or fix spelling & grammar.
+
+ Summarise                      Condense a long page into key points or action items.
+
+ Translate                      Render a selection into another language.
+
+ Edit in place                  Ask the AI to rewrite selected text directly in the doc.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                           39
+ 10      · NOTION AI
+
+
+ D    AI Autofill in databases
+ Add an AI property to a database and Notion fills it automatically per row — summarising the page,
+ extracting key info, or classifying it — and can keep it updated as the row changes.
+
+
+ E    AI Meeting Notes
+
+     ⠿      1    Start a meeting note (a dedicated block/page) and let it capture audio during a call.
+
+
+
+     ⠿      2    It transcribes and then summarises — pulling out decisions and action items, in
+                 many languages.
+
+
+     ⠿      3    Link the notes to a project page so the summary lives where the work does. You can
+                 add custom instructions to shape the summary format.
+
+
+      IMPORTANT — RECORDING ETIQUETTE & LAW
+
+      Recording and transcribing calls carries consent obligations that vary by region. Tell participants,
+      and follow your local laws and company policy before capturing a meeting.
+
+
+ F    Agents — AI that takes action
+         Notion Agent — a chat-based assistant that can carry out multi-step tasks across your
+         workspace (create pages, update databases, draft docs), remember context, and run saved
+         skills — reusable workflows you've taught it.
+         Custom Agents — autonomous agents that run on a trigger: a schedule, an incoming message,
+         or a database change. They do work without you asking each time. These sit on higher tiers and
+         consume usage-based credits.
+
+      PRO MOVE
+
+      A custom agent that every Monday reads last week's completed tasks and drafts a status update
+      into your team page is the kind of standing chore Notion can now simply do — verify current
+      agent availability and credit costs before you build a business process on it.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                            40
+ PART    ELEVEN
+
+
+
+
+ 11
+ Automations & the
+ developer edge
+ Make Notion do things by itself — with no-code automations and
+ buttons for everyone, and a real API, MCP, and Workers platform for
+ builders.
+
+
+
+
+ → Database automations                      → MCP for AI clients
+
+ → Buttons                                   → Workers
+
+ → The public API                            → Third-party automation
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                       41
+ 11    · AUTOMATIONS
+
+
+
+ From manual to automatic
+ Two features cover most needs without code; a developer platform sits underneath
+ for when you outgrow them.
+
+ A    Database automations (no code)
+ Inside a database, open the   ⚡ automations menu and build trigger → action rules.
+ Trigger examples              A property changes; a row is added; a button is clicked; a date arrives.
+
+ Action examples               Set a property; add a row; send a Slack message; notify a person.
+
+
+      RECIPE
+
+      When Status becomes "Done," set Completed date to today and message the project
+      channel. Built entirely from menus — no code.
+
+
+ B    Buttons
+ A button (as a block or a database property) runs a sequence you define: add pages, edit
+ properties, open a link, show a confirmation. Perfect for "＋ Log today's workout" or "Create next
+ sprint."
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                         42
+ 11    · AUTOMATIONS
+
+
+ C    The developer platform (for builders)
+ When menus aren't enough, Notion exposes a genuine platform — you don't need it to use Notion
+ well, but it's the ceiling.
+
+ Public REST API                 Read and write pages, blocks, databases, comments, and files; official SDKs
+                                 (including JavaScript) make it approachable.
+
+ MCP server                      An official Model Context Protocol server lets AI assistants (Claude, Cursor,
+                                 and others) act in your workspace over a secure connection.
+
+ Notion Workers                  Run custom code in a Notion-hosted sandbox to sync external data in, handle
+                                 webhooks, and give agents custom tools.
+
+ Webhooks                        Get notified in real time when pages, databases, comments, or files change.
+
+ Admin API                       For enterprises: manage tokens, exports, legal holds, and connections at the
+                                 org level.
+
+
+ D    Third-party automation
+ Prefer a visual builder? Zapier, Make, and n8n connect Notion to thousands of apps through the
+ same API — "new form response → create Notion row → post to Slack," no code required.
+
+      PRO MOVE
+
+      Start with database automations and buttons; reach for the API or Workers only when you must
+      talk to systems outside Notion, or run logic the built-in tools can't express.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                                43
+ PART    TWELVE
+
+
+
+
+ 12
+ The wider ecosystem
+ Notion is now a suite. Calendar, Mail, Sites, Forms, and the Web
+ Clipper all plug into the same account — plus the mobile, desktop,
+ offline, and import/export details that round out daily use.
+
+
+
+
+ → Notion Calendar                              → Forms & Web Clipper
+
+ → Notion Mail                                  → Apps & offline
+
+ → Notion Sites                                 → Import & export
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                       44
+ 12      · ECOSYSTEM
+
+
+
+ Beyond the core app
+ These companion products share your Notion login and data. You don't need them
+ to use Notion — but together they close the loop between your notes, your time, and
+ your inbox.
+
+
+      TIME                                                   INBOX
+
+      Notion Calendar                                        Notion Mail
+      A standalone calendar app. Connect Google and          An email client that treats your inbox like a
+      Outlook calendars, see them in one place,              Notion database: AI auto-labels, custom views
+      schedule with time-zone awareness, and                 filter conversations, saved snippets speed
+      surface Notion database dates alongside your           replies, and scheduling ties into Calendar.
+      meetings.
+
+
+
+      PUBLISH                                                COLLECT
+
+      Notion Sites                                           Notion Forms
+      Turn any page into a public website — custom           Native forms (a database view) that gather
+      domain, SEO controls, navigation. Your wiki and        submissions from anyone into a database — no
+      your website share one source of truth.                third-party form tool needed.
+
+
+
+ A    Notion Web Clipper
+
+     ⠿       1   Install the Web Clipper extension (Chrome, Firefox, Safari; plus the mobile share
+                 sheet). It's the official tool for saving the web into Notion.
+
+
+     ⠿       2   On any web page, click the clipper, choose the destination database or page, set any
+                 properties, and save. The page arrives as a clean, readable entry.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                            45
+ 12    · ECOSYSTEM
+
+
+ B    Apps, sync & offline
+      Real-time sync across web, desktop, and mobile — start on one device, continue on another
+      instantly.
+      Offline access — mark pages for offline use so you can read and edit without a connection;
+      changes sync when you're back online.
+      Quick capture — mobile widgets and desktop shortcuts drop a thought into Notion in seconds.
+
+
+ C    Import & export
+
+ Import from                    Evernote, Word, Google Docs, Trello, Asana, Confluence, CSV, HTML, and
+                                Markdown — via Settings → Import or ⋯ → Import on a page.
+
+ Export as                      Markdown, HTML, PDF, and CSV (for databases). Workspace-wide export is
+                                available on higher plans.
+
+ Trash & restore                Deleted pages go to Trash (bottom of the sidebar), where you can search and
+                                restore them before permanent deletion.
+
+
+      TIP
+
+      Export your most important workspace periodically as a personal backup. It's your data —
+      keeping a local copy costs nothing and buys peace of mind.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                         46
+ R1   · REFERENCE
+
+
+
+ Keyboard shortcuts worth memorising
+ Shown with Ctrl for Windows/Linux; use Cmd on macOS. These are the ones that
+ change how fast you work.
+
+ Navigation & essentials
+
+ DO THIS                                             PRESS
+
+
+ Search / jump to any page                            Ctrl   K
+
+ Quick find (search everything)                       Ctrl   P
+
+ Open Notion AI                                       Ctrl   J
+
+ New page                                             Ctrl   N
+
+ Toggle sidebar                                       Ctrl   \\
+
+ Toggle dark mode                                     Ctrl   Shift      L
+
+ Go back / forward                                    Ctrl   [ · Ctrl       ]
+
+
+ Blocks & editing
+
+ DO THIS                                      PRESS
+
+
+ Insert a block (slash menu)                   /
+
+ Duplicate selected block(s)                   Ctrl     D
+
+ Select the whole block                        Esc
+
+ Move block up / down                          Ctrl     Shift     ↑ / ↓
+
+ Indent / outdent                              Tab · Shift        Tab
+
+ Create a comment                              Ctrl     Shift     M
+
+
+ Formatting
+
+ DO THIS                                     PRESS
+
+
+ Bold · Italic · Underline                    Ctrl     B · I · U
+
+ Inline code                                  Ctrl     E
+
+ Strikethrough                                Ctrl     Shift      S
+
+ Add / edit link                              Ctrl     K
+
+ Insert inline equation                       Ctrl     Shift      E
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                               47
+ R2   · REFERENCE
+
+
+
+ Slash-command reference
+ Type / then any of these. You rarely need the full word — the first few letters usually
+ filter to the right block.
+
+ Basic blocks
+  /text · /h1 · /h2 · /h3 · /bullet ·                    /divider · /callout · /page
+  /number · /todo · /toggle · /quote ·
+
+ Media
+  /image · /video · /audio · /file · /pdf · /bookmark · /embed
+
+ Database
+  /table view · /board view · /calendar view · /timeline view · /list view · /gallery
+ view · /chart · /form · /linked view of database
+
+ Advanced
+  /toc · /breadcrumb · /table (simple) · /columns · /synced · /button · /code ·
+  /equation · /html · /mention
+
+ AI
+  /ai · ask a question · summarise · draft · continue writing · translate · action items
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                          48
+ R2    · REFERENCE
+
+
+ Quick-start checklist
+ Your first hour, distilled to eight moves:
+
+
+   ⠿     1    Create your account and name your workspace.
+
+
+
+   ⠿     2    Install the desktop and mobile apps; sign in on both.
+
+
+
+   ⠿     3    Make one page. Practise     / , the ⠿ handle, and Tab   to nest.
+
+
+
+   ⠿     4    Build a Tasks database; add a Status and a Date .
+
+
+
+   ⠿     5    Add a Board view and a Calendar view over it.
+
+
+
+   ⠿     6    Filter a view to Me & not Done; favourite it.
+
+
+
+   ⠿     7    Learn   Ctrl   K   — jump anywhere by name.
+
+
+
+   ⠿     8    Duplicate one gallery template and take it apart to see how it's built.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                       49
+ R3    · REFERENCE
+
+
+
+ Glossary
+ The vocabulary of Notion, in plain language. Learn these fifteen words and you can
+ read any Notion tutorial fluently.
+
+ Workspace                         Your whole Notion world — everything an account or team can access.
+
+ Teamspace                         A section of a workspace for a team, with its own members and defaults.
+
+ Page                              A document made of blocks; can contain infinite sub-pages.
+
+ Block                             The smallest unit of content — text, image, to-do, database, all blocks.
+
+ Database                          A collection of pages that share properties; viewable many ways.
+
+ Data source                       The underlying table (schema + rows) inside a database.
+
+ Property                          A database column — a typed field on every row (status, date, person…).
+
+ View                              A saved lens over a database: table, board, calendar, etc., with its own filters.
+
+ Relation                          A link between rows in two databases.
+
+ Rollup                            A summary calculated across a relation (count, sum, latest date…).
+
+ Formula                           A computed property derived from other properties.
+
+ Template                          A reusable starting layout for a page or a database row.
+
+ Synced block                      Content mirrored across pages; edit once, changes everywhere.
+
+ Guest                             An outside collaborator with access to specific pages only.
+
+ Agent                             An AI that performs multi-step tasks in your workspace, on request or on a
+                                   trigger.
+
+
+
+
+      CLOSING NOTE
+
+      Notion rewards a light touch early and depth later. Don't try to build the perfect system on day
+      one — make a page, make a database, and let structure grow as your needs reveal themselves.
+      Come back to Parts 05–07 when a plain list stops being enough; that's the moment Notion earns
+      its keep.
+
+
+
+
+ NOTION · THE COMPLETE FIELD GUIDE — EDITION 2026.1
+
+ An independent, unofficial reference. Not affiliated with, authorised by, or endorsed by Notion Labs, Inc. All
+ illustrations original. Product features, plan structures, prices, and AI models change frequently — verify current
+ details at notion.com. Prepared as an educational handbook.
+
+
+
+
+NOTION · THE COMPLETE FIELD GUIDE                                                                                      50
+

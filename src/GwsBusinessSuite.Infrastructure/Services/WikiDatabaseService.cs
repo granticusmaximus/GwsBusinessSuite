@@ -4,6 +4,7 @@ using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -20,6 +21,9 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
     // Same bound as WikiService.MaxRevisionsPerPage - kept as an independent constant rather
     // than shared so each history table can be tuned separately later if needed.
     private const int MaxRevisionsPerRow = 20;
+    private const int MaxCsvHeaderCharacters = 120;
+    private const int MaxCsvFieldCharacters = 128 * 1024;
+    private const int MaxCsvWarnings = 200;
 
     public async Task<IReadOnlyList<WikiDatabase>> ListDatabasesAsync(bool includeTrashed = false, CancellationToken cancellationToken = default)
     {
@@ -162,6 +166,9 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         var now = DateTimeOffset.UtcNow;
         var propertyIds = source.Properties.ToDictionary(property => property.Id, _ => Guid.NewGuid());
         var rowIds = source.Rows.ToDictionary(row => row.Id, _ => Guid.NewGuid());
+        var sourceRowTemplates = await dbContext.WikiDatabaseRowTemplates.AsNoTracking()
+            .Where(template => template.WikiDatabaseId == source.Id)
+            .ToListAsync(cancellationToken);
 
         var duplicate = new WikiDatabase
         {
@@ -201,9 +208,38 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
             {
                 Id = rowIds[row.Id],
                 WikiDatabaseId = duplicate.Id,
+                ParentRowId = row.ParentRowId is { } parentRowId && rowIds.TryGetValue(parentRowId, out var remappedParentRowId)
+                    ? remappedParentRowId
+                    : null,
                 SortOrder = row.SortOrder,
                 PropertyValuesJson = WikiPropertyValues.Serialize(remappedValues),
                 BlocksJson = WikiBlockJson.Serialize(blocks),
+                CreatedAt = now,
+                CreatedBy = performedBy
+            });
+        }
+
+        foreach (var template in sourceRowTemplates)
+        {
+            var remappedDefaults = RemapPropertyValues(
+                WikiPropertyValues.ParseObject(template.DefaultPropertyValuesJson),
+                source.Properties,
+                propertyIds,
+                rowIds,
+                source.Id);
+            var blocks = WikiBlockJson.ParseBlocks(template.BlocksJson)
+                .Select(block => block with { Id = Guid.NewGuid() })
+                .ToList();
+            duplicate.RowTemplates.Add(new WikiDatabaseRowTemplate
+            {
+                Id = Guid.NewGuid(),
+                WikiDatabaseId = duplicate.Id,
+                Name = template.Name,
+                NormalizedName = template.NormalizedName,
+                BlocksJson = WikiBlockJson.Serialize(blocks),
+                DefaultPropertyValuesJson = WikiPropertyValues.Serialize(remappedDefaults),
+                Icon = template.Icon,
+                CoverImageUrl = template.CoverImageUrl,
                 CreatedAt = now,
                 CreatedBy = performedBy
             });
@@ -227,7 +263,11 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
                     (config.PagePropertyOrder ?? []).Select(propertyId => RemapPropertyId(propertyId, propertyIds)).ToList(),
                     (config.HiddenPagePropertyIds ?? []).Select(propertyId => RemapPropertyId(propertyId, propertyIds)).ToList(),
                     (config.Calculations ?? new Dictionary<string, string>())
-                        .ToDictionary(item => RemapPropertyId(item.Key, propertyIds), item => item.Value))),
+                        .ToDictionary(item => RemapPropertyId(item.Key, propertyIds), item => item.Value),
+                    FilterGroup: RemapFilterGroup(config.FilterGroup, propertyIds),
+                    DependencyPropertyId: config.DependencyPropertyId is null
+                        ? null
+                        : RemapPropertyId(config.DependencyPropertyId, propertyIds))),
                 CreatedAt = now,
                 CreatedBy = performedBy
             });
@@ -252,6 +292,18 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         Guid.TryParse(propertyId, out var parsed) && propertyIds.TryGetValue(parsed, out var remapped)
             ? remapped.ToString()
             : propertyId;
+
+    private static WikiDatabaseFilterGroup? RemapFilterGroup(
+        WikiDatabaseFilterGroup? group,
+        IReadOnlyDictionary<Guid, Guid> propertyIds) => group is null
+            ? null
+            : new WikiDatabaseFilterGroup(
+                group.Combinator,
+                group.Conditions.Select(condition => condition with
+                {
+                    PropertyId = RemapPropertyId(condition.PropertyId, propertyIds)
+                }).ToList(),
+                group.Groups.Select(child => RemapFilterGroup(child, propertyIds)!).ToList());
 
     private static string RemapPropertyConfig(
         string configJson,
@@ -472,7 +524,11 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
                     (config.PagePropertyOrder ?? []).Select(propertyId => RemapPropertyId(propertyId, propertyIds)).ToList(),
                     (config.HiddenPagePropertyIds ?? []).Select(propertyId => RemapPropertyId(propertyId, propertyIds)).ToList(),
                     (config.Calculations ?? new Dictionary<string, string>())
-                        .ToDictionary(item => RemapPropertyId(item.Key, propertyIds), item => item.Value))),
+                        .ToDictionary(item => RemapPropertyId(item.Key, propertyIds), item => item.Value),
+                    FilterGroup: RemapFilterGroup(config.FilterGroup, propertyIds),
+                    DependencyPropertyId: config.DependencyPropertyId is null
+                        ? null
+                        : RemapPropertyId(config.DependencyPropertyId, propertyIds))),
                 CreatedAt = now,
                 CreatedBy = performedBy
             });
@@ -492,6 +548,7 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
     {
         var database = await dbContext.WikiDatabases.FirstOrDefaultAsync(item => item.Id == wikiDatabaseId, cancellationToken)
             ?? throw new KeyNotFoundException("The database no longer exists.");
+        EnsureDatabaseUnlocked(database);
 
         database.Title = string.IsNullOrWhiteSpace(title) ? database.Title : title.Trim();
         database.Icon = string.IsNullOrWhiteSpace(icon) ? null : icon.Trim();
@@ -499,6 +556,45 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         database.UpdatedBy = performedBy;
         await dbContext.SaveChangesAsync(cancellationToken);
         return database;
+    }
+
+    public async Task<WikiDatabase> SetDatabaseLockAsync(
+        Guid wikiDatabaseId,
+        bool isLocked,
+        string performedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var database = await dbContext.WikiDatabases.FirstOrDefaultAsync(
+            item => item.Id == wikiDatabaseId && item.TrashedAt == null,
+            cancellationToken)
+            ?? throw new KeyNotFoundException("The database no longer exists.");
+        if (database.IsLocked == isLocked)
+        {
+            return database;
+        }
+
+        database.IsLocked = isLocked;
+        database.UpdatedAt = DateTimeOffset.UtcNow;
+        database.UpdatedBy = performedBy;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return database;
+    }
+
+    private static void EnsureDatabaseUnlocked(WikiDatabase database)
+    {
+        if (database.IsLocked)
+        {
+            throw new InvalidOperationException(
+                "Database structure is locked. Unlock it before changing metadata, properties, shared views, or row templates.");
+        }
+    }
+
+    private async Task EnsureDatabaseUnlockedAsync(Guid wikiDatabaseId, CancellationToken cancellationToken)
+    {
+        var database = await dbContext.WikiDatabases.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == wikiDatabaseId && item.TrashedAt == null, cancellationToken)
+            ?? throw new KeyNotFoundException("The database no longer exists.");
+        EnsureDatabaseUnlocked(database);
     }
 
     public async Task TrashDatabaseAsync(Guid wikiDatabaseId, string performedBy, CancellationToken cancellationToken = default)
@@ -633,6 +729,7 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(editor);
+        await EnsureDatabaseUnlockedAsync(wikiDatabaseId, cancellationToken);
         if (string.IsNullOrWhiteSpace(editor.Name))
         {
             throw new ArgumentException("Property name is required.", nameof(editor));
@@ -689,7 +786,8 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
             editor.RollupPropertyId,
             string.IsNullOrWhiteSpace(editor.RollupAggregation) ? null : editor.RollupAggregation,
             editor.Type == WikiDatabasePropertyTypes.Button ? editor.AutomationWorkflowId : null,
-            editor.Type == WikiDatabasePropertyTypes.Button && !string.IsNullOrWhiteSpace(editor.ButtonLabel) ? editor.ButtonLabel.Trim() : null);
+            editor.Type == WikiDatabasePropertyTypes.Button && !string.IsNullOrWhiteSpace(editor.ButtonLabel) ? editor.ButtonLabel.Trim() : null,
+            editor.Type == WikiDatabasePropertyTypes.UniqueId && !string.IsNullOrWhiteSpace(editor.UniqueIdPrefix) ? editor.UniqueIdPrefix.Trim() : null);
         await ValidatePropertyConfigurationAsync(wikiDatabaseId, property.Id, editor.Type, configuration, cancellationToken);
         if (!isNew && editor.Type == WikiDatabasePropertyTypes.Relation
             && previousConfiguration.RelatedDatabaseId != configuration.RelatedDatabaseId)
@@ -757,7 +855,7 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
 
         property.ConfigJson = editor.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect
             or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Relation or WikiDatabasePropertyTypes.Rollup
-            or WikiDatabasePropertyTypes.Status or WikiDatabasePropertyTypes.Button
+            or WikiDatabasePropertyTypes.Status or WikiDatabasePropertyTypes.Button or WikiDatabasePropertyTypes.UniqueId
             ? WikiDatabasePropertyConfig.Serialize(configuration)
             : "{}";
 
@@ -853,6 +951,7 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
 
     public async Task DeletePropertyAsync(Guid wikiDatabaseId, Guid propertyId, string performedBy, CancellationToken cancellationToken = default)
     {
+        await EnsureDatabaseUnlockedAsync(wikiDatabaseId, cancellationToken);
         var property = await dbContext.WikiDatabaseProperties.FirstOrDefaultAsync(
             item => item.Id == propertyId && item.WikiDatabaseId == wikiDatabaseId, cancellationToken);
         if (property is null)
@@ -882,6 +981,17 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
             row.PropertyValuesJson = WikiPropertyValues.Serialize(values);
             row.UpdatedAt = now;
             row.UpdatedBy = performedBy;
+        }
+        var rowTemplates = await dbContext.WikiDatabaseRowTemplates
+            .Where(template => template.WikiDatabaseId == wikiDatabaseId)
+            .ToListAsync(cancellationToken);
+        foreach (var template in rowTemplates)
+        {
+            var defaults = WikiPropertyValues.ParseObject(template.DefaultPropertyValuesJson);
+            if (!defaults.Remove(property.Id.ToString())) continue;
+            template.DefaultPropertyValuesJson = WikiPropertyValues.Serialize(defaults);
+            template.UpdatedAt = now;
+            template.UpdatedBy = performedBy;
         }
         dbContext.WikiDatabaseProperties.Remove(property);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -919,11 +1029,15 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
             SortOrder = await NextRowSortOrderAsync(wikiDatabaseId, cancellationToken)
         };
 
+        await ValidateParentRowAsync(wikiDatabaseId, row.Id, editor.ParentRowId, cancellationToken);
+        row.ParentRowId = editor.ParentRowId;
+
         var computedPropertyIds = await dbContext.WikiDatabaseProperties
             .Where(property => property.WikiDatabaseId == wikiDatabaseId
                 && (property.Type == WikiDatabasePropertyTypes.Formula || property.Type == WikiDatabasePropertyTypes.Rollup
                     || property.Type == WikiDatabasePropertyTypes.LastEditedTime || property.Type == WikiDatabasePropertyTypes.LastEditedBy
-                    || property.Type == WikiDatabasePropertyTypes.CreatedBy || property.Type == WikiDatabasePropertyTypes.Button))
+                    || property.Type == WikiDatabasePropertyTypes.CreatedBy || property.Type == WikiDatabasePropertyTypes.Button
+                    || property.Type == WikiDatabasePropertyTypes.UniqueId))
             .Select(property => property.Id.ToString())
             .ToListAsync(cancellationToken);
         var values = new System.Text.Json.Nodes.JsonObject();
@@ -934,6 +1048,47 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
                 values[key] = value?.DeepClone();
             }
         }
+        if (isNew)
+        {
+            // UniqueId is assigned exactly once, here, and never re-assigned on edit - the
+            // number is the max already used by any sibling row (including trashed ones, so
+            // numbers are never reused) plus one, mirroring Notion's auto-increment behavior.
+            var uniqueIdProperties = await dbContext.WikiDatabaseProperties
+                .Where(property => property.WikiDatabaseId == wikiDatabaseId && property.Type == WikiDatabasePropertyTypes.UniqueId)
+                .ToListAsync(cancellationToken);
+            if (uniqueIdProperties.Count > 0)
+            {
+                var siblingValuesJson = await dbContext.WikiDatabaseRows
+                    .Where(sibling => sibling.WikiDatabaseId == wikiDatabaseId)
+                    .Select(sibling => sibling.PropertyValuesJson)
+                    .ToListAsync(cancellationToken);
+                foreach (var uniqueIdProperty in uniqueIdProperties)
+                {
+                    var nextId = siblingValuesJson
+                        .Select(json => WikiPropertyValues.GetNumber(WikiPropertyValues.ParseObject(json), uniqueIdProperty.Id))
+                        .Where(number => number.HasValue)
+                        .Select(number => number!.Value)
+                        .DefaultIfEmpty(0m)
+                        .Max() + 1;
+                    WikiPropertyValues.SetNumber(values, uniqueIdProperty.Id, nextId);
+                }
+            }
+        }
+        else
+        {
+            // UniqueId is excluded from editor.Values above (it's never client-writable), but
+            // editor.Values is the *complete* replacement set for this row - without carrying
+            // the already-assigned number forward here, every subsequent edit of the row would
+            // silently wipe it back to empty.
+            foreach (var propertyId in computedPropertyIds)
+            {
+                if (previousValues.TryGetPropertyValue(propertyId, out var previousValue) && previousValue is not null)
+                {
+                    values[propertyId] = previousValue.DeepClone();
+                }
+            }
+        }
+        await ValidateTimelineDependenciesAsync(wikiDatabaseId, row.Id, values, cancellationToken);
         row.PropertyValuesJson = WikiPropertyValues.Serialize(values);
         var propertyValuesChanged = isNew || !string.Equals(WikiPropertyValues.Serialize(previousValues), row.PropertyValuesJson, StringComparison.Ordinal);
         // Content-affecting fields, mirroring WikiPage's null-preserves convention: a
@@ -991,6 +1146,802 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         }
 
         return row;
+    }
+
+    private async Task ValidateTimelineDependenciesAsync(
+        Guid wikiDatabaseId,
+        Guid changedRowId,
+        JsonObject proposedValues,
+        CancellationToken cancellationToken)
+    {
+        var timelineConfigJson = await dbContext.WikiDatabaseViews.AsNoTracking()
+            .Where(view => view.WikiDatabaseId == wikiDatabaseId && view.Type == WikiDatabaseViewTypes.Timeline)
+            .Select(view => view.ConfigJson)
+            .ToListAsync(cancellationToken);
+        var dependencyPropertyIds = timelineConfigJson
+            .Select(configJson => WikiDatabaseViewConfigJson.Parse(configJson).DependencyPropertyId)
+            .Where(value => Guid.TryParse(value, out _))
+            .Select(value => Guid.Parse(value!))
+            .Distinct()
+            .ToList();
+        if (dependencyPropertyIds.Count == 0)
+        {
+            return;
+        }
+
+        var dependencyProperties = await dbContext.WikiDatabaseProperties.AsNoTracking()
+            .Where(property => property.WikiDatabaseId == wikiDatabaseId
+                && dependencyPropertyIds.Contains(property.Id)
+                && property.Type == WikiDatabasePropertyTypes.Relation)
+            .ToListAsync(cancellationToken);
+        var rows = await dbContext.WikiDatabaseRows.AsNoTracking()
+            .Where(row => row.WikiDatabaseId == wikiDatabaseId)
+            .Select(row => new { row.Id, row.PropertyValuesJson })
+            .ToListAsync(cancellationToken);
+        var validRowIds = rows.Select(row => row.Id).Append(changedRowId).ToHashSet();
+
+        foreach (var dependencyProperty in dependencyProperties)
+        {
+            if (WikiDatabasePropertyConfig.Parse(dependencyProperty).RelatedDatabaseId != wikiDatabaseId)
+            {
+                continue;
+            }
+
+            var proposedDependencies = WikiPropertyValues.GetMultiSelect(proposedValues, dependencyProperty.Id)
+                .Select(value => Guid.TryParse(value, out var rowId) ? new Guid?(rowId) : null)
+                .Where(rowId => rowId.HasValue)
+                .Select(rowId => rowId!.Value)
+                .Distinct()
+                .ToList();
+            if (proposedDependencies.Any(dependencyRowId => !validRowIds.Contains(dependencyRowId)))
+            {
+                throw new InvalidOperationException("Timeline dependencies must reference rows in the same database.");
+            }
+
+            IReadOnlyDictionary<Guid, IReadOnlyList<Guid>> graph = rows.ToDictionary(
+                row => row.Id,
+                row => (IReadOnlyList<Guid>)WikiPropertyValues.GetMultiSelect(
+                        WikiPropertyValues.ParseObject(row.PropertyValuesJson), dependencyProperty.Id)
+                    .Select(value => Guid.TryParse(value, out var dependencyRowId) ? new Guid?(dependencyRowId) : null)
+                    .Where(dependencyRowId => dependencyRowId.HasValue)
+                    .Select(dependencyRowId => dependencyRowId!.Value)
+                    .Distinct()
+                    .ToList());
+            var mutableGraph = graph.ToDictionary(item => item.Key, item => item.Value);
+            mutableGraph[changedRowId] = proposedDependencies;
+            WikiDatabaseViewLogic.EnsureAcyclicTimelineDependencies(changedRowId, mutableGraph);
+        }
+    }
+
+    private async Task ValidateParentRowAsync(
+        Guid wikiDatabaseId,
+        Guid rowId,
+        Guid? proposedParentRowId,
+        CancellationToken cancellationToken)
+    {
+        if (proposedParentRowId is null)
+        {
+            return;
+        }
+        if (proposedParentRowId == rowId)
+        {
+            throw new InvalidOperationException("A database row cannot be its own parent.");
+        }
+
+        var rowParents = await dbContext.WikiDatabaseRows
+            .AsNoTracking()
+            .Where(candidate => candidate.WikiDatabaseId == wikiDatabaseId)
+            .Select(candidate => new { candidate.Id, candidate.ParentRowId })
+            .ToDictionaryAsync(candidate => candidate.Id, candidate => candidate.ParentRowId, cancellationToken);
+        if (!rowParents.ContainsKey(proposedParentRowId.Value))
+        {
+            throw new InvalidOperationException("A sub-item parent must belong to the same database.");
+        }
+
+        // Walk upward from the proposed parent. Reaching this row would create a cycle; a
+        // repeated ancestor also rejects already-corrupt cyclic input instead of looping.
+        var visited = new HashSet<Guid> { rowId };
+        Guid? currentRowId = proposedParentRowId;
+        while (currentRowId is { } current)
+        {
+            if (!visited.Add(current))
+            {
+                throw new InvalidOperationException("A database row cannot be nested beneath one of its own descendants.");
+            }
+            if (!rowParents.TryGetValue(current, out currentRowId))
+            {
+                throw new InvalidOperationException("Every sub-item ancestor must belong to the same database.");
+            }
+        }
+    }
+
+    public async Task<WikiDatabaseCsvImportResult> ImportCsvAsync(
+        Guid wikiDatabaseId,
+        string csv,
+        string performedBy,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(csv);
+
+        // Parse and validate the complete document before adding properties or rows. A bad
+        // quote/header therefore cannot leave a half-created schema behind, while row-local
+        // shape/value problems can be reported and safely skipped below.
+        var records = ParseBoundedCsv(csv);
+        if (records.Count == 0)
+        {
+            throw new ArgumentException("CSV must contain a header row.", nameof(csv));
+        }
+
+        var headers = records[0]
+            .Select((header, index) => (index == 0 ? header.TrimStart('\uFEFF') : header).Trim())
+            .ToList();
+        for (var index = 0; index < headers.Count; index++)
+        {
+            if (headers[index].Length == 0)
+            {
+                throw new ArgumentException($"CSV header column {index + 1} is blank.", nameof(csv));
+            }
+            if (headers[index].Length > MaxCsvHeaderCharacters)
+            {
+                throw new ArgumentException(
+                    $"CSV header column {index + 1} exceeds the {MaxCsvHeaderCharacters}-character limit.",
+                    nameof(csv));
+            }
+        }
+        var duplicateHeader = headers
+            .GroupBy(header => header, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicateHeader is not null)
+        {
+            throw new ArgumentException($"CSV contains duplicate header '{duplicateHeader.Key}'.", nameof(csv));
+        }
+
+        if (!await dbContext.WikiDatabases.AsNoTracking().AnyAsync(
+                database => database.Id == wikiDatabaseId && database.TrashedAt == null,
+                cancellationToken))
+        {
+            throw new KeyNotFoundException("The database no longer exists.");
+        }
+
+        var existingProperties = await dbContext.WikiDatabaseProperties.AsNoTracking()
+            .Where(property => property.WikiDatabaseId == wikiDatabaseId)
+            .OrderBy(property => property.SortOrder)
+            .ToListAsync(cancellationToken);
+        var titleProperties = existingProperties
+            .Where(property => property.Type == WikiDatabasePropertyTypes.Title)
+            .ToList();
+        if (titleProperties.Count != 1)
+        {
+            throw new InvalidOperationException("The target database must have exactly one Title property before importing CSV.");
+        }
+
+        var warnings = new List<string>();
+        var suppressedWarnings = 0;
+        var mappings = new WikiDatabaseProperty?[headers.Count];
+        mappings[0] = titleProperties[0];
+        var propertiesToCreate = new List<(int ColumnIndex, string Name)>();
+        var propertiesByName = existingProperties
+            .GroupBy(property => property.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
+
+        for (var index = 1; index < headers.Count; index++)
+        {
+            if (!propertiesByName.TryGetValue(headers[index], out var matchingProperties))
+            {
+                propertiesToCreate.Add((index, headers[index]));
+                continue;
+            }
+            if (matchingProperties.Count != 1)
+            {
+                throw new InvalidOperationException(
+                    $"The target database contains multiple properties named '{headers[index]}', so that CSV column is ambiguous.");
+            }
+
+            var property = matchingProperties[0];
+            if (property.Id == titleProperties[0].Id)
+            {
+                throw new ArgumentException(
+                    $"CSV column '{headers[index]}' maps to the Title property already assigned to the first column.",
+                    nameof(csv));
+            }
+            if (IsCsvSystemManagedProperty(property.Type))
+            {
+                AddCsvWarning(
+                    warnings,
+                    ref suppressedWarnings,
+                    $"CSV column '{headers[index]}' maps to read-only property '{property.Name}' and was ignored.");
+                continue;
+            }
+            if (property.Type == WikiDatabasePropertyTypes.Relation)
+            {
+                AddCsvWarning(
+                    warnings,
+                    ref suppressedWarnings,
+                    $"CSV column '{headers[index]}' maps to Relation property '{property.Name}', whose row links cannot be resolved safely from standalone CSV, and was ignored.");
+                continue;
+            }
+
+            mappings[index] = property;
+        }
+
+        var rowsToImport = new List<(int SourceRowNumber, List<string> Fields)>();
+        var rowsSkipped = 0;
+        for (var recordIndex = 1; recordIndex < records.Count; recordIndex++)
+        {
+            var sourceRowNumber = recordIndex + 1;
+            var fields = records[recordIndex];
+            if (fields.All(string.IsNullOrWhiteSpace))
+            {
+                rowsSkipped++;
+                AddCsvWarning(warnings, ref suppressedWarnings, $"Row {sourceRowNumber} is blank and was skipped.");
+                continue;
+            }
+            if (fields.Count != headers.Count)
+            {
+                rowsSkipped++;
+                AddCsvWarning(
+                    warnings,
+                    ref suppressedWarnings,
+                    $"Row {sourceRowNumber} has {fields.Count} column(s); expected {headers.Count}. The row was skipped.");
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(fields[0]))
+            {
+                rowsSkipped++;
+                AddCsvWarning(warnings, ref suppressedWarnings, $"Row {sourceRowNumber} has no title and was skipped.");
+                continue;
+            }
+            rowsToImport.Add((sourceRowNumber, fields));
+        }
+
+        // A header-only file (or one whose every data record was rejected) must not mutate
+        // the target schema merely because it named columns that do not exist yet.
+        if (rowsToImport.Count == 0)
+        {
+            if (suppressedWarnings > 0)
+            {
+                warnings.Add($"{suppressedWarnings:N0} additional CSV import warning(s) were omitted.");
+            }
+            return new WikiDatabaseCsvImportResult(0, rowsSkipped, 0, warnings);
+        }
+
+        foreach (var (columnIndex, name) in propertiesToCreate)
+        {
+            mappings[columnIndex] = await SavePropertyAsync(
+                wikiDatabaseId,
+                new WikiDatabasePropertyEditor { Name = name, Type = WikiDatabasePropertyTypes.Text },
+                performedBy,
+                cancellationToken);
+        }
+
+        var rowsImported = 0;
+        foreach (var (sourceRowNumber, fields) in rowsToImport)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var values = new JsonObject();
+            for (var columnIndex = 0; columnIndex < mappings.Length; columnIndex++)
+            {
+                var property = mappings[columnIndex];
+                if (property is null)
+                {
+                    continue;
+                }
+                SetCsvImportValue(
+                    values,
+                    property,
+                    fields[columnIndex],
+                    sourceRowNumber,
+                    warnings,
+                    ref suppressedWarnings);
+            }
+
+            await SaveRowAsync(
+                wikiDatabaseId,
+                new WikiDatabaseRowEditor
+                {
+                    ParentRowId = null,
+                    Values = values.ToDictionary(item => item.Key, item => item.Value)
+                },
+                performedBy,
+                cancellationToken);
+            rowsImported++;
+        }
+
+        if (suppressedWarnings > 0)
+        {
+            warnings.Add($"{suppressedWarnings:N0} additional CSV import warning(s) were omitted.");
+        }
+        return new WikiDatabaseCsvImportResult(
+            rowsImported,
+            rowsSkipped,
+            propertiesToCreate.Count,
+            warnings);
+    }
+
+    private static bool IsCsvSystemManagedProperty(string propertyType) => propertyType is
+        WikiDatabasePropertyTypes.Formula
+        or WikiDatabasePropertyTypes.Rollup
+        or WikiDatabasePropertyTypes.CreatedTime
+        or WikiDatabasePropertyTypes.CreatedBy
+        or WikiDatabasePropertyTypes.LastEditedTime
+        or WikiDatabasePropertyTypes.LastEditedBy
+        or WikiDatabasePropertyTypes.Button
+        or WikiDatabasePropertyTypes.UniqueId
+        or WikiDatabasePropertyTypes.Verification;
+
+    private static void SetCsvImportValue(
+        JsonObject values,
+        WikiDatabaseProperty property,
+        string rawValue,
+        int sourceRowNumber,
+        List<string> warnings,
+        ref int suppressedWarnings)
+    {
+        if (property.Type == WikiDatabasePropertyTypes.Title)
+        {
+            WikiPropertyValues.SetText(values, property.Id, rawValue.Trim());
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return;
+        }
+
+        var value = rawValue.Trim();
+        switch (property.Type)
+        {
+            case WikiDatabasePropertyTypes.Number:
+                if (decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var number))
+                {
+                    WikiPropertyValues.SetNumber(values, property.Id, number);
+                }
+                else
+                {
+                    AddCsvWarning(
+                        warnings,
+                        ref suppressedWarnings,
+                        $"Row {sourceRowNumber}: '{CsvWarningValue(value)}' is not a valid number for '{property.Name}'; the value was left empty.");
+                }
+                break;
+            case WikiDatabasePropertyTypes.Checkbox:
+                if (value.Equals("true", StringComparison.OrdinalIgnoreCase)
+                    || value.Equals("yes", StringComparison.OrdinalIgnoreCase)
+                    || value.Equals("y", StringComparison.OrdinalIgnoreCase)
+                    || value.Equals("on", StringComparison.OrdinalIgnoreCase)
+                    || value == "1")
+                {
+                    WikiPropertyValues.SetCheckbox(values, property.Id, true);
+                }
+                else if (value.Equals("false", StringComparison.OrdinalIgnoreCase)
+                    || value.Equals("no", StringComparison.OrdinalIgnoreCase)
+                    || value.Equals("n", StringComparison.OrdinalIgnoreCase)
+                    || value.Equals("off", StringComparison.OrdinalIgnoreCase)
+                    || value == "0")
+                {
+                    WikiPropertyValues.SetCheckbox(values, property.Id, false);
+                }
+                else
+                {
+                    AddCsvWarning(
+                        warnings,
+                        ref suppressedWarnings,
+                        $"Row {sourceRowNumber}: '{CsvWarningValue(value)}' is not a valid checkbox value for '{property.Name}'; the value was left unchecked.");
+                }
+                break;
+            case WikiDatabasePropertyTypes.Date:
+                if (DateTimeOffset.TryParse(
+                        value,
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.AssumeUniversal,
+                        out var date))
+                {
+                    WikiPropertyValues.SetDate(values, property.Id, date);
+                }
+                else
+                {
+                    AddCsvWarning(
+                        warnings,
+                        ref suppressedWarnings,
+                        $"Row {sourceRowNumber}: '{CsvWarningValue(value)}' is not a valid date for '{property.Name}'; the value was left empty.");
+                }
+                break;
+            case WikiDatabasePropertyTypes.Select:
+            case WikiDatabasePropertyTypes.Status:
+                var optionId = ResolveCsvOptionId(property, value);
+                if (optionId is null)
+                {
+                    AddCsvWarning(
+                        warnings,
+                        ref suppressedWarnings,
+                        $"Row {sourceRowNumber}: '{CsvWarningValue(value)}' is not a configured option for '{property.Name}'; the value was left empty.");
+                }
+                else
+                {
+                    WikiPropertyValues.SetText(values, property.Id, optionId);
+                }
+                break;
+            case WikiDatabasePropertyTypes.MultiSelect:
+                var selectedOptionIds = new List<string>();
+                var invalidOptions = new List<string>();
+                foreach (var candidate in SplitCsvCollection(value))
+                {
+                    var selectedOptionId = ResolveCsvOptionId(property, candidate);
+                    if (selectedOptionId is null)
+                    {
+                        invalidOptions.Add(candidate);
+                    }
+                    else if (!selectedOptionIds.Contains(selectedOptionId, StringComparer.Ordinal))
+                    {
+                        selectedOptionIds.Add(selectedOptionId);
+                    }
+                }
+                if (invalidOptions.Count > 0)
+                {
+                    AddCsvWarning(
+                        warnings,
+                        ref suppressedWarnings,
+                        $"Row {sourceRowNumber}: {invalidOptions.Count} unconfigured option(s) for '{property.Name}' were ignored ({string.Join(", ", invalidOptions.Take(3).Select(CsvWarningValue))}).");
+                }
+                WikiPropertyValues.SetMultiSelect(values, property.Id, selectedOptionIds);
+                break;
+            case WikiDatabasePropertyTypes.Person:
+            case WikiDatabasePropertyTypes.Files:
+                WikiPropertyValues.SetMultiSelect(values, property.Id, SplitCsvCollection(value));
+                break;
+            case WikiDatabasePropertyTypes.Text:
+            case WikiDatabasePropertyTypes.Url:
+            case WikiDatabasePropertyTypes.Email:
+            case WikiDatabasePropertyTypes.Phone:
+            case WikiDatabasePropertyTypes.Place:
+                WikiPropertyValues.SetText(values, property.Id, rawValue);
+                break;
+            default:
+                AddCsvWarning(
+                    warnings,
+                    ref suppressedWarnings,
+                    $"Row {sourceRowNumber}: '{property.Name}' uses an unsupported property type and was ignored.");
+                break;
+        }
+    }
+
+    private static string? ResolveCsvOptionId(WikiDatabaseProperty property, string candidate)
+    {
+        var options = WikiDatabasePropertyConfig.GetOptions(property);
+        var exactIdMatches = options
+            .Where(item => string.Equals(item.Id, candidate, StringComparison.Ordinal))
+            .ToList();
+        if (exactIdMatches.Count == 1)
+        {
+            return exactIdMatches[0].Id;
+        }
+        var labelMatches = options
+            .Where(item => string.Equals(item.Label, candidate, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        return labelMatches.Count == 1 ? labelMatches[0].Id : null;
+    }
+
+    private static IReadOnlyList<string> SplitCsvCollection(string value) => value
+        .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    private static string CsvWarningValue(string value)
+    {
+        var singleLine = value.Replace('\r', ' ').Replace('\n', ' ');
+        return singleLine.Length <= 80 ? singleLine : $"{singleLine[..77]}...";
+    }
+
+    private static void AddCsvWarning(List<string> warnings, ref int suppressedWarnings, string warning)
+    {
+        if (warnings.Count < MaxCsvWarnings)
+        {
+            warnings.Add(warning);
+        }
+        else
+        {
+            suppressedWarnings++;
+        }
+    }
+
+    private static List<List<string>> ParseBoundedCsv(string csv)
+    {
+        if (Encoding.UTF8.GetByteCount(csv) > WikiDatabaseCsvImportLimits.MaxFileBytes)
+        {
+            throw new ArgumentException(
+                $"CSV exceeds the {WikiDatabaseCsvImportLimits.MaxFileBytes / 1024 / 1024} MB import limit.",
+                nameof(csv));
+        }
+
+        var records = new List<List<string>>();
+        var record = new List<string>();
+        var field = new StringBuilder();
+        var quoted = false;
+        var quoteClosed = false;
+        var recordStarted = false;
+
+        void AppendCharacter(char character)
+        {
+            if (field.Length >= MaxCsvFieldCharacters)
+            {
+                throw new ArgumentException(
+                    $"CSV row {records.Count + 1} contains a field longer than {MaxCsvFieldCharacters:N0} characters.",
+                    nameof(csv));
+            }
+            field.Append(character);
+            recordStarted = true;
+        }
+
+        void CompleteField()
+        {
+            record.Add(field.ToString());
+            if (record.Count > WikiDatabaseCsvImportLimits.MaxColumns)
+            {
+                throw new ArgumentException(
+                    $"CSV row {records.Count + 1} exceeds the {WikiDatabaseCsvImportLimits.MaxColumns}-column limit.",
+                    nameof(csv));
+            }
+            field.Clear();
+            quoteClosed = false;
+            recordStarted = true;
+        }
+
+        void CompleteRecord()
+        {
+            CompleteField();
+            records.Add(record);
+            if (records.Count > WikiDatabaseCsvImportLimits.MaxRows + 1)
+            {
+                throw new ArgumentException(
+                    $"CSV exceeds the {WikiDatabaseCsvImportLimits.MaxRows:N0}-row import limit.",
+                    nameof(csv));
+            }
+            record = [];
+            recordStarted = false;
+        }
+
+        for (var index = 0; index < csv.Length; index++)
+        {
+            var character = csv[index];
+            if (character == '\0')
+            {
+                throw new ArgumentException(
+                    $"CSV row {records.Count + 1} contains a null character.",
+                    nameof(csv));
+            }
+            if (quoted)
+            {
+                if (character == '"')
+                {
+                    if (index + 1 < csv.Length && csv[index + 1] == '"')
+                    {
+                        AppendCharacter('"');
+                        index++;
+                    }
+                    else
+                    {
+                        quoted = false;
+                        quoteClosed = true;
+                    }
+                }
+                else
+                {
+                    AppendCharacter(character);
+                }
+                continue;
+            }
+
+            if (quoteClosed)
+            {
+                if (character is ' ' or '\t')
+                {
+                    continue;
+                }
+                if (character == ',')
+                {
+                    CompleteField();
+                    continue;
+                }
+                if (character is '\r' or '\n')
+                {
+                    if (character == '\r' && index + 1 < csv.Length && csv[index + 1] == '\n')
+                    {
+                        index++;
+                    }
+                    CompleteRecord();
+                    continue;
+                }
+                throw new ArgumentException(
+                    $"CSV row {records.Count + 1} contains an unexpected character after a closing quote.",
+                    nameof(csv));
+            }
+
+            if (character == '"')
+            {
+                if (field.Length != 0)
+                {
+                    throw new ArgumentException(
+                        $"CSV row {records.Count + 1} contains an unexpected quote in an unquoted field.",
+                        nameof(csv));
+                }
+                quoted = true;
+                recordStarted = true;
+            }
+            else if (character == ',')
+            {
+                CompleteField();
+            }
+            else if (character is '\r' or '\n')
+            {
+                if (character == '\r' && index + 1 < csv.Length && csv[index + 1] == '\n')
+                {
+                    index++;
+                }
+                CompleteRecord();
+            }
+            else
+            {
+                AppendCharacter(character);
+            }
+        }
+
+        if (quoted)
+        {
+            throw new ArgumentException($"CSV row {records.Count + 1} has an unterminated quoted field.", nameof(csv));
+        }
+        if (recordStarted || record.Count > 0 || field.Length > 0 || quoteClosed)
+        {
+            CompleteRecord();
+        }
+        return records;
+    }
+
+    public async Task<IReadOnlyList<WikiDatabaseRowTemplate>> ListRowTemplatesAsync(
+        Guid wikiDatabaseId,
+        CancellationToken cancellationToken = default) =>
+        await dbContext.WikiDatabaseRowTemplates
+            .AsNoTracking()
+            .Where(template => template.WikiDatabaseId == wikiDatabaseId)
+            .OrderBy(template => template.Name)
+            .ToListAsync(cancellationToken);
+
+    public async Task<WikiDatabaseRowTemplate> CreateRowTemplateFromRowAsync(
+        Guid wikiDatabaseId,
+        Guid sourceRowId,
+        string name,
+        string performedBy,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureDatabaseUnlockedAsync(wikiDatabaseId, cancellationToken);
+        var normalizedName = NormalizeRowTemplateName(name);
+        if (await dbContext.WikiDatabaseRowTemplates.AnyAsync(
+                template => template.WikiDatabaseId == wikiDatabaseId && template.NormalizedName == normalizedName,
+                cancellationToken))
+        {
+            throw new InvalidOperationException("A row template with that name already exists in this database.");
+        }
+
+        var sourceRow = await dbContext.WikiDatabaseRows.AsNoTracking()
+            .FirstOrDefaultAsync(
+                row => row.Id == sourceRowId && row.WikiDatabaseId == wikiDatabaseId && row.TrashedAt == null,
+                cancellationToken)
+            ?? throw new InvalidOperationException("Choose an active row from this database as the template source.");
+        var reusablePropertyIds = (await dbContext.WikiDatabaseProperties.AsNoTracking()
+                .Where(property => property.WikiDatabaseId == wikiDatabaseId)
+                .Select(property => new { property.Id, property.Type })
+                .ToListAsync(cancellationToken))
+            .Where(property => IsReusableTemplateProperty(property.Type))
+            .Select(property => property.Id.ToString())
+            .ToHashSet(StringComparer.Ordinal);
+        var sourceValues = WikiPropertyValues.ParseObject(sourceRow.PropertyValuesJson);
+        var defaults = new JsonObject();
+        foreach (var (propertyId, value) in sourceValues)
+        {
+            if (value is not null && reusablePropertyIds.Contains(propertyId))
+            {
+                defaults[propertyId] = value.DeepClone();
+            }
+        }
+
+        var template = new WikiDatabaseRowTemplate
+        {
+            WikiDatabaseId = wikiDatabaseId,
+            Name = name.Trim(),
+            NormalizedName = normalizedName,
+            BlocksJson = sourceRow.BlocksJson,
+            DefaultPropertyValuesJson = WikiPropertyValues.Serialize(defaults),
+            Icon = sourceRow.Icon,
+            CoverImageUrl = sourceRow.CoverImageUrl,
+            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedBy = performedBy
+        };
+        await dbContext.WikiDatabaseRowTemplates.AddAsync(template, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return template;
+    }
+
+    public async Task<WikiDatabaseRow> CreateRowFromTemplateAsync(
+        Guid wikiDatabaseId,
+        Guid templateId,
+        Guid? parentRowId,
+        string performedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var template = await dbContext.WikiDatabaseRowTemplates.AsNoTracking()
+            .FirstOrDefaultAsync(
+                item => item.Id == templateId && item.WikiDatabaseId == wikiDatabaseId,
+                cancellationToken)
+            ?? throw new InvalidOperationException("The selected row template no longer exists in this database.");
+        var reusablePropertyIds = (await dbContext.WikiDatabaseProperties.AsNoTracking()
+                .Where(property => property.WikiDatabaseId == wikiDatabaseId)
+                .Select(property => new { property.Id, property.Type })
+                .ToListAsync(cancellationToken))
+            .Where(property => IsReusableTemplateProperty(property.Type))
+            .Select(property => property.Id.ToString())
+            .ToHashSet(StringComparer.Ordinal);
+        var storedDefaults = WikiPropertyValues.ParseObject(template.DefaultPropertyValuesJson);
+        var values = new JsonObject();
+        foreach (var (propertyId, value) in storedDefaults)
+        {
+            if (value is not null && reusablePropertyIds.Contains(propertyId))
+            {
+                values[propertyId] = value.DeepClone();
+            }
+        }
+        var blocks = WikiBlockJson.ParseBlocks(template.BlocksJson)
+            .Select(block => block with { Id = Guid.NewGuid() })
+            .ToList();
+
+        return await SaveRowAsync(wikiDatabaseId, new WikiDatabaseRowEditor
+        {
+            ParentRowId = parentRowId,
+            BlocksJson = WikiBlockJson.Serialize(blocks),
+            Icon = template.Icon ?? string.Empty,
+            CoverImageUrl = template.CoverImageUrl ?? string.Empty,
+            Values = values.ToDictionary(item => item.Key, item => item.Value)
+        }, performedBy, cancellationToken);
+    }
+
+    public async Task DeleteRowTemplateAsync(
+        Guid wikiDatabaseId,
+        Guid templateId,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureDatabaseUnlockedAsync(wikiDatabaseId, cancellationToken);
+        var template = await dbContext.WikiDatabaseRowTemplates.FirstOrDefaultAsync(
+            item => item.Id == templateId && item.WikiDatabaseId == wikiDatabaseId,
+            cancellationToken);
+        if (template is null)
+        {
+            return;
+        }
+        dbContext.WikiDatabaseRowTemplates.Remove(template);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static bool IsReusableTemplateProperty(string propertyType) => propertyType is not (
+        WikiDatabasePropertyTypes.Title
+        or WikiDatabasePropertyTypes.Formula
+        or WikiDatabasePropertyTypes.Rollup
+        or WikiDatabasePropertyTypes.CreatedTime
+        or WikiDatabasePropertyTypes.CreatedBy
+        or WikiDatabasePropertyTypes.LastEditedTime
+        or WikiDatabasePropertyTypes.LastEditedBy
+        or WikiDatabasePropertyTypes.Button
+        or WikiDatabasePropertyTypes.UniqueId
+        or WikiDatabasePropertyTypes.Verification);
+
+    private static string NormalizeRowTemplateName(string name)
+    {
+        var trimmed = name?.Trim() ?? string.Empty;
+        if (trimmed.Length == 0)
+        {
+            throw new ArgumentException("A row template name is required.", nameof(name));
+        }
+        if (trimmed.Length > 120)
+        {
+            throw new ArgumentException("Row template names cannot exceed 120 characters.", nameof(name));
+        }
+        return trimmed.ToUpperInvariant();
     }
 
     private async Task SynchronizeReciprocalRelationsAsync(
@@ -1157,8 +2108,9 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
             return;
         }
 
-        // Deliberately leaves other rows' Relation references to this row alone - trash is
-        // reversible, unlike DeleteRowPermanentlyAsync below, which does clean those up.
+        // Deliberately leaves other rows' Relation references and child ParentRowId values
+        // alone - trash is reversible. Children remain active and normal views render them as
+        // roots while their parent is hidden; restoring the parent restores the hierarchy.
         row.TrashedAt = DateTimeOffset.UtcNow;
         row.UpdatedAt = row.TrashedAt;
         row.UpdatedBy = performedBy;
@@ -1219,6 +2171,32 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
     {
         var database = await GetDatabaseAsync(wikiDatabaseId, cancellationToken);
         return database is null ? null : BuildInlineSnapshot(database);
+    }
+
+    public async Task<WikiInlineDatabaseSnapshot?> GetLinkedDatabaseAsync(
+        Guid wikiDatabaseId,
+        Guid? viewId,
+        CancellationToken cancellationToken = default)
+    {
+        var database = await GetDatabaseAsync(wikiDatabaseId, cancellationToken);
+        if (database is null)
+        {
+            return null;
+        }
+
+        var view = viewId is { } selectedViewId
+            ? database.Views.FirstOrDefault(candidate => candidate.Id == selectedViewId)
+            : database.Views.OrderBy(candidate => candidate.SortOrder).FirstOrDefault();
+        if (view is null)
+        {
+            return null;
+        }
+
+        var config = WikiDatabaseViewConfigJson.Parse(view.ConfigJson);
+        var rows = WikiDatabaseViewLogic.ApplyFilters(
+            database.Rows.ToList(), database.Properties.ToList(), config.Filters, config.FilterGroup);
+        rows = WikiDatabaseViewLogic.ApplySort(rows, database.Properties.ToList(), config.Sorts);
+        return BuildInlineSnapshot(database, rows, [view]);
     }
 
     public async Task<WikiInlineDatabaseSnapshot> AddInlineRowAsync(
@@ -1288,7 +2266,7 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
             ?? throw new KeyNotFoundException("The database row no longer exists.");
         if (property.Type is WikiDatabasePropertyTypes.CreatedTime or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup
             or WikiDatabasePropertyTypes.LastEditedTime or WikiDatabasePropertyTypes.LastEditedBy or WikiDatabasePropertyTypes.CreatedBy
-            or WikiDatabasePropertyTypes.Button)
+            or WikiDatabasePropertyTypes.Button or WikiDatabasePropertyTypes.UniqueId)
         {
             throw new InvalidOperationException("Computed properties are read-only.");
         }
@@ -1337,6 +2315,11 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
                     .Any(option => option.Id == value) ? value : null;
                 WikiPropertyValues.SetText(values, property.Id, selectedId);
                 break;
+            case WikiDatabasePropertyTypes.Verification:
+                WikiPropertyValues.SetVerification(values, property.Id, value == WikiVerificationState.Verified
+                    ? new WikiVerificationState(WikiVerificationState.Verified, performedBy, DateTimeOffset.UtcNow)
+                    : WikiVerificationState.NotVerified);
+                break;
             default:
                 WikiPropertyValues.SetText(values, property.Id, value);
                 break;
@@ -1345,6 +2328,7 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         await SaveRowAsync(wikiDatabaseId, new WikiDatabaseRowEditor
         {
             Id = rowId,
+            ParentRowId = row.ParentRowId,
             Values = values.ToDictionary(item => item.Key, item => item.Value)
         }, performedBy, cancellationToken);
 
@@ -1417,6 +2401,29 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         string performedBy,
         CancellationToken cancellationToken = default)
     {
+        await EnsureDatabaseUnlockedAsync(wikiDatabaseId, cancellationToken);
+        if (type == WikiDatabaseViewTypes.Timeline)
+        {
+            if (!Guid.TryParse(config.GroupByPropertyId, out var datePropertyId)
+                || !await dbContext.WikiDatabaseProperties.AsNoTracking().AnyAsync(property =>
+                    property.Id == datePropertyId
+                    && property.WikiDatabaseId == wikiDatabaseId
+                    && property.Type == WikiDatabasePropertyTypes.Date,
+                    cancellationToken))
+            {
+                throw new InvalidOperationException("A Timeline view requires a Date property from this database.");
+            }
+            if (config.DependencyPropertyId is { Length: > 0 } dependencyPropertyValue
+                && (!Guid.TryParse(dependencyPropertyValue, out var dependencyPropertyId)
+                    || !await dbContext.WikiDatabaseProperties.AsNoTracking().AnyAsync(property =>
+                        property.Id == dependencyPropertyId
+                        && property.WikiDatabaseId == wikiDatabaseId
+                        && property.Type == WikiDatabasePropertyTypes.Relation,
+                        cancellationToken)))
+            {
+                throw new InvalidOperationException("Timeline dependencies require a Relation property from this database.");
+            }
+        }
         var now = DateTimeOffset.UtcNow;
         var view = viewId is { } id
             ? await dbContext.WikiDatabaseViews.FirstOrDefaultAsync(item => item.Id == id && item.WikiDatabaseId == wikiDatabaseId, cancellationToken)
@@ -1450,6 +2457,7 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
 
     public async Task DeleteViewAsync(Guid wikiDatabaseId, Guid viewId, string performedBy, CancellationToken cancellationToken = default)
     {
+        await EnsureDatabaseUnlockedAsync(wikiDatabaseId, cancellationToken);
         var remainingCount = await dbContext.WikiDatabaseViews.CountAsync(item => item.WikiDatabaseId == wikiDatabaseId, cancellationToken);
         if (remainingCount <= 1)
         {
@@ -1466,6 +2474,59 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<WikiDatabaseViewConfig?> GetPersonalViewOverrideAsync(Guid viewId, string username, CancellationToken cancellationToken = default)
+    {
+        var personalization = await dbContext.WikiDatabaseViewPersonalizations.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.WikiDatabaseViewId == viewId && item.Username == username, cancellationToken);
+        return personalization is null ? null : WikiDatabaseViewConfigJson.Parse(personalization.ConfigJson);
+    }
+
+    public async Task<WikiDatabaseViewConfig> SavePersonalViewOverrideAsync(
+        Guid viewId, WikiDatabaseViewConfig overrideConfig, string username, CancellationToken cancellationToken = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var personalization = await dbContext.WikiDatabaseViewPersonalizations
+            .FirstOrDefaultAsync(item => item.WikiDatabaseViewId == viewId && item.Username == username, cancellationToken);
+        // Only Filters/Sorts/FilterGroup are ever read back out via GetPersonalViewOverrideAsync -
+        // storing the full config here (rather than a narrower shape) just reuses the existing
+        // WikiDatabaseViewConfigJson serializer instead of inventing a second one.
+        var storedConfig = new WikiDatabaseViewConfig(overrideConfig.Filters, overrideConfig.Sorts, null, FilterGroup: overrideConfig.FilterGroup);
+        if (personalization is null)
+        {
+            personalization = new WikiDatabaseViewPersonalization
+            {
+                WikiDatabaseViewId = viewId,
+                Username = username,
+                ConfigJson = WikiDatabaseViewConfigJson.Serialize(storedConfig),
+                CreatedAt = now,
+                CreatedBy = username
+            };
+            await dbContext.WikiDatabaseViewPersonalizations.AddAsync(personalization, cancellationToken);
+        }
+        else
+        {
+            personalization.ConfigJson = WikiDatabaseViewConfigJson.Serialize(storedConfig);
+            personalization.UpdatedAt = now;
+            personalization.UpdatedBy = username;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return storedConfig;
+    }
+
+    public async Task ClearPersonalViewOverrideAsync(Guid viewId, string username, CancellationToken cancellationToken = default)
+    {
+        var personalization = await dbContext.WikiDatabaseViewPersonalizations
+            .FirstOrDefaultAsync(item => item.WikiDatabaseViewId == viewId && item.Username == username, cancellationToken);
+        if (personalization is null)
+        {
+            return;
+        }
+
+        dbContext.WikiDatabaseViewPersonalizations.Remove(personalization);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     private async Task<int> NextPropertySortOrderAsync(Guid wikiDatabaseId, CancellationToken cancellationToken)
     {
         var orders = await dbContext.WikiDatabaseProperties.Where(item => item.WikiDatabaseId == wikiDatabaseId).Select(item => item.SortOrder).ToListAsync(cancellationToken);
@@ -1478,7 +2539,10 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         return orders.Count == 0 ? 0 : orders.Max() + 1;
     }
 
-    private static WikiInlineDatabaseSnapshot BuildInlineSnapshot(WikiDatabase database)
+    private static WikiInlineDatabaseSnapshot BuildInlineSnapshot(
+        WikiDatabase database,
+        IReadOnlyList<WikiDatabaseRow>? sourceRows = null,
+        IReadOnlyList<WikiDatabaseView>? sourceViews = null)
     {
         var properties = database.Properties
             .OrderBy(property => property.SortOrder)
@@ -1488,12 +2552,11 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
                 property.Type,
                 property.Type is WikiDatabasePropertyTypes.CreatedTime or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup
                     or WikiDatabasePropertyTypes.LastEditedTime or WikiDatabasePropertyTypes.LastEditedBy
-                    or WikiDatabasePropertyTypes.CreatedBy or WikiDatabasePropertyTypes.Button,
+                    or WikiDatabasePropertyTypes.CreatedBy or WikiDatabasePropertyTypes.Button or WikiDatabasePropertyTypes.UniqueId,
                 WikiDatabasePropertyConfig.GetOptions(property)))
             .ToList();
 
-        var rows = database.Rows
-            .OrderBy(row => row.SortOrder)
+        var rows = (sourceRows ?? database.Rows.OrderBy(row => row.SortOrder).ToList())
             .Select(row =>
             {
                 var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
@@ -1514,7 +2577,7 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
             properties,
             rows)
         {
-            Views = database.Views
+            Views = (sourceViews ?? database.Views.OrderBy(view => view.SortOrder).ToList())
                 .OrderByDescending(view => view.NotionId is not null)
                 .ThenBy(view => view.SortOrder)
                 .Select(view =>
@@ -1547,7 +2610,8 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
             WikiDatabasePropertyTypes.LastEditedTime => (updatedAt ?? createdAt).ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             WikiDatabasePropertyTypes.CreatedBy => createdBy ?? string.Empty,
             WikiDatabasePropertyTypes.LastEditedBy => updatedBy ?? createdBy ?? string.Empty,
-            WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup or WikiDatabasePropertyTypes.Button =>
+            WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup or WikiDatabasePropertyTypes.Button
+                or WikiDatabasePropertyTypes.UniqueId or WikiDatabasePropertyTypes.Verification =>
                 WikiPropertyValues.GetDisplayText(property, values, createdAt, updatedAt, createdBy, updatedBy),
             _ => WikiPropertyValues.GetText(values, property.Id) ?? string.Empty
         };
@@ -1609,12 +2673,17 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         var revision = await dbContext.WikiDatabaseRowRevisions.AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == revisionId && item.WikiDatabaseRowId == rowId, cancellationToken)
             ?? throw new InvalidOperationException("That revision no longer exists.");
+        var parentRowId = await dbContext.WikiDatabaseRows.AsNoTracking()
+            .Where(row => row.Id == rowId && row.WikiDatabaseId == wikiDatabaseId)
+            .Select(row => row.ParentRowId)
+            .FirstOrDefaultAsync(cancellationToken);
 
         // Revert only restores the page body, matching WikiService.RevertToRevisionAsync -
         // icon/cover are left as null (preserve current) rather than pulled from the revision.
         return await SaveRowAsync(wikiDatabaseId, new WikiDatabaseRowEditor
         {
             Id = rowId,
+            ParentRowId = parentRowId,
             BlocksJson = revision.BlocksJson
         }, performedBy, cancellationToken);
     }

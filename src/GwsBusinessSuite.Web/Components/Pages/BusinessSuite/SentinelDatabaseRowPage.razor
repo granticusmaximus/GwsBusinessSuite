@@ -305,7 +305,7 @@
         if (!_initialized)
         {
             _dotNetRef = DotNetObjectReference.Create(this);
-            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=6");
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=8");
             await _module.InvokeVoidAsync("initialize", _editorContainer, _dotNetRef, _blocksJson);
             _initialized = true;
         }
@@ -316,7 +316,8 @@
             await LoadHistoryAsync();
             try
             {
-                RowMentions = (await SentinelWorkspaceService.GetRowMentionsAsync(Database.Id, Row.Id)).ToList();
+                var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+                RowMentions = (await SentinelWorkspaceService.GetRowMentionsAsync(Database.Id, Row.Id, username)).ToList();
             }
             catch (Exception ex)
             {
@@ -369,6 +370,7 @@
             await WikiDatabaseService.SaveRowAsync(Database.Id, new WikiDatabaseRowEditor
             {
                 Id = Row.Id,
+                ParentRowId = Row.ParentRowId,
                 BlocksJson = _blocksJson,
                 Icon = _icon,
                 CoverImageUrl = _coverImageUrl,
@@ -549,6 +551,7 @@
             await WikiDatabaseService.SaveRowAsync(Database.Id, new WikiDatabaseRowEditor
             {
                 Id = Row.Id,
+                ParentRowId = Row.ParentRowId,
                 BlocksJson = _blocksJson,
                 Icon = _icon,
                 CoverImageUrl = _coverImageUrl,

@@ -18,6 +18,11 @@ public sealed record SentinelAccessSnapshot(
     IReadOnlyList<SentinelPermissionView> Permissions,
     IReadOnlyList<SentinelShareView> Shares);
 
+// Value object used by batch authorization checks. Page and database IDs are normally globally
+// unique, but IsDatabase remains part of the identity because permissions are scoped by both
+// columns and callers commonly combine both resource kinds in one workspace tree/search result.
+public readonly record struct SentinelAccessTarget(Guid TargetId, bool IsDatabase);
+
 public interface ISentinelAccessService
 {
     Task<SentinelAccessSnapshot> GetAccessAsync(Guid targetId, bool isDatabase, CancellationToken cancellationToken = default);
@@ -34,4 +39,12 @@ public interface ISentinelAccessService
     // password attempt is never counted as a view.
     Task RecordShareViewAsync(Guid shareId, CancellationToken cancellationToken = default);
     Task<bool> CanAccessAsync(Guid targetId, bool isDatabase, string username, string requiredAccessLevel, CancellationToken cancellationToken = default);
+    // Resolves a complete target set in one graph/permission load so tree and search callers do
+    // not issue one authorization query per item. A direct target permission wins; otherwise the
+    // nearest page-ancestor permission is inherited. Broken/cyclic ancestry fails closed.
+    Task<IReadOnlySet<SentinelAccessTarget>> GetAccessibleTargetsAsync(
+        IReadOnlyCollection<SentinelAccessTarget> targets,
+        string username,
+        string requiredAccessLevel,
+        CancellationToken cancellationToken = default);
 }

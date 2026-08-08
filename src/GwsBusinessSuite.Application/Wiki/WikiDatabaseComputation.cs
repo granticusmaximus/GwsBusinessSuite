@@ -238,6 +238,8 @@ public static class WikiDatabaseComputation
             WikiDatabasePropertyTypes.LastEditedTime => WikiComputedValue.Date(row.UpdatedAt ?? row.CreatedAt),
             WikiDatabasePropertyTypes.CreatedBy => WikiComputedValue.Text(row.CreatedBy),
             WikiDatabasePropertyTypes.LastEditedBy => WikiComputedValue.Text(row.UpdatedBy ?? row.CreatedBy),
+            WikiDatabasePropertyTypes.UniqueId => WikiPropertyValues.GetNumber(values, property.Id) is { } uniqueIdNumber
+                ? WikiComputedValue.Number(uniqueIdNumber) : WikiComputedValue.Empty,
             WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Person or WikiDatabasePropertyTypes.Files or WikiDatabasePropertyTypes.Relation =>
                 WikiComputedValue.Array(WikiPropertyValues.GetMultiSelect(values, property.Id)
                     .Select(item => WikiComputedValue.Text(item)).ToList()),

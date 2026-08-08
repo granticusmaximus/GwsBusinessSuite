@@ -88,6 +88,525 @@ public sealed class WikiDatabaseServiceTests
     }
 
     [Fact]
+    public async Task ImportCsvAsync_ShouldAppendTypedRootRowsCreateTextPropertiesAndContinueUniqueIds()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var title = database.Properties.Single(property => property.Type == WikiDatabasePropertyTypes.Title);
+        var points = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Points",
+            Type = WikiDatabasePropertyTypes.Number
+        }, "u");
+        var done = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Done",
+            Type = WikiDatabasePropertyTypes.Checkbox
+        }, "u");
+        var due = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Due",
+            Type = WikiDatabasePropertyTypes.Date
+        }, "u");
+        var status = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Status",
+            Type = WikiDatabasePropertyTypes.Select,
+            Options =
+            [
+                new WikiDatabasePropertyOption("todo", "To do", "gray"),
+                new WikiDatabasePropertyOption("done", "Done", "green")
+            ]
+        }, "u");
+        var tags = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Tags",
+            Type = WikiDatabasePropertyTypes.MultiSelect,
+            Options =
+            [
+                new WikiDatabasePropertyOption("red", "Red", "red"),
+                new WikiDatabasePropertyOption("blue", "Blue", "blue")
+            ]
+        }, "u");
+        var ticketId = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Ticket ID",
+            Type = WikiDatabasePropertyTypes.UniqueId,
+            UniqueIdPrefix = "TASK-"
+        }, "u");
+        var existingValues = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(existingValues, title.Id, "Existing task");
+        var existing = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            Values = existingValues.ToDictionary(item => item.Key, item => item.Value)
+        }, "u");
+
+        var csv =
+            "\uFEFFImported title,POINTS,Done,Due,status,Tags,Notes,Ticket ID\r\n"
+            + "First task,12.5,yes,2026-08-12,To do,\"Red, blue\",\"Line \"\"one\"\"\ncontinued\",999\r\n"
+            + "Second task,7,no,2026-08-13,done,Blue,Second note,1000";
+
+        var result = await service.ImportCsvAsync(database.Id, csv, "importer");
+
+        result.RowsImported.Should().Be(2);
+        result.RowsSkipped.Should().Be(0);
+        result.PropertiesCreated.Should().Be(1);
+        result.Warnings.Should().ContainSingle(warning => warning.Contains("Ticket ID") && warning.Contains("read-only"));
+
+        var reloaded = await service.GetDatabaseAsync(database.Id);
+        reloaded!.Rows.Should().HaveCount(3);
+        reloaded.Rows.Single(row => row.Id == existing.Id).SortOrder.Should().Be(0);
+        var notes = reloaded.Properties.Single(property => property.Name == "Notes");
+        notes.Type.Should().Be(WikiDatabasePropertyTypes.Text);
+
+        var rowsByTitle = reloaded.Rows.ToDictionary(
+            row => WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), title.Id)!);
+        var first = rowsByTitle["First task"];
+        var firstValues = WikiPropertyValues.ParseObject(first.PropertyValuesJson);
+        WikiPropertyValues.GetNumber(firstValues, points.Id).Should().Be(12.5m);
+        WikiPropertyValues.GetCheckbox(firstValues, done.Id).Should().BeTrue();
+        WikiPropertyValues.GetDate(firstValues, due.Id).Should().Be(DateTimeOffset.Parse("2026-08-12T00:00:00+00:00"));
+        WikiPropertyValues.GetText(firstValues, status.Id).Should().Be("todo");
+        WikiPropertyValues.GetMultiSelect(firstValues, tags.Id).Should().Equal("red", "blue");
+        WikiPropertyValues.GetText(firstValues, notes.Id).Should().Be("Line \"one\"\ncontinued");
+        WikiPropertyValues.GetNumber(firstValues, ticketId.Id).Should().Be(2m);
+        first.ParentRowId.Should().BeNull();
+
+        var secondValues = WikiPropertyValues.ParseObject(rowsByTitle["Second task"].PropertyValuesJson);
+        WikiPropertyValues.GetText(secondValues, status.Id).Should().Be("done");
+        WikiPropertyValues.GetNumber(secondValues, ticketId.Id).Should().Be(3m);
+        WikiPropertyValues.GetNumber(
+            WikiPropertyValues.ParseObject(rowsByTitle["Existing task"].PropertyValuesJson),
+            ticketId.Id).Should().Be(1m);
+    }
+
+    [Fact]
+    public async Task ImportCsvAsync_ShouldAppendMatchingTitlesWithoutUpdatingExistingRows()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var title = database.Properties.Single(property => property.Type == WikiDatabasePropertyTypes.Title);
+        var points = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Points",
+            Type = WikiDatabasePropertyTypes.Number
+        }, "u");
+        var existingValues = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(existingValues, title.Id, "Same title");
+        WikiPropertyValues.SetNumber(existingValues, points.Id, 99m);
+        var existing = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            Values = existingValues.ToDictionary(item => item.Key, item => item.Value)
+        }, "u");
+
+        var result = await service.ImportCsvAsync(database.Id, "Name,Points\nSame title,1", "importer");
+
+        result.RowsImported.Should().Be(1);
+        var reloadedRows = await db.WikiDatabaseRows.AsNoTracking()
+            .Where(row => row.WikiDatabaseId == database.Id)
+            .OrderBy(row => row.SortOrder)
+            .ToListAsync();
+        reloadedRows.Should().HaveCount(2);
+        reloadedRows[0].Id.Should().Be(existing.Id);
+        reloadedRows[0].SortOrder.Should().Be(0);
+        WikiPropertyValues.GetNumber(
+            WikiPropertyValues.ParseObject(reloadedRows[0].PropertyValuesJson),
+            points.Id).Should().Be(99m);
+        reloadedRows[1].Id.Should().NotBe(existing.Id);
+        reloadedRows[1].SortOrder.Should().Be(1);
+        WikiPropertyValues.GetNumber(
+            WikiPropertyValues.ParseObject(reloadedRows[1].PropertyValuesJson),
+            points.Id).Should().Be(1m);
+    }
+
+    [Fact]
+    public async Task ImportCsvAsync_ShouldSkipMalformedRowsAndKeepRowsWithInvalidTypedCells()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var title = database.Properties.Single(property => property.Type == WikiDatabasePropertyTypes.Title);
+        var points = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Points",
+            Type = WikiDatabasePropertyTypes.Number
+        }, "u");
+        var due = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Due",
+            Type = WikiDatabasePropertyTypes.Date
+        }, "u");
+        var csv =
+            "Name,Points,Due\n"
+            + "Valid,5,2026-08-01\n"
+            + "\n"
+            + ",9,2026-08-02\n"
+            + "Too few,3\n"
+            + "Bad typed,not-a-number,not-a-date";
+
+        var result = await service.ImportCsvAsync(database.Id, csv, "importer");
+
+        result.RowsImported.Should().Be(2);
+        result.RowsSkipped.Should().Be(3);
+        result.PropertiesCreated.Should().Be(0);
+        result.Warnings.Should().Contain(warning => warning.Contains("Row 3") && warning.Contains("blank"));
+        result.Warnings.Should().Contain(warning => warning.Contains("Row 4") && warning.Contains("no title"));
+        result.Warnings.Should().Contain(warning => warning.Contains("Row 5") && warning.Contains("expected 3"));
+        result.Warnings.Should().Contain(warning => warning.Contains("not a valid number"));
+        result.Warnings.Should().Contain(warning => warning.Contains("not a valid date"));
+
+        var reloaded = await service.GetDatabaseAsync(database.Id);
+        reloaded!.Rows.Should().OnlyContain(row => row.ParentRowId == null);
+        var badTypedRow = reloaded.Rows.Single(row =>
+            WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), title.Id) == "Bad typed");
+        var badTypedValues = WikiPropertyValues.ParseObject(badTypedRow.PropertyValuesJson);
+        WikiPropertyValues.GetNumber(badTypedValues, points.Id).Should().BeNull();
+        WikiPropertyValues.GetDate(badTypedValues, due.Id).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("Name,,Notes\nTask,x,y")]
+    [InlineData("Name,Notes,notes\nTask,x,y")]
+    [InlineData("Name,Notes\nTask,\"unterminated")]
+    [InlineData("Name,Notes\nTask,\"closed\"oops")]
+    [InlineData("Name,Notes\nTask,bad\0value")]
+    public async Task ImportCsvAsync_ShouldRejectInvalidHeadersOrQuotingWithoutPartialWrites(string csv)
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var initialPropertyCount = await db.WikiDatabaseProperties.CountAsync(property => property.WikiDatabaseId == database.Id);
+
+        var act = () => service.ImportCsvAsync(database.Id, csv, "importer");
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        (await db.WikiDatabaseProperties.CountAsync(property => property.WikiDatabaseId == database.Id))
+            .Should().Be(initialPropertyCount);
+        (await db.WikiDatabaseRows.AnyAsync(row => row.WikiDatabaseId == database.Id)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ImportCsvAsync_ShouldRejectInputBeyondTheByteLimitWithoutMutation()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var oversizedCsv = new string('x', WikiDatabaseCsvImportLimits.MaxFileBytes + 1);
+
+        var act = () => service.ImportCsvAsync(database.Id, oversizedCsv, "importer");
+
+        await act.Should().ThrowAsync<ArgumentException>().WithMessage("*5 MB*");
+        (await db.WikiDatabaseRows.AnyAsync(row => row.WikiDatabaseId == database.Id)).Should().BeFalse();
+        (await db.WikiDatabaseProperties.CountAsync(property => property.WikiDatabaseId == database.Id))
+            .Should().Be(1);
+    }
+
+    [Fact]
+    public async Task SaveRowAsync_ShouldCreateAndReparentSubItems()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var firstParent = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+        var secondParent = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+        var child = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            ParentRowId = firstParent.Id
+        }, "u");
+
+        child.ParentRowId.Should().Be(firstParent.Id);
+
+        await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            Id = child.Id,
+            ParentRowId = secondParent.Id
+        }, "u");
+
+        (await db.WikiDatabaseRows.AsNoTracking().SingleAsync(row => row.Id == child.Id))
+            .ParentRowId.Should().Be(secondParent.Id);
+    }
+
+    [Fact]
+    public async Task SaveRowAsync_ShouldRejectSubItemCycles()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var parent = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+        var child = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            ParentRowId = parent.Id
+        }, "u");
+
+        var act = () => service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            Id = parent.Id,
+            ParentRowId = child.Id
+        }, "u");
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*descendants*");
+    }
+
+    [Fact]
+    public async Task SaveRowAsync_ShouldRejectSubItemParentsFromAnotherDatabase()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var tasks = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var projects = await service.CreateDatabaseAsync("Projects", null, "u");
+        var project = await service.SaveRowAsync(projects.Id, new WikiDatabaseRowEditor(), "u");
+
+        var act = () => service.SaveRowAsync(tasks.Id, new WikiDatabaseRowEditor
+        {
+            ParentRowId = project.Id
+        }, "u");
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*same database*");
+    }
+
+    [Fact]
+    public async Task RowTemplates_ShouldMaterializeIndependentRowsWithReusableDefaultsAndFreshSystemValues()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var title = database.Properties.Single(property => property.Type == WikiDatabasePropertyTypes.Title);
+        var status = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Status",
+            Type = WikiDatabasePropertyTypes.Select,
+            Options = [new WikiDatabasePropertyOption("todo", "To do", "gray")]
+        }, "u");
+        var uniqueId = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Task ID",
+            Type = WikiDatabasePropertyTypes.UniqueId,
+            UniqueIdPrefix = "TASK"
+        }, "u");
+        var sourceValues = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(sourceValues, title.Id, "Template source");
+        WikiPropertyValues.SetText(sourceValues, status.Id, "todo");
+        var source = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            BlocksJson = ParagraphBlocks("Reusable checklist"),
+            Icon = "🧩",
+            CoverImageUrl = "/media/template.png",
+            Values = sourceValues.ToDictionary(item => item.Key, item => item.Value)
+        }, "u");
+        var template = await service.CreateRowTemplateFromRowAsync(database.Id, source.Id, "Standard task", "u");
+
+        var first = await service.CreateRowFromTemplateAsync(database.Id, template.Id, null, "u");
+        var second = await service.CreateRowFromTemplateAsync(database.Id, template.Id, first.Id, "u");
+
+        var reloaded = await service.GetDatabaseAsync(database.Id);
+        var firstValues = WikiPropertyValues.ParseObject(reloaded!.Rows.Single(row => row.Id == first.Id).PropertyValuesJson);
+        var secondValues = WikiPropertyValues.ParseObject(reloaded.Rows.Single(row => row.Id == second.Id).PropertyValuesJson);
+        WikiPropertyValues.GetText(firstValues, title.Id).Should().BeNullOrEmpty();
+        WikiPropertyValues.GetText(firstValues, status.Id).Should().Be("todo");
+        WikiPropertyValues.GetNumber(firstValues, uniqueId.Id).Should().Be(2m);
+        WikiPropertyValues.GetNumber(secondValues, uniqueId.Id).Should().Be(3m);
+        second.ParentRowId.Should().Be(first.Id);
+        first.Icon.Should().Be("🧩");
+        first.CoverImageUrl.Should().Be("/media/template.png");
+        var sourceBlockId = WikiBlockJson.ParseBlocks(source.BlocksJson).Single().Id;
+        var firstBlockId = WikiBlockJson.ParseBlocks(first.BlocksJson).Single().Id;
+        var secondBlockId = WikiBlockJson.ParseBlocks(second.BlocksJson).Single().Id;
+        firstBlockId.Should().NotBe(sourceBlockId);
+        secondBlockId.Should().NotBe(sourceBlockId).And.NotBe(firstBlockId);
+    }
+
+    [Fact]
+    public async Task RowTemplates_ShouldEnforceCaseInsensitiveNamesPerDatabaseAndOwnership()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var firstDatabase = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var secondDatabase = await service.CreateDatabaseAsync("Projects", null, "u");
+        var firstRow = await service.SaveRowAsync(firstDatabase.Id, new WikiDatabaseRowEditor(), "u");
+        var secondRow = await service.SaveRowAsync(secondDatabase.Id, new WikiDatabaseRowEditor(), "u");
+        var template = await service.CreateRowTemplateFromRowAsync(firstDatabase.Id, firstRow.Id, "Bug", "u");
+
+        var duplicateName = () => service.CreateRowTemplateFromRowAsync(firstDatabase.Id, firstRow.Id, " bug ", "u");
+        await duplicateName.Should().ThrowAsync<InvalidOperationException>().WithMessage("*already exists*");
+        await service.CreateRowTemplateFromRowAsync(secondDatabase.Id, secondRow.Id, "BUG", "u");
+
+        var crossDatabase = () => service.CreateRowFromTemplateAsync(secondDatabase.Id, template.Id, null, "u");
+        await crossDatabase.Should().ThrowAsync<InvalidOperationException>().WithMessage("*no longer exists*");
+    }
+
+    [Fact]
+    public async Task RowTemplates_ShouldDropDeletedPropertyDefaultsAndCascadeWithTheDatabase()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var priority = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Priority",
+            Type = WikiDatabasePropertyTypes.Text
+        }, "u");
+        var values = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(values, priority.Id, "High");
+        var source = await service.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = values.ToDictionary(item => item.Key, item => item.Value) }, "u");
+        var template = await service.CreateRowTemplateFromRowAsync(database.Id, source.Id, "Prioritized", "u");
+
+        await service.DeletePropertyAsync(database.Id, priority.Id, "u");
+
+        var cleanedTemplate = await db.WikiDatabaseRowTemplates.AsNoTracking().SingleAsync(item => item.Id == template.Id);
+        WikiPropertyValues.ParseObject(cleanedTemplate.DefaultPropertyValuesJson)
+            .ContainsKey(priority.Id.ToString()).Should().BeFalse();
+        await service.DeleteDatabasePermanentlyAsync(database.Id, "u");
+        (await db.WikiDatabaseRowTemplates.AnyAsync(item => item.Id == template.Id)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DatabaseLock_ShouldRejectSharedStructureChangesButKeepRowsAndTemplateCreationUsable()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var priority = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Priority",
+            Type = WikiDatabasePropertyTypes.Text
+        }, "u");
+        var source = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+        var template = await service.CreateRowTemplateFromRowAsync(database.Id, source.Id, "Task", "u");
+        var listView = await service.SaveViewAsync(
+            database.Id, null, "List", WikiDatabaseViewTypes.List, WikiDatabaseViewConfig.Empty, "u");
+
+        var locked = await service.SetDatabaseLockAsync(database.Id, true, "u");
+
+        locked.IsLocked.Should().BeTrue();
+        await FluentActions.Awaiting(() => service.RenameDatabaseAsync(database.Id, "Renamed", null, "u"))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*locked*");
+        await FluentActions.Awaiting(() => service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+            { Name = "Owner", Type = WikiDatabasePropertyTypes.Text }, "u"))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*locked*");
+        await FluentActions.Awaiting(() => service.DeletePropertyAsync(database.Id, priority.Id, "u"))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*locked*");
+        await FluentActions.Awaiting(() => service.SaveViewAsync(
+                database.Id, listView.Id, "Compact list", WikiDatabaseViewTypes.List, WikiDatabaseViewConfig.Empty, "u"))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*locked*");
+        await FluentActions.Awaiting(() => service.DeleteViewAsync(database.Id, listView.Id, "u"))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*locked*");
+        await FluentActions.Awaiting(() => service.CreateRowTemplateFromRowAsync(database.Id, source.Id, "Other", "u"))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*locked*");
+        await FluentActions.Awaiting(() => service.DeleteRowTemplateAsync(database.Id, template.Id))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*locked*");
+
+        var regularRow = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+        var templatedRow = await service.CreateRowFromTemplateAsync(database.Id, template.Id, null, "u");
+        regularRow.Id.Should().NotBeEmpty();
+        templatedRow.Id.Should().NotBeEmpty();
+
+        await service.SetDatabaseLockAsync(database.Id, false, "u");
+        var owner = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+            { Name = "Owner", Type = WikiDatabasePropertyTypes.Text }, "u");
+        owner.Name.Should().Be("Owner");
+    }
+
+    [Fact]
+    public async Task TimelineDependencies_ShouldPersistValidChainsAndRejectCyclesOrForeignRows()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Plan", null, "u");
+        var date = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Date",
+            Type = WikiDatabasePropertyTypes.Date
+        }, "u");
+        var dependency = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Depends on",
+            Type = WikiDatabasePropertyTypes.Relation,
+            RelatedDatabaseId = database.Id,
+            ReciprocalRelationEnabled = false
+        }, "u");
+        await service.SaveViewAsync(database.Id, null, "Timeline", WikiDatabaseViewTypes.Timeline,
+            new WikiDatabaseViewConfig(
+                [], [], date.Id.ToString(), DependencyPropertyId: dependency.Id.ToString()), "u");
+        var first = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+        var second = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+        var third = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        var secondValues = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetMultiSelect(secondValues, dependency.Id, [first.Id.ToString()]);
+        await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            Id = second.Id,
+            Values = secondValues.ToDictionary(item => item.Key, item => item.Value)
+        }, "u");
+        var thirdValues = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetMultiSelect(thirdValues, dependency.Id, [second.Id.ToString()]);
+        await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            Id = third.Id,
+            Values = thirdValues.ToDictionary(item => item.Key, item => item.Value)
+        }, "u");
+
+        var cycleValues = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetMultiSelect(cycleValues, dependency.Id, [third.Id.ToString()]);
+        await FluentActions.Awaiting(() => service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+            {
+                Id = first.Id,
+                Values = cycleValues.ToDictionary(item => item.Key, item => item.Value)
+            }, "u"))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*cycle*");
+
+        var otherDatabase = await service.CreateDatabaseAsync("Other", null, "u");
+        var foreignRow = await service.SaveRowAsync(otherDatabase.Id, new WikiDatabaseRowEditor(), "u");
+        var foreignValues = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetMultiSelect(foreignValues, dependency.Id, [foreignRow.Id.ToString()]);
+        await FluentActions.Awaiting(() => service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+            {
+                Id = first.Id,
+                Values = foreignValues.ToDictionary(item => item.Key, item => item.Value)
+            }, "u"))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*same database*");
+    }
+
+    [Fact]
+    public async Task DeleteRowPermanentlyAsync_ShouldPromoteSubItemsToRoot()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var parent = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+        var child = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            ParentRowId = parent.Id
+        }, "u");
+
+        await service.DeleteRowPermanentlyAsync(database.Id, parent.Id, "u");
+
+        (await db.WikiDatabaseRows.AsNoTracking().SingleAsync(row => row.Id == child.Id))
+            .ParentRowId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task TrashRowAsync_ShouldLeaveSubItemsActiveAndLinkedForRestore()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var parent = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+        var child = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            ParentRowId = parent.Id
+        }, "u");
+
+        await service.TrashRowAsync(database.Id, parent.Id, "u");
+
+        var visible = await service.GetDatabaseAsync(database.Id);
+        visible!.Rows.Should().ContainSingle(row => row.Id == child.Id && row.ParentRowId == parent.Id);
+    }
+
+    [Fact]
     public async Task GetDatabaseAsync_ShouldEvaluateFormulaPropertiesWithoutPersistingComputedValues()
     {
         await using var db = await CreateDbAsync();
@@ -779,6 +1298,69 @@ public sealed class WikiDatabaseServiceTests
     }
 
     [Fact]
+    public async Task GetLinkedDatabaseAsync_ShouldApplyTheSelectedViewsFiltersAndSorts()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Launch plan", null, "u");
+        var title = database.Properties.Single(property => property.Type == WikiDatabasePropertyTypes.Title);
+        var points = await service.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Points", Type = WikiDatabasePropertyTypes.Number }, "u");
+
+        async Task AddRow(string name, decimal score)
+        {
+            var values = new System.Text.Json.Nodes.JsonObject();
+            WikiPropertyValues.SetText(values, title.Id, name);
+            WikiPropertyValues.SetNumber(values, points.Id, score);
+            await service.SaveRowAsync(database.Id,
+                new WikiDatabaseRowEditor { Values = values.ToDictionary(item => item.Key, item => item.Value) }, "u");
+        }
+
+        await AddRow("Launch docs", 5m);
+        await AddRow("Launch API", 8m);
+        await AddRow("Backlog", 13m);
+        var filterGroup = new WikiDatabaseFilterGroup(
+            WikiDatabaseFilterGroup.And,
+            [new WikiDatabaseFilter(points.Id.ToString(), "greaterThan", "4")],
+            [new WikiDatabaseFilterGroup(
+                WikiDatabaseFilterGroup.Or,
+                [new WikiDatabaseFilter(title.Id.ToString(), "contains", "Launch")],
+                [])]);
+        var view = await service.SaveViewAsync(
+            database.Id,
+            null,
+            "Launch work",
+            WikiDatabaseViewTypes.Table,
+            new WikiDatabaseViewConfig(
+                [],
+                [new WikiDatabaseSort(points.Id.ToString(), "descending")],
+                null,
+                FilterGroup: filterGroup),
+            "u");
+
+        var snapshot = await service.GetLinkedDatabaseAsync(database.Id, view.Id);
+
+        snapshot.Should().NotBeNull();
+        snapshot!.Views.Should().ContainSingle(item => item.Id == view.Id);
+        snapshot.Rows.Select(row => row.Cells.Single(cell => cell.PropertyId == title.Id).Value)
+            .Should().Equal("Launch API", "Launch docs");
+    }
+
+    [Fact]
+    public async Task GetLinkedDatabaseAsync_ShouldRejectAViewOwnedByAnotherDatabase()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var source = await service.CreateDatabaseAsync("Source", null, "u");
+        var other = await service.CreateDatabaseAsync("Other", null, "u");
+        var otherView = other.Views.Single();
+
+        var snapshot = await service.GetLinkedDatabaseAsync(source.Id, otherView.Id);
+
+        snapshot.Should().BeNull();
+    }
+
+    [Fact]
     public async Task SaveInlineCellAsync_ShouldPersistTypedValuesAndReturnRefreshedSnapshot()
     {
         await using var db = await CreateDbAsync();
@@ -807,6 +1389,7 @@ public sealed class WikiDatabaseServiceTests
     [InlineData(WikiDatabasePropertyTypes.CreatedBy)]
     [InlineData(WikiDatabasePropertyTypes.Formula)]
     [InlineData(WikiDatabasePropertyTypes.Rollup)]
+    [InlineData(WikiDatabasePropertyTypes.UniqueId)]
     public async Task SaveInlineCellAsync_ShouldRejectComputedPropertyTypes(string propertyType)
     {
         await using var db = await CreateDbAsync();
@@ -858,6 +1441,66 @@ public sealed class WikiDatabaseServiceTests
         var action = async () => await service.SaveInlineCellAsync(database.Id, row.Id, button.Id, "click", "editor");
 
         await action.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task SaveRowAsync_ShouldAutoAssignSequentialUniqueIdsAndNeverReuseThem()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var uniqueId = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Ticket", Type = WikiDatabasePropertyTypes.UniqueId, UniqueIdPrefix = "TASK-"
+        }, "u");
+
+        var first = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+        var second = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+        await service.TrashRowAsync(database.Id, second.Id, "u");
+        var third = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        WikiPropertyValues.GetNumber(WikiPropertyValues.ParseObject(first.PropertyValuesJson), uniqueId.Id).Should().Be(1m);
+        WikiPropertyValues.GetNumber(WikiPropertyValues.ParseObject(second.PropertyValuesJson), uniqueId.Id).Should().Be(2m);
+        // Trashing row 2 must not free up "2" for reuse - Notion never recycles unique_id numbers.
+        WikiPropertyValues.GetNumber(WikiPropertyValues.ParseObject(third.PropertyValuesJson), uniqueId.Id).Should().Be(3m);
+
+        var displayText = WikiPropertyValues.GetDisplayText(
+            uniqueId, WikiPropertyValues.ParseObject(first.PropertyValuesJson), first.CreatedAt);
+        displayText.Should().Be("TASK-1");
+
+        // Re-saving an existing row (an edit, not a new row) must not re-assign its number.
+        // SaveRowAsync's Values dict is the complete replacement set, so - matching how the
+        // real UI always round-trips the row's current values - resubmit what's already there.
+        var currentValues = WikiPropertyValues.ParseObject(first.PropertyValuesJson);
+        var editedFirst = await service.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Id = first.Id, Values = currentValues.ToDictionary(kv => kv.Key, kv => kv.Value) }, "u");
+        WikiPropertyValues.GetNumber(WikiPropertyValues.ParseObject(editedFirst.PropertyValuesJson), uniqueId.Id).Should().Be(1m);
+    }
+
+    [Fact]
+    public async Task SaveInlineCellAsync_ShouldToggleVerificationAndStampWhoVerifiedIt()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Docs", null, "u");
+        var verification = await service.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Verified", Type = WikiDatabasePropertyTypes.Verification }, "u");
+        var row = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        await service.SaveInlineCellAsync(database.Id, row.Id, verification.Id, WikiVerificationState.Verified, "alice");
+
+        var reloaded = await service.GetDatabaseAsync(database.Id);
+        var state = WikiPropertyValues.GetVerification(
+            WikiPropertyValues.ParseObject(reloaded!.Rows.Single().PropertyValuesJson), verification.Id);
+        state.Status.Should().Be(WikiVerificationState.Verified);
+        state.VerifiedBy.Should().Be("alice");
+        state.VerifiedAt.Should().NotBeNull();
+
+        await service.SaveInlineCellAsync(database.Id, row.Id, verification.Id, WikiVerificationState.None, "alice");
+        var unverified = await service.GetDatabaseAsync(database.Id);
+        WikiPropertyValues.GetVerification(
+            WikiPropertyValues.ParseObject(unverified!.Rows.Single().PropertyValuesJson), verification.Id)
+            .Status.Should().Be(WikiVerificationState.None);
     }
 
     [Fact]
@@ -982,6 +1625,39 @@ public sealed class WikiDatabaseServiceTests
         var act = () => service.DeleteViewAsync(database.Id, onlyView.Id, "u");
 
         await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task PersonalViewOverride_ShouldLayerOnTopOfTheSharedViewWithoutChangingIt()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var titleProperty = database.Properties.Single(property => property.Type == WikiDatabasePropertyTypes.Title);
+        var sharedView = database.Views.Single();
+        var sharedFilter = new WikiDatabaseFilter(titleProperty.Id.ToString(), "contains", "shared");
+        await service.SaveViewAsync(database.Id, sharedView.Id, sharedView.Name, sharedView.Type,
+            new WikiDatabaseViewConfig([sharedFilter], [], null), "owner");
+
+        (await service.GetPersonalViewOverrideAsync(sharedView.Id, "alice")).Should().BeNull();
+
+        var personalFilter = new WikiDatabaseFilter(titleProperty.Id.ToString(), "contains", "mine");
+        var saved = await service.SavePersonalViewOverrideAsync(
+            sharedView.Id, new WikiDatabaseViewConfig([personalFilter], [], null), "alice");
+        saved.Filters.Should().ContainSingle().Which.Should().Be(personalFilter);
+
+        var alicesOverride = await service.GetPersonalViewOverrideAsync(sharedView.Id, "alice");
+        alicesOverride.Should().NotBeNull();
+        alicesOverride!.Filters.Should().ContainSingle().Which.Should().Be(personalFilter);
+
+        // Bob never personalized the view - he still sees the shared filter untouched.
+        (await service.GetPersonalViewOverrideAsync(sharedView.Id, "bob")).Should().BeNull();
+        var reloadedShared = await service.GetDatabaseAsync(database.Id);
+        var reloadedSharedConfig = WikiDatabaseViewConfigJson.Parse(reloadedShared!.Views.Single().ConfigJson);
+        reloadedSharedConfig.Filters.Should().ContainSingle().Which.Should().Be(sharedFilter);
+
+        await service.ClearPersonalViewOverrideAsync(sharedView.Id, "alice");
+        (await service.GetPersonalViewOverrideAsync(sharedView.Id, "alice")).Should().BeNull();
     }
 
     [Fact]

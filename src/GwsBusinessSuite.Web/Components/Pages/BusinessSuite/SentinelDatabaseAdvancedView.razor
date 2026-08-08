@@ -14,19 +14,87 @@
     }
     else
     {
-        var groups = WikiDatabaseViewLogic.BuildTimeline(VisibleRows, dateProperty);
-        <div class="sentinel-db-timeline">
-            @foreach (var group in groups)
+        var dependencyProperty = ResolveTimelineDependencyProperty();
+        var schedule = WikiDatabaseViewLogic.BuildTimelineSchedule(VisibleRows, dateProperty, dependencyProperty);
+        <div class="sentinel-db-timeline" aria-label="Timeline for @Database.Title">
+            <header>
+                <div>
+                    <strong>Timeline</strong>
+                    @if (schedule.StartDate is { } startDate && schedule.EndDate is { } endDate)
+                    {
+                        <span>@startDate.ToString("MMM d, yyyy") – @endDate.ToString("MMM d, yyyy")</span>
+                    }
+                    else
+                    {
+                        <span>Add a date to a row to place it on the schedule.</span>
+                    }
+                </div>
+                @if (dependencyProperty is not null)
+                {
+                    <span class="badge text-bg-secondary">@dependencyProperty.Name dependencies</span>
+                }
+            </header>
+
+            @foreach (var item in schedule.DatedItems)
             {
-                <section>
-                    <time>@(group.Date?.ToString("MMM d, yyyy") ?? "No date")</time>
-                    <div>
-                        @foreach (var row in group.Rows)
+                <article class="sentinel-db-timeline-row">
+                    <div class="sentinel-db-timeline-label">
+                        <button type="button" @onclick="() => OnOpenRow.InvokeAsync(item.Row.Id)">@Title(item.Row)</button>
+                        <time>@item.Date?.ToString("MMM d, yyyy")</time>
+                        @if (dependencyProperty is not null)
                         {
-                            <button type="button" @onclick="() => OnOpenRow.InvokeAsync(row.Id)">@Title(row)</button>
+                            <details>
+                                <summary>@DependencySummary(item)</summary>
+                                <div class="sentinel-db-timeline-dependency-picker">
+                                    @foreach (var candidate in VisibleRows.Where(row => row.Id != item.Row.Id).OrderBy(Title))
+                                    {
+                                        <label class="form-check mb-1">
+                                            <input class="form-check-input" type="checkbox"
+                                                   checked="@item.DependsOnRowIds.Contains(candidate.Id)"
+                                                   disabled="@(!CanEdit || _savingDependencyRowId == item.Row.Id)"
+                                                   @onchange="e => ToggleTimelineDependencyAsync(item.Row, dependencyProperty, candidate.Id, (bool)(e.Value ?? false))" />
+                                            <span class="form-check-label small">@Title(candidate)</span>
+                                        </label>
+                                    }
+                                    @if (VisibleRows.Count <= 1)
+                                    {
+                                        <span class="small text-secondary">Add another row before creating a dependency.</span>
+                                    }
+                                </div>
+                            </details>
+                        }
+                    </div>
+                    <div class="sentinel-db-timeline-track" style="@TimelineBarStyle(item, schedule)">
+                        <button type="button" class="sentinel-db-timeline-bar"
+                                @onclick="() => OnOpenRow.InvokeAsync(item.Row.Id)" title="@($"{Title(item.Row)} — {item.Date:MMM d, yyyy}")">
+                            <span>@Title(item.Row)</span>
+                        </button>
+                        @if (item.DependsOnRowIds.Count > 0)
+                        {
+                            <div class="sentinel-db-timeline-links">
+                                <i class="bi bi-arrow-return-right" aria-hidden="true"></i>
+                                <span>After @string.Join(", ", item.DependsOnRowIds.Select(DependencyTitle))</span>
+                            </div>
+                        }
+                    </div>
+                </article>
+            }
+
+            @if (schedule.UndatedItems.Count > 0)
+            {
+                <section class="sentinel-db-timeline-undated">
+                    <strong>Unscheduled</strong>
+                    <div>
+                        @foreach (var item in schedule.UndatedItems)
+                        {
+                            <button type="button" @onclick="() => OnOpenRow.InvokeAsync(item.Row.Id)">@Title(item.Row)</button>
                         }
                     </div>
                 </section>
+            }
+            @if (!string.IsNullOrWhiteSpace(_timelineMessage))
+            {
+                <div class="alert alert-danger py-2 small mb-0">@_timelineMessage</div>
             }
         </div>
     }
@@ -165,18 +233,21 @@ else if (View.Type == WikiDatabaseViewTypes.Dashboard)
     [Parameter, EditorRequired] public WikiDatabase Database { get; set; } = null!;
     [Parameter, EditorRequired] public WikiDatabaseView View { get; set; } = null!;
     [Parameter, EditorRequired] public WikiDatabaseViewConfig Config { get; set; } = WikiDatabaseViewConfig.Empty;
+    [Parameter] public bool CanEdit { get; set; } = true;
     [Parameter] public EventCallback<Guid> OnOpenRow { get; set; }
     [Parameter] public EventCallback OnChanged { get; set; }
 
     private readonly Dictionary<Guid, string> _formValues = [];
     private bool _saving;
     private string? _formMessage;
+    private Guid? _savingDependencyRowId;
+    private string? _timelineMessage;
 
     private IReadOnlyList<WikiDatabaseRow> VisibleRows
     {
         get
         {
-            var filtered = WikiDatabaseViewLogic.ApplyFilters(Database.Rows.ToList(), Database.Properties.ToList(), Config.Filters);
+            var filtered = WikiDatabaseViewLogic.ApplyFilters(Database.Rows.ToList(), Database.Properties.ToList(), Config.Filters, Config.FilterGroup);
             return WikiDatabaseViewLogic.ApplySort(filtered, Database.Properties.ToList(), Config.Sorts);
         }
     }
@@ -191,10 +262,98 @@ else if (View.Type == WikiDatabaseViewTypes.Dashboard)
             or WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Checkbox or WikiDatabasePropertyTypes.Text
             or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup);
 
+    private WikiDatabaseProperty? ResolveTimelineDependencyProperty()
+    {
+        if (!Guid.TryParse(Config.DependencyPropertyId, out var propertyId))
+        {
+            return null;
+        }
+
+        var property = Database.Properties.FirstOrDefault(candidate =>
+            candidate.Id == propertyId && candidate.Type == WikiDatabasePropertyTypes.Relation);
+        return property is not null
+            && WikiDatabasePropertyConfig.Parse(property).RelatedDatabaseId == Database.Id
+                ? property
+                : null;
+    }
+
     private string Title(WikiDatabaseRow row)
     {
         var property = Database.Properties.First(item => item.Type == WikiDatabasePropertyTypes.Title);
         return WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), property.Id) ?? "Untitled";
+    }
+
+    private string DependencyTitle(Guid rowId) =>
+        Database.Rows.FirstOrDefault(row => row.Id == rowId) is { } row ? Title(row) : "Unavailable row";
+
+    private string DependencySummary(WikiDatabaseTimelineItem item) => item.DependsOnRowIds.Count switch
+    {
+        0 => "No dependencies",
+        1 => $"Depends on {DependencyTitle(item.DependsOnRowIds[0])}",
+        _ => $"{item.DependsOnRowIds.Count} dependencies"
+    };
+
+    private static string TimelineBarStyle(
+        WikiDatabaseTimelineItem item,
+        WikiDatabaseTimelineSchedule schedule)
+    {
+        if (item.Date is not { } date || schedule.StartDate is not { } start || schedule.EndDate is not { } end)
+        {
+            return "--timeline-left:0%;--timeline-width:100%;";
+        }
+
+        var totalDays = Math.Max(1, end.DayNumber - start.DayNumber + 1);
+        var left = (date.DayNumber - start.DayNumber) * 100d / totalDays;
+        var width = Math.Max(3d, 100d / totalDays);
+        return FormattableString.Invariant($"--timeline-left:{left:0.###}%;--timeline-width:{width:0.###}%;");
+    }
+
+    private async Task ToggleTimelineDependencyAsync(
+        WikiDatabaseRow row,
+        WikiDatabaseProperty dependencyProperty,
+        Guid dependencyRowId,
+        bool selected)
+    {
+        if (!CanEdit)
+        {
+            return;
+        }
+
+        _savingDependencyRowId = row.Id;
+        _timelineMessage = null;
+        try
+        {
+            var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+            var dependencies = WikiPropertyValues.GetMultiSelect(values, dependencyProperty.Id)
+                .Where(value => Guid.TryParse(value, out _))
+                .ToHashSet(StringComparer.Ordinal);
+            if (selected)
+            {
+                dependencies.Add(dependencyRowId.ToString());
+            }
+            else
+            {
+                dependencies.Remove(dependencyRowId.ToString());
+            }
+            WikiPropertyValues.SetMultiSelect(values, dependencyProperty.Id, dependencies.ToList());
+
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await WikiDatabaseService.SaveRowAsync(Database.Id, new WikiDatabaseRowEditor
+            {
+                Id = row.Id,
+                ParentRowId = row.ParentRowId,
+                Values = values.ToDictionary(item => item.Key, item => item.Value)
+            }, username);
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception exception)
+        {
+            _timelineMessage = exception.Message;
+        }
+        finally
+        {
+            _savingDependencyRowId = null;
+        }
     }
 
     private string FormValue(Guid propertyId) => _formValues.GetValueOrDefault(propertyId, string.Empty);

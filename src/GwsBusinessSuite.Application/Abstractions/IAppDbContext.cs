@@ -28,8 +28,10 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<WikiDatabase> WikiDatabases { get; }
     DbSet<WikiDatabaseProperty> WikiDatabaseProperties { get; }
     DbSet<WikiDatabaseRow> WikiDatabaseRows { get; }
+    DbSet<WikiDatabaseRowTemplate> WikiDatabaseRowTemplates { get; }
     DbSet<WikiDatabaseRowRevision> WikiDatabaseRowRevisions { get; }
     DbSet<WikiDatabaseView> WikiDatabaseViews { get; }
+    DbSet<WikiDatabaseViewPersonalization> WikiDatabaseViewPersonalizations { get; }
     DbSet<CmsSite> CmsSites { get; }
     DbSet<CmsPage> CmsPages { get; }
     DbSet<CmsPageCategory> CmsPageCategories { get; }

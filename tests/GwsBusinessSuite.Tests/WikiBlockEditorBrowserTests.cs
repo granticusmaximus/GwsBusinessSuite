@@ -386,6 +386,81 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
     }
 
     [Fact]
+    public async Task Tabs_ShouldSwitchRenameAddRemoveAndMoveWithoutLosingContent()
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.SetContentAsync("""<div id="editor" class="wiki-block-editor"></div>""");
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+
+        var initialTabs = new[]
+        {
+            new WikiTab("Overview", [new WikiRichTextSpan("Summary")]),
+            new WikiTab("Details", [new WikiRichTextSpan("Evidence")])
+        };
+        var initialJson = WikiBlockJson.Serialize(
+        [
+            new WikiBlock(
+                Guid.NewGuid(),
+                WikiBlockTypes.Tab,
+                0,
+                [],
+                new Dictionary<string, string>
+                {
+                    ["tabsJson"] = JsonSerializer.Serialize(initialTabs, WikiBlockJson.Options)
+                })
+        ]);
+        await page.EvaluateAsync(
+            """
+            json => window.sentinelBlockEditor.initialize(
+                document.querySelector('#editor'),
+                { invokeMethodAsync: () => Promise.resolve([]) },
+                json)
+            """,
+            initialJson);
+
+        await Expect(page.GetByRole(AriaRole.Tab)).ToHaveCountAsync(2);
+        await Expect(page.GetByRole(AriaRole.Tab, new() { Name = "Overview" }))
+            .ToHaveAttributeAsync("aria-selected", "true");
+        await Expect(page.Locator(".wiki-tab-editor-panel:not([hidden]) .wiki-tab-content"))
+            .ToHaveTextAsync("Summary");
+
+        await page.GetByRole(AriaRole.Tab, new() { Name = "Details" }).ClickAsync();
+        var activePanel = page.Locator(".wiki-tab-editor-panel:not([hidden])");
+        await Expect(activePanel.Locator(".wiki-tab-content")).ToHaveTextAsync("Evidence");
+        await activePanel.GetByRole(AriaRole.Textbox, new() { Name = "Tab name" }).FillAsync("Evidence");
+        await activePanel.Locator(".wiki-tab-content").FillAsync("Updated evidence");
+        await activePanel.GetByRole(AriaRole.Button, new() { Name = "Move tab left" }).ClickAsync();
+        (await page.GetByRole(AriaRole.Tab).AllTextContentsAsync()).Should().Equal("Evidence", "Overview");
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Add tab" }).ClickAsync();
+        activePanel = page.Locator(".wiki-tab-editor-panel:not([hidden])");
+        await activePanel.GetByRole(AriaRole.Textbox, new() { Name = "Tab name" }).FillAsync("Timeline");
+        await activePanel.Locator(".wiki-tab-content").FillAsync("Third pane");
+        await page.GetByRole(AriaRole.Tab, new() { Name = "Overview" }).ClickAsync();
+        await page.Locator(".wiki-tab-editor-panel:not([hidden])")
+            .GetByRole(AriaRole.Button, new() { Name = "Remove tab" })
+            .ClickAsync();
+
+        await Expect(page.GetByRole(AriaRole.Tab)).ToHaveCountAsync(2);
+        var serialized = (await EditorBlocksAsync(page)).Single();
+        serialized.Type.Should().Be(WikiBlockTypes.Tab);
+        var tabs = JsonSerializer.Deserialize<List<WikiTab>>(
+            serialized.Props["tabsJson"],
+            WikiBlockJson.Options);
+        tabs.Should().NotBeNull();
+        tabs!.Select(tab => tab.Title).Should().Equal("Evidence", "Timeline");
+        tabs[0].RichText.Should().ContainSingle(span => span.Text == "Updated evidence");
+        tabs[1].RichText.Should().ContainSingle(span => span.Text == "Third pane");
+    }
+
+    [Fact]
     public async Task ImportedInlineBoard_ShouldRenderGroupedCardsAndRemainNavigable()
     {
         await using var page = await fixture.Browser.NewPageAsync();
@@ -605,6 +680,177 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
         openRowCall.Should().Contain("OpenLinkedDatabaseRow")
             .And.Contain(databaseId.ToString())
             .And.Contain(rowId.ToString());
+    }
+
+    [Fact]
+    public async Task LinkedDatabase_ShouldChoosePersistAndRefreshACanonicalFilteredView()
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.SetContentAsync(
+            """<main class="sentinel-workspace"><div id="editor" class="wiki-block-editor"></div></main>""");
+        var stylesPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/app.css"));
+        await page.AddStyleTagAsync(new PageAddStyleTagOptions { Content = await File.ReadAllTextAsync(stylesPath) });
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+
+        var databaseId = Guid.NewGuid();
+        var viewId = Guid.NewGuid();
+        var titlePropertyId = Guid.NewGuid();
+        var rowId = Guid.NewGuid();
+        var blockJson = WikiBlockJson.Serialize(
+        [
+            new WikiBlock(
+                Guid.NewGuid(),
+                WikiBlockTypes.LinkedDatabase,
+                0,
+                [],
+                new Dictionary<string, string>
+                {
+                    ["databaseId"] = databaseId.ToString(),
+                    ["databaseTitle"] = "Tasks",
+                    ["databaseIcon"] = "▦"
+                })
+        ]);
+        var sourceSnapshot = new WikiInlineDatabaseSnapshot(databaseId, "Tasks", "▦", [], [])
+        {
+            Views = [new WikiInlineDatabaseView(viewId, "Open work", WikiDatabaseViewTypes.Table, null)]
+        };
+        var linkedSnapshot = new WikiInlineDatabaseSnapshot(
+            databaseId,
+            "Tasks",
+            "▦",
+            [new WikiInlineDatabaseProperty(titlePropertyId, "Name", WikiDatabasePropertyTypes.Title, false, [])],
+            [new WikiInlineDatabaseRow(rowId, [new WikiInlineDatabaseCell(titlePropertyId, "Ship Sentinel")])])
+        {
+            Views = [new WikiInlineDatabaseView(viewId, "Open work", WikiDatabaseViewTypes.Table, null)],
+            CanEdit = true
+        };
+        var payload = JsonSerializer.Serialize(
+            new { blockJson, sourceSnapshot, linkedSnapshot },
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+
+        await page.EvaluateAsync(
+            """
+            payloadJson => {
+                const payload = JSON.parse(payloadJson);
+                window.editorCalls = [];
+                window.sentinelBlockEditor.initialize(
+                    document.querySelector('#editor'),
+                    {
+                        invokeMethodAsync: (method, ...args) => {
+                            window.editorCalls.push({ method, args });
+                            if (method === 'GetInlineDatabase') return Promise.resolve(payload.sourceSnapshot);
+                            if (method === 'GetLinkedDatabase' || method === 'SaveInlineDatabaseCell') {
+                                return Promise.resolve(payload.linkedSnapshot);
+                            }
+                            return Promise.resolve(null);
+                        }
+                    },
+                    payload.blockJson);
+            }
+            """,
+            payload);
+
+        await Expect(page.GetByRole(AriaRole.Button, new() { Name = "Open work" })).ToBeVisibleAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Open work" }).ClickAsync();
+        await Expect(page.Locator(".wiki-linked-view-badge")).ToHaveTextAsync("Open work");
+        await Expect(page.Locator(".wiki-inline-database-table tbody tr")).ToHaveCountAsync(1);
+        await Expect(page.GetByRole(AriaRole.Button, new() { Name = "New row" })).ToHaveCountAsync(0);
+
+        var titleInput = page.Locator(".wiki-inline-database-table tbody input");
+        await titleInput.FillAsync("Ship linked views");
+        await titleInput.PressAsync("Tab");
+        await page.WaitForFunctionAsync(
+            "() => window.editorCalls.some(call => call.method === 'SaveInlineDatabaseCell')"
+            + " && window.editorCalls.filter(call => call.method === 'GetLinkedDatabase').length >= 2");
+
+        var calls = await page.EvaluateAsync<string>("() => JSON.stringify(window.editorCalls)");
+        calls.Should().Contain("SaveInlineDatabaseCell")
+            .And.Contain("GetLinkedDatabase")
+            .And.Contain(viewId.ToString());
+        var serialized = (await EditorBlocksAsync(page)).Single();
+        serialized.Props["databaseViewId"].Should().Be(viewId.ToString());
+        serialized.Props["databaseViewName"].Should().Be("Open work");
+    }
+
+    [Fact]
+    public async Task LinkedDatabase_ShouldRenderViewOnlySourcesWithoutMutationControls()
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.SetContentAsync(
+            """<main class="sentinel-workspace"><div id="editor" class="wiki-block-editor"></div></main>""");
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+
+        var databaseId = Guid.NewGuid();
+        var viewId = Guid.NewGuid();
+        var propertyId = Guid.NewGuid();
+        var blockJson = WikiBlockJson.Serialize(
+        [
+            new WikiBlock(
+                Guid.NewGuid(),
+                WikiBlockTypes.LinkedDatabase,
+                0,
+                [],
+                new Dictionary<string, string>
+                {
+                    ["databaseId"] = databaseId.ToString(),
+                    ["databaseTitle"] = "Tasks",
+                    ["databaseViewId"] = viewId.ToString(),
+                    ["databaseViewName"] = "Shared"
+                })
+        ]);
+        var snapshot = new WikiInlineDatabaseSnapshot(
+            databaseId,
+            "Tasks",
+            "▦",
+            [new WikiInlineDatabaseProperty(propertyId, "Name", WikiDatabasePropertyTypes.Title, false, [])],
+            [new WikiInlineDatabaseRow(Guid.NewGuid(), [new WikiInlineDatabaseCell(propertyId, "Read only")])])
+        {
+            Views = [new WikiInlineDatabaseView(viewId, "Shared", WikiDatabaseViewTypes.Table, null)],
+            CanEdit = false
+        };
+        var payload = JsonSerializer.Serialize(
+            new { blockJson, snapshot },
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+
+        await page.EvaluateAsync(
+            """
+            payloadJson => {
+                const payload = JSON.parse(payloadJson);
+                window.editorCalls = [];
+                window.sentinelBlockEditor.initialize(
+                    document.querySelector('#editor'),
+                    {
+                        invokeMethodAsync: (method, ...args) => {
+                            window.editorCalls.push({ method, args });
+                            return Promise.resolve(method === 'GetLinkedDatabase' ? payload.snapshot : null);
+                        }
+                    },
+                    payload.blockJson);
+            }
+            """,
+            payload);
+
+        await Expect(page.Locator(".wiki-inline-cell-readonly")).ToHaveTextAsync("Read only");
+        await Expect(page.Locator(".wiki-inline-database-table input, .wiki-inline-database-table select")).ToHaveCountAsync(0);
+        await Expect(page.GetByRole(AriaRole.Button, new() { Name = "New row" })).ToHaveCountAsync(0);
+        var calls = await page.EvaluateAsync<string>("() => JSON.stringify(window.editorCalls)");
+        calls.Should().NotContain("SaveInlineDatabaseCell");
     }
 
     [Theory]
