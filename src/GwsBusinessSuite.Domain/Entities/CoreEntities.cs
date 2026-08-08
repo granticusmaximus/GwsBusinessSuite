@@ -131,6 +131,10 @@ public sealed class WikiPage : AuditableEntity
     // from NotionId so archive restores can reconcile records without being archived by the
     // live API connector when an export-only page is not visible to that integration.
     public string? NotionExportId { get; set; }
+    // Local, user-initiated soft-delete - distinct from NotionArchivedAt above, which reflects
+    // the *remote* Notion page's own archived state. A page can be trashed here without ever
+    // having touched Notion at all.
+    public DateTimeOffset? TrashedAt { get; set; }
     public ICollection<WikiPageRevision> Revisions { get; set; } = new List<WikiPageRevision>();
 }
 
@@ -400,6 +404,10 @@ public sealed class WikiDatabase : AuditableEntity
     public DateTimeOffset? NotionArchivedAt { get; set; }
     public DateTimeOffset? NotionLastEditedAt { get; set; }
     public string? NotionExportId { get; set; }
+    // Local, user-initiated soft-delete - see WikiPage.TrashedAt's own comment. Trashing a
+    // database does not touch its rows; they're hidden transitively because the database
+    // itself is excluded from normal loads, and reappear automatically on restore.
+    public DateTimeOffset? TrashedAt { get; set; }
     public ICollection<WikiDatabaseProperty> Properties { get; set; } = new List<WikiDatabaseProperty>();
     public ICollection<WikiDatabaseRow> Rows { get; set; } = new List<WikiDatabaseRow>();
     public ICollection<WikiDatabaseView> Views { get; set; } = new List<WikiDatabaseView>();
@@ -442,6 +450,10 @@ public sealed class WikiDatabaseRow : AuditableEntity
     public DateTimeOffset? NotionArchivedAt { get; set; }
     public DateTimeOffset? NotionLastEditedAt { get; set; }
     public string? NotionExportId { get; set; }
+    // Local, user-initiated soft-delete - see WikiPage.TrashedAt's own comment. Independent of
+    // the parent WikiDatabase's own TrashedAt, for trashing a single row without trashing the
+    // whole database.
+    public DateTimeOffset? TrashedAt { get; set; }
     public WikiDatabase? WikiDatabase { get; set; }
     public ICollection<WikiDatabaseRowRevision> Revisions { get; set; } = new List<WikiDatabaseRowRevision>();
 }

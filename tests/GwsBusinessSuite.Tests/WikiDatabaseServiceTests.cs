@@ -540,7 +540,7 @@ public sealed class WikiDatabaseServiceTests
             Values = values.ToDictionary(item => item.Key, item => item.Value)
         }, "u");
 
-        await service.DeleteRowAsync(teams.Id, team.Id, "u");
+        await service.DeleteRowPermanentlyAsync(teams.Id, team.Id, "u");
 
         var reloadedProject = (await service.GetDatabaseAsync(projects.Id))!.Rows.Single();
         WikiPropertyValues.GetMultiSelect(
@@ -885,7 +885,7 @@ public sealed class WikiDatabaseServiceTests
         var database = await service.CreateDatabaseAsync("Temp", null, "u");
         await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
 
-        await service.DeleteDatabaseAsync(database.Id, "u");
+        await service.DeleteDatabasePermanentlyAsync(database.Id, "u");
 
         (await db.WikiDatabaseProperties.Where(p => p.WikiDatabaseId == database.Id).ToListAsync()).Should().BeEmpty();
         (await db.WikiDatabaseRows.Where(r => r.WikiDatabaseId == database.Id).ToListAsync()).Should().BeEmpty();
@@ -908,7 +908,7 @@ public sealed class WikiDatabaseServiceTests
         }, "u");
         var reciprocalId = WikiDatabasePropertyConfig.Parse(relation).ReciprocalPropertyId!.Value;
 
-        await service.DeleteDatabaseAsync(projects.Id, "u");
+        await service.DeleteDatabasePermanentlyAsync(projects.Id, "u");
 
         (await db.WikiDatabaseProperties.AnyAsync(property => property.Id == reciprocalId)).Should().BeFalse();
     }
@@ -926,10 +926,121 @@ public sealed class WikiDatabaseServiceTests
         await access.SetPermissionAsync(database.Id, true, "viewer", SentinelAccessLevels.View, "u");
         await access.CreatePublicShareAsync(database.Id, true, null, false, null, "u");
 
-        await service.DeleteDatabaseAsync(database.Id, "u");
+        await service.DeleteDatabasePermanentlyAsync(database.Id, "u");
 
         (await db.SentinelResourcePermissions.Where(x => x.TargetId == database.Id).ToListAsync()).Should().BeEmpty();
         (await db.SentinelPublicShares.Where(x => x.TargetId == database.Id).ToListAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TrashDatabaseAsync_ShouldHideTheDatabaseButLeaveItsRowsPhysicallyIntact()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Temp", null, "u");
+        var row = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        await service.TrashDatabaseAsync(database.Id, "u");
+
+        (await service.ListDatabasesAsync()).Should().BeEmpty();
+        (await service.GetDatabaseAsync(database.Id)).Should().BeNull();
+        (await service.ListTrashedDatabasesAsync()).Should().ContainSingle(d => d.Id == database.Id);
+        // The row itself was never trashed - it's hidden transitively because its parent
+        // database is, and comes back automatically once the database is restored.
+        (await db.WikiDatabaseRows.SingleAsync(r => r.Id == row.Id)).TrashedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RestoreDatabaseAsync_ShouldBringBackTheDatabaseAndAllItsRows()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Temp", null, "u");
+        var row = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+        await service.TrashDatabaseAsync(database.Id, "u");
+
+        await service.RestoreDatabaseAsync(database.Id, "u");
+
+        var restored = await service.GetDatabaseAsync(database.Id);
+        restored.Should().NotBeNull();
+        restored!.Rows.Should().ContainSingle(r => r.Id == row.Id);
+        (await service.ListTrashedDatabasesAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RestoreDatabaseAsync_ShouldReparentToRoot_WhenTheOriginalParentPageIsStillTrashed()
+    {
+        await using var db = await CreateDbAsync();
+        var wikiService = new WikiService(db);
+        var databaseService = new WikiDatabaseService(db);
+        var page = await wikiService.SavePageAsync(new WikiPageEditorModel { Title = "Parent page" }, "u");
+        var database = await databaseService.CreateDatabaseAsync("Nested", page.Id, "u");
+        await wikiService.TrashPageAsync(page.Id, "u");
+
+        await databaseService.RestoreDatabaseAsync(database.Id, "u");
+
+        var restored = await databaseService.GetDatabaseAsync(database.Id);
+        restored.Should().NotBeNull();
+        restored!.ParentWikiPageId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SaveRowAsync_ShouldThrow_WhenEditingATrashedRow()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Temp", null, "u");
+        var row = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+        await service.TrashRowAsync(database.Id, row.Id, "u");
+
+        var act = () => service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor { Id = row.Id }, "u");
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Trash*");
+    }
+
+    [Fact]
+    public async Task TrashRowAsync_ShouldHideRow_AndRestoreRowAsync_ShouldBringItBack()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Temp", null, "u");
+        var row = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        await service.TrashRowAsync(database.Id, row.Id, "u");
+
+        (await service.GetDatabaseAsync(database.Id))!.Rows.Should().BeEmpty();
+        (await service.ListTrashedRowsAsync(database.Id)).Should().ContainSingle(r => r.Id == row.Id);
+
+        await service.RestoreRowAsync(database.Id, row.Id, "u");
+
+        (await service.GetDatabaseAsync(database.Id))!.Rows.Should().ContainSingle(r => r.Id == row.Id);
+        (await service.ListTrashedRowsAsync(database.Id)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TrashRowAsync_ShouldLeaveOtherRowsRelationReferencesIntact()
+    {
+        // Unlike DeleteRowPermanentlyAsync, trash is reversible - a row referencing this one
+        // via a Relation property must keep that reference while the row is only trashed.
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var targets = await service.CreateDatabaseAsync("Targets", null, "u");
+        var target = await service.SaveRowAsync(targets.Id, new WikiDatabaseRowEditor(), "u");
+        var sources = await service.CreateDatabaseAsync("Sources", null, "u");
+        var relation = await service.SavePropertyAsync(sources.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Target", Type = WikiDatabasePropertyTypes.Relation, RelatedDatabaseId = targets.Id
+        }, "u");
+        var values = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetMultiSelect(values, relation.Id, [target.Id.ToString()]);
+        var source = await service.SaveRowAsync(sources.Id,
+            new WikiDatabaseRowEditor { Values = values.ToDictionary(kv => kv.Key, kv => kv.Value) }, "u");
+
+        await service.TrashRowAsync(targets.Id, target.Id, "u");
+
+        var reloadedSource = (await db.WikiDatabaseRows.AsNoTracking().SingleAsync(r => r.Id == source.Id));
+        WikiPropertyValues.GetMultiSelect(WikiPropertyValues.ParseObject(reloadedSource.PropertyValuesJson), relation.Id)
+            .Should().Equal(target.Id.ToString());
     }
 
     [Fact]

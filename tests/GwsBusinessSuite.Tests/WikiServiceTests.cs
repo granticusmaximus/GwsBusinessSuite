@@ -48,7 +48,7 @@ public sealed class WikiServiceTests
         updated.UpdatedBy.Should().Be("grantwatson");
         updated.ContentVersion.Should().Be(2);
 
-        await service.DeletePageAsync(created.Id, "grantwatson");
+        await service.DeletePagePermanentlyAsync(created.Id, "grantwatson");
 
         (await service.ListPagesAsync()).Should().BeEmpty();
     }
@@ -339,7 +339,7 @@ public sealed class WikiServiceTests
             BlocksJson = ParagraphBlocks("Temporary content.")
         }, "grantwatson");
 
-        await service.DeletePageAsync(created.Id, "grantwatson");
+        await service.DeletePagePermanentlyAsync(created.Id, "grantwatson");
 
         (await db.WikiPageRevisions.Where(r => r.WikiPageId == created.Id).ToListAsync()).Should().BeEmpty();
     }
@@ -357,10 +357,102 @@ public sealed class WikiServiceTests
         await access.SetPermissionAsync(created.Id, false, "viewer", SentinelAccessLevels.View, "grantwatson");
         await access.CreatePublicShareAsync(created.Id, false, null, false, null, "grantwatson");
 
-        await service.DeletePageAsync(created.Id, "grantwatson");
+        await service.DeletePagePermanentlyAsync(created.Id, "grantwatson");
 
         (await db.SentinelResourcePermissions.Where(x => x.TargetId == created.Id).ToListAsync()).Should().BeEmpty();
         (await db.SentinelPublicShares.Where(x => x.TargetId == created.Id).ToListAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TrashPageAsync_ShouldRemoveFromDefaultListAndGet_ButKeepInTrash()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiService(db);
+        var page = await service.SavePageAsync(new WikiPageEditorModel { Title = "Runbook" }, "u");
+
+        await service.TrashPageAsync(page.Id, "u");
+
+        (await service.ListPagesAsync()).Should().BeEmpty();
+        (await service.ListPagesAsync(includeTrashed: true)).Should().ContainSingle(p => p.Id == page.Id);
+        (await service.GetPageAsync(page.Id)).Should().BeNull();
+        (await service.ListTrashedPagesAsync()).Should().ContainSingle(p => p.Id == page.Id);
+    }
+
+    [Fact]
+    public async Task TrashPageAsync_ShouldCascadeToDescendantPagesAndNestedDatabases()
+    {
+        // Regression guard: trashing a page must take its whole subtree with it - both
+        // descendant pages and any database parented anywhere in that subtree - so a trashed
+        // branch disappears together instead of leaving orphaned-looking children still
+        // visible in the live tree.
+        await using var db = await CreateDbAsync();
+        var service = new WikiService(db);
+        var databases = new WikiDatabaseService(db);
+        var parent = await service.SavePageAsync(new WikiPageEditorModel { Title = "Parent" }, "u");
+        var child = await service.SavePageAsync(
+            new WikiPageEditorModel { Title = "Child", ParentWikiPageId = parent.Id }, "u");
+        var grandchild = await service.SavePageAsync(
+            new WikiPageEditorModel { Title = "Grandchild", ParentWikiPageId = child.Id }, "u");
+        var nestedDatabase = await databases.CreateDatabaseAsync("Nested", child.Id, "u");
+        var unrelated = await service.SavePageAsync(new WikiPageEditorModel { Title = "Unrelated" }, "u");
+
+        await service.TrashPageAsync(parent.Id, "u");
+
+        var trashed = (await service.ListTrashedPagesAsync()).Select(p => p.Id).ToList();
+        trashed.Should().BeEquivalentTo([parent.Id, child.Id, grandchild.Id]);
+        (await service.GetPageAsync(unrelated.Id)).Should().NotBeNull();
+        (await databases.ListTrashedDatabasesAsync()).Should().ContainSingle(d => d.Id == nestedDatabase.Id);
+    }
+
+    [Fact]
+    public async Task RestorePageAsync_ShouldClearTrashedAt_AndReturnToDefaultList()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiService(db);
+        var page = await service.SavePageAsync(new WikiPageEditorModel { Title = "Runbook" }, "u");
+        await service.TrashPageAsync(page.Id, "u");
+
+        await service.RestorePageAsync(page.Id, "u");
+
+        (await service.ListPagesAsync()).Should().ContainSingle(p => p.Id == page.Id);
+        (await service.ListTrashedPagesAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RestorePageAsync_ShouldReparentToRoot_WhenTheOriginalParentIsStillTrashed()
+    {
+        // Restoring is per-item, not cascading - a page whose parent is still trashed must not
+        // come back invisible under a parent nobody can see.
+        await using var db = await CreateDbAsync();
+        var service = new WikiService(db);
+        var parent = await service.SavePageAsync(new WikiPageEditorModel { Title = "Parent" }, "u");
+        var child = await service.SavePageAsync(
+            new WikiPageEditorModel { Title = "Child", ParentWikiPageId = parent.Id }, "u");
+        await service.TrashPageAsync(parent.Id, "u");
+
+        await service.RestorePageAsync(child.Id, "u");
+
+        var restored = await service.GetPageAsync(child.Id);
+        restored.Should().NotBeNull();
+        restored!.ParentWikiPageId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SavePageAsync_ShouldThrow_WhenEditingATrashedPage()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiService(db);
+        var page = await service.SavePageAsync(new WikiPageEditorModel { Title = "Runbook" }, "u");
+        await service.TrashPageAsync(page.Id, "u");
+
+        var act = () => service.SavePageAsync(new WikiPageEditorModel
+        {
+            WikiPageId = page.Id,
+            ExpectedContentVersion = page.ContentVersion,
+            Title = "Edited while trashed"
+        }, "u");
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Trash*");
     }
 
     [Fact]

@@ -21,16 +21,35 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
     // than shared so each history table can be tuned separately later if needed.
     private const int MaxRevisionsPerRow = 20;
 
-    public async Task<IReadOnlyList<WikiDatabase>> ListDatabasesAsync(CancellationToken cancellationToken = default) =>
-        await dbContext.WikiDatabases.AsNoTracking().ToListAsync(cancellationToken);
+    public async Task<IReadOnlyList<WikiDatabase>> ListDatabasesAsync(bool includeTrashed = false, CancellationToken cancellationToken = default)
+    {
+        var query = dbContext.WikiDatabases.AsNoTracking();
+        if (!includeTrashed)
+        {
+            query = query.Where(database => database.TrashedAt == null);
+        }
+        return await query.ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<WikiDatabase>> ListTrashedDatabasesAsync(CancellationToken cancellationToken = default)
+    {
+        var databases = await dbContext.WikiDatabases
+            .AsNoTracking()
+            .Where(database => database.TrashedAt != null)
+            .ToListAsync(cancellationToken);
+
+        // SQLite can't translate ORDER BY on a DateTimeOffset column - order client-side
+        // after materializing (same pattern used throughout this app).
+        return databases.OrderByDescending(database => database.TrashedAt).ToList();
+    }
 
     public async Task<WikiDatabase?> GetDatabaseAsync(Guid wikiDatabaseId, CancellationToken cancellationToken = default)
     {
         var database = await dbContext.WikiDatabases.AsNoTracking()
             .Include(item => item.Properties)
-            .Include(item => item.Rows)
+            .Include(item => item.Rows.Where(row => row.TrashedAt == null))
             .Include(item => item.Views)
-            .FirstOrDefaultAsync(item => item.Id == wikiDatabaseId, cancellationToken);
+            .FirstOrDefaultAsync(item => item.Id == wikiDatabaseId && item.TrashedAt == null, cancellationToken);
         if (database is null)
         {
             return null;
@@ -58,9 +77,9 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         while (frontier.Count > 0)
         {
             var batch = await dbContext.WikiDatabases.AsNoTracking()
-                .Where(item => frontier.Contains(item.Id))
+                .Where(item => frontier.Contains(item.Id) && item.TrashedAt == null)
                 .Include(item => item.Properties)
-                .Include(item => item.Rows)
+                .Include(item => item.Rows.Where(row => row.TrashedAt == null))
                 .ToListAsync(cancellationToken);
             foreach (var related in batch)
             {
@@ -482,7 +501,50 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         return database;
     }
 
-    public async Task DeleteDatabaseAsync(Guid wikiDatabaseId, string performedBy, CancellationToken cancellationToken = default)
+    public async Task TrashDatabaseAsync(Guid wikiDatabaseId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var database = await dbContext.WikiDatabases.FirstOrDefaultAsync(item => item.Id == wikiDatabaseId, cancellationToken);
+        if (database is null || database.TrashedAt is not null)
+        {
+            return;
+        }
+
+        // Deliberately does not touch rows, reciprocal relation properties, or Sentinel access
+        // rows the way permanent delete does below - trash is reversible, so nothing else in
+        // the schema should be disturbed by it.
+        database.TrashedAt = DateTimeOffset.UtcNow;
+        database.UpdatedAt = database.TrashedAt;
+        database.UpdatedBy = performedBy;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task RestoreDatabaseAsync(Guid wikiDatabaseId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var database = await dbContext.WikiDatabases.FirstOrDefaultAsync(item => item.Id == wikiDatabaseId, cancellationToken);
+        if (database is null || database.TrashedAt is null)
+        {
+            return;
+        }
+
+        // Same reparent-to-root safety net as WikiService.RestorePageAsync, so a database
+        // whose parent page is still trashed (or gone) doesn't come back invisible.
+        if (database.ParentWikiPageId is { } parentId)
+        {
+            var parentIsAvailable = await dbContext.WikiPages.AsNoTracking()
+                .AnyAsync(item => item.Id == parentId && item.TrashedAt == null, cancellationToken);
+            if (!parentIsAvailable)
+            {
+                database.ParentWikiPageId = null;
+            }
+        }
+
+        database.TrashedAt = null;
+        database.UpdatedAt = DateTimeOffset.UtcNow;
+        database.UpdatedBy = performedBy;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task DeleteDatabasePermanentlyAsync(Guid wikiDatabaseId, string performedBy, CancellationToken cancellationToken = default)
     {
         var database = await dbContext.WikiDatabases.FirstOrDefaultAsync(item => item.Id == wikiDatabaseId, cancellationToken);
         if (database is null)
@@ -834,6 +896,12 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
             ? await dbContext.WikiDatabaseRows.FirstOrDefaultAsync(item => item.Id == rowId && item.WikiDatabaseId == wikiDatabaseId, cancellationToken)
                 ?? throw new KeyNotFoundException("The row no longer exists.")
             : null;
+        if (row is { TrashedAt: not null })
+        {
+            // A stale editor tab (opened before the row was trashed elsewhere) shouldn't be
+            // able to silently keep editing a trashed row - restore it first.
+            throw new InvalidOperationException("This row has been moved to Trash. Restore it before saving changes.");
+        }
         var previousValues = row is null
             ? new JsonObject()
             : WikiPropertyValues.ParseObject(row.PropertyValuesJson);
@@ -1050,7 +1118,49 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         }
     }
 
-    public async Task DeleteRowAsync(Guid wikiDatabaseId, Guid rowId, string performedBy, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<WikiDatabaseRow>> ListTrashedRowsAsync(Guid wikiDatabaseId, CancellationToken cancellationToken = default)
+    {
+        var rows = await dbContext.WikiDatabaseRows
+            .AsNoTracking()
+            .Where(row => row.WikiDatabaseId == wikiDatabaseId && row.TrashedAt != null)
+            .ToListAsync(cancellationToken);
+
+        // SQLite can't translate ORDER BY on a DateTimeOffset column - order client-side
+        // after materializing (same pattern used throughout this app).
+        return rows.OrderByDescending(row => row.TrashedAt).ToList();
+    }
+
+    public async Task TrashRowAsync(Guid wikiDatabaseId, Guid rowId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var row = await dbContext.WikiDatabaseRows.FirstOrDefaultAsync(item => item.Id == rowId && item.WikiDatabaseId == wikiDatabaseId, cancellationToken);
+        if (row is null || row.TrashedAt is not null)
+        {
+            return;
+        }
+
+        // Deliberately leaves other rows' Relation references to this row alone - trash is
+        // reversible, unlike DeleteRowPermanentlyAsync below, which does clean those up.
+        row.TrashedAt = DateTimeOffset.UtcNow;
+        row.UpdatedAt = row.TrashedAt;
+        row.UpdatedBy = performedBy;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task RestoreRowAsync(Guid wikiDatabaseId, Guid rowId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var row = await dbContext.WikiDatabaseRows.FirstOrDefaultAsync(item => item.Id == rowId && item.WikiDatabaseId == wikiDatabaseId, cancellationToken);
+        if (row is null || row.TrashedAt is null)
+        {
+            return;
+        }
+
+        row.TrashedAt = null;
+        row.UpdatedAt = DateTimeOffset.UtcNow;
+        row.UpdatedBy = performedBy;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task DeleteRowPermanentlyAsync(Guid wikiDatabaseId, Guid rowId, string performedBy, CancellationToken cancellationToken = default)
     {
         var row = await dbContext.WikiDatabaseRows.FirstOrDefaultAsync(item => item.Id == rowId && item.WikiDatabaseId == wikiDatabaseId, cancellationToken);
         if (row is null)

@@ -258,6 +258,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<WikiDatabase>().HasIndex(x => x.NotionId);
         modelBuilder.Entity<WikiDatabaseRow>().HasIndex(x => x.NotionId);
         modelBuilder.Entity<WikiDatabaseProperty>().HasIndex(x => x.NotionId);
+        modelBuilder.Entity<WikiPage>().HasIndex(x => x.TrashedAt);
+        modelBuilder.Entity<WikiDatabase>().HasIndex(x => x.TrashedAt);
+        modelBuilder.Entity<WikiDatabaseRow>().HasIndex(x => x.TrashedAt);
         modelBuilder.Entity<CmsSite>().HasIndex(x => x.Slug).IsUnique();
         // Slugs are unique per parent, not per site — /services/pricing and
         // /products/pricing can coexist since their full paths differ.

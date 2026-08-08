@@ -14,11 +14,14 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
 {
     private const int MaxRevisionsPerPage = 20;
 
-    public async Task<IReadOnlyList<WikiPage>> ListPagesAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<WikiPage>> ListPagesAsync(bool includeTrashed = false, CancellationToken cancellationToken = default)
     {
-        var pages = await dbContext.WikiPages
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
+        var query = dbContext.WikiPages.AsNoTracking();
+        if (!includeTrashed)
+        {
+            query = query.Where(page => page.TrashedAt == null);
+        }
+        var pages = await query.ToListAsync(cancellationToken);
 
         return pages
             .OrderBy(page => page.ParentWikiPageId.HasValue)
@@ -27,11 +30,26 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
             .ToList();
     }
 
+    public async Task<IReadOnlyList<WikiPage>> ListTrashedPagesAsync(CancellationToken cancellationToken = default)
+    {
+        var pages = await dbContext.WikiPages
+            .AsNoTracking()
+            .Where(page => page.TrashedAt != null)
+            .ToListAsync(cancellationToken);
+
+        // SQLite can't translate ORDER BY on a DateTimeOffset column - order client-side
+        // after materializing (same pattern used throughout this app).
+        return pages.OrderByDescending(page => page.TrashedAt).ToList();
+    }
+
+    // Excludes trashed pages - opening a stale link/tab for a page that's since been trashed
+    // should behave as "not found", not silently show/operate on it (same posture as
+    // CrmService.GetContactAsync).
     public async Task<WikiPage?> GetPageAsync(Guid wikiPageId, CancellationToken cancellationToken = default)
     {
         return await dbContext.WikiPages
             .AsNoTracking()
-            .FirstOrDefaultAsync(page => page.Id == wikiPageId, cancellationToken);
+            .FirstOrDefaultAsync(page => page.Id == wikiPageId && page.TrashedAt == null, cancellationToken);
     }
 
     public async Task<WikiPage> SavePageAsync(WikiPageEditorModel editor, string performedBy, CancellationToken cancellationToken = default)
@@ -55,6 +73,12 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
             // Reload before comparing so an entity tracked by an earlier save cannot conceal a
             // change committed by another circuit.
             await ReloadAsync(page, cancellationToken);
+            if (page.TrashedAt is not null)
+            {
+                // A stale editor tab (opened before the page was trashed elsewhere) shouldn't
+                // be able to silently keep editing a trashed page - restore it first.
+                throw new InvalidOperationException("This Sentinel page has been moved to Trash. Restore it before saving changes.");
+            }
             previousBlocksJson = page.BlocksJson;
             if (page.ContentVersion != editor.ExpectedContentVersion)
             {
@@ -184,6 +208,7 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
     {
         var pages = await dbContext.WikiPages
             .AsNoTracking()
+            .Where(page => page.TrashedAt == null)
             .ToListAsync(cancellationToken);
         var source = pages.FirstOrDefault(page => page.Id == wikiPageId)
             ?? throw new InvalidOperationException("The Sentinel page no longer exists.");
@@ -230,7 +255,75 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
         }
     }
 
-    public async Task DeletePageAsync(Guid wikiPageId, string performedBy, CancellationToken cancellationToken = default)
+    public async Task TrashPageAsync(Guid wikiPageId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var page = await dbContext.WikiPages.FirstOrDefaultAsync(item => item.Id == wikiPageId, cancellationToken);
+        if (page is null || page.TrashedAt is not null)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var descendantPageIds = await GetDescendantPageIdsAsync(wikiPageId, cancellationToken);
+        var subtreePageIds = new HashSet<Guid>(descendantPageIds) { wikiPageId };
+
+        // Trashing a page takes its whole subtree with it - both the descendant pages and any
+        // database parented anywhere in that subtree - so a trashed branch disappears together
+        // instead of leaving orphaned-looking children still visible in the live tree.
+        var pagesToTrash = await dbContext.WikiPages
+            .Where(item => subtreePageIds.Contains(item.Id) && item.TrashedAt == null)
+            .ToListAsync(cancellationToken);
+        foreach (var item in pagesToTrash)
+        {
+            item.TrashedAt = now;
+            item.UpdatedAt = now;
+            item.UpdatedBy = performedBy;
+        }
+
+        var databasesToTrash = await dbContext.WikiDatabases
+            .Where(item => item.ParentWikiPageId != null
+                && subtreePageIds.Contains(item.ParentWikiPageId!.Value)
+                && item.TrashedAt == null)
+            .ToListAsync(cancellationToken);
+        foreach (var item in databasesToTrash)
+        {
+            item.TrashedAt = now;
+            item.UpdatedAt = now;
+            item.UpdatedBy = performedBy;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task RestorePageAsync(Guid wikiPageId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var page = await dbContext.WikiPages.FirstOrDefaultAsync(item => item.Id == wikiPageId, cancellationToken);
+        if (page is null || page.TrashedAt is null)
+        {
+            return;
+        }
+
+        // Restoring is per-item, not cascading - a page's (also-trashed) descendants stay
+        // trashed until restored individually. If this page's original parent is itself still
+        // trashed (or gone), reparent to the workspace root instead of coming back invisible
+        // under a parent nobody can see.
+        if (page.ParentWikiPageId is { } parentId)
+        {
+            var parentIsAvailable = await dbContext.WikiPages.AsNoTracking()
+                .AnyAsync(item => item.Id == parentId && item.TrashedAt == null, cancellationToken);
+            if (!parentIsAvailable)
+            {
+                page.ParentWikiPageId = null;
+            }
+        }
+
+        page.TrashedAt = null;
+        page.UpdatedAt = DateTimeOffset.UtcNow;
+        page.UpdatedBy = performedBy;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task DeletePagePermanentlyAsync(Guid wikiPageId, string performedBy, CancellationToken cancellationToken = default)
     {
         var page = await dbContext.WikiPages.FirstOrDefaultAsync(item => item.Id == wikiPageId, cancellationToken);
         if (page is null)
@@ -246,6 +339,37 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
 
         dbContext.WikiPages.Remove(page);
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<HashSet<Guid>> GetDescendantPageIdsAsync(Guid rootPageId, CancellationToken cancellationToken)
+    {
+        var childIdsByParent = (await dbContext.WikiPages.AsNoTracking()
+                .Where(page => page.ParentWikiPageId != null)
+                .Select(page => new { page.Id, page.ParentWikiPageId })
+                .ToListAsync(cancellationToken))
+            .GroupBy(item => item.ParentWikiPageId!.Value)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.Id).ToList());
+
+        var descendants = new HashSet<Guid>();
+        var frontier = new Queue<Guid>();
+        frontier.Enqueue(rootPageId);
+        var guard = 0;
+        while (frontier.Count > 0 && guard++ < 10_000)
+        {
+            if (!childIdsByParent.TryGetValue(frontier.Dequeue(), out var children))
+            {
+                continue;
+            }
+            foreach (var childId in children)
+            {
+                if (descendants.Add(childId))
+                {
+                    frontier.Enqueue(childId);
+                }
+            }
+        }
+
+        return descendants;
     }
 
     private async Task RemoveSentinelAccessRowsAsync(Guid targetId, bool isDatabase, CancellationToken cancellationToken)
@@ -563,8 +687,11 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
     private async Task<string> GetUniqueSlugAsync(string requestedSlug, Guid currentPageId, CancellationToken cancellationToken)
     {
         var baseSlug = string.IsNullOrWhiteSpace(requestedSlug) ? "wiki-page" : requestedSlug;
+        // A trashed page's slug is available for reuse - it's effectively gone from the live
+        // workspace. If the original is later restored while a new page now holds its old slug,
+        // the restored page keeps whatever slug it already has rather than re-colliding.
         var slugs = await dbContext.WikiPages
-            .Where(page => page.Id != currentPageId)
+            .Where(page => page.Id != currentPageId && page.TrashedAt == null)
             .Select(page => page.Slug)
             .ToListAsync(cancellationToken);
 

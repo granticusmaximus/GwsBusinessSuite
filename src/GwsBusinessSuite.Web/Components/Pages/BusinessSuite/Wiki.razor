@@ -110,6 +110,15 @@
                     <button class="btn btn-sm btn-outline-secondary" @onclick="CreateNewDatabaseAsync" disabled="@IsBusy" title="New database">
                         <i class="bi bi-grid-3x3-gap-fill"></i>
                     </button>
+                    <button class="btn btn-sm btn-outline-secondary position-relative" @onclick="OpenTrashModal" disabled="@IsBusy" title="Trash">
+                        <i class="bi bi-trash3"></i>
+                        @if (TrashedPages.Count + TrashedDatabases.Count > 0)
+                        {
+                            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill text-bg-secondary" style="font-size:.55rem;">
+                                @(TrashedPages.Count + TrashedDatabases.Count)
+                            </span>
+                        }
+                    </button>
                 </div>
             </div>
             <div class="sentinel-nav-search">
@@ -317,7 +326,7 @@
                                                     <i class="bi bi-copy me-2"></i>Duplicate
                                                 </button>
                                                 <button type="button" class="dropdown-item text-danger" @onclick="() => DeleteNodeAsync(node)">
-                                                    <i class="bi bi-trash me-2"></i>Delete
+                                                    <i class="bi bi-trash me-2"></i>Move to Trash
                                                 </button>
                                             </div>
                                         }
@@ -524,8 +533,8 @@
                             <i class="bi bi-copy me-1"></i>Duplicate
                         </button>
                         <button type="button" class="btn btn-outline-danger" @onclick="DeleteSelectedPageAsync"
-                                disabled="@(IsBusy || !SelectedPageId.HasValue)">
-                            Delete
+                                disabled="@(IsBusy || !SelectedPageId.HasValue)" title="Move to Trash">
+                            <i class="bi bi-trash3 me-1"></i>Trash
                         </button>
                     </div>
                 </div>
@@ -1206,6 +1215,71 @@
     </div>
 }
 
+@if (ShowTrashModal)
+{
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Trash</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseTrashModal"></button>
+                </div>
+                <div class="modal-body">
+                    @if (TrashedPages.Count == 0 && TrashedDatabases.Count == 0)
+                    {
+                        <p class="text-secondary mb-0">Trash is empty.</p>
+                    }
+                    else
+                    {
+                        <p class="small text-secondary">Trashing a page also trashes its sub-pages and any
+                            databases nested under it. Restoring one item does not automatically restore the
+                            rest of that branch.</p>
+                        @if (TrashedPages.Count > 0)
+                        {
+                            <h6 class="text-secondary text-uppercase small mb-2">Pages (@TrashedPages.Count)</h6>
+                            <div class="list-group list-group-flush mb-3">
+                                @foreach (var trashedPage in TrashedPages)
+                                {
+                                    <div class="list-group-item d-flex justify-content-between align-items-start gap-2">
+                                        <div>
+                                            <div class="fw-semibold">@(string.IsNullOrWhiteSpace(trashedPage.Icon) ? "📄" : trashedPage.Icon) @trashedPage.Title</div>
+                                            <div class="small text-secondary">trashed @trashedPage.TrashedAt?.ToLocalTime().ToString("g")</div>
+                                        </div>
+                                        <div class="d-flex gap-1 flex-shrink-0">
+                                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => RestoreTrashedPageAsync(trashedPage.Id)" disabled="@IsBusy">Restore</button>
+                                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteTrashedPagePermanentlyAsync(trashedPage.Id)" disabled="@IsBusy">Delete Permanently</button>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        @if (TrashedDatabases.Count > 0)
+                        {
+                            <h6 class="text-secondary text-uppercase small mb-2">Databases (@TrashedDatabases.Count)</h6>
+                            <div class="list-group list-group-flush">
+                                @foreach (var database in TrashedDatabases)
+                                {
+                                    <div class="list-group-item d-flex justify-content-between align-items-start gap-2">
+                                        <div>
+                                            <div class="fw-semibold">@(string.IsNullOrWhiteSpace(database.Icon) ? "🗄️" : database.Icon) @database.Title</div>
+                                            <div class="small text-secondary">trashed @database.TrashedAt?.ToLocalTime().ToString("g")</div>
+                                        </div>
+                                        <div class="d-flex gap-1 flex-shrink-0">
+                                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => RestoreTrashedDatabaseAsync(database.Id)" disabled="@IsBusy">Restore</button>
+                                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteTrashedDatabasePermanentlyAsync(database.Id)" disabled="@IsBusy">Delete Permanently</button>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+        <div class="modal-backdrop show" style="z-index:-1"></div>
+    </div>
+}
+
 @code {
     private const int MaxHistoryDisplay = 20;
 
@@ -1223,6 +1297,9 @@
 
     private List<WikiPage> WikiPages { get; set; } = new();
     private List<WikiDatabase> WikiDatabases { get; set; } = new();
+    private List<WikiPage> TrashedPages { get; set; } = new();
+    private List<WikiDatabase> TrashedDatabases { get; set; } = new();
+    private bool ShowTrashModal { get; set; }
     private WikiPageEditorModel Editor { get; set; } = new();
     private Guid? SelectedPageId { get; set; }
     private Guid? SelectedDatabaseId { get; set; }
@@ -2406,6 +2483,8 @@
         {
             WikiPages = (await WikiService.ListPagesAsync()).ToList();
             WikiDatabases = (await WikiDatabaseService.ListDatabasesAsync()).ToList();
+            TrashedPages = (await WikiService.ListTrashedPagesAsync()).ToList();
+            TrashedDatabases = (await WikiDatabaseService.ListTrashedDatabasesAsync()).ToList();
             if (selectFirstPage && WikiPages.Count > 0)
             {
                 await OpenPageAsync(WikiPages[0].Id);
@@ -2416,6 +2495,54 @@
             Logger.LogError(ex, "Unable to load the wiki page/database tree.");
             ErrorMessage = $"Unable to load pages and databases. {ex.Message}";
         }
+    }
+
+    private void OpenTrashModal() => ShowTrashModal = true;
+    private void CloseTrashModal() => ShowTrashModal = false;
+
+    private async Task RestoreTrashedPageAsync(Guid wikiPageId) => await Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        await WikiService.RestorePageAsync(wikiPageId, user);
+        StatusMessage = "Restored from Trash.";
+        await LoadTreeAsync(selectFirstPage: false);
+    });
+
+    private async Task DeleteTrashedPagePermanentlyAsync(Guid wikiPageId)
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", "Permanently delete this page? This cannot be undone.");
+        if (!confirmed) return;
+
+        await Work(async () =>
+        {
+            var user = await CurrentUserNameAsync();
+            await WikiService.DeletePagePermanentlyAsync(wikiPageId, user);
+            StatusMessage = "Permanently deleted.";
+            await LoadTreeAsync(selectFirstPage: false);
+        });
+    }
+
+    private async Task RestoreTrashedDatabaseAsync(Guid wikiDatabaseId) => await Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        await WikiDatabaseService.RestoreDatabaseAsync(wikiDatabaseId, user);
+        StatusMessage = "Restored from Trash.";
+        await LoadTreeAsync(selectFirstPage: false);
+    });
+
+    private async Task DeleteTrashedDatabasePermanentlyAsync(Guid wikiDatabaseId)
+    {
+        var confirmed = await JS.InvokeAsync<bool>(
+            "confirm", "Permanently delete this database and all its rows? This cannot be undone.");
+        if (!confirmed) return;
+
+        await Work(async () =>
+        {
+            var user = await CurrentUserNameAsync();
+            await WikiDatabaseService.DeleteDatabasePermanentlyAsync(wikiDatabaseId, user);
+            StatusMessage = "Permanently deleted.";
+            await LoadTreeAsync(selectFirstPage: false);
+        });
     }
 
     private void CreateNewPage()
@@ -2737,16 +2864,16 @@
         try
         {
             var user = await CurrentUserNameAsync();
-            await WikiService.DeletePageAsync(wikiPageId, user);
-            StatusMessage = "Sentinel page deleted.";
+            await WikiService.TrashPageAsync(wikiPageId, user);
+            StatusMessage = "Sentinel page moved to Trash.";
             CreateNewPage();
             await LoadTreeAsync(selectFirstPage: false);
             await LoadWorkspaceNavigationAsync();
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Unable to delete wiki page {WikiPageId}.", wikiPageId);
-            ErrorMessage = $"Unable to delete Sentinel page. {ex.Message}";
+            Logger.LogError(ex, "Unable to trash wiki page {WikiPageId}.", wikiPageId);
+            ErrorMessage = $"Unable to move Sentinel page to Trash. {ex.Message}";
         }
         finally
         {
@@ -2884,8 +3011,8 @@
         var confirmed = await JS.InvokeAsync<bool>(
             "confirm",
             node.IsDatabase
-                ? "Delete this database and all its rows? This cannot be undone."
-                : "Delete this page? This cannot be undone.");
+                ? "Move this database and all its rows to Trash?"
+                : "Move this page (and its sub-pages) to Trash?");
         if (!confirmed)
         {
             return;
@@ -2896,7 +3023,7 @@
             var user = await CurrentUserNameAsync();
             if (node.IsDatabase)
             {
-                await WikiDatabaseService.DeleteDatabaseAsync(node.Id, user);
+                await WikiDatabaseService.TrashDatabaseAsync(node.Id, user);
                 if (SelectedDatabaseId == node.Id)
                 {
                     SelectedDatabaseId = null;
@@ -2904,13 +3031,13 @@
             }
             else
             {
-                await WikiService.DeletePageAsync(node.Id, user);
+                await WikiService.TrashPageAsync(node.Id, user);
                 if (SelectedPageId == node.Id)
                 {
                     CreateNewPage();
                 }
             }
-            StatusMessage = $"Deleted '{node.Title}'.";
+            StatusMessage = $"Moved '{node.Title}' to Trash.";
             await LoadTreeAsync(selectFirstPage: false);
             await LoadWorkspaceNavigationAsync();
         });

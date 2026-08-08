@@ -78,7 +78,7 @@ public sealed class SentinelTemplateServiceTests
         var template = await fixture.TemplateService.CreateFromPageAsync(
             source.Id, "Incident retrospective", "Owner");
 
-        await fixture.WikiService.DeletePageAsync(source.Id, "Owner");
+        await fixture.WikiService.DeletePagePermanentlyAsync(source.Id, "Owner");
         var created = await fixture.TemplateService.CreatePageAsync(template.Id, null, "Member");
         var createdBlock = WikiBlockJson.ParseBlocks(created.BlocksJson).Single();
 
@@ -210,7 +210,7 @@ public sealed class SentinelTemplateServiceTests
 
         var template = await fixture.TemplateService.CreateFromDatabaseAsync(
             source.Id, "Launch database", "Owner");
-        await fixture.DatabaseService.DeleteDatabaseAsync(source.Id, "Owner");
+        await fixture.DatabaseService.DeleteDatabasePermanentlyAsync(source.Id, "Owner");
         var created = await fixture.TemplateService.CreateDatabaseAsync(template.Id, null, "Member");
         var reloaded = await fixture.DatabaseService.GetDatabaseAsync(created.Id);
 

@@ -31,8 +31,11 @@ else
                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _showProperties = !_showProperties" disabled="@IsBusy">
                     <i class="bi bi-list-columns-reverse me-1"></i>Properties
                 </button>
-                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="DeleteDatabaseAsync" disabled="@IsBusy">
-                    <i class="bi bi-trash me-1"></i>Delete
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ToggleTrashedRowsAsync" disabled="@IsBusy" title="Trashed rows">
+                    <i class="bi bi-trash3 me-1"></i>Trash@(TrashedRows.Count > 0 ? $" ({TrashedRows.Count})" : "")
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="DeleteDatabaseAsync" disabled="@IsBusy" title="Move to Trash">
+                    <i class="bi bi-trash me-1"></i>Trash Database
                 </button>
             </div>
         </div>
@@ -240,6 +243,33 @@ else
                             </button>
                         </div>
                     </div>
+                </div>
+            }
+
+            @if (_showTrashedRows)
+            {
+                <div class="wiki-db-property-editor border rounded-3 p-3 mb-3">
+                    <div class="fw-semibold small mb-2">Trashed rows</div>
+                    @if (TrashedRows.Count == 0)
+                    {
+                        <p class="small text-secondary mb-0">No trashed rows.</p>
+                    }
+                    else
+                    {
+                        @foreach (var trashedRow in TrashedRows)
+                        {
+                            <div class="d-flex justify-content-between align-items-start gap-2 py-1 border-bottom">
+                                <div>
+                                    <div class="fw-semibold small">@GetDatabaseRowTitle(Database, trashedRow)</div>
+                                    <div class="small text-secondary">trashed @trashedRow.TrashedAt?.ToLocalTime().ToString("g")</div>
+                                </div>
+                                <div class="d-flex gap-1 flex-shrink-0">
+                                    <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => RestoreTrashedRowAsync(trashedRow.Id)" disabled="@IsBusy">Restore</button>
+                                    <button type="button" class="btn btn-xs btn-outline-danger" @onclick="() => DeleteTrashedRowPermanentlyAsync(trashedRow.Id)" disabled="@IsBusy">Delete Permanently</button>
+                                </div>
+                            </div>
+                        }
+                    }
                 </div>
             }
 
@@ -772,7 +802,7 @@ else
                                     <td>
                                         <div class="d-flex align-items-center gap-2">
                                             <button type="button" class="btn btn-xs btn-link p-0" @onclick="() => OpenRow(row)" disabled="@IsBusy">Open</button>
-                                            <button type="button" class="btn btn-xs btn-link text-danger p-0" @onclick="() => DeleteRowAsync(row)" disabled="@IsBusy">
+                                            <button type="button" class="btn btn-xs btn-link text-danger p-0" @onclick="() => TrashRowAsync(row)" disabled="@IsBusy" title="Move to Trash">
                                                 <i class="bi bi-x-lg"></i>
                                             </button>
                                         </div>
@@ -871,6 +901,8 @@ else
     private bool IsBusy;
     private string ErrorMessage = string.Empty;
     private bool _showProperties;
+    private bool _showTrashedRows;
+    private List<WikiDatabaseRow> TrashedRows { get; set; } = new();
     private string _schemaPushMessage = string.Empty;
     private bool _schemaPushSucceeded;
     private Guid? _activeViewId;
@@ -993,6 +1025,7 @@ else
                 _filterValue = SelectedFilterProperty?.Type == WikiDatabasePropertyTypes.Select
                     ? WikiDatabasePropertyConfig.GetOptions(SelectedFilterProperty).FirstOrDefault()?.Id ?? string.Empty
                     : string.Empty;
+                TrashedRows = (await WikiDatabaseService.ListTrashedRowsAsync(WikiDatabaseId)).ToList();
             }
         }
         catch (Exception ex)
@@ -1043,7 +1076,7 @@ else
 
     private async Task DeleteDatabaseAsync()
     {
-        var confirmed = await JS.InvokeAsync<bool>("confirm", "Delete this database and all its rows? This cannot be undone.");
+        var confirmed = await JS.InvokeAsync<bool>("confirm", "Move this database and all its rows to Trash?");
         if (!confirmed)
         {
             return;
@@ -1052,8 +1085,37 @@ else
         await Work(async () =>
         {
             var user = await CurrentUserNameAsync();
-            await WikiDatabaseService.DeleteDatabaseAsync(WikiDatabaseId, user);
+            await WikiDatabaseService.TrashDatabaseAsync(WikiDatabaseId, user);
             await OnChanged.InvokeAsync();
+        });
+    }
+
+    private async Task ToggleTrashedRowsAsync()
+    {
+        _showTrashedRows = !_showTrashedRows;
+        if (_showTrashedRows)
+        {
+            TrashedRows = (await WikiDatabaseService.ListTrashedRowsAsync(WikiDatabaseId)).ToList();
+        }
+    }
+
+    private async Task RestoreTrashedRowAsync(Guid rowId) => await Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        await WikiDatabaseService.RestoreRowAsync(WikiDatabaseId, rowId, user);
+        await ReloadAsync();
+    });
+
+    private async Task DeleteTrashedRowPermanentlyAsync(Guid rowId)
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", "Permanently delete this row? This cannot be undone.");
+        if (!confirmed) return;
+
+        await Work(async () =>
+        {
+            var user = await CurrentUserNameAsync();
+            await WikiDatabaseService.DeleteRowPermanentlyAsync(WikiDatabaseId, rowId, user);
+            await ReloadAsync();
         });
     }
 
@@ -1341,10 +1403,10 @@ else
         await ReloadAsync();
     });
 
-    private async Task DeleteRowAsync(WikiDatabaseRow row) => await Work(async () =>
+    private async Task TrashRowAsync(WikiDatabaseRow row) => await Work(async () =>
     {
         var user = await CurrentUserNameAsync();
-        await WikiDatabaseService.DeleteRowAsync(WikiDatabaseId, row.Id, user);
+        await WikiDatabaseService.TrashRowAsync(WikiDatabaseId, row.Id, user);
         await ReloadAsync();
     });
 
