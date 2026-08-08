@@ -4,6 +4,7 @@ using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -174,6 +175,34 @@ public sealed class GlobalBlockResolverTests
         canonical.Columns[0].Widgets[0].Props.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task ResolveAsync_ShouldWarnWhenAReferencedGlobalBlockNoLongerExists()
+    {
+        // Regression guard: a deleted/missing global block used to fail silently - the page
+        // kept rendering its last-cached content with zero signal to the editor that the
+        // linked block was gone. Graceful degradation is still correct; the warning just makes
+        // it discoverable.
+        await using var db = await CreateDbAsync();
+        var cms = new CmsBuilderService(db);
+        var globals = new GlobalBlockService(db);
+        var logger = new RecordingLogger<GlobalBlockResolver>();
+        var resolver = new GlobalBlockResolver(globals, logger);
+        var site = await cms.SaveSiteAsync(new CmsSiteEditorModel { Name = "Globals" });
+        var missingBlockId = Guid.NewGuid();
+
+        var layout = new PageLayout
+        {
+            Sections =
+            [
+                new LayoutSection { Id = "placement-a", GlobalBlockId = missingBlockId }
+            ]
+        };
+
+        await resolver.ResolveAsync(site.Id, layout);
+
+        logger.Warnings.Should().ContainSingle(w => w.Contains(missingBlockId.ToString()));
+    }
+
     private static async Task<ApplicationDbContext> CreateDbAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -182,5 +211,24 @@ public sealed class GlobalBlockResolverTests
         var db = new ApplicationDbContext(options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<string> Warnings { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Warning)
+            {
+                Warnings.Add(formatter(state, exception));
+            }
+        }
     }
 }

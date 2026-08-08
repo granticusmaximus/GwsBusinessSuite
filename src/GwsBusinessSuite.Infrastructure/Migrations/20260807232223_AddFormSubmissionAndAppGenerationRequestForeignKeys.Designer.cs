@@ -3,6 +3,7 @@ using System;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GwsBusinessSuite.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260807232223_AddFormSubmissionAndAppGenerationRequestForeignKeys")]
+    partial class AddFormSubmissionAndAppGenerationRequestForeignKeys
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
@@ -3851,9 +3854,6 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("LastSeenAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<long>("LastSeenAtUnixSeconds")
-                        .HasColumnType("INTEGER");
-
                     b.Property<DateTimeOffset?>("UpdatedAt")
                         .HasColumnType("TEXT");
 
@@ -3869,9 +3869,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("LastSeenAtUnixSeconds");
-
-                    b.HasIndex("WikiPageId", "LastSeenAtUnixSeconds");
+                    b.HasIndex("WikiPageId", "LastSeenAt");
 
                     b.ToTable("SentinelPresenceLeases");
                 });

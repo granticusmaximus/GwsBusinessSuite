@@ -105,7 +105,7 @@ else
                 }
                 else
                 {
-                    <div class="inspector-heading"><span>Node settings</span><button class="btn btn-sm btn-light" @onclick="ClearSelection"><i class="bi bi-x-lg"></i></button></div>
+                    <div class="inspector-heading"><span>Node settings</span><button class="btn btn-sm btn-light" title="Close node settings" aria-label="Close node settings" @onclick="ClearSelection"><i class="bi bi-x-lg"></i></button></div>
                     <label class="form-label small fw-semibold">Name</label>
                     <input class="form-control form-control-sm mb-3" @bind="_nodeName" />
                     <label class="form-label small fw-semibold">Parameters (JSON)</label>

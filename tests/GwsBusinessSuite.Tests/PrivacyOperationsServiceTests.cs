@@ -37,6 +37,78 @@ public sealed class PrivacyOperationsServiceTests
     }
 
     [Fact]
+    public async Task ErasureRequest_ShouldRefuseFulfillmentUntilDataDeletionIsExplicitlyConfirmed()
+    {
+        // Regression guard: this codebase has no real cascading-deletion implementation for
+        // Erasure requests - deletion happens manually, off-platform. Without this gate, a
+        // status of Fulfilled was assertable from the same generic dropdown used for
+        // Access/Correction/Restriction, letting the compliance record claim data was erased
+        // when nothing had actually been deleted. Untested until now.
+        await using var fixture = await Fixture.CreateAsync();
+        var request = await fixture.Service.CreateRequestAsync(new(PrivacyRequestTypes.Erasure, "grant"));
+        await fixture.Service.VerifyIdentityAsync(request.Id);
+
+        var withoutConfirmation = async () => await fixture.Service.CompleteRequestAsync(
+            request.Id, PrivacyRequestStatuses.Fulfilled, "Deleted everywhere.", erasureDataDeletionConfirmed: false);
+        await withoutConfirmation.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*actually been deleted*");
+
+        await fixture.Service.CompleteRequestAsync(
+            request.Id, PrivacyRequestStatuses.Fulfilled, "Deleted everywhere.", erasureDataDeletionConfirmed: true);
+
+        var dashboard = await fixture.Service.GetDashboardAsync();
+        var view = dashboard.Requests.Single(x => x.Id == request.Id);
+        view.Status.Should().Be(PrivacyRequestStatuses.Fulfilled);
+        view.CompletedAt.Should().NotBeNull();
+        (await fixture.Db.SecurityAuditEvents.CountAsync(x =>
+            x.Action == "PrivacyRequestStatusChanged" && x.TargetId == request.Id.ToString())).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ErasureRequest_ShouldStillAllowDenialWithoutTheDeletionConfirmation()
+    {
+        // The confirmation gate is specific to asserting Fulfilled - denying an erasure request
+        // (nothing was deleted because the request was refused) must not require it.
+        await using var fixture = await Fixture.CreateAsync();
+        var request = await fixture.Service.CreateRequestAsync(new(PrivacyRequestTypes.Erasure, "grant"));
+        await fixture.Service.VerifyIdentityAsync(request.Id);
+
+        await fixture.Service.CompleteRequestAsync(
+            request.Id, PrivacyRequestStatuses.Denied, "Identity could not be fully verified.");
+
+        var dashboard = await fixture.Service.GetDashboardAsync();
+        dashboard.Requests.Single(x => x.Id == request.Id).Status.Should().Be(PrivacyRequestStatuses.Denied);
+    }
+
+    [Theory]
+    [InlineData(PrivacyRequestTypes.Correction)]
+    [InlineData(PrivacyRequestTypes.Restriction)]
+    public async Task CorrectionAndRestrictionRequests_ShouldCompleteThroughTheFullLifecycle(string requestType)
+    {
+        // Untested request types until now - unlike Erasure, these have no special completion
+        // gate, but the full create -> verify -> fulfill lifecycle itself was never exercised
+        // for anything other than Access.
+        await using var fixture = await Fixture.CreateAsync();
+        var request = await fixture.Service.CreateRequestAsync(new(requestType, "grant"));
+        request.Status.Should().Be(PrivacyRequestStatuses.Received);
+
+        var beforeVerification = async () => await fixture.Service.CompleteRequestAsync(
+            request.Id, PrivacyRequestStatuses.Fulfilled, "Handled.");
+        await beforeVerification.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Identity must be verified*");
+
+        await fixture.Service.VerifyIdentityAsync(request.Id);
+        await fixture.Service.CompleteRequestAsync(request.Id, PrivacyRequestStatuses.Fulfilled, "Handled.");
+
+        var dashboard = await fixture.Service.GetDashboardAsync();
+        var view = dashboard.Requests.Single(x => x.Id == request.Id);
+        view.RequestType.Should().Be(requestType);
+        view.Status.Should().Be(PrivacyRequestStatuses.Fulfilled);
+        view.IdentityVerifiedAt.Should().NotBeNull();
+        view.CompletedAt.Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task PersonalDataIncident_ShouldStartSeventyTwoHourNotificationClock()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -82,6 +154,10 @@ public sealed class PrivacyOperationsServiceTests
         // "Enabled" and "Approved" must be true (each defaults to false/false on every seeded
         // policy) before a category is touched; everything else must survive untouched.
         await using var fixture = await Fixture.CreateAsync();
+        var site = new CmsSite { Name = "Site", Slug = "site" };
+        fixture.Db.CmsSites.Add(site);
+        var page = new CmsPage { SiteId = site.Id, Title = "Page", Slug = "page" };
+        fixture.Db.CmsPages.Add(page);
         fixture.Db.WebAnalyticsEvents.Add(new WebAnalyticsEvent
         {
             EventName = "pageview", VisitorKey = "visitor", SessionKey = "session", Path = "/",
@@ -90,6 +166,7 @@ public sealed class PrivacyOperationsServiceTests
         });
         fixture.Db.FormSubmissions.Add(new FormSubmission
         {
+            PageId = page.Id,
             CreatedAt = DateTimeOffset.UtcNow.AddDays(-1000)
         });
         await fixture.Db.SaveChangesAsync();

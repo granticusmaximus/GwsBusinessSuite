@@ -220,7 +220,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .IsUnique();
         modelBuilder.Entity<SentinelPublicShare>().HasIndex(x => x.TokenHash).IsUnique();
         modelBuilder.Entity<SentinelPublicShare>().HasIndex(x => new { x.TargetId, x.IsDatabase, x.RevokedAt });
-        modelBuilder.Entity<SentinelPresenceLease>().HasIndex(x => new { x.WikiPageId, x.LastSeenAt });
+        modelBuilder.Entity<SentinelPresenceLease>().HasIndex(x => new { x.WikiPageId, x.LastSeenAtUnixSeconds });
+        modelBuilder.Entity<SentinelPresenceLease>().HasIndex(x => x.LastSeenAtUnixSeconds);
         modelBuilder.Entity<SentinelAiRun>().HasIndex(x => new { x.ConversationId, x.CreatedAt });
         modelBuilder.Entity<SentinelAiRun>().HasIndex(x => new { x.WikiPageId, x.CreatedAt });
         modelBuilder.Entity<SentinelAiRun>().HasIndex(x => new { x.Status, x.CreatedAt });
@@ -289,6 +290,15 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .HasForeignKey(x => x.SiteId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<FormSubmission>().HasIndex(x => new { x.PageId, x.CreatedAt });
+        // FormSubmission.PageId had no FK - CmsBuilderService.DeletePageAsync/DeleteSiteAsync
+        // already clean submissions up manually before removing the page, so orphan risk is
+        // low today, but a real FK is defense-in-depth against any other/future deletion path
+        // (a raw admin script, a different caller) that forgets to do the same.
+        modelBuilder.Entity<FormSubmission>()
+            .HasOne<CmsPage>()
+            .WithMany()
+            .HasForeignKey(x => x.PageId)
+            .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<Comment>().HasIndex(x => new { x.ArticleId, x.Status });
         modelBuilder.Entity<Comment>()
             .HasOne<Comment>()
@@ -494,6 +504,16 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
 
         modelBuilder.Entity<AppGenerationRequest>().HasIndex(x => x.Status);
         modelBuilder.Entity<AppGenerationRequest>().HasIndex(x => x.TargetSiteId);
+        // AppGenerationRequest.TargetSiteId had no FK, and unlike FormSubmission above,
+        // CmsBuilderService.DeleteSiteAsync doesn't clean these up at all - deleting the
+        // generated site genuinely orphans the request (and its cascaded Messages transcript)
+        // with nothing left to reference. AppGenerationMessage already cascades from Request,
+        // so treating the request itself as meaningless without its target site is consistent.
+        modelBuilder.Entity<AppGenerationRequest>()
+            .HasOne<CmsSite>()
+            .WithMany()
+            .HasForeignKey(x => x.TargetSiteId)
+            .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<AppGenerationMessage>()
             .HasOne(x => x.Request)
             .WithMany(x => x.Messages)

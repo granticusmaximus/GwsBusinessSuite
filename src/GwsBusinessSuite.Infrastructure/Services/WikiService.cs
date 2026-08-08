@@ -239,8 +239,32 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
         }
 
         // WikiPageRevisions cascade-delete via the FK configured in ApplicationDbContext.
+        // SentinelResourcePermissions/SentinelPublicShares reference this page polymorphically
+        // via TargetId+IsDatabase (they can point at either a WikiPage or a WikiDatabase), so a
+        // real FK isn't possible - clean them up manually or they're dangling rows forever.
+        await RemoveSentinelAccessRowsAsync(wikiPageId, isDatabase: false, cancellationToken);
+
         dbContext.WikiPages.Remove(page);
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task RemoveSentinelAccessRowsAsync(Guid targetId, bool isDatabase, CancellationToken cancellationToken)
+    {
+        var permissions = await dbContext.SentinelResourcePermissions
+            .Where(item => item.TargetId == targetId && item.IsDatabase == isDatabase)
+            .ToListAsync(cancellationToken);
+        if (permissions.Count > 0)
+        {
+            dbContext.SentinelResourcePermissions.RemoveRange(permissions);
+        }
+
+        var shares = await dbContext.SentinelPublicShares
+            .Where(item => item.TargetId == targetId && item.IsDatabase == isDatabase)
+            .ToListAsync(cancellationToken);
+        if (shares.Count > 0)
+        {
+            dbContext.SentinelPublicShares.RemoveRange(shares);
+        }
     }
 
     public async Task ReorderPageAsync(

@@ -302,6 +302,12 @@ public sealed class SentinelPresenceLease : AuditableEntity
     public Guid WikiPageId { get; set; }
     public required string Username { get; set; }
     public DateTimeOffset LastSeenAt { get; set; }
+
+    // SQLite/EF Core can't translate a server-side range filter on a DateTimeOffset column -
+    // this shadow column lets ListAsync bound both its page-scoped query and its expired-lease
+    // sweep to real, indexed SQL WHERE clauses instead of materializing every presence lease
+    // across the entire workspace on every single poll of every page.
+    public long LastSeenAtUnixSeconds { get; set; }
 }
 
 public static class SentinelAiRunStatuses

@@ -41,6 +41,29 @@ public sealed class GrowthAnalyticsServiceTests
     }
 
     [Fact]
+    public async Task RecordAsync_ShouldStripControlCharactersFromFreeTextFields()
+    {
+        // Regression guard: these fields come straight from an anonymous, unauthenticated
+        // endpoint and are stored as-is (not HTML-encoded - see Clean()'s own comment on why
+        // that's correct as long as nothing ever renders them via MarkupString). Stripping
+        // non-printable characters is real, safe hardening at the one place all of this data
+        // funnels through, independent of that renderer-side safety net.
+        await using var fixture = await Fixture.CreateAsync();
+        var service = new GrowthAnalyticsService(fixture.Db);
+        var titleWithBell = "Titl" + '\u0007' + "e";
+        var sourceWithEscape = "sou" + '\u001b' + "rce";
+
+        await service.RecordAsync(
+            new("pageview", "visitor", "session", "/page", titleWithBell,
+                null, sourceWithEscape, null, null, 0),
+            "Mozilla/5.0");
+
+        var stored = await fixture.Db.WebAnalyticsEvents.SingleAsync();
+        stored.PageTitle.Should().Be("Title");
+        stored.Source.Should().Be("source");
+    }
+
+    [Fact]
     public async Task RecordAsync_ShouldPersistOnlyCoarseResolvedGeography()
     {
         await using var fixture = await Fixture.CreateAsync();

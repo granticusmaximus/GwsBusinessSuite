@@ -389,7 +389,13 @@ public sealed class SentinelCollaborationService(
     {
         var normalized = (body ?? string.Empty).Trim();
         if (normalized.Length == 0) throw new ArgumentException("Comment cannot be empty.", nameof(body));
-        return normalized.Length <= MaxBodyLength ? normalized : normalized[..MaxBodyLength];
+        // Previously truncated silently instead of rejecting - the saved comment quietly
+        // differed from what the user typed, with no error shown anywhere.
+        if (normalized.Length > MaxBodyLength)
+        {
+            throw new ArgumentException($"Comments are limited to {MaxBodyLength} characters.", nameof(body));
+        }
+        return normalized;
     }
 
     private static string NormalizeUsername(string username) =>

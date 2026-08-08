@@ -230,6 +230,35 @@ public sealed class LiveShowServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task DeleteRecordingAsync_ShouldRemoveBothTheDbRowAndTheFile()
+    {
+        // Regression guard: there was previously no way at all - manual or automatic - to
+        // remove a recording, so files accumulated on disk unbounded.
+        await using var db = await CreateDbAsync();
+        var service = CreateService(db);
+        var session = await service.StartSessionAsync("My Show");
+        await service.AppendRecordingChunkAsync(session.Id, new MemoryStream(Encoding.UTF8.GetBytes("data")), 0);
+        await service.FinalizeRecordingAsync(session.Id, 10);
+        var recording = (await service.ListRecordingsAsync()).Single();
+        var filePath = (await service.GetRecordingFilePathAsync(recording.Id))!;
+        File.Exists(filePath).Should().BeTrue();
+
+        await service.DeleteRecordingAsync(recording.Id);
+
+        (await service.ListRecordingsAsync()).Should().BeEmpty();
+        File.Exists(filePath).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DeleteRecordingAsync_ShouldNoOp_WhenRecordingDoesNotExist()
+    {
+        await using var db = await CreateDbAsync();
+        var service = CreateService(db);
+
+        await service.DeleteRecordingAsync(Guid.NewGuid());
+    }
+
+    [Fact]
     public async Task GetRecordingFilePathAsync_ShouldReturnNull_WhenRecordingNotFound()
     {
         await using var db = await CreateDbAsync();

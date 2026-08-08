@@ -41,6 +41,20 @@ public sealed class AutomationTriggerService(
             var requiredSecret = document.RootElement.TryGetProperty("secret", out var value) ? value.GetString() : null;
             if (!FixedTimeEquals(requiredSecret, providedSecret)) throw new UnauthorizedAccessException("Webhook secret is invalid.");
         }
+        else
+        {
+            // Intentional n8n-style design: the webhook response echoes the execution's full
+            // output back to the caller. Without a secret credential attached, that response -
+            // and whatever data the workflow's nodes touched - is readable by anyone who knows
+            // or guesses this path, with zero auth check. Not something to silently redesign
+            // (a secret-less webhook is a legitimate choice for a workflow with nothing
+            // sensitive to leak), but an author who forgot to attach one gets no signal
+            // anything is exposed - this at least makes it discoverable.
+            logger.LogWarning(
+                "Automation webhook {Path} for workflow {WorkflowId} fired with no secret credential attached - " +
+                "its response (including full execution output) is readable by anyone who can reach this URL.",
+                path, workflow.Id);
+        }
 
         return await executionService.ExecuteAsync(
             workflow.Id, inputJson, AutomationExecutionModes.Webhook, cancellationToken: cancellationToken);

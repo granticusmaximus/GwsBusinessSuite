@@ -1,5 +1,6 @@
 using FluentAssertions;
 using GwsBusinessSuite.Application.Wiki;
+using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.Data.Sqlite;
@@ -341,6 +342,25 @@ public sealed class WikiServiceTests
         await service.DeletePageAsync(created.Id, "grantwatson");
 
         (await db.WikiPageRevisions.Where(r => r.WikiPageId == created.Id).ToListAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DeletePageAsync_ShouldRemoveSentinelPermissionsAndPublicSharesForThePage()
+    {
+        // Regression guard: SentinelResourcePermissions/SentinelPublicShares reference a page
+        // polymorphically (TargetId + IsDatabase), so they can't have a real FK - previously
+        // nothing cleaned them up on page delete and they were dangling rows forever.
+        await using var db = await CreateDbAsync();
+        var service = new WikiService(db);
+        var access = new SentinelAccessService(db);
+        var created = await service.SavePageAsync(new WikiPageEditorModel { Title = "Temp Page" }, "grantwatson");
+        await access.SetPermissionAsync(created.Id, false, "viewer", SentinelAccessLevels.View, "grantwatson");
+        await access.CreatePublicShareAsync(created.Id, false, null, false, null, "grantwatson");
+
+        await service.DeletePageAsync(created.Id, "grantwatson");
+
+        (await db.SentinelResourcePermissions.Where(x => x.TargetId == created.Id).ToListAsync()).Should().BeEmpty();
+        (await db.SentinelPublicShares.Where(x => x.TargetId == created.Id).ToListAsync()).Should().BeEmpty();
     }
 
     [Fact]

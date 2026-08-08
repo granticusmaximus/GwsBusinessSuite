@@ -19,7 +19,8 @@ public sealed class SentinelPresenceService(
             lease = new SentinelPresenceLease
             {
                 Id = sessionId, Username = Normalize(username), WikiPageId = wikiPageId,
-                LastSeenAt = now, CreatedAt = now, CreatedBy = Normalize(username)
+                LastSeenAt = now, LastSeenAtUnixSeconds = now.ToUnixTimeSeconds(),
+                CreatedAt = now, CreatedBy = Normalize(username)
             };
             db.SentinelPresenceLeases.Add(lease);
         }
@@ -27,6 +28,7 @@ public sealed class SentinelPresenceService(
         {
             lease.WikiPageId = wikiPageId;
             lease.LastSeenAt = now;
+            lease.LastSeenAtUnixSeconds = now.ToUnixTimeSeconds();
             lease.UpdatedAt = now;
             lease.UpdatedBy = Normalize(username);
         }
@@ -38,7 +40,9 @@ public sealed class SentinelPresenceService(
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var lease = await db.SentinelPresenceLeases.FirstOrDefaultAsync(item => item.Id == sessionId, cancellationToken);
         if (lease is null) return;
-        lease.LastSeenAt = timeProvider.GetUtcNow();
+        var now = timeProvider.GetUtcNow();
+        lease.LastSeenAt = now;
+        lease.LastSeenAtUnixSeconds = now.ToUnixTimeSeconds();
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -54,20 +58,24 @@ public sealed class SentinelPresenceService(
     public async Task<IReadOnlyList<SentinelPresenceView>> ListAsync(Guid wikiPageId, CancellationToken cancellationToken = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var cutoff = timeProvider.GetUtcNow() - SentinelPresenceTracker.SessionTimeout;
-        // SQLite stores DateTimeOffset as TEXT and cannot translate ordering comparisons.
-        // Presence leases are bounded by active browser sessions, so materialize this small
-        // set once and apply the cutoff provider-independently in memory.
-        var allLeases = await db.SentinelPresenceLeases.ToListAsync(cancellationToken);
-        var expired = allLeases.Where(item => item.LastSeenAt < cutoff).ToList();
+        var cutoffUnix = (timeProvider.GetUtcNow() - SentinelPresenceTracker.SessionTimeout).ToUnixTimeSeconds();
+
+        // LastSeenAtUnixSeconds (unlike LastSeenAt itself) is a real integer column, so both
+        // queries below push their filter down as SQL instead of materializing every presence
+        // lease across the entire workspace on every poll of every page - this used to load
+        // the whole SentinelPresenceLeases table regardless of which page asked.
+        var expired = await db.SentinelPresenceLeases
+            .Where(item => item.LastSeenAtUnixSeconds < cutoffUnix)
+            .ToListAsync(cancellationToken);
         if (expired.Count > 0)
         {
             db.SentinelPresenceLeases.RemoveRange(expired);
             await db.SaveChangesAsync(cancellationToken);
         }
-        var leases = allLeases
-            .Where(item => item.WikiPageId == wikiPageId && item.LastSeenAt >= cutoff)
-            .ToList();
+
+        var leases = await db.SentinelPresenceLeases
+            .Where(item => item.WikiPageId == wikiPageId && item.LastSeenAtUnixSeconds >= cutoffUnix)
+            .ToListAsync(cancellationToken);
         return leases.GroupBy(item => item.Username, StringComparer.OrdinalIgnoreCase)
             .Select(group => new SentinelPresenceView(group.Key, group.Count(), group.Max(item => item.LastSeenAt)))
             .OrderBy(item => item.Username, StringComparer.OrdinalIgnoreCase)

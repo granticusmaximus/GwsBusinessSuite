@@ -508,8 +508,32 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         }
 
         // Properties/Rows/Views cascade-delete via the FKs configured in ApplicationDbContext.
+        // SentinelResourcePermissions/SentinelPublicShares reference this database
+        // polymorphically via TargetId+IsDatabase (see WikiService.DeletePageAsync's own
+        // version of this same cleanup for a WikiPage), so a real FK isn't possible here either.
+        await RemoveSentinelAccessRowsAsync(wikiDatabaseId, isDatabase: true, cancellationToken);
+
         dbContext.WikiDatabases.Remove(database);
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task RemoveSentinelAccessRowsAsync(Guid targetId, bool isDatabase, CancellationToken cancellationToken)
+    {
+        var permissions = await dbContext.SentinelResourcePermissions
+            .Where(item => item.TargetId == targetId && item.IsDatabase == isDatabase)
+            .ToListAsync(cancellationToken);
+        if (permissions.Count > 0)
+        {
+            dbContext.SentinelResourcePermissions.RemoveRange(permissions);
+        }
+
+        var shares = await dbContext.SentinelPublicShares
+            .Where(item => item.TargetId == targetId && item.IsDatabase == isDatabase)
+            .ToListAsync(cancellationToken);
+        if (shares.Count > 0)
+        {
+            dbContext.SentinelPublicShares.RemoveRange(shares);
+        }
     }
 
     public async Task ReorderDatabaseAsync(

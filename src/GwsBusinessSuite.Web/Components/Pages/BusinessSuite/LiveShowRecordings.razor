@@ -36,13 +36,21 @@ else
                     <div class="ratio ratio-16x9 bg-dark">
                         <video controls preload="metadata" src="/admin/api/live-show/recordings/@recording.Id/file"></video>
                     </div>
-                    <div class="card-body">
-                        <div class="fw-semibold">@recording.SessionTitle</div>
-                        <div class="small text-muted">
-                            @recording.CreatedAt.ToLocalTime().ToString("g") &middot;
-                            @FormatDuration(recording.DurationSeconds) &middot;
-                            @FormatSize(recording.FileSizeBytes)
+                    <div class="card-body d-flex align-items-start justify-content-between gap-2">
+                        <div>
+                            <div class="fw-semibold">@recording.SessionTitle</div>
+                            <div class="small text-muted">
+                                @recording.CreatedAt.ToLocalTime().ToString("g") &middot;
+                                @FormatDuration(recording.DurationSeconds) &middot;
+                                @FormatSize(recording.FileSizeBytes)
+                            </div>
                         </div>
+                        <button type="button" class="btn btn-outline-danger btn-sm flex-shrink-0"
+                                title="Delete this recording" aria-label="Delete this recording"
+                                disabled="@(_deletingId == recording.Id)"
+                                @onclick="() => DeleteRecordingAsync(recording.Id)">
+                            <i class="bi bi-trash"></i>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -52,10 +60,25 @@ else
 
 @code {
     private List<LiveShowRecordingView> Recordings { get; set; } = [];
+    private Guid? _deletingId;
 
     protected override async Task OnInitializedAsync()
     {
         Recordings = (await LiveShowService.ListRecordingsAsync()).ToList();
+    }
+
+    private async Task DeleteRecordingAsync(Guid recordingId)
+    {
+        _deletingId = recordingId;
+        try
+        {
+            await LiveShowService.DeleteRecordingAsync(recordingId);
+            Recordings.RemoveAll(recording => recording.Id == recordingId);
+        }
+        finally
+        {
+            _deletingId = null;
+        }
     }
 
     private static string FormatDuration(int seconds)

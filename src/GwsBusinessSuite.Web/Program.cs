@@ -470,12 +470,32 @@ app.MapHealthChecks("/health/ready", new()
 // requests are authenticated with X-Notion-Signature (HMAC-SHA256 over the exact raw body);
 // the one-time verification payload establishes and encrypts that signing secret.
 app.MapPost("/api/integrations/notion/webhook", async (
-    HttpRequest request,
+    HttpContext context,
     INotionWebhookService webhookService,
     CancellationToken cancellationToken) =>
 {
-    using var reader = new StreamReader(request.Body, Encoding.UTF8);
-    var rawBody = await reader.ReadToEndAsync(cancellationToken);
+    var request = context.Request;
+    // Shared pattern with the other anonymous endpoints app-wide (analytics ingestion,
+    // automation webhooks) - Kestrel's ~28MB default request body size has no business being
+    // reachable here. Must be set before the body is read. 1MB matches the automation
+    // webhook's own cap; a real Notion event payload is normally a small JSON object.
+    var maxBodySizeFeature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
+    if (maxBodySizeFeature is { IsReadOnly: false })
+    {
+        maxBodySizeFeature.MaxRequestBodySize = 1024 * 1024;
+    }
+
+    string rawBody;
+    try
+    {
+        using var reader = new StreamReader(request.Body, Encoding.UTF8);
+        rawBody = await reader.ReadToEndAsync(cancellationToken);
+    }
+    catch (Exception) when (!cancellationToken.IsCancellationRequested)
+    {
+        return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+    }
+
     var result = await webhookService.HandleAsync(
         rawBody,
         request.Headers["X-Notion-Signature"].FirstOrDefault(),

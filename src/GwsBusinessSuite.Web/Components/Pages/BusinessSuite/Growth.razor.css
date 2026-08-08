@@ -5,13 +5,14 @@
     --growth-panel-2: #211e1a;
     --growth-line: rgba(255,255,255,.09);
     --growth-accent: #f59e0b;
+    --growth-canvas: #100f0d;
     color: var(--growth-ink);
     margin: -1.5rem;
     min-height: calc(100vh - 3.5rem);
     padding: clamp(1.25rem, 3vw, 2.75rem);
     background:
         radial-gradient(circle at 90% -10%, rgba(245,158,11,.10), transparent 34rem),
-        #100f0d;
+        var(--growth-canvas);
 }
 
 .growth-header, .section-toolbar, .panel-heading, .publish-bar, .queue-item,

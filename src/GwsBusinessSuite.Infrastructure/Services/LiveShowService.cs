@@ -229,6 +229,24 @@ public sealed class LiveShowService(
         return File.Exists(filePath) ? filePath : null;
     }
 
+    public async Task DeleteRecordingAsync(Guid recordingId, CancellationToken cancellationToken = default)
+    {
+        var recording = await dbContext.LiveShowRecordings.FirstOrDefaultAsync(r => r.Id == recordingId, cancellationToken);
+        if (recording is null)
+        {
+            return;
+        }
+
+        var filePath = Path.Combine(recordingsRootPath, recording.FileName);
+        if (File.Exists(filePath))
+        {
+            File.Delete(filePath);
+        }
+
+        dbContext.LiveShowRecordings.Remove(recording);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     private string GetFilePath(Guid sessionId) => Path.Combine(recordingsRootPath, $"{sessionId:N}.webm");
 
     private static LiveShowSessionView ToView(LiveShowSession session) => new(

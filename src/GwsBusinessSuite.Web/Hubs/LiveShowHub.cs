@@ -15,6 +15,12 @@ public sealed class LiveShowHub(ILiveShowService liveShowService) : Hub
     // sessionId -> the broadcaster's current connectionId, so a joining viewer can be
     // introduced to the right peer. connectionId -> sessionId lets OnDisconnectedAsync
     // clean up either side without the client having to tell us who it was.
+    // Deliberately static, in-process state, not backed by a SignalR backplane (Redis, Azure
+    // SignalR, etc.) - correct only as long as this app runs as a single instance. If it's
+    // ever scaled to more than one instance/process, a broadcaster and a viewer connecting to
+    // different instances would never find each other here (each instance only sees its own
+    // connections), and the show would silently fail to relay signaling with no error surfaced
+    // anywhere. Add a backplane before scaling horizontally, don't just add more instances.
     private static readonly ConcurrentDictionary<Guid, string> BroadcasterConnections = new();
     private static readonly ConcurrentDictionary<string, Guid> ConnectionSessions = new();
 

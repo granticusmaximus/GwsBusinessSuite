@@ -151,6 +151,46 @@ public sealed class AutomationWorkflowTests
     }
 
     [Fact]
+    public async Task WebhookTrigger_ShouldWarnWhenFiredWithNoSecretCredentialAttached()
+    {
+        // Regression guard: echoing the full execution output back to the anonymous caller is
+        // intentional (n8n-style), but an author who forgets to attach a secret credential
+        // previously got no signal their workflow was running wide open. This doesn't change
+        // that it still runs - only that it's now discoverable.
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executions = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var recordingLogger = new RecordingLogger<AutomationTriggerService>();
+        var triggers = new AutomationTriggerService(db, workflowService, executions, credentials, TimeProvider.System, recordingLogger);
+        var workflow = await workflowService.CreateAsync("Open webhook");
+        var webhook = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Incoming order",
+            TypeKey = "core.webhookTrigger",
+            PositionX = 120,
+            PositionY = 420,
+            ParametersJson = "{\"path\":\"open-order\"}"
+        });
+        var setNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Mark received",
+            TypeKey = "core.set",
+            PositionX = 400,
+            PositionY = 420,
+            ParametersJson = "{\"values\":{\"received\":\"yes\"}}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, webhook.Id, "main", setNode.Id);
+        await workflowService.PublishAsync(workflow.Id, "Webhook version");
+        await workflowService.SetActiveAsync(workflow.Id, true);
+
+        await triggers.TriggerWebhookAsync("open-order", "{}", null);
+
+        recordingLogger.Warnings.Should().ContainSingle(w => w.Contains("open-order") && w.Contains("no secret"));
+    }
+
+    [Fact]
     public async Task PublishAsync_ShouldSyncTriggerWikiDatabaseIdFromAnEnabledDatabaseTriggerNode()
     {
         await using var db = await CreateDbAsync();

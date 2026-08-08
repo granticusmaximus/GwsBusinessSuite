@@ -914,6 +914,25 @@ public sealed class WikiDatabaseServiceTests
     }
 
     [Fact]
+    public async Task DeleteDatabaseAsync_ShouldRemoveSentinelPermissionsAndPublicSharesForTheDatabase()
+    {
+        // Regression guard: SentinelResourcePermissions/SentinelPublicShares reference a
+        // database polymorphically (TargetId + IsDatabase), so they can't have a real FK -
+        // previously nothing cleaned them up on database delete and they were dangling forever.
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var access = new GwsBusinessSuite.Infrastructure.Services.SentinelAccessService(db);
+        var database = await service.CreateDatabaseAsync("Temp", null, "u");
+        await access.SetPermissionAsync(database.Id, true, "viewer", SentinelAccessLevels.View, "u");
+        await access.CreatePublicShareAsync(database.Id, true, null, false, null, "u");
+
+        await service.DeleteDatabaseAsync(database.Id, "u");
+
+        (await db.SentinelResourcePermissions.Where(x => x.TargetId == database.Id).ToListAsync()).Should().BeEmpty();
+        (await db.SentinelPublicShares.Where(x => x.TargetId == database.Id).ToListAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ReorderDatabaseAsync_ShouldMoveADatabaseUnderAWikiPageAndRenumberSiblings()
     {
         await using var db = await CreateDbAsync();

@@ -111,6 +111,21 @@ public sealed class SentinelCollaborationServiceTests
     }
 
     [Fact]
+    public async Task CreateDiscussionAsync_ShouldRejectAnOverLengthComment_InsteadOfSilentlyTruncatingIt()
+    {
+        // Regression guard: a comment over the length limit used to be silently truncated -
+        // the saved comment quietly differed from what the user actually typed, with no error
+        // shown anywhere.
+        await using var fixture = await Fixture.CreateAsync();
+        var page = await fixture.CreatePageAsync(Guid.NewGuid());
+        var overLength = new string('a', 5001);
+
+        var action = () => fixture.Service.CreateDiscussionAsync(page.Id, null, overLength, "Member");
+
+        await action.Should().ThrowAsync<ArgumentException>().WithMessage("*limited to*characters*");
+    }
+
+    [Fact]
     public async Task ReplyResolveAndReaction_ShouldUpdateThreadAndCreateNotifications()
     {
         await using var fixture = await Fixture.CreateAsync();

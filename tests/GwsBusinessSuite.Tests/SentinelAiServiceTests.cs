@@ -3,6 +3,7 @@ using FluentAssertions;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Application.Wiki;
+using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.Data.Sqlite;
@@ -70,6 +71,39 @@ public sealed class SentinelAiServiceTests
 
         var conversationRuns = await service.ListConversationRunsAsync(completed.ConversationId, "grant");
         conversationRuns.Should().ContainSingle(run => run.Id == completed.Id);
+    }
+
+    [Fact]
+    public async Task StreamAsync_ShouldSaveAFailedRun_WhenOllamaTimesOutMidStream()
+    {
+        // Regression guard: a real timeout (the linked timeoutCts's CancelAfter firing after
+        // OllamaTimeoutMinutesOverride/DefaultTimeoutMinutes) had zero test coverage - only the
+        // success-path stream was ever exercised. TimingOutOllamaService throws the exact
+        // OperationCanceledException shape a real CancelAfter produces, so this exercises the
+        // "degrade to a saved Failed run instead of an unhandled exception" path deterministically,
+        // without a test actually waiting out a real multi-minute timeout window.
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var ollama = new TimingOutOllamaService(["Partial answer before it hangs. "]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache());
+
+        var act = async () =>
+        {
+            await foreach (var _ in service.StreamAsync(null, SentinelAiActions.Ask, "status update", "grant"))
+            {
+            }
+        };
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        var persisted = await db.SentinelAiRuns.AsNoTracking().SingleAsync();
+        persisted.Status.Should().Be(SentinelAiRunStatuses.Failed);
+        persisted.Output.Should().Be("Generation failed before producing a reviewable response.");
     }
 
     [Fact]
@@ -475,6 +509,40 @@ public sealed class SentinelAiServiceTests
             PulledModels.Add(model);
             return Task.CompletedTask;
         }
+
+        public Task DeleteModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default) =>
+            Task.FromResult(string.Empty);
+    }
+
+    // Simulates a real timeout (the linked timeoutCts's CancelAfter firing) without a test
+    // having to actually wait one out: yields whatever streamed before the hang, then throws
+    // the same OperationCanceledException shape a real CancelAfter would produce.
+    private sealed class TimingOutOllamaService(IReadOnlyList<string> fragmentsBeforeTimeout) : GwsBusinessSuite.Application.Abstractions.IOllamaService
+    {
+        public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public async IAsyncEnumerable<string> GenerateStreamAsync(
+            string model, string systemPrompt, string userPrompt, [EnumeratorCancellation] CancellationToken ct = default)
+        {
+            foreach (var fragment in fragmentsBeforeTimeout)
+            {
+                await Task.Yield();
+                yield return fragment;
+            }
+            throw new OperationCanceledException("Simulated Ollama timeout.");
+        }
+
+        public IAsyncEnumerable<string> GenerateStreamAsync(
+            string model, string systemPrompt, string userPrompt, int maxOutputTokens, CancellationToken ct = default) =>
+            GenerateStreamAsync(model, systemPrompt, userPrompt, ct);
+
+        public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) =>
+            Task.FromResult((IReadOnlyCollection<string>)Array.Empty<string>());
+
+        public Task PullModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
 
         public Task DeleteModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
 

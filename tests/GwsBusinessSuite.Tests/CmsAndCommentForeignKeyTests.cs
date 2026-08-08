@@ -71,6 +71,41 @@ public sealed class CmsAndCommentForeignKeyTests
         (await db.GlobalBlocks.CountAsync()).Should().Be(0);
     }
 
+    [Fact]
+    public async Task DeletingACmsPage_ShouldCascadeDeleteItsFormSubmissions()
+    {
+        await using var db = await CreateDbAsync();
+        var site = new CmsSite { Name = "Site", Slug = "site" };
+        db.CmsSites.Add(site);
+        await db.SaveChangesAsync();
+        var page = new CmsPage { SiteId = site.Id, Title = "Page", Slug = "page" };
+        db.CmsPages.Add(page);
+        await db.SaveChangesAsync();
+        db.FormSubmissions.Add(new FormSubmission { PageId = page.Id });
+        await db.SaveChangesAsync();
+
+        db.CmsPages.Remove(page);
+        await db.SaveChangesAsync();
+
+        (await db.FormSubmissions.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task DeletingACmsSite_ShouldCascadeDeleteAppGenerationRequestsTargetingIt()
+    {
+        await using var db = await CreateDbAsync();
+        var site = new CmsSite { Name = "Site", Slug = "site" };
+        db.CmsSites.Add(site);
+        await db.SaveChangesAsync();
+        db.AppGenerationRequests.Add(new AppGenerationRequest { TargetSiteId = site.Id, Title = "Generate a site" });
+        await db.SaveChangesAsync();
+
+        db.CmsSites.Remove(site);
+        await db.SaveChangesAsync();
+
+        (await db.AppGenerationRequests.CountAsync()).Should().Be(0);
+    }
+
     private static async Task<ApplicationDbContext> CreateDbAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

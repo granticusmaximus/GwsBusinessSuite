@@ -960,9 +960,20 @@ public sealed class GrowthAnalyticsService(
     private static bool IsValidCustomEvent(string eventName) =>
         eventName.All(character => char.IsLetterOrDigit(character) || character is '-' or '_' or '.');
 
+    // These values (Path/PageTitle/Source/Medium/Campaign/etc.) come straight from an
+    // anonymous, unauthenticated endpoint (/api/analytics/events) and are stored as-is, not
+    // HTML-encoded - correct today only because every current renderer (Growth Studio's
+    // dashboard) uses plain Razor text interpolation, which always auto-encodes. HTML-encoding
+    // at ingestion would be wrong (Razor would then double-encode it on render), so the actual
+    // safety net is "never render one of these fields via MarkupString" - stripping control
+    // characters here is real hardening that doesn't conflict with that; it's not a substitute
+    // for it.
     private static string Clean(string? value, int maxLength)
     {
-        var clean = (value ?? string.Empty).Trim();
+        var withoutControlCharacters = new string((value ?? string.Empty)
+            .Where(character => !char.IsControl(character))
+            .ToArray());
+        var clean = withoutControlCharacters.Trim();
         return clean.Length <= maxLength ? clean : clean[..maxLength];
     }
 

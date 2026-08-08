@@ -27,6 +27,12 @@ public interface ILiveShowService
 
     Task<string?> GetRecordingFilePathAsync(Guid recordingId, CancellationToken cancellationToken = default);
 
+    // Recordings never expire on their own - there was previously no way to reclaim disk
+    // space at all, manual or automatic. Removes both the DB row and the on-disk file;
+    // tolerant of the file already being gone so a partially-cleaned-up recording can still
+    // be removed instead of getting stuck.
+    Task DeleteRecordingAsync(Guid recordingId, CancellationToken cancellationToken = default);
+
     // Safety net for LiveShowHub.OnDisconnectedAsync when the broadcaster's connection
     // drops without a clean StopAsync (crash, force-quit) - finalizes any in-progress
     // recording and ends the session so it doesn't stay "Live" indefinitely.
