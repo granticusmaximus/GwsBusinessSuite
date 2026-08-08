@@ -680,13 +680,16 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
             throw new InvalidOperationException("A property's type can't be changed after creation - delete and re-add it instead.");
         }
         var configuration = new WikiDatabasePropertyConfiguration(
-            editor.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect ? editor.Options : [],
+            editor.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Status
+                ? editor.Options : [],
             string.IsNullOrWhiteSpace(editor.FormulaExpression) ? null : editor.FormulaExpression.Trim(),
             editor.RelatedDatabaseId,
             editor.ReciprocalPropertyId,
             editor.RelationPropertyId,
             editor.RollupPropertyId,
-            string.IsNullOrWhiteSpace(editor.RollupAggregation) ? null : editor.RollupAggregation);
+            string.IsNullOrWhiteSpace(editor.RollupAggregation) ? null : editor.RollupAggregation,
+            editor.Type == WikiDatabasePropertyTypes.Button ? editor.AutomationWorkflowId : null,
+            editor.Type == WikiDatabasePropertyTypes.Button && !string.IsNullOrWhiteSpace(editor.ButtonLabel) ? editor.ButtonLabel.Trim() : null);
         await ValidatePropertyConfigurationAsync(wikiDatabaseId, property.Id, editor.Type, configuration, cancellationToken);
         if (!isNew && editor.Type == WikiDatabasePropertyTypes.Relation
             && previousConfiguration.RelatedDatabaseId != configuration.RelatedDatabaseId)
@@ -754,6 +757,7 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
 
         property.ConfigJson = editor.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect
             or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Relation or WikiDatabasePropertyTypes.Rollup
+            or WikiDatabasePropertyTypes.Status or WikiDatabasePropertyTypes.Button
             ? WikiDatabasePropertyConfig.Serialize(configuration)
             : "{}";
 
@@ -917,7 +921,9 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
 
         var computedPropertyIds = await dbContext.WikiDatabaseProperties
             .Where(property => property.WikiDatabaseId == wikiDatabaseId
-                && (property.Type == WikiDatabasePropertyTypes.Formula || property.Type == WikiDatabasePropertyTypes.Rollup))
+                && (property.Type == WikiDatabasePropertyTypes.Formula || property.Type == WikiDatabasePropertyTypes.Rollup
+                    || property.Type == WikiDatabasePropertyTypes.LastEditedTime || property.Type == WikiDatabasePropertyTypes.LastEditedBy
+                    || property.Type == WikiDatabasePropertyTypes.CreatedBy || property.Type == WikiDatabasePropertyTypes.Button))
             .Select(property => property.Id.ToString())
             .ToListAsync(cancellationToken);
         var values = new System.Text.Json.Nodes.JsonObject();
@@ -1086,6 +1092,19 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
             return;
         }
 
+        // A Button with no workflow bound yet is allowed (an admin creating the property
+        // before finishing Automation setup elsewhere) - only reject a workflow id that
+        // doesn't actually exist.
+        if (propertyType == WikiDatabasePropertyTypes.Button)
+        {
+            if (configuration.AutomationWorkflowId is { } workflowId
+                && !await dbContext.AutomationWorkflows.AnyAsync(item => item.Id == workflowId, cancellationToken))
+            {
+                throw new ArgumentException("The selected automation workflow does not exist.");
+            }
+            return;
+        }
+
         if (propertyType != WikiDatabasePropertyTypes.Rollup)
         {
             return;
@@ -1223,7 +1242,8 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         var database = await GetDatabaseAsync(wikiDatabaseId, cancellationToken)
             ?? throw new KeyNotFoundException("The database no longer exists.");
         var groupProperty = database.Properties.FirstOrDefault(property =>
-            property.Id == groupByPropertyId && property.Type == WikiDatabasePropertyTypes.Select)
+            property.Id == groupByPropertyId
+            && property.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.Status)
             ?? throw new InvalidOperationException("The board grouping property is no longer available.");
         var normalizedOptionId = string.IsNullOrWhiteSpace(groupOptionId) ? null : groupOptionId;
         if (normalizedOptionId is not null
@@ -1266,7 +1286,9 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
             ?? throw new KeyNotFoundException("The database property no longer exists.");
         var row = database.Rows.FirstOrDefault(item => item.Id == rowId)
             ?? throw new KeyNotFoundException("The database row no longer exists.");
-        if (property.Type is WikiDatabasePropertyTypes.CreatedTime or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup)
+        if (property.Type is WikiDatabasePropertyTypes.CreatedTime or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup
+            or WikiDatabasePropertyTypes.LastEditedTime or WikiDatabasePropertyTypes.LastEditedBy or WikiDatabasePropertyTypes.CreatedBy
+            or WikiDatabasePropertyTypes.Button)
         {
             throw new InvalidOperationException("Computed properties are read-only.");
         }
@@ -1310,6 +1332,7 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
                 WikiPropertyValues.SetMultiSelect(values, property.Id, selectedIds);
                 break;
             case WikiDatabasePropertyTypes.Select:
+            case WikiDatabasePropertyTypes.Status:
                 var selectedId = WikiDatabasePropertyConfig.GetOptions(property)
                     .Any(option => option.Id == value) ? value : null;
                 WikiPropertyValues.SetText(values, property.Id, selectedId);
@@ -1342,14 +1365,14 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         // and newGroupOptionId outright - a malformed client call could overwrite an arbitrary
         // property (including Title or a Relation, neither of which is a valid Kanban column)
         // with a raw string, or set an option id that doesn't exist on the property at all.
-        // Board views are only ever grouped by a Select property (see AddBoardViewAsync), so
-        // that's the one type this accepts.
+        // Board views are only ever grouped by a Select or Status property (see
+        // AddBoardViewAsync), so those are the only types this accepts.
         var groupByProperty = await dbContext.WikiDatabaseProperties.AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == groupByPropertyId && item.WikiDatabaseId == wikiDatabaseId, cancellationToken)
             ?? throw new KeyNotFoundException("The group-by property no longer exists.");
-        if (groupByProperty.Type != WikiDatabasePropertyTypes.Select)
+        if (groupByProperty.Type is not (WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.Status))
         {
-            throw new InvalidOperationException("Rows can only be grouped and moved by a Select property.");
+            throw new InvalidOperationException("Rows can only be grouped and moved by a Select or Status property.");
         }
         if (newGroupOptionId is not null
             && !WikiDatabasePropertyConfig.GetOptions(groupByProperty).Any(option => option.Id == newGroupOptionId))
@@ -1463,7 +1486,9 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
                 property.Id,
                 property.Name,
                 property.Type,
-                property.Type is WikiDatabasePropertyTypes.CreatedTime or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup,
+                property.Type is WikiDatabasePropertyTypes.CreatedTime or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup
+                    or WikiDatabasePropertyTypes.LastEditedTime or WikiDatabasePropertyTypes.LastEditedBy
+                    or WikiDatabasePropertyTypes.CreatedBy or WikiDatabasePropertyTypes.Button,
                 WikiDatabasePropertyConfig.GetOptions(property)))
             .ToList();
 
@@ -1476,7 +1501,7 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
                     .OrderBy(property => property.SortOrder)
                     .Select(property => new WikiInlineDatabaseCell(
                         property.Id,
-                        GetInlineValue(property, values, row.CreatedAt)))
+                        GetInlineValue(property, values, row.CreatedAt, row.UpdatedAt, row.CreatedBy, row.UpdatedBy)))
                     .ToList();
                 return new WikiInlineDatabaseRow(row.Id, cells);
             })
@@ -1508,7 +1533,10 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
     private static string GetInlineValue(
         WikiDatabaseProperty property,
         System.Text.Json.Nodes.JsonObject values,
-        DateTimeOffset createdAt) => property.Type switch
+        DateTimeOffset createdAt,
+        DateTimeOffset? updatedAt,
+        string? createdBy,
+        string? updatedBy) => property.Type switch
         {
             WikiDatabasePropertyTypes.Number => WikiPropertyValues.GetNumber(values, property.Id)?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
             WikiDatabasePropertyTypes.Checkbox => WikiPropertyValues.GetCheckbox(values, property.Id).ToString().ToLowerInvariant(),
@@ -1516,8 +1544,11 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
             WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Person or WikiDatabasePropertyTypes.Files or WikiDatabasePropertyTypes.Relation =>
                 string.Join(',', WikiPropertyValues.GetMultiSelect(values, property.Id)),
             WikiDatabasePropertyTypes.CreatedTime => createdAt.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-            WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup =>
-                WikiPropertyValues.GetDisplayText(property, values, createdAt),
+            WikiDatabasePropertyTypes.LastEditedTime => (updatedAt ?? createdAt).ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            WikiDatabasePropertyTypes.CreatedBy => createdBy ?? string.Empty,
+            WikiDatabasePropertyTypes.LastEditedBy => updatedBy ?? createdBy ?? string.Empty,
+            WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup or WikiDatabasePropertyTypes.Button =>
+                WikiPropertyValues.GetDisplayText(property, values, createdAt, updatedAt, createdBy, updatedBy),
             _ => WikiPropertyValues.GetText(values, property.Id) ?? string.Empty
         };
 

@@ -298,6 +298,136 @@ public sealed class WikiDatabaseServiceTests
     }
 
     [Fact]
+    public async Task GetDatabaseAsync_ShouldCalculateNewRollupAggregations()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var invoices = await service.CreateDatabaseAsync("Invoices", null, "u");
+        var invoiceTitle = invoices.Properties.Single(property => property.Type == WikiDatabasePropertyTypes.Title);
+        var amount = await service.SavePropertyAsync(invoices.Id,
+            new WikiDatabasePropertyEditor { Name = "Amount", Type = WikiDatabasePropertyTypes.Number }, "u");
+
+        async Task<WikiDatabaseRow> AddInvoiceAsync(string title, decimal? invoiceAmount)
+        {
+            var values = new System.Text.Json.Nodes.JsonObject();
+            WikiPropertyValues.SetText(values, invoiceTitle.Id, title);
+            if (invoiceAmount is { } amountValue)
+            {
+                WikiPropertyValues.SetNumber(values, amount.Id, amountValue);
+            }
+            return await service.SaveRowAsync(invoices.Id,
+                new WikiDatabaseRowEditor { Values = values.ToDictionary(item => item.Key, item => item.Value) }, "u");
+        }
+
+        // 10, 20, 30 amounts plus one row with no amount at all - covers both "value present"
+        // aggregations (median/range) and "presence" aggregations (countEmpty/percentEmpty).
+        var first = await AddInvoiceAsync("INV-001", 10m);
+        var second = await AddInvoiceAsync("INV-002", 20m);
+        var third = await AddInvoiceAsync("INV-003", 30m);
+        var fourth = await AddInvoiceAsync("INV-004", null);
+
+        var clients = await service.CreateDatabaseAsync("Clients", null, "u");
+        var relation = await service.SavePropertyAsync(clients.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Invoices", Type = WikiDatabasePropertyTypes.Relation, RelatedDatabaseId = invoices.Id
+        }, "u");
+
+        async Task<Guid> AddRollupAsync(string aggregation) => (await service.SavePropertyAsync(clients.Id, new WikiDatabasePropertyEditor
+        {
+            Name = aggregation, Type = WikiDatabasePropertyTypes.Rollup,
+            RelationPropertyId = relation.Id, RollupPropertyId = amount.Id, RollupAggregation = aggregation
+        }, "u")).Id;
+
+        var countEmptyId = await AddRollupAsync(WikiDatabaseRollupAggregations.CountEmpty);
+        var countNotEmptyId = await AddRollupAsync(WikiDatabaseRollupAggregations.CountNotEmpty);
+        var percentEmptyId = await AddRollupAsync(WikiDatabaseRollupAggregations.PercentEmpty);
+        var percentNotEmptyId = await AddRollupAsync(WikiDatabaseRollupAggregations.PercentNotEmpty);
+        var medianId = await AddRollupAsync(WikiDatabaseRollupAggregations.Median);
+        var rangeId = await AddRollupAsync(WikiDatabaseRollupAggregations.Range);
+
+        var clientValues = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetMultiSelect(clientValues, relation.Id,
+            [first.Id.ToString(), second.Id.ToString(), third.Id.ToString(), fourth.Id.ToString()]);
+        await service.SaveRowAsync(clients.Id,
+            new WikiDatabaseRowEditor { Values = clientValues.ToDictionary(item => item.Key, item => item.Value) }, "u");
+
+        var computed = await service.GetDatabaseAsync(clients.Id);
+        var computedValues = WikiPropertyValues.ParseObject(computed!.Rows.Single().PropertyValuesJson);
+
+        WikiPropertyValues.GetComputedValue(computedValues, countEmptyId).Should().Be(1m);
+        WikiPropertyValues.GetComputedValue(computedValues, countNotEmptyId).Should().Be(3m);
+        WikiPropertyValues.GetComputedValue(computedValues, percentEmptyId).Should().Be(25m);
+        WikiPropertyValues.GetComputedValue(computedValues, percentNotEmptyId).Should().Be(75m);
+        WikiPropertyValues.GetComputedValue(computedValues, medianId).Should().Be(20m);
+        WikiPropertyValues.GetComputedValue(computedValues, rangeId).Should().Be(20m);
+    }
+
+    [Fact]
+    public async Task GetDatabaseAsync_ShouldEvaluateFormulaArrayFunctions()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var tags = await service.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Tags", Type = WikiDatabasePropertyTypes.MultiSelect,
+                Options = [new("a", "alpha", "#111"), new("b", "beta", "#222"), new("c", "gamma", "#333")] }, "u");
+        var firstTag = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "First tag", Type = WikiDatabasePropertyTypes.Formula, FormulaExpression = "first([Tags])"
+        }, "u");
+        var lastTag = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Last tag", Type = WikiDatabasePropertyTypes.Formula, FormulaExpression = "last([Tags])"
+        }, "u");
+        var tagCount = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Tag count", Type = WikiDatabasePropertyTypes.Formula, FormulaExpression = "length([Tags])"
+        }, "u");
+        var joinedTags = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Joined", Type = WikiDatabasePropertyTypes.Formula, FormulaExpression = "join([Tags], \"|\")"
+        }, "u");
+        var includesBeta = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Has beta", Type = WikiDatabasePropertyTypes.Formula, FormulaExpression = "includes([Tags], \"b\")"
+        }, "u");
+        var sortedTags = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Sorted", Type = WikiDatabasePropertyTypes.Formula, FormulaExpression = "join(sort([Tags]), \",\")"
+        }, "u");
+        var uniqueTags = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Unique count", Type = WikiDatabasePropertyTypes.Formula, FormulaExpression = "length(unique([Tags]))"
+        }, "u");
+        var atIndex = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "At -1", Type = WikiDatabasePropertyTypes.Formula, FormulaExpression = "at([Tags], -1)"
+        }, "u");
+        var sliced = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Sliced", Type = WikiDatabasePropertyTypes.Formula, FormulaExpression = "join(slice([Tags], 1), \",\")"
+        }, "u");
+
+        var values = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetMultiSelect(values, tags.Id, ["c", "a", "b"]);
+        var row = await service.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = values.ToDictionary(item => item.Key, item => item.Value) }, "u");
+
+        var computed = await service.GetDatabaseAsync(database.Id);
+        var computedValues = WikiPropertyValues.ParseObject(computed!.Rows.Single(item => item.Id == row.Id).PropertyValuesJson);
+
+        WikiPropertyValues.GetComputedValue(computedValues, firstTag.Id).Should().Be("c");
+        WikiPropertyValues.GetComputedValue(computedValues, lastTag.Id).Should().Be("b");
+        WikiPropertyValues.GetComputedValue(computedValues, tagCount.Id).Should().Be(3m);
+        WikiPropertyValues.GetComputedValue(computedValues, joinedTags.Id).Should().Be("c|a|b");
+        WikiPropertyValues.GetComputedValue(computedValues, includesBeta.Id).Should().Be(true);
+        WikiPropertyValues.GetComputedValue(computedValues, sortedTags.Id).Should().Be("a,b,c");
+        WikiPropertyValues.GetComputedValue(computedValues, uniqueTags.Id).Should().Be(3m);
+        WikiPropertyValues.GetComputedValue(computedValues, atIndex.Id).Should().Be("b");
+        WikiPropertyValues.GetComputedValue(computedValues, sliced.Id).Should().Be("a,b");
+    }
+
+    [Fact]
     public async Task GetDatabaseAsync_ShouldResolveChainedRollupsTwoHopsDeep()
     {
         // Regression guard: GetDatabaseAsync used to only pre-fetch databases directly related
@@ -372,7 +502,7 @@ public sealed class WikiDatabaseServiceTests
 
         var act = async () => await service.MoveRowAsync(database.Id, row.Id, titleProperty.Id, "anything", 0, "u");
 
-        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Select property*");
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Select or Status property*");
     }
 
     [Fact]
@@ -668,6 +798,129 @@ public sealed class WikiDatabaseServiceTests
         var reloaded = await service.GetDatabaseAsync(database.Id);
         WikiPropertyValues.GetText(
             WikiPropertyValues.ParseObject(reloaded!.Rows.Single().PropertyValuesJson), status.Id).Should().Be("done");
+    }
+
+    [Theory]
+    [InlineData(WikiDatabasePropertyTypes.CreatedTime)]
+    [InlineData(WikiDatabasePropertyTypes.LastEditedTime)]
+    [InlineData(WikiDatabasePropertyTypes.LastEditedBy)]
+    [InlineData(WikiDatabasePropertyTypes.CreatedBy)]
+    [InlineData(WikiDatabasePropertyTypes.Formula)]
+    [InlineData(WikiDatabasePropertyTypes.Rollup)]
+    public async Task SaveInlineCellAsync_ShouldRejectComputedPropertyTypes(string propertyType)
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        WikiDatabaseProperty? relationSource = null;
+        WikiDatabaseProperty? rollupTarget = null;
+        if (propertyType is WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup)
+        {
+            var otherDatabase = await service.CreateDatabaseAsync("Other", null, "u");
+            relationSource = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+            {
+                Name = "Related",
+                Type = WikiDatabasePropertyTypes.Relation,
+                RelatedDatabaseId = otherDatabase.Id
+            }, "u");
+            rollupTarget = otherDatabase.Properties.Single(item => item.Type == WikiDatabasePropertyTypes.Title);
+        }
+        var property = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Computed",
+            Type = propertyType,
+            FormulaExpression = propertyType == WikiDatabasePropertyTypes.Formula ? "1 + 1" : null,
+            RelationPropertyId = propertyType == WikiDatabasePropertyTypes.Rollup ? relationSource!.Id : null,
+            RollupPropertyId = propertyType == WikiDatabasePropertyTypes.Rollup ? rollupTarget!.Id : null,
+            RollupAggregation = propertyType == WikiDatabasePropertyTypes.Rollup ? WikiDatabaseRollupAggregations.Count : null
+        }, "u");
+        var row = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        var action = async () => await service.SaveInlineCellAsync(database.Id, row.Id, property.Id, "attempted-value", "editor");
+
+        await action.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task SaveInlineCellAsync_ShouldRejectAButtonProperty()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var button = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Run",
+            Type = WikiDatabasePropertyTypes.Button,
+            ButtonLabel = "Run it"
+        }, "u");
+        var row = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        var action = async () => await service.SaveInlineCellAsync(database.Id, row.Id, button.Id, "click", "editor");
+
+        await action.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task SaveInlineCellAsync_ShouldValidateStatusOptionsLikeSelect()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var status = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Status",
+            Type = WikiDatabasePropertyTypes.Status,
+            Options =
+            [
+                new WikiDatabasePropertyOption("todo", "To do", "#aaa", WikiDatabaseStatusGroups.ToDo),
+                new WikiDatabasePropertyOption("done", "Done", "#0f0", WikiDatabaseStatusGroups.Complete)
+            ]
+        }, "u");
+        var row = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        var snapshot = await service.SaveInlineCellAsync(database.Id, row.Id, status.Id, "done", "editor");
+        snapshot.Rows.Single().Cells.Single(cell => cell.PropertyId == status.Id).Value.Should().Be("done");
+
+        var invalidSnapshot = await service.SaveInlineCellAsync(database.Id, row.Id, status.Id, "not-a-real-option", "editor");
+        invalidSnapshot.Rows.Single().Cells.Single(cell => cell.PropertyId == status.Id).Value.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(WikiDatabasePropertyTypes.Email, "person@example.com")]
+    [InlineData(WikiDatabasePropertyTypes.Phone, "+1 555-0100")]
+    public async Task SaveInlineCellAsync_ShouldPersistEmailAndPhoneAsPlainText(string propertyType, string value)
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Contacts", null, "u");
+        var property = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Contact info",
+            Type = propertyType
+        }, "u");
+        var row = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        var snapshot = await service.SaveInlineCellAsync(database.Id, row.Id, property.Id, value, "editor");
+
+        snapshot.Rows.Single().Cells.Single(cell => cell.PropertyId == property.Id).Value.Should().Be(value);
+    }
+
+    [Fact]
+    public async Task SavePropertyAsync_ShouldRejectAButtonThatPointsToAMissingWorkflow()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+
+        var action = async () => await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Run",
+            Type = WikiDatabasePropertyTypes.Button,
+            ButtonLabel = "Run it",
+            AutomationWorkflowId = Guid.NewGuid()
+        }, "u");
+
+        await action.Should().ThrowAsync<ArgumentException>();
     }
 
     [Theory]

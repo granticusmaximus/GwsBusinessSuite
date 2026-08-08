@@ -4,7 +4,9 @@ using GwsBusinessSuite.Domain.Entities;
 
 namespace GwsBusinessSuite.Application.Wiki;
 
-public sealed record WikiDatabasePropertyOption(string Id, string Label, string Color);
+// Group is only meaningful for a Status property (WikiDatabaseStatusGroups) - Select and
+// MultiSelect options simply leave it null.
+public sealed record WikiDatabasePropertyOption(string Id, string Label, string Color, string? Group = null);
 
 public sealed record WikiDatabasePropertyConfiguration(
     IReadOnlyList<WikiDatabasePropertyOption> Options,
@@ -13,7 +15,11 @@ public sealed record WikiDatabasePropertyConfiguration(
     Guid? ReciprocalPropertyId,
     Guid? RelationPropertyId,
     Guid? RollupPropertyId,
-    string? RollupAggregation)
+    string? RollupAggregation,
+    // Button property only: which Automation workflow a click runs, and the label shown on
+    // the button (falls back to the property's own Name when blank).
+    Guid? AutomationWorkflowId = null,
+    string? ButtonLabel = null)
 {
     public static WikiDatabasePropertyConfiguration Empty { get; } = new([], null, null, null, null, null, null);
 }
@@ -27,9 +33,16 @@ public static class WikiDatabaseRollupAggregations
     public const string Minimum = "minimum";
     public const string Maximum = "maximum";
     public const string ShowUnique = "showUnique";
+    public const string CountEmpty = "countEmpty";
+    public const string CountNotEmpty = "countNotEmpty";
+    public const string PercentEmpty = "percentEmpty";
+    public const string PercentNotEmpty = "percentNotEmpty";
+    public const string Median = "median";
+    public const string Range = "range";
 
     public static IReadOnlyList<string> All { get; } =
-        [Count, CountValues, Sum, Average, Minimum, Maximum, ShowUnique];
+        [Count, CountValues, Sum, Average, Minimum, Maximum, ShowUnique,
+         CountEmpty, CountNotEmpty, PercentEmpty, PercentNotEmpty, Median, Range];
 }
 
 public sealed record WikiDatabaseFilter(string PropertyId, string Operator, string Value);
@@ -174,6 +187,8 @@ public sealed class WikiDatabasePropertyEditor
     public Guid? RelationPropertyId { get; set; }
     public Guid? RollupPropertyId { get; set; }
     public string? RollupAggregation { get; set; }
+    public Guid? AutomationWorkflowId { get; set; }
+    public string? ButtonLabel { get; set; }
 }
 
 public sealed class WikiDatabaseRowEditor
@@ -252,9 +267,21 @@ public static class WikiPropertyValues
     // A single-line rendering of a value, used for Board cards / table cells outside of
     // edit mode. CreatedTime reads the row's own CreatedAt rather than PropertyValuesJson.
     public static string GetDisplayText(WikiDatabaseProperty property, JsonObject values, DateTimeOffset rowCreatedAt) =>
+        GetDisplayText(property, values, rowCreatedAt, null, null, null);
+
+    public static string GetDisplayText(
+        WikiDatabaseProperty property,
+        JsonObject values,
+        DateTimeOffset rowCreatedAt,
+        DateTimeOffset? rowUpdatedAt,
+        string? rowCreatedBy,
+        string? rowUpdatedBy) =>
         property.Type switch
         {
             WikiDatabasePropertyTypes.CreatedTime => rowCreatedAt.ToLocalTime().ToString("MMM d, yyyy"),
+            WikiDatabasePropertyTypes.LastEditedTime => (rowUpdatedAt ?? rowCreatedAt).ToLocalTime().ToString("MMM d, yyyy"),
+            WikiDatabasePropertyTypes.CreatedBy => rowCreatedBy ?? string.Empty,
+            WikiDatabasePropertyTypes.LastEditedBy => rowUpdatedBy ?? rowCreatedBy ?? string.Empty,
             WikiDatabasePropertyTypes.Checkbox => GetCheckbox(values, property.Id) ? "✓" : string.Empty,
             WikiDatabasePropertyTypes.Number => GetNumber(values, property.Id)?.ToString() ?? string.Empty,
             WikiDatabasePropertyTypes.Date => GetDate(values, property.Id)?.ToLocalTime().ToString("MMM d, yyyy") ?? string.Empty,
@@ -262,10 +289,13 @@ public static class WikiPropertyValues
                 string.Join(", ", WikiDatabasePropertyConfig.GetOptions(property).Count > 0
                     ? ResolveOptionLabels(property, GetMultiSelect(values, property.Id))
                     : GetMultiSelect(values, property.Id)),
-            WikiDatabasePropertyTypes.Select => GetText(values, property.Id) is { } optionId
+            WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.Status => GetText(values, property.Id) is { } optionId
                 ? ResolveOptionLabels(property, [optionId]).FirstOrDefault() ?? string.Empty
                 : string.Empty,
             WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup => GetComputedDisplayText(values, property.Id),
+            WikiDatabasePropertyTypes.Button => string.IsNullOrWhiteSpace(WikiDatabasePropertyConfig.Parse(property).ButtonLabel)
+                ? property.Name
+                : WikiDatabasePropertyConfig.Parse(property).ButtonLabel!,
             _ => GetText(values, property.Id) ?? string.Empty
         };
 
@@ -317,7 +347,8 @@ public static class WikiDatabasePropertyConfig
                 : new WikiDatabasePropertyConfiguration(
                     parsed.Options ?? [], parsed.FormulaExpression, parsed.RelatedDatabaseId,
                     parsed.ReciprocalPropertyId, parsed.RelationPropertyId,
-                    parsed.RollupPropertyId, parsed.RollupAggregation);
+                    parsed.RollupPropertyId, parsed.RollupAggregation,
+                    parsed.AutomationWorkflowId, parsed.ButtonLabel);
         }
         catch (JsonException) { return WikiDatabasePropertyConfiguration.Empty; }
     }
@@ -336,7 +367,9 @@ public static class WikiDatabasePropertyConfig
             configuration.ReciprocalPropertyId,
             configuration.RelationPropertyId,
             configuration.RollupPropertyId,
-            configuration.RollupAggregation), WikiPropertyValues.Options);
+            configuration.RollupAggregation,
+            configuration.AutomationWorkflowId,
+            configuration.ButtonLabel), WikiPropertyValues.Options);
 
     private sealed record PropertyConfigDto(
         IReadOnlyList<WikiDatabasePropertyOption>? Options,
@@ -345,7 +378,9 @@ public static class WikiDatabasePropertyConfig
         Guid? ReciprocalPropertyId = null,
         Guid? RelationPropertyId = null,
         Guid? RollupPropertyId = null,
-        string? RollupAggregation = null);
+        string? RollupAggregation = null,
+        Guid? AutomationWorkflowId = null,
+        string? ButtonLabel = null);
 }
 
 // Pure, DB-free filter/sort/group logic over an already-loaded row list - same split as

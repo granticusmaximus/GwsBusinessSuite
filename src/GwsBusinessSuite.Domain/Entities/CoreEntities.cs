@@ -372,6 +372,32 @@ public static class WikiDatabasePropertyTypes
     // Auto-populated, read-only, backed by the row's own CreatedAt - never stored in
     // PropertyValuesJson.
     public const string CreatedTime = "createdTime";
+    // Same "auto-populated, read-only, never stored" shape as CreatedTime, backed by the
+    // row's own UpdatedAt/UpdatedBy/CreatedBy instead.
+    public const string LastEditedTime = "lastEditedTime";
+    public const string LastEditedBy = "lastEditedBy";
+    public const string CreatedBy = "createdBy";
+    // Text-shaped storage (same as Text/Url), distinguished only for display (mailto:/tel:
+    // links) - no separate validation is enforced server-side.
+    public const string Email = "email";
+    public const string Phone = "phone";
+    // Same single-option storage as Select, but each WikiDatabasePropertyOption also carries
+    // a Group (see WikiDatabaseStatusGroups) so Board views can group by group instead of by
+    // raw option, matching Notion's Status property.
+    public const string Status = "status";
+    // Never stores a per-row value (like Formula/Rollup, it's excluded from SaveRowAsync's
+    // incoming values) - its ConfigJson instead names an Automation workflow to run on click.
+    // Wired to actually invoke that workflow in the Automation phase of this build-out.
+    public const string Button = "button";
+}
+
+public static class WikiDatabaseStatusGroups
+{
+    public const string ToDo = "todo";
+    public const string InProgress = "inProgress";
+    public const string Complete = "complete";
+
+    public static IReadOnlyList<string> All { get; } = [ToDo, InProgress, Complete];
 }
 
 public static class WikiDatabaseViewTypes

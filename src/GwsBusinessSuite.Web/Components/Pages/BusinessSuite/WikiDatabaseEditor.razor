@@ -1,9 +1,11 @@
 @using System.Text.Json.Nodes
 @using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Domain.Entities
+@using GwsBusinessSuite.Application.Automation
 @inject IWikiDatabaseService WikiDatabaseService
 @inject INotionSyncService NotionSyncService
 @inject ICurrentUserAccessor CurrentUserAccessor
+@inject IAutomationWorkflowService AutomationWorkflowService
 @inject IJSRuntime JS
 @inject ILogger<WikiDatabaseEditor> Logger
 
@@ -76,6 +78,56 @@ else
                                     <input class="form-control form-control-sm" placeholder="Option A, Option B, ..."
                                            value="@string.Join(", ", WikiDatabasePropertyConfig.GetOptions(property).Select(o => o.Label))"
                                            @onchange="e => SetPropertyOptionsAsync(property, e.Value?.ToString() ?? string.Empty)" disabled="@IsBusy" />
+                                </div>
+                            }
+                            @if (property.Type == WikiDatabasePropertyTypes.Status)
+                            {
+                                <div class="col-12">
+                                    <label class="form-label small text-secondary mb-1">Status options</label>
+                                    @foreach (var option in WikiDatabasePropertyConfig.GetOptions(property))
+                                    {
+                                        <div class="d-flex gap-2 align-items-center mb-1">
+                                            <input class="form-control form-control-sm" value="@option.Label"
+                                                   @onchange="e => RenameStatusOptionAsync(property, option.Id, e.Value?.ToString() ?? option.Label)" disabled="@IsBusy" />
+                                            <select class="form-select form-select-sm" style="max-width:10rem;" value="@option.Group"
+                                                    @onchange="e => SetStatusOptionGroupAsync(property, option.Id, e.Value?.ToString())" disabled="@IsBusy">
+                                                @foreach (var group in WikiDatabaseStatusGroups.All)
+                                                {
+                                                    <option value="@group">@StatusGroupLabel(group)</option>
+                                                }
+                                            </select>
+                                            <button type="button" class="btn btn-xs btn-link text-danger p-0" @onclick="() => RemoveStatusOptionAsync(property, option.Id)" disabled="@IsBusy">
+                                                <i class="bi bi-x-lg"></i>
+                                            </button>
+                                        </div>
+                                    }
+                                    <button type="button" class="btn btn-sm btn-link px-0" @onclick="() => AddStatusOptionAsync(property)" disabled="@IsBusy">
+                                        <i class="bi bi-plus-lg me-1"></i>Add status option
+                                    </button>
+                                </div>
+                            }
+                            @if (property.Type == WikiDatabasePropertyTypes.Button)
+                            {
+                                var buttonConfig = WikiDatabasePropertyConfig.Parse(property);
+                                <div class="col-12">
+                                    <div class="row g-2">
+                                        <div class="col-md-4">
+                                            <label class="form-label small text-secondary mb-1">Button label</label>
+                                            <input class="form-control form-control-sm" value="@buttonConfig.ButtonLabel"
+                                                   @onchange="e => SetButtonLabelAsync(property, e.Value?.ToString() ?? string.Empty)" disabled="@IsBusy" />
+                                        </div>
+                                        <div class="col-md-8">
+                                            <label class="form-label small text-secondary mb-1">Runs automation</label>
+                                            <select class="form-select form-select-sm" value="@buttonConfig.AutomationWorkflowId"
+                                                    @onchange="e => SetButtonWorkflowAsync(property, e.Value?.ToString())" disabled="@IsBusy">
+                                                <option value="">— No automation selected —</option>
+                                                @foreach (var workflow in _workflowChoices)
+                                                {
+                                                    <option value="@workflow.Id">@workflow.Name</option>
+                                                }
+                                            </select>
+                                        </div>
+                                    </div>
                                 </div>
                             }
                             <div class="col-md-1 text-end">
@@ -237,6 +289,21 @@ else
                             else if (_newPropertyType == WikiDatabasePropertyTypes.Rollup)
                             {
                                 <div class="small text-secondary mb-2">A new rollup starts with the first available relation and target property; configure it above after creation.</div>
+                            }
+                            else if (_newPropertyType == WikiDatabasePropertyTypes.Status)
+                            {
+                                <div class="small text-secondary mb-2">Add status options above after creation.</div>
+                            }
+                            else if (_newPropertyType == WikiDatabasePropertyTypes.Button)
+                            {
+                                <input class="form-control form-control-sm mb-2" placeholder="Button label" @bind="_newButtonLabel" />
+                                <select class="form-select form-select-sm mb-2" @bind="_newAutomationWorkflowId">
+                                    <option value="">— No automation selected —</option>
+                                    @foreach (var workflow in _workflowChoices)
+                                    {
+                                        <option value="@workflow.Id">@workflow.Name</option>
+                                    }
+                                </select>
                             }
                             <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddPropertyAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(_newPropertyName))">
                                 <i class="bi bi-plus-lg me-1"></i>Add property
@@ -732,6 +799,7 @@ else
                                                            @onchange="e => SetDateAsync(row, property, e.Value?.ToString())" />
                                                     break;
                                                 case WikiDatabasePropertyTypes.Select:
+                                                case WikiDatabasePropertyTypes.Status:
                                                     <select class="form-select form-select-sm" disabled="@IsBusy" @onchange="e => SetSelectAsync(row, property, e.Value?.ToString())">
                                                         <option value="">—</option>
                                                         @foreach (var option in WikiDatabasePropertyConfig.GetOptions(property))
@@ -789,12 +857,37 @@ else
                                                     <input class="form-control form-control-sm" value="@GetText(row, property)" disabled="@IsBusy"
                                                            @onchange="e => SetTextAsync(row, property, e.Value?.ToString())" placeholder="Address or place" />
                                                     break;
+                                                case WikiDatabasePropertyTypes.Email:
+                                                    <input type="email" class="form-control form-control-sm" value="@GetText(row, property)" disabled="@IsBusy"
+                                                           @onchange="e => SetTextAsync(row, property, e.Value?.ToString())" placeholder="name@example.com" />
+                                                    break;
+                                                case WikiDatabasePropertyTypes.Phone:
+                                                    <input type="tel" class="form-control form-control-sm" value="@GetText(row, property)" disabled="@IsBusy"
+                                                           @onchange="e => SetTextAsync(row, property, e.Value?.ToString())" placeholder="+1 555-0100" />
+                                                    break;
                                                 case WikiDatabasePropertyTypes.Formula:
                                                 case WikiDatabasePropertyTypes.Rollup:
                                                     <span class="small text-secondary">@WikiPropertyValues.GetDisplayText(property, WikiPropertyValues.ParseObject(row.PropertyValuesJson), row.CreatedAt)</span>
                                                     break;
                                                 case WikiDatabasePropertyTypes.CreatedTime:
                                                     <span class="small text-secondary">@row.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")</span>
+                                                    break;
+                                                case WikiDatabasePropertyTypes.LastEditedTime:
+                                                    <span class="small text-secondary">@(row.UpdatedAt ?? row.CreatedAt).ToLocalTime().ToString("MMM d, yyyy")</span>
+                                                    break;
+                                                case WikiDatabasePropertyTypes.CreatedBy:
+                                                    <span class="small text-secondary">@row.CreatedBy</span>
+                                                    break;
+                                                case WikiDatabasePropertyTypes.LastEditedBy:
+                                                    <span class="small text-secondary">@(row.UpdatedBy ?? row.CreatedBy)</span>
+                                                    break;
+                                                case WikiDatabasePropertyTypes.Button:
+                                                    var buttonLabel = string.IsNullOrWhiteSpace(WikiDatabasePropertyConfig.Parse(property).ButtonLabel)
+                                                        ? property.Name
+                                                        : WikiDatabasePropertyConfig.Parse(property).ButtonLabel;
+                                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled title="Automations from Button properties aren't wired up yet.">
+                                                        @buttonLabel
+                                                    </button>
                                                     break;
                                             }
                                         </td>
@@ -880,10 +973,12 @@ else
     private static readonly IReadOnlyList<string> AddablePropertyTypes =
     [
         WikiDatabasePropertyTypes.Text, WikiDatabasePropertyTypes.Number, WikiDatabasePropertyTypes.Select,
-        WikiDatabasePropertyTypes.MultiSelect, WikiDatabasePropertyTypes.Date, WikiDatabasePropertyTypes.Checkbox,
-        WikiDatabasePropertyTypes.Url, WikiDatabasePropertyTypes.Person, WikiDatabasePropertyTypes.Files,
+        WikiDatabasePropertyTypes.MultiSelect, WikiDatabasePropertyTypes.Status, WikiDatabasePropertyTypes.Date,
+        WikiDatabasePropertyTypes.Checkbox, WikiDatabasePropertyTypes.Url, WikiDatabasePropertyTypes.Email,
+        WikiDatabasePropertyTypes.Phone, WikiDatabasePropertyTypes.Person, WikiDatabasePropertyTypes.Files,
         WikiDatabasePropertyTypes.Place, WikiDatabasePropertyTypes.Formula, WikiDatabasePropertyTypes.Relation,
-        WikiDatabasePropertyTypes.Rollup, WikiDatabasePropertyTypes.CreatedTime
+        WikiDatabasePropertyTypes.Rollup, WikiDatabasePropertyTypes.Button, WikiDatabasePropertyTypes.CreatedTime,
+        WikiDatabasePropertyTypes.LastEditedTime, WikiDatabasePropertyTypes.CreatedBy, WikiDatabasePropertyTypes.LastEditedBy
     ];
     private static readonly IReadOnlyList<(string Type, string Name)> AdvancedViewOptions =
     [
@@ -916,7 +1011,10 @@ else
     private Guid? _newRelatedDatabaseId;
     private bool _newReciprocalRelationEnabled;
     private string _newReciprocalPropertyName = string.Empty;
+    private string _newButtonLabel = "Run";
+    private Guid? _newAutomationWorkflowId;
     private List<WikiDatabase> _databaseChoices = [];
+    private List<AutomationWorkflowSummary> _workflowChoices = [];
     private readonly Dictionary<Guid, WikiDatabase> _relatedDatabases = [];
     private DateOnly _calendarMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
     private Guid _filterPropertyId;
@@ -1009,6 +1107,7 @@ else
         {
             Database = await WikiDatabaseService.GetDatabaseAsync(WikiDatabaseId);
             _databaseChoices = (await WikiDatabaseService.ListDatabasesAsync()).OrderBy(database => database.Title).ToList();
+            _workflowChoices = (await AutomationWorkflowService.ListAsync()).OrderBy(workflow => workflow.Name).ToList();
             if (Database is not null)
             {
                 _title = Database.Title;
@@ -1148,7 +1247,9 @@ else
                     : null,
                 ReciprocalPropertyName = _newPropertyType == WikiDatabasePropertyTypes.Relation
                     ? _newReciprocalPropertyName
-                    : null
+                    : null,
+                ButtonLabel = _newPropertyType == WikiDatabasePropertyTypes.Button ? _newButtonLabel : null,
+                AutomationWorkflowId = _newPropertyType == WikiDatabasePropertyTypes.Button ? _newAutomationWorkflowId : null
             };
             if (_newPropertyType == WikiDatabasePropertyTypes.Rollup)
             {
@@ -1165,6 +1266,8 @@ else
             _newPropertyName = string.Empty;
             _newReciprocalRelationEnabled = false;
             _newReciprocalPropertyName = string.Empty;
+            _newButtonLabel = "Run";
+            _newAutomationWorkflowId = null;
             await ReloadAsync();
         });
     }
@@ -1200,6 +1303,67 @@ else
         await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, await CurrentUserNameAsync());
         await ReloadAsync();
     });
+
+    private async Task AddStatusOptionAsync(WikiDatabaseProperty property) => await Work(async () =>
+    {
+        var editor = CreatePropertyEditor(property);
+        editor.Options = [.. WikiDatabasePropertyConfig.GetOptions(property),
+            new WikiDatabasePropertyOption(Guid.NewGuid().ToString(), "New status", "#6c757d", WikiDatabaseStatusGroups.ToDo)];
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, await CurrentUserNameAsync());
+        await ReloadAsync();
+    });
+
+    private async Task RenameStatusOptionAsync(WikiDatabaseProperty property, string optionId, string label) => await Work(async () =>
+    {
+        var editor = CreatePropertyEditor(property);
+        editor.Options = WikiDatabasePropertyConfig.GetOptions(property)
+            .Select(option => option.Id == optionId ? option with { Label = label } : option)
+            .ToList();
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, await CurrentUserNameAsync());
+        await ReloadAsync();
+    });
+
+    private async Task SetStatusOptionGroupAsync(WikiDatabaseProperty property, string optionId, string? group) => await Work(async () =>
+    {
+        var editor = CreatePropertyEditor(property);
+        editor.Options = WikiDatabasePropertyConfig.GetOptions(property)
+            .Select(option => option.Id == optionId ? option with { Group = group } : option)
+            .ToList();
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, await CurrentUserNameAsync());
+        await ReloadAsync();
+    });
+
+    private async Task RemoveStatusOptionAsync(WikiDatabaseProperty property, string optionId) => await Work(async () =>
+    {
+        var editor = CreatePropertyEditor(property);
+        editor.Options = WikiDatabasePropertyConfig.GetOptions(property).Where(option => option.Id != optionId).ToList();
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, await CurrentUserNameAsync());
+        await ReloadAsync();
+    });
+
+    private async Task SetButtonLabelAsync(WikiDatabaseProperty property, string label) => await Work(async () =>
+    {
+        var editor = CreatePropertyEditor(property);
+        editor.ButtonLabel = label;
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, await CurrentUserNameAsync());
+        await ReloadAsync();
+    });
+
+    private async Task SetButtonWorkflowAsync(WikiDatabaseProperty property, string? rawWorkflowId) => await Work(async () =>
+    {
+        var editor = CreatePropertyEditor(property);
+        editor.AutomationWorkflowId = Guid.TryParse(rawWorkflowId, out var workflowId) ? workflowId : null;
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, await CurrentUserNameAsync());
+        await ReloadAsync();
+    });
+
+    private static string StatusGroupLabel(string group) => group switch
+    {
+        WikiDatabaseStatusGroups.ToDo => "To-do",
+        WikiDatabaseStatusGroups.InProgress => "In progress",
+        WikiDatabaseStatusGroups.Complete => "Complete",
+        _ => group
+    };
 
     private async Task SetRelationDatabaseAsync(WikiDatabaseProperty property, string? rawDatabaseId) => await Work(async () =>
     {
@@ -1800,7 +1964,9 @@ else
             ReciprocalPropertyId = config.ReciprocalPropertyId,
             RelationPropertyId = config.RelationPropertyId,
             RollupPropertyId = config.RollupPropertyId,
-            RollupAggregation = config.RollupAggregation
+            RollupAggregation = config.RollupAggregation,
+            AutomationWorkflowId = config.AutomationWorkflowId,
+            ButtonLabel = config.ButtonLabel
         };
     }
 
@@ -1840,6 +2006,12 @@ else
         WikiDatabaseRollupAggregations.Minimum => "Minimum",
         WikiDatabaseRollupAggregations.Maximum => "Maximum",
         WikiDatabaseRollupAggregations.ShowUnique => "Show unique",
+        WikiDatabaseRollupAggregations.CountEmpty => "Count empty",
+        WikiDatabaseRollupAggregations.CountNotEmpty => "Count not empty",
+        WikiDatabaseRollupAggregations.PercentEmpty => "Percent empty",
+        WikiDatabaseRollupAggregations.PercentNotEmpty => "Percent not empty",
+        WikiDatabaseRollupAggregations.Median => "Median",
+        WikiDatabaseRollupAggregations.Range => "Range",
         _ => aggregation
     };
 
@@ -1847,6 +2019,9 @@ else
     {
         WikiDatabasePropertyTypes.MultiSelect => "Multi-select",
         WikiDatabasePropertyTypes.CreatedTime => "Created time",
+        WikiDatabasePropertyTypes.LastEditedTime => "Last edited time",
+        WikiDatabasePropertyTypes.LastEditedBy => "Last edited by",
+        WikiDatabasePropertyTypes.CreatedBy => "Created by",
         WikiDatabasePropertyTypes.Rollup => "Rollup",
         _ => type
     };

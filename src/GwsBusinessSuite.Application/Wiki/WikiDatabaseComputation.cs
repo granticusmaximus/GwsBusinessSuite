@@ -181,8 +181,26 @@ public static class WikiDatabaseComputation
                 .Select(value => value.ToDisplayText())
                 .Where(value => !string.IsNullOrWhiteSpace(value))
                 .Distinct(StringComparer.OrdinalIgnoreCase))),
+            // Same underlying count as CountValues - kept as a separate named aggregation
+            // purely so the option list matches Notion's own naming (both exist there too).
+            WikiDatabaseRollupAggregations.CountNotEmpty => WikiComputedValue.Number(values.Count),
+            WikiDatabaseRollupAggregations.CountEmpty => WikiComputedValue.Number(relatedRows.Count - values.Count),
+            WikiDatabaseRollupAggregations.PercentEmpty => WikiComputedValue.Number(
+                relatedRows.Count == 0 ? 0 : Math.Round(100m * (relatedRows.Count - values.Count) / relatedRows.Count, 1)),
+            WikiDatabaseRollupAggregations.PercentNotEmpty => WikiComputedValue.Number(
+                relatedRows.Count == 0 ? 0 : Math.Round(100m * values.Count / relatedRows.Count, 1)),
+            WikiDatabaseRollupAggregations.Median => AggregateNumbers(values, Median),
+            WikiDatabaseRollupAggregations.Range => AggregateNumbers(values, numbers => numbers.Count == 0 ? 0 : numbers.Max() - numbers.Min()),
             _ => WikiComputedValue.Text("#ERROR! Unsupported rollup")
         };
+    }
+
+    private static decimal Median(IReadOnlyList<decimal> numbers)
+    {
+        if (numbers.Count == 0) return 0;
+        var sorted = numbers.OrderBy(number => number).ToList();
+        var middle = sorted.Count / 2;
+        return sorted.Count % 2 == 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
     }
 
     private static WikiComputedValue AggregateNumbers(
@@ -217,9 +235,13 @@ public static class WikiDatabaseComputation
             WikiDatabasePropertyTypes.Date => WikiPropertyValues.GetDate(values, property.Id) is { } date
                 ? WikiComputedValue.Date(date) : WikiComputedValue.Empty,
             WikiDatabasePropertyTypes.CreatedTime => WikiComputedValue.Date(row.CreatedAt),
+            WikiDatabasePropertyTypes.LastEditedTime => WikiComputedValue.Date(row.UpdatedAt ?? row.CreatedAt),
+            WikiDatabasePropertyTypes.CreatedBy => WikiComputedValue.Text(row.CreatedBy),
+            WikiDatabasePropertyTypes.LastEditedBy => WikiComputedValue.Text(row.UpdatedBy ?? row.CreatedBy),
             WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Person or WikiDatabasePropertyTypes.Files or WikiDatabasePropertyTypes.Relation =>
-                WikiComputedValue.Text(string.Join(", ", WikiPropertyValues.GetMultiSelect(values, property.Id))),
-            _ => WikiComputedValue.Text(WikiPropertyValues.GetDisplayText(property, values, row.CreatedAt))
+                WikiComputedValue.Array(WikiPropertyValues.GetMultiSelect(values, property.Id)
+                    .Select(item => WikiComputedValue.Text(item)).ToList()),
+            _ => WikiComputedValue.Text(WikiPropertyValues.GetDisplayText(property, values, row.CreatedAt, row.UpdatedAt, row.CreatedBy, row.UpdatedBy))
         };
     }
 
@@ -230,7 +252,22 @@ public static class WikiDatabaseComputation
         public static WikiComputedValue Boolean(bool value) => new(value);
         public static WikiComputedValue Text(string? value) => new(value);
         public static WikiComputedValue Date(DateTimeOffset value) => new(value);
-        public bool IsEmpty => Value is null || Value is string text && string.IsNullOrWhiteSpace(text);
+        // Backs MultiSelect/Person/Files/Relation property references and the new list/array
+        // formula functions (length/first/last/at/slice/unique/join/includes/sort). Every
+        // *other* existing formula behavior (concat, comparisons, string coercion) is
+        // preserved unchanged because ToDisplayText() below still comma-joins an array
+        // exactly like the plain-text join this replaced.
+        public static WikiComputedValue Array(IReadOnlyList<WikiComputedValue> items) => new(items);
+        public bool IsEmpty => Value switch
+        {
+            null => true,
+            string text => string.IsNullOrWhiteSpace(text),
+            IReadOnlyList<WikiComputedValue> items => items.Count == 0,
+            _ => false
+        };
+        public bool IsArray => Value is IReadOnlyList<WikiComputedValue>;
+        public IReadOnlyList<WikiComputedValue> AsArray() =>
+            Value as IReadOnlyList<WikiComputedValue> ?? [this];
 
         public bool TryAsNumber(out decimal number)
         {
@@ -268,6 +305,7 @@ public static class WikiDatabaseComputation
             bool boolean => boolean ? "True" : "False",
             decimal number => number.ToString("0.############################", CultureInfo.InvariantCulture),
             DateTimeOffset date => date.ToString("O", CultureInfo.InvariantCulture),
+            IReadOnlyList<WikiComputedValue> items => string.Join(", ", items.Select(item => item.ToDisplayText())),
             _ => Value.ToString() ?? string.Empty
         };
 
@@ -513,7 +551,26 @@ public static class WikiDatabaseComputation
                     "pow" => EvaluatePower(arguments, name),
                     "concat" => WikiComputedValue.Text(string.Concat(arguments.Select(argument => argument.ToDisplayText()))),
                     "coalesce" => arguments.FirstOrDefault(argument => !argument.IsEmpty),
-                    "length" => WikiComputedValue.Number(arguments[0].ToDisplayText().Length),
+                    // Polymorphic: an array argument (Relation/MultiSelect/Person/Files, or the
+                    // result of another list function) counts elements; anything else falls
+                    // back to the original string-length behavior.
+                    "length" => WikiComputedValue.Number(
+                        arguments[0].IsArray ? arguments[0].AsArray().Count : arguments[0].ToDisplayText().Length),
+                    "first" => arguments[0].AsArray() is { Count: > 0 } firstItems ? firstItems[0] : WikiComputedValue.Empty,
+                    "last" => arguments[0].AsArray() is { Count: > 0 } lastItems ? lastItems[^1] : WikiComputedValue.Empty,
+                    "at" => AtIndex(arguments[0].AsArray(), (int)RequireNumber(arguments[1], name)),
+                    "slice" => WikiComputedValue.Array(SliceArray(
+                        arguments[0].AsArray(), (int)RequireNumber(arguments[1], name),
+                        arguments.Count == 3 ? (int)RequireNumber(arguments[2], name) : null)),
+                    "unique" => WikiComputedValue.Array(arguments[0].AsArray()
+                        .DistinctBy(item => item.ToDisplayText(), StringComparer.OrdinalIgnoreCase).ToList()),
+                    "join" => WikiComputedValue.Text(string.Join(
+                        arguments.Count == 2 ? arguments[1].ToDisplayText() : ", ",
+                        arguments[0].AsArray().Select(item => item.ToDisplayText()))),
+                    "includes" => WikiComputedValue.Boolean(arguments[0].AsArray().Any(item =>
+                        string.Equals(item.ToDisplayText(), arguments[1].ToDisplayText(), StringComparison.OrdinalIgnoreCase))),
+                    "sort" => WikiComputedValue.Array(arguments[0].AsArray()
+                        .OrderBy(item => item, Comparer<WikiComputedValue>.Create(Compare)).ToList()),
                     "lower" => WikiComputedValue.Text(arguments[0].ToDisplayText().ToLowerInvariant()),
                     "upper" => WikiComputedValue.Text(arguments[0].ToDisplayText().ToUpperInvariant()),
                     "trim" => WikiComputedValue.Text(arguments[0].ToDisplayText().Trim()),
@@ -553,8 +610,11 @@ public static class WikiDatabaseComputation
                 "if" or "replace" or "dateadd" or "datebetween" => count == 3,
                 "round" => count is 1 or 2,
                 "and" or "or" or "concat" or "coalesce" or "min" or "max" => count >= 1,
-                "not" or "empty" or "abs" or "ceil" or "floor" or "length" or "lower" or "upper" or "trim" => count == 1,
-                "pow" or "contains" or "startswith" or "endswith" or "formatdate" => count == 2,
+                "not" or "empty" or "abs" or "ceil" or "floor" or "length" or "lower" or "upper" or "trim"
+                    or "first" or "last" or "unique" or "sort" => count == 1,
+                "pow" or "contains" or "startswith" or "endswith" or "formatdate" or "at" or "includes" => count == 2,
+                "slice" => count is 2 or 3,
+                "join" => count is 1 or 2,
                 "now" or "today" => count == 0,
                 _ => false
             };
@@ -566,6 +626,22 @@ public static class WikiDatabaseComputation
             var result = Math.Pow((double)RequireNumber(arguments[0], name), (double)RequireNumber(arguments[1], name));
             if (double.IsNaN(result) || double.IsInfinity(result)) throw Error("Power result is outside the supported range");
             return WikiComputedValue.Number((decimal)result);
+        }
+
+        private static WikiComputedValue AtIndex(IReadOnlyList<WikiComputedValue> items, int index)
+        {
+            // Negative indexes count from the end, matching Notion's own at() semantics.
+            var resolved = index < 0 ? items.Count + index : index;
+            return resolved >= 0 && resolved < items.Count ? items[resolved] : WikiComputedValue.Empty;
+        }
+
+        private static List<WikiComputedValue> SliceArray(IReadOnlyList<WikiComputedValue> items, int start, int? end)
+        {
+            var from = Math.Clamp(start < 0 ? items.Count + start : start, 0, items.Count);
+            var to = end is { } exclusiveEnd
+                ? Math.Clamp(exclusiveEnd < 0 ? items.Count + exclusiveEnd : exclusiveEnd, 0, items.Count)
+                : items.Count;
+            return to > from ? items.Skip(from).Take(to - from).ToList() : [];
         }
 
         private decimal RequireNumber(WikiComputedValue value, string functionName)
