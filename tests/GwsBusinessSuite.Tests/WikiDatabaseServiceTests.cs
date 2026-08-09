@@ -2312,6 +2312,144 @@ public sealed class WikiDatabaseServiceTests
     }
 
     [Fact]
+    public async Task ButtonProperty_RunViaManualExecution_ShouldWriteBackToTheTriggeringRow()
+    {
+        // Mirrors exactly what WikiDatabaseEditor.razor's RunButtonWorkflowAsync does when a
+        // user clicks a Button property: call ExecuteAsync in Manual mode with a
+        // {wikiDatabaseId, rowId, values} payload - same shape as database.rowChangedTrigger's
+        // own input, so a workflow author can reuse {{ $json.rowId }} either way it's triggered.
+        await using var db = await CreateDbAsync();
+        IWikiDatabaseService? wikiDatabaseService = null;
+        var dbContextFactoryOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(db.Database.GetDbConnection())
+            .Options;
+        var accessService = new SentinelAccessService(db);
+        var registry = new AutomationNodeRegistry(
+            new FakeHttpClient(),
+            dbContextFactory: new FakeAppDbContextFactory(dbContextFactoryOptions),
+            serviceProvider: new AutomationServiceProvider(() => wikiDatabaseService, accessService));
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executions = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggers = new AutomationTriggerService(db, workflowService, executions, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+        var service = new WikiDatabaseService(db, triggers);
+        wikiDatabaseService = service;
+
+        db.AppUsers.Add(new AppUser { Username = "user", Role = AppRoles.Admin, PasswordHash = "hash" });
+        await db.SaveChangesAsync();
+
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var titleProperty = database.Properties.Single(p => p.Type == WikiDatabasePropertyTypes.Title);
+        var statusProperty = await service.SavePropertyAsync(
+            database.Id, new WikiDatabasePropertyEditor { Name = "Status", Type = WikiDatabasePropertyTypes.Text }, "u");
+        var row = await service.SaveRowAsync(database.Id, RowWithStatus(titleProperty.Id, "First task"), "u");
+
+        // AutomationWorkflowService.CreateAsync seeds a default core.manualTrigger node, which is
+        // exactly what a Button-driven Manual execution requires (see AutomationExecutionService.
+        // ExecuteAsync's mode-to-trigger-type mapping).
+        var workflow = await workflowService.CreateAsync("Mark as reviewed");
+        var writeBack = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Mark reviewed",
+            TypeKey = "database.setRowProperty",
+            PositionX = 400,
+            PositionY = 420,
+            ParametersJson = $"{{\"wikiDatabaseId\":\"{database.Id}\",\"rowId\":\"{{{{ $json.rowId }}}}\",\"propertyId\":\"{statusProperty.Id}\",\"value\":\"reviewed\"}}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", writeBack.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var buttonProperty = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Review", Type = WikiDatabasePropertyTypes.Button, ButtonLabel = "Mark reviewed", AutomationWorkflowId = workflow.Id
+        }, "u");
+
+        var payload = new System.Text.Json.Nodes.JsonObject
+        {
+            ["wikiDatabaseId"] = database.Id.ToString(),
+            ["rowId"] = row.Id.ToString(),
+            ["values"] = WikiPropertyValues.ParseObject(row.PropertyValuesJson)
+        };
+        var execution = await executions.ExecuteAsync(
+            WikiDatabasePropertyConfig.Parse(buttonProperty).AutomationWorkflowId!.Value,
+            payload.ToJsonString(),
+            AutomationExecutionModes.Manual);
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        var updatedRow = await db.WikiDatabaseRows.AsNoTracking().SingleAsync(item => item.Id == row.Id);
+        WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(updatedRow.PropertyValuesJson), statusProperty.Id)
+            .Should().Be("reviewed");
+    }
+
+    [Fact]
+    public async Task DatabaseAddRowNode_ShouldCreateARowWithResolvedPropertyValuesAndSubItemParent()
+    {
+        // Notion-style "add row to database X" automation action - the one genuinely missing
+        // piece from conditional (core.if), recurring (core.scheduleTrigger), and edit-elsewhere
+        // (database.setRowProperty), which all already existed.
+        await using var db = await CreateDbAsync();
+        IWikiDatabaseService? wikiDatabaseService = null;
+        var dbContextFactoryOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(db.Database.GetDbConnection())
+            .Options;
+        var registry = new AutomationNodeRegistry(
+            new FakeHttpClient(),
+            dbContextFactory: new FakeAppDbContextFactory(dbContextFactoryOptions),
+            serviceProvider: new SingleServiceProvider(() => wikiDatabaseService));
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executions = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggers = new AutomationTriggerService(db, workflowService, executions, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+        var service = new WikiDatabaseService(db, triggers);
+        wikiDatabaseService = service;
+
+        db.AppUsers.Add(new AppUser { Username = "user", Role = AppRoles.Admin, PasswordHash = "hash" });
+        await db.SaveChangesAsync();
+
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var titleProperty = database.Properties.Single(p => p.Type == WikiDatabasePropertyTypes.Title);
+        var parentRow = await service.SaveRowAsync(database.Id, RowWithStatus(titleProperty.Id, "Parent task"), "u");
+
+        var workflow = await workflowService.CreateAsync("Add follow-up sub-task");
+        var trigger = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Row changed",
+            TypeKey = "database.rowChangedTrigger",
+            PositionX = 120,
+            PositionY = 420,
+            ParametersJson = $"{{\"wikiDatabaseId\":\"{database.Id}\"}}"
+        });
+        var addRow = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Add follow-up",
+            TypeKey = "database.addRow",
+            PositionX = 400,
+            PositionY = 420,
+            ParametersJson = $"{{\"wikiDatabaseId\":\"{database.Id}\",\"parentRowId\":\"{{{{ $json.rowId }}}}\",\"propertyValues\":{{\"{titleProperty.Id}\":\"Follow-up for {{{{ $json.rowId }}}}\"}}}}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, trigger.Id, "main", addRow.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+        await workflowService.SetActiveAsync(workflow.Id, true);
+
+        // Editing the parent row (a genuine property-values change) fires the trigger, which
+        // creates the new sub-item row.
+        var parentEditor = RowWithStatus(titleProperty.Id, "Parent task (updated)");
+        parentEditor.Id = parentRow.Id;
+        await service.SaveRowAsync(database.Id, parentEditor, "u");
+
+        var reloaded = await service.GetDatabaseAsync(database.Id);
+        var createdRow = reloaded!.Rows.Single(r => r.Id != parentRow.Id);
+        createdRow.ParentRowId.Should().Be(parentRow.Id);
+        WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(createdRow.PropertyValuesJson), titleProperty.Id)
+            .Should().Be($"Follow-up for {parentRow.Id}");
+
+        // The new row's own creation must not re-trigger this (or any) workflow - only the one
+        // execution from editing the parent row should exist.
+        (await db.AutomationExecutions.AsNoTracking().Where(item => item.WorkflowId == workflow.Id).ToListAsync())
+            .Should().ContainSingle("creating the new row must not spawn a second execution of its own workflow");
+    }
+
+    [Fact]
     public async Task DatabaseSetRowPropertyNode_ShouldAllowWritesFromANonAdminOwnerWithExplicitEditAccess()
     {
         await using var db = await CreateDbAsync();

@@ -17,32 +17,45 @@ const MAX_DRAFT_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 let suggestionMenuSequence = 0;
 let tabEditorSequence = 0;
 
+// Grouped and labeled to match Notion's own "+"//" menu taxonomy (Basic Blocks / Media Blocks /
+// Database Inline / Full Page / Advanced & Inline Blocks) rather than this editor's earlier,
+// looser grouping - see the "+" button feature request this mirrors.
 const BLOCK_TYPES = [
     { type: 'paragraph', label: 'Text', icon: '¶', group: 'Basic blocks', description: 'Start writing with plain text.', keywords: 'paragraph' },
+    { type: '__create_page', label: 'Page', icon: '📄', group: 'Basic blocks', description: 'Create a new nested sub-page and open it.', keywords: 'page subpage new document' },
+    { type: 'to_do', label: 'To-do list', icon: '☑', group: 'Basic blocks', description: 'Text with a clickable checkbox next to it.', keywords: 'task checkbox' },
     { type: 'heading_1', label: 'Heading 1', icon: 'H1', group: 'Basic blocks', description: 'Large section heading.', keywords: 'title' },
     { type: 'heading_2', label: 'Heading 2', icon: 'H2', group: 'Basic blocks', description: 'Medium section heading.', keywords: 'subtitle' },
     { type: 'heading_3', label: 'Heading 3', icon: 'H3', group: 'Basic blocks', description: 'Small section heading.', keywords: 'subtitle' },
-    { type: 'bulleted_list_item', label: 'Bulleted list', icon: '•', group: 'Lists', description: 'Create a simple bulleted list.', keywords: 'unordered' },
-    { type: 'numbered_list_item', label: 'Numbered list', icon: '1.', group: 'Lists', description: 'Create an ordered list.', keywords: 'ordered' },
-    { type: 'to_do', label: 'To-do', icon: '☑', group: 'Lists', description: 'Track a task with a checkbox.', keywords: 'task checkbox' },
-    { type: 'toggle', label: 'Toggle', icon: '▸', group: 'Lists', description: 'Hide content inside a collapsible branch.', keywords: 'details collapse' },
-    { type: 'quote', label: 'Quote', icon: '❝', group: 'Advanced blocks', description: 'Capture a quotation.', keywords: 'blockquote' },
-    { type: 'callout', label: 'Callout', icon: '💡', group: 'Advanced blocks', description: 'Emphasize an important note.', keywords: 'notice aside' },
-    { type: 'code', label: 'Code', icon: '</>', group: 'Advanced blocks', description: 'Write a formatted code snippet.', keywords: 'preformatted' },
-    { type: 'divider', label: 'Divider', icon: '—', group: 'Advanced blocks', description: 'Visually separate sections.', keywords: 'rule separator' },
-    { type: 'equation', label: 'Equation', icon: '∑', group: 'Advanced blocks', description: 'Display a mathematical expression.', keywords: 'math formula' },
-    { type: 'button', label: 'Button', icon: '▣', group: 'Advanced blocks', description: 'Add a prominent action.', keywords: 'action link' },
-    { type: 'synced_block', label: 'Synced block', icon: '↻', group: 'Advanced blocks', description: 'Reuse synchronized content.', keywords: 'reusable' },
-    { type: 'columns', label: 'Columns', icon: '▥', group: 'Advanced blocks', description: 'Lay content out side by side.', keywords: 'layout' },
-    { type: 'tab', label: 'Tabs', icon: '▤', group: 'Advanced blocks', description: 'Organize content into switchable tabs.', keywords: 'tabbed container panes' },
-    { type: 'image', label: 'Image', icon: '🖼', group: 'Media', description: 'Upload or link to an image.', keywords: 'photo picture' },
-    { type: 'embed', label: 'Embed link', icon: '🔗', group: 'Media', description: 'Embed content from another site.', keywords: 'video url' },
-    { type: 'linked_database', label: 'Linked database', icon: '▦', group: 'Data', description: 'Show an existing database view.', keywords: 'data view' },
-    { type: 'inline_database', label: 'Inline database', icon: '▤', group: 'Data', description: 'Create a database inside this page.', keywords: 'data collection' },
-    { type: 'table', label: 'Table', icon: '▦', group: 'Data', description: 'Add a simple table.', keywords: 'grid rows columns' },
-    { type: 'breadcrumb', label: 'Breadcrumb', icon: '›', group: 'Page tools', description: 'Show this page’s location.', keywords: 'navigation path' },
-    { type: 'table_of_contents', label: 'Table of contents', icon: '☷', group: 'Page tools', description: 'Link to headings on this page.', keywords: 'outline headings' }
+    { type: 'table', label: 'Table', icon: '▦', group: 'Basic blocks', description: 'A simple, standalone text table layout.', keywords: 'grid rows columns' },
+    { type: 'bulleted_list_item', label: 'Bulleted list', icon: '•', group: 'Basic blocks', description: 'Create a simple bulleted list.', keywords: 'unordered' },
+    { type: 'numbered_list_item', label: 'Numbered list', icon: '1.', group: 'Basic blocks', description: 'Create an ordered list.', keywords: 'ordered' },
+    { type: 'toggle', label: 'Toggle list', icon: '▸', group: 'Basic blocks', description: 'Arrows that expand or collapse nested content.', keywords: 'details collapse' },
+    { type: 'quote', label: 'Quote', icon: '❝', group: 'Basic blocks', description: 'Large text offset with a vertical accent line.', keywords: 'blockquote' },
+    { type: 'divider', label: 'Divider', icon: '—', group: 'Basic blocks', description: 'A thin horizontal line to separate visual space.', keywords: 'rule separator' },
+    { type: '__link_to_page', label: 'Link to page', icon: '🔗', group: 'Basic blocks', description: 'Creates a shortcut link to another existing page.', keywords: 'link page shortcut wikilink' },
+    { type: 'callout', label: 'Callout', icon: '💡', group: 'Basic blocks', description: 'Text boxed within a light background banner with a custom icon.', keywords: 'notice aside' },
+    { type: 'image', label: 'Image', icon: '🖼', group: 'Media', description: 'Uploads or embeds pictures, GIFs, or stock imagery.', keywords: 'photo picture' },
+    { type: 'embed', label: 'Web bookmark', icon: '🔖', group: 'Media', description: 'Creates a neat preview card for web links.', keywords: 'embed video url bookmark' },
+    { type: 'code', label: 'Code', icon: '</>', group: 'Media', description: 'A dedicated block for formatting code snippets across languages.', keywords: 'preformatted' },
+    { type: 'inline_database', label: 'Table view', icon: '▦', group: 'Database inline / full page', description: 'Data displayed in a grid of rows and columns.', keywords: 'database data collection table grid' },
+    { type: 'linked_database', label: 'Linked database', icon: '▤', group: 'Database inline / full page', description: 'Show an existing database view.', keywords: 'database data view' },
+    { type: '__create_database', label: 'New database', icon: '🗄️', group: 'Database inline / full page', description: 'Create a new database nested here and open it.', keywords: 'database table collection new board gallery list calendar timeline' },
+    { type: 'table_of_contents', label: 'Table of contents', icon: '☷', group: 'Advanced & inline blocks', description: 'Auto-generates a list of jump links using your page headings.', keywords: 'outline headings' },
+    { type: 'equation', label: 'Block equation', icon: '∑', group: 'Advanced & inline blocks', description: 'Centers standard LaTeX scientific formulas.', keywords: 'math formula latex' },
+    { type: 'synced_block', label: 'Synced block', icon: '↻', group: 'Advanced & inline blocks', description: 'Edits applied here sync across multiple duplicated spaces.', keywords: 'reusable' },
+    { type: 'button', label: 'Button', icon: '▣', group: 'Advanced & inline blocks', description: 'Creates automatic action macro scripts when clicked.', keywords: 'action link automation' },
+    { type: '__mention_person', label: 'Mention a person', icon: '@', group: 'Advanced & inline blocks', description: 'Inline flag for a coworker.', keywords: 'mention person user' },
+    { type: 'columns', label: 'Columns', icon: '▥', group: 'Advanced & inline blocks', description: 'Lay content out side by side.', keywords: 'layout' },
+    { type: 'tab', label: 'Tabs', icon: '▤', group: 'Advanced & inline blocks', description: 'Organize content into switchable tabs.', keywords: 'tabbed container panes' },
+    { type: 'breadcrumb', label: 'Breadcrumb', icon: '›', group: 'Advanced & inline blocks', description: 'Show this page’s location.', keywords: 'navigation path' }
 ];
+// Pseudo block types handled by their own commit branch in commitBlockPickerItem rather than
+// convertBlockType - they don't change the current block's type, they navigate away to a newly
+// created page/database (__create_*), open a second search menu in place (__link_to_page,
+// __mention_person), or splice in reusable content (dynamic __template_<id> entries added to
+// the menu at open time from GetSuggestedBlockTemplates).
+const CREATE_MENU_TYPES = new Set(['__create_page', '__create_database']);
 const TEXTLESS_TYPES = new Set(['divider', 'image', 'embed', 'linked_database', 'inline_database', 'breadcrumb', 'table_of_contents']);
 const RICH_TEXT_COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
 
@@ -73,10 +86,23 @@ export function initialize(container, dotNetRef, initialBlocksJson, historyKey =
         historyKey: normalizeHistoryKey(historyKey),
         lastCursorKey: null,
         isOffline: !navigator.onLine,
-        offlineBanner: null
+        offlineBanner: null,
+        // Populated once per editor session (not re-fetched per keystroke) and merged into the
+        // +//slash menu's "Suggested" group - see GetSuggestedBlockTemplates.
+        suggestedBlockTemplates: []
     };
     states.set(container, state);
     setBlocks(container, initialBlocksJson, historyKey);
+    dotNetRef.invokeMethodAsync('GetSuggestedBlockTemplates').then(templates => {
+        state.suggestedBlockTemplates = (templates || []).map(template => ({
+            type: `__template_${template.id}`,
+            label: template.name,
+            icon: '🧩',
+            group: 'Suggested',
+            description: `${template.blockCount} block${template.blockCount === 1 ? '' : 's'} · ${template.preview}`,
+            keywords: `template suggested ${template.name}`
+        }));
+    }).catch(() => { /* circuit may be gone, or no templates yet - menu just skips the group */ });
 
     container.addEventListener('pointerdown', event => onHandlePointerDown(state, event));
     container.addEventListener('pointermove', event => onHandlePointerMove(state, event));
@@ -425,6 +451,15 @@ function createBlockElement(block, state) {
     addBtn.textContent = '+';
     addBtn.addEventListener('mousedown', event => {
         event.preventDefault();
+        // Without this, the same mousedown that opens the menu below keeps bubbling up to the
+        // document-level "click outside closes floating menus" listener (see
+        // state.outsideClickHandler / closeFloatingMenus), which then immediately closes the
+        // menu this handler just opened - the picker would render for a single frame and vanish.
+        // The "/" trigger never had this problem because it fires from a text `input` event, not
+        // a mousedown.
+        event.stopPropagation();
+        closeInlineToolbar(state);
+        closeBlockMenu(state);
         const block = emptyBlock('paragraph');
         block.indentLevel = blockIndent(el);
         const created = createBlockElement(block, state);
@@ -433,6 +468,23 @@ function createBlockElement(block, state) {
         refreshBlockPresentation(state.container);
         focusBlock(created);
         notifyChanged(state);
+        // Notion's "+" opens the same searchable type/create/suggestions menu as typing "/" -
+        // previously this just silently inserted a blank paragraph with no way to pick a type
+        // from the button itself (you had to already know to type "/").
+        const newContent = created.querySelector('.wiki-block-content');
+        if (newContent) {
+            openSuggestionMenu(state, {
+                kind: 'slash',
+                anchor: newContent,
+                ariaLabel: 'Insert a block',
+                items: blockPickerItems(state),
+                group: item => item.group,
+                icon: item => item.icon,
+                label: item => item.label,
+                description: item => item.description,
+                commit: item => commitBlockPickerItem(state, newContent.closest('.wiki-block'), item)
+            });
+        }
     });
 
     const handle = document.createElement('span');
@@ -2079,6 +2131,97 @@ function canIndentBlock(blockEl) {
 // ---- Slash command menu (same trigger -> async search -> floating dropdown
 // -> mousedown-commit template proven by markdownEditor.js's wiki-link autocomplete) -------
 
+function blockPickerItems(state) {
+    // Suggested templates first (Notion surfaces suggestions above the generic block list too),
+    // then every real block type, then the Create-a-page/Create-a-database pseudo-entries.
+    return [...state.suggestedBlockTemplates, ...BLOCK_TYPES];
+}
+
+// Shared commit handler for both the "/" trigger and the "+" button - most items just convert
+// the current block's type, but Page/Database/Link-to-page/Mention/Suggested-template entries
+// don't touch the current block's type at all (they navigate to a new page/database, open a
+// second search menu in place, or splice in reusable content), so they need their own branches
+// instead of falling into convertBlockType.
+function commitBlockPickerItem(state, blockEl, item) {
+    if (CREATE_MENU_TYPES.has(item.type)) {
+        const method = item.type === '__create_page' ? 'CreateChildPageFromEditor' : 'CreateChildDatabaseFromEditor';
+        state.dotNetRef.invokeMethodAsync(method, '').catch(() => { /* circuit may be gone */ });
+        return;
+    }
+    const content = blockEl.querySelector('.wiki-block-content');
+    if (item.type === '__link_to_page') {
+        if (content) openLinkToPagePicker(state, content);
+        return;
+    }
+    if (item.type === '__mention_person') {
+        if (content) openMentionPersonPicker(state, content);
+        return;
+    }
+    if (item.type.startsWith('__template_')) {
+        const templateId = item.type.slice('__template_'.length);
+        state.dotNetRef.invokeMethodAsync('InsertBlockTemplateById', templateId).catch(() => { /* circuit may be gone */ });
+        return;
+    }
+    convertBlockType(state, blockEl, item.type);
+}
+
+// Inserts at the current caret position with no backwards deletion - unlike insertWikiLink/
+// insertMention (triggered by typing "[[query"/"@query", which must delete that typed text
+// first), these pickers are opened directly from the block menu with nothing typed yet to erase.
+function insertAtCaret(state, content, node) {
+    const range = getCaretRange(content);
+    if (!range) return;
+    range.deleteContents();
+    range.insertNode(node);
+    node.after(document.createTextNode(' '));
+    placeCaretAtTextOffset(content, content.textContent.length);
+    scheduleNotify(state);
+}
+
+function openLinkToPagePicker(state, content) {
+    state.dotNetRef.invokeMethodAsync('SearchWikiLinkSuggestions', '').then(suggestions => {
+        if (!suggestions || suggestions.length === 0) return;
+        openSuggestionMenu(state, {
+            kind: 'slash',
+            anchor: content,
+            ariaLabel: 'Link to a Sentinel page',
+            items: suggestions,
+            icon: () => '📄',
+            label: suggestion => suggestion.title,
+            description: () => 'Sentinel page',
+            commit: suggestion => {
+                const anchor = document.createElement('a');
+                anchor.href = `wikilink:${suggestion.id}`;
+                anchor.textContent = suggestion.title;
+                insertAtCaret(state, content, anchor);
+            }
+        });
+    }).catch(() => { /* circuit may be gone */ });
+}
+
+function openMentionPersonPicker(state, content) {
+    state.dotNetRef.invokeMethodAsync('SearchMentionSuggestions', '').then(suggestions => {
+        const people = (suggestions || []).filter(item => item.kind === 'user');
+        if (people.length === 0) return;
+        openSuggestionMenu(state, {
+            kind: 'mention',
+            anchor: content,
+            ariaLabel: 'Mention a person',
+            items: people,
+            icon: () => '@',
+            label: suggestion => suggestion.label,
+            description: suggestion => suggestion.description,
+            commit: suggestion => {
+                const anchor = document.createElement('a');
+                anchor.href = `${suggestion.kind}mention:${suggestion.value}`;
+                anchor.className = 'wiki-mention';
+                anchor.textContent = suggestion.label;
+                insertAtCaret(state, content, anchor);
+            }
+        });
+    }).catch(() => { /* circuit may be gone */ });
+}
+
 function checkSlashTrigger(state, content) {
     const text = content.textContent;
     const match = text.match(/^\/(\w*)$/);
@@ -2086,7 +2229,7 @@ function checkSlashTrigger(state, content) {
     if (!match) return;
 
     const query = match[1].toLowerCase();
-    const matches = BLOCK_TYPES.filter(item => `${item.label} ${item.type} ${item.keywords || ''}`
+    const matches = blockPickerItems(state).filter(item => `${item.label} ${item.type} ${item.keywords || ''}`
         .toLowerCase()
         .includes(query));
     if (matches.length === 0) return;
@@ -2100,7 +2243,7 @@ function checkSlashTrigger(state, content) {
         icon: item => item.icon,
         label: item => item.label,
         description: item => item.description,
-        commit: item => convertBlockType(state, content.closest('.wiki-block'), item.type)
+        commit: item => commitBlockPickerItem(state, content.closest('.wiki-block'), item)
     });
 }
 

@@ -271,6 +271,14 @@ public sealed class SentinelGptGenerationCoordinatorTests
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        public IAsyncEnumerable<SentinelAiStreamChunk> StreamToolCallingConversationAsync(
+            Guid conversationId,
+            Guid? wikiPageId,
+            string instruction,
+            string performedBy,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<SentinelGptCommandResult> ExecuteModelCommandAsync(
             Guid conversationId,
             string instruction,
@@ -300,6 +308,13 @@ public sealed class SentinelGptGenerationCoordinatorTests
         public Task ReviewAsync(
             Guid runId,
             bool approved,
+            string performedBy,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<DatabaseAutofillResult> SuggestDatabaseRowValuesAsync(
+            Guid wikiDatabaseId,
+            Guid rowId,
             string performedBy,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();

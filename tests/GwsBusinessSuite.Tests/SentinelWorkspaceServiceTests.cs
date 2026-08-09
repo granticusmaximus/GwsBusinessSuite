@@ -115,6 +115,35 @@ public sealed class SentinelWorkspaceServiceTests
     }
 
     [Fact]
+    public async Task SearchAsync_ShouldNotThrowWhenAPageMatchesOnlyByTitleWithNoTermInItsContent()
+    {
+        // Regression guard for a real bug: BuildPreview relied on FirstOrDefault() over an
+        // empty sequence of (string Term, int Index) value tuples to signal "no match in
+        // content" via a negative Index - but the tuple's default Index is 0, not negative, so
+        // the guard never fired and it crashed with a NullReferenceException on
+        // firstMatch.Term.Length whenever a result matched only through its title (the term
+        // never appears anywhere in the body text) - a completely ordinary search outcome.
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = await CreateDbAsync(connection);
+        var wiki = new WikiService(db);
+        var sentinel = new SentinelWorkspaceService(db, TimeProvider.System);
+
+        await wiki.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Deploy runbook",
+            BlocksJson = WikiBlockJson.Serialize([
+                new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0,
+                    [new WikiRichTextSpan("Flip the blue switch before liftoff.")], new Dictionary<string, string>())])
+        }, "u");
+
+        var act = async () => await sentinel.SearchAsync("deploy", "u");
+
+        var results = await act.Should().NotThrowAsync();
+        results.Subject.Should().ContainSingle(result => result.Title == "Deploy runbook");
+    }
+
+    [Fact]
     public async Task NavigationAsync_ShouldTrackPerUserFavoritesAndRecents()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -137,6 +166,32 @@ public sealed class SentinelWorkspaceServiceTests
         state.Favorites.Should().ContainSingle(item => item.Id == page.Id && !item.IsDatabase);
         state.Recents.Select(item => item.Id).Should().Equal(database.Id, page.Id);
         (await sentinel.GetNavigationAsync("another-user")).Recents.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ToggleFavoriteAsync_ShouldAllowAnAdminUserWithNoExplicitResourcePermission()
+    {
+        // Regression guard for a real bug: an Admin (AppUsers.Role == Admin) with no
+        // SentinelWorkspaceMembers Owner row and no explicit SentinelResourcePermission grant
+        // on this specific page got "Unable to update favorite: you don't have access to this
+        // Sentinel item" - even though every other admin-gated surface (e.g. Wiki.razor's
+        // `_isAdmin ||` check) already treats an Admin as having full access everywhere.
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = await CreateDbAsync(connection);
+        db.AppUsers.Add(new GwsBusinessSuite.Domain.Entities.AppUser
+        {
+            Username = "grant", Role = GwsBusinessSuite.Domain.Entities.AppRoles.Admin, IsActive = true
+        });
+        await db.SaveChangesAsync();
+        var wiki = new WikiService(db);
+        var accessService = new SentinelAccessService(db);
+        var sentinel = new SentinelWorkspaceService(db, TimeProvider.System, accessService);
+        var page = await wiki.SavePageAsync(new WikiPageEditorModel { Title = "Runbook" }, "u");
+
+        var isFavorite = await sentinel.ToggleFavoriteAsync("grant", page.Id, false);
+
+        isFavorite.Should().BeTrue();
     }
 
     [Fact]

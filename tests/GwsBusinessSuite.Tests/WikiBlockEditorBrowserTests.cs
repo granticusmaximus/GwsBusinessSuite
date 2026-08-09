@@ -75,11 +75,120 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
         await Expect(page.Locator(".wiki-block-content a")).ToHaveCountAsync(2);
         await Expect(page.Locator(".wiki-block-content a").First).ToHaveAttributeAsync("href", "https://example.com");
         await page.Locator("""a[href^="wikilink:"]""").ClickAsync();
-        await page.WaitForFunctionAsync("() => (window.wikiLinkCalls || []).length === 1");
+        // initialize() now also fires a GetSuggestedBlockTemplates call for the "+"//" menu's
+        // Suggested group (see wiki-block-editor.js), so this mock's call log isn't exclusively
+        // the click's own call anymore - wait for the specific navigate call rather than an
+        // exact total count.
+        await page.WaitForFunctionAsync(
+            "() => (window.wikiLinkCalls || []).some(call => call[0] === 'NavigateToWikiPageId')");
         var linkCall = await page.EvaluateAsync<string>(
-            "() => JSON.stringify(window.wikiLinkCalls[0])");
+            "() => JSON.stringify((window.wikiLinkCalls || []).find(call => call[0] === 'NavigateToWikiPageId'))");
         linkCall.Should().Be($"[\"NavigateToWikiPageId\",\"{linkedPageId}\"]");
         await Expect(page.Locator(".wiki-block-content")).ToContainTextAsync("UnsafeSafePage");
+    }
+
+    [Fact]
+    public async Task PlusButton_ShouldOpenTheFullPickerWithCreateAndSuggestedTemplateItems()
+    {
+        // Regression guard: the hover "+" button used to just silently insert a blank paragraph
+        // with no way to pick a type from the button itself - Notion's "+" opens the same
+        // searchable menu as typing "/", now also carrying "Page"/"Database" creation items and
+        // a "Suggested" group sourced from the user's saved block templates.
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "text/html",
+            Body = """<main class="sentinel-workspace"><div id="editor" class="wiki-block-editor"></div></main>"""
+        }));
+        await page.GotoAsync("http://localhost/editor");
+
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+
+        var blocksJson = WikiBlockJson.Serialize(
+        [
+            new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0, [], new Dictionary<string, string>())
+        ]);
+        await page.EvaluateAsync(
+            """
+            json => {
+                window.calls = [];
+                window.sentinelBlockEditor.initialize(
+                    document.querySelector('#editor'),
+                    {
+                        invokeMethodAsync: (method, ...args) => {
+                            window.calls.push([method, ...args]);
+                            if (method === 'GetSuggestedBlockTemplates') {
+                                return Promise.resolve([
+                                    { id: '11111111-1111-1111-1111-111111111111', name: 'Meeting notes', blockCount: 3, preview: 'Agenda, notes, action items' }
+                                ]);
+                            }
+                            return Promise.resolve([]);
+                        }
+                    },
+                    json);
+            }
+            """,
+            blocksJson);
+        // Suggested templates are fetched once on initialize - wait for that round trip before
+        // opening the menu so the "Suggested" group is actually populated.
+        await page.WaitForFunctionAsync(
+            "() => (window.calls || []).some(call => call[0] === 'GetSuggestedBlockTemplates')");
+
+        await page.Locator(".wiki-block-add").Last.ClickAsync(new LocatorClickOptions { Force = true });
+
+        await Expect(page.Locator(".wiki-editor-menu-group")).ToHaveTextAsync(
+            ["Suggested", "Basic blocks", "Media", "Database inline / full page", "Advanced & inline blocks"]);
+        await Expect(page.Locator(".wiki-editor-menu-label:text-is(\"Meeting notes\")")).ToBeVisibleAsync();
+        await Expect(page.Locator(".wiki-editor-menu-label:text-is(\"Page\")")).ToBeVisibleAsync();
+        await Expect(page.Locator(".wiki-editor-menu-label:text-is(\"New database\")")).ToBeVisibleAsync();
+        await Expect(page.Locator(".wiki-editor-menu-label:text-is(\"Link to page\")")).ToBeVisibleAsync();
+        await Expect(page.Locator(".wiki-editor-menu-label:text-is(\"Mention a person\")")).ToBeVisibleAsync();
+
+        // Picking "Page" must not touch the block's type - it calls the .NET side to create and
+        // navigate to a new child page instead of converting the current (empty paragraph) block.
+        await page.Locator(".wiki-editor-menu-item:has(.wiki-editor-menu-label:text-is(\"Page\"))")
+            .ClickAsync(new LocatorClickOptions { Force = true });
+        var lastCallJson = await page.EvaluateAsync<string>("() => JSON.stringify(window.calls[window.calls.length - 1])");
+        lastCallJson.Should().Be("[\"CreateChildPageFromEditor\",\"\"]");
+        await Expect(page.Locator(".wiki-block[data-block-type]").First).ToHaveAttributeAsync("data-block-type", "paragraph");
+
+        // Re-open via "+" and pick "New database" this time.
+        await page.Locator(".wiki-block-add").Last.ClickAsync(new LocatorClickOptions { Force = true });
+        await page.Locator(".wiki-editor-menu-item:has(.wiki-editor-menu-label:text-is(\"New database\"))")
+            .ClickAsync(new LocatorClickOptions { Force = true });
+        var databaseCallJson = await page.EvaluateAsync<string>("() => JSON.stringify(window.calls[window.calls.length - 1])");
+        databaseCallJson.Should().Be("[\"CreateChildDatabaseFromEditor\",\"\"]");
+
+        // Re-open and pick the suggested template - it must call InsertBlockTemplateById with
+        // the template's id, not touch the current block's type either.
+        await page.Locator(".wiki-block-add").Last.ClickAsync(new LocatorClickOptions { Force = true });
+        await page.Locator(".wiki-editor-menu-item:has(.wiki-editor-menu-label:text-is(\"Meeting notes\"))")
+            .ClickAsync(new LocatorClickOptions { Force = true });
+        var templateCallJson = await page.EvaluateAsync<string>("() => JSON.stringify(window.calls[window.calls.length - 1])");
+        templateCallJson.Should().Be("[\"InsertBlockTemplateById\",\"11111111-1111-1111-1111-111111111111\"]");
+
+        // "Link to page" opens a second search menu in place (reusing SearchWikiLinkSuggestions)
+        // rather than converting the block's type - picking a result inserts a wikilink anchor.
+        await page.Locator(".wiki-block-add").Last.ClickAsync(new LocatorClickOptions { Force = true });
+        await page.Locator(".wiki-editor-menu-item:has(.wiki-editor-menu-label:text-is(\"Link to page\"))")
+            .ClickAsync(new LocatorClickOptions { Force = true });
+        var linkCallJson = await page.EvaluateAsync<string>("() => JSON.stringify(window.calls[window.calls.length - 1])");
+        linkCallJson.Should().Be("[\"SearchWikiLinkSuggestions\",\"\"]");
+
+        // "Mention a person" opens a second search menu the same way, reusing SearchMentionSuggestions.
+        await page.Locator(".wiki-block-add").Last.ClickAsync(new LocatorClickOptions { Force = true });
+        await page.Locator(".wiki-editor-menu-item:has(.wiki-editor-menu-label:text-is(\"Mention a person\"))")
+            .ClickAsync(new LocatorClickOptions { Force = true });
+        var mentionCallJson = await page.EvaluateAsync<string>("() => JSON.stringify(window.calls[window.calls.length - 1])");
+        mentionCallJson.Should().Be("[\"SearchMentionSuggestions\",\"\"]");
     }
 
     [Fact]

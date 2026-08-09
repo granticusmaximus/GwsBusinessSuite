@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 
@@ -235,6 +236,111 @@ public sealed class OllamaService(
         }
     }
 
+    // Ollama's /api/chat, the OpenAI-compatible message-array endpoint with tool-calling
+    // support - see IOllamaService.ChatAsync's own comment for why this is additive rather than
+    // a change to the /api/generate methods above. Non-streaming only: a tool-calling loop needs
+    // the complete message (including tool_calls) before it can decide whether to execute a tool
+    // and continue, so there is no partial-output use case here the way there is for GenerateStreamAsync.
+    public async Task<OllamaChatResponse> ChatAsync(
+        string model,
+        IReadOnlyList<OllamaChatMessage> messages,
+        IReadOnlyList<OllamaToolDefinition>? tools = null,
+        CancellationToken ct = default)
+    {
+        var messagesArray = new JsonArray();
+        foreach (var message in messages)
+        {
+            var messageObject = new JsonObject
+            {
+                ["role"] = message.Role,
+                ["content"] = message.Content
+            };
+            if (message.ToolCalls is { Count: > 0 } toolCalls)
+            {
+                var toolCallsArray = new JsonArray();
+                foreach (var toolCall in toolCalls)
+                {
+                    toolCallsArray.Add(new JsonObject
+                    {
+                        ["function"] = new JsonObject
+                        {
+                            ["name"] = toolCall.Name,
+                            ["arguments"] = ParseJsonOrEmptyObject(toolCall.ArgumentsJson)
+                        }
+                    });
+                }
+                messageObject["tool_calls"] = toolCallsArray;
+            }
+            messagesArray.Add(messageObject);
+        }
+
+        var payload = new JsonObject
+        {
+            ["model"] = model,
+            ["stream"] = false,
+            ["messages"] = messagesArray,
+            ["keep_alive"] = ModelKeepAlive
+        };
+        if (tools is { Count: > 0 })
+        {
+            var toolsArray = new JsonArray();
+            foreach (var tool in tools)
+            {
+                toolsArray.Add(new JsonObject
+                {
+                    ["type"] = "function",
+                    ["function"] = new JsonObject
+                    {
+                        ["name"] = tool.Name,
+                        ["description"] = tool.Description,
+                        ["parameters"] = ParseJsonOrEmptyObject(tool.ParametersJsonSchema)
+                    }
+                });
+            }
+            payload["tools"] = toolsArray;
+        }
+
+        try
+        {
+            var queueTimer = Stopwatch.StartNew();
+            await using var workloadLease = await workloadScheduler.AcquireAsync(ct);
+            queueTimer.Stop();
+            LogQueueWait(model, queueTimer.Elapsed);
+            var stopwatch = Stopwatch.StartNew();
+            using var response = await http.PostAsJsonAsync("/api/chat", payload, ct);
+            response.EnsureSuccessStatusCode();
+            var result = await response.Content.ReadFromJsonAsync<OllamaChatApiResponse>(cancellationToken: ct);
+            stopwatch.Stop();
+            var toolCallResults = (result?.Message?.ToolCalls ?? [])
+                .Where(call => call.Function is not null)
+                .Select(call => new OllamaToolCall(
+                    call.Function!.Name,
+                    call.Function.Arguments.ValueKind == JsonValueKind.Undefined ? "{}" : call.Function.Arguments.GetRawText()))
+                .ToList();
+            logger.LogInformation(
+                "Ollama chat request for '{Model}' completed in {RequestMs:F0} ms with {ToolCallCount} tool call(s).",
+                model, stopwatch.Elapsed.TotalMilliseconds, toolCallResults.Count);
+            return new OllamaChatResponse(result?.Message?.Content ?? string.Empty, toolCallResults);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            logger.LogWarning(ex, "Ollama chat request failed for model '{Model}'.", model);
+            throw;
+        }
+    }
+
+    private static JsonNode ParseJsonOrEmptyObject(string json)
+    {
+        try
+        {
+            return JsonNode.Parse(json) ?? new JsonObject();
+        }
+        catch (JsonException)
+        {
+            return new JsonObject();
+        }
+    }
+
     public async Task PullModelAsync(string model, CancellationToken ct = default)
     {
         var payload = new { model, stream = false };
@@ -293,6 +399,18 @@ public sealed class OllamaService(
     private sealed record OllamaTagsResponse([property: JsonPropertyName("models")] OllamaTagModel[]? Models);
 
     private sealed record OllamaTagModel([property: JsonPropertyName("name")] string Name);
+
+    private sealed record OllamaChatApiResponse([property: JsonPropertyName("message")] OllamaChatApiMessage? Message);
+
+    private sealed record OllamaChatApiMessage(
+        [property: JsonPropertyName("content")] string? Content,
+        [property: JsonPropertyName("tool_calls")] OllamaChatApiToolCall[]? ToolCalls);
+
+    private sealed record OllamaChatApiToolCall([property: JsonPropertyName("function")] OllamaChatApiFunction? Function);
+
+    private sealed record OllamaChatApiFunction(
+        [property: JsonPropertyName("name")] string Name,
+        [property: JsonPropertyName("arguments")] JsonElement Arguments);
 
     private void LogGenerationMetrics(
         string model,

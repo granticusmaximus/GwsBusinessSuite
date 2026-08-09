@@ -6,6 +6,8 @@
 @inject INotionSyncService NotionSyncService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IAutomationWorkflowService AutomationWorkflowService
+@inject IAutomationExecutionService AutomationExecutionService
+@inject ISentinelAiService SentinelAiService
 @inject IJSRuntime JS
 @inject ILogger<WikiDatabaseEditor> Logger
 
@@ -467,6 +469,40 @@ else
                                 </div>
                             </div>
                         }
+                    }
+                </div>
+            }
+
+            @if (_autofillRow is not null)
+            {
+                <div class="wiki-db-property-editor border rounded-3 p-3 mb-3">
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                        <div class="fw-semibold small">✦ SentinelGPT autofill — @GetDatabaseRowTitle(Database, _autofillRow)</div>
+                        <button type="button" class="btn btn-xs btn-link p-0" @onclick="CloseAutofillPanel" disabled="@IsBusy">Cancel</button>
+                    </div>
+                    @foreach (var warning in _autofillWarnings)
+                    {
+                        <div class="small text-warning mb-1">@warning</div>
+                    }
+                    @if (_autofillSuggestions.Count == 0)
+                    {
+                        <p class="small text-secondary mb-0">No suggestions to review.</p>
+                    }
+                    else
+                    {
+                        @foreach (var suggestion in _autofillSuggestions)
+                        {
+                            <label class="d-flex align-items-center gap-2 mb-1 small">
+                                <input type="checkbox" class="form-check-input"
+                                       checked="@_autofillSelectedPropertyIds.Contains(suggestion.PropertyId)"
+                                       @onchange="e => ToggleAutofillSuggestion(suggestion.PropertyId, (bool)(e.Value ?? false))" disabled="@IsBusy" />
+                                <strong>@suggestion.PropertyName:</strong> @suggestion.DisplayLabel
+                            </label>
+                        }
+                        <button type="button" class="btn btn-sm btn-outline-primary mt-2"
+                                @onclick="ApplyAutofillAsync" disabled="@(IsBusy || _autofillSelectedPropertyIds.Count == 0)">
+                            Apply selected
+                        </button>
                     }
                 </div>
             }
@@ -1064,10 +1100,19 @@ else
                                                     <span class="small text-secondary">@(row.UpdatedBy ?? row.CreatedBy)</span>
                                                     break;
                                                 case WikiDatabasePropertyTypes.Button:
-                                                    var buttonLabel = string.IsNullOrWhiteSpace(WikiDatabasePropertyConfig.Parse(property).ButtonLabel)
+                                                    var buttonConfig = WikiDatabasePropertyConfig.Parse(property);
+                                                    var buttonLabel = string.IsNullOrWhiteSpace(buttonConfig.ButtonLabel)
                                                         ? property.Name
-                                                        : WikiDatabasePropertyConfig.Parse(property).ButtonLabel;
-                                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled title="Automations from Button properties aren't wired up yet.">
+                                                        : buttonConfig.ButtonLabel;
+                                                    var isButtonRunning = _runningButtons.Contains((row.Id, property.Id));
+                                                    <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                            disabled="@(IsBusy || !CanEdit || isButtonRunning || buttonConfig.AutomationWorkflowId is null)"
+                                                            title="@(buttonConfig.AutomationWorkflowId is null ? "No automation selected for this button yet - configure it in the property editor." : $"Run '{buttonLabel}'")"
+                                                            @onclick="() => RunButtonWorkflowAsync(row, property)">
+                                                        @if (isButtonRunning)
+                                                        {
+                                                            <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                                                        }
                                                         @buttonLabel
                                                     </button>
                                                     break;
@@ -1092,6 +1137,9 @@ else
                                             <button type="button" class="btn btn-xs btn-link p-0" @onclick="() => OpenRow(row)" disabled="@IsBusy">Open</button>
                                             <button type="button" class="btn btn-xs btn-link p-0" @onclick="() => AddSubItemAsync(row)" disabled="@IsBusy" title="Add a row nested beneath this one">
                                                 <i class="bi bi-node-plus me-1"></i>Sub-item
+                                            </button>
+                                            <button type="button" class="btn btn-xs btn-link p-0" @onclick="() => RequestAutofillAsync(row)" disabled="@(IsBusy || !CanEdit)" title="Suggest values for this row's empty properties with SentinelGPT">
+                                                <i class="bi bi-magic me-1"></i>Autofill
                                             </button>
                                             <button type="button" class="btn btn-xs btn-link text-danger p-0" @onclick="() => TrashRowAsync(row)" disabled="@IsBusy" title="Move to Trash">
                                                 <i class="bi bi-x-lg"></i>
@@ -1194,6 +1242,18 @@ else
     private bool _loading = true;
     private bool IsBusy;
     private string ErrorMessage = string.Empty;
+    // Tracks in-flight Button-property automation runs so the clicked button can show a spinner
+    // and every button stays disabled against a double-fire while its own run is in progress -
+    // keyed per (row, property) rather than a single flag since a table can have several rows
+    // with Button properties open at once.
+    private readonly HashSet<(Guid RowId, Guid PropertyId)> _runningButtons = [];
+    // DatabaseAutofill review state - one row at a time, mirroring the rest of SentinelGPT's
+    // "suggest, then a human approves" pattern rather than writing model output straight to the
+    // row. Selection defaults to every suggestion checked (see RequestAutofillAsync).
+    private WikiDatabaseRow? _autofillRow;
+    private IReadOnlyList<DatabaseAutofillSuggestion> _autofillSuggestions = [];
+    private IReadOnlyList<string> _autofillWarnings = [];
+    private HashSet<Guid> _autofillSelectedPropertyIds = [];
     private bool _showProperties;
     private bool _showRowTemplates;
     private bool _showCsvImport;
@@ -1695,6 +1755,95 @@ else
         await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, await CurrentUserNameAsync());
         await ReloadAsync();
     });
+
+    private async Task RunButtonWorkflowAsync(WikiDatabaseRow row, WikiDatabaseProperty property)
+    {
+        if (WikiDatabasePropertyConfig.Parse(property).AutomationWorkflowId is not { } workflowId)
+        {
+            return;
+        }
+
+        var key = (row.Id, property.Id);
+        if (!_runningButtons.Add(key))
+        {
+            return;
+        }
+        StateHasChanged();
+
+        await Work(async () =>
+        {
+            // Same payload shape as database.rowChangedTrigger's own input (see
+            // WikiDatabaseService.SaveRowAsync) so a workflow author can reuse expressions like
+            // {{ $json.rowId }} regardless of whether it's wired to run from a row edit or a
+            // Button click.
+            var payload = new JsonObject
+            {
+                ["wikiDatabaseId"] = WikiDatabaseId.ToString(),
+                ["rowId"] = row.Id.ToString(),
+                ["values"] = WikiPropertyValues.ParseObject(row.PropertyValuesJson)
+            };
+            var execution = await AutomationExecutionService.ExecuteAsync(
+                workflowId, payload.ToJsonString(), AutomationExecutionModes.Manual);
+            if (execution.Status == AutomationExecutionStatuses.Failed)
+            {
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(execution.ErrorMessage)
+                    ? "The automation failed."
+                    : execution.ErrorMessage);
+            }
+            // A database.setRowProperty action further along the workflow may have written back
+            // to this row (or another one) - refresh so the table reflects it immediately rather
+            // than waiting for the next unrelated reload.
+            await ReloadAsync();
+        });
+
+        _runningButtons.Remove(key);
+        StateHasChanged();
+    }
+
+    private async Task RequestAutofillAsync(WikiDatabaseRow row) => await Work(async () =>
+    {
+        var result = await SentinelAiService.SuggestDatabaseRowValuesAsync(WikiDatabaseId, row.Id, await CurrentUserNameAsync());
+        _autofillRow = row;
+        _autofillSuggestions = result.Suggestions;
+        _autofillWarnings = result.Warnings;
+        _autofillSelectedPropertyIds = result.Suggestions.Select(suggestion => suggestion.PropertyId).ToHashSet();
+    });
+
+    private void ToggleAutofillSuggestion(Guid propertyId, bool isChecked)
+    {
+        if (isChecked)
+        {
+            _autofillSelectedPropertyIds.Add(propertyId);
+        }
+        else
+        {
+            _autofillSelectedPropertyIds.Remove(propertyId);
+        }
+    }
+
+    private async Task ApplyAutofillAsync() => await Work(async () =>
+    {
+        if (_autofillRow is not { } row)
+        {
+            return;
+        }
+
+        var user = await CurrentUserNameAsync();
+        foreach (var suggestion in _autofillSuggestions.Where(item => _autofillSelectedPropertyIds.Contains(item.PropertyId)))
+        {
+            await WikiDatabaseService.SaveInlineCellAsync(WikiDatabaseId, row.Id, suggestion.PropertyId, suggestion.Value, user);
+        }
+        CloseAutofillPanel();
+        await ReloadAsync();
+    });
+
+    private void CloseAutofillPanel()
+    {
+        _autofillRow = null;
+        _autofillSuggestions = [];
+        _autofillWarnings = [];
+        _autofillSelectedPropertyIds = [];
+    }
 
     private static string StatusGroupLabel(string group) => group switch
     {

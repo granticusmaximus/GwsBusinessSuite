@@ -530,11 +530,16 @@ public sealed class SentinelWorkspaceService(
         if (string.IsNullOrWhiteSpace(content)) return titleFallback;
 
         var singleLine = string.Join(' ', content.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        // Regression guard for a real bug: FirstOrDefault() on an empty sequence of
+        // (string Term, int Index) value tuples returns (null, 0) - not a negative sentinel -
+        // so the old "if (index < 0)" guard below never caught a title-only match (content has
+        // no term at all) and fell through to firstMatch.Term.Length, a NullReferenceException.
+        // Passing an explicit default with Index -1 makes the "no match" case detectable.
         var firstMatch = terms
             .Select(term => (Term: term, Index: singleLine.IndexOf(term, StringComparison.OrdinalIgnoreCase)))
             .Where(match => match.Index >= 0)
             .OrderBy(match => match.Index)
-            .FirstOrDefault();
+            .FirstOrDefault((Term: string.Empty, Index: -1));
         var index = firstMatch.Index;
         if (index < 0) return titleFallback;
 

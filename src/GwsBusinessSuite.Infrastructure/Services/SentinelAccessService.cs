@@ -184,10 +184,19 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
         }
 
         var distinctTargets = targets.ToHashSet();
+        // Two independent "has full access to everything" overrides: a SentinelWorkspaceMembers
+        // Owner row (per-workspace concept, populated by the Sentinel-specific membership flow),
+        // and an AppUsers.Role == Admin account (the app-wide role every other admin-only surface
+        // - e.g. Wiki.razor's `_isAdmin ||` gate - already trusts). Without the second check here,
+        // an Admin who was never separately added as a SentinelWorkspaceMembers Owner gets denied
+        // by every access-gated action that doesn't have its own redundant admin bypass (this was
+        // the root cause of "Unable to update favorite: you don't have access" for an Admin user).
         var isOwner = await dbContext.SentinelWorkspaceMembers.AsNoTracking()
             .AnyAsync(
                 item => item.Username == username && item.Role == SentinelWorkspaceRoles.Owner,
-                cancellationToken);
+                cancellationToken)
+            || await dbContext.AppUsers.AsNoTracking()
+                .AnyAsync(item => item.Username == username && item.Role == AppRoles.Admin, cancellationToken);
         if (isOwner)
         {
             // Preserve the existing owner override: owners have full access independently of

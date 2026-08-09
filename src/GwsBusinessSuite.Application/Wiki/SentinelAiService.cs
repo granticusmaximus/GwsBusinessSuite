@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Settings;
@@ -20,7 +22,11 @@ public sealed class SentinelAiService(
     IMemoryCache cache,
     IOllamaWebSearchService? webSearchService = null,
     ILogger<SentinelAiService>? logger = null,
-    ISentinelAccessService? accessService = null) : ISentinelAiService
+    ISentinelAccessService? accessService = null,
+    // Trailing/optional/nullable like the params above it, specifically so every existing
+    // positional-argument call site (this class has many, in both production DI and tests)
+    // keeps compiling unchanged - only SuggestDatabaseRowValuesAsync needs this.
+    IWikiDatabaseService? wikiDatabaseService = null) : ISentinelAiService
 {
     private static readonly HashSet<string> AllowedActions =
     [
@@ -108,6 +114,190 @@ public sealed class SentinelAiService(
             cancellationToken: cancellationToken))
         {
             yield return chunk;
+        }
+    }
+
+    private const int MaxToolCallingRounds = 5;
+
+    private const string ToolCallingSystemPrompt =
+        "You are SentinelGPT with tool access. Use search_wiki to find relevant Sentinel pages/databases and get_page to " +
+        "read one specific page's full content before answering questions that need current Sentinel workspace data you " +
+        "don't already have. Call one tool at a time and stop calling tools as soon as you have enough information. " +
+        "These tools are read-only - never claim you changed application state. " +
+        "Give a direct, concise final answer, noting what you found and where.";
+
+    private static IReadOnlyList<OllamaToolDefinition> BuildToolCallingTools() =>
+    [
+        new(
+            "search_wiki",
+            "Search Sentinel wiki pages and databases by keyword. Returns up to 5 ranked matches, each with id, title, and a short preview.",
+            """{"type":"object","properties":{"query":{"type":"string","description":"Search keywords"}},"required":["query"]}"""),
+        new(
+            "get_page",
+            "Fetch the full plain-text content of one Sentinel wiki page by its id (a GUID, usually taken from a prior search_wiki result).",
+            """{"type":"object","properties":{"pageId":{"type":"string","description":"The page's GUID id"}},"required":["pageId"]}""")
+    ];
+
+    public async IAsyncEnumerable<SentinelAiStreamChunk> StreamToolCallingConversationAsync(
+        Guid conversationId,
+        Guid? wikiPageId,
+        string instruction,
+        string performedBy,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(instruction);
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var settings = await siteSettings.GetSettingsAsync(cancellationToken);
+        var model = string.IsNullOrWhiteSpace(settings.OllamaModelOverride) ? SentinelGptDefaults.Model : settings.OllamaModelOverride;
+        var tools = BuildToolCallingTools();
+        var citations = new List<SentinelAiCitation>();
+        var messages = new List<OllamaChatMessage>
+        {
+            new("system", ToolCallingSystemPrompt),
+            new("user", instruction.Trim())
+        };
+
+        var run = new SentinelAiRun
+        {
+            ConversationId = conversationId,
+            WikiPageId = wikiPageId,
+            Action = SentinelAiActions.Tools,
+            Instruction = instruction.Trim(),
+            Model = model,
+            Status = SentinelAiRunStatuses.Completed,
+            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedBy = performedBy
+        };
+
+        for (var round = 0; round < MaxToolCallingRounds; round++)
+        {
+            OllamaChatResponse response;
+            try
+            {
+                response = await ollama.ChatAsync(model, messages, tools, cancellationToken);
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                run.Status = SentinelAiRunStatuses.Failed;
+                run.Output = "Generation failed before producing a reviewable response.";
+                db.SentinelAiRuns.Add(run);
+                await db.SaveChangesAsync(cancellationToken);
+                throw;
+            }
+
+            if (response.ToolCalls.Count == 0)
+            {
+                var finalText = response.Content.Trim();
+                if (finalText.Length == 0)
+                {
+                    run.Status = SentinelAiRunStatuses.Failed;
+                    run.Output = "SentinelGPT returned an empty response.";
+                    db.SentinelAiRuns.Add(run);
+                    await db.SaveChangesAsync(cancellationToken);
+                    throw new InvalidOperationException("SentinelGPT returned an empty response.");
+                }
+
+                yield return new SentinelAiStreamChunk(finalText, null);
+                run.Output = finalText;
+                run.CitationsJson = JsonSerializer.Serialize(citations);
+                db.SentinelAiRuns.Add(run);
+                await db.SaveChangesAsync(cancellationToken);
+                yield return new SentinelAiStreamChunk(string.Empty, ToView(run, citations));
+                yield break;
+            }
+
+            messages.Add(new OllamaChatMessage("assistant", response.Content, ToolCalls: response.ToolCalls));
+            foreach (var toolCall in response.ToolCalls)
+            {
+                yield return new SentinelAiStreamChunk(string.Empty, null, DescribeToolCall(toolCall));
+                var toolResult = await ExecuteToolCallAsync(db, toolCall, performedBy, citations, cancellationToken);
+                messages.Add(new OllamaChatMessage("tool", toolResult));
+            }
+        }
+
+        run.Status = SentinelAiRunStatuses.Failed;
+        run.Output = $"SentinelGPT couldn't reach a final answer within {MaxToolCallingRounds} tool-call rounds.";
+        db.SentinelAiRuns.Add(run);
+        await db.SaveChangesAsync(cancellationToken);
+        throw new InvalidOperationException(run.Output);
+    }
+
+    private static string DescribeToolCall(OllamaToolCall toolCall)
+    {
+        try
+        {
+            var arguments = JsonNode.Parse(toolCall.ArgumentsJson) as JsonObject;
+            return toolCall.Name switch
+            {
+                "search_wiki" => $"🔧 Searching the wiki for \"{arguments?["query"]?.GetValue<string>()}\"",
+                "get_page" => $"🔧 Opening page {arguments?["pageId"]?.GetValue<string>()}",
+                _ => $"🔧 Calling {toolCall.Name}"
+            };
+        }
+        catch (JsonException)
+        {
+            return $"🔧 Calling {toolCall.Name}";
+        }
+    }
+
+    private async Task<string> ExecuteToolCallAsync(
+        IAppDbContext db,
+        OllamaToolCall toolCall,
+        string performedBy,
+        List<SentinelAiCitation> citations,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var arguments = JsonNode.Parse(toolCall.ArgumentsJson) as JsonObject ?? [];
+            switch (toolCall.Name)
+            {
+                case "search_wiki":
+                {
+                    var query = arguments["query"]?.GetValue<string>() ?? string.Empty;
+                    var results = (await workspaceService.SearchAsync(query, performedBy, cancellationToken: cancellationToken)).Take(5).ToList();
+                    foreach (var result in results)
+                    {
+                        citations.Add(new SentinelAiCitation(result.Id, result.IsDatabase, result.Title));
+                    }
+                    return JsonSerializer.Serialize(results.Select(result => new
+                    {
+                        id = result.Id,
+                        title = result.Title,
+                        isDatabase = result.IsDatabase,
+                        preview = result.Preview
+                    }));
+                }
+                case "get_page":
+                {
+                    var pageIdText = arguments["pageId"]?.GetValue<string>() ?? string.Empty;
+                    if (!Guid.TryParse(pageIdText, out var pageId))
+                    {
+                        return """{"error":"pageId must be a valid GUID"}""";
+                    }
+                    if (accessService is not null
+                        && !await accessService.CanAccessAsync(pageId, isDatabase: false, performedBy, SentinelAccessLevels.View, cancellationToken))
+                    {
+                        return """{"error":"Access denied to this page"}""";
+                    }
+                    var page = await db.WikiPages.AsNoTracking().FirstOrDefaultAsync(item => item.Id == pageId, cancellationToken);
+                    if (page is null)
+                    {
+                        return """{"error":"Page not found"}""";
+                    }
+                    citations.Add(new SentinelAiCitation(page.Id, false, page.Title));
+                    var text = string.Join(" ", WikiBlockJson.ParseBlocks(page.BlocksJson).Select(block => WikiBlockHtmlRenderer.PlainTextPreview(block, 500)));
+                    return JsonSerializer.Serialize(new { title = page.Title, content = LimitRaw(text, 4_000) });
+                }
+                default:
+                    return JsonSerializer.Serialize(new { error = $"Unknown tool '{toolCall.Name}'" });
+            }
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "SentinelGPT tool call '{Tool}' failed.", toolCall.Name);
+            return """{"error":"Tool execution failed"}""";
         }
     }
 
@@ -515,6 +705,227 @@ public sealed class SentinelAiService(
         run.UpdatedAt = run.ReviewedAt;
         run.UpdatedBy = performedBy;
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    // Property types this never suggests values for: Title (context, not a target), the
+    // computed/system-managed types (never client-writable - see WikiDatabaseService's own
+    // computedPropertyIds exclusion), and the array-shaped types SaveInlineCellAsync already
+    // refuses to accept inline (Relation/Person/Files), plus Verification (a togglable stamp,
+    // not really an autofill-able text value).
+    private static readonly HashSet<string> DatabaseAutofillExcludedTypes =
+    [
+        WikiDatabasePropertyTypes.Title, WikiDatabasePropertyTypes.CreatedTime, WikiDatabasePropertyTypes.LastEditedTime,
+        WikiDatabasePropertyTypes.LastEditedBy, WikiDatabasePropertyTypes.CreatedBy, WikiDatabasePropertyTypes.Button,
+        WikiDatabasePropertyTypes.UniqueId, WikiDatabasePropertyTypes.Formula, WikiDatabasePropertyTypes.Rollup,
+        WikiDatabasePropertyTypes.Relation, WikiDatabasePropertyTypes.Person, WikiDatabasePropertyTypes.Files,
+        WikiDatabasePropertyTypes.Verification
+    ];
+
+    public async Task<DatabaseAutofillResult> SuggestDatabaseRowValuesAsync(
+        Guid wikiDatabaseId, Guid rowId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        if (wikiDatabaseService is null)
+        {
+            throw new InvalidOperationException("Database autofill is not available right now.");
+        }
+
+        var database = await wikiDatabaseService.GetDatabaseAsync(wikiDatabaseId, cancellationToken)
+            ?? throw new KeyNotFoundException("The database no longer exists.");
+        var row = database.Rows.FirstOrDefault(item => item.Id == rowId)
+            ?? throw new KeyNotFoundException("The row no longer exists.");
+
+        var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+        var knownLines = new List<string>();
+        var emptyProperties = new List<WikiDatabaseProperty>();
+        foreach (var property in database.Properties.OrderBy(item => item.SortOrder))
+        {
+            if (DatabaseAutofillExcludedTypes.Contains(property.Type))
+            {
+                continue;
+            }
+
+            var display = WikiPropertyValues.GetDisplayText(property, values, row.CreatedAt, row.UpdatedAt, row.CreatedBy, row.UpdatedBy);
+            if (string.IsNullOrWhiteSpace(display))
+            {
+                emptyProperties.Add(property);
+            }
+            else
+            {
+                knownLines.Add($"- {property.Name}: {display}");
+            }
+        }
+
+        if (emptyProperties.Count == 0)
+        {
+            return new DatabaseAutofillResult([], ["Every eligible property on this row already has a value."]);
+        }
+
+        var titleProperty = database.Properties.FirstOrDefault(item => item.Type == WikiDatabasePropertyTypes.Title);
+        var rowTitle = titleProperty is null ? "Untitled" : WikiPropertyValues.GetText(values, titleProperty.Id) ?? "Untitled";
+
+        var schemaLines = emptyProperties.Select(property => property.Type switch
+        {
+            WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.Status =>
+                $"- \"{property.Name}\" ({property.Type}): choose exactly one of [{string.Join(", ", WikiDatabasePropertyConfig.GetOptions(property).Select(option => option.Label))}]",
+            WikiDatabasePropertyTypes.MultiSelect =>
+                $"- \"{property.Name}\" ({property.Type}): a JSON array choosing any of [{string.Join(", ", WikiDatabasePropertyConfig.GetOptions(property).Select(option => option.Label))}]",
+            WikiDatabasePropertyTypes.Checkbox => $"- \"{property.Name}\" (checkbox): true or false",
+            WikiDatabasePropertyTypes.Date => $"- \"{property.Name}\" (date): YYYY-MM-DD",
+            WikiDatabasePropertyTypes.Number => $"- \"{property.Name}\" (number): a plain number, no units or commas",
+            _ => $"- \"{property.Name}\" ({property.Type}): short plain text"
+        });
+
+        var systemPrompt =
+            "You suggest values for empty Sentinel database properties on one row. Respond with ONLY a single JSON object " +
+            "mapping each property's exact name (as given) to your suggested value - no prose, no markdown code fences. " +
+            "Omit a property entirely rather than guessing when the row gives you no real signal for it. " +
+            "For a Select/Status property the value must be exactly one of its listed options, verbatim. " +
+            "For a MultiSelect property the value must be a JSON array of its listed options, verbatim. " +
+            "For Checkbox use true or false. For Date use YYYY-MM-DD. For Number use a plain number.";
+        var userPrompt =
+            $"Row title: \"{rowTitle}\"\n\n" +
+            (knownLines.Count > 0 ? $"Known properties on this row:\n{string.Join('\n', knownLines)}\n\n" : string.Empty) +
+            $"Empty properties to suggest values for:\n{string.Join('\n', schemaLines)}";
+
+        var settings = await siteSettings.GetSettingsAsync(cancellationToken);
+        var model = string.IsNullOrWhiteSpace(settings.OllamaModelOverride) ? SentinelGptDefaults.Model : settings.OllamaModelOverride;
+        var rawResponse = await ollama.GenerateAsync(model, systemPrompt, userPrompt, cancellationToken);
+
+        return ParseDatabaseAutofillResponse(rawResponse, emptyProperties);
+    }
+
+    private static DatabaseAutofillResult ParseDatabaseAutofillResponse(
+        string rawResponse, IReadOnlyList<WikiDatabaseProperty> emptyProperties)
+    {
+        var warnings = new List<string>();
+        var jsonText = ExtractJsonObject(rawResponse);
+        if (jsonText is null)
+        {
+            return new DatabaseAutofillResult([], ["SentinelGPT's response wasn't valid JSON - no suggestions could be parsed."]);
+        }
+
+        JsonNode? parsed;
+        try
+        {
+            parsed = JsonNode.Parse(jsonText);
+        }
+        catch (JsonException)
+        {
+            return new DatabaseAutofillResult([], ["SentinelGPT's response wasn't valid JSON - no suggestions could be parsed."]);
+        }
+
+        if (parsed is not JsonObject suggestedByName)
+        {
+            return new DatabaseAutofillResult([], ["SentinelGPT's response wasn't a JSON object - no suggestions could be parsed."]);
+        }
+
+        var suggestions = new List<DatabaseAutofillSuggestion>();
+        var propertiesByName = emptyProperties.ToDictionary(property => property.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, node) in suggestedByName)
+        {
+            if (!propertiesByName.TryGetValue(name, out var property) || node is null)
+            {
+                continue;
+            }
+
+            var resolved = ResolveSuggestedValue(property, node, warnings);
+            if (resolved is { } suggestion)
+            {
+                suggestions.Add(suggestion);
+            }
+        }
+
+        if (suggestions.Count == 0 && warnings.Count == 0)
+        {
+            warnings.Add("SentinelGPT didn't offer a usable suggestion for any empty property on this row.");
+        }
+        return new DatabaseAutofillResult(suggestions, warnings);
+    }
+
+    private static DatabaseAutofillSuggestion? ResolveSuggestedValue(
+        WikiDatabaseProperty property, JsonNode node, List<string> warnings)
+    {
+        switch (property.Type)
+        {
+            case WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.Status:
+                var label = node.GetValueKind() == JsonValueKind.String ? node.GetValue<string>() : null;
+                var option = WikiDatabasePropertyConfig.GetOptions(property)
+                    .FirstOrDefault(candidate => string.Equals(candidate.Label, label, StringComparison.OrdinalIgnoreCase));
+                if (option is null)
+                {
+                    warnings.Add($"SentinelGPT suggested \"{label}\" for \"{property.Name}\", which isn't one of its options - skipped.");
+                    return null;
+                }
+                return new DatabaseAutofillSuggestion(property.Id, property.Name, option.Id, option.Label);
+
+            case WikiDatabasePropertyTypes.MultiSelect:
+                if (node is not JsonArray array)
+                {
+                    warnings.Add($"SentinelGPT's suggestion for \"{property.Name}\" wasn't a list - skipped.");
+                    return null;
+                }
+                var knownOptions = WikiDatabasePropertyConfig.GetOptions(property);
+                var matchedIds = new List<string>();
+                var matchedLabels = new List<string>();
+                foreach (var item in array)
+                {
+                    var itemLabel = item?.GetValueKind() == JsonValueKind.String ? item.GetValue<string>() : null;
+                    var matched = knownOptions.FirstOrDefault(candidate => string.Equals(candidate.Label, itemLabel, StringComparison.OrdinalIgnoreCase));
+                    if (matched is not null)
+                    {
+                        matchedIds.Add(matched.Id);
+                        matchedLabels.Add(matched.Label);
+                    }
+                }
+                if (matchedIds.Count == 0)
+                {
+                    return null;
+                }
+                return new DatabaseAutofillSuggestion(property.Id, property.Name, string.Join(',', matchedIds), string.Join(", ", matchedLabels));
+
+            case WikiDatabasePropertyTypes.Checkbox:
+                var boolText = node.GetValueKind() switch
+                {
+                    JsonValueKind.True => "true",
+                    JsonValueKind.False => "false",
+                    JsonValueKind.String when bool.TryParse(node.GetValue<string>(), out var parsedBool) => parsedBool ? "true" : "false",
+                    _ => null
+                };
+                return boolText is null ? null : new DatabaseAutofillSuggestion(property.Id, property.Name, boolText, boolText);
+
+            case WikiDatabasePropertyTypes.Number:
+                var numberText = node.GetValueKind() switch
+                {
+                    JsonValueKind.Number => node.GetValue<decimal>().ToString(CultureInfo.InvariantCulture),
+                    JsonValueKind.String when decimal.TryParse(node.GetValue<string>(), NumberStyles.Number, CultureInfo.InvariantCulture, out var parsedNumber) =>
+                        parsedNumber.ToString(CultureInfo.InvariantCulture),
+                    _ => null
+                };
+                return numberText is null ? null : new DatabaseAutofillSuggestion(property.Id, property.Name, numberText, numberText);
+
+            case WikiDatabasePropertyTypes.Date:
+                var dateText = node.GetValueKind() == JsonValueKind.String ? node.GetValue<string>() : null;
+                if (dateText is null || !DateTimeOffset.TryParse(dateText, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var parsedDate))
+                {
+                    warnings.Add($"SentinelGPT's date for \"{property.Name}\" couldn't be parsed - skipped.");
+                    return null;
+                }
+                var isoDate = parsedDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                return new DatabaseAutofillSuggestion(property.Id, property.Name, isoDate, isoDate);
+
+            default:
+                var text = node.GetValueKind() == JsonValueKind.String ? node.GetValue<string>() : node.ToJsonString();
+                return string.IsNullOrWhiteSpace(text) ? null : new DatabaseAutofillSuggestion(property.Id, property.Name, text.Trim(), text.Trim());
+        }
+    }
+
+    // Models occasionally wrap JSON in a markdown code fence or add a stray sentence despite the
+    // "no prose" instruction - take the first balanced {...} span rather than failing outright.
+    private static string? ExtractJsonObject(string text)
+    {
+        var start = text.IndexOf('{');
+        var end = text.LastIndexOf('}');
+        return start >= 0 && end > start ? text[start..(end + 1)] : null;
     }
 
     // Ranked top-K retrieval (reusing the same SentinelWorkspaceService.SearchAsync the

@@ -17,6 +17,7 @@
 @inject INotionSyncCoordinator NotionSyncCoordinator
 @inject INotionOAuthService NotionOAuthService
 @inject IMediaLibraryService MediaLibraryService
+@inject ISentinelTemplateService SentinelTemplateService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject SentinelCursorTracker CursorTracker
 @inject IJSRuntime JS
@@ -2189,6 +2190,54 @@
         _editorGeneration++;
         StatusMessage = "Inserted reusable blocks. Save the page to persist them.";
         await InvokeAsync(StateHasChanged);
+    }
+
+    // Backing the "+"/"/" block picker's "Create" group (WikiDatabaseEditor... no, wiki-block-editor.js's
+    // BLOCK_TYPES "Create" group) - Notion's "+" menu creates a page/database nested under wherever
+    // you triggered it and jumps you straight into the new item, so these mirror that rather than
+    // inserting an inline reference block.
+    [JSInvokable]
+    public async Task<string?> CreateChildPageFromEditor(string title)
+    {
+        var user = await CurrentUserNameAsync();
+        var page = await WikiService.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = string.IsNullOrWhiteSpace(title) ? "Untitled" : title.Trim(),
+            ParentWikiPageId = SelectedPageId
+        }, user);
+        await LoadTreeAsync(selectFirstPage: false);
+        await OpenPageAsync(page.Id);
+        StateHasChanged();
+        return page.Id.ToString();
+    }
+
+    [JSInvokable]
+    public async Task<string?> CreateChildDatabaseFromEditor(string title)
+    {
+        var user = await CurrentUserNameAsync();
+        var database = await WikiDatabaseService.CreateDatabaseAsync(
+            string.IsNullOrWhiteSpace(title) ? "Untitled Database" : title.Trim(), SelectedPageId, user);
+        await LoadTreeAsync(selectFirstPage: false);
+        await OpenDatabaseAsync(database.Id);
+        StateHasChanged();
+        return database.Id.ToString();
+    }
+
+    [JSInvokable]
+    public async Task<IReadOnlyList<SentinelBlockTemplateView>> GetSuggestedBlockTemplates()
+    {
+        var templates = await SentinelTemplateService.ListBlockTemplatesAsync();
+        return templates.OrderByDescending(template => template.CreatedAt).Take(5).ToList();
+    }
+
+    [JSInvokable]
+    public async Task InsertBlockTemplateById(string templateId)
+    {
+        if (Guid.TryParse(templateId, out var id))
+        {
+            var blocksJson = await SentinelTemplateService.MaterializeBlockTemplateAsync(id);
+            await InsertBlockTemplateAsync(blocksJson);
+        }
     }
 
     [JSInvokable]

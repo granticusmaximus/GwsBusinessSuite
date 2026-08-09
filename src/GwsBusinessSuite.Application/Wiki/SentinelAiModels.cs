@@ -10,6 +10,10 @@ public static class SentinelAiActions
     public const string MeetingNotes = "meetingNotes";
     public const string DatabaseAutofill = "databaseAutofill";
     public const string ModelManagement = "modelManagement";
+    // StreamToolCallingConversationAsync's own run marker - not part of AllowedActions since
+    // that set gates the generic action-dispatch methods (StreamAsync/StreamConversationAsync),
+    // which the tool-calling loop doesn't go through.
+    public const string Tools = "tools";
 }
 
 public static class SentinelGptDefaults
@@ -79,6 +83,18 @@ public sealed record SentinelGptCommandResult(
     string? ConfirmationPrompt,
     SentinelAiRunView? CompletedRun);
 
+// A single property suggestion for DatabaseAutofill. Value is already resolved to the exact
+// storage shape WikiDatabaseService.SaveInlineCellAsync expects for the property's type (e.g.
+// a Select/Status option's id rather than its label, comma-joined option ids for MultiSelect) -
+// the UI applies it by calling SaveInlineCellAsync directly with this string, the same as if a
+// person had typed/picked it themselves. DisplayLabel is what a human reviews before approving.
+public sealed record DatabaseAutofillSuggestion(
+    Guid PropertyId, string PropertyName, string Value, string DisplayLabel);
+
+public sealed record DatabaseAutofillResult(
+    IReadOnlyList<DatabaseAutofillSuggestion> Suggestions,
+    IReadOnlyList<string> Warnings);
+
 public interface ISentinelAiService
 {
     bool IsInternetConfigured { get; }
@@ -93,6 +109,19 @@ public interface ISentinelAiService
         bool useDeepAnalysis,
         int maxOutputTokens = SentinelGptResponseBudgets.Standard,
         CancellationToken cancellationToken = default);
+    // A bounded ReAct-style loop: the model can call search_wiki/get_page (read-only Sentinel
+    // lookups) as many times as it needs, seeing each result before deciding whether to call
+    // another tool or give a final answer - unlike every other method here, retrieval is
+    // model-decided at generation time rather than pre-fetched by C# before the first call.
+    // Activity-only chunks (Delta empty, CompletedRun null, Activity set) surface each tool call
+    // as it happens; the final chunk carries the answer the same way StreamAsync's does.
+    IAsyncEnumerable<SentinelAiStreamChunk> StreamToolCallingConversationAsync(
+        Guid conversationId,
+        Guid? wikiPageId,
+        string instruction,
+        string performedBy,
+        CancellationToken cancellationToken = default);
+
     Task<SentinelGptCommandResult> ExecuteModelCommandAsync(
         Guid conversationId,
         string instruction,
@@ -103,4 +132,11 @@ public interface ISentinelAiService
     Task<IReadOnlyList<SentinelGptConversationView>> ListConversationsAsync(string requestedBy, int maxResults = 40, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SentinelAiRunView>> ListConversationRunsAsync(Guid conversationId, string requestedBy, CancellationToken cancellationToken = default);
     Task ReviewAsync(Guid runId, bool approved, string performedBy, CancellationToken cancellationToken = default);
+
+    // DatabaseAutofill: unlike every other action above, this returns structured, per-property
+    // suggestions for review rather than a streamed text blob - there is no SentinelAiRun to
+    // approve/reject here, the caller applies (or discards) each suggestion directly via
+    // WikiDatabaseService.SaveInlineCellAsync.
+    Task<DatabaseAutofillResult> SuggestDatabaseRowValuesAsync(
+        Guid wikiDatabaseId, Guid rowId, string performedBy, CancellationToken cancellationToken = default);
 }

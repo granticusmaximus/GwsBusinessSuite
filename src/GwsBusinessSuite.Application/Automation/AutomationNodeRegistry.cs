@@ -26,6 +26,7 @@ public sealed partial class AutomationNodeRegistry(
         new("core.scheduleTrigger", 1, "Schedule Trigger", "Starts an active workflow at a recurring minute interval.", "Triggers", "bi-clock-fill", true, ["main"], "{\"intervalMinutes\":60}"),
         new("database.rowChangedTrigger", 1, "Database Row Changed", "Starts an active workflow when a row's properties change in a Sentinel database. Paste the database's id (visible in its Sentinel URL) into wikiDatabaseId.", "Triggers", "bi-table", true, ["main"], "{\"wikiDatabaseId\":\"\"}"),
         new("database.setRowProperty", 1, "Set Database Row Property", "Sets one property on a Sentinel database row. Paste the database, row, and property ids and an optional {{ $json.path }} expression for the value. Never re-triggers a Database Row Changed workflow, so it cannot cause an automation loop - chaining a second workflow off this write is not supported.", "Actions", "bi-pencil-square", false, ["main"], "{\"wikiDatabaseId\":\"\",\"rowId\":\"{{ $json.rowId }}\",\"propertyId\":\"\",\"value\":\"\"}", IsIdempotent: false),
+        new("database.addRow", 1, "Add Database Row", "Creates a new row in a Sentinel database. propertyValues maps property ids to values (string values support {{ $json.path }} expressions); parentRowId is optional and nests the new row as a sub-item. Like Set Database Row Property, this never re-triggers a Database Row Changed workflow.", "Actions", "bi-plus-square", false, ["main"], "{\"wikiDatabaseId\":\"\",\"parentRowId\":\"\",\"propertyValues\":{}}", IsIdempotent: false),
         new("core.set", 1, "Set Fields", "Adds or replaces JSON fields using literal values or expressions.", "Data", "bi-braces", false, ["main"], "{\"values\":{\"message\":\"Hello from GWS\"}}"),
         new("core.if", 1, "If", "Routes an item to the true or false output.", "Flow", "bi-signpost-split-fill", false, ["true", "false"], "{\"left\":\"{{ $json.enabled }}\",\"operator\":\"equals\",\"right\":\"true\"}"),
         new("core.httpRequest", 1, "HTTP Request", "Calls an HTTP API and returns status, headers, and response data.", "Actions", "bi-globe2", false, ["main"], "{\"method\":\"GET\",\"url\":\"https://example.com\",\"headers\":{},\"body\":\"\"}", IsIdempotent: false),
@@ -92,6 +93,7 @@ public sealed partial class AutomationNodeRegistry(
             "core.scheduleTrigger" => SingleOutput("main", input),
             "database.rowChangedTrigger" => SingleOutput("main", input),
             "database.setRowProperty" => await ExecuteSetRowPropertyAsync(node, input, workflowOwnerUsername, cancellationToken),
+            "database.addRow" => await ExecuteAddRowAsync(node, input, workflowOwnerUsername, cancellationToken),
             "core.set" => ExecuteSet(node, input),
             "core.if" => ExecuteIf(node, input),
             "core.httpRequest" => await ExecuteHttpAsync(node, input, credentialJson, cancellationToken),
@@ -275,6 +277,57 @@ public sealed partial class AutomationNodeRegistry(
             ["wikiDatabaseId"] = wikiDatabaseId.ToString(),
             ["rowId"] = rowId.ToString(),
             ["propertyId"] = propertyId.ToString()
+        };
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    private async Task<AutomationNodeRunResult> ExecuteAddRowAsync(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        string? workflowOwnerUsername,
+        CancellationToken cancellationToken)
+    {
+        var wikiDatabaseService = serviceProvider?.GetService(typeof(IWikiDatabaseService)) as IWikiDatabaseService
+            ?? throw new InvalidOperationException("Database writes are not available to the automation engine.");
+        var parameters = ParseObject(node.ParametersJson, node.Name);
+        var source = RequireObject(input, node.Name);
+
+        var wikiDatabaseId = ParseRequiredGuid(parameters["wikiDatabaseId"]?.GetValue<string>(), node.Name, "wikiDatabaseId");
+        // Same access model as Set Database Row Property - see EnsureCanEditDatabaseAsync's own
+        // comment for why an Admin-authored workflow bypasses this while others don't.
+        await EnsureCanEditDatabaseAsync(wikiDatabaseId, workflowOwnerUsername, node.Name, cancellationToken);
+
+        var parentRowIdText = ResolveText(parameters["parentRowId"]?.GetValue<string>() ?? string.Empty, input);
+        var parentRowId = Guid.TryParse(parentRowIdText, out var parsedParentRowId) ? parsedParentRowId : (Guid?)null;
+
+        // Same per-key resolution as core.set's "values": string leaves support {{ $json.path }}
+        // expressions, everything else (numbers/booleans/arrays already shaped for a specific
+        // property type) is copied through unchanged.
+        var values = new JsonObject();
+        if (parameters["propertyValues"] is JsonObject propertyValues)
+        {
+            foreach (var pair in propertyValues)
+            {
+                values[pair.Key] = pair.Value is JsonValue value && value.TryGetValue<string>(out var text)
+                    ? JsonValue.Create(ResolveText(text, input))
+                    : pair.Value?.DeepClone();
+            }
+        }
+
+        // "automation-engine" (see WikiDatabaseService.SaveRowAsync) is the actor that skips
+        // re-firing database.rowChangedTrigger - same loop guard as Set Database Row Property.
+        var row = await wikiDatabaseService.SaveRowAsync(wikiDatabaseId, new WikiDatabaseRowEditor
+        {
+            ParentRowId = parentRowId,
+            Values = values.ToDictionary(pair => pair.Key, pair => pair.Value)
+        }, "automation-engine", cancellationToken);
+
+        var output = source.DeepClone().AsObject();
+        output["databaseRow"] = new JsonObject
+        {
+            ["created"] = true,
+            ["wikiDatabaseId"] = wikiDatabaseId.ToString(),
+            ["rowId"] = row.Id.ToString()
         };
         return SingleOutput("main", JsonSerializer.SerializeToElement(output));
     }

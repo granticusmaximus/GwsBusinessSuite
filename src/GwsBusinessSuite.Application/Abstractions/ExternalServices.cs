@@ -43,7 +43,46 @@ public interface IOllamaService
     // Requires a model with image-generation capability (e.g. an installed Z-Image
     // Turbo / FLUX build) - returns raw base64 PNG bytes, no data: URI prefix.
     Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default);
+
+    // Ollama's /api/chat endpoint with tool-calling support (SentinelGptToolCallLoop is the
+    // first and, for now, only caller). Deliberately a separate method from GenerateAsync/
+    // GenerateStreamAsync above rather than a modification to them - those stay on /api/generate
+    // exactly as before, so every existing caller (ai.modelAdvisor, ai.sentinelSynthesize, the
+    // main SentinelGPT single-shot flow) is completely unaffected by this addition. The default
+    // body means an implementation that never expects to run a tool-calling loop (including
+    // every existing test fake of this interface) doesn't need to change to keep compiling.
+    Task<OllamaChatResponse> ChatAsync(
+        string model,
+        IReadOnlyList<OllamaChatMessage> messages,
+        IReadOnlyList<OllamaToolDefinition>? tools = null,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException("This Ollama service implementation does not support tool-calling chat.");
 }
+
+// role is "system" | "user" | "assistant" | "tool". ToolCallId/Name are only meaningful on a
+// "tool" role message (Ollama doesn't emit an id on its own tool_calls, so this is the caller's
+// own bookkeeping key - see SentinelGptToolCallLoop). ToolCalls is only meaningful on an
+// "assistant" role message that itself requested tool calls (round-tripped back into the next
+// request's message history, matching Ollama/OpenAI-style chat transcripts).
+public sealed record OllamaChatMessage(
+    string Role,
+    string Content,
+    string? ToolCallId = null,
+    string? Name = null,
+    IReadOnlyList<OllamaToolCall>? ToolCalls = null);
+
+// Mirrors Ollama's /api/chat "tools" array shape (OpenAI-compatible function-calling schema):
+// {"type":"function","function":{"name","description","parameters": <JSON Schema object>}}.
+// ParametersJsonSchema is passed through verbatim as a raw JSON Schema string.
+public sealed record OllamaToolDefinition(string Name, string Description, string ParametersJsonSchema);
+
+// One requested call from the model, parsed out of message.tool_calls[].function in Ollama's
+// response. ArgumentsJson is the raw JSON object Ollama returned for that call's arguments,
+// deliberately left unparsed here - the tool dispatcher (not this transport layer) owns
+// validating/binding it to a specific tool's expected shape.
+public sealed record OllamaToolCall(string Name, string ArgumentsJson);
+
+public sealed record OllamaChatResponse(string Content, IReadOnlyList<OllamaToolCall> ToolCalls);
 
 public sealed record OllamaWebSearchResult(string Title, string Url, string Content);
 

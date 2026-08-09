@@ -488,6 +488,200 @@ public sealed class SentinelAiServiceTests
         (await settings.GetSettingsAsync()).OllamaModelOverride.Should().Be("qwen3:8b");
     }
 
+    [Fact]
+    public async Task SuggestDatabaseRowValuesAsync_ShouldResolveOptionLabelsAndTypedValuesFromModelJson()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var databases = new WikiDatabaseService(db);
+        var database = await databases.CreateDatabaseAsync("Tasks", null, "u");
+        var titleProperty = database.Properties.Single(p => p.Type == WikiDatabasePropertyTypes.Title);
+        var statusProperty = await databases.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Status", Type = WikiDatabasePropertyTypes.Select,
+            Options = [new("todo", "To do", "#ccc"), new("done", "Done", "#0f0")]
+        }, "u");
+        var priorityProperty = await databases.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Priority", Type = WikiDatabasePropertyTypes.Number }, "u");
+        var urgentProperty = await databases.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Urgent", Type = WikiDatabasePropertyTypes.Checkbox }, "u");
+        var notesProperty = await databases.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Notes", Type = WikiDatabasePropertyTypes.Text }, "u");
+
+        var titledRow = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(titledRow, titleProperty.Id, "Fix the deploy pipeline");
+        var row = await databases.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = titledRow.ToDictionary(kv => kv.Key, kv => kv.Value) }, "u");
+
+        var modelJson = $$"""
+            Here you go:
+            {
+              "Status": "Done",
+              "Priority": 3,
+              "Urgent": true,
+              "Notes": "Blocks the release",
+              "Unknown property": "ignored"
+            }
+            """;
+        var ollama = new FakeStreamingOllamaService([modelJson]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache(),
+            wikiDatabaseService: databases);
+
+        var result = await service.SuggestDatabaseRowValuesAsync(database.Id, row.Id, "grant");
+
+        result.Suggestions.Should().HaveCount(4);
+        result.Suggestions.Single(s => s.PropertyId == statusProperty.Id).Value.Should().Be("done");
+        result.Suggestions.Single(s => s.PropertyId == priorityProperty.Id).Value.Should().Be("3");
+        result.Suggestions.Single(s => s.PropertyId == urgentProperty.Id).Value.Should().Be("true");
+        result.Suggestions.Single(s => s.PropertyId == notesProperty.Id).Value.Should().Be("Blocks the release");
+    }
+
+    [Fact]
+    public async Task SuggestDatabaseRowValuesAsync_ShouldWarnAndSkipAnUnrecognizedSelectOption()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var databases = new WikiDatabaseService(db);
+        var database = await databases.CreateDatabaseAsync("Tasks", null, "u");
+        var titleProperty = database.Properties.Single(p => p.Type == WikiDatabasePropertyTypes.Title);
+        var statusProperty = await databases.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Status", Type = WikiDatabasePropertyTypes.Select,
+            Options = [new("todo", "To do", "#ccc"), new("done", "Done", "#0f0")]
+        }, "u");
+        var titledRow = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(titledRow, titleProperty.Id, "Untitled task");
+        var row = await databases.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = titledRow.ToDictionary(kv => kv.Key, kv => kv.Value) }, "u");
+
+        var ollama = new FakeStreamingOllamaService(["""{"Status": "Somewhere in between"}"""]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache(),
+            wikiDatabaseService: databases);
+
+        var result = await service.SuggestDatabaseRowValuesAsync(database.Id, row.Id, "grant");
+
+        result.Suggestions.Should().BeEmpty();
+        result.Warnings.Should().ContainSingle(warning => warning.Contains(statusProperty.Name));
+    }
+
+    [Fact]
+    public async Task StreamToolCallingConversationAsync_ShouldCallSearchWikiThenAnswerUsingItsResult()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var wiki = new WikiService(db);
+        await wiki.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Deploy runbook",
+            BlocksJson = WikiBlockJson.Serialize([
+                new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0,
+                    [new WikiRichTextSpan("Flip the blue switch before liftoff.")], new Dictionary<string, string>())])
+        }, "u");
+
+        var ollama = new ScriptedToolCallingOllamaService(
+        [
+            new(string.Empty, [new OllamaToolCall("search_wiki", """{"query":"deploy"}""")]),
+            new("The deploy runbook says to flip the blue switch.", [])
+        ]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache());
+
+        var chunks = new List<SentinelAiStreamChunk>();
+        await foreach (var chunk in service.StreamToolCallingConversationAsync(Guid.NewGuid(), null, "How do I deploy?", "grant"))
+        {
+            chunks.Add(chunk);
+        }
+
+        chunks.Should().Contain(chunk => chunk.Activity != null && chunk.Activity.Contains("deploy"));
+        ollama.Requests.Should().HaveCount(2);
+        // The second request must carry the tool's own result back as a "tool" role message,
+        // otherwise the model has no way to know what search_wiki actually found.
+        var toolMessage = ollama.Requests[1].Single(message => message.Role == "tool");
+        toolMessage.Content.Should().Contain("Deploy runbook", because: $"actual tool content was: {toolMessage.Content}");
+        chunks[^1].CompletedRun!.Output.Should().Contain("blue switch");
+        chunks[^1].CompletedRun!.Citations.Should().Contain(citation => citation.Title == "Deploy runbook");
+    }
+
+    [Fact]
+    public async Task StreamToolCallingConversationAsync_ShouldFailAfterExceedingTheRoundLimitWithoutAFinalAnswer()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        // Always responds with another tool call, never a final answer - the loop must give up
+        // rather than call Ollama forever.
+        var ollama = new ScriptedToolCallingOllamaService(
+        [
+            new(string.Empty, [new OllamaToolCall("search_wiki", """{"query":"anything"}""")])
+        ]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache());
+
+        var act = async () =>
+        {
+            await foreach (var _ in service.StreamToolCallingConversationAsync(Guid.NewGuid(), null, "Loop forever", "grant")) { }
+        };
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*round*");
+        (await db.SentinelAiRuns.CountAsync()).Should().Be(1, "the failed attempt should still be persisted for review");
+    }
+
+    private sealed class ScriptedToolCallingOllamaService(IReadOnlyList<OllamaChatResponse> responses)
+        : GwsBusinessSuite.Application.Abstractions.IOllamaService
+    {
+        private int _index;
+        public List<IReadOnlyList<OllamaChatMessage>> Requests { get; } = [];
+
+        public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) =>
+            Task.FromResult((IReadOnlyCollection<string>)Array.Empty<string>());
+
+        public Task PullModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task DeleteModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default) =>
+            Task.FromResult(string.Empty);
+
+        public Task<OllamaChatResponse> ChatAsync(
+            string model,
+            IReadOnlyList<OllamaChatMessage> messages,
+            IReadOnlyList<OllamaToolDefinition>? tools = null,
+            CancellationToken ct = default)
+        {
+            Requests.Add(messages);
+            var response = responses[Math.Min(_index, responses.Count - 1)];
+            _index++;
+            return Task.FromResult(response);
+        }
+    }
+
     private sealed class FakeAppDbContextFactory(DbContextOptions<ApplicationDbContext> options) : IAppDbContextFactory
     {
         public Task<IAppDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
