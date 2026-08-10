@@ -222,6 +222,59 @@ public sealed class WikiBlockHtmlRendererTests
         html.Should().NotContain("language-");
     }
 
+    [Theory]
+    [InlineData(WikiBlockTypes.Video, "<video")]
+    [InlineData(WikiBlockTypes.Audio, "<audio")]
+    public void RenderBlock_ForVideoOrAudio_ShouldRenderAPlayableMediaTagFromTheUrl(string type, string expectedTag)
+    {
+        var block = new WikiBlock(Guid.NewGuid(), type, 0, [], new Dictionary<string, string> { ["url"] = "https://example.com/clip.mp4" });
+
+        var html = WikiBlockHtmlRenderer.RenderBlock(block);
+
+        html.Should().Contain(expectedTag);
+        html.Should().Contain("https://example.com/clip.mp4");
+        html.Should().Contain("controls");
+    }
+
+    [Fact]
+    public void RenderBlock_ForPdf_ShouldRenderAViewerFrameAndAFallbackLink()
+    {
+        var block = new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Pdf, 0, [], new Dictionary<string, string> { ["url"] = "https://example.com/report.pdf" });
+
+        var html = WikiBlockHtmlRenderer.RenderBlock(block);
+
+        html.Should().Contain("wiki-pdf-viewer");
+        html.Should().Contain("<iframe");
+        html.Should().Contain("https://example.com/report.pdf");
+        html.Should().Contain("Open PDF");
+    }
+
+    [Fact]
+    public void RenderBlock_ForFile_ShouldRenderADownloadLinkUsingTheFileNameWhenPresent()
+    {
+        var block = new WikiBlock(
+            Guid.NewGuid(), WikiBlockTypes.File, 0, [],
+            new Dictionary<string, string> { ["url"] = "https://example.com/spec.zip", ["fileName"] = "spec.zip" });
+
+        var html = WikiBlockHtmlRenderer.RenderBlock(block);
+
+        html.Should().Contain("wiki-file-block");
+        html.Should().Contain("download");
+        html.Should().Contain(">spec.zip<");
+    }
+
+    [Theory]
+    [InlineData(WikiBlockTypes.Video)]
+    [InlineData(WikiBlockTypes.Audio)]
+    [InlineData(WikiBlockTypes.Pdf)]
+    [InlineData(WikiBlockTypes.File)]
+    public void RenderBlock_ForEachNewMediaType_ShouldRenderNothingWithoutAUrl(string type)
+    {
+        var block = new WikiBlock(Guid.NewGuid(), type, 0, [], new Dictionary<string, string>());
+
+        WikiBlockHtmlRenderer.RenderBlock(block).Should().BeEmpty();
+    }
+
     [Fact]
     public void RenderBlock_ShouldPreserveRichTableCellsImportedFromNotion()
     {

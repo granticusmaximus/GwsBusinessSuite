@@ -18,7 +18,15 @@ public static class WikiBlockTypes
     public const string Code = "code";
     public const string Divider = "divider";
     public const string Image = "image";
+    // "Web bookmark" - a link-preview card (or provider iframe for the handful of hosts
+    // WikiEmbedResolver recognizes). Phase 5.4 split the video/audio/file/pdf cases that used
+    // to be crammed into this one type (distinguished only by a Props["mediaKind"] string) out
+    // into their own real block types below, each with its own icon/menu entry/renderer.
     public const string Embed = "embed";
+    public const string Video = "video";
+    public const string Audio = "audio";
+    public const string File = "file";
+    public const string Pdf = "pdf";
     // A reference to an existing Sentinel database. The database remains the single source
     // of truth; the block stores only its id and a display-title snapshot so pages can link
     // to the same database without copying schema or rows.
@@ -41,7 +49,8 @@ public static class WikiBlockTypes
     public static readonly IReadOnlyList<string> All =
     [
         Paragraph, Heading1, Heading2, Heading3, BulletedListItem, NumberedListItem,
-        ToDo, Toggle, Quote, Callout, Code, Divider, Image, Embed, LinkedDatabase, InlineDatabase,
+        ToDo, Toggle, Quote, Callout, Code, Divider, Image, Embed, Video, Audio, File, Pdf,
+        LinkedDatabase, InlineDatabase,
         Table, Equation, Breadcrumb, TableOfContents, Button, SyncedBlock, Columns, Tab, Markdown
     ];
 

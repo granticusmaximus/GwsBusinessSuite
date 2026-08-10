@@ -29,6 +29,42 @@ public sealed record SentinelDiscussionView(
     IReadOnlyList<SentinelDiscussionCommentView> Comments,
     SentinelDiscussionAnchor? Anchor = null);
 
+// Client-side facet filtering (Phase 5.3) over an already-loaded discussion list
+// (SentinelDiscussions.razor) - a thread has no single "Author" field of its own (it's a
+// container of comments), so "the thread's author" is defined here as whoever started it.
+public static class SentinelDiscussionFiltering
+{
+    public static string ThreadAuthor(SentinelDiscussionView discussion) =>
+        discussion.Comments.Count > 0 ? discussion.Comments[0].Author : string.Empty;
+
+    public static IReadOnlyList<SentinelDiscussionView> Apply(
+        IReadOnlyList<SentinelDiscussionView> discussions,
+        string? authorFilter,
+        string? dateFilter,
+        DateTimeOffset now)
+    {
+        IEnumerable<SentinelDiscussionView> filtered = discussions;
+        if (!string.IsNullOrEmpty(authorFilter))
+        {
+            filtered = filtered.Where(discussion => string.Equals(ThreadAuthor(discussion), authorFilter, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var cutoff = dateFilter switch
+        {
+            SentinelSearchFiltering.PastWeek => now.AddDays(-7),
+            SentinelSearchFiltering.PastMonth => now.AddMonths(-1),
+            SentinelSearchFiltering.PastYear => now.AddYears(-1),
+            _ => (DateTimeOffset?)null
+        };
+        if (cutoff is { } cutoffValue)
+        {
+            filtered = filtered.Where(discussion => discussion.CreatedAt >= cutoffValue);
+        }
+
+        return filtered.ToList();
+    }
+}
+
 public sealed record SentinelNotificationView(
     Guid Id,
     string Kind,

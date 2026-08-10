@@ -149,15 +149,13 @@ public static class NotionMapping
             case "image":
                 return NewBlock(WikiBlockTypes.Image, indentLevel, richText, FileProps(block, body));
             case "video":
+                return NewBlock(WikiBlockTypes.Video, indentLevel, richText, FileProps(block, body));
             case "audio":
-            case "file":
+                return NewBlock(WikiBlockTypes.Audio, indentLevel, richText, FileProps(block, body));
             case "pdf":
-                // Sentinel has no dedicated Video/Audio/File/PDF block types, but the shared
-                // Embed renderer can pick an inline <video>/<audio> player instead of a bare
-                // link when it knows the media kind - see WikiBlockHtmlRenderer.RenderEmbed
-                // and wiki-block-editor.js's renderMediaPreview.
-                var mediaProps = new Dictionary<string, string>(FileProps(block, body)) { ["mediaKind"] = type };
-                return NewBlock(WikiBlockTypes.Embed, indentLevel, richText, mediaProps);
+                return NewBlock(WikiBlockTypes.Pdf, indentLevel, richText, FileProps(block, body));
+            case "file":
+                return NewBlock(WikiBlockTypes.File, indentLevel, richText, FileProps(block, body));
             case "embed":
             case "bookmark":
             case "link_preview":
@@ -343,6 +341,10 @@ public static class NotionMapping
             WikiBlockTypes.Divider => new { @object = "block", type = "divider", divider = new { } },
             WikiBlockTypes.Image when block.Props.TryGetValue("url", out var imageUrl) => new { @object = "block", type = "image", image = new { type = "external", external = new { url = imageUrl } } },
             WikiBlockTypes.Embed when block.Props.TryGetValue("url", out var embedUrl) => new { @object = "block", type = "bookmark", bookmark = new { url = embedUrl } },
+            WikiBlockTypes.Video when block.Props.TryGetValue("url", out var videoUrl) => new { @object = "block", type = "video", video = new { type = "external", external = new { url = videoUrl } } },
+            WikiBlockTypes.Audio when block.Props.TryGetValue("url", out var audioUrl) => new { @object = "block", type = "audio", audio = new { type = "external", external = new { url = audioUrl } } },
+            WikiBlockTypes.Pdf when block.Props.TryGetValue("url", out var pdfUrl) => new { @object = "block", type = "pdf", pdf = new { type = "external", external = new { url = pdfUrl } } },
+            WikiBlockTypes.File when block.Props.TryGetValue("url", out var fileUrl) => new { @object = "block", type = "file", file = new { type = "external", external = new { url = fileUrl } } },
             WikiBlockTypes.Equation => new { @object = "block", type = "equation", equation = new { expression = block.PlainText } },
             WikiBlockTypes.TableOfContents => new { @object = "block", type = "table_of_contents", table_of_contents = new { } },
             WikiBlockTypes.Breadcrumb => new { @object = "block", type = "breadcrumb", breadcrumb = new { } },

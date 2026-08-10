@@ -1166,6 +1166,8 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .sentinel-db-timeline-track { position: relative; min-height: 3.2rem; border-radius: .4rem; background-image: repeating-linear-gradient(90deg,rgba(148,163,184,.11) 0,rgba(148,163,184,.11) 1px,transparent 1px,transparent 10%); }
 .sentinel-db-timeline-bar { position: absolute; top: .35rem; left: var(--timeline-left); width: var(--timeline-width); min-width: 2.25rem; max-width: calc(100% - var(--timeline-left)); overflow: hidden; padding: .4rem .55rem; border: 1px solid rgba(251,191,36,.35); border-radius: .45rem; background: linear-gradient(90deg,rgba(245,158,11,.86),rgba(249,115,22,.82)); color: #fff; text-align: left; font-size: .75rem; font-weight: 700; white-space: nowrap; box-shadow: 0 .25rem .7rem rgba(0,0,0,.18); }
 .sentinel-db-timeline-bar span { color: inherit; }
+.sentinel-db-timeline-bar { cursor: grab; touch-action: none; }
+.sentinel-db-timeline-bar.is-dragging { cursor: grabbing; z-index: 2; box-shadow: 0 .5rem 1.2rem rgba(0,0,0,.32); transition: none; }
 .sentinel-db-timeline-links { position: absolute; top: 2.35rem; left: var(--timeline-left,0); display: flex; align-items: center; gap: .25rem; max-width: 75%; color: #94a3b8; font-size: .68rem; white-space: nowrap; }
 .sentinel-db-timeline-undated { display: grid; grid-template-columns: 15rem minmax(30rem,1fr); gap: .75rem; min-width: 46rem; padding: .7rem .55rem; }
 .sentinel-db-timeline-undated > div { display: flex; flex-wrap: wrap; gap: .4rem; }
@@ -1175,10 +1177,17 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .sentinel-db-chart-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sentinel-db-chart-row > div { height: 1.45rem; background: rgba(148,163,184,.12); border-radius: .35rem; overflow: hidden; }
 .sentinel-db-chart-row i { display: block; height: 100%; min-width: .3rem; background: linear-gradient(90deg,#f59e0b,#f97316); border-radius: inherit; }
+.sentinel-db-chart-toolbar { display: flex; gap: .35rem; margin-bottom: .75rem; }
+.sentinel-db-chart-line { display: block; width: 100%; max-width: 58rem; height: 14rem; background: rgba(148,163,184,.07); border-radius: .5rem; }
+.sentinel-db-chart-donut { display: block; width: 14rem; height: 14rem; }
+.sentinel-db-chart-legend { display: flex; flex-wrap: wrap; gap: .5rem .9rem; margin-top: .65rem; font-size: .78rem; color: #cbd5e1; }
+.sentinel-db-chart-legend i { display: inline-block; width: .6rem; height: .6rem; margin-right: .35rem; border-radius: 50%; vertical-align: middle; }
+.sentinel-db-chart-legend strong { margin-left: .25rem; color: #f8fafc; }
 .sentinel-db-form { display: grid; gap: .85rem; max-width: 42rem; padding: 1.25rem; border: 1px solid rgba(148,163,184,.2); border-radius: .85rem; background: rgba(15,23,42,.34); }
 .sentinel-db-form label { display: grid; gap: .35rem; }
 .sentinel-db-form label > span { font-size: .78rem; color: #94a3b8; font-weight: 600; }
 .sentinel-db-form input:not([type=checkbox]), .sentinel-db-form select { width: 100%; padding: .55rem .65rem; border: 1px solid rgba(148,163,184,.25); border-radius: .45rem; background: rgba(2,6,23,.45); color: inherit; }
+.sentinel-db-map-canvas { height: 22rem; margin-bottom: .75rem; border-radius: .65rem; overflow: hidden; border: 1px solid rgba(148,163,184,.18); }
 .sentinel-db-map, .sentinel-db-feed { display: grid; gap: .55rem; }
 .sentinel-db-map article, .sentinel-db-feed article { display: flex; align-items: center; gap: .8rem; padding: .8rem; border: 1px solid rgba(148,163,184,.18); border-radius: .65rem; background: rgba(15,23,42,.28); }
 .sentinel-db-map article > div, .sentinel-db-feed article > div:last-child { display: grid; flex: 1; }
@@ -1443,6 +1452,12 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     border-radius: 0.4rem;
 }
 audio.wiki-embed-media { max-width: 100%; }
+
+.wiki-pdf-block { display: grid; gap: .4rem; margin-top: 0.4rem; max-width: 40rem; }
+.wiki-pdf-viewer { width: 100%; height: 32rem; border: 1px solid rgba(148,163,184,.2); border-radius: .4rem; background: #fff; }
+.wiki-pdf-block > a { justify-self: start; text-decoration: none; }
+.wiki-file-block { display: inline-flex; align-items: center; gap: .5rem; margin-top: 0.4rem; padding: .5rem .8rem; border: 1px solid rgba(148,163,184,.22); border-radius: .5rem; text-decoration: none; max-width: 100%; }
+.wiki-file-block span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .wiki-slash-menu {
     min-width: 200px;
@@ -2269,6 +2284,9 @@ audio.wiki-embed-media { max-width: 100%; }
     font-size: .6rem;
     line-height: 1.35;
 }
+
+.sentinel-search-filters { display: flex; gap: .4rem; padding: .5rem .75rem; border-bottom: 1px solid var(--sentinel-border, rgba(214,211,209,.14)); }
+.sentinel-search-filters select { flex: 1; font-size: .72rem; }
 
 .sentinel-gpt-entry {
     display: grid;
@@ -3263,6 +3281,16 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 .sentinel-workspace .wiki-embed-link::before { margin-right: .55rem; color: #f59e0b; content: "↗"; }
 .sentinel-workspace .wiki-embed-link:hover { border-color: var(--sentinel-border-strong); color: #fafaf9; }
+.sentinel-workspace .wiki-pdf-block a,
+.sentinel-workspace .wiki-file-block {
+    border-color: var(--sentinel-border);
+    background: var(--sentinel-canvas-raised);
+    color: #d6d3d1;
+    font-size: .76rem;
+}
+.sentinel-workspace .wiki-file-block:hover,
+.sentinel-workspace .wiki-pdf-block a:hover { border-color: var(--sentinel-border-strong); color: #fafaf9; }
+.sentinel-workspace .wiki-pdf-block a { display: inline-flex; align-items: center; gap: .4rem; padding: .5rem .85rem; border: 1px solid; border-radius: 7px; text-decoration: none; }
 
 .sentinel-workspace .wiki-linked-database-editor {
     position: relative;
@@ -3817,6 +3845,25 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-db-calendar-undated button:hover { background: var(--sentinel-hover); color: #e7e5e4; }
 .sentinel-workspace .sentinel-search-highlight { background: rgba(245, 158, 11, .3); color: #fef3c7; }
 .sentinel-workspace .wiki-mention { background: rgba(245, 158, 11, .12); color: #fbbf24; }
+
+/* Command palette (Phase 5.2) - Ctrl/Cmd+K and Ctrl/Cmd+Shift+F both open this. */
+.sentinel-command-palette-backdrop { position: fixed; inset: 0; z-index: 1080; display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; background: rgba(8,7,6,.55); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+.sentinel-command-palette { width: min(38rem, 92vw); max-height: 70vh; display: flex; flex-direction: column; background: #1c1917; border: 1px solid rgba(214,211,209,.16); border-radius: .85rem; box-shadow: 0 1.5rem 3.5rem rgba(0,0,0,.5); overflow: hidden; }
+.sentinel-command-palette-input { display: flex; align-items: center; gap: .6rem; padding: .9rem 1.1rem; border-bottom: 1px solid rgba(214,211,209,.12); color: #a8a29e; }
+.sentinel-command-palette-input input { flex: 1; border: 0; background: transparent; color: #fafaf9; font-size: 1rem; outline: none; }
+.sentinel-command-palette-input input::placeholder { color: #78716c; }
+.sentinel-command-palette-input kbd { padding: .1rem .4rem; border: 1px solid rgba(214,211,209,.25); border-radius: .3rem; color: #a8a29e; font-size: .72rem; }
+.sentinel-command-palette-results { overflow-y: auto; padding: .4rem; }
+.sentinel-command-palette-empty { padding: 1.5rem 1rem; text-align: center; color: #78716c; font-size: .85rem; }
+.sentinel-command-palette-item { display: flex; align-items: center; gap: .7rem; width: 100%; padding: .55rem .65rem; border: 0; border-radius: .55rem; background: transparent; color: #e7e5e4; text-align: left; }
+.sentinel-command-palette-item i { flex: 0 0 auto; color: #78716c; }
+.sentinel-command-palette-item span:not(.badge) { flex: 1; min-width: 0; display: grid; gap: .05rem; }
+.sentinel-command-palette-item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.sentinel-command-palette-item small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a8a29e; font-size: .74rem; }
+.sentinel-command-palette-item.is-selected, .sentinel-command-palette-item:hover { background: rgba(245,158,11,.14); }
+.sentinel-command-palette-item .badge { flex: 0 0 auto; }
+.sentinel-command-palette-filters { display: flex; gap: .5rem; padding: .55rem .9rem; border-bottom: 1px solid rgba(214,211,209,.1); }
+.sentinel-command-palette-filters select { flex: 1; background: #111827; color: #d6d3d1; border-color: rgba(214,211,209,.2); font-size: .78rem; }
 
 .notion-connection-choice {
     padding: 1rem;

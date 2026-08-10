@@ -7,12 +7,54 @@ public sealed record SentinelSearchResult(
     string Preview,
     string MatchKind,
     int Score,
-    IReadOnlyList<string> MatchedTerms);
+    IReadOnlyList<string> MatchedTerms,
+    // Phase 5.3 - lets search UI facet-filter an already-fetched result set by author/date
+    // without a second round trip, rather than adding filter parameters to SearchAsync itself.
+    string CreatedBy,
+    DateTimeOffset CreatedAt);
 
 public sealed record SentinelBacklink(
     Guid SourcePageId,
     string SourcePageTitle,
     string Preview);
+
+// Facet filtering (Phase 5.3) over an already-fetched SearchAsync result set - both the
+// sidebar's always-present search box and the Ctrl/Cmd+K command palette (Wiki.razor) call
+// this against their own independent result lists rather than adding filter parameters to
+// SearchAsync itself, which would mean a second round trip on every filter change.
+public static class SentinelSearchFiltering
+{
+    public const string PastWeek = "week";
+    public const string PastMonth = "month";
+    public const string PastYear = "year";
+
+    public static IReadOnlyList<SentinelSearchResult> Apply(
+        IReadOnlyList<SentinelSearchResult> results,
+        string? authorFilter,
+        string? dateFilter,
+        DateTimeOffset now)
+    {
+        IEnumerable<SentinelSearchResult> filtered = results;
+        if (!string.IsNullOrEmpty(authorFilter))
+        {
+            filtered = filtered.Where(result => string.Equals(result.CreatedBy, authorFilter, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var cutoff = dateFilter switch
+        {
+            PastWeek => now.AddDays(-7),
+            PastMonth => now.AddMonths(-1),
+            PastYear => now.AddYears(-1),
+            _ => (DateTimeOffset?)null
+        };
+        if (cutoff is { } cutoffValue)
+        {
+            filtered = filtered.Where(result => result.CreatedAt >= cutoffValue);
+        }
+
+        return filtered.ToList();
+    }
+}
 
 public sealed record SentinelNavigationItem(
     Guid Id,

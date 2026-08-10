@@ -421,6 +421,54 @@ public sealed class WikiDatabaseViewLogicTests
         chart.Select(bucket => (bucket.Label, bucket.Count)).Should().Equal(("To Do", 2), ("Done", 1), ("Empty", 1));
     }
 
+    [Fact]
+    public void LinePoints_ShouldPlotEachBucketAcrossA0To100ViewBoxWithTallerBarsCloserToZero()
+    {
+        var buckets = new List<WikiDatabaseChartBucket> { new("A", 10), new("B", 5), new("C", 0) };
+
+        var points = WikiDatabaseViewLogic.LinePoints(buckets, maximum: 10).Split(' ');
+
+        points.Should().HaveCount(3);
+        // SVG y grows downward, so the tallest bar (A, count == maximum) plots at y=0 and the
+        // empty bucket (C, count 0) plots at y=100 - "taller" means a smaller y coordinate.
+        points[0].Should().Be("0,0");
+        points[1].Should().Be("50,50");
+        points[2].Should().Be("100,100");
+    }
+
+    [Fact]
+    public void LinePoints_WithASingleBucket_ShouldPlotItAtTheHorizontalCenter()
+    {
+        var points = WikiDatabaseViewLogic.LinePoints([new WikiDatabaseChartBucket("Only", 3)], maximum: 3);
+
+        points.Should().Be("50,0");
+    }
+
+    [Fact]
+    public void DonutSegments_ShouldSplitTheFullCircumferenceProportionallyAndChainOffsets()
+    {
+        var buckets = new List<WikiDatabaseChartBucket> { new("A", 3), new("B", 1) };
+
+        var segments = WikiDatabaseViewLogic.DonutSegments(buckets);
+
+        segments.Should().HaveCount(2);
+        segments[0].DashOffset.Should().Be(0);
+        (segments[0].DashArrayValue + segments[1].DashArrayValue).Should().BeApproximately(251.327, 0.01);
+        segments[0].DashArrayValue.Should().BeApproximately(251.327 * 0.75, 0.01, "A is 3 of the 4 total rows");
+        segments[1].DashOffset.Should().BeApproximately(-segments[0].DashArrayValue, 0.01, "B's arc starts where A's ends");
+        segments[0].Color.Should().NotBe(segments[1].Color);
+    }
+
+    [Fact]
+    public void WikiDatabaseViewConfig_ShouldRoundTripChartTypeThroughJson()
+    {
+        var config = WikiDatabaseViewConfig.Empty with { ChartType = WikiDatabaseChartTypes.Donut };
+
+        var parsed = WikiDatabaseViewConfigJson.Parse(WikiDatabaseViewConfigJson.Serialize(config));
+
+        parsed.ChartType.Should().Be(WikiDatabaseChartTypes.Donut);
+    }
+
     private static WikiDatabaseProperty NewProperty(string type) => new()
     {
         Id = Guid.NewGuid(),

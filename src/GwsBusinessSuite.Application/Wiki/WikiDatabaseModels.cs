@@ -108,9 +108,19 @@ public sealed record WikiDatabaseViewConfig(
     IReadOnlyList<string>? HiddenPagePropertyIds = null,
     IReadOnlyDictionary<string, string>? Calculations = null,
     WikiDatabaseFilterGroup? FilterGroup = null,
-    string? DependencyPropertyId = null)
+    string? DependencyPropertyId = null,
+    // Phase 5.1 - which of WikiDatabaseChartTypes a Chart view renders as; null/unrecognized
+    // falls back to Bar (the original, only chart type before this field existed).
+    string? ChartType = null)
 {
-    public static WikiDatabaseViewConfig Empty { get; } = new([], [], null, null, [], [], new Dictionary<string, string>(), null, null);
+    public static WikiDatabaseViewConfig Empty { get; } = new([], [], null, null, [], [], new Dictionary<string, string>(), null, null, null);
+}
+
+public static class WikiDatabaseChartTypes
+{
+    public const string Bar = "bar";
+    public const string Line = "line";
+    public const string Donut = "donut";
 }
 
 public static class WikiDatabasePagePresentation
@@ -196,7 +206,8 @@ public static class WikiDatabaseViewConfigJson
                     parsed.HiddenPagePropertyIds ?? [],
                     parsed.Calculations ?? new Dictionary<string, string>(),
                     parsed.FilterGroup,
-                    parsed.DependencyPropertyId);
+                    parsed.DependencyPropertyId,
+                    parsed.ChartType);
         }
         catch (JsonException) { return WikiDatabaseViewConfig.Empty; }
     }
@@ -798,7 +809,49 @@ public static class WikiDatabaseViewLogic
 
         return buckets;
     }
+
+    public static readonly IReadOnlyList<string> ChartPalette =
+        ["#f59e0b", "#38bdf8", "#34d399", "#a78bfa", "#fb7185", "#facc15", "#2dd4bf", "#f472b6"];
+
+    // A flat 0..100 viewBox regardless of bucket count/values - the consuming <svg>'s own
+    // width/height does the scaling, so this never needs to know the rendered pixel size.
+    public static string LinePoints(IReadOnlyList<WikiDatabaseChartBucket> buckets, int maximum)
+    {
+        if (buckets.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var stepX = buckets.Count == 1 ? 0 : 100d / (buckets.Count - 1);
+        return string.Join(' ', buckets.Select((bucket, index) =>
+        {
+            var x = buckets.Count == 1 ? 50 : index * stepX;
+            var y = 100 - (bucket.Count * 100d / maximum);
+            return FormattableString.Invariant($"{x:0.##},{y:0.##}");
+        }));
+    }
+
+    // Classic stroke-dasharray/stroke-dashoffset donut technique: each bucket becomes one arc of
+    // a circle whose circumference is 2*pi*40 (r=40, matching a <circle r="40"> in the consuming
+    // markup), with dashoffset accumulating so each arc starts where the previous one ended.
+    public static IReadOnlyList<WikiDatabaseDonutSegment> DonutSegments(IReadOnlyList<WikiDatabaseChartBucket> buckets)
+    {
+        const double circumference = 251.327;
+        var total = Math.Max(1, buckets.Sum(bucket => bucket.Count));
+        var offset = 0d;
+        var segments = new List<WikiDatabaseDonutSegment>();
+        for (var index = 0; index < buckets.Count; index++)
+        {
+            var length = buckets[index].Count / (double)total * circumference;
+            segments.Add(new WikiDatabaseDonutSegment(ChartPalette[index % ChartPalette.Count], length, -offset));
+            offset += length;
+        }
+
+        return segments;
+    }
 }
+
+public readonly record struct WikiDatabaseDonutSegment(string Color, double DashArrayValue, double DashOffset);
 
 public sealed record WikiDatabaseBoardGroup(string OptionId, string Label, IReadOnlyList<WikiDatabaseRow> Rows);
 

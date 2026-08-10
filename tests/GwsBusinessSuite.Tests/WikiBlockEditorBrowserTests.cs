@@ -207,6 +207,25 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
         await Expect(page.Locator(".wiki-block[data-block-type]").Last).ToHaveAttributeAsync("data-block-type", "synced_block");
         var syncedBlocksJson = await page.EvaluateAsync<string>("() => window.sentinelBlockEditor.getBlocksJson(document.querySelector('#editor'))");
         syncedBlocksJson.Should().Contain("\"sourceId\":\"33333333-3333-3333-3333-333333333333\"");
+
+        // Phase 5.4: Video/Audio/File/PDF are now real, distinctly-typed menu entries (no
+        // longer folded into the generic "Web bookmark" embed type) - picking one is a plain
+        // synchronous conversion like Image/Code, not a server round trip like Synced block
+        // above, so this just asserts the resulting block type and its URL-input placeholder.
+        foreach (var (label, expectedType, expectedPlaceholder) in new[]
+        {
+            ("Video", "video", "Paste a video URL and press Enter"),
+            ("Audio", "audio", "Paste an audio URL and press Enter"),
+            ("PDF", "pdf", "Paste a PDF URL and press Enter"),
+            ("File", "file", "Paste a file URL and press Enter")
+        })
+        {
+            await page.Locator(".wiki-block-add").Last.ClickAsync(new LocatorClickOptions { Force = true });
+            await page.Locator($".wiki-editor-menu-item:has(.wiki-editor-menu-label:text-is(\"{label}\"))")
+                .ClickAsync(new LocatorClickOptions { Force = true });
+            await Expect(page.Locator(".wiki-block[data-block-type]").Last).ToHaveAttributeAsync("data-block-type", expectedType);
+            await Expect(page.Locator(".wiki-block").Last.Locator("input")).ToHaveAttributeAsync("placeholder", expectedPlaceholder);
+        }
     }
 
     [Fact]

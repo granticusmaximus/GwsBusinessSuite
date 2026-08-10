@@ -59,10 +59,10 @@ public sealed class NotionMappingTests
     [InlineData("code", WikiBlockTypes.Code)]
     [InlineData("divider", WikiBlockTypes.Divider)]
     [InlineData("image", WikiBlockTypes.Image)]
-    [InlineData("video", WikiBlockTypes.Embed)]
-    [InlineData("audio", WikiBlockTypes.Embed)]
-    [InlineData("file", WikiBlockTypes.Embed)]
-    [InlineData("pdf", WikiBlockTypes.Embed)]
+    [InlineData("video", WikiBlockTypes.Video)]
+    [InlineData("audio", WikiBlockTypes.Audio)]
+    [InlineData("file", WikiBlockTypes.File)]
+    [InlineData("pdf", WikiBlockTypes.Pdf)]
     [InlineData("embed", WikiBlockTypes.Embed)]
     [InlineData("bookmark", WikiBlockTypes.Embed)]
     [InlineData("link_preview", WikiBlockTypes.Embed)]
@@ -126,17 +126,18 @@ public sealed class NotionMappingTests
     }
 
     [Theory]
-    [InlineData("video")]
-    [InlineData("audio")]
-    public void MapBlock_ShouldTagVideoAndAudioWithMediaKindForInlinePlayerRendering(string notionType)
+    [InlineData("video", WikiBlockTypes.Video)]
+    [InlineData("audio", WikiBlockTypes.Audio)]
+    [InlineData("file", WikiBlockTypes.File)]
+    [InlineData("pdf", WikiBlockTypes.Pdf)]
+    public void MapBlock_ShouldMapNotionMediaTypesToTheirOwnDedicatedBlockTypes(string notionType, string expectedType)
     {
         var block = Json($"{{\"type\":\"{notionType}\",\"{notionType}\":{{\"external\":{{\"url\":\"https://example.com/a\"}},\"rich_text\":[]}}}}");
 
         var mapped = NotionMapping.MapBlock(block, 0);
 
         mapped.Should().NotBeNull();
-        mapped!.Type.Should().Be(WikiBlockTypes.Embed);
-        mapped.Props["mediaKind"].Should().Be(notionType);
+        mapped!.Type.Should().Be(expectedType);
         mapped.Props["url"].Should().Be("https://example.com/a");
     }
 
@@ -169,6 +170,23 @@ public sealed class NotionMappingTests
         payload[0].GetProperty("paragraph").GetProperty("rich_text")[0]
             .GetProperty("annotations").GetProperty("color").GetString()
             .Should().Be("yellow_background");
+    }
+
+    [Theory]
+    [InlineData(WikiBlockTypes.Video, "video")]
+    [InlineData(WikiBlockTypes.Audio, "audio")]
+    [InlineData(WikiBlockTypes.Pdf, "pdf")]
+    [InlineData(WikiBlockTypes.File, "file")]
+    public void MapBlocksForWrite_ShouldExportEachNewMediaTypeAsItsOwnNotionBlockType(string wikiType, string expectedNotionType)
+    {
+        var block = new WikiBlock(
+            Guid.NewGuid(), wikiType, 0, [], new Dictionary<string, string> { ["url"] = "https://example.com/a" });
+
+        var payload = JsonSerializer.SerializeToElement(NotionMapping.MapBlocksForWrite([block]), WikiBlockJson.Options);
+
+        payload[0].GetProperty("type").GetString().Should().Be(expectedNotionType);
+        payload[0].GetProperty(expectedNotionType).GetProperty("external").GetProperty("url").GetString()
+            .Should().Be("https://example.com/a");
     }
 
     [Theory]

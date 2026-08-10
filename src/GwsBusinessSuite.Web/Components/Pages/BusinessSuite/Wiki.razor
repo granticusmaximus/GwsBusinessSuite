@@ -28,6 +28,74 @@
 <PageTitle>Sentinel</PageTitle>
 
 <div class="sentinel-workspace">
+@if (_paletteOpen)
+{
+    <div class="sentinel-command-palette-backdrop" @onclick="CloseCommandPalette">
+        <div class="sentinel-command-palette" @onclick:stopPropagation="true" role="dialog" aria-modal="true" aria-label="Search Sentinel">
+            <div class="sentinel-command-palette-input">
+                <i class="bi bi-search"></i>
+                <input @ref="_paletteInputRef" @bind="_paletteQuery" @bind:event="oninput" @bind:after="SearchCommandPaletteAsync"
+                       @onkeydown="HandlePaletteKeyDownAsync"
+                       placeholder="Search pages, content, databases, and rows..."
+                       aria-label="Search every Sentinel page, block, database, and row" />
+                @if (_paletteBusy)
+                {
+                    <span class="spinner-border spinner-border-sm"></span>
+                }
+                <kbd>Esc</kbd>
+            </div>
+            @if (_paletteRawResults.Count > 0)
+            {
+                <div class="sentinel-command-palette-filters">
+                    <select class="form-select form-select-sm" @bind="_paletteAuthorFilter" @bind:after="ApplyPaletteFilters" aria-label="Filter search results by author">
+                        <option value="">Any author</option>
+                        @foreach (var author in _paletteRawResults.Select(result => result.CreatedBy).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(author => author, StringComparer.OrdinalIgnoreCase))
+                        {
+                            <option value="@author">@author</option>
+                        }
+                    </select>
+                    <select class="form-select form-select-sm" @bind="_paletteDateFilter" @bind:after="ApplyPaletteFilters" aria-label="Filter search results by date">
+                        <option value="">Any time</option>
+                        <option value="week">Past week</option>
+                        <option value="month">Past month</option>
+                        <option value="year">Past year</option>
+                    </select>
+                </div>
+            }
+            <div class="sentinel-command-palette-results">
+                @if (string.IsNullOrWhiteSpace(_paletteQuery))
+                {
+                    <div class="sentinel-command-palette-empty">Start typing to search everything in Sentinel.</div>
+                }
+                else if (_paletteRawResults.Count == 0 && !_paletteBusy)
+                {
+                    <div class="sentinel-command-palette-empty">Nothing matches "@_paletteQuery".</div>
+                }
+                else if (_paletteResults.Count == 0 && !_paletteBusy)
+                {
+                    <div class="sentinel-command-palette-empty">No results match the current filters.</div>
+                }
+                else
+                {
+                    @for (var index = 0; index < _paletteResults.Count; index++)
+                    {
+                        var result = _paletteResults[index];
+                        var isSelected = index == _paletteSelectedIndex;
+                        <button type="button" class="sentinel-command-palette-item @(isSelected ? "is-selected" : string.Empty)"
+                                @onclick="() => OpenPaletteResultAsync(result)" @onmouseenter="() => _paletteSelectedIndex = index">
+                            <i class="bi @(result.IsDatabase ? "bi-grid-3x3-gap-fill" : "bi-file-earmark-text")"></i>
+                            <span>
+                                <strong>@HighlightMatches(result.Title, result.MatchedTerms)</strong>
+                                <small>@HighlightMatches(result.Preview, result.MatchedTerms)</small>
+                            </span>
+                            <span class="badge text-bg-light border">@result.MatchKind</span>
+                        </button>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+}
 <div class="sentinel-workspace-header">
     <div class="sentinel-workspace-identity">
         <button type="button" class="sentinel-sidebar-shortcut" @onclick="ToggleWorkspaceBrowser"
@@ -44,9 +112,9 @@
     </div>
     <div class="sentinel-workspace-actions">
         <button type="button" class="btn btn-sm btn-outline-secondary sentinel-global-search"
-                @onclick="FocusSearchAsync" title="Search every Sentinel page, block, database, and row">
+                @onclick="OpenCommandPaletteAsync" title="Search every Sentinel page, block, database, and row">
             <i class="bi bi-search me-1"></i>Quick find
-            <kbd>⌘⇧F</kbd>
+            <kbd>⌘K</kbd>
         </button>
         <button type="button" class="btn btn-sm btn-outline-secondary sentinel-mobile-nav-toggle"
                 @onclick="ToggleMobileWorkspaceNav" aria-controls="sentinel-workspace-browser"
@@ -106,9 +174,23 @@
                     <small>Private workspace</small>
                 </div>
                 <div class="d-flex gap-1">
-                    <button class="btn btn-sm btn-outline-secondary" @onclick="CreateNewPage" disabled="@IsBusy" title="New page">
-                        <i class="bi bi-file-earmark-plus"></i>
-                    </button>
+                    <div class="btn-group">
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="CreateNewPage" disabled="@IsBusy" title="New blank page">
+                            <i class="bi bi-file-earmark-plus"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary dropdown-toggle dropdown-toggle-split" type="button"
+                                data-bs-toggle="dropdown" aria-expanded="false" disabled="@IsBusy" title="New page from a starter template">
+                            <span class="visually-hidden">Starter templates</span>
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li><button type="button" class="dropdown-item" @onclick="CreateNewPage">📄 Blank page</button></li>
+                            <li><hr class="dropdown-divider" /></li>
+                            @foreach (var template in SentinelStarterTemplates.All)
+                            {
+                                <li><button type="button" class="dropdown-item" @onclick="() => CreateNewPageFromTemplate(template.Key)">@template.Icon @template.Name</button></li>
+                            }
+                        </ul>
+                    </div>
                     <button class="btn btn-sm btn-outline-secondary" @onclick="CreateNewDatabaseAsync" disabled="@IsBusy" title="New database">
                         <i class="bi bi-grid-3x3-gap-fill"></i>
                     </button>
@@ -237,20 +319,45 @@
                     }
                     else
                     {
-                        <div class="list-group list-group-flush sentinel-search-results">
-                            @foreach (var result in WorkspaceSearchResults)
-                            {
-                                <button type="button" class="list-group-item list-group-item-action text-start"
-                                        @onclick="() => OpenSearchResultAsync(result)" disabled="@IsBusy">
-                                    <div class="d-flex align-items-center gap-2">
-                                        <i class="bi @(result.IsDatabase ? "bi-grid-3x3-gap-fill" : "bi-file-earmark-text") text-secondary"></i>
-                                        <span class="fw-semibold text-truncate">@HighlightMatches(result.Title, result.MatchedTerms)</span>
-                                        <span class="badge text-bg-light border ms-auto">@result.MatchKind</span>
-                                    </div>
-                                    <div class="small text-secondary text-truncate mt-1">@HighlightMatches(result.Preview, result.MatchedTerms)</div>
-                                </button>
-                            }
+                        <div class="sentinel-search-filters">
+                            <select class="form-select form-select-sm" @bind="_searchAuthorFilter" aria-label="Filter search results by author">
+                                <option value="">Any author</option>
+                                @foreach (var author in WorkspaceSearchResults.Select(result => result.CreatedBy).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(author => author, StringComparer.OrdinalIgnoreCase))
+                                {
+                                    <option value="@author">@author</option>
+                                }
+                            </select>
+                            <select class="form-select form-select-sm" @bind="_searchDateFilter" aria-label="Filter search results by date">
+                                <option value="">Any time</option>
+                                <option value="week">Past week</option>
+                                <option value="month">Past month</option>
+                                <option value="year">Past year</option>
+                            </select>
                         </div>
+                        var filteredWorkspaceResults = ApplySearchFilters(WorkspaceSearchResults, _searchAuthorFilter, _searchDateFilter);
+                        @if (filteredWorkspaceResults.Count == 0)
+                        {
+                            <div class="p-4 text-secondary">
+                                <p class="mb-0">No results match the current filters.</p>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="list-group list-group-flush sentinel-search-results">
+                                @foreach (var result in filteredWorkspaceResults)
+                                {
+                                    <button type="button" class="list-group-item list-group-item-action text-start"
+                                            @onclick="() => OpenSearchResultAsync(result)" disabled="@IsBusy">
+                                        <div class="d-flex align-items-center gap-2">
+                                            <i class="bi @(result.IsDatabase ? "bi-grid-3x3-gap-fill" : "bi-file-earmark-text") text-secondary"></i>
+                                            <span class="fw-semibold text-truncate">@HighlightMatches(result.Title, result.MatchedTerms)</span>
+                                            <span class="badge text-bg-light border ms-auto">@result.MatchKind</span>
+                                        </div>
+                                        <div class="small text-secondary text-truncate mt-1">@HighlightMatches(result.Preview, result.MatchedTerms)</div>
+                                    </button>
+                                }
+                            </div>
+                        }
                     }
                 }
                 else
@@ -1322,6 +1429,8 @@
     private string SearchQuery { get; set; } = string.Empty;
     private bool IsSearchBusy { get; set; }
     private List<SentinelSearchResult> WorkspaceSearchResults { get; set; } = new();
+    private string _searchAuthorFilter = string.Empty;
+    private string _searchDateFilter = string.Empty;
     private List<SentinelBacklink> Backlinks { get; set; } = new();
     private WikiPageConflictSnapshot? PageConflict { get; set; }
     private SentinelNavigationState Navigation { get; set; } = new([], []);
@@ -2534,6 +2643,131 @@
         }
     }
 
+    // Floating Ctrl/Cmd+K palette (Phase 5.2). Deliberately its own query/results state rather
+    // than sharing SearchQuery/WorkspaceSearchResults with the sidebar's own always-present
+    // search box below - opening/closing/typing in the palette must never clobber whatever the
+    // user separately has typed into that box, and vice versa. Both app.js's Ctrl/Cmd+K handler
+    // and sentinel-workspace.js's Ctrl/Cmd+Shift+F handler already converge on clicking the
+    // "Quick find" button (.sentinel-global-search) - see its @onclick in the markup above -
+    // so no JS changes were needed to wire either shortcut to this.
+    private bool _paletteOpen;
+    private string _paletteQuery = string.Empty;
+    // _paletteRawResults is exactly what SearchAsync returned; _paletteResults is that list
+    // after the author/date facet filters below are applied - kept separate so the "no filters
+    // configured yet" vs. "the filters excluded everything" empty states can be told apart, and
+    // so keyboard nav (_paletteSelectedIndex) always indexes into what's actually on screen.
+    private List<SentinelSearchResult> _paletteRawResults = new();
+    private List<SentinelSearchResult> _paletteResults = new();
+    private string _paletteAuthorFilter = string.Empty;
+    private string _paletteDateFilter = string.Empty;
+    private bool _paletteBusy;
+    private int _paletteSelectedIndex;
+    private ElementReference _paletteInputRef;
+
+    private async Task OpenCommandPaletteAsync()
+    {
+        _paletteOpen = true;
+        _paletteQuery = string.Empty;
+        _paletteRawResults = new();
+        _paletteResults = new();
+        _paletteAuthorFilter = string.Empty;
+        _paletteDateFilter = string.Empty;
+        _paletteSelectedIndex = 0;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            await _paletteInputRef.FocusAsync();
+        }
+        catch (JSException)
+        {
+            // The input may not have finished rendering yet on a very fast repeat keypress.
+        }
+    }
+
+    private void CloseCommandPalette()
+    {
+        _paletteOpen = false;
+        _paletteQuery = string.Empty;
+        _paletteRawResults = new();
+        _paletteResults = new();
+    }
+
+    private async Task SearchCommandPaletteAsync()
+    {
+        var query = _paletteQuery.Trim();
+        if (query.Length == 0)
+        {
+            _paletteRawResults = new();
+            _paletteResults = new();
+            _paletteSelectedIndex = 0;
+            return;
+        }
+
+        _paletteBusy = true;
+        try
+        {
+            var results = (await SentinelWorkspaceService.SearchAsync(query, CurrentUsername)).ToList();
+            // Ignore a stale response if the query changed again while this was in flight.
+            if (string.Equals(_paletteQuery.Trim(), query, StringComparison.Ordinal))
+            {
+                _paletteRawResults = results;
+                ApplyPaletteFilters();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to search Sentinel from the command palette.");
+        }
+        finally
+        {
+            _paletteBusy = false;
+        }
+    }
+
+    private void ApplyPaletteFilters()
+    {
+        _paletteResults = ApplySearchFilters(_paletteRawResults, _paletteAuthorFilter, _paletteDateFilter);
+        _paletteSelectedIndex = 0;
+    }
+
+    private static List<SentinelSearchResult> ApplySearchFilters(
+        IReadOnlyList<SentinelSearchResult> results, string authorFilter, string dateFilter) =>
+        SentinelSearchFiltering.Apply(results, authorFilter, dateFilter, DateTimeOffset.UtcNow).ToList();
+
+    private async Task OpenPaletteResultAsync(SentinelSearchResult result)
+    {
+        CloseCommandPalette();
+        await OpenSearchResultAsync(result);
+    }
+
+    private async Task HandlePaletteKeyDownAsync(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "Escape":
+                CloseCommandPalette();
+                break;
+            case "ArrowDown":
+                if (_paletteResults.Count > 0)
+                {
+                    _paletteSelectedIndex = (_paletteSelectedIndex + 1) % _paletteResults.Count;
+                }
+                break;
+            case "ArrowUp":
+                if (_paletteResults.Count > 0)
+                {
+                    _paletteSelectedIndex = (_paletteSelectedIndex - 1 + _paletteResults.Count) % _paletteResults.Count;
+                }
+                break;
+            case "Enter":
+                if (_paletteSelectedIndex >= 0 && _paletteSelectedIndex < _paletteResults.Count)
+                {
+                    await OpenPaletteResultAsync(_paletteResults[_paletteSelectedIndex]);
+                }
+                break;
+        }
+    }
+
     private async Task FocusSearchAsync()
     {
         _workspaceBrowserCollapsed = false;
@@ -2549,6 +2783,8 @@
     {
         SearchQuery = string.Empty;
         WorkspaceSearchResults = new();
+        _searchAuthorFilter = string.Empty;
+        _searchDateFilter = string.Empty;
         await FocusSearchAsync();
     }
 
@@ -2716,6 +2952,23 @@
         _editorGeneration++;
         StatusMessage = "Ready to create a new Sentinel page.";
         ErrorMessage = string.Empty;
+    }
+
+    // Starter gallery (Phase 5.3) - offered alongside the plain "Blank page" entry from the
+    // sidebar's "+ New page" control only (not the in-editor "Reset" button, which is a
+    // different action - discarding the current unsaved edit, not choosing a new page's shape).
+    private void CreateNewPageFromTemplate(string templateKey)
+    {
+        var template = SentinelStarterTemplates.Find(templateKey);
+        if (template is null)
+        {
+            return;
+        }
+
+        CreateNewPage();
+        Editor.Title = template.Title;
+        Editor.BlocksJson = WikiBlockJson.Serialize(template.Blocks);
+        StatusMessage = $"Ready to create a new page from '{template.Name}'.";
     }
 
     private async Task CreateNewDatabaseAsync() => await Work(async () =>

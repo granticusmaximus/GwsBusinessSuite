@@ -27,9 +27,28 @@
                 <input class="form-check-input" type="checkbox" id="sentinelResolvedThreads" @bind="IncludeResolved" @bind:after="LoadDiscussionsAsync" />
                 <label class="form-check-label small" for="sentinelResolvedThreads">Resolved</label>
             </div>
-            <span class="badge text-bg-secondary">@Discussions.Count</span>
+            <span class="badge text-bg-secondary">@FilteredDiscussions.Count</span>
         </div>
     </div>
+
+    @if (Discussions.Count > 0)
+    {
+        <div class="sentinel-discussion-filters px-3 py-2 border-bottom d-flex gap-2">
+            <select class="form-select form-select-sm" @bind="_discussionAuthorFilter" aria-label="Filter discussions by author">
+                <option value="">Any author</option>
+                @foreach (var author in Discussions.Select(SentinelDiscussionFiltering.ThreadAuthor).Where(author => author.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(author => author, StringComparer.OrdinalIgnoreCase))
+                {
+                    <option value="@author">@author</option>
+                }
+            </select>
+            <select class="form-select form-select-sm" @bind="_discussionDateFilter" aria-label="Filter discussions by date">
+                <option value="">Any time</option>
+                <option value="@SentinelSearchFiltering.PastWeek">Past week</option>
+                <option value="@SentinelSearchFiltering.PastMonth">Past month</option>
+                <option value="@SentinelSearchFiltering.PastYear">Past year</option>
+            </select>
+        </div>
+    }
 
     @if (ShowNotifications)
     {
@@ -98,10 +117,14 @@
     {
         <div class="card-body text-secondary small">No @(IncludeResolved ? string.Empty : "open ")discussions yet.</div>
     }
+    else if (FilteredDiscussions.Count == 0)
+    {
+        <div class="card-body text-secondary small">No discussions match the current filters.</div>
+    }
     else
     {
         <div class="list-group list-group-flush">
-            @foreach (var discussion in Discussions)
+            @foreach (var discussion in FilteredDiscussions)
             {
                 <div class="list-group-item sentinel-discussion-thread @(discussion.IsResolved ? "sentinel-discussion-resolved" : "") @(FocusedBlockId.HasValue && FocusedBlockId == discussion.BlockId ? "is-focused" : "")">
                     <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
@@ -185,6 +208,11 @@
 
     private static readonly string[] ReactionChoices = ["👍", "❤️", "🎉", "👀", "✅"];
     private List<SentinelDiscussionView> Discussions { get; set; } = new();
+    private string _discussionAuthorFilter = string.Empty;
+    private string _discussionDateFilter = string.Empty;
+
+    private IReadOnlyList<SentinelDiscussionView> FilteredDiscussions =>
+        SentinelDiscussionFiltering.Apply(Discussions, _discussionAuthorFilter, _discussionDateFilter, DateTimeOffset.UtcNow);
     private List<SentinelNotificationView> Notifications { get; set; } = new();
     private string CurrentUsername { get; set; } = "unknown";
     private string NewDiscussionBody { get; set; } = string.Empty;

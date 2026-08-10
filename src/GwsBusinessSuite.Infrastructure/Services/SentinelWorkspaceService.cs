@@ -86,7 +86,9 @@ public sealed class SentinelWorkspaceService(
                     BuildPreview(content, terms, "Page title match"),
                     terms.All(term => page.Title.Contains(term, StringComparison.OrdinalIgnoreCase)) ? "Page" : "Page content",
                     score,
-                    terms));
+                    terms,
+                    page.CreatedBy,
+                    page.CreatedAt));
             }
         }
 
@@ -115,7 +117,9 @@ public sealed class SentinelWorkspaceService(
                     BuildPreview(content, terms, "Database title match"),
                     terms.All(term => database.Title.Contains(term, StringComparison.OrdinalIgnoreCase)) ? "Database" : "Database content",
                     score,
-                    terms));
+                    terms,
+                    database.CreatedBy,
+                    database.CreatedAt));
             }
         }
 

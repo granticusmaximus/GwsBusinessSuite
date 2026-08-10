@@ -2,8 +2,10 @@
 @using GwsBusinessSuite.Application.Abstractions
 @using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Domain.Entities
+@implements IAsyncDisposable
 @inject IWikiDatabaseService WikiDatabaseService
 @inject ICurrentUserAccessor CurrentUserAccessor
+@inject IJSRuntime JS
 
 @if (View.Type == WikiDatabaseViewTypes.Timeline)
 {
@@ -16,7 +18,9 @@
     {
         var dependencyProperty = ResolveTimelineDependencyProperty();
         var schedule = WikiDatabaseViewLogic.BuildTimelineSchedule(VisibleRows, dateProperty, dependencyProperty);
-        <div class="sentinel-db-timeline" aria-label="Timeline for @Database.Title">
+        <div class="sentinel-db-timeline" aria-label="Timeline for @Database.Title" @ref="_timelineContainerRef"
+             data-schedule-start="@schedule.StartDate?.ToString("yyyy-MM-dd")" data-schedule-end="@schedule.EndDate?.ToString("yyyy-MM-dd")"
+             data-can-edit="@(CanEdit ? "true" : "false")">
             <header>
                 <div>
                     <strong>Timeline</strong>
@@ -64,9 +68,11 @@
                             </details>
                         }
                     </div>
-                    <div class="sentinel-db-timeline-track" style="@TimelineBarStyle(item, schedule)">
+                    <div class="sentinel-db-timeline-track" style="@TimelineBarStyle(item, schedule)"
+                         data-row-id="@item.Row.Id" data-date="@item.Date?.ToString("yyyy-MM-dd")">
                         <button type="button" class="sentinel-db-timeline-bar"
-                                @onclick="() => OnOpenRow.InvokeAsync(item.Row.Id)" title="@($"{Title(item.Row)} — {item.Date:MMM d, yyyy}")">
+                                @onclick="() => OnOpenRow.InvokeAsync(item.Row.Id)"
+                                title="@(CanEdit ? $"{Title(item.Row)} — {item.Date:MMM d, yyyy} (drag to reschedule)" : $"{Title(item.Row)} — {item.Date:MMM d, yyyy}")">
                             <span>@Title(item.Row)</span>
                         </button>
                         @if (item.DependsOnRowIds.Count > 0)
@@ -110,16 +116,63 @@ else if (View.Type == WikiDatabaseViewTypes.Chart)
     {
         var buckets = WikiDatabaseViewLogic.BuildChart(VisibleRows, chartProperty);
         var maximum = Math.Max(1, buckets.Select(bucket => bucket.Count).DefaultIfEmpty().Max());
-        <div class="sentinel-db-chart" role="img" aria-label="Chart grouped by @chartProperty.Name">
-            @foreach (var bucket in buckets)
+        <div class="sentinel-db-chart-toolbar" role="group" aria-label="Chart type">
+            @foreach (var type in new[] { WikiDatabaseChartTypes.Bar, WikiDatabaseChartTypes.Line, WikiDatabaseChartTypes.Donut })
             {
-                <div class="sentinel-db-chart-row">
-                    <span title="@bucket.Label">@bucket.Label</span>
-                    <div><i style="width:@((bucket.Count * 100d / maximum).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))%"></i></div>
-                    <strong>@bucket.Count</strong>
-                </div>
+                <button type="button" class="btn btn-sm @(ChartType == type ? "btn-secondary" : "btn-outline-secondary")"
+                        @onclick="() => SetChartTypeAsync(type)" disabled="@(!CanEdit || _savingChartType)">
+                    @System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(type)
+                </button>
             }
         </div>
+
+        @if (ChartType == WikiDatabaseChartTypes.Line)
+        {
+            <svg class="sentinel-db-chart-line" viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Line chart grouped by @chartProperty.Name">
+                <polyline points="@LinePoints(buckets, maximum)" fill="none" stroke="#f59e0b" stroke-width="2.5" vector-effect="non-scaling-stroke" />
+            </svg>
+            <div class="sentinel-db-chart-legend">
+                @foreach (var bucket in buckets)
+                {
+                    <span title="@bucket.Label">@bucket.Label <strong>@bucket.Count</strong></span>
+                }
+            </div>
+        }
+        else if (ChartType == WikiDatabaseChartTypes.Donut)
+        {
+            var segments = DonutSegments(buckets);
+            <svg class="sentinel-db-chart-donut" viewBox="0 0 100 100" role="img" aria-label="Donut chart grouped by @chartProperty.Name">
+                <g transform="rotate(-90 50 50)">
+                    @for (var index = 0; index < segments.Count; index++)
+                    {
+                        var segment = segments[index];
+                        <circle cx="50" cy="50" r="40" fill="none" stroke="@segment.Color" stroke-width="16"
+                                stroke-dasharray="@(FormattableString.Invariant($"{segment.DashArrayValue:0.##} 999"))"
+                                stroke-dashoffset="@(FormattableString.Invariant($"{segment.DashOffset:0.##}"))" />
+                    }
+                </g>
+            </svg>
+            <div class="sentinel-db-chart-legend">
+                @for (var index = 0; index < buckets.Count; index++)
+                {
+                    var bucket = buckets[index];
+                    <span title="@bucket.Label"><i style="background:@ChartPalette[index % ChartPalette.Count]"></i>@bucket.Label <strong>@bucket.Count</strong></span>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="sentinel-db-chart" role="img" aria-label="Chart grouped by @chartProperty.Name">
+                @foreach (var bucket in buckets)
+                {
+                    <div class="sentinel-db-chart-row">
+                        <span title="@bucket.Label">@bucket.Label</span>
+                        <div><i style="width:@((bucket.Count * 100d / maximum).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))%"></i></div>
+                        <strong>@bucket.Count</strong>
+                    </div>
+                }
+            </div>
+        }
     }
 }
 else if (View.Type == WikiDatabaseViewTypes.Form)
@@ -169,6 +222,7 @@ else if (View.Type == WikiDatabaseViewTypes.Map)
     }
     else
     {
+        <div class="sentinel-db-map-canvas" @ref="_mapContainerRef" aria-label="Map for @Database.Title"></div>
         <div class="sentinel-db-map">
             @foreach (var row in VisibleRows)
             {
@@ -242,6 +296,153 @@ else if (View.Type == WikiDatabaseViewTypes.Dashboard)
     private string? _formMessage;
     private Guid? _savingDependencyRowId;
     private string? _timelineMessage;
+    private bool _savingChartType;
+    private ElementReference _timelineContainerRef;
+    private ElementReference _mapContainerRef;
+    private IJSObjectReference? _timelineDragModule;
+    private IJSObjectReference? _mapModule;
+    private DotNetObjectReference<SentinelDatabaseAdvancedView>? _selfRef;
+    private string? _mapMarkersRenderedFor;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try
+        {
+            if (View.Type == WikiDatabaseViewTypes.Timeline)
+            {
+                _timelineDragModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wikiTimelineDrag.js");
+                _selfRef ??= DotNetObjectReference.Create(this);
+                await _timelineDragModule.InvokeVoidAsync("initialize", _timelineContainerRef, _selfRef);
+            }
+            else if (View.Type == WikiDatabaseViewTypes.Map)
+            {
+                var placeProperty = ResolveProperty(WikiDatabasePropertyTypes.Place);
+                if (placeProperty is not null)
+                {
+                    var markers = VisibleRows
+                        .Select(row => (Row: row, Place: WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), placeProperty.Id)))
+                        .Where(item => !string.IsNullOrWhiteSpace(item.Place))
+                        .Select(item => new { id = item.Row.Id, title = Title(item.Row), place = item.Place })
+                        .ToList();
+                    var markersJson = System.Text.Json.JsonSerializer.Serialize(markers);
+                    // Re-initializing re-geocodes every marker (no server-side coordinate cache -
+                    // see wikiMapView.js), so only do it again when the marker set actually
+                    // changed, not on every unrelated re-render this component goes through.
+                    if (markersJson != _mapMarkersRenderedFor)
+                    {
+                        _mapModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wikiMapView.js");
+                        _selfRef ??= DotNetObjectReference.Create(this);
+                        await _mapModule.InvokeVoidAsync("initialize", _mapContainerRef, _selfRef, markersJson);
+                        _mapMarkersRenderedFor = markersJson;
+                    }
+                }
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit may already be gone by the time this fires.
+        }
+    }
+
+    // Leaflet marker popups (wikiMapView.js) route back through here instead of a native
+    // wikilink so opening a row from the map uses the exact same OnOpenRow callback every other
+    // view (Table, Board, Feed, ...) already uses.
+    [JSInvokable]
+    public async Task OpenMapRowAsync(string rowId)
+    {
+        if (Guid.TryParse(rowId, out var parsedRowId))
+        {
+            await OnOpenRow.InvokeAsync(parsedRowId);
+        }
+    }
+
+    // Drag-to-reschedule (Phase 5.1) - wikiTimelineDrag.js's pointer drag ends by calling this
+    // with the row's new single Date value (see that file's own header comment for why this is
+    // a move, not a start/end resize - the Timeline schedule has no end-date concept today).
+    [JSInvokable]
+    public async Task UpdateTimelineRowDateAsync(string rowId, string newDateIso)
+    {
+        if (!CanEdit || !Guid.TryParse(rowId, out var parsedRowId) || !DateTimeOffset.TryParse(newDateIso, out var newDate))
+        {
+            return;
+        }
+
+        var dateProperty = ResolveProperty(WikiDatabasePropertyTypes.Date);
+        var row = Database.Rows.FirstOrDefault(item => item.Id == parsedRowId);
+        if (dateProperty is null || row is null)
+        {
+            return;
+        }
+
+        _timelineMessage = null;
+        try
+        {
+            var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+            WikiPropertyValues.SetDate(values, dateProperty.Id, newDate);
+
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await WikiDatabaseService.SaveRowAsync(Database.Id, new WikiDatabaseRowEditor
+            {
+                Id = row.Id,
+                ParentRowId = row.ParentRowId,
+                Values = values.ToDictionary(item => item.Key, item => item.Value)
+            }, username);
+            await OnChanged.InvokeAsync();
+            StateHasChanged();
+        }
+        catch (Exception exception)
+        {
+            _timelineMessage = exception.Message;
+            StateHasChanged();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_timelineDragModule is not null)
+        {
+            try { await _timelineDragModule.DisposeAsync(); }
+            catch (JSDisconnectedException) { /* circuit already gone */ }
+        }
+        if (_mapModule is not null)
+        {
+            try { await _mapModule.DisposeAsync(); }
+            catch (JSDisconnectedException) { /* circuit already gone */ }
+        }
+        _selfRef?.Dispose();
+    }
+
+    private static IReadOnlyList<string> ChartPalette => WikiDatabaseViewLogic.ChartPalette;
+
+    private string ChartType => Config.ChartType is WikiDatabaseChartTypes.Line or WikiDatabaseChartTypes.Donut
+        ? Config.ChartType
+        : WikiDatabaseChartTypes.Bar;
+
+    private async Task SetChartTypeAsync(string chartType)
+    {
+        if (!CanEdit || _savingChartType)
+        {
+            return;
+        }
+
+        _savingChartType = true;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await WikiDatabaseService.SaveViewAsync(Database.Id, View.Id, View.Name, View.Type, Config with { ChartType = chartType }, username);
+            await OnChanged.InvokeAsync();
+        }
+        finally
+        {
+            _savingChartType = false;
+        }
+    }
+
+    private static string LinePoints(IReadOnlyList<WikiDatabaseChartBucket> buckets, int maximum) =>
+        WikiDatabaseViewLogic.LinePoints(buckets, maximum);
+
+    private static IReadOnlyList<WikiDatabaseDonutSegment> DonutSegments(IReadOnlyList<WikiDatabaseChartBucket> buckets) =>
+        WikiDatabaseViewLogic.DonutSegments(buckets);
 
     private IReadOnlyList<WikiDatabaseRow> VisibleRows
     {

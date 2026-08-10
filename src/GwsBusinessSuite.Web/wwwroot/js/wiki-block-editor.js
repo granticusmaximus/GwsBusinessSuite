@@ -36,7 +36,11 @@ const BLOCK_TYPES = [
     { type: '__link_to_page', label: 'Link to page', icon: '🔗', group: 'Basic blocks', description: 'Creates a shortcut link to another existing page.', keywords: 'link page shortcut wikilink' },
     { type: 'callout', label: 'Callout', icon: '💡', group: 'Basic blocks', description: 'Text boxed within a light background banner with a custom icon.', keywords: 'notice aside' },
     { type: 'image', label: 'Image', icon: '🖼', group: 'Media', description: 'Uploads or embeds pictures, GIFs, or stock imagery.', keywords: 'photo picture' },
-    { type: 'embed', label: 'Web bookmark', icon: '🔖', group: 'Media', description: 'Creates a neat preview card for web links.', keywords: 'embed video url bookmark' },
+    { type: 'embed', label: 'Web bookmark', icon: '🔖', group: 'Media', description: 'Creates a neat preview card for web links.', keywords: 'embed url bookmark' },
+    { type: 'video', label: 'Video', icon: '🎬', group: 'Media', description: 'Uploads or embeds video streams like YouTube or Vimeo.', keywords: 'movie mp4 youtube vimeo' },
+    { type: 'audio', label: 'Audio', icon: '🎧', group: 'Media', description: 'Uploads or links to audio recordings or Spotify playlists.', keywords: 'music sound mp3 podcast spotify' },
+    { type: 'pdf', label: 'PDF', icon: '📕', group: 'Media', description: 'Embeds a viewable PDF document.', keywords: 'document viewer' },
+    { type: 'file', label: 'File', icon: '📎', group: 'Media', description: 'Uploads and saves data downloads directly into your workspace.', keywords: 'attachment download upload' },
     { type: 'code', label: 'Code', icon: '</>', group: 'Media', description: 'A dedicated block for formatting code snippets across languages.', keywords: 'preformatted' },
     { type: 'inline_database', label: 'Table view', icon: '▦', group: 'Database inline / full page', description: 'Data displayed in a grid of rows and columns.', keywords: 'database data collection table grid' },
     { type: 'linked_database', label: 'Linked database', icon: '▤', group: 'Database inline / full page', description: 'Show an existing database view.', keywords: 'database data view' },
@@ -56,7 +60,8 @@ const BLOCK_TYPES = [
 // __mention_person), or splice in reusable content (dynamic __template_<id> entries added to
 // the menu at open time from GetSuggestedBlockTemplates).
 const CREATE_MENU_TYPES = new Set(['__create_page', '__create_database']);
-const TEXTLESS_TYPES = new Set(['divider', 'image', 'embed', 'linked_database', 'inline_database', 'breadcrumb', 'table_of_contents']);
+const MEDIA_TYPES = new Set(['image', 'embed', 'video', 'audio', 'pdf', 'file']);
+const TEXTLESS_TYPES = new Set(['divider', 'linked_database', 'inline_database', 'breadcrumb', 'table_of_contents', ...MEDIA_TYPES]);
 const RICH_TEXT_COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
 
 export function initialize(container, dotNetRef, initialBlocksJson, historyKey = null) {
@@ -426,7 +431,7 @@ function createBlockElement(block, state) {
     if (block.type === 'to_do' && block.props && block.props.checked === 'true') el.dataset.checked = 'true';
     if (block.type === 'numbered_list_item') el.dataset.number = (block.props && block.props.number) || '';
     if (block.type === 'toggle') el.dataset.open = block.props && block.props.open === 'true' ? 'true' : 'false';
-    if (block.type === 'image' || block.type === 'embed') {
+    if (MEDIA_TYPES.has(block.type)) {
         el.dataset.url = (block.props && block.props.url) || '';
         el.dataset.fileName = (block.props && block.props.fileName) || '';
         el.dataset.notionBlockId = (block.props && block.props.notionBlockId) || '';
@@ -574,7 +579,7 @@ function createBlockBody(block, state) {
         return body;
     }
 
-    if (block.type === 'image' || block.type === 'embed') {
+    if (MEDIA_TYPES.has(block.type)) {
         body.appendChild(createMediaBody(block, state));
         return body;
     }
@@ -1161,6 +1166,28 @@ function refreshToggleVisibility(container) {
     });
 }
 
+function mediaUrlLabel(type) {
+    switch (type) {
+        case 'image': return 'Image';
+        case 'video': return 'Video';
+        case 'audio': return 'Audio';
+        case 'pdf': return 'PDF';
+        case 'file': return 'File';
+        default: return 'Embed';
+    }
+}
+
+function mediaUrlPlaceholder(type) {
+    switch (type) {
+        case 'image': return 'Paste an image URL and press Enter';
+        case 'video': return 'Paste a video URL and press Enter';
+        case 'audio': return 'Paste an audio URL and press Enter';
+        case 'pdf': return 'Paste a PDF URL and press Enter';
+        case 'file': return 'Paste a file URL and press Enter';
+        default: return 'Paste a link and press Enter';
+    }
+}
+
 function createMediaBody(block, state) {
     const wrapper = document.createElement('div');
     wrapper.className = 'wiki-media-block';
@@ -1170,9 +1197,9 @@ function createMediaBody(block, state) {
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'form-control form-control-sm';
-    input.placeholder = block.type === 'image' ? 'Paste an image URL and press Enter' : 'Paste a link and press Enter';
+    input.placeholder = mediaUrlPlaceholder(block.type);
     input.value = url;
-    input.setAttribute('aria-label', block.type === 'image' ? 'Image URL' : 'Embed URL');
+    input.setAttribute('aria-label', `${mediaUrlLabel(block.type)} URL`);
 
     const preview = document.createElement('div');
     preview.className = 'wiki-media-preview';
@@ -1222,6 +1249,13 @@ function resolveEmbedUrl(url) {
     return null;
 }
 
+function icon(bootstrapIconClass) {
+    const el = document.createElement('i');
+    el.className = `bi ${bootstrapIconClass}`;
+    el.setAttribute('aria-hidden', 'true');
+    return el;
+}
+
 function renderMediaPreview(preview, type, url, fileName = '', mediaKind = '') {
     preview.innerHTML = '';
     if (!url) return;
@@ -1237,16 +1271,49 @@ function renderMediaPreview(preview, type, url, fileName = '', mediaKind = '') {
         return;
     }
 
-    // Set only on blocks imported from Notion's video/audio types (NotionMapping.MapBlock) -
-    // Sentinel has no dedicated block type for these, but an inline player reads far better
-    // than a bare link for the two kinds a <video>/<audio> tag can actually play.
-    if (mediaKind === 'video' || mediaKind === 'audio') {
-        const player = document.createElement(mediaKind);
+    // type is 'video'/'audio' for real Video/Audio blocks (Phase 5.4); mediaKind is the older
+    // fallback still set on Embed blocks imported from Notion before that split existed (see
+    // NotionMapping.MapBlock and WikiBlockHtmlRenderer.RenderEmbed's own mediaKind fallback).
+    const playerKind = type === 'video' || type === 'audio' ? type : (mediaKind === 'video' || mediaKind === 'audio' ? mediaKind : null);
+    if (playerKind) {
+        const player = document.createElement(playerKind);
         player.className = 'wiki-embed-media';
         player.src = safeUrl;
         player.controls = true;
         player.preload = 'metadata';
         preview.appendChild(player);
+        return;
+    }
+
+    if (type === 'pdf') {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'wiki-pdf-block';
+        const frame = document.createElement('iframe');
+        frame.className = 'wiki-pdf-viewer';
+        frame.src = safeUrl;
+        frame.title = 'PDF document';
+        frame.loading = 'lazy';
+        const link = document.createElement('a');
+        link.href = safeUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.append(icon('bi-file-earmark-pdf'), document.createTextNode(' Open PDF'));
+        wrapper.append(frame, link);
+        preview.appendChild(wrapper);
+        return;
+    }
+
+    if (type === 'file') {
+        const link = document.createElement('a');
+        link.className = 'wiki-file-block';
+        link.href = safeUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.setAttribute('download', '');
+        const label = document.createElement('span');
+        label.textContent = fileName || safeUrl;
+        link.append(icon('bi-file-earmark-arrow-down'), label);
+        preview.appendChild(link);
         return;
     }
 
@@ -3043,7 +3110,7 @@ function serializeBlock(blockEl) {
                     richText: richTextFromNode(panel.querySelector('.wiki-tab-content'))
                 })));
     }
-    if (type === 'image' || type === 'embed') {
+    if (MEDIA_TYPES.has(type)) {
         props.url = blockEl.dataset.url || '';
         if (blockEl.dataset.fileName) props.fileName = blockEl.dataset.fileName;
         if (blockEl.dataset.notionBlockId) props.notionBlockId = blockEl.dataset.notionBlockId;

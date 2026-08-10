@@ -114,6 +114,10 @@ public static class WikiBlockHtmlRenderer
                 ? string.Empty
                 : $"<img src=\"{WebUtility.HtmlEncode(imageUrl)}\" alt=\"{WebUtility.HtmlEncode(block.PlainText)}\" loading=\"lazy\" style=\"max-width:100%\" />",
             WikiBlockTypes.Embed => RenderEmbed(block),
+            WikiBlockTypes.Video => RenderMediaTag(block, "video"),
+            WikiBlockTypes.Audio => RenderMediaTag(block, "audio"),
+            WikiBlockTypes.Pdf => RenderPdf(block),
+            WikiBlockTypes.File => RenderFile(block),
             WikiBlockTypes.LinkedDatabase => RenderLinkedDatabase(block, indentStyle),
             WikiBlockTypes.InlineDatabase => RenderLinkedDatabase(block, indentStyle, isInline: true),
             WikiBlockTypes.Table => RenderTable(block, indentStyle),
@@ -407,6 +411,47 @@ public static class WikiBlockHtmlRenderer
         }
 
         return $"<a href=\"{WebUtility.HtmlEncode(url)}\" target=\"_blank\" rel=\"noopener noreferrer\">{WebUtility.HtmlEncode(url)}</a>";
+    }
+
+    // Video/Audio (Phase 5.4) - real block types now, rather than being inferred from the
+    // generic Embed block's Props["mediaKind"] (still read as a fallback in RenderEmbed above,
+    // for pages saved before this split existed).
+    private static string RenderMediaTag(WikiBlock block, string tag)
+    {
+        var url = GetSafeLink(block.Props.GetValueOrDefault("url"));
+        return url is null
+            ? string.Empty
+            : $"<{tag} class=\"wiki-embed-media\" src=\"{WebUtility.HtmlEncode(url)}\" controls preload=\"metadata\"></{tag}>";
+    }
+
+    private static string RenderPdf(WikiBlock block)
+    {
+        var url = GetSafeLink(block.Props.GetValueOrDefault("url"));
+        if (url is null)
+        {
+            return string.Empty;
+        }
+
+        var encodedUrl = WebUtility.HtmlEncode(url);
+        // Not every browser/device renders a PDF inline inside an <iframe> (most mobile
+        // browsers don't) - the fallback link below the frame is the actual guarantee this
+        // block is usable everywhere, the frame itself is a bonus for the common desktop case.
+        return $"<div class=\"wiki-pdf-block\"><iframe class=\"wiki-pdf-viewer\" src=\"{encodedUrl}\" title=\"PDF document\" loading=\"lazy\"></iframe>"
+            + $"<a href=\"{encodedUrl}\" target=\"_blank\" rel=\"noopener noreferrer\"><i class=\"bi bi-file-earmark-pdf\"></i> Open PDF</a></div>";
+    }
+
+    private static string RenderFile(WikiBlock block)
+    {
+        var url = GetSafeLink(block.Props.GetValueOrDefault("url"));
+        if (url is null)
+        {
+            return string.Empty;
+        }
+
+        var fileName = block.Props.GetValueOrDefault("fileName");
+        var label = string.IsNullOrWhiteSpace(fileName) ? url : fileName;
+        return $"<a class=\"wiki-file-block\" href=\"{WebUtility.HtmlEncode(url)}\" target=\"_blank\" rel=\"noopener noreferrer\" download>"
+            + $"<i class=\"bi bi-file-earmark-arrow-down\"></i><span>{WebUtility.HtmlEncode(label)}</span></a>";
     }
 
     private static string RenderLinkedDatabase(WikiBlock block, string indentStyle, bool isInline = false)
