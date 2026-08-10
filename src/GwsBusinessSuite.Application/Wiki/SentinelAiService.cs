@@ -491,12 +491,25 @@ public sealed class SentinelAiService(
             // yield to a circuit that's gone) while our own CancelAfter firing - or any
             // other failure - degrades gracefully into a saved "Failed" run instead of an
             // unhandled exception.
-            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {
                 run.Status = SentinelAiRunStatuses.Failed;
                 run.Output = "Generation failed before producing a reviewable response.";
                 db.SentinelAiRuns.Add(run);
                 await db.SaveChangesAsync(cancellationToken);
+                // A bare OperationCanceledException's .Message is the unhelpful framework
+                // default ("The operation was canceled.") - it propagates verbatim up through
+                // SentinelGptGenerationCoordinator into the chat UI's error banner with no clue
+                // whether the model was genuinely slow, stuck queued behind another Ollama
+                // caller (see OllamaWorkloadScheduler), or something else entirely. Rethrowing
+                // a message that names the actual timeout budget turns every future occurrence
+                // of this into something a reader can act on instead of a dead end.
+                if (ex is OperationCanceledException && timeoutCts.IsCancellationRequested)
+                {
+                    throw new TimeoutException(
+                        $"SentinelGPT did not respond within {timeoutMinutes} minute(s). The local model may be " +
+                        "slow, busy handling another request, or unavailable - check Docker Health.");
+                }
                 throw;
             }
 
