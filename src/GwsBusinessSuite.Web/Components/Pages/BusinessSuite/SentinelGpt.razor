@@ -51,12 +51,24 @@
                         <div class="sentinel-gpt-section-label">@group.Label</div>
                         @foreach (var conversation in group.Items)
                         {
-                            <button type="button"
-                                    class="sentinel-gpt-history-item @(_conversationId == conversation.Id ? "active" : null)"
-                                    @onclick="() => OpenConversationAsync(conversation.Id)">
-                                <i class="bi bi-chat"></i>
-                                <span><strong>@conversation.Title</strong><small>@ConversationMeta(conversation)</small></span>
-                            </button>
+                            <div class="sentinel-gpt-history-row">
+                                <button type="button"
+                                        class="sentinel-gpt-history-item @(_conversationId == conversation.Id ? "active" : null)"
+                                        @onclick="() => OpenConversationAsync(conversation.Id)">
+                                    <i class="bi bi-chat"></i>
+                                    <span><strong>@conversation.Title</strong><small>@ConversationMeta(conversation)</small></span>
+                                </button>
+                                <div class="dropdown sentinel-gpt-history-menu">
+                                    <button type="button" class="sentinel-gpt-history-kebab" data-bs-toggle="dropdown"
+                                            aria-expanded="false" aria-label="Chat options" title="Chat options">
+                                        <i class="bi bi-three-dots-vertical"></i>
+                                    </button>
+                                    <ul class="dropdown-menu dropdown-menu-end">
+                                        <li><button type="button" class="dropdown-item text-danger" @onclick="() => DeleteConversationAsync(conversation)">Delete</button></li>
+                                        <li><button type="button" class="dropdown-item">Cancel</button></li>
+                                    </ul>
+                                </div>
+                            </div>
                         }
                     </section>
                 }
@@ -511,6 +523,28 @@
         _notice = string.Empty;
         _runs = (await SentinelGptService.ListConversationRunsAsync(id, _username)).ToList();
         RequestThreadScroll();
+    }
+
+    private async Task DeleteConversationAsync(SentinelGptConversationView conversation)
+    {
+        // Blocked mid-generation rather than letting a delete race the background coordinator
+        // job that's still writing SentinelAiRuns into this same conversation - StartNewChat's
+        // own generating-guard uses the same reasoning.
+        if (_generating) return;
+        try
+        {
+            await SentinelGptService.DeleteConversationAsync(conversation.Id, _username);
+            _conversations.Remove(conversation);
+            if (_conversationId == conversation.Id)
+            {
+                StartNewChat();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Unable to delete SentinelGPT conversation {ConversationId}.", conversation.Id);
+            _error = $"Unable to delete this chat. {ex.Message}";
+        }
     }
 
     private async Task ReviewRunAsync(SentinelAiRunView run, bool approved)

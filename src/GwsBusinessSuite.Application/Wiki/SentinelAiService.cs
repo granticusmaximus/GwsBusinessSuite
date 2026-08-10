@@ -707,6 +707,22 @@ public sealed class SentinelAiService(
             .ToList();
     }
 
+    public async Task DeleteConversationAsync(Guid conversationId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var runs = await db.SentinelAiRuns
+            .Where(run => (run.ConversationId == conversationId || (run.ConversationId == Guid.Empty && run.Id == conversationId))
+                && run.CreatedBy == performedBy)
+            .ToListAsync(cancellationToken);
+        if (runs.Count == 0)
+        {
+            return;
+        }
+
+        db.SentinelAiRuns.RemoveRange(runs);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task ReviewAsync(Guid runId, bool approved, string performedBy, CancellationToken cancellationToken = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);

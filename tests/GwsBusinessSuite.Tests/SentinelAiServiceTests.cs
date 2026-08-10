@@ -74,6 +74,86 @@ public sealed class SentinelAiServiceTests
     }
 
     [Fact]
+    public async Task DeleteConversationAsync_ShouldRemoveEveryRunInThatConversationButLeaveOthersUntouched()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var factory = new FakeAppDbContextFactory(options);
+        var service = new SentinelAiService(
+            factory, new FakeStreamingOllamaService(["Answer one."]), new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache());
+
+        Guid? conversationToDelete = null;
+        await foreach (var chunk in service.StreamAsync(null, SentinelAiActions.Ask, "first question", "grant"))
+        {
+            if (chunk.CompletedRun is { } run) conversationToDelete = run.ConversationId;
+        }
+
+        Guid? otherConversation = null;
+        await foreach (var chunk in service.StreamAsync(null, SentinelAiActions.Ask, "second question", "grant"))
+        {
+            if (chunk.CompletedRun is { } run) otherConversation = run.ConversationId;
+        }
+
+        await service.DeleteConversationAsync(conversationToDelete!.Value, "grant");
+
+        (await db.SentinelAiRuns.AsNoTracking().Where(run => run.ConversationId == conversationToDelete).ToListAsync())
+            .Should().BeEmpty();
+        (await db.SentinelAiRuns.AsNoTracking().Where(run => run.ConversationId == otherConversation).ToListAsync())
+            .Should().ContainSingle();
+        (await service.ListConversationsAsync("grant")).Should().ContainSingle(conversation => conversation.Id == otherConversation);
+    }
+
+    [Fact]
+    public async Task DeleteConversationAsync_ShouldNotDeleteAnotherUsersConversation()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var factory = new FakeAppDbContextFactory(options);
+        var service = new SentinelAiService(
+            factory, new FakeStreamingOllamaService(["Answer."]), new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache());
+
+        Guid? conversationId = null;
+        await foreach (var chunk in service.StreamAsync(null, SentinelAiActions.Ask, "a question", "grant"))
+        {
+            if (chunk.CompletedRun is { } run) conversationId = run.ConversationId;
+        }
+
+        await service.DeleteConversationAsync(conversationId!.Value, "someone-else");
+
+        (await db.SentinelAiRuns.AsNoTracking().Where(run => run.ConversationId == conversationId).ToListAsync())
+            .Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task DeleteConversationAsync_ForAnUnknownConversation_ShouldNotThrow()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var factory = new FakeAppDbContextFactory(options);
+        var service = new SentinelAiService(
+            factory, new FakeStreamingOllamaService(["Answer."]), new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache());
+
+        var act = () => service.DeleteConversationAsync(Guid.NewGuid(), "grant");
+
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
     public async Task StreamAsync_ShouldNotGroundOnDeniedSearchResultsOrADeniedPinnedPage()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

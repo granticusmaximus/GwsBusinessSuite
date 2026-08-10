@@ -141,6 +141,12 @@ public interface ISentinelAiService
     Task<IReadOnlyList<SentinelGptConversationView>> ListConversationsAsync(string requestedBy, int maxResults = 40, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SentinelAiRunView>> ListConversationRunsAsync(Guid conversationId, string requestedBy, CancellationToken cancellationToken = default);
     Task ReviewAsync(Guid runId, bool approved, string performedBy, CancellationToken cancellationToken = default);
+    // Deletes every SentinelAiRun that makes up this conversation, scoped to the requesting
+    // user - the same "own conversation" identity ListConversationRunsAsync already uses (a
+    // Sentinel conversation has no separate row of its own; it's just the set of runs sharing
+    // a ConversationId). A no-op, not an error, if the conversation doesn't exist or belongs to
+    // someone else, so a stale/duplicate delete click can't leak whether it exists.
+    Task DeleteConversationAsync(Guid conversationId, string performedBy, CancellationToken cancellationToken = default);
 
     // DatabaseAutofill: unlike every other action above, this returns structured, per-property
     // suggestions for review rather than a streamed text blob - there is no SentinelAiRun to

@@ -4214,6 +4214,30 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-history-item small { margin-top: .1rem; color: #706a66; font-size: .62rem; }
 .sentinel-gpt-history-empty { padding: 2rem .6rem; color: #7c7671; font-size: .73rem; text-align: center; }
 
+.sentinel-gpt-history-row { position: relative; }
+.sentinel-gpt-history-row .sentinel-gpt-history-item { padding-right: 2.1rem; }
+.sentinel-gpt-history-kebab {
+    position: absolute;
+    top: 50%;
+    right: .35rem;
+    transform: translateY(-50%);
+    display: grid;
+    place-items: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #8d8782;
+    opacity: 0;
+    transition: opacity .12s ease;
+}
+.sentinel-gpt-history-row:hover .sentinel-gpt-history-kebab,
+.sentinel-gpt-history-kebab:focus-visible,
+.sentinel-gpt-history-menu.show .sentinel-gpt-history-kebab { opacity: 1; }
+.sentinel-gpt-history-kebab:hover { background: #33302c; color: #fff; }
+
 .sentinel-gpt-chat {
     position: relative;
     display: grid;

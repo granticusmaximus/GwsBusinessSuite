@@ -230,9 +230,12 @@ public sealed class WikiServiceTests
         // Backdate three same-day revisions and one different-day revision to well outside the
         // 90-day retention window, simulating history that accumulated before the cutoff -
         // TrimOldRevisionsAsync can't be driven by real elapsed time in a unit test, so this
-        // manipulates WikiPageRevision.CreatedAt directly instead.
-        var oldDay = DateTimeOffset.UtcNow.AddDays(-120);
-        var otherOldDay = DateTimeOffset.UtcNow.AddDays(-200);
+        // manipulates WikiPageRevision.CreatedAt directly instead. Anchored to midnight UTC
+        // (not "now's time-of-day, N days back") so the +2h/+5h offsets below can never spill
+        // into the next calendar day depending on what wall-clock time the test happens to run
+        // at - this test was flaky for exactly that reason before this fix.
+        var oldDay = DateTimeOffset.UtcNow.Date.AddDays(-120);
+        var otherOldDay = DateTimeOffset.UtcNow.Date.AddDays(-200);
         db.WikiPageRevisions.AddRange(
             new WikiPageRevision { WikiPageId = created.Id, RevisionNumber = 101, Title = "Long Lived", Slug = created.Slug, BlocksJson = ParagraphBlocks("old-1"), CreatedAt = oldDay, CreatedBy = "grantwatson" },
             new WikiPageRevision { WikiPageId = created.Id, RevisionNumber = 102, Title = "Long Lived", Slug = created.Slug, BlocksJson = ParagraphBlocks("old-2"), CreatedAt = oldDay.AddHours(2), CreatedBy = "grantwatson" },

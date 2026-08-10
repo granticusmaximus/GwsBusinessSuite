@@ -367,6 +367,12 @@ public sealed class SentinelGptGenerationCoordinatorTests
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        public Task DeleteConversationAsync(
+            Guid conversationId,
+            string performedBy,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<DatabaseAutofillResult> SuggestDatabaseRowValuesAsync(
             Guid wikiDatabaseId,
             Guid rowId,
