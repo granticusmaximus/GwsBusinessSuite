@@ -2985,6 +2985,22 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .wiki-block[data-block-type="code"] .wiki-block-content { padding: 1.7rem 1rem .9rem; border: 1px solid rgba(214, 211, 209, .08); line-height: 1.55; }
 .sentinel-workspace .wiki-code-language { position: absolute; top: .35rem; right: .65rem; z-index: 1; color: var(--sentinel-faint); font: 600 .62rem/1 var(--gws-font-sans); text-transform: uppercase; }
 .sentinel-workspace .wiki-block[data-block-type="equation"] .wiki-block-content { padding: 1rem; text-align: center; font-family: Georgia,serif; font-size: 1.25rem; font-style: italic; background: rgba(15,23,42,.32); border-radius: .5rem; }
+
+/* KaTeX/highlight.js rendered previews (Phase 4.2) - equation and code blocks show a live
+   rendered preview when not focused, and swap back to the raw-text editable while focused, via
+   attachRichPreview in wiki-block-editor.js. Two separate DOM nodes (never one repainted while
+   focused) so cursor position in the editable is never at risk. */
+.sentinel-workspace .wiki-has-rich-preview .wiki-code-preview,
+.sentinel-workspace .wiki-has-rich-preview .wiki-equation-preview { display: none; }
+.sentinel-workspace .wiki-has-rich-preview:not(.is-editing-rich) .wiki-block-content { display: none; }
+.sentinel-workspace .wiki-has-rich-preview:not(.is-editing-rich) .wiki-code-preview,
+.sentinel-workspace .wiki-has-rich-preview:not(.is-editing-rich) .wiki-equation-preview { display: block; }
+.sentinel-workspace .wiki-code-preview { padding: 1.7rem 1rem .9rem; background: var(--sentinel-canvas-raised); border: 1px solid rgba(214, 211, 209, .08); border-radius: .35rem; overflow-x: auto; cursor: text; }
+.sentinel-workspace .wiki-code-preview pre { margin: 0; background: transparent !important; }
+.sentinel-workspace .wiki-code-preview code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .82rem; line-height: 1.55; background: transparent !important; }
+.sentinel-workspace .wiki-equation-preview { padding: 1rem; text-align: center; background: rgba(15,23,42,.32); border-radius: .5rem; overflow-x: auto; cursor: text; }
+.sentinel-workspace .wiki-equation-preview:empty::before { content: attr(data-placeholder); color: #57534e; font-family: Georgia,serif; font-style: italic; }
+.sentinel-workspace .wiki-equation-preview.has-error { color: #f87171; font-family: Georgia,serif; font-style: italic; }
 .sentinel-workspace .wiki-native-table-editor { width: 100%; overflow-x: auto; padding: .2rem 0 .35rem; }
 .sentinel-workspace .wiki-native-table { min-width: 100%; width: max-content; border-collapse: collapse; }
 .sentinel-workspace .wiki-native-table th,

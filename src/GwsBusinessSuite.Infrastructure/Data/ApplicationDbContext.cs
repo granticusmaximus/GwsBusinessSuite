@@ -116,6 +116,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SecurityIncident> SecurityIncidents => Set<SecurityIncident>();
     public DbSet<SecurityIncidentUpdate> SecurityIncidentUpdates => Set<SecurityIncidentUpdate>();
     public DbSet<CongressionalFloorTranscript> CongressionalFloorTranscripts => Set<CongressionalFloorTranscript>();
+    public DbSet<WikiSyncedBlockSource> WikiSyncedBlockSources => Set<WikiSyncedBlockSource>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

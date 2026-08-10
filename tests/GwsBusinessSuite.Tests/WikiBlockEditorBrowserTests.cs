@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
@@ -130,6 +131,9 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
                                     { id: '11111111-1111-1111-1111-111111111111', name: 'Meeting notes', blockCount: 3, preview: 'Agenda, notes, action items' }
                                 ]);
                             }
+                            if (method === 'CreateSyncedBlockSource') {
+                                return Promise.resolve('33333333-3333-3333-3333-333333333333');
+                            }
                             return Promise.resolve([]);
                         }
                     },
@@ -189,6 +193,75 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
             .ClickAsync(new LocatorClickOptions { Force = true });
         var mentionCallJson = await page.EvaluateAsync<string>("() => JSON.stringify(window.calls[window.calls.length - 1])");
         mentionCallJson.Should().Be("[\"SearchMentionSuggestions\",\"\"]");
+
+        // "Synced block" needs a real source id from the server before it can convert - unlike
+        // every other conversion in BLOCK_TYPES, which is purely local/synchronous, it awaits
+        // CreateSyncedBlockSource first and stashes the id it gets back onto the new block. The
+        // debounced OnBlocksChanged notification that follows the conversion can land in
+        // window.calls after it, so find the specific call rather than assuming it's last.
+        await page.Locator(".wiki-block-add").Last.ClickAsync(new LocatorClickOptions { Force = true });
+        await page.Locator(".wiki-editor-menu-item:has(.wiki-editor-menu-label:text-is(\"Synced block\"))")
+            .ClickAsync(new LocatorClickOptions { Force = true });
+        await page.WaitForFunctionAsync(
+            "() => (window.calls || []).some(call => call[0] === 'CreateSyncedBlockSource')");
+        await Expect(page.Locator(".wiki-block[data-block-type]").Last).ToHaveAttributeAsync("data-block-type", "synced_block");
+        var syncedBlocksJson = await page.EvaluateAsync<string>("() => window.sentinelBlockEditor.getBlocksJson(document.querySelector('#editor'))");
+        syncedBlocksJson.Should().Contain("\"sourceId\":\"33333333-3333-3333-3333-333333333333\"");
+    }
+
+    [Fact]
+    public async Task EquationBlock_ShouldShowARenderedPreviewWhenBlurredAndTheRawEditableWhenFocused()
+    {
+        // This harness never loads App.razor, so window.katex/window.hljs are undefined here -
+        // that's exactly what exercises attachRichPreview's "library not loaded" fallback (plain
+        // text), which is also what real users would see if the CDN script ever failed to load.
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "text/html",
+            Body = """<main class="sentinel-workspace"><div id="editor" class="wiki-block-editor"></div><button id="elsewhere">Elsewhere</button></main>"""
+        }));
+        await page.GotoAsync("http://localhost/editor");
+
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+
+        var blocksJson = WikiBlockJson.Serialize(
+        [
+            new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Equation, 0, [new WikiRichTextSpan("E=mc^2")], new Dictionary<string, string>())
+        ]);
+        await page.EvaluateAsync(
+            """
+            json => window.sentinelBlockEditor.initialize(
+                document.querySelector('#editor'), { invokeMethodAsync: () => Promise.resolve([]) }, json)
+            """,
+            blocksJson);
+
+        var body = page.Locator(".wiki-block-body").First;
+        var preview = page.Locator(".wiki-equation-preview").First;
+        var content = page.Locator(".wiki-block-content").First;
+
+        // Blurred by default (nothing focused it yet) - the rendered preview (here, the plain-
+        // text fallback since KaTeX isn't loaded in this harness) is what's visible.
+        await Expect(body).Not.ToHaveClassAsync(new Regex("is-editing-rich"));
+        await Expect(preview).ToHaveTextAsync("E=mc^2");
+
+        await content.ClickAsync(new LocatorClickOptions { Force = true });
+        await Expect(body).ToHaveClassAsync(new Regex("is-editing-rich"));
+
+        await content.PressSequentiallyAsync(" + 1");
+        await Expect(preview).ToHaveTextAsync("E=mc^2 + 1");
+
+        await page.Locator("#elsewhere").ClickAsync();
+        await Expect(body).Not.ToHaveClassAsync(new Regex("is-editing-rich"));
+        await Expect(preview).ToHaveTextAsync("E=mc^2 + 1");
     }
 
     [Fact]

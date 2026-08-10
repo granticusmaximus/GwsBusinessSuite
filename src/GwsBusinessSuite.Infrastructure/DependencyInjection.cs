@@ -207,6 +207,7 @@ public static class DependencyInjection
         services.AddScoped<IAutomationTriggerService, AutomationTriggerService>();
         services.AddHostedService<AutomationScheduleBackgroundService>();
         services.AddHostedService<AutomationResumeBackgroundService>();
+        services.AddScoped<IWikiSyncedBlockService, WikiSyncedBlockService>();
         services.AddScoped<IWikiService, WikiService>();
         services.AddScoped<IWikiDatabaseService, WikiDatabaseService>();
         services.AddScoped<ISentinelTemplateService, SentinelTemplateService>();

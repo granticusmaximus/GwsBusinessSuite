@@ -10,9 +10,10 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 // MaxRevisionsPerPage trim-on-save pattern - replaces the old git-commit-per-save model
 // (see git history for the LibGit2Sharp version) now that page content is structured
 // WikiBlock JSON rather than a single Markdown string that read well as a prose diff.
-public sealed class WikiService(IAppDbContext dbContext) : IWikiService
+public sealed class WikiService(IAppDbContext dbContext, IWikiSyncedBlockService? syncedBlockService = null) : IWikiService
 {
     private const int MaxRevisionsPerPage = 20;
+    private const string SyncedBlockSourceIdProp = "sourceId";
 
     public async Task<IReadOnlyList<WikiPage>> ListPagesAsync(bool includeTrashed = false, CancellationToken cancellationToken = default)
     {
@@ -47,10 +48,102 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
     // CrmService.GetContactAsync).
     public async Task<WikiPage?> GetPageAsync(Guid wikiPageId, CancellationToken cancellationToken = default)
     {
-        return await dbContext.WikiPages
+        var page = await dbContext.WikiPages
             .AsNoTracking()
             .FirstOrDefaultAsync(page => page.Id == wikiPageId && page.TrashedAt == null, cancellationToken);
+        if (page is not null)
+        {
+            page.BlocksJson = await HydrateSyncedBlocksAsync(page.BlocksJson, cancellationToken);
+        }
+        return page;
     }
+
+    // Every synced-block instance's own RichText is a stale local snapshot at best - the shared
+    // WikiSyncedBlockSource row is the only thing that's ever authoritative. Rewriting it here,
+    // on every read, is what makes "edit any instance, every instance updates" true without any
+    // explicit fan-out write to other pages that might also embed the same source.
+    private async Task<string> HydrateSyncedBlocksAsync(string blocksJson, CancellationToken cancellationToken)
+    {
+        if (syncedBlockService is null)
+        {
+            return blocksJson;
+        }
+
+        var blocks = WikiBlockJson.ParseBlocks(blocksJson);
+        var sourceIds = blocks
+            .Select(TryGetSyncedBlockSourceId)
+            .Where(id => id is not null)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToList();
+        if (sourceIds.Count == 0)
+        {
+            return blocksJson;
+        }
+
+        var content = await syncedBlockService.GetContentBatchAsync(sourceIds, cancellationToken);
+        if (content.Count == 0)
+        {
+            return blocksJson;
+        }
+
+        var hydrated = blocks
+            .Select(block => TryGetSyncedBlockSourceId(block) is { } sourceId && content.TryGetValue(sourceId, out var richText)
+                ? block with { RichText = richText }
+                : block)
+            .ToList();
+        return WikiBlockJson.Serialize(hydrated);
+    }
+
+    // The inverse of hydration: on save, any synced-block instance's just-edited RichText is
+    // pushed into its shared source so every OTHER instance (including ones on other pages)
+    // picks it up the next time it's read. The page's own persisted copy is left as-is - it's
+    // always overwritten again on the next GetPageAsync, so there's nothing to keep tidy here.
+    //
+    // Only instances whose content actually changed from this same page's own previous save are
+    // propagated. Without that guard, a block that's new to this page (most notably a duplicated
+    // page's synced-block instances, cloned straight from a possibly-stale on-disk copy without
+    // ever being hydrated first) would blindly overwrite the shared source with a stale or blank
+    // local snapshot instead of leaving the real content alone - it will pick up the true content
+    // itself the next time anyone reads it, via HydrateSyncedBlocksAsync.
+    private async Task PropagateSyncedBlocksAsync(
+        string previousBlocksJson, string blocksJson, string performedBy, CancellationToken cancellationToken)
+    {
+        if (syncedBlockService is null)
+        {
+            return;
+        }
+
+        var previousById = WikiBlockJson.ParseBlocks(previousBlocksJson).ToDictionary(block => block.Id);
+        foreach (var block in WikiBlockJson.ParseBlocks(blocksJson))
+        {
+            if (TryGetSyncedBlockSourceId(block) is not { } sourceId)
+            {
+                continue;
+            }
+
+            if (previousById.TryGetValue(block.Id, out var previous))
+            {
+                if (previous.RichText.SequenceEqual(block.RichText))
+                {
+                    continue;
+                }
+            }
+            else if (block.RichText.Count == 0)
+            {
+                continue;
+            }
+
+            await syncedBlockService.UpdateContentAsync(sourceId, block.RichText, performedBy, cancellationToken);
+        }
+    }
+
+    private static Guid? TryGetSyncedBlockSourceId(WikiBlock block) =>
+        block.Type == WikiBlockTypes.SyncedBlock
+            && block.Props.TryGetValue(SyncedBlockSourceIdProp, out var raw)
+            && Guid.TryParse(raw, out var sourceId)
+            ? sourceId
+            : null;
 
     public async Task<WikiPage> SavePageAsync(WikiPageEditorModel editor, string performedBy, CancellationToken cancellationToken = default)
     {
@@ -146,6 +239,7 @@ public sealed class WikiService(IAppDbContext dbContext) : IWikiService
             await ReloadAsync(page, cancellationToken);
             throw CreateConcurrencyException(page, editor.ExpectedContentVersion);
         }
+        await PropagateSyncedBlocksAsync(previousBlocksJson, page.BlocksJson, performedBy, cancellationToken);
         if (!isNew && !string.Equals(previousBlocksJson, page.BlocksJson, StringComparison.Ordinal))
         {
             await ReanchorDiscussionsAsync(page.Id, previousBlocksJson, page.BlocksJson, cancellationToken);

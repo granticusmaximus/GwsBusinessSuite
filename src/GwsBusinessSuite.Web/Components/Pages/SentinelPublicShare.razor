@@ -5,6 +5,7 @@
 @inject ISentinelAccessService AccessService
 @inject IWikiService WikiService
 @inject IWikiDatabaseService WikiDatabaseService
+@inject IJSRuntime JS
 
 <PageTitle>@(_title ?? "Shared Sentinel page")</PageTitle>
 
@@ -120,5 +121,17 @@
     private async Task OnPasswordKeyDownAsync(KeyboardEventArgs e)
     {
         if (e.Key == "Enter") await SubmitPasswordAsync();
+    }
+
+    // This is a read-only view (no live block editor), so equation/code blocks need the same
+    // KaTeX/highlight.js pass the editor applies itself in wiki-block-editor.js's
+    // attachRichPreview - wikiRichContentHydrate.js is the shared implementation both use.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_page is not null)
+        {
+            try { await JS.InvokeVoidAsync("wikiRichContentHydrate", ".sentinel-public-content"); }
+            catch (JSDisconnectedException) { /* circuit gone */ }
+        }
     }
 }

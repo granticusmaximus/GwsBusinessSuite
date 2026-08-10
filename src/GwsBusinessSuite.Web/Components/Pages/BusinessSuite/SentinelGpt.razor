@@ -313,6 +313,13 @@
                     <i class="bi @(_useDeepAnalysis ? "bi-stars" : "bi-lightning-charge")"></i>
                     <span>@(_useDeepAnalysis ? "Deep" : "Fast")</span>
                 </button>
+                <button type="button" class="sentinel-gpt-context-pill @(_useTools ? "is-enabled" : null)"
+                        @onclick="ToggleTools"
+                        disabled="@_generating"
+                        title="@(_useTools ? "Tools on: SentinelGPT can search the wiki and open pages while it answers" : "Let SentinelGPT search the wiki and open pages to ground its answer")">
+                    <i class="bi bi-tools"></i>
+                    <span>@(_useTools ? "Tools on" : "Tools off")</span>
+                </button>
                 <button type="button" aria-label="Voice input" title="Voice input">
                     <i class="bi bi-mic"></i>
                 </button>
@@ -341,11 +348,13 @@
                 {
                     <span class="sentinel-gpt-character-count">@RemainingPromptCharacters.ToString("N0") characters remaining · </span>
                 }
-                Enter to send · Shift+Enter for a new line. @(_includeInternet
-                    ? "Web on: this prompt is sent to Ollama web search. Do not include secrets."
-                    : _useDeepAnalysis
-                        ? "Deep analysis consults Qwen and DeepSeek before SentinelGPT."
-                        : "Fast mode: SentinelGPT responds directly.")
+                Enter to send · Shift+Enter for a new line. @(_useTools
+                    ? "Tools on: SentinelGPT may search the wiki and open pages before answering."
+                    : _includeInternet
+                        ? "Web on: this prompt is sent to Ollama web search. Do not include secrets."
+                        : _useDeepAnalysis
+                            ? "Deep analysis consults Qwen and DeepSeek before SentinelGPT."
+                            : "Fast mode: SentinelGPT responds directly.")
             </small>
         </footer>
     </main>
@@ -374,6 +383,7 @@
     private bool _stoppingGeneration;
     private bool _includeInternet;
     private bool _useDeepAnalysis;
+    private bool _useTools;
     private int _maxOutputTokens = SentinelGptResponseBudgets.Standard;
     private Guid? _conversationId;
     private Guid? _activeGenerationId;
@@ -558,7 +568,8 @@
                     _username,
                     _includeInternet,
                     _useDeepAnalysis,
-                    _maxOutputTokens);
+                    _maxOutputTokens,
+                    _useTools);
                 _activeGenerationId = generation.Id;
                 await MonitorGenerationAsync(generation.Id);
             }
@@ -662,6 +673,7 @@
         _pendingInstruction = snapshot.Instruction;
         _includeInternet = snapshot.IncludeInternet;
         _useDeepAnalysis = snapshot.UseDeepAnalysis;
+        _useTools = snapshot.UseTools;
         _maxOutputTokens = snapshot.MaxOutputTokens;
         _liveOutput = snapshot.Output;
         _toolActivity = snapshot.Activity;
@@ -737,12 +749,31 @@
         }
 
         _includeInternet = !_includeInternet;
+        if (_includeInternet)
+        {
+            _useTools = false;
+        }
         _error = string.Empty;
     }
 
     private void ToggleDeepAnalysis()
     {
         _useDeepAnalysis = !_useDeepAnalysis;
+        if (_useDeepAnalysis)
+        {
+            _useTools = false;
+        }
+        _error = string.Empty;
+    }
+
+    private void ToggleTools()
+    {
+        _useTools = !_useTools;
+        if (_useTools)
+        {
+            _includeInternet = false;
+            _useDeepAnalysis = false;
+        }
         _error = string.Empty;
     }
 

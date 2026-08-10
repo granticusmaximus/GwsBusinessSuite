@@ -188,6 +188,41 @@ public sealed class WikiBlockHtmlRendererTests
     }
 
     [Fact]
+    public void RenderBlock_ForEquation_ShouldEmitADataLatexAttributeForClientSideKatexHydration()
+    {
+        var block = new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Equation, 0, [new WikiRichTextSpan("E=mc^2")], new Dictionary<string, string>());
+
+        var html = WikiBlockHtmlRenderer.RenderBlock(block);
+
+        html.Should().Contain("wiki-katex-target");
+        html.Should().Contain("data-latex=\"E=mc^2\"");
+    }
+
+    [Fact]
+    public void RenderBlock_ForCode_ShouldEmitAHydrateMarkerAndALanguageClassWhenTheLanguageIsKnown()
+    {
+        var block = new WikiBlock(
+            Guid.NewGuid(), WikiBlockTypes.Code, 0, [new WikiRichTextSpan("const x = 1;")],
+            new Dictionary<string, string> { ["language"] = "javascript" });
+
+        var html = WikiBlockHtmlRenderer.RenderBlock(block);
+
+        html.Should().Contain("wiki-code-hydrate");
+        html.Should().Contain("language-javascript");
+    }
+
+    [Fact]
+    public void RenderBlock_ForCode_ShouldOmitTheLanguageClassWhenNoLanguageIsSet()
+    {
+        var block = new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Code, 0, [new WikiRichTextSpan("plain")], new Dictionary<string, string>());
+
+        var html = WikiBlockHtmlRenderer.RenderBlock(block);
+
+        html.Should().Contain("wiki-code-hydrate\">");
+        html.Should().NotContain("language-");
+    }
+
+    [Fact]
     public void RenderBlock_ShouldPreserveRichTableCellsImportedFromNotion()
     {
         var table = NotionMarkdownBlockParser.Parse("""

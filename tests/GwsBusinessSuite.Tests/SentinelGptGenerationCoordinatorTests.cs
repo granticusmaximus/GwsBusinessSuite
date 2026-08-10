@@ -45,6 +45,30 @@ public sealed class SentinelGptGenerationCoordinatorTests
     }
 
     [Fact]
+    public async Task Generation_WithUseToolsEnabled_ShouldRouteToTheToolCallingConversationInsteadOfTheAgentConversation()
+    {
+        var sentinel = new ControllableSentinelAiService();
+        var coordinator = CreateCoordinator(sentinel);
+        var conversationId = Guid.NewGuid();
+
+        var started = await coordinator.StartAsync(
+            conversationId, null, "What does our onboarding page say?", "grant",
+            includeInternet: false, useDeepAnalysis: false, useTools: true);
+        await sentinel.Started.Task.WaitAsync(TestTimeout);
+
+        sentinel.ToolCallingWasInvoked.Should().BeTrue();
+        coordinator.GetActive("grant").Should().Match<SentinelGptGenerationSnapshot>(snapshot =>
+            snapshot.Id == started.Id && snapshot.UseTools && snapshot.Activity == "🔧 search_wiki");
+
+        sentinel.Release.TrySetResult();
+        var completed = await WaitForTerminalAsync(coordinator, started.Id, "grant");
+
+        completed.Status.Should().Be(SentinelGptGenerationStatuses.Completed);
+        completed.Output.Should().Be("Recovered response.");
+        completed.UseTools.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task Generation_ShouldAllowOnlyOneActiveResponsePerUser()
     {
         var sentinel = new ControllableSentinelAiService();
@@ -271,13 +295,44 @@ public sealed class SentinelGptGenerationCoordinatorTests
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
-        public IAsyncEnumerable<SentinelAiStreamChunk> StreamToolCallingConversationAsync(
+        public bool? ToolCallingWasInvoked { get; private set; }
+
+        public async IAsyncEnumerable<SentinelAiStreamChunk> StreamToolCallingConversationAsync(
             Guid conversationId,
             Guid? wikiPageId,
             string instruction,
             string performedBy,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            ToolCallingWasInvoked = true;
+            Started.TrySetResult();
+            yield return new SentinelAiStreamChunk(string.Empty, null, "🔧 search_wiki");
+            try
+            {
+                await Release.Task.WaitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                CancellationObserved.TrySetResult();
+                throw;
+            }
+            yield return new SentinelAiStreamChunk("Recovered ", null);
+            yield return new SentinelAiStreamChunk("response.", null);
+            yield return new SentinelAiStreamChunk(
+                string.Empty,
+                new SentinelAiRunView(
+                    Guid.NewGuid(),
+                    conversationId,
+                    wikiPageId,
+                    SentinelAiActions.Tools,
+                    instruction,
+                    "Recovered response.",
+                    "completed",
+                    SentinelGptDefaults.Model,
+                    performedBy,
+                    DateTimeOffset.UtcNow,
+                    []));
+        }
 
         public Task<SentinelGptCommandResult> ExecuteModelCommandAsync(
             Guid conversationId,

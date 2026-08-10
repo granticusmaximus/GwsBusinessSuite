@@ -43,7 +43,7 @@ const BLOCK_TYPES = [
     { type: '__create_database', label: 'New database', icon: '🗄️', group: 'Database inline / full page', description: 'Create a new database nested here and open it.', keywords: 'database table collection new board gallery list calendar timeline' },
     { type: 'table_of_contents', label: 'Table of contents', icon: '☷', group: 'Advanced & inline blocks', description: 'Auto-generates a list of jump links using your page headings.', keywords: 'outline headings' },
     { type: 'equation', label: 'Block equation', icon: '∑', group: 'Advanced & inline blocks', description: 'Centers standard LaTeX scientific formulas.', keywords: 'math formula latex' },
-    { type: 'synced_block', label: 'Synced block', icon: '↻', group: 'Advanced & inline blocks', description: 'Edits applied here sync across multiple duplicated spaces.', keywords: 'reusable' },
+    { type: 'synced_block', label: 'Synced block', icon: '↻', group: 'Advanced & inline blocks', description: 'Edits here update every duplicated copy of this block.', keywords: 'reusable' },
     { type: 'button', label: 'Button', icon: '▣', group: 'Advanced & inline blocks', description: 'Creates automatic action macro scripts when clicked.', keywords: 'action link automation' },
     { type: '__mention_person', label: 'Mention a person', icon: '@', group: 'Advanced & inline blocks', description: 'Inline flag for a coworker.', keywords: 'mention person user' },
     { type: 'columns', label: 'Columns', icon: '▥', group: 'Advanced & inline blocks', description: 'Lay content out side by side.', keywords: 'layout' },
@@ -632,8 +632,80 @@ function createBlockBody(block, state) {
         body.appendChild(language);
     }
 
-    body.appendChild(createContentEditable(block, state));
+    const content = createContentEditable(block, state);
+    body.appendChild(content);
+    if (block.type === 'equation' || block.type === 'code') {
+        attachRichPreview(body, content, block);
+    }
     return body;
+}
+
+// Equation/code blocks show a rendered KaTeX/highlight.js preview whenever the block isn't
+// focused, and fall back to the plain contentEditable text while it is - two separate DOM nodes
+// (see the .wiki-has-rich-preview rules in app.css) so re-rendering the preview never touches
+// the editable element itself and can't disturb its cursor position, even while live-updating on
+// every keystroke.
+function attachRichPreview(body, content, block) {
+    const preview = document.createElement('div');
+    preview.className = block.type === 'equation' ? 'wiki-equation-preview' : 'wiki-code-preview';
+    if (block.type === 'equation') preview.dataset.placeholder = placeholderFor('equation');
+    body.classList.add('wiki-has-rich-preview');
+    body.appendChild(preview);
+
+    const render = () => {
+        const text = content.textContent || '';
+        if (block.type === 'equation') renderKatexInto(preview, text);
+        else renderHighlightInto(preview, text, block.props && block.props.language);
+    };
+    preview.addEventListener('mousedown', event => {
+        event.preventDefault();
+        content.focus();
+    });
+    content.addEventListener('focus', () => body.classList.add('is-editing-rich'));
+    content.addEventListener('blur', () => body.classList.remove('is-editing-rich'));
+    content.addEventListener('input', render);
+    render();
+}
+
+function renderKatexInto(el, latex) {
+    if (!latex.trim()) {
+        el.textContent = '';
+        el.classList.remove('has-error');
+        return;
+    }
+    if (!window.katex) {
+        el.textContent = latex;
+        return;
+    }
+    try {
+        window.katex.render(latex, el, { throwOnError: false, displayMode: true });
+        el.classList.remove('has-error');
+    } catch {
+        el.textContent = latex;
+        el.classList.add('has-error');
+    }
+}
+
+function renderHighlightInto(el, code, language) {
+    if (!code.trim()) {
+        el.replaceChildren();
+        return;
+    }
+    if (!window.hljs) {
+        el.textContent = code;
+        return;
+    }
+    try {
+        const result = language && window.hljs.getLanguage(language)
+            ? window.hljs.highlight(code, { language })
+            : window.hljs.highlightAuto(code);
+        const codeEl = document.createElement('code');
+        codeEl.className = `language-${result.language || language || 'plaintext'} hljs`;
+        codeEl.innerHTML = result.value;
+        el.replaceChildren(codeEl);
+    } catch {
+        el.textContent = code;
+    }
 }
 
 function createTableBody(block, state) {
@@ -2148,6 +2220,10 @@ function commitBlockPickerItem(state, blockEl, item) {
         state.dotNetRef.invokeMethodAsync(method, '').catch(() => { /* circuit may be gone */ });
         return;
     }
+    if (item.type === 'synced_block') {
+        convertToNewSyncedBlock(state, blockEl);
+        return;
+    }
     const content = blockEl.querySelector('.wiki-block-content');
     if (item.type === '__link_to_page') {
         if (content) openLinkToPagePicker(state, content);
@@ -2245,6 +2321,28 @@ function checkSlashTrigger(state, content) {
         description: item => item.description,
         commit: item => commitBlockPickerItem(state, content.closest('.wiki-block'), item)
     });
+}
+
+// A synced block's content lives server-side (WikiSyncedBlockSource), not in this block's own
+// props - every instance sharing the same sourceId re-hydrates from it on the next load, and
+// every edit to any instance is written back to it on save (WikiService.GetPageAsync/
+// SavePageAsync). Converting a block into one therefore needs a real source id from the server
+// first, unlike every other entry in convertBlockType which is purely local and synchronous.
+// A second (or third...) instance is created the ordinary way, via "Duplicate" on the block's
+// ⋮ menu - duplicateBlock() already clones props verbatim, which carries the sourceId along.
+function convertToNewSyncedBlock(state, blockEl) {
+    state.dotNetRef.invokeMethodAsync('CreateSyncedBlockSource').then(sourceId => {
+        const block = serializeBlock(blockEl);
+        block.type = 'synced_block';
+        block.richText = [];
+        block.props = { sourceId };
+        const newEl = createBlockElement(block, state);
+        blockEl.replaceWith(newEl);
+        refreshBlockPresentation(state.container);
+        const focusable = newEl.querySelector('.wiki-block-content, input');
+        if (focusable) focusable.focus();
+        notifyChanged(state);
+    }).catch(() => { /* circuit may be gone */ });
 }
 
 function convertBlockType(state, blockEl, newType) {

@@ -152,6 +152,19 @@ public sealed class WikiPageRevision : AuditableEntity
     public WikiPage? WikiPage { get; set; }
 }
 
+// Shared canonical content for Notion-style "synced blocks". A synced block instance is just
+// an ordinary WikiBlock (Type = WikiBlockTypes.SyncedBlock) whose Props["sourceId"] points at
+// one of these rows instead of carrying its own RichText - every instance re-hydrates from the
+// row on read (WikiService.GetPageAsync) and every edit to any instance overwrites the row on
+// save (WikiService.SavePageAsync), so instances never fork. Duplicating a block or a whole
+// page preserves the Props (and therefore the shared sourceId), which is how a second instance
+// normally comes into being.
+public sealed class WikiSyncedBlockSource : AuditableEntity
+{
+    public string RichTextJson { get; set; } = "[]";
+    public Guid? OriginWikiPageId { get; set; }
+}
+
 // Durable page-content snapshot used to create new Sentinel pages. Templates deliberately
 // do not retain a foreign key to their source page so deleting or reorganizing that page
 // cannot invalidate a reusable workspace template.

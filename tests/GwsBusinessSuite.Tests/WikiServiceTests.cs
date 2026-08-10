@@ -526,6 +526,58 @@ public sealed class WikiServiceTests
         await action.Should().ThrowAsync<ArgumentException>().WithMessage("*expected content version*");
     }
 
+    [Fact]
+    public async Task SavePageAsync_ShouldPropagateSyncedBlockEditsToEveryOtherPageThatEmbedsTheSameSource()
+    {
+        await using var db = await CreateDbAsync();
+        var syncedBlocks = new WikiSyncedBlockService(db);
+        var service = new WikiService(db, syncedBlocks);
+
+        var sourceId = await syncedBlocks.CreateAsync([], null, "grant");
+
+        var pageA = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Page A",
+            BlocksJson = SyncedBlockJson(sourceId, "Original text")
+        }, "grant");
+        var pageB = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Page B",
+            // A fresh/blank local copy - what a brand-new instance looks like before it has
+            // ever been hydrated. Loading it must still show the shared source's real content.
+            BlocksJson = SyncedBlockJson(sourceId, string.Empty)
+        }, "grant");
+
+        var loadedB = await service.GetPageAsync(pageB.Id);
+        loadedB!.BlocksJson.Should().Contain("Original text");
+
+        // Editing the instance on Page B and saving must push the new content back into the
+        // shared source, not just into Page B's own copy - Page A (never touched again) should
+        // pick up the change purely by being re-read.
+        var editedB = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            WikiPageId = pageB.Id,
+            ExpectedContentVersion = pageB.ContentVersion,
+            Title = "Page B",
+            BlocksJson = SyncedBlockJson(sourceId, "Edited from Page B")
+        }, "grant");
+        editedB.ContentVersion.Should().Be(2);
+
+        var reloadedA = await service.GetPageAsync(pageA.Id);
+        reloadedA!.BlocksJson.Should().Contain("Edited from Page B");
+        reloadedA.BlocksJson.Should().NotContain("Original text");
+    }
+
+    private static string SyncedBlockJson(Guid sourceId, string text) => WikiBlockJson.Serialize(
+    [
+        new WikiBlock(
+            Guid.NewGuid(),
+            WikiBlockTypes.SyncedBlock,
+            0,
+            string.IsNullOrEmpty(text) ? [] : [new WikiRichTextSpan(text)],
+            new Dictionary<string, string> { ["sourceId"] = sourceId.ToString() })
+    ]);
+
     private static string ParagraphBlocks(string text) => WikiBlockJson.Serialize(
     [
         new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0, [new WikiRichTextSpan(text)], new Dictionary<string, string>())

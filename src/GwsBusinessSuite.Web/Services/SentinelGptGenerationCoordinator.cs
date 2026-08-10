@@ -22,6 +22,7 @@ public sealed record SentinelGptGenerationSnapshot(
     string RequestedBy,
     bool IncludeInternet,
     bool UseDeepAnalysis,
+    bool UseTools,
     int MaxOutputTokens,
     string Status,
     string Output,
@@ -59,7 +60,8 @@ public sealed class SentinelGptGenerationCoordinator(
         string requestedBy,
         bool includeInternet,
         bool useDeepAnalysis,
-        int maxOutputTokens = SentinelGptResponseBudgets.Standard)
+        int maxOutputTokens = SentinelGptResponseBudgets.Standard,
+        bool useTools = false)
     {
         if (conversationId == Guid.Empty)
             throw new ArgumentException("A conversation is required.", nameof(conversationId));
@@ -78,6 +80,7 @@ public sealed class SentinelGptGenerationCoordinator(
             requestedBy,
             includeInternet,
             useDeepAnalysis,
+            useTools,
             maxOutputTokens);
         return Task.FromResult(state.Snapshot());
     }
@@ -110,6 +113,7 @@ public sealed class SentinelGptGenerationCoordinator(
             requestedBy,
             includeInternet: false,
             useDeepAnalysis: false,
+            useTools: false,
             SentinelGptResponseBudgets.Standard);
         return Task.FromResult(state.Snapshot());
     }
@@ -122,6 +126,7 @@ public sealed class SentinelGptGenerationCoordinator(
         string requestedBy,
         bool includeInternet,
         bool useDeepAnalysis,
+        bool useTools,
         int maxOutputTokens)
     {
         lock (_startGate)
@@ -148,6 +153,7 @@ public sealed class SentinelGptGenerationCoordinator(
                 requestedBy,
                 includeInternet,
                 useDeepAnalysis,
+                useTools,
                 maxOutputTokens,
                 now);
             _jobs[state.Id] = state;
@@ -201,22 +207,29 @@ public sealed class SentinelGptGenerationCoordinator(
         {
             await using var scope = scopeFactory.CreateAsyncScope();
             var sentinelGpt = scope.ServiceProvider.GetRequiredService<ISentinelAiService>();
-            var stream = state.ConversationId is { } conversationId
-                ? sentinelGpt.StreamAgentConversationAsync(
-                    conversationId,
-                    state.WikiPageId,
-                    state.Instruction,
-                    state.RequestedBy,
-                    state.IncludeInternet,
-                    state.UseDeepAnalysis,
-                    state.MaxOutputTokens,
-                    generationToken.Token)
-                : sentinelGpt.StreamAsync(
+            var stream = state.ConversationId is not { } conversationId
+                ? sentinelGpt.StreamAsync(
                     state.WikiPageId,
                     state.Action!,
                     state.Instruction,
                     state.RequestedBy,
-                    generationToken.Token);
+                    generationToken.Token)
+                : state.UseTools
+                    ? sentinelGpt.StreamToolCallingConversationAsync(
+                        conversationId,
+                        state.WikiPageId,
+                        state.Instruction,
+                        state.RequestedBy,
+                        generationToken.Token)
+                    : sentinelGpt.StreamAgentConversationAsync(
+                        conversationId,
+                        state.WikiPageId,
+                        state.Instruction,
+                        state.RequestedBy,
+                        state.IncludeInternet,
+                        state.UseDeepAnalysis,
+                        state.MaxOutputTokens,
+                        generationToken.Token);
             await foreach (var chunk in stream)
             {
                 state.Apply(chunk, timeProvider.GetUtcNow());
@@ -281,6 +294,7 @@ public sealed class SentinelGptGenerationCoordinator(
             string requestedBy,
             bool includeInternet,
             bool useDeepAnalysis,
+            bool useTools,
             int maxOutputTokens,
             DateTimeOffset startedAt)
         {
@@ -292,6 +306,7 @@ public sealed class SentinelGptGenerationCoordinator(
             RequestedBy = requestedBy;
             IncludeInternet = includeInternet;
             UseDeepAnalysis = useDeepAnalysis;
+            UseTools = useTools;
             MaxOutputTokens = maxOutputTokens;
             StartedAt = startedAt;
             _updatedAt = startedAt;
@@ -305,6 +320,7 @@ public sealed class SentinelGptGenerationCoordinator(
         public string RequestedBy { get; }
         public bool IncludeInternet { get; }
         public bool UseDeepAnalysis { get; }
+        public bool UseTools { get; }
         public int MaxOutputTokens { get; }
         public DateTimeOffset StartedAt { get; }
         public CancellationToken CancellationToken => _cancellation.Token;
@@ -458,6 +474,7 @@ public sealed class SentinelGptGenerationCoordinator(
                     RequestedBy,
                     IncludeInternet,
                     UseDeepAnalysis,
+                    UseTools,
                     MaxOutputTokens,
                     _status,
                     _output.ToString(),

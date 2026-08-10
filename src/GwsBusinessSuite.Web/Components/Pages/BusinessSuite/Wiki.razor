@@ -11,6 +11,7 @@
 @using Microsoft.AspNetCore.WebUtilities
 @inject IWikiService WikiService
 @inject IWikiDatabaseService WikiDatabaseService
+@inject IWikiSyncedBlockService WikiSyncedBlockService
 @inject ISentinelWorkspaceService SentinelWorkspaceService
 @inject ISentinelAccessService SentinelAccessService
 @inject INotionSyncService NotionSyncService
@@ -2221,6 +2222,17 @@
         await OpenDatabaseAsync(database.Id);
         StateHasChanged();
         return database.Id.ToString();
+    }
+
+    // Creates the shared source row a new "Synced block" instance points at (see
+    // WikiSyncedBlockSource) - the block itself is converted client-side once this id comes
+    // back, in wiki-block-editor.js's convertToNewSyncedBlock.
+    [JSInvokable]
+    public async Task<string> CreateSyncedBlockSource()
+    {
+        var user = await CurrentUserNameAsync();
+        var sourceId = await WikiSyncedBlockService.CreateAsync([], SelectedPageId, user);
+        return sourceId.ToString();
     }
 
     [JSInvokable]

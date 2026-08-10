@@ -106,7 +106,7 @@ public static class WikiBlockHtmlRenderer
             WikiBlockTypes.Toggle => $"<details{indentStyle}><summary>{content}</summary></details>",
             WikiBlockTypes.Quote => $"<blockquote{indentStyle}>{content}</blockquote>",
             WikiBlockTypes.Callout => $"<div class=\"wiki-callout\"{indentStyle}>{WebUtility.HtmlEncode(block.Props.GetValueOrDefault("icon", "💡"))} {content}</div>",
-            WikiBlockTypes.Code => $"<pre class=\"wiki-code\" data-language=\"{WebUtility.HtmlEncode(block.Props.GetValueOrDefault("language", string.Empty))}\"{indentStyle}><code>{WebUtility.HtmlEncode(block.PlainText)}</code></pre>",
+            WikiBlockTypes.Code => RenderCode(block, indentStyle),
             WikiBlockTypes.Divider => "<hr />",
             WikiBlockTypes.Image => GetSafeLink(block.Props.GetValueOrDefault("url")) is not { } imageUrl
                 ? string.Empty
@@ -115,7 +115,7 @@ public static class WikiBlockHtmlRenderer
             WikiBlockTypes.LinkedDatabase => RenderLinkedDatabase(block, indentStyle),
             WikiBlockTypes.InlineDatabase => RenderLinkedDatabase(block, indentStyle, isInline: true),
             WikiBlockTypes.Table => RenderTable(block, indentStyle),
-            WikiBlockTypes.Equation => $"<div class=\"wiki-equation\"{indentStyle}>{WebUtility.HtmlEncode(block.PlainText)}</div>",
+            WikiBlockTypes.Equation => RenderEquation(block, indentStyle),
             WikiBlockTypes.Breadcrumb => $"<nav class=\"wiki-breadcrumb\"{indentStyle} aria-label=\"Breadcrumb\">{content}</nav>",
             WikiBlockTypes.TableOfContents => $"<nav class=\"wiki-table-of-contents\"{indentStyle}>Table of contents</nav>",
             WikiBlockTypes.Button => $"<a class=\"wiki-button\" href=\"{WebUtility.HtmlEncode(GetSafeLink(block.Props.GetValueOrDefault("url")) ?? "#")}\">{content}</a>",
@@ -355,6 +355,21 @@ public static class WikiBlockHtmlRenderer
         text = text.Replace('\n', ' ').Trim();
         return text.Length > maxLength ? text[..maxLength] + "…" : text;
     }
+
+    // The "wiki-code-hydrate"/"wiki-katex-target" markers are what wikiRichContentHydrate.js
+    // looks for post-render to call highlight.js/KaTeX in read-only views (SentinelPublicShare)
+    // - the raw HTML-encoded text is still the fallback if that script or its CDN libraries
+    // never load, matching the live block editor's own approach (see attachRichPreview in
+    // wiki-block-editor.js) rather than requiring a server-side LaTeX/highlighter dependency.
+    private static string RenderCode(WikiBlock block, string indentStyle)
+    {
+        var language = block.Props.GetValueOrDefault("language", string.Empty);
+        var languageClass = string.IsNullOrWhiteSpace(language) ? string.Empty : $" language-{WebUtility.HtmlEncode(language)}";
+        return $"<pre class=\"wiki-code\" data-language=\"{WebUtility.HtmlEncode(language)}\"{indentStyle}><code class=\"wiki-code-hydrate{languageClass}\">{WebUtility.HtmlEncode(block.PlainText)}</code></pre>";
+    }
+
+    private static string RenderEquation(WikiBlock block, string indentStyle) =>
+        $"<div class=\"wiki-equation wiki-katex-target\" data-latex=\"{WebUtility.HtmlEncode(block.PlainText)}\"{indentStyle}>{WebUtility.HtmlEncode(block.PlainText)}</div>";
 
     private static string RenderEmbed(WikiBlock block)
     {
