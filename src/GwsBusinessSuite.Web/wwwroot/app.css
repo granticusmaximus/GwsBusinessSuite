@@ -4404,6 +4404,31 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-feedback button.is-selected.is-rejected { border-color: #633838; background: #321f1f; color: #ef8c8c; }
 .sentinel-gpt-feedback button:disabled { opacity: .55; cursor: wait; }
 .sentinel-gpt-assistant-message.is-streaming::after { content: "▋"; margin-left: .15rem; animation: sentinelAiCaretBlink 1s step-end infinite; color: #f59e0b; }
+.sentinel-gpt-failed-message {
+    display: flex;
+    align-items: flex-start;
+    gap: .45rem;
+    padding: .7rem .85rem;
+    border: 1px solid rgba(239, 68, 68, .3);
+    border-radius: 4px 16px 16px 16px;
+    background: rgba(127, 29, 29, .14);
+    color: #fca5a5;
+    font-size: .82rem;
+}
+.sentinel-gpt-failed-message i { margin-top: .1rem; }
+.sentinel-gpt-retry {
+    display: inline-flex;
+    align-items: center;
+    gap: .3rem;
+    padding: .18rem .55rem;
+    border: 1px solid #4b4642;
+    border-radius: 6px;
+    background: transparent;
+    color: #aaa49f;
+    font-size: .62rem;
+}
+.sentinel-gpt-retry:hover { border-color: #f59e0b; color: #f4a515; }
+.sentinel-gpt-retry:disabled { opacity: .55; cursor: wait; }
 .sentinel-gpt-thinking-copy { display: inline-flex; align-items: center; gap: .55rem; color: #aaa49f; font-size: .72rem; }
 .sentinel-gpt-thinking { display: flex; gap: .25rem; padding: .35rem .1rem; }
 .sentinel-gpt-thinking i { width: .35rem; height: .35rem; border-radius: 50%; background: #918b86; animation: sentinelGptThinking 1.2s infinite ease-in-out; }

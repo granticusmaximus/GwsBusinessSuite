@@ -182,57 +182,74 @@
                     </div>
                     <div class="sentinel-gpt-assistant-row">
                         <span class="sentinel-gpt-avatar">S</span>
-                        <div>
-                            <div class="sentinel-gpt-message sentinel-gpt-assistant-message">@run.Output</div>
-                            @if (run.Citations.Count > 0)
-                            {
-                                <details class="sentinel-gpt-sources">
-                                    <summary><i class="bi bi-file-earmark-text"></i>Sources · @string.Join(" · ", run.Citations.Take(3).Select(item => item.Title))</summary>
-                                    <div>
-                                        @foreach (var citation in run.Citations)
-                                        {
-                                            <a href="@CitationUrl(citation)"
-                                               target="@(citation.SourceType == "web" ? "_blank" : null)"
-                                               rel="@(citation.SourceType == "web" ? "noopener noreferrer" : null)">
-                                                <i class="bi @CitationIcon(citation)"></i>@citation.Title
-                                            </a>
-                                        }
-                                    </div>
-                                </details>
-                            }
-                            <div class="sentinel-gpt-response-meta">
-                                <time>@run.CreatedAt.ToLocalTime().ToString("t") · @run.Model</time>
-                                @if (run.Action != SentinelAiActions.ModelManagement)
-                                {
-                                    <div class="sentinel-gpt-feedback" aria-label="Teach SentinelGPT from this answer">
-                                        <button type="button"
-                                                class="@(run.Status == SentinelAiRunStatuses.Approved ? "is-selected" : null)"
-                                                title="Approve this answer as reusable SentinelGPT learning memory"
-                                                aria-label="Approve answer as learning memory"
-                                                disabled="@_reviewingRunIds.Contains(run.Id)"
-                                                @onclick="() => ReviewRunAsync(run, true)">
-                                            <i class="bi bi-hand-thumbs-up"></i>
-                                        </button>
-                                        <button type="button"
-                                                class="@(run.Status == SentinelAiRunStatuses.Rejected ? "is-selected is-rejected" : null)"
-                                                title="Reject this answer so SentinelGPT does not learn from it"
-                                                aria-label="Reject answer"
-                                                disabled="@_reviewingRunIds.Contains(run.Id)"
-                                                @onclick="() => ReviewRunAsync(run, false)">
-                                            <i class="bi bi-hand-thumbs-down"></i>
-                                        </button>
-                                        @if (run.Status == SentinelAiRunStatuses.Approved)
-                                        {
-                                            <span>Saved to learning memory</span>
-                                        }
-                                        else if (run.Status == SentinelAiRunStatuses.Rejected)
-                                        {
-                                            <span>Excluded from learning memory</span>
-                                        }
-                                    </div>
-                                }
+                        @if (run.Status == SentinelAiRunStatuses.Failed)
+                        {
+                            <div>
+                                <div class="sentinel-gpt-message sentinel-gpt-failed-message">
+                                    <i class="bi bi-exclamation-circle"></i>@run.Output
+                                </div>
+                                <div class="sentinel-gpt-response-meta">
+                                    <time>@run.CreatedAt.ToLocalTime().ToString("t") · @run.Model</time>
+                                    <button type="button" class="sentinel-gpt-retry" @onclick="() => RetryRunAsync(run)" disabled="@_generating">
+                                        <i class="bi bi-arrow-clockwise"></i>Retry
+                                    </button>
+                                </div>
                             </div>
-                        </div>
+                        }
+                        else
+                        {
+                            <div>
+                                <div class="sentinel-gpt-message sentinel-gpt-assistant-message">@run.Output</div>
+                                @if (run.Citations.Count > 0)
+                                {
+                                    <details class="sentinel-gpt-sources">
+                                        <summary><i class="bi bi-file-earmark-text"></i>Sources · @string.Join(" · ", run.Citations.Take(3).Select(item => item.Title))</summary>
+                                        <div>
+                                            @foreach (var citation in run.Citations)
+                                            {
+                                                <a href="@CitationUrl(citation)"
+                                                   target="@(citation.SourceType == "web" ? "_blank" : null)"
+                                                   rel="@(citation.SourceType == "web" ? "noopener noreferrer" : null)">
+                                                    <i class="bi @CitationIcon(citation)"></i>@citation.Title
+                                                </a>
+                                            }
+                                        </div>
+                                    </details>
+                                }
+                                <div class="sentinel-gpt-response-meta">
+                                    <time>@run.CreatedAt.ToLocalTime().ToString("t") · @run.Model</time>
+                                    @if (run.Action != SentinelAiActions.ModelManagement)
+                                    {
+                                        <div class="sentinel-gpt-feedback" aria-label="Teach SentinelGPT from this answer">
+                                            <button type="button"
+                                                    class="@(run.Status == SentinelAiRunStatuses.Approved ? "is-selected" : null)"
+                                                    title="Approve this answer as reusable SentinelGPT learning memory"
+                                                    aria-label="Approve answer as learning memory"
+                                                    disabled="@_reviewingRunIds.Contains(run.Id)"
+                                                    @onclick="() => ReviewRunAsync(run, true)">
+                                                <i class="bi bi-hand-thumbs-up"></i>
+                                            </button>
+                                            <button type="button"
+                                                    class="@(run.Status == SentinelAiRunStatuses.Rejected ? "is-selected is-rejected" : null)"
+                                                    title="Reject this answer so SentinelGPT does not learn from it"
+                                                    aria-label="Reject answer"
+                                                    disabled="@_reviewingRunIds.Contains(run.Id)"
+                                                    @onclick="() => ReviewRunAsync(run, false)">
+                                                <i class="bi bi-hand-thumbs-down"></i>
+                                            </button>
+                                            @if (run.Status == SentinelAiRunStatuses.Approved)
+                                            {
+                                                <span>Saved to learning memory</span>
+                                            }
+                                            else if (run.Status == SentinelAiRunStatuses.Rejected)
+                                            {
+                                                <span>Excluded from learning memory</span>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
                     </div>
                 </article>
             }
@@ -725,6 +742,16 @@
     }
 
     private void UseStarter(string prompt) => _instruction = prompt;
+
+    // A Failed run's own Instruction is never lost (SentinelAiRun always persists it, even on
+    // failure - see SentinelAiService's catch blocks), so a retry is just resubmitting it
+    // through the normal send path rather than needing to remember/restore anything special.
+    private async Task RetryRunAsync(SentinelAiRunView run)
+    {
+        if (_generating) return;
+        _instruction = run.Instruction;
+        await SendAsync();
+    }
     private void UseWebStarter(string prompt)
     {
         _instruction = prompt;
