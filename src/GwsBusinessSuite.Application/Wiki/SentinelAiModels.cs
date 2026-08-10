@@ -31,7 +31,16 @@ public static class SentinelGptDefaults
     // timeout, so an unbounded chat call can hold that lease - and block every other
     // feature's Ollama use - for up to 2 hours. Bounded to a duration a human is actually
     // willing to sit in a chat waiting for, well under the 2-hour HttpClient ceiling.
-    public const int DefaultTimeoutMinutes = 5;
+    //
+    // Was 5 - too short in practice. Production runs a 3B model on CPU-only inference (no
+    // GPU), where prompt processing alone ran ~18-20 tokens/sec; a single grounded
+    // SentinelGPT request's ~6,300-token prompt (system prompt + workspace context +
+    // history) took 5+ minutes just to finish prefill, before generation even started,
+    // reliably tripping the old 5-minute limit (confirmed against the Ollama server's own
+    // request log: a POST /api/generate cancelled by us at 4m49s, still mid-prompt).
+    // OllamaTimeoutMinutesOverride (Settings > AI) still overrides this per-site without a
+    // restart if 15 minutes still isn't enough for a particular deployment's hardware.
+    public const int DefaultTimeoutMinutes = 15;
 }
 
 public static class SentinelGptResponseBudgets
