@@ -1369,6 +1369,204 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
         await Expect(content).ToHaveTextAsync("/");
     }
 
+    [Theory]
+    [InlineData("# ", WikiBlockTypes.Heading1)]
+    [InlineData("## ", WikiBlockTypes.Heading2)]
+    [InlineData("### ", WikiBlockTypes.Heading3)]
+    [InlineData("- ", WikiBlockTypes.BulletedListItem)]
+    [InlineData("* ", WikiBlockTypes.BulletedListItem)]
+    [InlineData("1. ", WikiBlockTypes.NumberedListItem)]
+    [InlineData("> ", WikiBlockTypes.Quote)]
+    [InlineData("---", WikiBlockTypes.Divider)]
+    [InlineData("```", WikiBlockTypes.Code)]
+    [InlineData("[] ", WikiBlockTypes.ToDo)]
+    public async Task MarkdownShortcut_ShouldConvertTheBlockAsYouType(string typed, string expectedType)
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "text/html",
+            Body = """<div id="editor" class="wiki-block-editor"></div>"""
+        }));
+        await page.GotoAsync("http://localhost/editor");
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+        await page.EvaluateAsync(
+            """
+            () => window.sentinelBlockEditor.initialize(
+                document.querySelector('#editor'), { invokeMethodAsync: () => Promise.resolve([]) }, '[]')
+            """);
+
+        await page.Locator(".wiki-block-content").FillAsync(typed);
+
+        await Expect(page.Locator(".wiki-block")).ToHaveAttributeAsync("data-block-type", expectedType);
+        if (expectedType != WikiBlockTypes.Divider)
+        {
+            // The trigger text itself is consumed by the conversion, not left behind as content.
+            // Divider has no .wiki-block-content at all (it's a textless type - just an <hr />).
+            await Expect(page.Locator(".wiki-block-content")).ToHaveTextAsync(string.Empty);
+        }
+    }
+
+    [Fact]
+    public async Task MarkdownShortcut_ForACheckedToDo_ShouldConvertAndLeaveTheCheckboxChecked()
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "text/html",
+            Body = """<div id="editor" class="wiki-block-editor"></div>"""
+        }));
+        await page.GotoAsync("http://localhost/editor");
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+        await page.EvaluateAsync(
+            """
+            () => window.sentinelBlockEditor.initialize(
+                document.querySelector('#editor'), { invokeMethodAsync: () => Promise.resolve([]) }, '[]')
+            """);
+
+        await page.Locator(".wiki-block-content").FillAsync("[x] ");
+
+        await Expect(page.Locator(".wiki-block")).ToHaveAttributeAsync("data-block-type", WikiBlockTypes.ToDo);
+        await Expect(page.Locator(".wiki-todo-checkbox")).ToBeCheckedAsync();
+        (await EditorBlocksAsync(page)).Single().Props["checked"].Should().Be("true");
+    }
+
+    [Fact]
+    public async Task PastingMarkdown_IntoAnEmptyBlock_ShouldReplaceItWithTheParsedBlocks()
+    {
+        // Bypasses the real ParseMarkdownToBlocksJson (a plain, server-side, no-side-effect
+        // parse - see WikiBlockJson.FromMarkdown/NotionMarkdownBlockParser) and asserts purely
+        // on the client-side splicing: does the paste handler recognize markdown, call the
+        // JSInvokable, and insert whatever comes back at the right spot.
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "text/html",
+            Body = """<div id="editor" class="wiki-block-editor"></div>"""
+        }));
+        await page.GotoAsync("http://localhost/editor");
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+        await page.EvaluateAsync(
+            """
+            () => {
+                window.calls = [];
+                window.sentinelBlockEditor.initialize(
+                    document.querySelector('#editor'),
+                    {
+                        invokeMethodAsync: (method, markdown) => {
+                            window.calls.push([method, markdown]);
+                            if (method === 'ParseMarkdownToBlocksJson') {
+                                return Promise.resolve(JSON.stringify([
+                                    { id: crypto.randomUUID(), type: 'heading_1', indentLevel: 0, richText: [{ text: 'Title' }], props: {} },
+                                    { id: crypto.randomUUID(), type: 'bulleted_list_item', indentLevel: 0, richText: [{ text: 'Item one' }], props: {} }
+                                ]));
+                            }
+                            return Promise.resolve([]);
+                        }
+                    },
+                    '[]');
+            }
+            """);
+
+        await page.EvaluateAsync(
+            """
+            () => {
+                const content = document.querySelector('.wiki-block-content');
+                const dataTransfer = new DataTransfer();
+                dataTransfer.setData('text/plain', '# Title\n- Item one');
+                content.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dataTransfer, bubbles: true, cancelable: true }));
+            }
+            """);
+
+        await Expect(page.Locator(".wiki-block")).ToHaveCountAsync(2);
+        // The debounced OnBlocksChanged notification that follows the splice can land in
+        // window.calls after it, so find the specific call rather than assuming it's last.
+        var parseCallJson = await page.EvaluateAsync<string>(
+            "() => JSON.stringify((window.calls || []).find(call => call[0] === 'ParseMarkdownToBlocksJson'))");
+        parseCallJson.Should().Be("[\"ParseMarkdownToBlocksJson\",\"# Title\\n- Item one\"]");
+
+        var blocks = await EditorBlocksAsync(page);
+        blocks.Select(block => block.Type).Should().Equal(WikiBlockTypes.Heading1, WikiBlockTypes.BulletedListItem);
+        blocks[0].PlainText.Should().Be("Title");
+        blocks[1].PlainText.Should().Be("Item one");
+    }
+
+    [Fact]
+    public async Task PastingPlainText_ShouldNotBeReinterpretedAsMarkdown()
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "text/html",
+            Body = """<div id="editor" class="wiki-block-editor"></div>"""
+        }));
+        await page.GotoAsync("http://localhost/editor");
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+        await page.EvaluateAsync(
+            """
+            () => {
+                window.calls = [];
+                window.sentinelBlockEditor.initialize(
+                    document.querySelector('#editor'),
+                    { invokeMethodAsync: (method, arg) => { window.calls.push([method, arg]); return Promise.resolve([]); } },
+                    '[]');
+            }
+            """);
+
+        await page.EvaluateAsync(
+            """
+            () => {
+                const content = document.querySelector('.wiki-block-content');
+                const dataTransfer = new DataTransfer();
+                dataTransfer.setData('text/plain', 'Fix bug #123 in the release-2024 branch');
+                content.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dataTransfer, bubbles: true, cancelable: true }));
+            }
+            """);
+
+        // document.execCommand('insertText', ...) - the plain-paste fallback this exercises -
+        // only actually inserts text for a browser-trusted paste event, which a script-dispatched
+        // ClipboardEvent in a test harness isn't; real user-initiated pastes don't have this
+        // limitation. What's meaningfully testable (and the actual point of this test) is that
+        // looksLikeMarkdown correctly declined to treat this as markdown: no block-splicing, no
+        // ParseMarkdownToBlocksJson call, still a single plain paragraph.
+        await Expect(page.Locator(".wiki-block")).ToHaveCountAsync(1);
+        await Expect(page.Locator(".wiki-block")).ToHaveAttributeAsync("data-block-type", WikiBlockTypes.Paragraph);
+        var callsJson = await page.EvaluateAsync<string>("() => JSON.stringify(window.calls)");
+        callsJson.Should().NotContain("ParseMarkdownToBlocksJson");
+    }
+
     private static WikiBlock TextBlock(string text, int indentLevel) =>
         new(
             Guid.NewGuid(),

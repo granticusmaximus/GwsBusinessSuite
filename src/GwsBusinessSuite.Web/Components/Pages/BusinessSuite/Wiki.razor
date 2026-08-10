@@ -2363,6 +2363,16 @@
         }
     }
 
+    // Pasted-markdown auto-conversion - a pure parse with no page-state side effect (unlike
+    // InsertBlockTemplateAsync, which mutates Editor.BlocksJson and forces a full editor
+    // reinit). wiki-block-editor.js's paste handler splices the returned blocks directly into
+    // the live DOM at the cursor's block, so reuses the exact same Notion-import markdown
+    // parser (NotionMarkdownBlockParser, via WikiBlockJson.FromMarkdown) rather than a second,
+    // JS-side implementation.
+    [JSInvokable]
+    public Task<string> ParseMarkdownToBlocksJson(string markdown) =>
+        Task.FromResult(WikiBlockJson.Serialize(WikiBlockJson.FromMarkdown(markdown)));
+
     [JSInvokable]
     public async Task OpenBlockDiscussion(string blockId)
     {

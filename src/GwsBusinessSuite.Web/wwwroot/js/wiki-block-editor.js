@@ -2018,6 +2018,7 @@ function createContentEditable(block, state) {
         checkSlashTrigger(state, content);
         checkWikiLinkTrigger(state, content);
         checkMentionTrigger(state, content);
+        checkMarkdownShortcut(state, content);
         scheduleNotify(state);
         reportCursor(state, content);
     });
@@ -2025,10 +2026,59 @@ function createContentEditable(block, state) {
     content.addEventListener('paste', event => {
         event.preventDefault();
         const text = (event.clipboardData || window.clipboardData).getData('text/plain');
+        if (looksLikeMarkdown(text)) {
+            pasteMarkdownAsBlocks(state, content, text);
+            return;
+        }
         document.execCommand('insertText', false, text);
     });
 
     return content;
+}
+
+// A conservative heuristic on purpose - false positives (reformatting text the user just
+// wanted pasted verbatim, e.g. "Fix bug #123" or a filesystem path) are far more annoying than
+// false negatives (an obvious markdown paste landing as one plain-text block, still editable
+// afterward). Requires an actual block-level marker at the START of some line, or a clearly
+// intentional inline marker (bold/italic/inline-code/link) - a stray "#" or "-" mid-sentence
+// doesn't count.
+const MARKDOWN_PASTE_LINE_PATTERN = /^(#{1,6}\s|[-*+]\s|\d+[.)]\s|>\s|```|\|.+\|)/;
+const MARKDOWN_PASTE_INLINE_PATTERN = /\*\*[^*\n]+\*\*|__[^_\n]+__|`[^`\n]+`|\[[^\]\n]+\]\([^)\n]+\)/;
+
+function looksLikeMarkdown(text) {
+    if (!text || !text.trim()) return false;
+    if (text.split(/\r?\n/).some(line => MARKDOWN_PASTE_LINE_PATTERN.test(line.trim()))) return true;
+    return MARKDOWN_PASTE_INLINE_PATTERN.test(text);
+}
+
+async function pasteMarkdownAsBlocks(state, content, markdownText) {
+    let parsedBlocks;
+    try {
+        const blocksJson = await state.dotNetRef.invokeMethodAsync('ParseMarkdownToBlocksJson', markdownText);
+        parsedBlocks = JSON.parse(blocksJson || '[]');
+    } catch {
+        parsedBlocks = null;
+    }
+
+    if (!parsedBlocks || parsedBlocks.length === 0) {
+        // The circuit may be gone, or the parse produced nothing usable - the paste shouldn't
+        // just silently vanish, so fall back to the plain-text behavior this replaced.
+        document.execCommand('insertText', false, markdownText);
+        return;
+    }
+
+    const blockEl = content.closest('.wiki-block');
+    const wasEmpty = content.textContent.trim().length === 0;
+    const created = parsedBlocks.map(block => createBlockElement(block, state));
+
+    if (wasEmpty) {
+        blockEl.replaceWith(...created);
+    } else {
+        blockEl.after(...created);
+    }
+    refreshBlockPresentation(state.container);
+    focusBlock(created[created.length - 1]);
+    notifyChanged(state);
 }
 
 function placeholderFor(type) {
@@ -2423,6 +2473,45 @@ function convertBlockType(state, blockEl, newType) {
     const focusable = newEl.querySelector('.wiki-block-content, input');
     if (focusable) focusable.focus();
     notifyChanged(state);
+    return newEl;
+}
+
+// Markdown-style typing shortcuts (e.g. Notion's own "# " -> Heading 1). Longest-prefix
+// patterns are listed first (### before ## before #) since a shorter pattern would otherwise
+// match before the user finishes typing the longer one. Checked on every input event alongside
+// the "/" slash menu, but on the block's *entire* current text - unlike the slash menu, there's
+// no separate trigger character, so this only fires once the whole block is exactly the
+// shortcut sequence (nothing typed after it yet), the same moment real Notion converts it.
+const MARKDOWN_SHORTCUTS = [
+    { pattern: /^```$/, type: 'code' },
+    { pattern: /^---$/, type: 'divider' },
+    { pattern: /^###\s$/, type: 'heading_3' },
+    { pattern: /^##\s$/, type: 'heading_2' },
+    { pattern: /^#\s$/, type: 'heading_1' },
+    { pattern: /^[-*]\s$/, type: 'bulleted_list_item' },
+    { pattern: /^\d+[.)]\s$/, type: 'numbered_list_item' },
+    { pattern: /^>\s$/, type: 'quote' },
+    { pattern: /^\[[xX]\]\s$/, type: 'to_do', checked: true },
+    { pattern: /^\[\s?\]\s$/, type: 'to_do', checked: false }
+];
+
+function checkMarkdownShortcut(state, content) {
+    const blockEl = content.closest('.wiki-block');
+    // Typing "```" inside an already-a-code-block should just be three literal backticks, not
+    // another conversion.
+    if (!blockEl || blockEl.dataset.blockType === 'code') return;
+
+    const text = content.textContent;
+    const shortcut = MARKDOWN_SHORTCUTS.find(item => item.pattern.test(text));
+    if (!shortcut) return;
+
+    const newEl = convertBlockType(state, blockEl, shortcut.type);
+    if (shortcut.type === 'to_do' && shortcut.checked) {
+        newEl.dataset.checked = 'true';
+        const checkbox = newEl.querySelector('.wiki-todo-checkbox');
+        if (checkbox) checkbox.checked = true;
+        notifyChanged(state);
+    }
 }
 
 function closeSlashMenu(state) {
