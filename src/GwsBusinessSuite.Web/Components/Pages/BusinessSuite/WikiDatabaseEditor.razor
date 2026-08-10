@@ -38,6 +38,9 @@ else
                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _showCsvImport = !_showCsvImport" disabled="@IsBusy" title="Append rows from a CSV file">
                     <i class="bi bi-filetype-csv me-1"></i>Import
                 </button>
+                <a class="btn btn-sm btn-outline-secondary" href="@($"admin/sentinel/databases/{Database.Id}/export.csv")" title="Export every row as a CSV file" download>
+                    <i class="bi bi-download me-1"></i>Export
+                </a>
                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _showProperties = !_showProperties" disabled="@(IsBusy || Database.IsLocked)">
                     <i class="bi bi-list-columns-reverse me-1"></i>Properties
                 </button>

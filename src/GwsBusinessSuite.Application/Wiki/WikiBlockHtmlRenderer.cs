@@ -58,7 +58,9 @@ public static class WikiBlockHtmlRenderer
         return builder.ToString();
     }
 
-    private static string? GetSafeLink(string? value)
+    // Internal rather than private so WikiMarkdownExporter (same assembly) can apply the same
+    // executable-scheme filtering to links it writes out.
+    internal static string? GetSafeLink(string? value)
     {
         var link = value?.Trim();
         if (string.IsNullOrEmpty(link))
@@ -511,7 +513,9 @@ public static class WikiBlockHtmlRenderer
             + $"<div class=\"wiki-tabs\" style=\"--wiki-tab-count:{tabs.Count}\">{renderedTabs}</div></div>";
     }
 
-    private static IReadOnlyList<WikiTab> ParseTabs(WikiBlock block)
+    // Internal rather than private so WikiMarkdownExporter (same assembly) can reuse the exact
+    // same tabsJson/plain-text-fallback parsing instead of duplicating it.
+    internal static IReadOnlyList<WikiTab> ParseTabs(WikiBlock block)
     {
         if (block.Props.TryGetValue("tabsJson", out var tabsJson))
         {

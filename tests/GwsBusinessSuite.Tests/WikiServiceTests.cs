@@ -186,8 +186,10 @@ public sealed class WikiServiceTests
     }
 
     [Fact]
-    public async Task SavePageAsync_ShouldTrimOldRevisions_BeyondMaxRevisionsPerPage()
+    public async Task SavePageAsync_ShouldKeepEveryRecentRevisionRegardlessOfCount()
     {
+        // Phase 4.4: the old flat 20-revision cap is gone - anything within the retention
+        // window (the last 90 days) is kept in full, however many saves that adds up to.
         await using var db = await CreateDbAsync();
         var service = new WikiService(db);
 
@@ -199,7 +201,7 @@ public sealed class WikiServiceTests
 
         for (var i = 1; i <= 25; i++)
         {
-            await service.SavePageAsync(new WikiPageEditorModel
+            created = await service.SavePageAsync(new WikiPageEditorModel
             {
                 WikiPageId = created.Id,
                 ExpectedContentVersion = created.ContentVersion,
@@ -209,8 +211,52 @@ public sealed class WikiServiceTests
         }
 
         var history = await service.GetHistoryAsync(created.Id);
-        history.Should().HaveCount(20, "revisions are trimmed to WikiService.MaxRevisionsPerPage");
-        history[0].RevisionNumber.Should().Be(26, "the newest revisions are kept, not the oldest");
+        history.Should().HaveCount(26, "none of these revisions are old enough to be thinned");
+        history[0].RevisionNumber.Should().Be(26, "history is ordered newest-first");
+    }
+
+    [Fact]
+    public async Task SavePageAsync_ShouldThinRevisionsOlderThanTheRetentionWindowToOnePerCalendarDay()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiService(db);
+
+        var created = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Long Lived",
+            BlocksJson = ParagraphBlocks("v0")
+        }, "grantwatson");
+
+        // Backdate three same-day revisions and one different-day revision to well outside the
+        // 90-day retention window, simulating history that accumulated before the cutoff -
+        // TrimOldRevisionsAsync can't be driven by real elapsed time in a unit test, so this
+        // manipulates WikiPageRevision.CreatedAt directly instead.
+        var oldDay = DateTimeOffset.UtcNow.AddDays(-120);
+        var otherOldDay = DateTimeOffset.UtcNow.AddDays(-200);
+        db.WikiPageRevisions.AddRange(
+            new WikiPageRevision { WikiPageId = created.Id, RevisionNumber = 101, Title = "Long Lived", Slug = created.Slug, BlocksJson = ParagraphBlocks("old-1"), CreatedAt = oldDay, CreatedBy = "grantwatson" },
+            new WikiPageRevision { WikiPageId = created.Id, RevisionNumber = 102, Title = "Long Lived", Slug = created.Slug, BlocksJson = ParagraphBlocks("old-2"), CreatedAt = oldDay.AddHours(2), CreatedBy = "grantwatson" },
+            new WikiPageRevision { WikiPageId = created.Id, RevisionNumber = 103, Title = "Long Lived", Slug = created.Slug, BlocksJson = ParagraphBlocks("old-3-latest"), CreatedAt = oldDay.AddHours(5), CreatedBy = "grantwatson" },
+            new WikiPageRevision { WikiPageId = created.Id, RevisionNumber = 104, Title = "Long Lived", Slug = created.Slug, BlocksJson = ParagraphBlocks("other-old-day"), CreatedAt = otherOldDay, CreatedBy = "grantwatson" });
+        await db.SaveChangesAsync();
+
+        // Any save triggers TrimOldRevisionsAsync.
+        await service.SavePageAsync(new WikiPageEditorModel
+        {
+            WikiPageId = created.Id,
+            ExpectedContentVersion = created.ContentVersion,
+            Title = "Long Lived",
+            BlocksJson = ParagraphBlocks("v1")
+        }, "grantwatson");
+
+        var revisionNumbers = (await service.GetHistoryAsync(created.Id))
+            .Select(item => item.RevisionNumber)
+            .ToList();
+
+        revisionNumbers.Should().Contain(103, "the latest revision on the older calendar day survives");
+        revisionNumbers.Should().Contain(104, "the only revision on its (different) old day has nothing to thin against");
+        revisionNumbers.Should().NotContain(101);
+        revisionNumbers.Should().NotContain(102);
     }
 
     [Fact]

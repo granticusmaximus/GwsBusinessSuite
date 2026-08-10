@@ -419,6 +419,10 @@
                                 @onclick="() => ToggleFavoriteAsync(selectedPageId, false)" title="Toggle favorite">
                             <i class="bi @(IsFavorite(selectedPageId, false) ? "bi-star-fill" : "bi-star")"></i>
                         </button>
+                        <a class="btn btn-sm btn-outline-secondary" href="@($"admin/sentinel/pages/{selectedPageId}/export.md")"
+                           title="Export this page as Markdown" download>
+                            <i class="bi bi-download"></i>
+                        </a>
                     }
                     <span class="sentinel-editing-state">
                         @(SelectedPageId.HasValue ? "Saved" : "New page")
@@ -599,7 +603,7 @@
                 <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
                     <div>
                         <div class="fw-semibold">History</div>
-                        <div class="small text-secondary">Bounded version snapshots - the last @MaxHistoryDisplay are kept.</div>
+                        <div class="small text-secondary">Every version from the last 90 days is kept; older versions are thinned to one per day.</div>
                     </div>
                     <span class="badge text-bg-secondary">@History.Count version@(History.Count == 1 ? "" : "s")</span>
                 </div>
@@ -616,7 +620,7 @@
                     }
                     else
                     {
-                        <div class="list-group list-group-flush">
+                        <div class="list-group list-group-flush" style="max-height: 26rem; overflow-y: auto;">
                             @for (var i = 0; i < History.Count; i++)
                             {
                                 var revision = History[i];
@@ -1283,8 +1287,6 @@
 }
 
 @code {
-    private const int MaxHistoryDisplay = 20;
-
     // This route was Admin-only until per-resource Sentinel sharing (SentinelAccessService)
     // needed somewhere for Author/Contributor accounts to actually apply - see
     // OpenPageAsync/SavePageAsync/OpenDatabaseAsync for the per-resource checks that gate what

@@ -673,6 +673,50 @@ app.MapGet("/admin/api/privacy/requests/{requestId:guid}/export", async (
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("admin-mutation");
 
+// Phase 4.5 Notion-parity export: a page as a standalone Markdown file, a database as CSV.
+// AdminOnly rather than a per-resource SentinelAccessService check, matching the existing
+// /admin/sentinel/files/{id:guid} download endpoint's own posture - per-resource sharing to
+// non-Admin accounts is enforced in the Wiki.razor UI itself, not on raw file-download routes.
+app.MapGet("/admin/sentinel/pages/{wikiPageId:guid}/export.md", async (
+    Guid wikiPageId,
+    IWikiService wikiService,
+    CancellationToken cancellationToken) =>
+{
+    var page = await wikiService.GetPageAsync(wikiPageId, cancellationToken);
+    if (page is null)
+    {
+        return Results.NotFound();
+    }
+
+    var markdown = WikiMarkdownExporter.ExportPage(page.Title, WikiBlockJson.ParseBlocks(page.BlocksJson));
+    return Results.File(
+        Encoding.UTF8.GetBytes(markdown),
+        "text/markdown; charset=utf-8",
+        $"{(string.IsNullOrWhiteSpace(page.Slug) ? "sentinel-page" : page.Slug)}.md");
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("public-read");
+
+app.MapGet("/admin/sentinel/databases/{wikiDatabaseId:guid}/export.csv", async (
+    Guid wikiDatabaseId,
+    IWikiDatabaseService wikiDatabaseService,
+    CancellationToken cancellationToken) =>
+{
+    var database = await wikiDatabaseService.GetDatabaseAsync(wikiDatabaseId, cancellationToken);
+    if (database is null)
+    {
+        return Results.NotFound();
+    }
+
+    var csv = WikiCsvExporter.ExportDatabase(database);
+    return Results.File(
+        Encoding.UTF8.GetBytes(csv),
+        "text/csv; charset=utf-8",
+        $"{SlugForFileName(database.Title)}.csv");
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("public-read");
+
 // AllowAnonymous at the connection level - unauthenticated viewers must be able to open
 // this connection to call JoinAsViewer(inviteToken); JoinAsBroadcaster separately checks
 // Context.User's role itself (see LiveShowHub) since the two roles share one hub.
@@ -2865,6 +2909,18 @@ static string Csv(string? value)
     var trimmed = safe.TrimStart();
     if (trimmed.Length > 0 && "=+-@".Contains(trimmed[0])) safe = $"'{safe}";
     return $"\"{safe.Replace("\"", "\"\"")}\"";
+}
+
+// WikiDatabase has no Slug column (unlike WikiPage), so its title needs sanitizing into a safe
+// download filename here instead.
+static string SlugForFileName(string value)
+{
+    var slug = new string(value.Trim().ToLowerInvariant()
+        .Select(character => char.IsLetterOrDigit(character) ? character : '-')
+        .ToArray());
+    while (slug.Contains("--", StringComparison.Ordinal)) slug = slug.Replace("--", "-");
+    slug = slug.Trim('-');
+    return slug.Length == 0 ? "sentinel-database" : slug;
 }
 
 static string NormalizePathBase(string? pathBase)

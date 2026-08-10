@@ -6,13 +6,16 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
-// DB-snapshot history (WikiPageRevision), mirroring CmsPageRevision/PageRevisionService's
-// MaxRevisionsPerPage trim-on-save pattern - replaces the old git-commit-per-save model
-// (see git history for the LibGit2Sharp version) now that page content is structured
-// WikiBlock JSON rather than a single Markdown string that read well as a prose diff.
+// DB-snapshot history (WikiPageRevision) - replaces the old git-commit-per-save model (see git
+// history for the LibGit2Sharp version) now that page content is structured WikiBlock JSON
+// rather than a single Markdown string that read well as a prose diff. Originally trimmed with
+// a flat MaxRevisionsPerPage cap mirroring CmsPageRevision/PageRevisionService's own pattern;
+// see TrimOldRevisionsAsync for the time-tiered policy that replaced it.
 public sealed class WikiService(IAppDbContext dbContext, IWikiSyncedBlockService? syncedBlockService = null) : IWikiService
 {
-    private const int MaxRevisionsPerPage = 20;
+    // Was a flat 20-revision cap (hard-deleted anything past it); replaced in Phase 4.4 with a
+    // time-tiered policy closer to Notion's own page history - see TrimOldRevisionsAsync.
+    private static readonly TimeSpan RecentRevisionRetentionWindow = TimeSpan.FromDays(90);
     private const string SyncedBlockSourceIdProp = "sourceId";
 
     public async Task<IReadOnlyList<WikiPage>> ListPagesAsync(bool includeTrashed = false, CancellationToken cancellationToken = default)
@@ -673,19 +676,37 @@ public sealed class WikiService(IAppDbContext dbContext, IWikiSyncedBlockService
         await TrimOldRevisionsAsync(page.Id, cancellationToken);
     }
 
+    // Every revision from the last RecentRevisionRetentionWindow is kept in full, however many
+    // that is - real day-to-day "what changed an hour ago" history is effectively unbounded.
+    // Only revisions OLDER than that window are thinned, down to at most one (the latest) per
+    // calendar day, which bounds long-term storage growth (e.g. against a runaway automation
+    // save loop) without silently deleting a page's entire history the way the old flat
+    // 20-revision cap did.
     private async Task TrimOldRevisionsAsync(Guid wikiPageId, CancellationToken cancellationToken)
     {
         var revisions = await dbContext.WikiPageRevisions
             .Where(revision => revision.WikiPageId == wikiPageId)
-            .OrderByDescending(revision => revision.RevisionNumber)
             .ToListAsync(cancellationToken);
 
-        if (revisions.Count <= MaxRevisionsPerPage)
+        // SQLite/EF Core can't translate DateTimeOffset comparisons server-side - filter and
+        // group client-side after materializing, the same convention used throughout this app.
+        var cutoff = DateTimeOffset.UtcNow - RecentRevisionRetentionWindow;
+        var older = revisions.Where(revision => revision.CreatedAt < cutoff).ToList();
+        if (older.Count == 0)
         {
             return;
         }
 
-        var toDelete = revisions.Skip(MaxRevisionsPerPage).ToList();
+        var keepIds = older
+            .GroupBy(revision => revision.CreatedAt.UtcDateTime.Date)
+            .Select(group => group.OrderByDescending(revision => revision.RevisionNumber).First().Id)
+            .ToHashSet();
+        var toDelete = older.Where(revision => !keepIds.Contains(revision.Id)).ToList();
+        if (toDelete.Count == 0)
+        {
+            return;
+        }
+
         dbContext.WikiPageRevisions.RemoveRange(toDelete);
         await dbContext.SaveChangesAsync(cancellationToken);
     }
