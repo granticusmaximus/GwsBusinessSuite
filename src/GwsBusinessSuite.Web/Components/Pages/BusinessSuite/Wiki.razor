@@ -175,7 +175,7 @@
                 </div>
                 <div class="d-flex gap-1">
                     <div class="btn-group">
-                        <button class="btn btn-sm btn-outline-secondary" @onclick="CreateNewPage" disabled="@IsBusy" title="New blank page">
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="NewBlankPageAsync" disabled="@IsBusy" title="New blank page">
                             <i class="bi bi-file-earmark-plus"></i>
                         </button>
                         <button class="btn btn-sm btn-outline-secondary dropdown-toggle dropdown-toggle-split" type="button"
@@ -183,11 +183,11 @@
                             <span class="visually-hidden">Starter templates</span>
                         </button>
                         <ul class="dropdown-menu">
-                            <li><button type="button" class="dropdown-item" @onclick="CreateNewPage">📄 Blank page</button></li>
+                            <li><button type="button" class="dropdown-item" @onclick="NewBlankPageAsync">📄 Blank page</button></li>
                             <li><hr class="dropdown-divider" /></li>
                             @foreach (var template in SentinelStarterTemplates.All)
                             {
-                                <li><button type="button" class="dropdown-item" @onclick="() => CreateNewPageFromTemplate(template.Key)">@template.Icon @template.Name</button></li>
+                                <li><button type="button" class="dropdown-item" @onclick="() => CreateNewPageFromTemplateAsync(template.Key)">@template.Icon @template.Name</button></li>
                             }
                         </ul>
                     </div>
@@ -532,7 +532,7 @@
                         </a>
                     }
                     <span class="sentinel-editing-state">
-                        @(SelectedPageId.HasValue ? "Saved" : "New page")
+                        @(!string.IsNullOrEmpty(_autosaveStatus) ? _autosaveStatus : SelectedPageId.HasValue ? "Saved" : "New page")
                     </span>
                 </div>
             </div>
@@ -545,7 +545,7 @@
                             <button type="button" class="btn btn-sm btn-dark" @onclick="ToggleCoverPickerAsync">
                                 <i class="bi bi-image me-1"></i>Change cover
                             </button>
-                            <button type="button" class="btn btn-sm btn-dark" @onclick="() => Editor.CoverImageUrl = null">
+                            <button type="button" class="btn btn-sm btn-dark" @onclick="RemoveCoverImage">
                                 <i class="bi bi-trash3 me-1"></i>Remove
                             </button>
                         </div>
@@ -570,7 +570,7 @@
                                 aria-label="Change page icon" title="Change page icon">
                             @(string.IsNullOrWhiteSpace(Editor.Icon) ? "📄" : Editor.Icon)
                         </button>
-                        <InputTextArea class="sentinel-title-input" @bind-Value="Editor.Title"
+                        <InputTextArea class="sentinel-title-input" @bind-Value="Editor.Title" @bind-Value:after="ScheduleAutosave"
                                        rows="1" placeholder="Untitled" aria-label="Page title" />
                     </div>
 
@@ -1456,6 +1456,9 @@
     private string _searchDateFilter = string.Empty;
     private List<SentinelBacklink> Backlinks { get; set; } = new();
     private WikiPageConflictSnapshot? PageConflict { get; set; }
+    private CancellationTokenSource? _autosaveCts;
+    private bool _hasUnsavedAutosaveChanges;
+    private string _autosaveStatus = string.Empty;
     private SentinelNavigationState Navigation { get; set; } = new([], []);
     private List<SentinelMention> Mentions { get; set; } = new();
     private List<SentinelSavedSearchView> SavedSearches { get; set; } = new();
@@ -1558,6 +1561,13 @@
         Editor.Icon = string.IsNullOrWhiteSpace(icon) ? null : icon.Trim();
         _showIconPicker = false;
         _customIconInput = string.Empty;
+        ScheduleAutosave();
+    }
+
+    private void RemoveCoverImage()
+    {
+        Editor.CoverImageUrl = null;
+        ScheduleAutosave();
     }
 
     private async Task ToggleCoverPickerAsync()
@@ -1597,6 +1607,7 @@
             Editor.CoverImageUrl = uploaded.Url;
             _mediaAssets = (await MediaLibraryService.ListAsync()).ToList();
             _showCoverPicker = false;
+            ScheduleAutosave();
         }
         catch (Exception ex)
         {
@@ -1613,6 +1624,7 @@
     {
         Editor.CoverImageUrl = asset.Url;
         _showCoverPicker = false;
+        ScheduleAutosave();
     }
 
     private async Task OpenNotionModalAsync()
@@ -2314,6 +2326,7 @@
     public async Task OnBlocksChanged(string blocksJson)
     {
         Editor.BlocksJson = blocksJson;
+        ScheduleAutosave();
         await InvokeAsync(StateHasChanged);
     }
 
@@ -2334,6 +2347,125 @@
         }
 
         return Editor.BlocksJson;
+    }
+
+    // Silent background persistence for the main page editor, mirroring the pattern already
+    // used for database row pages (SentinelDatabaseRowPage.ScheduleAutosave): debounced so a
+    // burst of keystrokes becomes one write, and passes createRevisionCheckpoint=false so it
+    // never mints a version-history entry on its own - only an explicit "Save changes" click
+    // (or a revert) does that. This is also what fixes a brand-new, never-saved page actually
+    // persisting: the first tick creates the real WikiPage row instead of the title/icon/
+    // content being silently lost if the user navigates away before ever clicking Save.
+    private void ScheduleAutosave()
+    {
+        _hasUnsavedAutosaveChanges = true;
+        _autosaveCts?.Cancel();
+        _autosaveCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _autosaveCts = cts;
+        _autosaveStatus = "Editing…";
+        _ = AutosaveAfterDelayAsync(cts.Token);
+    }
+
+    private async Task AutosaveAfterDelayAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1.5), cancellationToken);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+        if (cancellationToken.IsCancellationRequested) return;
+
+        await PerformAutosaveAsync(cancellationToken);
+    }
+
+    // Cancels any pending debounce timer, without saving, for resets where the user is
+    // explicitly discarding in-progress edits: the toolbar "Reset" button, or the editor
+    // being pointed at a fresh/blank state because its underlying page was just trashed out
+    // from under it. CreateNewPage always starts here so neither caller has to remember to.
+    private void DiscardPendingAutosave()
+    {
+        _autosaveCts?.Cancel();
+        _autosaveCts?.Dispose();
+        _autosaveCts = null;
+        _hasUnsavedAutosaveChanges = false;
+        _autosaveStatus = string.Empty;
+    }
+
+    // Cancels any pending debounce timer and, if there are edits it hasn't written yet, saves
+    // them immediately. Called from every place the editor is about to move on from the page
+    // currently open (open a different page/database) so "typed, then clicked away before the
+    // debounce fired" can no longer lose work - the exact bug this autosave path exists to fix.
+    private async Task FlushAutosaveAsync()
+    {
+        _autosaveCts?.Cancel();
+        _autosaveCts?.Dispose();
+        _autosaveCts = null;
+        if (!_hasUnsavedAutosaveChanges) return;
+        await PerformAutosaveAsync(CancellationToken.None);
+    }
+
+    private async Task PerformAutosaveAsync(CancellationToken cancellationToken)
+    {
+        if (IsBusy) return;
+        if (Editor.WikiPageId is { } existingPageId
+            && !await CanAccessPageOrDatabaseAsync(existingPageId, isDatabase: false, SentinelAccessLevels.Edit))
+        {
+            // A permission change mid-edit is rare and not autosave's job to explain - the
+            // explicit Save button's own permission check already surfaces that clearly.
+            return;
+        }
+
+        try
+        {
+            await CaptureEditorBlocksAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is tearing down - fall back to whatever Editor.BlocksJson last held
+            // from OnBlocksChanged (at most ~250ms stale) rather than failing the flush.
+        }
+
+        var wasNew = !Editor.WikiPageId.HasValue;
+        try
+        {
+            var user = await CurrentUserNameAsync();
+            var saved = await WikiService.SavePageAsync(Editor, user, createRevisionCheckpoint: false, cancellationToken: cancellationToken);
+            if (cancellationToken.IsCancellationRequested) return;
+
+            Editor.WikiPageId = saved.Id;
+            Editor.ExpectedContentVersion = saved.ContentVersion;
+            Editor.BaseBlocksJson = saved.BlocksJson;
+            Editor.Slug = saved.Slug;
+            _hasUnsavedAutosaveChanges = false;
+            _autosaveStatus = "Saved";
+
+            if (wasNew)
+            {
+                // The page just became real - reflect it in the sidebar/breadcrumbs the same
+                // way an explicit Save does, so the user can find it again later.
+                SelectedPageId = saved.Id;
+                ExpandAncestorPath(saved.Id);
+                await LoadTreeAsync(selectFirstPage: false);
+            }
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (WikiPageConcurrencyException ex)
+        {
+            Logger.LogWarning(ex, "Sentinel page {WikiPageId} had a concurrent edit conflict during autosave.", Editor.WikiPageId);
+            PageConflict = ex.Conflict;
+            _autosaveStatus = string.Empty;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            Logger.LogError(ex, "Autosave failed for Sentinel page {WikiPageId}.", Editor.WikiPageId);
+            _autosaveStatus = "Autosave failed - use Save changes to retry";
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task InsertBlockTemplateAsync(string templateBlocksJson)
@@ -2999,8 +3131,15 @@
         });
     }
 
+    // Always discards rather than flushes - this doubles as the toolbar "Reset" button
+    // (explicitly discarding the current unsaved edit) and the recovery path after a page was
+    // just trashed out from under the editor, where the stale Editor content must never be
+    // written back. Callers that instead want to preserve prior edits when navigating away to
+    // start a new page (the sidebar's "+ New page" control) flush first via NewBlankPageAsync/
+    // CreateNewPageFromTemplateAsync, before calling this.
     private void CreateNewPage()
     {
+        DiscardPendingAutosave();
         _mobileWorkspaceNavOpen = false;
         SelectedPageId = null;
         SelectedDatabaseId = null;
@@ -3014,10 +3153,16 @@
         ErrorMessage = string.Empty;
     }
 
+    private async Task NewBlankPageAsync()
+    {
+        await FlushAutosaveAsync();
+        CreateNewPage();
+    }
+
     // Starter gallery (Phase 5.3) - offered alongside the plain "Blank page" entry from the
     // sidebar's "+ New page" control only (not the in-editor "Reset" button, which is a
     // different action - discarding the current unsaved edit, not choosing a new page's shape).
-    private void CreateNewPageFromTemplate(string templateKey)
+    private async Task CreateNewPageFromTemplateAsync(string templateKey)
     {
         var template = SentinelStarterTemplates.Find(templateKey);
         if (template is null)
@@ -3025,6 +3170,7 @@
             return;
         }
 
+        await FlushAutosaveAsync();
         CreateNewPage();
         Editor.Title = template.Title;
         Editor.BlocksJson = WikiBlockJson.Serialize(template.Blocks);
@@ -3042,6 +3188,12 @@
 
     private async Task OpenDatabaseAsync(Guid wikiDatabaseId)
     {
+        // Flush any pending page-editor autosave before this method blanks SelectedPageId out
+        // from under it - otherwise the in-progress edit becomes orphaned in memory and is
+        // lost the moment something else replaces Editor (e.g. the next page opened). If the
+        // flush surfaces a genuine concurrent-edit conflict, stop so the user sees it.
+        await FlushAutosaveAsync();
+        if (PageConflict is not null) return;
         if (!await CanAccessPageOrDatabaseAsync(wikiDatabaseId, isDatabase: true, SentinelAccessLevels.View))
         {
             ErrorMessage = "You don't have access to this Sentinel database.";
@@ -3101,6 +3253,14 @@
 
     private async Task OpenPageAsync(Guid wikiPageId)
     {
+        // Flush any pending autosave from whatever was previously open before this method
+        // replaces Editor with the target page's data - otherwise an in-progress edit is
+        // silently discarded the instant navigation happens. If the flush itself surfaces a
+        // genuine concurrent-edit conflict, stop here so the user actually sees the recovery
+        // UI instead of navigating straight past it.
+        await FlushAutosaveAsync();
+        if (PageConflict is not null) return;
+
         try
         {
             if (!await CanAccessPageOrDatabaseAsync(wikiPageId, isDatabase: false, SentinelAccessLevels.View))
@@ -3209,6 +3369,10 @@
 
     private async Task SavePageAsync()
     {
+        // An explicit save is about to write the freshest possible snapshot and rebuild
+        // Editor from the result - any autosave debounce still pending against the current
+        // (about to be replaced) Editor is now moot.
+        DiscardPendingAutosave();
         IsBusy = true;
         ErrorMessage = string.Empty;
         StatusMessage = string.Empty;
@@ -3861,6 +4025,19 @@
 
     public async ValueTask DisposeAsync()
     {
+        // Flush any pending autosave before the block editor module (and possibly the whole
+        // circuit) tears down below - the component is going away entirely (route change,
+        // browser closed, circuit lost), which is exactly the case OpenPageAsync/
+        // OpenDatabaseAsync's flush calls can't cover on their own.
+        try
+        {
+            await FlushAutosaveAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is already gone; whatever OnBlocksChanged last synced is what ships.
+        }
+
         CursorTracker.Moved -= HandleCursorsMoved;
         LeaveCursorTracking();
         await _disposeCts.CancelAsync();

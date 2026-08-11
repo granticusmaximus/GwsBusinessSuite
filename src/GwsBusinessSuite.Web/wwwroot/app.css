@@ -1706,9 +1706,13 @@ audio.wiki-embed-media { max-width: 100%; }
     display: flex;
     flex-shrink: 0;
     gap: 0.1rem;
-    opacity: 0;
+    /* Dimmed rather than fully hidden (opacity: 0) by default - a fully invisible row menu
+       gave no visual hint that Duplicate/Move to Trash existed at all unless a mouse happened
+       to hover the exact row, which is how "delete" became hard to find in the first place. */
+    opacity: 0.45;
 }
-.wiki-tree-row:hover .wiki-tree-actions {
+.wiki-tree-row:hover .wiki-tree-actions,
+.wiki-tree-row:focus-within .wiki-tree-actions {
     opacity: 1;
 }
 .sentinel-quick-navigation {

@@ -54,6 +54,55 @@ public sealed class WikiServiceTests
     }
 
     [Fact]
+    public async Task SavePageAsync_WithCreateRevisionCheckpointFalse_ShouldCreateANewPage_ButNotAHistoryEntry()
+    {
+        // This is the path Wiki.razor's silent autosave uses (createRevisionCheckpoint:
+        // false) - regression guard for the bug where a brand-new, never-explicitly-saved
+        // Sentinel page lost its title/content entirely if the user navigated away before
+        // clicking "Save changes". Autosave must still create the real WikiPage row (so the
+        // page persists), just without spamming version history on every debounce tick.
+        await using var db = await CreateDbAsync();
+        var service = new WikiService(db);
+
+        var created = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Autosaved Draft",
+            BlocksJson = ParagraphBlocks("Typed before navigating away.")
+        }, "grantwatson", createRevisionCheckpoint: false);
+
+        created.Title.Should().Be("Autosaved Draft");
+        created.BlocksJson.Should().Contain("Typed before navigating away.");
+        created.ContentVersion.Should().Be(1);
+        (await service.GetPageAsync(created.Id))?.Title.Should().Be("Autosaved Draft");
+        (await service.GetHistoryAsync(created.Id)).Should().BeEmpty("autosave must not mint a revision checkpoint");
+    }
+
+    [Fact]
+    public async Task SavePageAsync_WithCreateRevisionCheckpointFalse_ShouldUpdateAnExistingPage_ButNotAddToHistory()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiService(db);
+        var created = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Checkpointed Page",
+            BlocksJson = ParagraphBlocks("v1")
+        }, "grantwatson");
+        (await service.GetHistoryAsync(created.Id)).Should().ContainSingle("the explicit initial save does checkpoint");
+
+        var autosaved = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            WikiPageId = created.Id,
+            ExpectedContentVersion = created.ContentVersion,
+            Title = "Checkpointed Page",
+            BlocksJson = ParagraphBlocks("v2, autosaved")
+        }, "grantwatson", createRevisionCheckpoint: false);
+
+        autosaved.BlocksJson.Should().Contain("v2, autosaved");
+        autosaved.ContentVersion.Should().Be(2);
+        (await service.GetHistoryAsync(created.Id)).Should().ContainSingle("autosave must not add a second revision");
+    }
+
+    [Fact]
     public async Task SavePageAsync_ShouldGenerateUniqueSlugsForDuplicateTitles()
     {
         await using var db = await CreateDbAsync();

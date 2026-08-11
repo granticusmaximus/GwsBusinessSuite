@@ -7,7 +7,12 @@ public interface IWikiService
     Task<IReadOnlyList<WikiPage>> ListPagesAsync(bool includeTrashed = false, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<WikiPage>> ListTrashedPagesAsync(CancellationToken cancellationToken = default);
     Task<WikiPage?> GetPageAsync(Guid wikiPageId, CancellationToken cancellationToken = default);
-    Task<WikiPage> SavePageAsync(WikiPageEditorModel editor, string performedBy, CancellationToken cancellationToken = default);
+    // createRevisionCheckpoint=false backs silent background autosave (Wiki.razor) - every
+    // other field/permission/concurrency rule still applies, it just skips minting a
+    // WikiPageRevision so a burst of debounced autosave ticks doesn't spam version history
+    // the way an explicit "Save changes" click deliberately does.
+    Task<WikiPage> SavePageAsync(
+        WikiPageEditorModel editor, string performedBy, bool createRevisionCheckpoint = true, CancellationToken cancellationToken = default);
     Task<WikiPage> DuplicatePageAsync(Guid wikiPageId, string performedBy, CancellationToken cancellationToken = default);
 
     // Soft-delete: also trashes every descendant page, and every database parented anywhere

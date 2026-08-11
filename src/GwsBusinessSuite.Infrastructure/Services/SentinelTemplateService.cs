@@ -84,7 +84,7 @@ public sealed class SentinelTemplateService(
             Icon = template.Icon,
             CoverImageUrl = template.CoverImageUrl,
             ParentWikiPageId = parentWikiPageId
-        }, NormalizeUser(performedBy), cancellationToken);
+        }, NormalizeUser(performedBy), cancellationToken: cancellationToken);
     }
 
     public async Task DeleteAsync(Guid templateId, CancellationToken cancellationToken = default)

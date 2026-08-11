@@ -148,7 +148,8 @@ public sealed class WikiService(IAppDbContext dbContext, IWikiSyncedBlockService
             ? sourceId
             : null;
 
-    public async Task<WikiPage> SavePageAsync(WikiPageEditorModel editor, string performedBy, CancellationToken cancellationToken = default)
+    public async Task<WikiPage> SavePageAsync(
+        WikiPageEditorModel editor, string performedBy, bool createRevisionCheckpoint = true, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(editor);
 
@@ -247,7 +248,10 @@ public sealed class WikiService(IAppDbContext dbContext, IWikiSyncedBlockService
         {
             await ReanchorDiscussionsAsync(page.Id, previousBlocksJson, page.BlocksJson, cancellationToken);
         }
-        await CreateRevisionAsync(page, performedBy, cancellationToken);
+        if (createRevisionCheckpoint)
+        {
+            await CreateRevisionAsync(page, performedBy, cancellationToken);
+        }
 
         return page;
     }
@@ -585,7 +589,7 @@ public sealed class WikiService(IAppDbContext dbContext, IWikiSyncedBlockService
             CoverImageUrl = page.CoverImageUrl,
             ParentWikiPageId = page.ParentWikiPageId,
             ExpectedContentVersion = page.ContentVersion
-        }, performedBy, cancellationToken);
+        }, performedBy, cancellationToken: cancellationToken);
     }
 
     private async Task ReloadAsync(WikiPage page, CancellationToken cancellationToken)
@@ -622,7 +626,7 @@ public sealed class WikiService(IAppDbContext dbContext, IWikiSyncedBlockService
             Icon = source.Icon,
             CoverImageUrl = source.CoverImageUrl,
             ParentWikiPageId = newParentWikiPageId
-        }, performedBy, cancellationToken);
+        }, performedBy, cancellationToken: cancellationToken);
 
         if (childrenByParent.TryGetValue(source.Id, out var children))
         {
