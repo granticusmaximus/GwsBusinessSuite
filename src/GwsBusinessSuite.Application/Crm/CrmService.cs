@@ -1,12 +1,28 @@
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace GwsBusinessSuite.Application.Crm;
 
-public sealed class CrmService(IAppDbContext dbContext, ICurrentUserAccessor? currentUserAccessor = null) : ICrmService
+public sealed class CrmService(
+    IAppDbContext dbContext,
+    ICurrentUserAccessor? currentUserAccessor = null,
+    IMemoryCache? cache = null) : ICrmService
 {
     private readonly ICurrentUserAccessor _currentUserAccessor = currentUserAccessor ?? FixedCurrentUserAccessor.Unknown;
+    // Falls back to a private, per-instance cache when constructed without DI (existing
+    // tests new this up directly with just a db/user accessor) - same optional-dependency
+    // pattern as currentUserAccessor above.
+    private readonly IMemoryCache _cache = cache ?? new MemoryCache(new MemoryCacheOptions());
+
+    // GetDashboardAsync loads every non-trashed contact on every /admin/crm page load with
+    // no filtering - fine at a handful of users' worth of contacts, but a flat unindexed
+    // full-table read that's worth capping. A short TTL (rather than event-driven
+    // invalidation on every contact/deal write) keeps this simple: at most one page load
+    // per window pays the real query cost, and staleness is bounded to a few seconds.
+    private const string DashboardCacheKey = "crm:dashboard";
+    private static readonly TimeSpan DashboardCacheDuration = TimeSpan.FromSeconds(30);
 
     public async Task<IReadOnlyList<Contact>> ListContactsAsync(bool includeTrashed = false, CancellationToken cancellationToken = default)
     {
@@ -93,6 +109,7 @@ public sealed class CrmService(IAppDbContext dbContext, ICurrentUserAccessor? cu
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        _cache.Remove(DashboardCacheKey);
         return contact;
     }
 
@@ -108,6 +125,7 @@ public sealed class CrmService(IAppDbContext dbContext, ICurrentUserAccessor? cu
         contact.UpdatedAt = contact.TrashedAt;
         contact.UpdatedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
+        _cache.Remove(DashboardCacheKey);
     }
 
     public async Task RestoreContactAsync(Guid contactId, CancellationToken cancellationToken = default)
@@ -122,6 +140,7 @@ public sealed class CrmService(IAppDbContext dbContext, ICurrentUserAccessor? cu
         contact.UpdatedAt = DateTimeOffset.UtcNow;
         contact.UpdatedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
+        _cache.Remove(DashboardCacheKey);
     }
 
     public async Task DeleteContactPermanentlyAsync(Guid contactId, CancellationToken cancellationToken = default)
@@ -134,6 +153,7 @@ public sealed class CrmService(IAppDbContext dbContext, ICurrentUserAccessor? cu
 
         dbContext.Contacts.Remove(contact);
         await dbContext.SaveChangesAsync(cancellationToken);
+        _cache.Remove(DashboardCacheKey);
     }
 
     public async Task<IReadOnlyList<ContactActivityView>> ListActivitiesAsync(Guid contactId, CancellationToken cancellationToken = default)
@@ -210,6 +230,9 @@ public sealed class CrmService(IAppDbContext dbContext, ICurrentUserAccessor? cu
 
     public async Task<CrmDashboardData> GetDashboardAsync(CancellationToken cancellationToken = default)
     {
+        if (_cache.TryGetValue(DashboardCacheKey, out CrmDashboardData? cached) && cached is not null)
+            return cached;
+
         var contacts = await dbContext.Contacts
             .AsNoTracking()
             .Where(contact => contact.TrashedAt == null)
@@ -224,9 +247,120 @@ public sealed class CrmService(IAppDbContext dbContext, ICurrentUserAccessor? cu
             .Where(contact => contact.FollowUpDate <= now)
             .OrderBy(contact => contact.FollowUpDate)
             .ToList();
+        var openDeals = await ListDealsAsync(cancellationToken);
 
-        return new CrmDashboardData(orderedContacts, dueFollowUps);
+        var dashboard = new CrmDashboardData(
+            orderedContacts, dueFollowUps, openDeals.Where(deal => DealStages.Open.Contains(deal.Stage)).ToList());
+        _cache.Set(DashboardCacheKey, dashboard, DashboardCacheDuration);
+        return dashboard;
     }
+
+    public async Task<IReadOnlyList<DealView>> ListDealsAsync(CancellationToken cancellationToken = default)
+    {
+        var deals = await dbContext.Deals.AsNoTracking().ToListAsync(cancellationToken);
+        if (deals.Count == 0) return [];
+
+        var contactNames = await dbContext.Contacts.AsNoTracking()
+            .Where(contact => deals.Select(deal => deal.ContactId).Contains(contact.Id))
+            .Select(contact => new { contact.Id, contact.FullName })
+            .ToDictionaryAsync(contact => contact.Id, contact => contact.FullName, cancellationToken);
+
+        return deals
+            .OrderByDescending(deal => deal.CreatedAt)
+            .Select(deal => ToDealView(deal, contactNames.GetValueOrDefault(deal.ContactId, "Unknown contact")))
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<DealView>> ListDealsForContactAsync(Guid contactId, CancellationToken cancellationToken = default)
+    {
+        var contact = await dbContext.Contacts.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == contactId, cancellationToken);
+        var deals = await dbContext.Deals.AsNoTracking()
+            .Where(deal => deal.ContactId == contactId)
+            .ToListAsync(cancellationToken);
+
+        return deals
+            .OrderByDescending(deal => deal.CreatedAt)
+            .Select(deal => ToDealView(deal, contact?.FullName ?? "Unknown contact"))
+            .ToList();
+    }
+
+    public async Task<DealView> SaveDealAsync(DealEditorModel editor, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(editor);
+
+        var contact = await dbContext.Contacts.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == editor.ContactId, cancellationToken)
+            ?? throw new InvalidOperationException("The selected contact no longer exists.");
+
+        var now = DateTimeOffset.UtcNow;
+        var performedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
+        var deal = editor.DealId is { } dealId
+            ? await dbContext.Deals.FirstOrDefaultAsync(item => item.Id == dealId, cancellationToken)
+                ?? throw new KeyNotFoundException("Deal was not found.")
+            : new Deal { ContactId = editor.ContactId, Title = string.Empty, CreatedAt = now, CreatedBy = performedBy };
+        var isNew = editor.DealId is null;
+
+        deal.ContactId = editor.ContactId;
+        deal.Title = editor.Title.Trim();
+        deal.Stage = string.IsNullOrWhiteSpace(editor.Stage) ? DealStages.Lead : editor.Stage.Trim();
+        deal.ValueUsd = editor.ValueUsd;
+        deal.ExpectedCloseDate = editor.ExpectedCloseDate is { } closeDate
+            ? new DateTimeOffset(closeDate.Date, TimeSpan.Zero)
+            : null;
+        deal.Notes = editor.Notes?.Trim() ?? string.Empty;
+        deal.ClosedAt = deal.Stage is DealStages.Won or DealStages.Lost ? deal.ClosedAt ?? now : null;
+        deal.UpdatedAt = now;
+        deal.UpdatedBy = performedBy;
+
+        if (isNew) await dbContext.Deals.AddAsync(deal, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        _cache.Remove(DashboardCacheKey);
+        return ToDealView(deal, contact.FullName);
+    }
+
+    public async Task<DealView> SetDealStageAsync(Guid dealId, string stage, CancellationToken cancellationToken = default)
+    {
+        if (!DealStages.All.Contains(stage)) throw new ArgumentException($"'{stage}' is not a recognized deal stage.", nameof(stage));
+
+        var deal = await dbContext.Deals.FirstOrDefaultAsync(item => item.Id == dealId, cancellationToken)
+            ?? throw new KeyNotFoundException("Deal was not found.");
+        var contact = await dbContext.Contacts.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == deal.ContactId, cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        deal.Stage = stage;
+        deal.ClosedAt = stage is DealStages.Won or DealStages.Lost ? now : null;
+        deal.UpdatedAt = now;
+        deal.UpdatedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        _cache.Remove(DashboardCacheKey);
+        return ToDealView(deal, contact?.FullName ?? "Unknown contact");
+    }
+
+    public async Task DeleteDealAsync(Guid dealId, CancellationToken cancellationToken = default)
+    {
+        var deal = await dbContext.Deals.FirstOrDefaultAsync(item => item.Id == dealId, cancellationToken);
+        if (deal is null) return;
+
+        dbContext.Deals.Remove(deal);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        _cache.Remove(DashboardCacheKey);
+    }
+
+    private static DealView ToDealView(Deal deal, string contactName) => new()
+    {
+        Id = deal.Id,
+        ContactId = deal.ContactId,
+        ContactName = contactName,
+        Title = deal.Title,
+        Stage = deal.Stage,
+        ValueUsd = deal.ValueUsd,
+        ExpectedCloseDate = deal.ExpectedCloseDate,
+        ClosedAt = deal.ClosedAt,
+        Notes = deal.Notes,
+        CreatedAt = deal.CreatedAt
+    };
 
     public async Task<int> CountDueFollowUpsAsync(CancellationToken cancellationToken = default)
     {

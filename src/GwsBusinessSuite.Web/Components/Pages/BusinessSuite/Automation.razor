@@ -21,6 +21,28 @@
     <div class="alert alert-danger">@_error</div>
 }
 
+@if (_recentFailures.Count > 0)
+{
+    <div class="card border-0 shadow-sm mb-4 border-start border-danger border-3">
+        <div class="card-header bg-white border-bottom py-2 d-flex align-items-center justify-content-between">
+            <span class="fw-semibold text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>Recent failures across all workflows</span>
+            <span class="badge text-bg-danger">@_recentFailures.Count</span>
+        </div>
+        <div class="list-group list-group-flush">
+            @foreach (var failure in _recentFailures)
+            {
+                <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-start gap-2" @onclick="() => OpenWorkflow(failure.WorkflowId)">
+                    <div>
+                        <div class="fw-semibold">@failure.WorkflowName <span class="text-secondary fw-normal">&middot; @failure.Mode</span></div>
+                        <div class="small text-secondary text-truncate" style="max-width: 40rem;">@failure.ErrorMessage</div>
+                    </div>
+                    <span class="small text-secondary flex-shrink-0">@FormatLastRun(failure.FinishedAt)</span>
+                </button>
+            }
+        </div>
+    </div>
+}
+
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
         <div class="row g-3 align-items-end">
@@ -97,6 +119,7 @@ else
 
 @code {
     private List<AutomationWorkflowSummary> _workflows = [];
+    private List<AutomationRecentFailureView> _recentFailures = [];
     private bool _loading = true, _busy, _showCreate;
     private string _search = "", _statusFilter = "", _newName = "", _newDescription = "", _error = "";
 
@@ -106,7 +129,11 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        try { _workflows = (await WorkflowService.ListAsync()).ToList(); }
+        try
+        {
+            _workflows = (await WorkflowService.ListAsync()).ToList();
+            _recentFailures = (await WorkflowService.ListRecentFailuresAsync()).ToList();
+        }
         catch (Exception ex) { Logger.LogError(ex, "Unable to load automation workflows."); _error = ex.Message; }
         finally { _loading = false; }
     }

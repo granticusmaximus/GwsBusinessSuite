@@ -2,12 +2,14 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.Operations;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Renci.SshNet;
 
 namespace GwsBusinessSuite.Web.Services;
 
@@ -23,12 +25,26 @@ public sealed class DatabaseBackupOptions
     public string LiveShowRecordingsPath { get; set; } = "/app/data/live-show-recordings";
     public int IntervalHours { get; set; } = 6;
     public int RetentionDays { get; set; } = 30;
+
+    // Offsite copy - deliberately generic (any SFTP-reachable host: a second droplet, a NAS,
+    // a Hetzner/rsync.net storage box) rather than one specific cloud vendor's SDK, so it
+    // works with whatever the operator already has. Left blank (disabled) until an admin
+    // configures a real destination - a local backup on the same disk as the app is still
+    // strictly better than no backup, so this is additive, never a precondition for backups
+    // to run at all.
+    public string OffsiteSftpHost { get; set; } = string.Empty;
+    public int OffsiteSftpPort { get; set; } = 22;
+    public string OffsiteSftpUsername { get; set; } = string.Empty;
+    public string OffsiteSftpPassword { get; set; } = string.Empty;
+    public string OffsiteSftpPrivateKeyPath { get; set; } = string.Empty;
+    public string OffsiteSftpRemoteDirectory { get; set; } = "/backups";
 }
 
 public sealed class DatabaseBackupService(
     IConfiguration configuration,
     IOptions<DatabaseBackupOptions> options,
-    ILogger<DatabaseBackupService> logger)
+    ILogger<DatabaseBackupService> logger,
+    IOperationalAlertService? alerts = null)
 {
     private const string ArchiveExtension = ".gwsbackup";
     private readonly DatabaseBackupOptions _options = options.Value;
@@ -89,6 +105,7 @@ public sealed class DatabaseBackupService(
             finally { if (File.Exists(plaintextArchive)) File.Delete(plaintextArchive); }
             PruneExpiredBackups();
             logger.LogInformation("Created encrypted GWS backup {BackupPath}.", archivePath);
+            await UploadOffsiteAsync(archivePath, cancellationToken);
             return archivePath;
         }
         finally
@@ -266,6 +283,62 @@ public sealed class DatabaseBackupService(
         public string Unprotect(string protectedValue) => _protector.Unprotect(protectedValue);
     }
 
+    // Best-effort: a failed offsite copy must never fail the backup itself - the local,
+    // encrypted, integrity-checked archive this method receives already exists and is what
+    // DatabaseBackupHealthCheck/DiskSpaceHealthCheck reason about. This only adds a second
+    // copy off the same disk; if it fails, an admin gets an operational alert (throttled -
+    // see OperationalAlertService) rather than the scheduled backup itself being marked
+    // Unhealthy over a network hiccup to a remote host.
+    // Trust model: host key verification is intentionally not pinned here (unlike
+    // SshTerminalService's TrustHostKeyAsync flow for the interactive terminal) - the
+    // destination is an admin-configured trusted backup target, not a general-purpose remote
+    // shell, so first-connect trust-on-first-use complexity wasn't worth adding for this path.
+    private async Task UploadOffsiteAsync(string archivePath, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(_options.OffsiteSftpHost)) return;
+
+        try
+        {
+            using var client = BuildSftpClient();
+            await Task.Run(() =>
+            {
+                client.Connect();
+                try
+                {
+                    if (!client.Exists(_options.OffsiteSftpRemoteDirectory))
+                        client.CreateDirectory(_options.OffsiteSftpRemoteDirectory);
+
+                    var remotePath = $"{_options.OffsiteSftpRemoteDirectory.TrimEnd('/')}/{System.IO.Path.GetFileName(archivePath)}";
+                    using var stream = File.OpenRead(archivePath);
+                    client.UploadFile(stream, remotePath, canOverride: true);
+                }
+                finally
+                {
+                    client.Disconnect();
+                }
+            }, cancellationToken);
+            logger.LogInformation("Uploaded backup {BackupPath} to offsite SFTP target.", archivePath);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Offsite SFTP upload failed for backup {BackupPath}.", archivePath);
+            if (alerts is not null)
+                await alerts.NotifyFailureAsync("database-backup-offsite-upload", "The offsite backup upload failed.", ex, cancellationToken);
+        }
+    }
+
+    private SftpClient BuildSftpClient()
+    {
+        if (!string.IsNullOrWhiteSpace(_options.OffsiteSftpPrivateKeyPath))
+        {
+            var keyFile = string.IsNullOrWhiteSpace(_options.OffsiteSftpPassword)
+                ? new PrivateKeyFile(_options.OffsiteSftpPrivateKeyPath)
+                : new PrivateKeyFile(_options.OffsiteSftpPrivateKeyPath, _options.OffsiteSftpPassword);
+            return new SftpClient(_options.OffsiteSftpHost, _options.OffsiteSftpPort, _options.OffsiteSftpUsername, keyFile);
+        }
+        return new SftpClient(_options.OffsiteSftpHost, _options.OffsiteSftpPort, _options.OffsiteSftpUsername, _options.OffsiteSftpPassword);
+    }
+
     private static void CopyDirectory(string source, string destination)
     {
         Directory.CreateDirectory(destination);
@@ -290,6 +363,7 @@ public sealed record BackupVerificationResult(string ArchivePath, DateTimeOffset
 public sealed class DatabaseBackupBackgroundService(
     IServiceScopeFactory scopeFactory,
     IOptions<DatabaseBackupOptions> options,
+    GwsBusinessSuite.Application.Operations.IOperationalAlertService alerts,
     ILogger<DatabaseBackupBackgroundService> logger) : BackgroundService
 {
     private readonly DatabaseBackupOptions _options = options.Value;
@@ -316,6 +390,7 @@ public sealed class DatabaseBackupBackgroundService(
             catch (Exception ex)
             {
                 logger.LogError(ex, "The scheduled Sentinel backup failed.");
+                await alerts.NotifyFailureAsync("database-backup", "The scheduled database backup failed.", ex, stoppingToken);
             }
 
             await Task.Delay(

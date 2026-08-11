@@ -19,6 +19,10 @@ public interface IAutomationWorkflowService
     Task<AutomationWorkflowSnapshot?> GetPublishedSnapshotAsync(Guid workflowId, CancellationToken cancellationToken = default);
     Task<AutomationWorkflowSnapshot?> GetSnapshotByVersionAsync(Guid workflowId, int versionNumber, CancellationToken cancellationToken = default);
     Task<AutomationExecutionView?> GetExecutionAsync(Guid executionId, CancellationToken cancellationToken = default);
+
+    // Failed executions across every workflow, most recent first - an admin currently has no
+    // way to see this without opening each workflow's own Executions tab individually.
+    Task<IReadOnlyList<AutomationRecentFailureView>> ListRecentFailuresAsync(int take = 20, CancellationToken cancellationToken = default);
 }
 
 public interface IAutomationExecutionService

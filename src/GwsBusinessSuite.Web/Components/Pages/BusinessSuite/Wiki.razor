@@ -566,10 +566,33 @@
                     }
 
                     <div class="sentinel-page-heading">
-                        <input class="sentinel-icon-input" @bind="Editor.Icon" placeholder="📄" maxlength="4" aria-label="Page icon" />
+                        <button type="button" class="sentinel-icon-input" @onclick="ToggleIconPicker"
+                                aria-label="Change page icon" title="Change page icon">
+                            @(string.IsNullOrWhiteSpace(Editor.Icon) ? "📄" : Editor.Icon)
+                        </button>
                         <InputTextArea class="sentinel-title-input" @bind-Value="Editor.Title"
                                        rows="1" placeholder="Untitled" aria-label="Page title" />
                     </div>
+
+                    @if (_showIconPicker)
+                    {
+                        <div class="wiki-icon-picker border rounded-3 p-2 mb-3">
+                            <div class="wiki-icon-picker-grid">
+                                @foreach (var emoji in CommonPageIcons)
+                                {
+                                    <button type="button" class="wiki-icon-picker-option" @onclick="() => SelectIcon(emoji)">@emoji</button>
+                                }
+                            </div>
+                            <div class="d-flex align-items-center gap-2 mt-2">
+                                <input class="form-control form-control-sm" style="max-width:8rem;" maxlength="4"
+                                       placeholder="Paste any emoji" value="@_customIconInput"
+                                       @oninput="e => _customIconInput = e.Value?.ToString() ?? string.Empty" />
+                                <button type="button" class="btn btn-sm btn-outline-primary" disabled="@string.IsNullOrWhiteSpace(_customIconInput)"
+                                        @onclick="() => SelectIcon(_customIconInput)">Use</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SelectIcon(string.Empty)">Remove icon</button>
+                            </div>
+                        </div>
+                    }
 
                     <details class="sentinel-page-properties">
                         <summary><i class="bi bi-sliders2"></i><span>Page properties</span><i class="bi bi-chevron-right"></i></summary>
@@ -1509,6 +1532,33 @@
     private List<MediaAssetSummary> _mediaAssets = new();
     private DotNetObjectReference<Wiki>? _wikiLinksRef;
     private bool _wikiLinksInitialized;
+
+    private bool _showIconPicker;
+    private string _customIconInput = string.Empty;
+
+    // A short curated set rather than a full emoji picker library (which would mean a new
+    // CDN dependency and an addition to the CSP script-src allowlist for something this
+    // small) - "Paste any emoji" below covers everything outside this set.
+    private static readonly string[] CommonPageIcons =
+    [
+        "📄", "📝", "📌", "📋", "📚", "📁", "🗂️", "🗃️",
+        "💡", "🎯", "🚀", "⭐", "✅", "⚠️", "🔥", "❤️",
+        "🧠", "🔧", "🛠️", "📊", "📈", "🗓️", "⏰", "🔒",
+        "🌐", "💬", "🎨", "🎬", "🎧", "📷", "🧩", "🏷️"
+    ];
+
+    private void ToggleIconPicker()
+    {
+        _showIconPicker = !_showIconPicker;
+        _customIconInput = string.Empty;
+    }
+
+    private void SelectIcon(string icon)
+    {
+        Editor.Icon = string.IsNullOrWhiteSpace(icon) ? null : icon.Trim();
+        _showIconPicker = false;
+        _customIconInput = string.Empty;
+    }
 
     private async Task ToggleCoverPickerAsync()
     {

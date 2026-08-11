@@ -1,6 +1,7 @@
 @using GwsBusinessSuite.Application.GovernmentIntelligence
 @implements IAsyncDisposable
 @inject IJSRuntime JS
+@inject IFederalCivicFeedService FederalCivicFeed
 
 <div class="floor-status @(Status.InSession ? "in-session" : "recess")">
     <div class="floor-badge">
@@ -30,6 +31,36 @@
             <p>@transcript.Excerpt</p>
             <a href="@transcript.SourceUrl" target="_blank" rel="noopener noreferrer">Open official record (PDF) <i class="bi bi-arrow-up-right"></i></a>
         </div>
+
+        <button type="button" class="transcript-archive-toggle" @onclick="ToggleArchiveAsync">
+            <i class="bi bi-clock-history"></i> @(_showArchive ? "Hide" : "View") transcript archive
+        </button>
+
+        @if (_showArchive)
+        {
+            <div class="transcript-archive">
+                @if (_archiveLoading)
+                {
+                    <p class="text-secondary small mb-0">Loading archive…</p>
+                }
+                else if (_archive.Count == 0)
+                {
+                    <p class="text-secondary small mb-0">No other saved transcripts for @Chamber yet.</p>
+                }
+                else
+                {
+                    <ul>
+                        @foreach (var entry in _archive)
+                        {
+                            <li>
+                                <span>@entry.SessionDate.ToString("MMM d, yyyy")</span>
+                                <a href="@entry.SourceUrl" target="_blank" rel="noopener noreferrer">Official record <i class="bi bi-arrow-up-right"></i></a>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        }
     }
 </div>
 
@@ -39,6 +70,28 @@
 
     private ElementReference _videoRef;
     private string? _attachedUrl;
+    private bool _showArchive;
+    private bool _archiveLoading;
+    private List<CongressionalTranscriptSummary> _archive = [];
+
+    private async Task ToggleArchiveAsync()
+    {
+        _showArchive = !_showArchive;
+        if (!_showArchive || _archive.Count > 0) return;
+
+        _archiveLoading = true;
+        try
+        {
+            var all = await FederalCivicFeed.ListTranscriptArchiveAsync(Chamber);
+            // The latest transcript is already shown above - the archive list is everything
+            // else, so it doesn't just repeat the same entry back to the admin.
+            _archive = all.Where(entry => entry.Id != Status.LatestTranscript?.Id).ToList();
+        }
+        finally
+        {
+            _archiveLoading = false;
+        }
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

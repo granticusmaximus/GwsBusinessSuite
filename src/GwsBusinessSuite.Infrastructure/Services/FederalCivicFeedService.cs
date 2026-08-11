@@ -63,6 +63,24 @@ public sealed class FederalCivicFeedService(
 
     private static readonly FloorStatus EmptyFloorStatus = new(false, string.Empty, null, null);
 
+    public async Task<IReadOnlyList<CongressionalTranscriptSummary>> ListTranscriptArchiveAsync(
+        string? chamber = null, int take = 50, CancellationToken ct = default)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+        var query = db.CongressionalFloorTranscripts.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(chamber)) query = query.Where(t => t.Chamber == chamber);
+
+        // SessionDate is a DateTimeOffset column - see the project-wide SQLite note on why
+        // ORDER BY on one can't be translated server-side; materialize then sort client-side.
+        var rows = await query.ToListAsync(ct);
+        return rows
+            .OrderByDescending(t => t.SessionDate)
+            .Take(Math.Clamp(take, 1, 200))
+            .Select(t => new CongressionalTranscriptSummary(
+                t.Id, t.Chamber, DateOnly.FromDateTime(t.SessionDate.UtcDateTime), t.SourceUrl, t.Excerpt, t.FetchedAt))
+            .ToList();
+    }
+
     public async Task RefreshAsync(CancellationToken ct = default)
     {
         var newsTask = RefreshNewsAsync(ct);

@@ -1,4 +1,5 @@
 using GwsBusinessSuite.Application.GovernmentIntelligence;
+using GwsBusinessSuite.Application.Operations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -13,6 +14,7 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 // transcript archive upsert) that the read-only snapshot refresh doesn't need to wait on.
 public sealed class FederalCivicRefreshBackgroundService(
     IServiceScopeFactory scopeFactory,
+    IOperationalAlertService alerts,
     ILogger<FederalCivicRefreshBackgroundService> logger) : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromHours(1);
@@ -51,6 +53,7 @@ public sealed class FederalCivicRefreshBackgroundService(
         catch (Exception ex)
         {
             logger.LogError(ex, "Federal Civic Feed: refresh failed");
+            await alerts.NotifyFailureAsync("federal-civic-feed-refresh", "The Federal Civic Feed hourly refresh failed.", ex, ct);
         }
         finally
         {

@@ -11,8 +11,21 @@
 
 <div class="page-header">
     <h1><i class="bi bi-people-fill me-2 text-primary"></i>CRM</h1>
-    <p>Track leads and contacts with local SQLite persistence.</p>
+    <p>Track leads, contacts, and deals with local SQLite persistence.</p>
 </div>
+
+<ul class="nav nav-pills mb-4">
+    <li class="nav-item">
+        <button type="button" class="nav-link @(ActiveTab == "Contacts" ? "active" : string.Empty)" @onclick='() => SwitchTabAsync("Contacts")'>
+            <i class="bi bi-person-lines-fill me-1"></i>Contacts
+        </button>
+    </li>
+    <li class="nav-item">
+        <button type="button" class="nav-link @(ActiveTab == "Pipeline" ? "active" : string.Empty)" @onclick='() => SwitchTabAsync("Pipeline")'>
+            <i class="bi bi-kanban-fill me-1"></i>Pipeline@(Deals.Count > 0 ? $" ({Deals.Count})" : "")
+        </button>
+    </li>
+</ul>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
@@ -49,6 +62,8 @@
     </div>
 }
 
+@if (ActiveTab == "Contacts")
+{
 <div class="row g-4">
     <div class="col-lg-4">
         <div class="card border-0 shadow-sm h-100">
@@ -238,6 +253,129 @@
         }
     </div>
 </div>
+}
+
+@if (ActiveTab == "Pipeline")
+{
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
+            <span class="fw-semibold">@(EditingDealId.HasValue ? "Edit Deal" : "New Deal")</span>
+        </div>
+        <div class="card-body">
+            <EditForm Model="DealEditor" OnValidSubmit="SaveDealAsync">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold small">Contact</label>
+                        <InputSelect class="form-select" @bind-Value="DealEditor.ContactId">
+                            <option value="@Guid.Empty">Select a contact...</option>
+                            @foreach (var contact in Contacts)
+                            {
+                                <option value="@contact.Id">@contact.FullName</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold small">Title</label>
+                        <InputText class="form-control" @bind-Value="DealEditor.Title" placeholder="e.g. Annual support renewal" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold small">Stage</label>
+                        <InputSelect class="form-select" @bind-Value="DealEditor.Stage">
+                            @foreach (var option in DealStages.All)
+                            {
+                                <option value="@option">@option</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold small">Value (USD)</label>
+                        <InputNumber class="form-control" @bind-Value="DealEditor.ValueUsd" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold small">Expected Close Date <span class="text-muted">(optional)</span></label>
+                        <InputDate class="form-control" @bind-Value="DealEditor.ExpectedCloseDate" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold small">Notes</label>
+                        <InputText class="form-control" @bind-Value="DealEditor.Notes" placeholder="Optional" />
+                    </div>
+                </div>
+                <div class="mt-3 d-flex flex-wrap gap-2">
+                    <button type="submit" class="btn btn-primary" disabled="@(IsBusy || Contacts.Count == 0)">
+                        <i class="bi bi-floppy-fill me-1"></i>Save Deal
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CreateNewDeal" disabled="@IsBusy">Reset</button>
+                </div>
+                @if (Contacts.Count == 0)
+                {
+                    <div class="form-text text-warning mt-2">Add a contact first - every deal needs one.</div>
+                }
+            </EditForm>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        @foreach (var stage in DealStages.Open)
+        {
+            <div class="col-lg-3">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-header bg-white border-bottom py-2 fw-semibold small text-uppercase">
+                        @stage <span class="text-secondary">(@DealsByStage(stage).Count)</span>
+                    </div>
+                    <div class="card-body p-2 d-flex flex-column gap-2">
+                        @foreach (var deal in DealsByStage(stage))
+                        {
+                            <div class="border rounded p-2">
+                                <div class="fw-semibold small">@deal.Title</div>
+                                <div class="small text-secondary">@deal.ContactName</div>
+                                <div class="small">@deal.ValueUsd.ToString("C0")</div>
+                                <div class="d-flex align-items-center gap-1 mt-2">
+                                    <select class="form-select form-select-sm" value="@deal.Stage" @onchange="e => MoveDealStageAsync(deal.Id, e.Value?.ToString() ?? deal.Stage)" disabled="@IsBusy">
+                                        @foreach (var option in DealStages.All)
+                                        {
+                                            <option value="@option">@option</option>
+                                        }
+                                    </select>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" title="Edit" @onclick="() => EditDeal(deal)" disabled="@IsBusy">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" title="Delete" @onclick="() => DeleteDealAsync(deal.Id)" disabled="@IsBusy">
+                                        <i class="bi bi-trash3"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        }
+                        @if (DealsByStage(stage).Count == 0)
+                        {
+                            <p class="text-secondary small mb-0">No deals.</p>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+
+    @if (ClosedDeals.Count > 0)
+    {
+        <div class="card border-0 shadow-sm mt-3">
+            <div class="card-header bg-white border-bottom py-2 fw-semibold small text-uppercase">Closed (@ClosedDeals.Count)</div>
+            <div class="list-group list-group-flush">
+                @foreach (var deal in ClosedDeals)
+                {
+                    <div class="list-group-item d-flex justify-content-between align-items-center gap-2">
+                        <div>
+                            <span class="fw-semibold">@deal.Title</span>
+                            <span class="text-secondary"> &mdash; @deal.ContactName &mdash; @deal.ValueUsd.ToString("C0")</span>
+                        </div>
+                        <span class="badge @(deal.Stage == DealStages.Won ? "text-bg-success" : "text-bg-secondary")">@deal.Stage</span>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+}
 
 @code {
     private List<Contact> Contacts { get; set; } = new();
@@ -253,8 +391,134 @@
     private string SearchText { get; set; } = string.Empty;
     private string StatusFilter { get; set; } = "All";
     private string NewActivityNote { get; set; } = string.Empty;
+    private string ActiveTab { get; set; } = "Contacts";
+    private List<DealView> Deals { get; set; } = new();
+    private DealEditorModel DealEditor { get; set; } = new();
+    private Guid? EditingDealId { get; set; }
 
     private string EditorHeader => SelectedContactId.HasValue ? "Edit Contact" : "Create Contact";
+
+    private async Task SwitchTabAsync(string tab)
+    {
+        ActiveTab = tab;
+        if (tab == "Pipeline")
+        {
+            await LoadDealsAsync();
+        }
+    }
+
+    private List<DealView> DealsByStage(string stage) => Deals.Where(deal => deal.Stage == stage).ToList();
+
+    private List<DealView> ClosedDeals => Deals.Where(deal => deal.Stage is DealStages.Won or DealStages.Lost).ToList();
+
+    private async Task LoadDealsAsync()
+    {
+        try
+        {
+            Deals = (await CrmService.ListDealsAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load CRM deals.");
+            ErrorMessage = $"Unable to load deals. {ex.Message}";
+        }
+    }
+
+    private void CreateNewDeal()
+    {
+        EditingDealId = null;
+        DealEditor = new DealEditorModel { ContactId = Contacts.FirstOrDefault()?.Id ?? Guid.Empty };
+        ErrorMessage = string.Empty;
+    }
+
+    private void EditDeal(DealView deal)
+    {
+        EditingDealId = deal.Id;
+        DealEditor = new DealEditorModel
+        {
+            DealId = deal.Id,
+            ContactId = deal.ContactId,
+            Title = deal.Title,
+            Stage = deal.Stage,
+            ValueUsd = deal.ValueUsd,
+            ExpectedCloseDate = deal.ExpectedCloseDate,
+            Notes = deal.Notes
+        };
+        ErrorMessage = string.Empty;
+    }
+
+    private async Task SaveDealAsync()
+    {
+        if (IsBusy || DealEditor.ContactId == Guid.Empty) return;
+
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        try
+        {
+            var saved = await CrmService.SaveDealAsync(DealEditor);
+            StatusMessage = $"Saved deal '{saved.Title}'.";
+            CreateNewDeal();
+            await LoadDealsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to save CRM deal.");
+            ErrorMessage = $"Unable to save deal. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task MoveDealStageAsync(Guid dealId, string stage)
+    {
+        if (IsBusy) return;
+
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            await CrmService.SetDealStageAsync(dealId, stage);
+            await LoadDealsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to move CRM deal {DealId} to stage {Stage}.", dealId, stage);
+            ErrorMessage = $"Unable to update the deal's stage. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task DeleteDealAsync(Guid dealId)
+    {
+        if (IsBusy) return;
+
+        var confirmed = await JS.InvokeAsync<bool>("confirm", "Delete this deal? This cannot be undone.");
+        if (!confirmed) return;
+
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            await CrmService.DeleteDealAsync(dealId);
+            StatusMessage = "Deleted the deal.";
+            await LoadDealsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to delete CRM deal {DealId}.", dealId);
+            ErrorMessage = $"Unable to delete deal. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
 
     private void OnStatusFilterChange(ChangeEventArgs e) => StatusFilter = e.Value?.ToString() ?? "All";
 
@@ -283,6 +547,7 @@
     protected override async Task OnInitializedAsync()
     {
         await LoadDashboardAsync();
+        CreateNewDeal();
     }
 
     private async Task LoadDashboardAsync()
@@ -292,6 +557,7 @@
             var dashboard = await CrmService.GetDashboardAsync();
             Contacts = dashboard.Contacts.ToList();
             DueFollowUps = dashboard.DueFollowUps.ToList();
+            Deals = dashboard.OpenDeals.ToList();
         }
         catch (Exception ex)
         {

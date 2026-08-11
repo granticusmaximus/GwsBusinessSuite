@@ -71,6 +71,17 @@ public sealed record AutomationCredentialSummary(
     DateTimeOffset? LastUsedAt,
     DateTimeOffset UpdatedAt);
 
+// Denormalizes the workflow name so the cross-workflow failures panel doesn't need a second
+// round trip per row - an admin scanning this list wants to know which workflow broke, not
+// just an execution GUID they'd have to look up separately.
+public sealed record AutomationRecentFailureView(
+    Guid ExecutionId,
+    Guid WorkflowId,
+    string WorkflowName,
+    string Mode,
+    string ErrorMessage,
+    DateTimeOffset? FinishedAt);
+
 public sealed record AutomationExecutionView(
     Guid Id,
     Guid WorkflowId,

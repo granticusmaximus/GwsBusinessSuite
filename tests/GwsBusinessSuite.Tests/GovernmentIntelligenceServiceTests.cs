@@ -486,6 +486,10 @@ public sealed class GovernmentIntelligenceServiceTests
         public IReadOnlyList<FederalNewsItem> GetCachedHouseNewsOrEmpty() => [];
         public FloorStatus GetCachedSenateFloorOrEmpty() => Empty;
         public FloorStatus GetCachedHouseFloorOrEmpty() => Empty;
+
+        public Task<IReadOnlyList<CongressionalTranscriptSummary>> ListTranscriptArchiveAsync(
+            string? chamber = null, int take = 50, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<CongressionalTranscriptSummary>>([]);
     }
 
     // Ollama is unavailable in tests - EnrichWithAiOverviewAsync treats an empty response

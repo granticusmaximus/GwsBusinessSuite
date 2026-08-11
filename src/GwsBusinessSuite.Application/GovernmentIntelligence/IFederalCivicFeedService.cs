@@ -13,4 +13,12 @@ public interface IFederalCivicFeedService
     IReadOnlyList<FederalNewsItem> GetCachedHouseNewsOrEmpty();
     FloorStatus GetCachedSenateFloorOrEmpty();
     FloorStatus GetCachedHouseFloorOrEmpty();
+
+    // The archive/detail view CongressionalTranscriptSummary's own doc comment refers to -
+    // FloorStatus.LatestTranscript only ever surfaces the single newest transcript per
+    // chamber, so this is the only way to see everything RefreshAsync has archived over time.
+    // Not cache-backed like the other reads here since it's a real DB query hit only when an
+    // admin opens the archive view, not on every 15-minute snapshot cycle.
+    Task<IReadOnlyList<CongressionalTranscriptSummary>> ListTranscriptArchiveAsync(
+        string? chamber = null, int take = 50, CancellationToken ct = default);
 }

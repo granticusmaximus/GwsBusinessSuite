@@ -32,8 +32,22 @@ public interface ICrmService
     Task<IReadOnlyList<Contact>> ListDueFollowUpsAsync(CancellationToken cancellationToken = default);
 
     Task<int> CountDueFollowUpsAsync(CancellationToken cancellationToken = default);
+
+    // All deals, newest first - the pipeline board groups these client-side by Stage.
+    Task<IReadOnlyList<DealView>> ListDealsAsync(CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<DealView>> ListDealsForContactAsync(Guid contactId, CancellationToken cancellationToken = default);
+
+    Task<DealView> SaveDealAsync(DealEditorModel editor, CancellationToken cancellationToken = default);
+
+    // Moving into Won/Lost stamps ClosedAt; moving back out of them (a re-opened deal)
+    // clears it again.
+    Task<DealView> SetDealStageAsync(Guid dealId, string stage, CancellationToken cancellationToken = default);
+
+    Task DeleteDealAsync(Guid dealId, CancellationToken cancellationToken = default);
 }
 
 public sealed record CrmDashboardData(
     IReadOnlyList<Contact> Contacts,
-    IReadOnlyList<Contact> DueFollowUps);
+    IReadOnlyList<Contact> DueFollowUps,
+    IReadOnlyList<DealView> OpenDeals);

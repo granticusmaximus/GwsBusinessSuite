@@ -1,4 +1,5 @@
 using GwsBusinessSuite.Application.Automation;
+using GwsBusinessSuite.Application.Operations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -8,6 +9,7 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 public sealed class AutomationScheduleBackgroundService(
     IServiceScopeFactory scopeFactory,
     OllamaWorkloadScheduler ollamaWorkloads,
+    IOperationalAlertService alerts,
     ILogger<AutomationScheduleBackgroundService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -24,7 +26,11 @@ public sealed class AutomationScheduleBackgroundService(
                 if (count > 0) logger.LogInformation("Started {Count} scheduled automation workflow(s).", count);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
-            catch (Exception ex) { logger.LogError(ex, "Automation schedule sweep failed."); }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Automation schedule sweep failed.");
+                await alerts.NotifyFailureAsync("automation-schedule-sweep", "The automation schedule sweep failed.", ex, stoppingToken);
+            }
         }
     }
 }

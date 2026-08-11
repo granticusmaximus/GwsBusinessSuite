@@ -102,6 +102,38 @@ public sealed class ContactActivity : AuditableEntity
     public required string Note { get; set; }
 }
 
+public static class DealStages
+{
+    public const string Lead = "Lead";
+    public const string Qualified = "Qualified";
+    public const string ProposalSent = "ProposalSent";
+    public const string Negotiation = "Negotiation";
+    public const string Won = "Won";
+    public const string Lost = "Lost";
+
+    public static readonly string[] All = [Lead, Qualified, ProposalSent, Negotiation, Won, Lost];
+
+    // Won/Lost are terminal - the pipeline board groups everything else as "open".
+    public static readonly string[] Open = [Lead, Qualified, ProposalSent, Negotiation];
+}
+
+// A sales opportunity tied to a Contact - separate from ContactActivity (a free-text note
+// log) because a deal needs its own lifecycle (stage, value, close date) that a contact can
+// have several of over time (e.g. a repeat customer with one Won deal and one open Lead).
+public sealed class Deal : AuditableEntity
+{
+    public Guid ContactId { get; set; }
+    public required string Title { get; set; }
+    public string Stage { get; set; } = DealStages.Lead;
+    public decimal ValueUsd { get; set; }
+    public DateTimeOffset? ExpectedCloseDate { get; set; }
+    // Set when Stage first becomes Won or Lost - lets the pipeline distinguish "closed
+    // yesterday" from "closed six months ago" without re-deriving it from UpdatedAt (which
+    // also changes for unrelated edits, e.g. fixing a typo in Notes long after closing).
+    public DateTimeOffset? ClosedAt { get; set; }
+    public string Notes { get; set; } = string.Empty;
+}
+
 public sealed class WikiPage : AuditableEntity
 {
     public required string Title { get; set; }

@@ -8,6 +8,7 @@ public interface IAppDbContext : IAsyncDisposable
 {
     DbSet<Contact> Contacts { get; }
     DbSet<ContactActivity> ContactActivities { get; }
+    DbSet<Deal> Deals { get; }
     DbSet<WikiPage> WikiPages { get; }
     DbSet<WikiPageRevision> WikiPageRevisions { get; }
     DbSet<SentinelPageTemplate> SentinelPageTemplates { get; }

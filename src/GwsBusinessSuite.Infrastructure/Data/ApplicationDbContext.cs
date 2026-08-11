@@ -26,6 +26,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
 
     public DbSet<Contact> Contacts => Set<Contact>();
     public DbSet<ContactActivity> ContactActivities => Set<ContactActivity>();
+    public DbSet<Deal> Deals => Set<Deal>();
     public DbSet<WikiPage> WikiPages => Set<WikiPage>();
     public DbSet<WikiPageRevision> WikiPageRevisions => Set<WikiPageRevision>();
     public DbSet<SentinelPageTemplate> SentinelPageTemplates => Set<SentinelPageTemplate>();
@@ -122,12 +123,28 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     {
         modelBuilder.Entity<Contact>().HasIndex(x => x.Status);
         modelBuilder.Entity<Contact>().HasIndex(x => x.TrashedAt);
+        // CrmService.GetDashboardAsync/ListDueFollowUpsAsync both filter on this - see the
+        // materialize-then-filter comments there for why the index doesn't remove that step
+        // (SQLite/EF Core can't translate a DateTimeOffset range comparison), but it still
+        // speeds up TrashedAt == null lookups the query planner can combine it with.
+        modelBuilder.Entity<Contact>().HasIndex(x => x.FollowUpDate);
         modelBuilder.Entity<ContactActivity>()
             .HasOne<Contact>()
             .WithMany()
             .HasForeignKey(x => x.ContactId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<ContactActivity>().HasIndex(x => new { x.ContactId, x.CreatedAt });
+
+        modelBuilder.Entity<Deal>()
+            .HasOne<Contact>()
+            .WithMany()
+            .HasForeignKey(x => x.ContactId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<Deal>().HasIndex(x => x.ContactId);
+        modelBuilder.Entity<Deal>().HasIndex(x => x.Stage);
+
+        modelBuilder.Entity<MediaAsset>().HasIndex(x => x.CreatedAt);
+        modelBuilder.Entity<WatchedTopic>().HasIndex(x => x.IsActive);
 
         modelBuilder.Entity<WikiPage>().HasIndex(x => x.Slug).IsUnique();
         modelBuilder.Entity<WikiPage>().HasIndex(x => x.NotionExportId).IsUnique();

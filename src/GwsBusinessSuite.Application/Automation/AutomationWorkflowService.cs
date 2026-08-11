@@ -2,15 +2,30 @@ using System.Text.Json;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace GwsBusinessSuite.Application.Automation;
 
 public sealed class AutomationWorkflowService(
     IAppDbContext db,
     IAutomationNodeRegistry nodeRegistry,
-    TimeProvider timeProvider) : IAutomationWorkflowService
+    TimeProvider timeProvider,
+    IMemoryCache? cache = null) : IAutomationWorkflowService
 {
     private static readonly JsonSerializerOptions SnapshotJsonOptions = new(JsonSerializerDefaults.Web);
+    // Falls back to a private, per-instance cache when constructed without DI - existing
+    // tests new this up directly with just the first three dependencies, same
+    // optional-dependency pattern as CrmService's own IMemoryCache fallback.
+    private readonly IMemoryCache _cache = cache ?? new MemoryCache(new MemoryCacheOptions());
+
+    // A published version's SnapshotJson is immutable once written (a re-publish creates a new
+    // version number), so caching by (workflowId, versionNumber) is safe indefinitely. This
+    // matters most for AutomationTriggerService.ResumeDueWaitsAsync, which calls ResumeAsync (and
+    // therefore this lookup) once per due execution in a sweep - executions from the same
+    // workflow/version otherwise re-fetch and re-deserialize the identical snapshot on every
+    // iteration.
+    private static string SnapshotCacheKey(Guid workflowId, int versionNumber) =>
+        $"automation-workflow-snapshot:{workflowId:N}:{versionNumber}";
 
     public async Task<IReadOnlyList<AutomationWorkflowSummary>> ListAsync(CancellationToken cancellationToken = default)
     {
@@ -374,11 +389,16 @@ public sealed class AutomationWorkflowService(
 
     public async Task<AutomationWorkflowSnapshot?> GetSnapshotByVersionAsync(Guid workflowId, int versionNumber, CancellationToken cancellationToken = default)
     {
+        var cacheKey = SnapshotCacheKey(workflowId, versionNumber);
+        if (_cache.TryGetValue(cacheKey, out AutomationWorkflowSnapshot? cached)) return cached;
+
         var version = await db.AutomationWorkflowVersions.AsNoTracking()
             .FirstOrDefaultAsync(item => item.WorkflowId == workflowId && item.VersionNumber == versionNumber, cancellationToken);
-        return version is null
+        var snapshot = version is null
             ? null
             : JsonSerializer.Deserialize<AutomationWorkflowSnapshot>(version.SnapshotJson, SnapshotJsonOptions);
+        if (snapshot is not null) _cache.Set(cacheKey, snapshot, TimeSpan.FromHours(1));
+        return snapshot;
     }
 
     public async Task<AutomationExecutionView?> GetExecutionAsync(Guid executionId, CancellationToken cancellationToken = default)
@@ -387,6 +407,35 @@ public sealed class AutomationWorkflowService(
             .Include(item => item.NodeExecutions)
             .FirstOrDefaultAsync(item => item.Id == executionId, cancellationToken);
         return execution is null ? null : ToExecutionView(execution);
+    }
+
+    public async Task<IReadOnlyList<AutomationRecentFailureView>> ListRecentFailuresAsync(
+        int take = 20, CancellationToken cancellationToken = default)
+    {
+        // FinishedAtUnixSeconds (a plain long) is server-orderable, unlike the DateTimeOffset
+        // FinishedAt column it mirrors - see the project-wide SQLite/DateTimeOffset note.
+        var failures = await db.AutomationExecutions.AsNoTracking()
+            .Where(execution => execution.Status == AutomationExecutionStatuses.Failed)
+            .OrderByDescending(execution => execution.FinishedAtUnixSeconds)
+            .Take(Math.Clamp(take, 1, 100))
+            .Select(execution => new { execution.Id, execution.WorkflowId, execution.Mode, execution.ErrorMessage, execution.FinishedAt })
+            .ToListAsync(cancellationToken);
+        if (failures.Count == 0) return [];
+
+        var workflowNames = await db.AutomationWorkflows.AsNoTracking()
+            .Where(workflow => failures.Select(f => f.WorkflowId).Contains(workflow.Id))
+            .Select(workflow => new { workflow.Id, workflow.Name })
+            .ToDictionaryAsync(workflow => workflow.Id, workflow => workflow.Name, cancellationToken);
+
+        return failures
+            .Select(failure => new AutomationRecentFailureView(
+                failure.Id,
+                failure.WorkflowId,
+                workflowNames.GetValueOrDefault(failure.WorkflowId, "(deleted workflow)"),
+                failure.Mode,
+                failure.ErrorMessage,
+                failure.FinishedAt))
+            .ToList();
     }
 
     private async Task<AutomationWorkflow> GetWorkflowAsync(Guid id, CancellationToken cancellationToken) =>

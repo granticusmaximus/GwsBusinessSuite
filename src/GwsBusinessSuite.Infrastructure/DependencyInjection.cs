@@ -167,6 +167,10 @@ public static class DependencyInjection
         services.AddScoped<ISecurityAuditService, SecurityAuditService>();
         services.AddScoped<IPrivacyOperationsService, PrivacyOperationsService>();
         services.AddHostedService<PrivacyRetentionPurgeBackgroundService>();
+        services.AddOptions<OperationalDataRetentionOptions>()
+            .Bind(configuration.GetSection(OperationalDataRetentionOptions.SectionName));
+        services.AddScoped<GwsBusinessSuite.Application.Operations.IOperationalDataRetentionService, OperationalDataRetentionService>();
+        services.AddHostedService<OperationalDataRetentionBackgroundService>();
         services.AddScoped<IResumePdfService, ResumePdfService>();
         services.AddScoped<IAffiliateSuggestionService, AffiliateSuggestionService>();
         services.AddScoped<IAffiliateAnalyticsService, AffiliateAnalyticsService>();
@@ -175,6 +179,9 @@ public static class DependencyInjection
         services.AddOptions<GrowthReportEmailOptions>()
             .Bind(configuration.GetSection(GrowthReportEmailOptions.SectionName));
         services.AddSingleton<IGrowthReportEmailSender, GrowthReportEmailSender>();
+        services.AddOptions<OperationalAlertOptions>()
+            .Bind(configuration.GetSection(OperationalAlertOptions.SectionName));
+        services.AddSingleton<GwsBusinessSuite.Application.Operations.IOperationalAlertService, OperationalAlertService>();
         services.AddScoped<IGrowthReportService, GrowthReportService>();
         services.AddHostedService<GrowthReportBackgroundService>();
         services.AddHttpClient<ISocialPublishingService, SocialPublishingService>(client =>

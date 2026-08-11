@@ -2763,10 +2763,25 @@ audio.wiki-embed-media { max-width: 100%; }
     background: var(--sentinel-canvas);
     font-size: 2rem;
     text-align: center;
+    line-height: 1;
+    cursor: pointer;
 }
 
 .sentinel-icon-input:hover,
 .sentinel-icon-input:focus { background: var(--sentinel-hover); }
+
+.wiki-icon-picker-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: .25rem; }
+.wiki-icon-picker-option {
+    border: 0;
+    background: transparent;
+    border-radius: 6px;
+    font-size: 1.35rem;
+    line-height: 1;
+    padding: .35rem;
+    cursor: pointer;
+}
+.wiki-icon-picker-option:hover,
+.wiki-icon-picker-option:focus { background: var(--sentinel-hover); }
 
 .sentinel-title-input {
     width: 100%;

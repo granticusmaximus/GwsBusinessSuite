@@ -14,3 +14,11 @@
 .transcript-head em { font-style: normal; font-weight: 600; }
 .floor-transcript p { margin: .5rem 0; color: var(--civic-ink); font-size: .74rem; line-height: 1.55; }
 .floor-transcript a { color: var(--civic-accent-strong); font-size: .68rem; font-weight: 750; text-decoration: none; }
+
+.transcript-archive-toggle { align-self: flex-start; border: 0; background: none; padding: 0; color: var(--civic-accent-strong); font-size: .68rem; font-weight: 750; cursor: pointer; }
+.transcript-archive-toggle:hover { text-decoration: underline; }
+
+.transcript-archive { padding: .65rem .85rem; border: 1px dashed var(--civic-line); border-radius: .7rem; }
+.transcript-archive ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .4rem; }
+.transcript-archive li { display: flex; align-items: center; justify-content: space-between; gap: .5rem; font-size: .7rem; color: var(--civic-muted); }
+.transcript-archive li a { color: var(--civic-accent-strong); font-weight: 650; text-decoration: none; }

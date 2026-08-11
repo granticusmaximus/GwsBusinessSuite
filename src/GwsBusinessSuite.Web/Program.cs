@@ -182,6 +182,9 @@ builder.Services.AddHealthChecks()
         tags: ["ready"])
     .AddCheck<GwsBusinessSuite.Web.HealthChecks.SecurityAuditHealthCheck>(
         "security-audit",
+        tags: ["ready"])
+    .AddCheck<GwsBusinessSuite.Web.HealthChecks.DiskSpaceHealthCheck>(
+        "disk-space",
         tags: ["ready"]);
 
 // HeaderName enables validating JSON API requests (which can't carry a hidden form
@@ -409,6 +412,46 @@ forwardedHeadersOptions.KnownIPNetworks.Add(System.Net.IPNetwork.Parse("172.16.0
 forwardedHeadersOptions.KnownProxies.Add(System.Net.IPAddress.Loopback);
 forwardedHeadersOptions.KnownProxies.Add(System.Net.IPAddress.IPv6Loopback);
 app.UseForwardedHeaders(forwardedHeadersOptions);
+
+// Response-header hardening - added wholesale rather than per-endpoint since this app has
+// no public API consumers that need cross-origin embedding or inline script injection.
+// The CSP allowlist below is deliberately built from every third-party origin actually
+// referenced in Components/App.razor and wwwroot/js (jsDelivr for vendored libs, Google
+// Fonts, OpenStreetMap tiles/geocoding, and the House Clerk's HLS video proxy for Civic
+// Watch's floor-video feature) rather than a generic 'self'-only policy, which would have
+// silently broken all of those. style-src needs 'unsafe-inline' because several pages bind
+// the style="" attribute directly from C# (e.g. BreakdownTable.razor, Growth.razor) - that's
+// a materially different risk than allowing inline <script>, which stays disallowed.
+// OnStarting (not a direct header set) so this still applies to redirects, static files, and
+// error pages, not just MVC/Razor responses.
+app.Use(async (context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        var headers = context.Response.Headers;
+        headers["X-Content-Type-Options"] = "nosniff";
+        headers["X-Frame-Options"] = "SAMEORIGIN";
+        headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+        headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=(), payment=()";
+        headers["Content-Security-Policy"] = string.Join(' ', [
+            "default-src 'self';",
+            "script-src 'self' https://cdn.jsdelivr.net;",
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com;",
+            "img-src 'self' data: https:;",
+            "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net;",
+            "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net;",
+            "media-src 'self' blob: https:;",
+            "worker-src 'self' blob:;",
+            "frame-src 'self';",
+            "frame-ancestors 'self';",
+            "object-src 'none';",
+            "base-uri 'self';",
+            "form-action 'self';"
+        ]);
+        return Task.CompletedTask;
+    });
+    await next(context);
+});
 
 if (!app.Environment.IsDevelopment())
 {
