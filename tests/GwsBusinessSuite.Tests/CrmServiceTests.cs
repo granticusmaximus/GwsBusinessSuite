@@ -240,6 +240,154 @@ public sealed class CrmServiceTests
         dashboard.DueFollowUps.Should().ContainSingle(contact => contact.Id == due.Id);
     }
 
+    [Fact]
+    public async Task SaveDealAsync_ShouldCreateAndUpdateDeals_DenormalizingTheContactName()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CrmService(db, new FixedCurrentUserAccessor("grantwatson"));
+        var contact = await service.SaveContactAsync(new ContactEditorModel { FullName = "Grace Hill" });
+
+        var created = await service.SaveDealAsync(new DealEditorModel
+        {
+            ContactId = contact.Id, Title = "Website revamp", Stage = DealStages.Lead, ValueUsd = 5000m
+        });
+
+        created.ContactName.Should().Be("Grace Hill");
+        created.Stage.Should().Be(DealStages.Lead);
+        created.ValueUsd.Should().Be(5000m);
+        created.ClosedAt.Should().BeNull();
+
+        var updated = await service.SaveDealAsync(new DealEditorModel
+        {
+            DealId = created.Id, ContactId = contact.Id, Title = "Website revamp v2", Stage = DealStages.Qualified, ValueUsd = 7500m
+        });
+
+        updated.Id.Should().Be(created.Id);
+        updated.Title.Should().Be("Website revamp v2");
+        updated.Stage.Should().Be(DealStages.Qualified);
+        updated.ValueUsd.Should().Be(7500m);
+        (await service.ListDealsAsync()).Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task SaveDealAsync_ShouldThrow_WhenTheContactDoesNotExist()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CrmService(db);
+
+        var act = () => service.SaveDealAsync(new DealEditorModel { ContactId = Guid.NewGuid(), Title = "Ghost deal" });
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task SaveDealAsync_ShouldStampClosedAt_WhenStageIsWonOrLost_AndClearIt_WhenReopened()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CrmService(db);
+        var contact = await service.SaveContactAsync(new ContactEditorModel { FullName = "Won Deal Contact" });
+        var deal = await service.SaveDealAsync(new DealEditorModel { ContactId = contact.Id, Title = "Deal", Stage = DealStages.Lead });
+
+        var won = await service.SaveDealAsync(new DealEditorModel { DealId = deal.Id, ContactId = contact.Id, Title = "Deal", Stage = DealStages.Won });
+        won.ClosedAt.Should().NotBeNull();
+
+        var reopened = await service.SaveDealAsync(new DealEditorModel { DealId = deal.Id, ContactId = contact.Id, Title = "Deal", Stage = DealStages.Negotiation });
+        reopened.ClosedAt.Should().BeNull("moving a deal back to an open stage must clear its closed timestamp");
+    }
+
+    [Fact]
+    public async Task SetDealStageAsync_ShouldMoveTheDeal_AndStampOrClearClosedAt()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CrmService(db);
+        var contact = await service.SaveContactAsync(new ContactEditorModel { FullName = "Stage Move Contact" });
+        var deal = await service.SaveDealAsync(new DealEditorModel { ContactId = contact.Id, Title = "Deal", Stage = DealStages.Lead });
+
+        var lost = await service.SetDealStageAsync(deal.Id, DealStages.Lost);
+        lost.Stage.Should().Be(DealStages.Lost);
+        lost.ClosedAt.Should().NotBeNull();
+
+        var backToLead = await service.SetDealStageAsync(deal.Id, DealStages.Lead);
+        backToLead.ClosedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SetDealStageAsync_ShouldThrow_ForAnUnrecognizedStage()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CrmService(db);
+        var contact = await service.SaveContactAsync(new ContactEditorModel { FullName = "Bad Stage Contact" });
+        var deal = await service.SaveDealAsync(new DealEditorModel { ContactId = contact.Id, Title = "Deal" });
+
+        var act = () => service.SetDealStageAsync(deal.Id, "NotARealStage");
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task DeleteDealAsync_ShouldRemoveTheDeal_AndBeANoOpForAnUnknownId()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CrmService(db);
+        var contact = await service.SaveContactAsync(new ContactEditorModel { FullName = "Delete Deal Contact" });
+        var deal = await service.SaveDealAsync(new DealEditorModel { ContactId = contact.Id, Title = "Deal" });
+
+        await service.DeleteDealAsync(deal.Id);
+
+        (await service.ListDealsAsync()).Should().BeEmpty();
+        var act = () => service.DeleteDealAsync(Guid.NewGuid());
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task ListDealsForContactAsync_ShouldOnlyReturnThatContactsDeals()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CrmService(db);
+        var contactA = await service.SaveContactAsync(new ContactEditorModel { FullName = "Contact A" });
+        var contactB = await service.SaveContactAsync(new ContactEditorModel { FullName = "Contact B" });
+        var dealA = await service.SaveDealAsync(new DealEditorModel { ContactId = contactA.Id, Title = "A's deal" });
+        await service.SaveDealAsync(new DealEditorModel { ContactId = contactB.Id, Title = "B's deal" });
+
+        var dealsForA = await service.ListDealsForContactAsync(contactA.Id);
+
+        dealsForA.Should().ContainSingle(d => d.Id == dealA.Id);
+    }
+
+    [Fact]
+    public async Task GetDashboardAsync_ShouldOnlyIncludeOpenDeals()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CrmService(db);
+        var contact = await service.SaveContactAsync(new ContactEditorModel { FullName = "Dashboard Deal Contact" });
+        var openDeal = await service.SaveDealAsync(new DealEditorModel { ContactId = contact.Id, Title = "Open deal", Stage = DealStages.Qualified });
+        await service.SaveDealAsync(new DealEditorModel { ContactId = contact.Id, Title = "Won deal", Stage = DealStages.Won });
+
+        var dashboard = await service.GetDashboardAsync();
+
+        dashboard.OpenDeals.Should().ContainSingle(d => d.Id == openDeal.Id);
+    }
+
+    [Fact]
+    public async Task GetDashboardAsync_ShouldReflectWritesImmediately_DespiteTheShortLivedCache()
+    {
+        // Regression guard: GetDashboardAsync caches its snapshot for 30 seconds - every
+        // mutating CrmService method must explicitly invalidate that cache, or the pipeline
+        // board/dashboard would show stale data for up to 30 seconds after a real edit.
+        await using var db = await CreateDbAsync();
+        var service = new CrmService(db);
+        var contact = await service.SaveContactAsync(new ContactEditorModel { FullName = "Cache Contact" });
+        await service.GetDashboardAsync();
+
+        await service.SaveDealAsync(new DealEditorModel { ContactId = contact.Id, Title = "Fresh deal", Stage = DealStages.Lead });
+        var afterDealSave = await service.GetDashboardAsync();
+        afterDealSave.OpenDeals.Should().ContainSingle();
+
+        await service.TrashContactAsync(contact.Id);
+        var afterTrash = await service.GetDashboardAsync();
+        afterTrash.Contacts.Should().BeEmpty();
+    }
+
     private static async Task<ApplicationDbContext> CreateDbAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

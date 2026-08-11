@@ -65,17 +65,22 @@ manual entries with generated evidence where practical.
 
 | Check | Priority | Current evidence | Status |
 | --- | --- | --- | --- |
-| Release solution build | P0 | 0 warnings/errors on 2026-07-31 | Pass |
-| Full automated suite | P0 | 820 passed, 0 failed on 2026-08-01 local Release validation | Pass |
-| Direct/transitive NuGet vulnerability audit | P0 | No known vulnerable packages on 2026-07-31 | Pass |
-| Docker Compose rendering | P0 | `docker compose config --quiet` on 2026-07-31 | Pass |
-| SentinelGPT response-length UI | P1 | Authenticated desktop and 390px Playwright smoke on 2026-07-31 | Pass |
+| Release solution build | P0 | 0 warnings/errors on 2026-08-11 (commit `4b993ee`) | Pass |
+| Full automated suite | P0 | 1098 passed, 0 failed on 2026-08-11 local Release validation, via `verify-release.sh` | Pass |
+| Direct/transitive NuGet vulnerability audit | P0 | No known vulnerable packages on 2026-08-11 | Pass |
+| Docker Compose rendering | P0 | `docker compose config --quiet` on 2026-08-11 | Pass |
+| SentinelGPT response-length UI | P1 | Authenticated desktop and 390px Playwright smoke on 2026-08-11 (part of the full automated suite) | Pass |
+| HTTP security headers (CSP/X-Frame-Options/Referrer-Policy/Permissions-Policy/HSTS) | P0 | Confirmed present on `https://admin.gwsapp.net` response headers on 2026-08-11 | Pass |
+| Disk-space health check | P0 | `DiskSpaceHealthCheck` unit-tested (path selection, missing-directory fallback, connection-string parsing) 2026-08-11; `/health/ready` returns Healthy in production with the check wired in | Local pass; deployed low-disk (Degraded/Unhealthy) branch not exercised, by construction |
+| Operational failure alerting (email on background-job/backup/automation failure) | P1 | `OperationalAlertService` unit-tested (send, per-source cooldown throttling, opt-in-only, never-throws) on 2026-08-11 | Local pass; no controlled failure has been triggered against the deployed SMTP config |
+| Operational data retention purge (automation/social-alert/live-show/app-gen/news/CJ-commission/podcast tables) | P1 | `OperationalDataRetentionService` unit-tested (per-table cutoffs, terminal-status-only automation purge, node-execution cascade, live-show file deletion) on 2026-08-11 | Local pass |
+| CRM deal/pipeline board | P1 | `CrmService` deal create/update/stage-move/delete and dashboard cache-invalidation unit-tested on 2026-08-11 | Local pass; no browser journey yet |
 | Mandatory portal MFA | P0 | TOTP/recovery/replay tests plus local browser enrollment and returning-login journeys | Local pass; deployed acceptance required |
 | Security audit ledger | P0 | Hash-chain, secret-metadata rejection, encrypted-network, account-event tests and local admin browser journey | Local pass; deployed acceptance required |
 | Privacy and incident operations | P0 | Identity-gated subject export, one-month rights clock, retention preview, incident register, and 72-hour breach clock tests | Local pass; legal policy approval and deployed acceptance required |
 | Empty and upgraded database migration rehearsal | P0 | Startup/migration compatibility tests apply the complete chain and latest migration to isolated SQLite databases | Local pass; deployed database-copy rehearsal required |
-| Production liveness/readiness | P0 | `https://admin.gwsapp.net/health/live` and `/health/ready` returned 200 on 2026-07-31 | Pass |
-| Backup plus Data Protection key restore | P0 | Encrypted authenticated archive, manifest, database/key/recording restore, migration, integrity, MFA, Sentinel, audit-chain, restored-secret, and tamper tests | Local pass; production rehearsal and key escrow required |
+| Production liveness/readiness | P0 | `https://admin.gwsapp.net/health/live` and `/health/ready` returned 200 on 2026-08-11 | Pass |
+| Backup plus Data Protection key restore | P0 | Encrypted authenticated archive, manifest, database/key/recording restore, migration, integrity, MFA, Sentinel, audit-chain, restored-secret, and tamper tests; `scripts/rehearse-restore.sh` automates create+verify against the live container | Local pass; production rehearsal (`scripts/rehearse-restore.sh` run on the droplet) and key escrow required |
 | Deployment rollback | P0 | CI workflow now takes/verifies a pre-deploy backup and rolls code back without reverting the data volume | Implemented; production-topology rehearsal required |
 | Real Notion sync and guarded write-back | P1 | Requires controlled workspace acceptance run | Not run |
 | Real social publish success/failure | P1 | Requires controlled platform destinations | Not run |
@@ -192,6 +197,9 @@ manual entries with generated evidence where practical.
 - Broader competitor parity not represented by a named GWS user outcome.
 
 ## Execution order
+
+`docs/RELEASE_RUNBOOK_REMAINING.md` is the current punch list of exactly what's left and who it
+needs (droplet access, a real browser session, legal sign-off, or external-account credentials).
 
 1. Generate the local/deployed release-acceptance harness and evidence report.
 2. Close P0 security, privacy, recovery, migration, health, and rollback gates.
