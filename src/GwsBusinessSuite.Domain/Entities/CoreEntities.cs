@@ -677,6 +677,43 @@ public sealed class CmsPage : AuditableEntity
     public string Status { get; set; } = CmsPageStatuses.Draft;
     public DateTimeOffset? PublishedAt { get; set; }
     public DateTimeOffset? TrashedAt { get; set; }
+    // Part 6.1 (structured content fields) - Dictionary<propertyId(GUID string), value>,
+    // same shape/helpers convention as WikiDatabaseRow.PropertyValuesJson/WikiPropertyValues,
+    // keyed against this site's CmsPageProperty definitions.
+    public string PropertyValuesJson { get; set; } = "{}";
+    // Part 6.5 (scheduled publishing) - true only while this page's cms.pagePublishedTrigger
+    // fire has been deferred because PublishedAt was in the future at save time (see
+    // CmsBuilderService.SavePageAsync); CmsScheduledPublishBackgroundService clears it and fires
+    // the trigger once PublishedAt actually arrives, so automations react at the real publish
+    // moment instead of the moment someone scheduled it.
+    public bool ScheduledPublishTriggerPending { get; set; }
+}
+
+// Part 6.1: one row per typed custom field defined for a CmsSite (shared across every page on
+// that site, same "define once, use per-row" relationship WikiDatabaseProperty has to
+// WikiDatabase) - mirrors WikiDatabaseProperty's own shape exactly, narrowed to the field types
+// a CMS page actually needs (see CmsPagePropertyTypes) rather than reusing the full
+// Formula/Relation/Rollup/Person/etc. vocabulary built for Sentinel databases.
+public sealed class CmsPageProperty : AuditableEntity
+{
+    public Guid SiteId { get; set; }
+    public required string Name { get; set; }
+    public required string Type { get; set; }
+    public int SortOrder { get; set; }
+    // Only Select uses this today (a JSON array of option strings) - present for the same
+    // forward-compatible reason WikiDatabaseProperty.ConfigJson exists.
+    public string ConfigJson { get; set; } = "{}";
+}
+
+public static class CmsPagePropertyTypes
+{
+    public const string Text = "Text";
+    public const string Number = "Number";
+    public const string Date = "Date";
+    public const string Select = "Select";
+    public const string MediaReference = "MediaReference";
+
+    public static readonly string[] All = [Text, Number, Date, Select, MediaReference];
 }
 
 public sealed class CmsPageCategory : AuditableEntity

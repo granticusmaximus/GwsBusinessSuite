@@ -32,4 +32,18 @@ public interface ICmsBuilderService
         string blueprintKey,
         bool replaceExistingBlocks,
         CancellationToken cancellationToken = default);
+
+    // Part 6.1: structured content fields, shared per-site and set per-page. Field definitions
+    // (ListPagePropertiesAsync/SavePagePropertyAsync/DeletePagePropertyAsync) are managed
+    // separately from page content; per-page values travel on CmsPageEditorModel.PropertyValues
+    // through the existing SavePageAsync.
+    Task<IReadOnlyList<CmsPagePropertyView>> ListPagePropertiesAsync(Guid siteId, CancellationToken cancellationToken = default);
+    Task<CmsPagePropertyView> SavePagePropertyAsync(CmsPagePropertyEditor editor, CancellationToken cancellationToken = default);
+    Task DeletePagePropertyAsync(Guid propertyId, CancellationToken cancellationToken = default);
+
+    // Part 6.5: fires cms.pagePublishedTrigger (deferred by SavePageAsync when a page was
+    // scheduled for the future) for every page whose scheduled PublishedAt has now arrived.
+    // Called periodically by CmsScheduledPublishBackgroundService; returns the number of pages
+    // triggered, for logging.
+    Task<int> RunScheduledPublishSweepAsync(CancellationToken cancellationToken = default);
 }

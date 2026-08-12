@@ -36,6 +36,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<CmsSite> CmsSites { get; }
     DbSet<CmsPage> CmsPages { get; }
     DbSet<CmsPageCategory> CmsPageCategories { get; }
+    DbSet<CmsPageProperty> CmsPageProperties { get; }
     DbSet<GlobalBlock> GlobalBlocks { get; }
     DbSet<MediaAsset> MediaAssets { get; }
     DbSet<FormSubmission> FormSubmissions { get; }

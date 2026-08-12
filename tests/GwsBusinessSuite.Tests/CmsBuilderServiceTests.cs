@@ -23,6 +23,51 @@ public sealed class CmsBuilderServiceTests
     }
 
     [Fact]
+    public async Task PageProperties_ShouldRoundTripThroughSavePageAsyncAndSupportDelete()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+
+        var priceProperty = await service.SavePagePropertyAsync(new CmsPagePropertyEditor
+        {
+            SiteId = site.Id, Name = "Price", Type = CmsPagePropertyTypes.Number
+        });
+        var sizeProperty = await service.SavePagePropertyAsync(new CmsPagePropertyEditor
+        {
+            SiteId = site.Id, Name = "Size", Type = CmsPagePropertyTypes.Select, SelectOptions = ["Small", "Large"]
+        });
+
+        (await service.ListPagePropertiesAsync(site.Id)).Should().HaveCount(2);
+
+        var page = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id, Title = "Product", Slug = "product",
+            PropertyValues = new Dictionary<Guid, string> { [priceProperty.Id] = "19.99", [sizeProperty.Id] = "Large" }
+        });
+
+        var reloaded = await service.GetPageAsync(page.Id);
+        var values = CmsPropertyValues.ParseObject(reloaded!.PropertyValuesJson);
+        CmsPropertyValues.GetText(values, priceProperty.Id).Should().Be("19.99");
+        CmsPropertyValues.GetText(values, sizeProperty.Id).Should().Be("Large");
+
+        await service.DeletePagePropertyAsync(priceProperty.Id);
+        (await service.ListPagePropertiesAsync(site.Id)).Should().ContainSingle(item => item.Id == sizeProperty.Id);
+    }
+
+    [Fact]
+    public async Task SavePagePropertyAsync_ShouldRejectAnUnknownFieldType()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+
+        var act = () => service.SavePagePropertyAsync(new CmsPagePropertyEditor { SiteId = site.Id, Name = "Bad", Type = "NotARealType" });
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
     public async Task GetPageByFullPathAsync_ShouldHideDraftPages_ByDefault_AndShowThemWithIncludeUnpublished()
     {
         await using var db = await CreateDbAsync();

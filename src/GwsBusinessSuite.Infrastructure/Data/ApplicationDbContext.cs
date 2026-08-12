@@ -54,6 +54,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<CmsSite> CmsSites => Set<CmsSite>();
     public DbSet<CmsPage> CmsPages => Set<CmsPage>();
     public DbSet<CmsPageCategory> CmsPageCategories => Set<CmsPageCategory>();
+    public DbSet<CmsPageProperty> CmsPageProperties => Set<CmsPageProperty>();
     public DbSet<GlobalBlock> GlobalBlocks => Set<GlobalBlock>();
     public DbSet<MediaAsset> MediaAssets => Set<MediaAsset>();
     public DbSet<FormSubmission> FormSubmissions => Set<FormSubmission>();

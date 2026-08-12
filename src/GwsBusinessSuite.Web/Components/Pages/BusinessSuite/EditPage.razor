@@ -123,6 +123,42 @@
                     <InputTextArea class="form-control font-monospace cms-custom-css-editor" @bind-Value="PageEditorModel.CustomCss"
                                    placeholder="Applies only to this page, after the site-wide CSS." spellcheck="false" />
                 </div>
+                @if (PageProperties.Count > 0)
+                {
+                    <div class="col-12">
+                        <label class="form-label fw-semibold small d-block">Custom fields</label>
+                        <div class="row g-2">
+                            @foreach (var property in PageProperties)
+                            {
+                                <div class="col-md-6">
+                                    <label class="form-label small text-secondary mb-1">@property.Name</label>
+                                    @if (property.Type == CmsPagePropertyTypes.Select)
+                                    {
+                                        <select class="form-select" value="@GetPropertyValue(property.Id)" @onchange="e => SetPropertyValue(property.Id, e.Value?.ToString())">
+                                            <option value="">—</option>
+                                            @foreach (var option in property.SelectOptions)
+                                            {
+                                                <option value="@option">@option</option>
+                                            }
+                                        </select>
+                                    }
+                                    else if (property.Type == CmsPagePropertyTypes.Date)
+                                    {
+                                        <input class="form-control" type="date" value="@GetPropertyValue(property.Id)" @onchange="e => SetPropertyValue(property.Id, e.Value?.ToString())" />
+                                    }
+                                    else if (property.Type == CmsPagePropertyTypes.Number)
+                                    {
+                                        <input class="form-control" type="number" value="@GetPropertyValue(property.Id)" @onchange="e => SetPropertyValue(property.Id, e.Value?.ToString())" />
+                                    }
+                                    else
+                                    {
+                                        <input class="form-control" value="@GetPropertyValue(property.Id)" placeholder="@(property.Type == CmsPagePropertyTypes.MediaReference ? "https://... or /media/{id}" : "")" @onchange="e => SetPropertyValue(property.Id, e.Value?.ToString())" />
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
             </div>
 
             @if (LivePageUrl is { } livePageUrl && PageId.HasValue)
@@ -356,6 +392,7 @@
     private CmsSite? CurrentSite { get; set; }
     private List<CmsPage> CmsPages { get; set; } = new();
     private List<CmsPageCategory> PageCategories { get; set; } = new();
+    private List<CmsPagePropertyView> PageProperties { get; set; } = new();
     private List<CmsWorkflowBlueprintSummary> CmsBlueprints { get; set; } = new();
     private CmsPageEditorModel PageEditorModel { get; set; } = new() { BlocksJson = "{\"sections\":[]}" };
     private Guid? SelectedSiteId { get; set; }
@@ -413,6 +450,7 @@
             NavMenuItems = ParseNavMenuJson(site.NavMenuJson);
             CmsPages = (await CmsBuilderService.ListPagesAsync(site.Id)).ToList();
             PageCategories = (await CmsBuilderService.ListPageCategoriesAsync(site.Id)).ToList();
+            PageProperties = (await CmsBuilderService.ListPagePropertiesAsync(site.Id)).ToList();
 
             if (PageId.HasValue)
             {
@@ -442,7 +480,8 @@
                     Tags = page.Tags,
                     CustomCss = page.CustomCss,
                     Status = page.Status,
-                    PublishedAt = page.PublishedAt
+                    PublishedAt = page.PublishedAt,
+                    PropertyValues = LoadPropertyValues(page.PropertyValuesJson)
                 };
 
                 await LoadFormSubmissionsAsync();
@@ -883,6 +922,23 @@
         var local = DateTime.SpecifyKind(parsed, DateTimeKind.Local);
         return new DateTimeOffset(local);
     }
+
+    private static Dictionary<Guid, string> LoadPropertyValues(string propertyValuesJson)
+    {
+        var values = new Dictionary<Guid, string>();
+        var parsed = CmsPropertyValues.ParseObject(propertyValuesJson);
+        foreach (var pair in parsed)
+        {
+            if (Guid.TryParse(pair.Key, out var propertyId))
+            {
+                values[propertyId] = pair.Value?.GetValue<string>() ?? string.Empty;
+            }
+        }
+        return values;
+    }
+
+    private string GetPropertyValue(Guid propertyId) => PageEditorModel.PropertyValues.GetValueOrDefault(propertyId, string.Empty);
+    private void SetPropertyValue(Guid propertyId, string? value) => PageEditorModel.PropertyValues[propertyId] = value ?? string.Empty;
 
     private static string CombinePublicUrl(string baseUrl, string routePath)
     {

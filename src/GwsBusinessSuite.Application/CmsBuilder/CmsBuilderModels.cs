@@ -63,6 +63,24 @@ public sealed class CmsPageEditorModel
     public string Status { get; set; } = CmsPageStatuses.Draft;
 
     public DateTimeOffset? PublishedAt { get; set; }
+
+    // Part 6.1 - keyed by CmsPageProperty.Id. Full-replace, same convention as every other field
+    // on this editor model (e.g. CategoryName/Tags): a save that omits this clears existing
+    // values, matching the pre-existing Canvas-Studio-vs-EditPage editor split's own behavior.
+    public Dictionary<Guid, string> PropertyValues { get; set; } = [];
+}
+
+public sealed record CmsPagePropertyView(Guid Id, Guid SiteId, string Name, string Type, int SortOrder, IReadOnlyList<string> SelectOptions);
+
+public sealed class CmsPagePropertyEditor
+{
+    public Guid? PropertyId { get; set; }
+    [Required] public Guid SiteId { get; set; }
+    [Required] public string Name { get; set; } = string.Empty;
+    [Required] public string Type { get; set; } = CmsPagePropertyTypes.Text;
+    public int SortOrder { get; set; }
+    // Only meaningful when Type == Select - one option per line in the UI, parsed to a list.
+    public IReadOnlyList<string> SelectOptions { get; set; } = [];
 }
 
 public sealed record NavMenuItem(string Id, string Label, string Href, bool OpenInNewTab);

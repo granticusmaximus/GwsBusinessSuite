@@ -1380,6 +1380,49 @@ public sealed class AutomationWorkflowTests
         (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == watcher.Id)).Should().Be(1);
     }
 
+    [Fact]
+    public async Task CmsPagePublishedTrigger_ShouldDeferUntilTheScheduledPublishTimeArrives()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+        var clock = new FakeTimeProvider { UtcNow = DateTimeOffset.UtcNow };
+        var cmsBuilderService = new CmsBuilderService(db, automationTriggerService: triggerService, timeProvider: clock);
+
+        var site = new CmsSite { Name = "Site", Slug = "site" };
+        db.CmsSites.Add(site);
+        await db.SaveChangesAsync();
+
+        var watcher = await workflowService.CreateAsync("Publish watcher");
+        await workflowService.SaveNodeAsync(watcher.Id, new AutomationNodeEditor
+        {
+            Id = watcher.Nodes.Single().Id, Name = "Published", TypeKey = "cms.pagePublishedTrigger",
+            PositionX = 100, PositionY = 100, ParametersJson = "{}"
+        });
+        await workflowService.PublishAsync(watcher.Id, "v1");
+        await workflowService.SetActiveAsync(watcher.Id, true);
+
+        var futurePublishedAt = clock.UtcNow.AddDays(1);
+        var scheduled = await cmsBuilderService.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id, Title = "Launch page", Slug = "launch", Status = CmsPageStatuses.Published, PublishedAt = futurePublishedAt
+        });
+        scheduled.ScheduledPublishTriggerPending.Should().BeTrue();
+        (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == watcher.Id)).Should()
+            .Be(0, "the page isn't actually live yet, so the automation must not fire prematurely");
+
+        (await cmsBuilderService.RunScheduledPublishSweepAsync()).Should().Be(0, "the scheduled time hasn't arrived yet");
+
+        clock.UtcNow = futurePublishedAt.AddMinutes(1);
+        (await cmsBuilderService.RunScheduledPublishSweepAsync()).Should().Be(1);
+
+        (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == watcher.Id)).Should().Be(1);
+        (await db.CmsPages.AsNoTracking().SingleAsync(p => p.Id == scheduled.Id)).ScheduledPublishTriggerPending.Should().BeFalse();
+    }
+
     // --- Part 4.4: execution time-travel replay ---
 
     [Fact]
@@ -2212,6 +2255,10 @@ public sealed class AutomationWorkflowTests
         public Task DeletePageAsync(Guid pageId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<CmsWorkflowBlueprintSummary>> ListWorkflowBlueprintsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<CmsPage> ApplyWorkflowBlueprintAsync(Guid pageId, string blueprintKey, bool replaceExistingBlocks, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<CmsPagePropertyView>> ListPagePropertiesAsync(Guid siteId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<CmsPagePropertyView> SavePagePropertyAsync(CmsPagePropertyEditor editor, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task DeletePagePropertyAsync(Guid propertyId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<int> RunScheduledPublishSweepAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
 
     private sealed class FakeGrowthReportEmailSender : IGrowthReportEmailSender

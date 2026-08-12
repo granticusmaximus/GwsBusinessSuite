@@ -220,6 +220,7 @@ public static class DependencyInjection
         services.AddHostedService<AutomationScheduleBackgroundService>();
         services.AddHostedService<AutomationResumeBackgroundService>();
         services.AddHostedService<AutomationCredentialRefreshBackgroundService>();
+        services.AddHostedService<CmsScheduledPublishBackgroundService>();
         services.AddScoped<IWikiSyncedBlockService, WikiSyncedBlockService>();
         services.AddScoped<IWikiService, WikiService>();
         services.AddScoped<IWikiDatabaseService, WikiDatabaseService>();

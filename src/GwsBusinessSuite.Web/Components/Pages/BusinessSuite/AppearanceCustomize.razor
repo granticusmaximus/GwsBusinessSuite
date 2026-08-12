@@ -70,6 +70,56 @@
     </div>
 </div>
 
+<div class="card border-0 shadow-sm mt-3" style="max-width: 640px;">
+    <div class="card-body">
+        <label class="form-label fw-semibold small">Custom fields</label>
+        <p class="text-secondary small">Typed fields available on every page of this site (e.g. "Product" or "Event" pages can carry real structured data beyond Title/Slug/Blocks) - edited per page on the page's Properties screen.</p>
+        @if (PageProperties.Count > 0)
+        {
+            <div class="table-responsive mb-3">
+                <table class="table table-sm align-middle">
+                    <thead><tr><th>Name</th><th>Type</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var property in PageProperties)
+                        {
+                            <tr>
+                                <td>@property.Name</td>
+                                <td><span class="badge text-bg-light border">@property.Type</span>@if (property.Type == CmsPagePropertyTypes.Select) { <span class="text-secondary small ms-1">(@string.Join(", ", property.SelectOptions))</span> }</td>
+                                <td class="text-end"><button type="button" class="btn btn-sm btn-link text-danger" disabled="@IsBusy" @onclick="() => DeletePropertyAsync(property.Id)">Delete</button></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        <div class="row g-2 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label small mb-1">Field name</label>
+                <InputText class="form-control form-control-sm" @bind-Value="NewPropertyName" placeholder="Price" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small mb-1">Type</label>
+                <select class="form-select form-select-sm" @bind="NewPropertyType">
+                    @foreach (var type in CmsPagePropertyTypes.All)
+                    {
+                        <option value="@type">@type</option>
+                    }
+                </select>
+            </div>
+            @if (NewPropertyType == CmsPagePropertyTypes.Select)
+            {
+                <div class="col-md-3">
+                    <label class="form-label small mb-1">Options (comma-separated)</label>
+                    <InputText class="form-control form-control-sm" @bind-Value="NewPropertyOptions" placeholder="Small, Medium, Large" />
+                </div>
+            }
+            <div class="col-md-2">
+                <button type="button" class="btn btn-sm btn-outline-primary w-100" disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewPropertyName))" @onclick="AddPropertyAsync">Add field</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 @code {
     private CmsSite? CurrentSite { get; set; }
     private string CustomCssInput { get; set; } = string.Empty;
@@ -80,6 +130,10 @@
     private bool IsBusy { get; set; }
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
+    private List<CmsPagePropertyView> PageProperties { get; set; } = [];
+    private string NewPropertyName { get; set; } = string.Empty;
+    private string NewPropertyType { get; set; } = CmsPagePropertyTypes.Text;
+    private string NewPropertyOptions { get; set; } = string.Empty;
 
     private string? ExportUrl =>
         CurrentSite is { } site ? $"/admin/api/cms/{site.Slug}/export.zip" : null;
@@ -101,6 +155,42 @@
         FontPairingInput = site.FontPairingKey;
         LogoUrlInput = site.LogoUrl;
         FaviconUrlInput = site.FaviconUrl;
+        PageProperties = (await CmsBuilderService.ListPagePropertiesAsync(site.Id)).ToList();
+    }
+
+    private async Task AddPropertyAsync()
+    {
+        if (CurrentSite is null || string.IsNullOrWhiteSpace(NewPropertyName)) return;
+        IsBusy = true;
+        try
+        {
+            await CmsBuilderService.SavePagePropertyAsync(new CmsPagePropertyEditor
+            {
+                SiteId = CurrentSite.Id,
+                Name = NewPropertyName,
+                Type = NewPropertyType,
+                SortOrder = PageProperties.Count,
+                SelectOptions = NewPropertyOptions.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            });
+            PageProperties = (await CmsBuilderService.ListPagePropertiesAsync(CurrentSite.Id)).ToList();
+            NewPropertyName = string.Empty;
+            NewPropertyOptions = string.Empty;
+        }
+        catch (Exception ex) { ErrorMessage = ex.Message; }
+        finally { IsBusy = false; }
+    }
+
+    private async Task DeletePropertyAsync(Guid propertyId)
+    {
+        if (CurrentSite is null) return;
+        IsBusy = true;
+        try
+        {
+            await CmsBuilderService.DeletePagePropertyAsync(propertyId);
+            PageProperties = (await CmsBuilderService.ListPagePropertiesAsync(CurrentSite.Id)).ToList();
+        }
+        catch (Exception ex) { ErrorMessage = ex.Message; }
+        finally { IsBusy = false; }
     }
 
     // Partial save: re-fetch the freshest site so a concurrent edit on

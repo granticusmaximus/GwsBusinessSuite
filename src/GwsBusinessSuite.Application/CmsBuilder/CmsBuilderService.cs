@@ -12,8 +12,11 @@ public sealed class CmsBuilderService(
     // Optional, resolved by DI in production - same pattern as CrmService's
     // automationTriggerService: fires cms.pagePublishedTrigger subscribers on a draft-to-
     // published transition, skipped when actor is "automation-engine".
-    IAutomationTriggerService? automationTriggerService = null) : ICmsBuilderService
+    IAutomationTriggerService? automationTriggerService = null,
+    TimeProvider? timeProvider = null) : ICmsBuilderService
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     private static readonly IReadOnlyList<CmsWorkflowBlueprintSummary> WorkflowBlueprints =
     [
         new()
@@ -414,7 +417,7 @@ public sealed class CmsBuilderService(
             throw new InvalidOperationException("The selected CMS site no longer exists.");
         }
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         var page = editor.PageId is { } pageId
             ? await dbContext.CmsPages.FirstOrDefaultAsync(item => item.Id == pageId, cancellationToken)
             : null;
@@ -470,6 +473,9 @@ public sealed class CmsBuilderService(
         page.CategoryId = await ResolvePageCategoryIdAsync(siteId, editor.CategoryName, cancellationToken);
         page.Tags = editor.Tags?.Trim() ?? string.Empty;
         page.CustomCss = editor.CustomCss?.Trim() ?? string.Empty;
+        var propertyValues = new JsonObject();
+        foreach (var pair in editor.PropertyValues) CmsPropertyValues.SetText(propertyValues, pair.Key, pair.Value);
+        page.PropertyValuesJson = CmsPropertyValues.Serialize(propertyValues);
         var requestedPublishedAt = editor.PublishedAt;
         if (requestedPublishedAt.HasValue)
         {
@@ -491,9 +497,16 @@ public sealed class CmsBuilderService(
             await dbContext.CmsPages.AddAsync(page, cancellationToken);
         }
 
+        // Part 6.5 (scheduled publishing): a scheduled save (Published with a future PublishedAt)
+        // must not fire cms.pagePublishedTrigger yet - the page isn't actually live (see
+        // PublicationWindows.IsVisible), so an automation reacting "now" would be reacting to a
+        // page nobody can see. Deferred instead of dropped: CmsScheduledPublishBackgroundService
+        // fires it once PublishedAt actually arrives.
+        var isNewlyPublished = requestedStatus == CmsPageStatuses.Published && previousStatus != CmsPageStatuses.Published;
+        var isScheduledForTheFuture = page.PublishedAt is { } publishedAt && publishedAt > now;
+        page.ScheduledPublishTriggerPending = isNewlyPublished && isScheduledForTheFuture;
         await dbContext.SaveChangesAsync(cancellationToken);
-        if (requestedStatus == CmsPageStatuses.Published && previousStatus != CmsPageStatuses.Published
-            && automationTriggerService is not null && actor != "automation-engine")
+        if (isNewlyPublished && !isScheduledForTheFuture && automationTriggerService is not null && actor != "automation-engine")
         {
             var triggerPayload = JsonSerializer.Serialize(new { siteId = page.SiteId, pageId = page.Id, title = page.Title, slug = page.Slug });
             await automationTriggerService.TriggerCmsPagePublishedAsync(page.SiteId, triggerPayload, cancellationToken);
@@ -635,6 +648,104 @@ public sealed class CmsBuilderService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return page;
+    }
+
+    public async Task<IReadOnlyList<CmsPagePropertyView>> ListPagePropertiesAsync(Guid siteId, CancellationToken cancellationToken = default)
+    {
+        var properties = await dbContext.CmsPageProperties.AsNoTracking()
+            .Where(item => item.SiteId == siteId)
+            .OrderBy(item => item.SortOrder)
+            .ToListAsync(cancellationToken);
+        return properties.Select(ToPropertyView).ToList();
+    }
+
+    public async Task<CmsPagePropertyView> SavePagePropertyAsync(CmsPagePropertyEditor editor, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(editor);
+        if (string.IsNullOrWhiteSpace(editor.Name))
+        {
+            throw new ArgumentException("A field name is required.", nameof(editor));
+        }
+        if (!CmsPagePropertyTypes.All.Contains(editor.Type))
+        {
+            throw new ArgumentException($"'{editor.Type}' is not a known field type.", nameof(editor));
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var property = editor.PropertyId is { } propertyId
+            ? await dbContext.CmsPageProperties.FirstOrDefaultAsync(item => item.Id == propertyId, cancellationToken)
+                ?? throw new InvalidOperationException("The field no longer exists.")
+            : new CmsPageProperty { SiteId = editor.SiteId, Name = string.Empty, Type = editor.Type, CreatedAt = now, CreatedBy = "cms-ui" };
+
+        property.Name = editor.Name.Trim();
+        property.Type = editor.Type;
+        property.SortOrder = editor.SortOrder;
+        property.ConfigJson = editor.Type == CmsPagePropertyTypes.Select
+            ? JsonSerializer.Serialize(new { options = editor.SelectOptions.Where(option => !string.IsNullOrWhiteSpace(option)).Select(option => option.Trim()).ToList() })
+            : "{}";
+        property.UpdatedAt = now;
+        property.UpdatedBy = "cms-ui";
+
+        if (editor.PropertyId is null)
+        {
+            await dbContext.CmsPageProperties.AddAsync(property, cancellationToken);
+        }
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ToPropertyView(property);
+    }
+
+    public async Task DeletePagePropertyAsync(Guid propertyId, CancellationToken cancellationToken = default)
+    {
+        var property = await dbContext.CmsPageProperties.FirstOrDefaultAsync(item => item.Id == propertyId, cancellationToken);
+        if (property is null) return;
+        dbContext.CmsPageProperties.Remove(property);
+        // Deliberately does not scrub the property's values out of every page's
+        // PropertyValuesJson - an orphaned key is harmless (never read once the property
+        // definition is gone) and this avoids an O(pages-in-site) rewrite on every field delete.
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<int> RunScheduledPublishSweepAsync(CancellationToken cancellationToken = default)
+    {
+        if (automationTriggerService is null) return 0;
+        var now = _timeProvider.GetUtcNow();
+        // SQLite/EF Core cannot translate a DateTimeOffset "<=" comparison server-side - the
+        // ScheduledPublishTriggerPending bool filter narrows the candidate set server-side
+        // (this flag is rarely set), then PublishedAt is compared client-side.
+        var candidates = await dbContext.CmsPages
+            .Where(item => item.ScheduledPublishTriggerPending)
+            .ToListAsync(cancellationToken);
+        var due = candidates.Where(item => item.PublishedAt is { } publishedAt && publishedAt <= now).ToList();
+        foreach (var page in due)
+        {
+            page.ScheduledPublishTriggerPending = false;
+        }
+        if (due.Count > 0) await dbContext.SaveChangesAsync(cancellationToken);
+
+        foreach (var page in due)
+        {
+            var triggerPayload = JsonSerializer.Serialize(new { siteId = page.SiteId, pageId = page.Id, title = page.Title, slug = page.Slug });
+            await automationTriggerService.TriggerCmsPagePublishedAsync(page.SiteId, triggerPayload, cancellationToken);
+        }
+        return due.Count;
+    }
+
+    private static CmsPagePropertyView ToPropertyView(CmsPageProperty property)
+    {
+        var options = new List<string>();
+        if (property.Type == CmsPagePropertyTypes.Select)
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(property.ConfigJson);
+                if (document.RootElement.TryGetProperty("options", out var optionsElement) && optionsElement.ValueKind == JsonValueKind.Array)
+                {
+                    options.AddRange(optionsElement.EnumerateArray().Select(item => item.GetString() ?? string.Empty).Where(item => item.Length > 0));
+                }
+            }
+            catch (JsonException) { /* malformed config - treat as no options rather than fail the whole list */ }
+        }
+        return new CmsPagePropertyView(property.Id, property.SiteId, property.Name, property.Type, property.SortOrder, options);
     }
 
     internal static string CreateSlug(string value)
