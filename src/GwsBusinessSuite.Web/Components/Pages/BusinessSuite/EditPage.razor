@@ -322,8 +322,12 @@
             else
             {
                 <div class="list-group list-group-flush">
-                    @foreach (var rev in PageRevisions)
+                    @for (var i = 0; i < PageRevisions.Count; i++)
                     {
+                        var rev = PageRevisions[i];
+                        // PageRevisions is ordered newest-first, so the next item is the
+                        // chronologically-previous revision - null for the oldest one.
+                        var previousRev = i + 1 < PageRevisions.Count ? PageRevisions[i + 1] : null;
                         <div class="list-group-item">
                             <div class="d-flex justify-content-between align-items-start gap-2">
                                 <div>
@@ -350,6 +354,12 @@
                                     <button class="btn btn-xs btn-outline-secondary" @onclick="() => PreviewRevision(rev)">
                                         Preview
                                     </button>
+                                    @if (previousRev is not null)
+                                    {
+                                        <button class="btn btn-xs btn-outline-secondary" @onclick="() => ToggleDiffAsync(rev, previousRev)">
+                                            Diff
+                                        </button>
+                                    }
                                     <button class="btn btn-xs btn-outline-primary" @onclick="() => RestoreRevisionAsync(rev.Id)"
                                             disabled="@IsRevisionBusy">
                                         Restore
@@ -365,6 +375,25 @@
                                 <div class="mt-3 border-top pt-3">
                                     <div class="small fw-semibold text-secondary mb-2">Preview of revision #@rev.RevisionNumber</div>
                                     <CmsBlockPreview BlocksJson="@rev.BlocksJson" SiteId="@PageEditorModel.SiteId" />
+                                </div>
+                            }
+                            @if (DiffRevisionKey == rev.Id)
+                            {
+                                <div class="mt-3 border-top pt-3">
+                                    <div class="small fw-semibold text-secondary mb-2">Changes since revision #@previousRev!.RevisionNumber</div>
+                                    @if (string.IsNullOrEmpty(DiffText))
+                                    {
+                                        <div class="small text-secondary">No section or widget changes between these versions.</div>
+                                    }
+                                    else
+                                    {
+                                        <div class="p-2 rounded-3 border bg-body-tertiary">
+                                            @foreach (var line in DiffText.Split('\n'))
+                                            {
+                                                <div class="@DiffLineClass(line)" style="white-space:pre-wrap;font-family:var(--bs-font-monospace, monospace);font-size:0.8125rem;">@line</div>
+                                            }
+                                        </div>
+                                    }
                                 </div>
                             }
                         </div>
@@ -411,6 +440,8 @@
     private bool IsRevisionBusy { get; set; }
     private string RevisionErrorMessage { get; set; } = string.Empty;
     private Guid? PreviewedRevisionId { get; set; }
+    private Guid? DiffRevisionKey { get; set; }
+    private string? DiffText { get; set; }
 
     private Guid? _loadedForPageId;
     private bool _hasLoadedOnce;
@@ -504,6 +535,8 @@
                 FormSubmissions = new();
                 PageRevisions = new();
                 PreviewedRevisionId = null;
+                DiffRevisionKey = null;
+                DiffText = null;
             }
         }
         catch (Exception ex)
@@ -703,6 +736,33 @@
         PreviewedRevisionId = PreviewedRevisionId == revision.Id ? null : revision.Id;
     }
 
+    private async Task ToggleDiffAsync(CmsPageRevision revision, CmsPageRevision previousRevision)
+    {
+        if (DiffRevisionKey == revision.Id)
+        {
+            DiffRevisionKey = null;
+            DiffText = null;
+            return;
+        }
+
+        try
+        {
+            DiffText = await PageRevisionService.GetPageStructuralDiffAsync(previousRevision.Id, revision.Id);
+            DiffRevisionKey = revision.Id;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load diff for CMS page revision {RevisionId}.", revision.Id);
+            RevisionErrorMessage = $"Unable to load diff. {ex.Message}";
+        }
+    }
+
+    private static string DiffLineClass(string line) =>
+        line.StartsWith('+') ? "text-success"
+        : line.StartsWith('-') ? "text-danger"
+        : line.StartsWith('~') ? "text-warning"
+        : "text-secondary";
+
     private async Task RestoreRevisionAsync(Guid revisionId)
     {
         if (!PageId.HasValue) return;
@@ -715,6 +775,8 @@
             var restored = await PageRevisionService.RestoreAsync(PageId.Value, revisionId);
             await LoadAsync();
             PreviewedRevisionId = null;
+            DiffRevisionKey = null;
+            DiffText = null;
             CmsStatusMessage = "Revision restored. A checkpoint of the previous state was saved as the latest revision.";
         }
         catch (Exception ex)
@@ -735,6 +797,8 @@
         {
             await PageRevisionService.DeleteAsync(revisionId);
             await LoadRevisionsAsync();
+            DiffRevisionKey = null;
+            DiffText = null;
         }
         catch (Exception ex)
         {

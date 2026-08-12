@@ -91,6 +91,90 @@ public sealed class PageRevisionService(IAppDbContext dbContext) : IPageRevision
         return page;
     }
 
+    public async Task<string?> GetPageStructuralDiffAsync(Guid fromRevisionId, Guid toRevisionId, CancellationToken cancellationToken = default)
+    {
+        var revisions = await dbContext.CmsPageRevisions
+            .AsNoTracking()
+            .Where(revision => revision.Id == fromRevisionId || revision.Id == toRevisionId)
+            .ToListAsync(cancellationToken);
+
+        var from = revisions.FirstOrDefault(revision => revision.Id == fromRevisionId);
+        var to = revisions.FirstOrDefault(revision => revision.Id == toRevisionId);
+        if (from is null || to is null)
+        {
+            return null;
+        }
+
+        return BuildStructuralDiff(
+            CmsBuilderJson.ParseLayoutOrEmpty(from.BlocksJson),
+            CmsBuilderJson.ParseLayoutOrEmpty(to.BlocksJson));
+    }
+
+    // Mirrors WikiDatabaseService.BuildStructuralDiff's dictionary-by-id diff approach, applied
+    // to this domain's own Section > Column > Widget tree instead of a flat block list: section
+    // add/remove/modify is diffed by LayoutSection.Id, and separately every widget across the
+    // whole page (regardless of which section/column it's in) is diffed by LayoutWidget.Id - a
+    // widget that only moved between columns shows no change, matching git's own "content
+    // diff, not position diff" posture for this kind of coarse structural summary.
+    private static string BuildStructuralDiff(PageLayout from, PageLayout to)
+    {
+        var lines = new List<string>();
+
+        var fromSectionsById = from.Sections.ToDictionary(section => section.Id);
+        var toSectionsById = to.Sections.ToDictionary(section => section.Id);
+
+        foreach (var section in from.Sections)
+        {
+            if (!toSectionsById.ContainsKey(section.Id))
+            {
+                lines.Add($"- [section] {SectionLabel(section)}");
+            }
+        }
+        foreach (var section in to.Sections)
+        {
+            if (!fromSectionsById.TryGetValue(section.Id, out var previous))
+            {
+                lines.Add($"+ [section] {SectionLabel(section)}");
+            }
+            else if (SectionSignature(previous) != SectionSignature(section))
+            {
+                lines.Add($"~ [section] {SectionLabel(section)}");
+            }
+        }
+
+        var fromWidgetsById = from.Sections.SelectMany(section => section.Columns).SelectMany(column => column.Widgets)
+            .ToDictionary(widget => widget.Id);
+        var toWidgetsById = to.Sections.SelectMany(section => section.Columns).SelectMany(column => column.Widgets)
+            .ToDictionary(widget => widget.Id);
+
+        foreach (var widget in fromWidgetsById.Values)
+        {
+            if (!toWidgetsById.ContainsKey(widget.Id))
+            {
+                lines.Add($"- [{widget.WidgetType}] {CmsBlockHtmlRenderer.PlainTextPreview(widget)}");
+            }
+        }
+        foreach (var widget in toWidgetsById.Values)
+        {
+            if (!fromWidgetsById.TryGetValue(widget.Id, out var previous))
+            {
+                lines.Add($"+ [{widget.WidgetType}] {CmsBlockHtmlRenderer.PlainTextPreview(widget)}");
+            }
+            else if (CmsBuilderJson.Serialize(previous) != CmsBuilderJson.Serialize(widget))
+            {
+                lines.Add($"~ [{widget.WidgetType}] {CmsBlockHtmlRenderer.PlainTextPreview(widget)}");
+            }
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    private static string SectionLabel(LayoutSection section) =>
+        string.IsNullOrWhiteSpace(section.Label) ? "Section" : section.Label;
+
+    private static string SectionSignature(LayoutSection section) =>
+        $"{section.Label}|{section.Background}|{section.Padding}|{section.ColumnLayout}|{section.GlobalBlockId}";
+
     public async Task DeleteAsync(Guid revisionId, CancellationToken cancellationToken = default)
     {
         var revision = await dbContext.CmsPageRevisions

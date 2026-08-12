@@ -35,6 +35,34 @@ public static class CmsBlockHtmlRenderer
     public static bool LayoutContainsPostsGrid(PageLayout? layout) =>
         layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "posts-grid")));
 
+    // A short single-line preview of a widget's content, used by the structural revision diff
+    // (PageRevisionService.BuildStructuralDiff) - never HTML, just text. Mirrors
+    // WikiBlockHtmlRenderer.PlainTextPreview's role for wiki blocks.
+    public static string PlainTextPreview(LayoutWidget widget, int maxLength = 80)
+    {
+        var p = widget.Props;
+        var text = widget.WidgetType switch
+        {
+            "hero" => Get(p, "headline"),
+            "heading" => Get(p, "text"),
+            "paragraph" => Get(p, "text"),
+            "richtext" => Get(p, "content"),
+            "button" => Get(p, "label"),
+            "image" => Get(p, "alt", Get(p, "src", "[image]")),
+            "card" => Get(p, "title"),
+            "testimonial" => Get(p, "quote"),
+            "spacer" => "[spacer]",
+            "divider" => "---",
+            "html" => "[custom HTML]",
+            "form" => "[form]",
+            "posts-grid" => "[posts grid]",
+            "accordion" => "[accordion]",
+            _ => string.Empty
+        };
+        text = text.Replace('\n', ' ').Trim();
+        return text.Length > maxLength ? text[..maxLength] + "…" : text;
+    }
+
     // isLoggedIn only matters for VisibilityModes.LoggedInOnly widgets and defaults to false
     // (the safe default for the two call sites - static export and the fully-anonymous public
     // canvas route - that have no concept of a logged-in visitor at all). The one route that

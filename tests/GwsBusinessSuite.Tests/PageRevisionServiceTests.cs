@@ -165,6 +165,69 @@ public sealed class PageRevisionServiceTests
         restored.CategoryId.Should().Be(page.CategoryId);
     }
 
+    [Fact]
+    public async Task GetPageStructuralDiffAsync_ShouldDescribeAddedRemovedAndModifiedWidgets()
+    {
+        await using var db = await CreateDbAsync();
+        var cms = new CmsBuilderService(db);
+        var revisions = new PageRevisionService(db);
+        var page = await CreatePageAsync(cms,
+            """{"sections":[{"id":"s1","columns":[{"id":"c1","widgets":[{"id":"w1","widgetType":"heading","props":{"text":"Hello"}},{"id":"w2","widgetType":"paragraph","props":{"text":"Removed"}}]}]}]}""");
+        var fromRevision = await revisions.CreateRevisionAsync(page);
+
+        var toPage = await cms.SavePageAsync(new CmsPageEditorModel
+        {
+            PageId = page.Id,
+            SiteId = page.SiteId,
+            Title = page.Title,
+            BlocksJson = """{"sections":[{"id":"s1","columns":[{"id":"c1","widgets":[{"id":"w1","widgetType":"heading","props":{"text":"Hello World"}},{"id":"w3","widgetType":"button","props":{"label":"New"}}]}]}]}"""
+        });
+        var toRevision = await revisions.CreateRevisionAsync(toPage);
+
+        var diff = await revisions.GetPageStructuralDiffAsync(fromRevision.Id, toRevision.Id);
+
+        diff.Should().Contain("~ [heading]");
+        diff.Should().Contain("- [paragraph] Removed");
+        diff.Should().Contain("+ [button] New");
+    }
+
+    [Fact]
+    public async Task GetPageStructuralDiffAsync_ShouldReportAddedSection()
+    {
+        await using var db = await CreateDbAsync();
+        var cms = new CmsBuilderService(db);
+        var revisions = new PageRevisionService(db);
+        var page = await CreatePageAsync(cms, """{"sections":[]}""");
+        var fromRevision = await revisions.CreateRevisionAsync(page);
+
+        var toPage = await cms.SavePageAsync(new CmsPageEditorModel
+        {
+            PageId = page.Id,
+            SiteId = page.SiteId,
+            Title = page.Title,
+            BlocksJson = """{"sections":[{"id":"s1","label":"Hero","columns":[]}]}"""
+        });
+        var toRevision = await revisions.CreateRevisionAsync(toPage);
+
+        var diff = await revisions.GetPageStructuralDiffAsync(fromRevision.Id, toRevision.Id);
+
+        diff.Should().Contain("+ [section] Hero");
+    }
+
+    [Fact]
+    public async Task GetPageStructuralDiffAsync_ShouldReturnNull_WhenARevisionNoLongerExists()
+    {
+        await using var db = await CreateDbAsync();
+        var cms = new CmsBuilderService(db);
+        var revisions = new PageRevisionService(db);
+        var page = await CreatePageAsync(cms, "[]");
+        var revision = await revisions.CreateRevisionAsync(page);
+
+        var diff = await revisions.GetPageStructuralDiffAsync(revision.Id, Guid.NewGuid());
+
+        diff.Should().BeNull();
+    }
+
     private static async Task<GwsBusinessSuite.Domain.Entities.CmsPage> CreatePageAsync(CmsBuilderService cms, string blocksJson)
     {
         var site = await cms.SaveSiteAsync(new CmsSiteEditorModel { Name = "Test" });

@@ -432,4 +432,23 @@ public sealed class CmsBlockHtmlRendererTests
     {
         Assert.True(CmsBlockHtmlRenderer.ShouldRenderWidget(new VisibilityRule(), "anything", isLoggedIn: false));
     }
+
+    [Fact]
+    public void PlainTextPreview_ShouldReturnAShortSingleLineSummary_PerWidgetType()
+    {
+        var widget = new LayoutWidget { WidgetType = "heading", Props = new() { ["text"] = "Line one\nLine two" } };
+
+        Assert.Equal("Line one Line two", CmsBlockHtmlRenderer.PlainTextPreview(widget));
+    }
+
+    [Fact]
+    public void PlainTextPreview_ShouldTruncateLongText()
+    {
+        var widget = new LayoutWidget { WidgetType = "paragraph", Props = new() { ["text"] = new string('x', 200) } };
+
+        var preview = CmsBlockHtmlRenderer.PlainTextPreview(widget, maxLength: 10);
+
+        Assert.Equal(11, preview.Length); // 10 chars + ellipsis
+        Assert.EndsWith("…", preview);
+    }
 }
