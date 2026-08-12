@@ -326,6 +326,10 @@ public sealed class SentinelPublicShare : AuditableEntity
 {
     public Guid TargetId { get; set; }
     public bool IsDatabase { get; set; }
+    // A third target kind alongside page (both false) and database (IsDatabase=true) - a
+    // read-only automation status/report page (Part 4.10), reusing this same token/password/
+    // expiry/revoke infrastructure rather than building a parallel share mechanism.
+    public bool IsAutomationWorkflow { get; set; }
     public required string TokenHash { get; set; }
     public DateTimeOffset? ExpiresAt { get; set; }
     public bool AllowSearchIndexing { get; set; }
@@ -1594,6 +1598,11 @@ public static class AutomationExecutionModes
     public const string Retry = "Retry";
     public const string DatabaseTrigger = "DatabaseTrigger";
     public const string SubWorkflow = "SubWorkflow";
+    public const string CrmDealStageChanged = "CrmDealStageChanged";
+    public const string CmsPagePublished = "CmsPagePublished";
+    // A sandboxed dry run of a past execution's recorded input against the current published
+    // graph - see AutomationExecutionService.ReplayAsync. Never performs real side effects.
+    public const string Replay = "Replay";
 }
 
 public sealed class AutomationWorkflow : AuditableEntity
@@ -1607,6 +1616,10 @@ public sealed class AutomationWorkflow : AuditableEntity
     public DateTimeOffset? LastExecutedAt { get; set; }
     public string? WebhookPath { get; set; }
     public int? ScheduleIntervalMinutes { get; set; }
+    // When set, takes precedence over ScheduleIntervalMinutes for computing NextScheduledAt -
+    // see CronSchedule.GetNextOccurrence. Synced from an enabled core.scheduleTrigger node's
+    // cronExpression parameter on Publish, same pattern as ScheduleIntervalMinutes itself.
+    public string? ScheduleCronExpression { get; set; }
     public DateTimeOffset? NextScheduledAt { get; set; }
     public long? NextScheduledAtUnixSeconds { get; set; }
     // Synced from an enabled "database.rowChangedTrigger" node's ParametersJson on Publish,
@@ -1614,6 +1627,21 @@ public sealed class AutomationWorkflow : AuditableEntity
     // nodes - see AutomationWorkflowService.PublishAsync. Null means this workflow has no
     // (enabled) database trigger.
     public Guid? TriggerWikiDatabaseId { get; set; }
+    // Opt-in escape hatch for the documented no-chaining tradeoff: database.setRowProperty/
+    // database.addRow normally save as actor "automation-engine" specifically so
+    // WikiDatabaseService.SaveRowAsync skips re-firing database.rowChangedTrigger (preventing
+    // infinite automation loops). When this is true, those two node handlers use a different
+    // actor string instead ("automation-engine:chained"), which WikiDatabaseService's actor
+    // check doesn't special-case, so downstream automations DO see the write. Default false -
+    // an author must deliberately opt in per workflow, understanding the loop risk they're
+    // accepting.
+    public bool AllowDownstreamAutomationTriggers { get; set; }
+    // Synced on Publish from the presence of an enabled "crm.dealStageChangedTrigger" /
+    // "cms.pagePublishedTrigger" node, same cached-subscriber-lookup pattern as
+    // TriggerWikiDatabaseId above - lets AutomationTriggerService find subscribers without
+    // deserializing every active workflow's published snapshot.
+    public bool TriggerCrmDealStageChanged { get; set; }
+    public bool TriggerCmsPagePublished { get; set; }
     public ICollection<AutomationNode> Nodes { get; set; } = new List<AutomationNode>();
     public ICollection<AutomationConnection> Connections { get; set; } = new List<AutomationConnection>();
     public ICollection<AutomationWorkflowVersion> Versions { get; set; } = new List<AutomationWorkflowVersion>();
@@ -1709,6 +1737,11 @@ public sealed class AutomationNodeExecution : AuditableEntity
     public long StartedAtUnixSeconds { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
     public long? FinishedAtUnixSeconds { get; set; }
+    // True when this node's OutputJson was substituted from a prior execution's recorded output
+    // rather than actually run - see AutomationExecutionService.ReplayAsync / IsDryRun. Only ever
+    // set on a node with a real external side effect (HTTP, CRM/CMS writes, AI calls, etc.);
+    // pure data/flow nodes always run for real even during a dry run.
+    public bool IsSimulated { get; set; }
     public AutomationExecution? Execution { get; set; }
 }
 

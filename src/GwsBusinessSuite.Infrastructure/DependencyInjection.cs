@@ -163,6 +163,7 @@ public static class DependencyInjection
         services.AddScoped<ICmsKnowledgeService, CmsKnowledgeService>();
         services.AddScoped<IContentStudioService, ContentStudioService>();
         services.AddScoped<ICrmService, CrmService>();
+        services.AddScoped<GwsBusinessSuite.Application.MissionControl.IMissionControlService, MissionControlService>();
         services.AddScoped<IUserManagementService, UserManagementService>();
         services.AddScoped<ISecurityAuditService, SecurityAuditService>();
         services.AddScoped<IPrivacyOperationsService, PrivacyOperationsService>();
@@ -215,6 +216,7 @@ public static class DependencyInjection
         services.AddScoped<IAutomationTemplateService, AutomationTemplateService>();
         services.AddHostedService<AutomationScheduleBackgroundService>();
         services.AddHostedService<AutomationResumeBackgroundService>();
+        services.AddHostedService<AutomationCredentialRefreshBackgroundService>();
         services.AddScoped<IWikiSyncedBlockService, WikiSyncedBlockService>();
         services.AddScoped<IWikiService, WikiService>();
         services.AddScoped<IWikiDatabaseService, WikiDatabaseService>();

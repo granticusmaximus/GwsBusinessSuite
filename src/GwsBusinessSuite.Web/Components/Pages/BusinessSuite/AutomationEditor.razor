@@ -2,7 +2,9 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "AdminOnly")]
 @implements IAsyncDisposable
+@using GwsBusinessSuite.Application.Abstractions
 @using GwsBusinessSuite.Application.Automation
+@using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Domain.Entities
 @using Microsoft.JSInterop
 @inject IAutomationWorkflowService WorkflowService
@@ -10,6 +12,8 @@
 @inject IAutomationNodeRegistry NodeRegistry
 @inject IAutomationCredentialService CredentialService
 @inject IAutomationTemplateService TemplateService
+@inject ISentinelAccessService AccessService
+@inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
 @inject ILogger<AutomationEditor> Logger
@@ -40,6 +44,14 @@ else
                 <button class="btn btn-sm btn-outline-secondary" @onclick="Validate" disabled="@_busy"><i class="bi bi-check2-circle me-1"></i>Validate</button>
                 <a class="btn btn-sm btn-outline-secondary" href="/admin/api/automation/@WorkflowId/export.json"><i class="bi bi-download me-1"></i>Export</a>
                 <button class="btn btn-sm btn-outline-secondary" @onclick="OpenSaveTemplate" disabled="@_busy"><i class="bi bi-collection me-1"></i>Save as template</button>
+                <div class="btn-group" role="group" aria-label="Undo and redo">
+                    <button class="btn btn-sm btn-outline-secondary" title="Undo (Ctrl+Z)" disabled="@(_busy || _undoStack.Count == 0)" @onclick="UndoAsync"><i class="bi bi-arrow-counterclockwise"></i></button>
+                    <button class="btn btn-sm btn-outline-secondary" title="Redo (Ctrl+Y)" disabled="@(_busy || _redoStack.Count == 0)" @onclick="RedoAsync"><i class="bi bi-arrow-clockwise"></i></button>
+                </div>
+                <div class="btn-group" role="group" aria-label="Copy and paste">
+                    <button class="btn btn-sm btn-outline-secondary" title="Copy selected (Ctrl+C)" disabled="@(_busy || SelectedNodeIds.Count == 0)" @onclick="CopySelection"><i class="bi bi-clipboard"></i></button>
+                    <button class="btn btn-sm btn-outline-secondary" title="Paste (Ctrl+V)" disabled="@(_busy || _clipboardNodes.Count == 0)" @onclick="PasteClipboardAsync"><i class="bi bi-clipboard-check"></i></button>
+                </div>
                 <button class="btn btn-sm btn-outline-primary" @onclick="Publish" disabled="@_busy"><i class="bi bi-cloud-arrow-up me-1"></i>Publish</button>
                 <button class="btn btn-sm @(_view.Status == AutomationWorkflowStatuses.Active ? "btn-success" : "btn-outline-success")" @onclick="ToggleActive" disabled="@(_busy || _view.CurrentVersion == 0)">
                     <i class="bi @(_view.Status == AutomationWorkflowStatuses.Active ? "bi-toggle-on" : "bi-toggle-off") me-1"></i>@(_view.Status == AutomationWorkflowStatuses.Active ? "Active" : "Inactive")
@@ -71,7 +83,7 @@ else
             </aside>
 
             <main class="automation-canvas-viewport">
-                <div class="automation-canvas" @ref="_canvas" @onclick="ClearSelection">
+                <div class="automation-canvas" @ref="_canvas" tabindex="0" @onclick="ClearSelection" @onkeydown="HandleCanvasKeyDown">
                     <svg class="automation-connections" width="2400" height="1400" aria-hidden="true">
                         @foreach (var connection in _view.Connections)
                         {
@@ -81,9 +93,9 @@ else
                     @foreach (var node in _view.Nodes)
                     {
                         var definition = NodeRegistry.Find(node.TypeKey, node.TypeVersion);
-                        <article class="automation-node @(node.Id == _selectedNodeId ? "is-selected" : "") @(node.IsDisabled ? "is-disabled" : "")"
+                        <article class="automation-node @(node.Id == _selectedNodeId ? "is-selected" : "") @(_multiSelectedNodeIds.Contains(node.Id) ? "is-multi-selected" : "") @(node.IsDisabled ? "is-disabled" : "")"
                                  data-automation-node="@node.Id" style="left:@(node.PositionX)px; top:@(node.PositionY)px"
-                                 @onclick="() => SelectNode(node.Id)" @onclick:stopPropagation="true">
+                                 @onclick="e => SelectNode(node.Id, e)" @onclick:stopPropagation="true">
                             <div class="node-output node-output-main" title="Output"></div>
                             @if (definition?.Outputs.Contains("true") == true)
                             {
@@ -96,7 +108,17 @@ else
                         </article>
                     }
                 </div>
-                <div class="canvas-help"><i class="bi bi-arrows-move me-1"></i>Drag nodes to arrange · select a node to configure</div>
+                <div class="canvas-help"><i class="bi bi-arrows-move me-1"></i>Drag nodes to arrange · click to select · Ctrl/Shift+click to multi-select · Ctrl+C/V to copy/paste · Ctrl+Z/Y to undo/redo</div>
+                @if (_view.Nodes.Count > 0)
+                {
+                    <div class="automation-minimap" aria-hidden="true" title="Workflow overview">
+                        @foreach (var node in _view.Nodes)
+                        {
+                            <span class="automation-minimap-dot @(node.Id == _selectedNodeId || _multiSelectedNodeIds.Contains(node.Id) ? "is-selected" : "")"
+                                  style="left:@(node.PositionX / 2200 * 100)%; top:@(node.PositionY / 1250 * 100)%"></span>
+                        }
+                    </div>
+                }
             </main>
 
             <aside class="automation-inspector">
@@ -164,6 +186,15 @@ else
                 {
                     @if (_latestExecution is not null)
                     {
+                        @if (_latestExecution.Mode == AutomationExecutionModes.Replay)
+                        {
+                            <div class="alert alert-info py-2 px-3 mb-2 small">
+                                <i class="bi bi-clock-history me-1"></i><strong>Time-travel replay</strong> - a sandboxed
+                                dry run against the current published graph; @_latestExecution.Nodes.Count(node => node.IsSimulated)
+                                node(s) with a real side effect were simulated from their original recorded output, not
+                                actually run.
+                            </div>
+                        }
                         <div class="execution-result @(_latestExecution.Status == AutomationExecutionStatuses.Succeeded ? "is-success" : _latestExecution.Status == AutomationExecutionStatuses.Waiting ? "is-waiting" : "is-failure")">
                             <strong>@_latestExecution.Status</strong><span>@_latestExecution.ErrorMessage</span><pre>@_latestExecution.OutputJson</pre>
                         </div>
@@ -195,7 +226,7 @@ else
                     <div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Status</th><th>Mode</th><th>Started</th><th>Duration</th><th></th></tr></thead><tbody>
                         @foreach (var run in _view.RecentExecutions)
                         {
-                            <tr><td><span class="badge @(run.Status == AutomationExecutionStatuses.Succeeded ? "text-bg-success" : run.Status == AutomationExecutionStatuses.Failed ? "text-bg-danger" : run.Status == AutomationExecutionStatuses.Waiting ? "text-bg-warning" : "text-bg-secondary")">@run.Status</span></td><td>@run.Mode</td><td>@FormatDate(run.StartedAt)</td><td>@Duration(run.StartedAt, run.FinishedAt)</td><td class="text-end"><button class="btn btn-sm btn-link" @onclick="() => LoadExecution(run.Id)">Inspect</button></td></tr>
+                            <tr><td><span class="badge @(run.Status == AutomationExecutionStatuses.Succeeded ? "text-bg-success" : run.Status == AutomationExecutionStatuses.Failed ? "text-bg-danger" : run.Status == AutomationExecutionStatuses.Waiting ? "text-bg-warning" : "text-bg-secondary")">@run.Status</span></td><td>@run.Mode</td><td>@FormatDate(run.StartedAt)</td><td>@Duration(run.StartedAt, run.FinishedAt)</td><td class="text-end"><button class="btn btn-sm btn-link" @onclick="() => LoadExecution(run.Id)">Inspect</button><button class="btn btn-sm btn-link" title="Re-run this execution's recorded input against the current published graph as a sandboxed dry run" disabled="@_busy" @onclick="() => ReplayExecution(run.Id)">Replay</button></td></tr>
                         }
                     </tbody></table></div>
                 }
@@ -233,6 +264,36 @@ else
                 else
                 {
                     <div class="row g-3"><div class="col-md-5"><label class="form-label small fw-semibold">Description</label><textarea class="form-control form-control-sm" rows="3" @bind="_description"></textarea></div><div class="col-md-4"><label class="form-label small fw-semibold">Tags</label><input class="form-control form-control-sm" @bind="_tags" placeholder="sales, notifications" /></div><div class="col-md-3"><label class="form-label small fw-semibold">Manual input JSON</label><textarea class="form-control form-control-sm font-monospace" rows="3" @bind="_runInput"></textarea></div></div>
+                    <div class="form-check mt-3">
+                        <input id="allowDownstreamTriggers" class="form-check-input" type="checkbox" checked="@_allowDownstreamTriggers" disabled="@_busy" @onchange="ToggleAllowDownstreamTriggers" />
+                        <label for="allowDownstreamTriggers" class="form-check-label small">
+                            Allow this workflow's database writes to trigger other automations
+                            <span class="text-secondary d-block">Off by default to prevent automation loops. Turn on only if you understand a downstream Database Row Changed trigger reacting to this workflow's own writes is what you want.</span>
+                        </label>
+                    </div>
+                    <hr class="my-4" />
+                    <h3 class="h6 fw-bold">Public status page</h3>
+                    <p class="text-secondary small">Share a read-only status page externally (e.g. with a client or affiliate) - it shows this workflow's name, description, status, and recent run history only, never node configuration, credentials, or run input/output data.</p>
+                    <div class="row g-2 align-items-end mb-2">
+                        <div class="col-md-5"><label class="form-label small mb-1">Expires (optional)</label><input type="datetime-local" class="form-control form-control-sm" @bind="_shareExpiresAt" /></div>
+                        <div class="col-md-4"><label class="form-label small mb-1">Password (optional)</label><input type="text" class="form-control form-control-sm" @bind="_sharePassword" placeholder="Require a password to view" /></div>
+                        <div class="col-md-3"><button class="btn btn-sm btn-outline-warning w-100" disabled="@_busy" @onclick="CreatePublicShare">Create link</button></div>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_newPublicShareUrl))
+                    {
+                        <div class="input-group input-group-sm mb-2">
+                            <input class="form-control" value="@_newPublicShareUrl" readonly />
+                            <button type="button" class="btn btn-outline-secondary" @onclick="CopyPublicShareUrl">Copy</button>
+                        </div>
+                        <div class="small text-warning mb-2">Copy this link now. The secret token is not stored in plaintext.</div>
+                    }
+                    @foreach (var share in _publicShares.Where(item => !item.IsRevoked))
+                    {
+                        <div class="d-flex align-items-center justify-content-between border rounded px-2 py-1 mb-1 small">
+                            <span><i class="bi bi-globe2 me-1"></i>Public link @if (share.RequiresPassword) { <i class="bi bi-lock-fill ms-1" title="Password protected"></i> } <span class="text-secondary">&middot; @(share.ViewCount == 1 ? "1 view" : $"{share.ViewCount} views")</span></span>
+                            <button type="button" class="btn btn-sm btn-link text-danger" disabled="@_busy" @onclick="() => RevokePublicShare(share.Id)">Revoke</button>
+                        </div>
+                    }
                 }
             </div>
         </section>
@@ -265,7 +326,7 @@ else
     private IReadOnlyList<AutomationCredentialSummary> _credentials = [];
     private Guid? _selectedNodeId;
     private AutomationNodeView? _selectedNode => _view?.Nodes.FirstOrDefault(node => node.Id == _selectedNodeId);
-    private bool _loading = true, _busy, _messageIsError;
+    private bool _loading = true, _busy, _messageIsError, _allowDownstreamTriggers;
     private string _message = "", _name = "", _description = "", _tags = "", _paletteSearch = "", _bottomTab = "connections", _runInput = "{}";
     private string _nodeName = "", _nodeParameters = "{}", _nodeNotes = "";
     private Guid? _nodeCredentialId;
@@ -281,6 +342,34 @@ else
     private ElementReference _canvas;
     private IJSObjectReference? _module;
     private DotNetObjectReference<AutomationEditor>? _dotNetRef;
+    private readonly HashSet<Guid> _multiSelectedNodeIds = [];
+    private List<AutomationNodeView> _clipboardNodes = [];
+    private List<AutomationConnectionView> _clipboardConnections = [];
+    private List<SentinelShareView> _publicShares = [];
+    private DateTime? _shareExpiresAt;
+    private string _sharePassword = "";
+    private string? _newPublicShareUrl;
+    private readonly List<IUndoableAction> _undoStack = [];
+    private readonly List<IUndoableAction> _redoStack = [];
+    // A node deleted then undone gets a brand-new id (SaveNodeAsync always mints one) - this
+    // remaps whatever id an in-memory undo/redo action still references to the node's current
+    // live id, so a chain of delete/undo/delete/undo on the same node keeps resolving correctly
+    // instead of pointing at an id that no longer exists.
+    private readonly Dictionary<Guid, Guid> _nodeIdRemap = [];
+
+    // Union of the single inspector selection and the ctrl/shift-click multi-selection - what
+    // Copy/bulk actions operate on.
+    private HashSet<Guid> SelectedNodeIds
+    {
+        get
+        {
+            var ids = new HashSet<Guid>(_multiSelectedNodeIds);
+            if (_selectedNodeId.HasValue) ids.Add(_selectedNodeId.Value);
+            return ids;
+        }
+    }
+
+    private Guid ResolveNodeId(Guid id) => _nodeIdRemap.TryGetValue(id, out var mapped) ? mapped : id;
 
     private IEnumerable<AutomationNodeDefinition> FilteredDefinitions => _definitions.Where(definition => string.IsNullOrWhiteSpace(_paletteSearch) || definition.DisplayName.Contains(_paletteSearch, StringComparison.OrdinalIgnoreCase) || definition.Category.Contains(_paletteSearch, StringComparison.OrdinalIgnoreCase));
 
@@ -298,7 +387,8 @@ else
         try
         {
             _view = await WorkflowService.GetAsync(WorkflowId);
-            if (_view is not null) { _name = _view.Name; _description = _view.Description; _tags = _view.TagsCsv; }
+            if (_view is not null) { _name = _view.Name; _description = _view.Description; _tags = _view.TagsCsv; _allowDownstreamTriggers = _view.AllowDownstreamAutomationTriggers; }
+            _publicShares = (await AccessService.GetAccessAsync(WorkflowId, isDatabase: false)).Shares.ToList();
         }
         catch (Exception ex) { Fail(ex, "Unable to open workflow."); }
         finally { _loading = false; }
@@ -321,7 +411,20 @@ else
         _nodeCredentialId = node.CredentialId;
         _nodeContinueOnFail = node.ContinueOnFail; _nodeRetryOnFail = node.RetryOnFail; _nodeMaxTries = node.MaxTries; _nodeWaitMs = node.WaitBetweenTriesMs; _nodeTimeoutMs = node.TimeoutMs;
     }
-    private void ClearSelection() => _selectedNodeId = null;
+    // Plain click: single-select (existing inspector behavior, clears any multi-selection).
+    // Ctrl/Shift+click: toggles the node into/out of the multi-selection, used by Copy, without
+    // disturbing whichever node the inspector currently shows.
+    private void SelectNode(Guid id, MouseEventArgs e)
+    {
+        if (e.CtrlKey || e.ShiftKey)
+        {
+            if (!_multiSelectedNodeIds.Remove(id)) _multiSelectedNodeIds.Add(id);
+            return;
+        }
+        _multiSelectedNodeIds.Clear();
+        SelectNode(id);
+    }
+    private void ClearSelection() { _selectedNodeId = null; _multiSelectedNodeIds.Clear(); }
     private void Back() => Navigation.NavigateTo("/admin/automation");
     private void ShowConnections() => _bottomTab = "connections";
     private void ShowRuns() => _bottomTab = "runs";
@@ -352,19 +455,213 @@ else
     private async Task DeleteSelectedNode()
     {
         if (_selectedNodeId is null) return;
-        await Work(async () => { await WorkflowService.DeleteNodeAsync(WorkflowId, _selectedNodeId.Value); _selectedNodeId = null; await Reload(); _message = "Node deleted."; });
+        var nodeId = _selectedNodeId.Value;
+        var node = _selectedNode!;
+        await Work(async () =>
+        {
+            var touching = _view!.Connections.Where(c => c.SourceNodeId == nodeId || c.TargetNodeId == nodeId).ToList();
+            await WorkflowService.DeleteNodeAsync(WorkflowId, nodeId);
+            PushUndo(new NodeDeletionAction(nodeId, EditorFrom(node), touching));
+            _selectedNodeId = null;
+            _multiSelectedNodeIds.Remove(nodeId);
+            await Reload();
+            _message = "Node deleted.";
+        });
     }
     private async Task AddConnection()
     {
         if (_connectionSource is null || _connectionTarget is null) { Show("Choose a source and target node.", true); return; }
         await Work(async () => { await WorkflowService.AddConnectionAsync(WorkflowId, _connectionSource.Value, _connectionOutput, _connectionTarget.Value, _connectionTargetInput); await Reload(); _message = "Connection added."; });
     }
-    private async Task DeleteConnection(Guid id) => await Work(async () => { await WorkflowService.DeleteConnectionAsync(WorkflowId, id); await Reload(); _message = "Connection removed."; });
+    private async Task DeleteConnection(Guid id) => await Work(async () =>
+    {
+        var connection = _view!.Connections.First(c => c.Id == id);
+        await WorkflowService.DeleteConnectionAsync(WorkflowId, id);
+        PushUndo(new ConnectionDeletionAction(connection));
+        await Reload();
+        _message = "Connection removed.";
+    });
+
+    private void PushUndo(IUndoableAction action) { _undoStack.Add(action); _redoStack.Clear(); }
+
+    private async Task UndoAsync() => await Work(async () =>
+    {
+        if (_undoStack.Count == 0) return;
+        var action = _undoStack[^1]; _undoStack.RemoveAt(_undoStack.Count - 1);
+        await action.UndoAsync(this);
+        _redoStack.Add(action);
+        await Reload();
+        _message = "Undone.";
+    });
+
+    private async Task RedoAsync() => await Work(async () =>
+    {
+        if (_redoStack.Count == 0) return;
+        var action = _redoStack[^1]; _redoStack.RemoveAt(_redoStack.Count - 1);
+        await action.RedoAsync(this);
+        _undoStack.Add(action);
+        await Reload();
+        _message = "Redone.";
+    });
+
+    private Task HandleCanvasKeyDown(KeyboardEventArgs e)
+    {
+        if (!e.CtrlKey && !e.MetaKey) return Task.CompletedTask;
+        switch (e.Key.ToLowerInvariant())
+        {
+            case "c": CopySelection(); return Task.CompletedTask;
+            case "v": return PasteClipboardAsync();
+            case "z": return e.ShiftKey ? RedoAsync() : UndoAsync();
+            case "y": return RedoAsync();
+            default: return Task.CompletedTask;
+        }
+    }
+
+    private void CopySelection()
+    {
+        var ids = SelectedNodeIds;
+        if (ids.Count == 0) return;
+        _clipboardNodes = _view!.Nodes.Where(node => ids.Contains(node.Id)).ToList();
+        _clipboardConnections = _view.Connections.Where(c => ids.Contains(c.SourceNodeId) && ids.Contains(c.TargetNodeId)).ToList();
+        Show($"Copied {_clipboardNodes.Count} node(s).");
+    }
+
+    private async Task PasteClipboardAsync() => await Work(async () =>
+    {
+        if (_clipboardNodes.Count == 0) return;
+        var idMap = new Dictionary<Guid, Guid>();
+        var pastedIds = new HashSet<Guid>();
+        foreach (var node in _clipboardNodes)
+        {
+            var editor = EditorFrom(node);
+            var created = await WorkflowService.SaveNodeAsync(WorkflowId, new AutomationNodeEditor
+            {
+                Name = UniqueNodeName(node.Name), TypeKey = editor.TypeKey, TypeVersion = editor.TypeVersion,
+                PositionX = Math.Clamp(node.PositionX + 40, 0, 5000), PositionY = Math.Clamp(node.PositionY + 40, 0, 5000),
+                ParametersJson = editor.ParametersJson, CredentialId = editor.CredentialId, IsDisabled = editor.IsDisabled,
+                ContinueOnFail = editor.ContinueOnFail, RetryOnFail = editor.RetryOnFail, MaxTries = editor.MaxTries,
+                WaitBetweenTriesMs = editor.WaitBetweenTriesMs, TimeoutMs = editor.TimeoutMs, Notes = editor.Notes
+            });
+            idMap[node.Id] = created.Id;
+            pastedIds.Add(created.Id);
+        }
+        foreach (var connection in _clipboardConnections)
+        {
+            if (idMap.TryGetValue(connection.SourceNodeId, out var sourceId) && idMap.TryGetValue(connection.TargetNodeId, out var targetId))
+            {
+                await WorkflowService.AddConnectionAsync(WorkflowId, sourceId, connection.SourceOutput, targetId, connection.TargetInput);
+            }
+        }
+        await Reload();
+        _multiSelectedNodeIds.Clear();
+        foreach (var id in pastedIds) _multiSelectedNodeIds.Add(id);
+        _selectedNodeId = null;
+        _message = $"Pasted {pastedIds.Count} node(s).";
+    });
+
+    private string UniqueNodeName(string baseName)
+    {
+        if (_view!.Nodes.All(node => node.Name != baseName)) return baseName;
+        var suffix = 2;
+        while (_view.Nodes.Any(node => node.Name == $"{baseName} copy {suffix}")) suffix++;
+        return suffix == 2 && _view.Nodes.All(node => node.Name != $"{baseName} copy") ? $"{baseName} copy" : $"{baseName} copy {suffix}";
+    }
+
+    private static AutomationNodeEditor EditorFrom(AutomationNodeView node) => new()
+    {
+        Name = node.Name, TypeKey = node.TypeKey, TypeVersion = node.TypeVersion,
+        PositionX = node.PositionX, PositionY = node.PositionY, ParametersJson = node.ParametersJson,
+        CredentialId = node.CredentialId, IsDisabled = node.IsDisabled, ContinueOnFail = node.ContinueOnFail,
+        RetryOnFail = node.RetryOnFail, MaxTries = node.MaxTries, WaitBetweenTriesMs = node.WaitBetweenTriesMs,
+        TimeoutMs = node.TimeoutMs, Notes = node.Notes
+    };
+
+    private interface IUndoableAction
+    {
+        Task UndoAsync(AutomationEditor editor);
+        Task RedoAsync(AutomationEditor editor);
+    }
+
+    // Represents "this node was deleted." Undo recreates it (and whatever of its connections
+    // can still be reattached) and remembers its new id; redo deletes that recreated node again.
+    private sealed class NodeDeletionAction : IUndoableAction
+    {
+        private readonly Guid _originalNodeId;
+        private readonly AutomationNodeEditor _snapshot;
+        private readonly List<AutomationConnectionView> _connections;
+        private Guid _currentNodeId;
+
+        public NodeDeletionAction(Guid originalNodeId, AutomationNodeEditor snapshot, List<AutomationConnectionView> connections)
+        {
+            _originalNodeId = originalNodeId;
+            _currentNodeId = originalNodeId;
+            _snapshot = snapshot;
+            _connections = connections;
+        }
+
+        public async Task UndoAsync(AutomationEditor editor)
+        {
+            var recreated = await editor.WorkflowService.SaveNodeAsync(editor.WorkflowId, _snapshot);
+            editor._nodeIdRemap[_originalNodeId] = recreated.Id;
+            _currentNodeId = recreated.Id;
+            foreach (var connection in _connections)
+            {
+                var sourceId = connection.SourceNodeId == _originalNodeId ? recreated.Id : editor.ResolveNodeId(connection.SourceNodeId);
+                var targetId = connection.TargetNodeId == _originalNodeId ? recreated.Id : editor.ResolveNodeId(connection.TargetNodeId);
+                try { await editor.WorkflowService.AddConnectionAsync(editor.WorkflowId, sourceId, connection.SourceOutput, targetId, connection.TargetInput); }
+                catch (Exception) { /* the other endpoint may no longer exist - best effort reattachment */ }
+            }
+        }
+
+        public async Task RedoAsync(AutomationEditor editor) => await editor.WorkflowService.DeleteNodeAsync(editor.WorkflowId, _currentNodeId);
+    }
+
+    // Represents "this connection was deleted." Undo recreates it; redo deletes it again.
+    private sealed class ConnectionDeletionAction(AutomationConnectionView snapshot) : IUndoableAction
+    {
+        private Guid _currentConnectionId = snapshot.Id;
+
+        public async Task UndoAsync(AutomationEditor editor)
+        {
+            var sourceId = editor.ResolveNodeId(snapshot.SourceNodeId);
+            var targetId = editor.ResolveNodeId(snapshot.TargetNodeId);
+            var recreated = await editor.WorkflowService.AddConnectionAsync(editor.WorkflowId, sourceId, snapshot.SourceOutput, targetId, snapshot.TargetInput);
+            _currentConnectionId = recreated.Id;
+        }
+
+        public async Task RedoAsync(AutomationEditor editor) => await editor.WorkflowService.DeleteConnectionAsync(editor.WorkflowId, _currentConnectionId);
+    }
     private async Task SaveMetadata() => await Work(async () => { await WorkflowService.UpdateMetadataAsync(WorkflowId, _name, _description, _tags); await Reload(); _message = "Workflow saved."; });
     private async Task Validate() => await Work(async () => { var result = await WorkflowService.ValidateAsync(WorkflowId); Show(result.IsValid ? "Workflow is valid and ready to publish." : string.Join(" ", result.Errors), !result.IsValid); });
     private async Task Publish() => await Work(async () => { await WorkflowService.UpdateMetadataAsync(WorkflowId, _name, _description, _tags); var version = await WorkflowService.PublishAsync(WorkflowId, "Published from visual editor"); await Reload(); _message = $"Published immutable version {version}."; });
     private async Task ToggleActive() => await Work(async () => { await WorkflowService.SetActiveAsync(WorkflowId, _view!.Status != AutomationWorkflowStatuses.Active); await Reload(); _message = _view!.Status == AutomationWorkflowStatuses.Active ? "Workflow activated." : "Workflow deactivated."; });
+    private async Task ToggleAllowDownstreamTriggers() => await Work(async () =>
+    {
+        await WorkflowService.SetAllowDownstreamAutomationTriggersAsync(WorkflowId, !_allowDownstreamTriggers);
+        await Reload();
+        _message = _allowDownstreamTriggers ? "This workflow's writes can now trigger other automations." : "This workflow's writes no longer trigger other automations.";
+    });
     private async Task RunWorkflow() => await Work(async () => { _latestExecution = await ExecutionService.ExecuteAsync(WorkflowId, _runInput); _bottomTab = "runs"; await Reload(); Show(_latestExecution.Status == AutomationExecutionStatuses.Succeeded ? "Workflow completed successfully." : _latestExecution.ErrorMessage, _latestExecution.Status != AutomationExecutionStatuses.Succeeded); });
+    private async Task CreatePublicShare() => await Work(async () =>
+    {
+        var expiresAt = _shareExpiresAt is { } parsed ? new DateTimeOffset(parsed) : (DateTimeOffset?)null;
+        var password = string.IsNullOrWhiteSpace(_sharePassword) ? null : _sharePassword;
+        var share = await AccessService.CreatePublicShareAsync(
+            WorkflowId, isDatabase: false, expiresAt, allowSearchIndexing: false, password,
+            await CurrentUserAccessor.GetCurrentUsernameAsync(), isAutomationWorkflow: true);
+        _newPublicShareUrl = Navigation.ToAbsoluteUri($"/sentinel/share/{share.PublicToken}").ToString();
+        _shareExpiresAt = null;
+        _sharePassword = "";
+        await Reload();
+        _message = "Public status link created.";
+    });
+    private async Task RevokePublicShare(Guid shareId) => await Work(async () =>
+    {
+        await AccessService.RevokePublicShareAsync(shareId, await CurrentUserAccessor.GetCurrentUsernameAsync());
+        await Reload();
+        _message = "Public status link revoked.";
+    });
+    private async Task CopyPublicShareUrl() => await JS.InvokeVoidAsync("navigator.clipboard.writeText", _newPublicShareUrl);
     private async Task LoadExecution(Guid id) => await Work(async () => { _latestExecution = await WorkflowService.GetExecutionAsync(id); _bottomTab = "runs"; });
     private async Task ResolveApproval(bool approved) => await Work(async () =>
     {
@@ -386,6 +683,13 @@ else
         _latestExecution = await ExecutionService.RetryFromFailedNodeAsync(_latestExecution.Id);
         await Reload();
         Show(_latestExecution.Status == AutomationExecutionStatuses.Succeeded ? "Retry succeeded." : _latestExecution.ErrorMessage, _latestExecution.Status != AutomationExecutionStatuses.Succeeded);
+    });
+    private async Task ReplayExecution(Guid executionId) => await Work(async () =>
+    {
+        _latestExecution = await ExecutionService.ReplayAsync(executionId);
+        _bottomTab = "runs";
+        await Reload();
+        Show(_latestExecution.Status == AutomationExecutionStatuses.Succeeded ? "Replay completed - no real side effects were performed." : $"Replay stopped: {_latestExecution.ErrorMessage}", _latestExecution.Status != AutomationExecutionStatuses.Succeeded);
     });
 
     private void OpenSaveTemplate() { _templateName = _view?.Name ?? ""; _templateDescription = _view?.Description ?? ""; _showSaveTemplate = true; }

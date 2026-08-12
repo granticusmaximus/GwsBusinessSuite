@@ -37,6 +37,7 @@ public sealed class AutomationWorkflowService(
                 workflow.Name,
                 workflow.Description,
                 workflow.Status,
+                workflow.TagsCsv,
                 workflow.CurrentVersion,
                 workflow.LastExecutedAt,
                 workflow.CreatedAt,
@@ -50,6 +51,7 @@ public sealed class AutomationWorkflowService(
             workflow.Name,
             workflow.Description,
             workflow.Status,
+            workflow.TagsCsv,
             workflow.CurrentVersion,
             workflow.NodeCount,
             workflow.LastExecutedAt,
@@ -100,6 +102,15 @@ public sealed class AutomationWorkflowService(
         db.AutomationWorkflows.Add(workflow);
         await db.SaveChangesAsync(cancellationToken);
         return (await GetAsync(workflow.Id, cancellationToken))!;
+    }
+
+    public async Task<AutomationWorkflowView> DuplicateAsync(
+        Guid workflowId, string newName, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var source = await GetAsync(workflowId, cancellationToken)
+            ?? throw new KeyNotFoundException("Workflow was not found.");
+        var name = string.IsNullOrWhiteSpace(newName) ? $"{source.Name} (copy)" : newName.Trim();
+        return await CreateFromGraphAsync(name, source.Description, source.Nodes, source.Connections, performedBy, cancellationToken);
     }
 
     public async Task UpdateMetadataAsync(
@@ -278,8 +289,24 @@ public sealed class AutomationWorkflowService(
         var scheduleNodes = workflow.Nodes.Where(node => node.TypeKey == "core.scheduleTrigger" && !node.IsDisabled).ToList();
         if (scheduleNodes.Count > 1) errors.Add("This foundation supports one enabled Schedule Trigger per workflow.");
         foreach (var node in scheduleNodes)
-            if (ReadIntParameter(node.ParametersJson, "intervalMinutes") is not (>= 1 and <= 525600))
-                errors.Add($"Schedule Trigger '{node.Name}' needs intervalMinutes between 1 and 525600.");
+        {
+            var cronExpression = ReadStringParameter(node.ParametersJson, "cronExpression");
+            if (!string.IsNullOrWhiteSpace(cronExpression))
+            {
+                try { CronSchedule.Validate(cronExpression); }
+                catch (FormatException ex) { errors.Add($"Schedule Trigger '{node.Name}' has an invalid cronExpression: {ex.Message}"); }
+            }
+            else if (ReadIntParameter(node.ParametersJson, "intervalMinutes") is not (>= 1 and <= 525600))
+            {
+                errors.Add($"Schedule Trigger '{node.Name}' needs intervalMinutes between 1 and 525600, or a cronExpression.");
+            }
+        }
+
+        foreach (var databaseTriggerNode in workflow.Nodes.Where(node => node.TypeKey == "database.rowChangedTrigger" && !node.IsDisabled))
+        {
+            try { DatabaseTriggerConditions.ValidateConditions(databaseTriggerNode.ParametersJson, databaseTriggerNode.Name); }
+            catch (InvalidOperationException ex) { errors.Add(ex.Message); }
+        }
 
         foreach (var mergeNode in workflow.Nodes.Where(node => node.TypeKey == "core.merge" && !node.IsDisabled))
         {
@@ -351,15 +378,23 @@ public sealed class AutomationWorkflowService(
         workflow.CurrentVersion = versionNumber;
         workflow.PublishedAt = timeProvider.GetUtcNow();
         workflow.WebhookPath = webhookPath;
+        var cronExpression = scheduleNode is null ? null : ReadStringParameter(scheduleNode.ParametersJson, "cronExpression")?.Trim();
+        workflow.ScheduleCronExpression = string.IsNullOrWhiteSpace(cronExpression) ? null : cronExpression;
+        // cronExpression takes precedence when both are set - intervalMinutes stays populated
+        // either way so switching back to interval-only mode later doesn't lose the old value.
         workflow.ScheduleIntervalMinutes = scheduleNode is null ? null : ReadIntParameter(scheduleNode.ParametersJson, "intervalMinutes");
-        workflow.NextScheduledAt = workflow.ScheduleIntervalMinutes.HasValue
-            ? timeProvider.GetUtcNow().AddMinutes(workflow.ScheduleIntervalMinutes.Value)
-            : null;
+        workflow.NextScheduledAt = workflow.ScheduleCronExpression is not null
+            ? CronSchedule.GetNextOccurrence(workflow.ScheduleCronExpression, timeProvider.GetUtcNow())
+            : workflow.ScheduleIntervalMinutes.HasValue
+                ? timeProvider.GetUtcNow().AddMinutes(workflow.ScheduleIntervalMinutes.Value)
+                : null;
         workflow.NextScheduledAtUnixSeconds = workflow.NextScheduledAt?.ToUnixTimeSeconds();
         workflow.TriggerWikiDatabaseId = databaseTriggerNode is not null
             && Guid.TryParse(ReadStringParameter(databaseTriggerNode.ParametersJson, "wikiDatabaseId"), out var wikiDatabaseId)
                 ? wikiDatabaseId
                 : null;
+        workflow.TriggerCrmDealStageChanged = workflow.Nodes.Any(node => node.TypeKey == "crm.dealStageChangedTrigger" && !node.IsDisabled);
+        workflow.TriggerCmsPagePublished = workflow.Nodes.Any(node => node.TypeKey == "cms.pagePublishedTrigger" && !node.IsDisabled);
         if (workflow.Status == AutomationWorkflowStatuses.Draft) workflow.Status = AutomationWorkflowStatuses.Inactive;
         Touch(workflow);
         await db.SaveChangesAsync(cancellationToken);
@@ -372,6 +407,14 @@ public sealed class AutomationWorkflowService(
         if (active && workflow.CurrentVersion == 0)
             throw new InvalidOperationException("Publish a valid workflow before activating it.");
         workflow.Status = active ? AutomationWorkflowStatuses.Active : AutomationWorkflowStatuses.Inactive;
+        Touch(workflow);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task SetAllowDownstreamAutomationTriggersAsync(Guid workflowId, bool allow, CancellationToken cancellationToken = default)
+    {
+        var workflow = await GetWorkflowAsync(workflowId, cancellationToken);
+        workflow.AllowDownstreamAutomationTriggers = allow;
         Touch(workflow);
         await db.SaveChangesAsync(cancellationToken);
     }
@@ -436,6 +479,26 @@ public sealed class AutomationWorkflowService(
                 failure.ErrorMessage,
                 failure.FinishedAt))
             .ToList();
+    }
+
+    public async Task<AutomationPublicStatusView?> GetPublicStatusAsync(Guid workflowId, int take = 10, CancellationToken cancellationToken = default)
+    {
+        var workflow = await db.AutomationWorkflows.AsNoTracking()
+            .Where(item => item.Id == workflowId)
+            .Select(item => new { item.Name, item.Description, item.Status, item.LastExecutedAt })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (workflow is null) return null;
+
+        // StartedAtUnixSeconds (a plain long), not StartedAt, for the same SQLite/DateTimeOffset
+        // server-ordering reason as ListRecentFailuresAsync above.
+        var runs = await db.AutomationExecutions.AsNoTracking()
+            .Where(item => item.WorkflowId == workflowId)
+            .OrderByDescending(item => item.StartedAtUnixSeconds)
+            .Take(Math.Clamp(take, 1, 50))
+            .Select(item => new AutomationPublicStatusRun(item.Status, item.Mode, item.StartedAt, item.FinishedAt))
+            .ToListAsync(cancellationToken);
+
+        return new AutomationPublicStatusView(workflow.Name, workflow.Description, workflow.Status, workflow.LastExecutedAt, runs);
     }
 
     public async Task<IReadOnlyList<AutomationWorkflowVersionSummary>> ListVersionsAsync(Guid workflowId, CancellationToken cancellationToken = default)
@@ -682,6 +745,7 @@ public sealed class AutomationWorkflowService(
         Description = workflow.Description,
         Status = workflow.Status,
         TagsCsv = workflow.TagsCsv,
+        AllowDownstreamAutomationTriggers = workflow.AllowDownstreamAutomationTriggers,
         CurrentVersion = workflow.CurrentVersion,
         PublishedAt = workflow.PublishedAt,
         Nodes = workflow.Nodes.OrderBy(node => node.CreatedAt).Select(ToNodeView).ToList(),
@@ -706,5 +770,5 @@ public sealed class AutomationWorkflowService(
             : null,
         execution.NodeExecutions.OrderBy(node => node.StartedAtUnixSeconds).Select(node => new AutomationNodeExecutionView(
             node.Id, node.NodeId, node.NodeName, node.NodeTypeKey, node.Status, node.Attempt,
-            node.InputJson, node.OutputJson, node.ErrorMessage, node.StartedAt, node.FinishedAt)).ToList());
+            node.InputJson, node.OutputJson, node.ErrorMessage, node.StartedAt, node.FinishedAt, node.IsSimulated)).ToList());
 }

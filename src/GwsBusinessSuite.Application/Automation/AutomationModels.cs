@@ -7,10 +7,24 @@ public sealed record AutomationWorkflowSummary(
     string Name,
     string Description,
     string Status,
+    string TagsCsv,
     int CurrentVersion,
     int NodeCount,
     DateTimeOffset? LastExecutedAt,
     DateTimeOffset UpdatedAt);
+
+// Deliberately sanitized for anonymous public viewing (Part 4.10 client-facing automation
+// embeds, served through SentinelPublicShare/SentinelPublicShare.razor) - no node graph,
+// credentials, or per-run InputJson/OutputJson/ErrorMessage, which could leak business data or
+// internal system details to anyone holding the share link.
+public sealed record AutomationPublicStatusView(
+    string Name,
+    string Description,
+    string Status,
+    DateTimeOffset? LastExecutedAt,
+    IReadOnlyList<AutomationPublicStatusRun> RecentRuns);
+
+public sealed record AutomationPublicStatusRun(string Status, string Mode, DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt);
 
 public sealed class AutomationWorkflowView
 {
@@ -19,6 +33,7 @@ public sealed class AutomationWorkflowView
     public string Description { get; init; } = string.Empty;
     public string Status { get; init; } = string.Empty;
     public string TagsCsv { get; init; } = string.Empty;
+    public bool AllowDownstreamAutomationTriggers { get; init; }
     public int CurrentVersion { get; init; }
     public DateTimeOffset? PublishedAt { get; init; }
     public IReadOnlyList<AutomationNodeView> Nodes { get; init; } = [];
@@ -107,7 +122,8 @@ public sealed record AutomationNodeExecutionView(
     string OutputJson,
     string ErrorMessage,
     DateTimeOffset StartedAt,
-    DateTimeOffset? FinishedAt);
+    DateTimeOffset? FinishedAt,
+    bool IsSimulated);
 
 public sealed record AutomationNodeDefinition(
     string TypeKey,

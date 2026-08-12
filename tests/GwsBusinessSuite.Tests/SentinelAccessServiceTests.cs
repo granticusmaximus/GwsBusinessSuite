@@ -28,6 +28,21 @@ public sealed class SentinelAccessServiceTests
     }
 
     [Fact]
+    public async Task PublicShare_ForAnAutomationWorkflow_ShouldRoundTripTheFlagThroughCreateAndResolve()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var workflowId = Guid.NewGuid();
+
+        var created = await fixture.Service.CreatePublicShareAsync(
+            workflowId, isDatabase: false, expiresAt: null, allowSearchIndexing: false, password: null, performedBy: "owner", isAutomationWorkflow: true);
+
+        created.IsAutomationWorkflow.Should().BeTrue();
+        var resolved = await fixture.Service.ResolvePublicShareAsync(created.PublicToken!);
+        resolved!.IsAutomationWorkflow.Should().BeTrue();
+        resolved.IsDatabase.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task PublicShare_WithPassword_ShouldRequireTheCorrectPasswordAndNeverStoreItInPlaintext()
     {
         await using var fixture = await Fixture.CreateAsync();

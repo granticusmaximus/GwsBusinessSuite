@@ -379,11 +379,20 @@
                                 </button>
                             </div>
                         }
+                        @if (_selectedTreeNodeIds.Count > 0)
+                        {
+                            <div class="wiki-tree-bulk-bar">
+                                <span>@_selectedTreeNodeIds.Count selected</span>
+                                <button type="button" class="btn btn-xs btn-link" @onclick="() => _selectedTreeNodeIds.Clear()">Clear</button>
+                                <button type="button" class="btn btn-xs btn-outline-secondary" @onclick="OpenBulkMoveModal" disabled="@IsBusy">Move to…</button>
+                                <button type="button" class="btn btn-xs btn-outline-danger" @onclick="() => _showBulkDeleteConfirm = true" disabled="@IsBusy">Move to Trash</button>
+                            </div>
+                        }
                         @foreach (var node in FilteredAndOrderedNodes())
                         {
                             var nodeDepth = GetNodeDepth(node);
                             var hasChildren = HasChildren(node.Id);
-                            <div class="wiki-tree-row @(nodeDepth == 0 ? "is-top-level" : string.Empty) @(hasChildren ? "has-children" : string.Empty) @((node.IsDatabase ? SelectedDatabaseId == node.Id : SelectedPageId == node.Id) ? "active" : "") @(node.IsArchived ? "wiki-tree-archived" : "") @(_dragOverNodeId == node.Id ? "wiki-tree-drag-over" : "")"
+                            <div class="wiki-tree-row @(nodeDepth == 0 ? "is-top-level" : string.Empty) @(hasChildren ? "has-children" : string.Empty) @((node.IsDatabase ? SelectedDatabaseId == node.Id : SelectedPageId == node.Id) ? "active" : "") @(node.IsArchived ? "wiki-tree-archived" : "") @(_dragOverNodeId == node.Id ? "wiki-tree-drag-over" : "") @(_selectedTreeNodeIds.Contains(node.Id) ? "wiki-tree-multi-selected" : "")"
                                  style="padding-left:@(0.4 + nodeDepth * 1.15)rem;"
                                  draggable="true"
                                  @ondragstart="() => StartDragNode(node)"
@@ -392,6 +401,9 @@
                                  @ondragleave="() => _dragOverNodeId = null"
                                  @ondragover:preventDefault
                                  @ondrop="() => DropOnNodeAsync(node)">
+                                <input type="checkbox" class="form-check-input wiki-tree-select" checked="@_selectedTreeNodeIds.Contains(node.Id)"
+                                       @onchange="e => ToggleTreeNodeSelect(node.Id, (bool)e.Value!)" @onclick:stopPropagation="true"
+                                       aria-label="Select @node.Title" />
                                 @if (hasChildren && string.IsNullOrWhiteSpace(SearchQuery))
                                 {
                                     <button type="button" class="wiki-tree-toggle" @onclick="() => ToggleExpanded(node.Id)"
@@ -447,6 +459,40 @@
                 }
             </div>
         </div>
+
+        <ConfirmModal Show="_showSingleDeleteConfirm"
+                      Title="Move to Trash"
+                      Message="@(_pendingSingleDelete is { IsDatabase: true } ? "Move this database and all its rows to Trash?" : "Move this page (and its sub-pages) to Trash?")"
+                      ConfirmText="Move to Trash" ConfirmButtonClass="btn-danger" Busy="IsBusy"
+                      OnConfirm="ConfirmSingleDeleteAsync" OnCancel="CancelSingleDelete" />
+
+        <ConfirmModal Show="_showBulkDeleteConfirm"
+                      Title="Move to Trash"
+                      Message="@($"Move {_selectedTreeNodeIds.Count} selected item(s) (and any sub-pages) to Trash?")"
+                      ConfirmText="Move to Trash" ConfirmButtonClass="btn-danger" Busy="_bulkActionBusy"
+                      OnConfirm="ConfirmBulkDeleteAsync" OnCancel="CancelBulkDelete" />
+
+        <ConfirmModal Show="_showBulkMoveModal"
+                      Title="Move selected items"
+                      ConfirmText="Move here" ConfirmButtonClass="btn-primary" Busy="_bulkActionBusy"
+                      OnConfirm="ConfirmBulkMoveAsync" OnCancel="CloseBulkMoveModal">
+            <ChildContent>
+                <p class="small text-secondary">Choose a destination for the @_selectedTreeNodeIds.Count selected item(s). Moving a page under its own selected sub-page isn't allowed and will be skipped.</p>
+                <div class="wiki-move-target-list">
+                    <button type="button" class="wiki-move-target-option @(_bulkMoveTargetParentId is null ? "is-selected" : "")" @onclick="() => _bulkMoveTargetParentId = null">
+                        <i class="bi bi-house me-2"></i>Top level
+                    </button>
+                    @foreach (var candidate in AllTreeNodes().Where(n => !_selectedTreeNodeIds.Contains(n.Id)).OrderBy(n => n.Title))
+                    {
+                        <button type="button" class="wiki-move-target-option @(_bulkMoveTargetParentId == candidate.Id ? "is-selected" : "")" @onclick="() => _bulkMoveTargetParentId = candidate.Id">
+                            <span class="wiki-tree-icon">@(string.IsNullOrWhiteSpace(candidate.Icon) ? (candidate.IsDatabase ? "🗄️" : "📄") : candidate.Icon)</span>
+                            @candidate.Title
+                        </button>
+                    }
+                </div>
+            </ChildContent>
+        </ConfirmModal>
+
         <div class="sentinel-teamspaces">
             <div class="sentinel-nav-heading"><i class="bi bi-people"></i> Teamspaces</div>
             <button type="button" class="sentinel-nav-item" @onclick="OpenNotionModalAsync" disabled="@IsBusy">
@@ -1472,6 +1518,10 @@
     private bool _draggedNodeIsDatabase;
     private Guid? _dragOverNodeId;
     private Guid? _openRowMenuNodeId;
+    private readonly HashSet<Guid> _selectedTreeNodeIds = new();
+    private bool _showBulkDeleteConfirm, _showBulkMoveModal, _showSingleDeleteConfirm, _bulkActionBusy;
+    private WikiTreeNode? _pendingSingleDelete;
+    private Guid? _bulkMoveTargetParentId;
 
     private bool ShowNotionModal { get; set; }
     private bool ShowNotionToken { get; set; }
@@ -3654,16 +3704,16 @@
             ErrorMessage = $"You don't have permission to move this Sentinel {(node.IsDatabase ? "database" : "page")} to Trash.";
             return;
         }
-        var confirmed = await JS.InvokeAsync<bool>(
-            "confirm",
-            node.IsDatabase
-                ? "Move this database and all its rows to Trash?"
-                : "Move this page (and its sub-pages) to Trash?");
-        if (!confirmed)
-        {
-            return;
-        }
+        _pendingSingleDelete = node;
+        _showSingleDeleteConfirm = true;
+    }
 
+    private void CancelSingleDelete() { _pendingSingleDelete = null; _showSingleDeleteConfirm = false; }
+
+    private async Task ConfirmSingleDeleteAsync()
+    {
+        if (_pendingSingleDelete is not { } node) { _showSingleDeleteConfirm = false; return; }
+        _showSingleDeleteConfirm = false;
         await Work(async () =>
         {
             var user = await CurrentUserNameAsync();
@@ -3687,6 +3737,104 @@
             await LoadTreeAsync(selectFirstPage: false);
             await LoadWorkspaceNavigationAsync();
         });
+        _pendingSingleDelete = null;
+    }
+
+    private void ToggleTreeNodeSelect(Guid nodeId, bool selected)
+    {
+        if (selected) _selectedTreeNodeIds.Add(nodeId);
+        else _selectedTreeNodeIds.Remove(nodeId);
+    }
+
+    private void OpenBulkMoveModal() { _bulkMoveTargetParentId = null; _showBulkMoveModal = true; }
+    private void CloseBulkMoveModal() => _showBulkMoveModal = false;
+    private void CancelBulkDelete() => _showBulkDeleteConfirm = false;
+
+    private async Task ConfirmBulkDeleteAsync()
+    {
+        _bulkActionBusy = true;
+        try
+        {
+            var user = await CurrentUserNameAsync();
+            var nodesById = AllTreeNodes().ToDictionary(n => n.Id);
+            var attempted = _selectedTreeNodeIds.Count;
+            var failures = 0;
+            foreach (var id in _selectedTreeNodeIds.ToList())
+            {
+                if (!nodesById.TryGetValue(id, out var node)) continue;
+                try
+                {
+                    if (!await CanAccessPageOrDatabaseAsync(node.Id, node.IsDatabase, SentinelAccessLevels.FullAccess))
+                    {
+                        failures++;
+                        continue;
+                    }
+                    if (node.IsDatabase)
+                    {
+                        await WikiDatabaseService.TrashDatabaseAsync(node.Id, user);
+                        if (SelectedDatabaseId == node.Id) SelectedDatabaseId = null;
+                    }
+                    else
+                    {
+                        await WikiService.TrashPageAsync(node.Id, user);
+                        if (SelectedPageId == node.Id) CreateNewPage();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Bulk trash failed for Sentinel item {NodeId}.", node.Id);
+                    failures++;
+                }
+            }
+            StatusMessage = failures == 0
+                ? $"Moved {attempted} item(s) to Trash."
+                : $"Moved {attempted - failures} of {attempted} item(s) to Trash ({failures} could not be moved).";
+            _selectedTreeNodeIds.Clear();
+            _showBulkDeleteConfirm = false;
+            await LoadTreeAsync(selectFirstPage: false);
+            await LoadWorkspaceNavigationAsync();
+        }
+        finally { _bulkActionBusy = false; }
+    }
+
+    private async Task ConfirmBulkMoveAsync()
+    {
+        _bulkActionBusy = true;
+        try
+        {
+            var user = await CurrentUserNameAsync();
+            var nodesById = AllTreeNodes().ToDictionary(n => n.Id);
+            var attempted = _selectedTreeNodeIds.Count;
+            var failures = 0;
+            foreach (var id in _selectedTreeNodeIds.ToList())
+            {
+                if (!nodesById.TryGetValue(id, out var node)) continue;
+                try
+                {
+                    // Recomputed per item (not hoisted) so items appended earlier in this same
+                    // loop land after each other rather than all claiming the same slot.
+                    var newSortOrder = AllTreeNodes().Count(n => n.ParentId == _bulkMoveTargetParentId);
+                    if (node.IsDatabase) await WikiDatabaseService.ReorderDatabaseAsync(node.Id, _bulkMoveTargetParentId, newSortOrder, user);
+                    else await WikiService.ReorderPageAsync(node.Id, _bulkMoveTargetParentId, newSortOrder, user);
+                }
+                catch (Exception ex)
+                {
+                    // ReorderPageAsync/ReorderDatabaseAsync reject a move that would create a
+                    // cycle (e.g. a selected page being moved under its own selected
+                    // descendant) - expected for some bulk selections, not a bug.
+                    Logger.LogWarning(ex, "Bulk move failed for Sentinel item {NodeId}.", node.Id);
+                    failures++;
+                }
+            }
+            StatusMessage = failures == 0
+                ? $"Moved {attempted} item(s)."
+                : $"Moved {attempted - failures} of {attempted} item(s) ({failures} couldn't be moved there - selecting a page together with its own destination or descendant isn't allowed).";
+            _selectedTreeNodeIds.Clear();
+            _showBulkMoveModal = false;
+            if (_bulkMoveTargetParentId.HasValue) _expandedPageIds.Add(_bulkMoveTargetParentId.Value);
+            await LoadTreeAsync(selectFirstPage: false);
+        }
+        finally { _bulkActionBusy = false; }
     }
 
     private async Task MoveToSelectedParentAsync()

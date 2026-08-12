@@ -1,0 +1,40 @@
+@* Reusable app-styled confirmation dialog - replaces native window.confirm() with markup that
+   matches every other modal already hand-rolled in this app (Bootstrap classes, no Bootstrap
+   JS, .modal.d-block + a manual backdrop). Render conditionally from the caller
+   (@if (_show) { <ConfirmModal ... /> }); this component owns no visibility state of its own. *@
+
+@if (Show)
+{
+    <div class="modal-backdrop fade show"></div>
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+        <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title h5">@Title</h2>
+                <button type="button" class="btn-close" @onclick="Cancel" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                @if (ChildContent is not null) { @ChildContent } else { <p>@Message</p> }
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" disabled="@Busy" @onclick="Cancel">@CancelText</button>
+                <button type="button" class="btn @ConfirmButtonClass" disabled="@Busy" @onclick="Confirm">@ConfirmText</button>
+            </div>
+        </div></div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Show { get; set; }
+    [Parameter] public string Title { get; set; } = "Confirm";
+    [Parameter] public string Message { get; set; } = "Are you sure?";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public string ConfirmText { get; set; } = "Confirm";
+    [Parameter] public string CancelText { get; set; } = "Cancel";
+    [Parameter] public string ConfirmButtonClass { get; set; } = "btn-danger";
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback OnConfirm { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private Task Confirm() => OnConfirm.InvokeAsync();
+    private Task Cancel() => OnCancel.InvokeAsync();
+}

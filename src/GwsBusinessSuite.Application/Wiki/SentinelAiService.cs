@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -26,7 +27,13 @@ public sealed class SentinelAiService(
     // Trailing/optional/nullable like the params above it, specifically so every existing
     // positional-argument call site (this class has many, in both production DI and tests)
     // keeps compiling unchanged - only SuggestDatabaseRowValuesAsync needs this.
-    IWikiDatabaseService? wikiDatabaseService = null) : ISentinelAiService
+    IWikiDatabaseService? wikiDatabaseService = null,
+    // Both optional/nullable for the same reason - only propose_create_automation_workflow
+    // (agentic workflow authoring) needs them. Neither depends back on this service even
+    // indirectly (AutomationNodeRegistry only ever resolves things like ISentinelAiService
+    // lazily via IServiceProvider, never through its constructor), so there's no DI cycle.
+    IAutomationNodeRegistry? automationNodeRegistry = null,
+    IAutomationWorkflowService? automationWorkflowService = null) : ISentinelAiService
 {
     private static readonly HashSet<string> AllowedActions =
     [
@@ -119,7 +126,7 @@ public sealed class SentinelAiService(
 
     private const int MaxToolCallingRounds = 5;
 
-    private const string ToolCallingSystemPrompt =
+    private const string ToolCallingSystemPromptBase =
         "You are SentinelGPT with tool access. Use search_wiki to find relevant Sentinel pages/databases and get_page to " +
         "read one specific page's full content before answering questions that need current Sentinel workspace data you " +
         "don't already have. If the user explicitly asks you to change a database row's value, call " +
@@ -130,24 +137,54 @@ public sealed class SentinelAiService(
         "Give a direct, concise final answer, noting what you found and where.";
 
     private const string ProposeSetDatabaseRowPropertyToolName = "propose_set_database_row_property";
+    private const string ProposeCreateAutomationWorkflowToolName = "propose_create_automation_workflow";
 
-    private static IReadOnlyList<OllamaToolDefinition> BuildToolCallingTools() =>
-    [
-        new(
-            "search_wiki",
-            "Search Sentinel wiki pages and databases by keyword. Returns up to 5 ranked matches, each with id, title, and a short preview.",
-            """{"type":"object","properties":{"query":{"type":"string","description":"Search keywords"}},"required":["query"]}"""),
-        new(
-            "get_page",
-            "Fetch the full plain-text content of one Sentinel wiki page by its id (a GUID, usually taken from a prior search_wiki result).",
-            """{"type":"object","properties":{"pageId":{"type":"string","description":"The page's GUID id"}},"required":["pageId"]}"""),
-        new(
-            ProposeSetDatabaseRowPropertyToolName,
-            "Propose setting one property on a Sentinel database row. Does not write immediately - returns a preview " +
-            "that pauses the conversation for a human to confirm or decline. Only call this when the user has " +
-            "explicitly asked for a value to be changed, not merely discussed.",
-            """{"type":"object","properties":{"wikiDatabaseId":{"type":"string","description":"The database's GUID id"},"rowId":{"type":"string","description":"The row's GUID id"},"propertyId":{"type":"string","description":"The property's GUID id"},"value":{"type":"string","description":"The new value to propose"}},"required":["wikiDatabaseId","rowId","propertyId","value"]}""")
-    ];
+    private const string ProposeCreateAutomationWorkflowGuidance =
+        " If the user asks you to build, draft, or set up an automation workflow in plain English (e.g. \"watch for " +
+        "CRM deals over $10k and notify me\"), call propose_create_automation_workflow with the node graph you design. " +
+        "It never activates anything immediately - it only records a proposal for a human to confirm or decline, and " +
+        "even once confirmed the workflow is created as an inactive draft that still needs a human to connect any " +
+        "credentials and publish/activate it. Pick typeKey values only from the node catalog given below, and give " +
+        "every connection's \"from\"/\"to\" the exact node name you used in nodes. Call it at most once per turn.";
+
+    private string BuildToolCallingSystemPrompt()
+    {
+        if (automationNodeRegistry is null || automationWorkflowService is null) return ToolCallingSystemPromptBase;
+        var catalog = string.Join(
+            "; ",
+            automationNodeRegistry.ListDefinitions().Select(definition => $"{definition.TypeKey} ({definition.Category}): {definition.Description}"));
+        return ToolCallingSystemPromptBase + ProposeCreateAutomationWorkflowGuidance + " Available node types: " + catalog;
+    }
+
+    private IReadOnlyList<OllamaToolDefinition> BuildToolCallingTools()
+    {
+        var tools = new List<OllamaToolDefinition>
+        {
+            new(
+                "search_wiki",
+                "Search Sentinel wiki pages and databases by keyword. Returns up to 5 ranked matches, each with id, title, and a short preview.",
+                """{"type":"object","properties":{"query":{"type":"string","description":"Search keywords"}},"required":["query"]}"""),
+            new(
+                "get_page",
+                "Fetch the full plain-text content of one Sentinel wiki page by its id (a GUID, usually taken from a prior search_wiki result).",
+                """{"type":"object","properties":{"pageId":{"type":"string","description":"The page's GUID id"}},"required":["pageId"]}"""),
+            new(
+                ProposeSetDatabaseRowPropertyToolName,
+                "Propose setting one property on a Sentinel database row. Does not write immediately - returns a preview " +
+                "that pauses the conversation for a human to confirm or decline. Only call this when the user has " +
+                "explicitly asked for a value to be changed, not merely discussed.",
+                """{"type":"object","properties":{"wikiDatabaseId":{"type":"string","description":"The database's GUID id"},"rowId":{"type":"string","description":"The row's GUID id"},"propertyId":{"type":"string","description":"The property's GUID id"},"value":{"type":"string","description":"The new value to propose"}},"required":["wikiDatabaseId","rowId","propertyId","value"]}""")
+        };
+        if (automationNodeRegistry is not null && automationWorkflowService is not null)
+        {
+            tools.Add(new(
+                ProposeCreateAutomationWorkflowToolName,
+                "Propose creating a new automation workflow from a node graph you design. Does not create anything " +
+                "immediately - returns a preview that pauses the conversation for a human to confirm or decline.",
+                """{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"},"nodes":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string","description":"A short unique label for this node, referenced by connections"},"typeKey":{"type":"string","description":"One of the available node type keys"},"parametersJson":{"type":"string","description":"A JSON object string with this node type's parameters; omit to use its defaults"}},"required":["name","typeKey"]}},"connections":{"type":"array","items":{"type":"object","properties":{"from":{"type":"string","description":"Source node's name"},"to":{"type":"string","description":"Target node's name"},"fromOutput":{"type":"string","description":"Source output label; omit for \"main\", or use \"true\"/\"false\" from an If node"}},"required":["from","to"]}}},"required":["name","nodes"]}"""));
+        }
+        return tools;
+    }
 
     public async IAsyncEnumerable<SentinelAiStreamChunk> StreamToolCallingConversationAsync(
         Guid conversationId,
@@ -165,7 +202,7 @@ public sealed class SentinelAiService(
         var citations = new List<SentinelAiCitation>();
         var messages = new List<OllamaChatMessage>
         {
-            new("system", ToolCallingSystemPrompt),
+            new("system", BuildToolCallingSystemPrompt()),
             new("user", instruction.Trim())
         };
 
@@ -230,6 +267,14 @@ public sealed class SentinelAiService(
                 if (toolCall.Name == ProposeSetDatabaseRowPropertyToolName)
                 {
                     var previewText = await ProposeSetDatabaseRowPropertyAsync(db, toolCall, run, cancellationToken);
+                    db.SentinelAiRuns.Add(run);
+                    await db.SaveChangesAsync(cancellationToken);
+                    yield return new SentinelAiStreamChunk(previewText, ToView(run, citations));
+                    yield break;
+                }
+                if (toolCall.Name == ProposeCreateAutomationWorkflowToolName)
+                {
+                    var previewText = ProposeCreateAutomationWorkflow(toolCall, run);
                     db.SentinelAiRuns.Add(run);
                     await db.SaveChangesAsync(cancellationToken);
                     yield return new SentinelAiStreamChunk(previewText, ToView(run, citations));
@@ -386,6 +431,128 @@ public sealed class SentinelAiService(
         }
     }
 
+    // Purely synchronous validation against the node registry's known type keys/defaults -
+    // unlike ProposeSetDatabaseRowPropertyAsync, nothing here reads or writes the database yet,
+    // so nothing is created until a human confirms via ResolveCreateAutomationWorkflowAsync.
+    private string ProposeCreateAutomationWorkflow(OllamaToolCall toolCall, SentinelAiRun run)
+    {
+        try
+        {
+            var arguments = JsonNode.Parse(toolCall.ArgumentsJson) as JsonObject ?? [];
+            var name = arguments["name"]?.GetValue<string>()?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                run.Status = SentinelAiRunStatuses.Failed;
+                run.Output = "That workflow proposal is missing a name.";
+                return run.Output;
+            }
+            var description = arguments["description"]?.GetValue<string>()?.Trim() ?? string.Empty;
+            var nodesArray = arguments["nodes"] as JsonArray;
+            if (nodesArray is null || nodesArray.Count == 0)
+            {
+                run.Status = SentinelAiRunStatuses.Failed;
+                run.Output = "That workflow proposal has no nodes.";
+                return run.Output;
+            }
+            if (nodesArray.Count > 15)
+            {
+                run.Status = SentinelAiRunStatuses.Failed;
+                run.Output = "That workflow proposal has too many nodes (max 15) - ask for a smaller workflow.";
+                return run.Output;
+            }
+
+            var nodeNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var proposedNodes = new List<(string Name, string TypeKey, string ParametersJson)>();
+            foreach (var nodeElement in nodesArray)
+            {
+                var nodeObject = nodeElement as JsonObject;
+                var nodeName = nodeObject?["name"]?.GetValue<string>()?.Trim() ?? string.Empty;
+                var typeKey = nodeObject?["typeKey"]?.GetValue<string>()?.Trim() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(nodeName) || string.IsNullOrWhiteSpace(typeKey))
+                {
+                    run.Status = SentinelAiRunStatuses.Failed;
+                    run.Output = "Every proposed node needs a name and a typeKey.";
+                    return run.Output;
+                }
+                if (!nodeNames.Add(nodeName))
+                {
+                    run.Status = SentinelAiRunStatuses.Failed;
+                    run.Output = $"Node name \"{nodeName}\" was used more than once - node names must be unique.";
+                    return run.Output;
+                }
+                var definition = automationNodeRegistry!.Find(typeKey, 1);
+                if (definition is null)
+                {
+                    run.Status = SentinelAiRunStatuses.Failed;
+                    run.Output = $"\"{typeKey}\" is not a known automation node type.";
+                    return run.Output;
+                }
+                var parametersJson = nodeObject?["parametersJson"]?.GetValue<string>();
+                if (string.IsNullOrWhiteSpace(parametersJson))
+                {
+                    parametersJson = definition.DefaultParametersJson;
+                }
+                else
+                {
+                    try { using var _ = JsonDocument.Parse(parametersJson); }
+                    catch (JsonException)
+                    {
+                        run.Status = SentinelAiRunStatuses.Failed;
+                        run.Output = $"Node \"{nodeName}\"'s parameters were not valid JSON.";
+                        return run.Output;
+                    }
+                }
+                proposedNodes.Add((nodeName, typeKey, parametersJson));
+            }
+            if (!proposedNodes.Any(node => automationNodeRegistry!.Find(node.TypeKey, 1)?.IsTrigger == true))
+            {
+                run.Status = SentinelAiRunStatuses.Failed;
+                run.Output = "That workflow proposal needs at least one trigger node.";
+                return run.Output;
+            }
+
+            var proposedConnections = new List<(string From, string To, string FromOutput)>();
+            foreach (var connectionElement in (arguments["connections"] as JsonArray) ?? [])
+            {
+                var connectionObject = connectionElement as JsonObject;
+                var from = connectionObject?["from"]?.GetValue<string>()?.Trim() ?? string.Empty;
+                var to = connectionObject?["to"]?.GetValue<string>()?.Trim() ?? string.Empty;
+                if (!nodeNames.Contains(from) || !nodeNames.Contains(to))
+                {
+                    run.Status = SentinelAiRunStatuses.Failed;
+                    run.Output = "A proposed connection referenced a node name that wasn't declared in nodes.";
+                    return run.Output;
+                }
+                var fromOutput = connectionObject?["fromOutput"]?.GetValue<string>()?.Trim();
+                proposedConnections.Add((from, to, string.IsNullOrWhiteSpace(fromOutput) ? "main" : fromOutput));
+            }
+
+            run.Status = SentinelAiRunStatuses.Pending;
+            run.PendingToolName = ProposeCreateAutomationWorkflowToolName;
+            run.PendingToolArgumentsJson = JsonSerializer.Serialize(new
+            {
+                name,
+                description,
+                nodes = proposedNodes.Select(node => new { node.Name, node.TypeKey, node.ParametersJson }),
+                connections = proposedConnections.Select(connection => new { connection.From, connection.To, connection.FromOutput })
+            });
+            var nodeSummary = string.Join(", ", proposedNodes.Select(node => $"{node.Name} ({node.TypeKey})"));
+            run.Output =
+                $"I'd like to create a new automation workflow \"{name}\" with {proposedNodes.Count} node(s): {nodeSummary}. " +
+                "It will be created as an inactive draft, not activated - confirm to create it, or decline to discard " +
+                "this proposal. You'll still need to open it in Workflow Automation to connect any credentials and " +
+                "publish/activate it.";
+            return run.Output;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "SentinelGPT propose-create-automation-workflow tool call failed.");
+            run.Status = SentinelAiRunStatuses.Failed;
+            run.Output = "That workflow proposal could not be prepared.";
+            return run.Output;
+        }
+    }
+
     public async Task<SentinelAiRunView> ResolvePendingToolActionAsync(
         Guid runId, bool approved, string performedBy, CancellationToken cancellationToken = default)
     {
@@ -410,42 +577,104 @@ public sealed class SentinelAiService(
             return ToView(run, []);
         }
 
-        if (wikiDatabaseService is null || accessService is null)
-        {
-            throw new InvalidOperationException("Database writes are not available right now.");
-        }
         if (string.IsNullOrWhiteSpace(run.PendingToolArgumentsJson))
         {
             throw new InvalidOperationException("This proposal's details are no longer available.");
         }
-        var arguments = JsonSerializer.Deserialize<JsonElement>(run.PendingToolArgumentsJson);
-        var wikiDatabaseId = arguments.GetProperty("wikiDatabaseId").GetGuid();
-        var rowId = arguments.GetProperty("rowId").GetGuid();
-        var propertyId = arguments.GetProperty("propertyId").GetGuid();
-        var value = arguments.GetProperty("value").GetString() ?? string.Empty;
 
-        // Re-checked here rather than trusted from proposal time - access could have changed in
-        // the interval, and confirmation is the moment the write actually happens.
-        if (!await accessService.CanAccessAsync(wikiDatabaseId, isDatabase: true, performedBy, SentinelAccessLevels.Edit, cancellationToken))
+        switch (run.PendingToolName)
         {
-            throw new InvalidOperationException("You don't have edit access to that database.");
+            case ProposeCreateAutomationWorkflowToolName:
+                await ResolveCreateAutomationWorkflowAsync(run, performedBy, cancellationToken);
+                break;
+            default:
+                if (wikiDatabaseService is null || accessService is null)
+                {
+                    throw new InvalidOperationException("Database writes are not available right now.");
+                }
+                var arguments = JsonSerializer.Deserialize<JsonElement>(run.PendingToolArgumentsJson);
+                var wikiDatabaseId = arguments.GetProperty("wikiDatabaseId").GetGuid();
+                var rowId = arguments.GetProperty("rowId").GetGuid();
+                var propertyId = arguments.GetProperty("propertyId").GetGuid();
+                var value = arguments.GetProperty("value").GetString() ?? string.Empty;
+
+                // Re-checked here rather than trusted from proposal time - access could have
+                // changed in the interval, and confirmation is the moment the write actually happens.
+                if (!await accessService.CanAccessAsync(wikiDatabaseId, isDatabase: true, performedBy, SentinelAccessLevels.Edit, cancellationToken))
+                {
+                    throw new InvalidOperationException("You don't have edit access to that database.");
+                }
+
+                // "sentinelgpt-tool", not "automation-engine": WikiDatabaseService.SaveRowAsync's
+                // loop-prevention check only skips re-firing database.rowChangedTrigger for the
+                // literal actor "automation-engine" - this write intentionally still fires any
+                // configured trigger, since a human just confirmed it and a downstream automation
+                // reacting to it is the desired outcome, not a robotic loop.
+                await wikiDatabaseService.SaveInlineCellAsync(wikiDatabaseId, rowId, propertyId, value, "sentinelgpt-tool", cancellationToken);
+                run.Status = SentinelAiRunStatuses.Completed;
+                run.Output = "Done - the change was applied.";
+                break;
         }
 
-        // "sentinelgpt-tool", not "automation-engine": WikiDatabaseService.SaveRowAsync's
-        // loop-prevention check only skips re-firing database.rowChangedTrigger for the literal
-        // actor "automation-engine" - this write intentionally still fires any configured
-        // trigger, since a human just confirmed it and a downstream automation reacting to it is
-        // the desired outcome, not a robotic loop.
-        await wikiDatabaseService.SaveInlineCellAsync(wikiDatabaseId, rowId, propertyId, value, "sentinelgpt-tool", cancellationToken);
-
-        run.Status = SentinelAiRunStatuses.Completed;
-        run.Output = "Done - the change was applied.";
         run.ReviewedAt = now;
         run.ReviewedBy = performedBy;
         run.PendingToolName = null;
         run.PendingToolArgumentsJson = null;
         await db.SaveChangesAsync(cancellationToken);
         return ToView(run, []);
+    }
+
+    // Mints a fresh Guid per proposed node name and rebuilds the graph through
+    // IAutomationWorkflowService.CreateFromGraphAsync - the same "portable graph + fresh-identity
+    // rebuild" routine already shared by workflow import and IAutomationTemplateService.InstantiateAsync,
+    // so this reuses existing, already-tested plumbing rather than inserting rows directly. The
+    // created workflow is always a Draft (CreateFromGraphAsync never activates it), so a bad
+    // AI-authored graph can't run anything until a human reviews it, connects credentials, and
+    // explicitly publishes/activates it.
+    private async Task ResolveCreateAutomationWorkflowAsync(SentinelAiRun run, string performedBy, CancellationToken cancellationToken)
+    {
+        if (automationWorkflowService is null)
+        {
+            throw new InvalidOperationException("Creating automation workflows is not available right now.");
+        }
+        var arguments = JsonSerializer.Deserialize<JsonElement>(run.PendingToolArgumentsJson!);
+        var name = arguments.GetProperty("name").GetString() ?? "Untitled workflow";
+        var description = arguments.TryGetProperty("description", out var descriptionElement) ? descriptionElement.GetString() ?? string.Empty : string.Empty;
+
+        var nodesByName = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        var nodeViews = new List<AutomationNodeView>();
+        var index = 0;
+        foreach (var nodeElement in arguments.GetProperty("nodes").EnumerateArray())
+        {
+            var nodeName = nodeElement.GetProperty("Name").GetString() ?? $"Node {index + 1}";
+            var nodeId = Guid.NewGuid();
+            nodesByName[nodeName] = nodeId;
+            nodeViews.Add(new AutomationNodeView(
+                nodeId, nodeName, nodeElement.GetProperty("TypeKey").GetString() ?? string.Empty, 1,
+                PositionX: 120 + (index % 4) * 280, PositionY: 140 + (index / 4) * 200,
+                ParametersJson: nodeElement.GetProperty("ParametersJson").GetString() ?? "{}",
+                CredentialId: null, IsDisabled: false, ContinueOnFail: false, RetryOnFail: false,
+                MaxTries: 1, WaitBetweenTriesMs: 0, TimeoutMs: 0, Notes: string.Empty));
+            index++;
+        }
+
+        var connectionViews = new List<AutomationConnectionView>();
+        if (arguments.TryGetProperty("connections", out var connectionsElement))
+        {
+            foreach (var connectionElement in connectionsElement.EnumerateArray())
+            {
+                var from = connectionElement.GetProperty("From").GetString() ?? string.Empty;
+                var to = connectionElement.GetProperty("To").GetString() ?? string.Empty;
+                var fromOutput = connectionElement.GetProperty("FromOutput").GetString() ?? "main";
+                if (!nodesByName.TryGetValue(from, out var sourceId) || !nodesByName.TryGetValue(to, out var targetId)) continue;
+                connectionViews.Add(new AutomationConnectionView(Guid.NewGuid(), sourceId, fromOutput, targetId, "main"));
+            }
+        }
+
+        var created = await automationWorkflowService.CreateFromGraphAsync(name, description, nodeViews, connectionViews, performedBy, cancellationToken);
+        run.Status = SentinelAiRunStatuses.Completed;
+        run.Output = $"Done - created the draft workflow \"{created.Name}\" with {created.Nodes.Count} node(s). " +
+            "Open it in Workflow Automation to connect credentials and publish/activate it when ready.";
     }
 
     private async IAsyncEnumerable<SentinelAiStreamChunk> StreamGroundedConversationAsync(
@@ -1252,6 +1481,22 @@ public sealed class SentinelAiService(
             AddResult("CRM CONTACT", item.FullName, $"Company: {item.Company ?? "Not set"}. Status: {item.Status}. Follow-up: {item.FollowUpDate?.ToString("u") ?? "Not scheduled"}.", $"admin/crm/{item.Id}");
         }
 
+        // Deals are grounded separately from Contacts above - a question like "why did deal X
+        // stall" needs the deal's own stage/value/notes/close date, not just its contact's info.
+        var deals = await db.Deals.AsNoTracking()
+            .Select(item => new { item.Id, item.Title, item.Stage, item.ValueUsd, item.Notes, item.ExpectedCloseDate, item.UpdatedAt })
+            .Take(80)
+            .ToListAsync(cancellationToken);
+        foreach (var item in deals.Where(item => MatchesAny(terms, item.Title, item.Stage, item.Notes)).Take(4))
+        {
+            AddResult(
+                "CRM DEAL",
+                item.Title,
+                $"Stage: {item.Stage}. Value: ${item.ValueUsd:N0}. Expected close: {item.ExpectedCloseDate?.ToString("u") ?? "Not set"}. " +
+                $"Last updated: {item.UpdatedAt?.ToString("u") ?? "Unknown"}. Notes: {Limit(item.Notes, 300)}",
+                $"admin/crm/{item.Id}");
+        }
+
         var workflows = await db.AutomationWorkflows.AsNoTracking()
             .Select(item => new { item.Id, item.Name, item.Description, item.Status, item.TagsCsv, item.CurrentVersion, item.LastExecutedAt })
             .Take(80)
@@ -1355,7 +1600,7 @@ public sealed class SentinelAiService(
                 entry.AbsoluteExpirationRelativeToNow = SuiteContextCacheDuration;
                 entry.Size = 1;
                 var builder = new StringBuilder("GWS BUSINESS SUITE LIVE OVERVIEW (read-only, secrets excluded):\n");
-                builder.AppendLine($"- CRM contacts: {await db.Contacts.CountAsync(item => item.TrashedAt == null, cancellationToken)}");
+                builder.AppendLine($"- CRM contacts/deals: {await db.Contacts.CountAsync(item => item.TrashedAt == null, cancellationToken)}/{await db.Deals.CountAsync(cancellationToken)}");
                 builder.AppendLine($"- Sentinel pages/databases: {await db.WikiPages.CountAsync(item => item.NotionArchivedAt == null, cancellationToken)}/{await db.WikiDatabases.CountAsync(item => item.NotionArchivedAt == null, cancellationToken)}");
                 builder.AppendLine($"- CMS pages/articles/drafts: {await db.CmsPages.CountAsync(item => item.TrashedAt == null, cancellationToken)}/{await db.Articles.CountAsync(item => item.TrashedAt == null, cancellationToken)}/{await db.SeoArticleDrafts.CountAsync(cancellationToken)}");
                 builder.AppendLine($"- Automation workflows/executions: {await db.AutomationWorkflows.CountAsync(cancellationToken)}/{await db.AutomationExecutions.CountAsync(cancellationToken)}");

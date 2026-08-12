@@ -38,11 +38,18 @@ public interface ICrmService
 
     Task<IReadOnlyList<DealView>> ListDealsForContactAsync(Guid contactId, CancellationToken cancellationToken = default);
 
-    Task<DealView> SaveDealAsync(DealEditorModel editor, CancellationToken cancellationToken = default);
+    // actor is optional and only affects the automation.crm.dealStageChangedTrigger loop guard
+    // (see SetDealStageAsync) - a stage change made through the deal edit form counts too, not
+    // just the pipeline board drag.
+    Task<DealView> SaveDealAsync(DealEditorModel editor, string? actor = null, CancellationToken cancellationToken = default);
 
     // Moving into Won/Lost stamps ClosedAt; moving back out of them (a re-opened deal)
-    // clears it again.
-    Task<DealView> SetDealStageAsync(Guid dealId, string stage, CancellationToken cancellationToken = default);
+    // clears it again. actor is passed through to the automation engine's actor-tagging
+    // loop-prevention convention (see WikiDatabaseService.SaveRowAsync) - the automation
+    // action node crm.setDealStage passes "automation-engine" (or "automation-engine:chained"
+    // when the workflow opts into downstream chaining) so this stage change can skip
+    // re-firing crm.dealStageChangedTrigger unless the workflow explicitly opted in.
+    Task<DealView> SetDealStageAsync(Guid dealId, string stage, string? actor = null, CancellationToken cancellationToken = default);
 
     Task DeleteDealAsync(Guid dealId, CancellationToken cancellationToken = default);
 }

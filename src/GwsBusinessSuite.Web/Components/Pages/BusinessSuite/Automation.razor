@@ -58,11 +58,18 @@
                 <label class="form-label small fw-semibold" for="workflowSearch">Search workflows</label>
                 <input id="workflowSearch" class="form-control" @bind="_search" @bind:event="oninput" placeholder="Name or description" />
             </div>
-            <div class="col-md-4">
+            <div class="col-md-2">
                 <label class="form-label small fw-semibold" for="workflowStatus">Status</label>
                 <select id="workflowStatus" class="form-select" @bind="_statusFilter">
                     <option value="">All statuses</option>
                     <option>Active</option><option>Inactive</option><option>Draft</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-semibold" for="workflowTag">Tag</label>
+                <select id="workflowTag" class="form-select" @bind="_tagFilter">
+                    <option value="">All tags</option>
+                    @foreach (var tag in AllTags) { <option value="@tag">@tag</option> }
                 </select>
             </div>
         </div>
@@ -88,8 +95,8 @@ else
         @foreach (var workflow in FilteredWorkflows)
         {
             <div class="col-xl-4 col-md-6">
-                <button type="button" class="card border-0 shadow-sm h-100 w-100 text-start workflow-card" @onclick="() => OpenWorkflow(workflow.Id)">
-                    <div class="card-body">
+                <div class="card border-0 shadow-sm h-100 workflow-card">
+                    <button type="button" class="card-body text-start w-100 border-0 bg-transparent p-3" @onclick="() => OpenWorkflow(workflow.Id)">
                         <div class="d-flex justify-content-between gap-2 mb-3">
                             <div class="automation-icon"><i class="bi bi-diagram-3-fill"></i></div>
                             <span class="badge @StatusClass(workflow.Status)">@workflow.Status</span>
@@ -101,8 +108,19 @@ else
                             <span><i class="bi bi-layers me-1"></i>v@workflow.CurrentVersion</span>
                             <span><i class="bi bi-clock me-1"></i>@FormatLastRun(workflow.LastExecutedAt)</span>
                         </div>
+                        @if (WorkflowTags(workflow).Count > 0)
+                        {
+                            <div class="d-flex flex-wrap gap-1 mt-2">
+                                @foreach (var tag in WorkflowTags(workflow)) { <span class="badge text-bg-light border">@tag</span> }
+                            </div>
+                        }
+                    </button>
+                    <div class="card-footer bg-transparent border-0 pt-0 px-3 pb-3 d-flex justify-content-end">
+                        <button type="button" class="btn btn-sm btn-link" disabled="@_busy" @onclick="() => DuplicateWorkflowAsync(workflow)">
+                            <i class="bi bi-copy me-1"></i>Duplicate
+                        </button>
                     </div>
-                </button>
+                </div>
             </div>
         }
     </div>
@@ -132,9 +150,23 @@ else
         <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
             <div class="modal-header"><h2 class="modal-title h5">New workflow from template</h2><button class="btn-close" @onclick="CloseTemplates" aria-label="Close"></button></div>
             <div class="modal-body">
+                <h3 class="h6 text-secondary text-uppercase small fw-bold mb-2">Starter workflows</h3>
+                <div class="list-group mb-4">
+                    @foreach (var starter in AutomationStarterWorkflows.All)
+                    {
+                        <div class="list-group-item d-flex justify-content-between align-items-center gap-2">
+                            <div>
+                                <div class="fw-semibold"><i class="bi @starter.Icon me-1 text-primary"></i>@starter.Graph.Name</div>
+                                <div class="small text-secondary">@starter.Description</div>
+                            </div>
+                            <button class="btn btn-sm btn-outline-primary flex-shrink-0" disabled="@_busy" @onclick="() => UseStarterWorkflow(starter)">Use starter</button>
+                        </div>
+                    }
+                </div>
+                <h3 class="h6 text-secondary text-uppercase small fw-bold mb-2">Your templates</h3>
                 @if (_templates.Count == 0)
                 {
-                    <p class="text-secondary mb-0">No templates yet. Open a workflow and use "Save as template" to create one.</p>
+                    <p class="text-secondary mb-0">No saved templates yet. Open a workflow and use "Save as template" to create one.</p>
                 }
                 else
                 {
@@ -162,12 +194,20 @@ else
     private List<AutomationRecentFailureView> _recentFailures = [];
     private List<AutomationWorkflowTemplateSummary> _templates = [];
     private bool _loading = true, _busy, _showCreate, _showTemplates, _importing;
-    private string _search = "", _statusFilter = "", _newName = "", _newDescription = "", _error = "";
+    private string _search = "", _statusFilter = "", _tagFilter = "", _newName = "", _newDescription = "", _error = "";
     private const long MaxImportBytes = 5 * 1024 * 1024;
 
     private List<AutomationWorkflowSummary> FilteredWorkflows => _workflows.Where(workflow =>
         (string.IsNullOrWhiteSpace(_search) || workflow.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) || workflow.Description.Contains(_search, StringComparison.OrdinalIgnoreCase))
-        && (string.IsNullOrWhiteSpace(_statusFilter) || workflow.Status.Equals(_statusFilter, StringComparison.OrdinalIgnoreCase))).ToList();
+        && (string.IsNullOrWhiteSpace(_statusFilter) || workflow.Status.Equals(_statusFilter, StringComparison.OrdinalIgnoreCase))
+        && (string.IsNullOrWhiteSpace(_tagFilter) || WorkflowTags(workflow).Contains(_tagFilter, StringComparer.OrdinalIgnoreCase))).ToList();
+
+    // Tags double as lightweight "folders" for browsing - a dedicated folder hierarchy wasn't
+    // built given tags already cover grouping/filtering without a new entity/CRUD surface.
+    private List<string> AllTags => _workflows.SelectMany(WorkflowTags).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(tag => tag).ToList();
+
+    private static List<string> WorkflowTags(AutomationWorkflowSummary workflow) =>
+        workflow.TagsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
     protected override async Task OnInitializedAsync()
     {
@@ -191,6 +231,18 @@ else
         finally { _busy = false; }
     }
 
+    private async Task DuplicateWorkflowAsync(AutomationWorkflowSummary workflow)
+    {
+        _busy = true; _error = "";
+        try
+        {
+            var created = await WorkflowService.DuplicateAsync(workflow.Id, $"{workflow.Name} (copy)", "user");
+            Navigation.NavigateTo($"/admin/automation/{created.Id}");
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Unable to duplicate workflow {WorkflowId}.", workflow.Id); _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
     private async Task OpenTemplates()
     {
         _error = "";
@@ -198,6 +250,20 @@ else
         catch (Exception ex) { Logger.LogError(ex, "Unable to load workflow templates."); _error = ex.Message; }
     }
     private void CloseTemplates() => _showTemplates = false;
+
+    private async Task UseStarterWorkflow(AutomationStarterWorkflow starter)
+    {
+        _busy = true; _error = "";
+        try
+        {
+            var created = await WorkflowService.CreateFromGraphAsync(
+                starter.Graph.Name, starter.Graph.Description, starter.Graph.Nodes, starter.Graph.Connections, "user");
+            Navigation.NavigateTo($"/admin/automation/{created.Id}");
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Unable to create workflow from starter {StarterKey}.", starter.Key); _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
     private async Task UseTemplate(Guid templateId)
     {
         _busy = true; _error = "";

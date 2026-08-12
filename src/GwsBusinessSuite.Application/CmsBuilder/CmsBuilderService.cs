@@ -1,12 +1,18 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace GwsBusinessSuite.Application.CmsBuilder;
 
-public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderService
+public sealed class CmsBuilderService(
+    IAppDbContext dbContext,
+    // Optional, resolved by DI in production - same pattern as CrmService's
+    // automationTriggerService: fires cms.pagePublishedTrigger subscribers on a draft-to-
+    // published transition, skipped when actor is "automation-engine".
+    IAutomationTriggerService? automationTriggerService = null) : ICmsBuilderService
 {
     private static readonly IReadOnlyList<CmsWorkflowBlueprintSummary> WorkflowBlueprints =
     [
@@ -393,7 +399,7 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         return string.Join('/', segments);
     }
 
-    public async Task<CmsPage> SavePageAsync(CmsPageEditorModel editor, CancellationToken cancellationToken = default)
+    public async Task<CmsPage> SavePageAsync(CmsPageEditorModel editor, string? actor = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(editor);
 
@@ -414,6 +420,7 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
             : null;
 
         var isNew = page is null;
+        var previousStatus = page?.Status;
         page ??= new CmsPage
         {
             SiteId = siteId,
@@ -485,6 +492,12 @@ public sealed class CmsBuilderService(IAppDbContext dbContext) : ICmsBuilderServ
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (requestedStatus == CmsPageStatuses.Published && previousStatus != CmsPageStatuses.Published
+            && automationTriggerService is not null && actor != "automation-engine")
+        {
+            var triggerPayload = JsonSerializer.Serialize(new { siteId = page.SiteId, pageId = page.Id, title = page.Title, slug = page.Slug });
+            await automationTriggerService.TriggerCmsPagePublishedAsync(page.SiteId, triggerPayload, cancellationToken);
+        }
         return page;
     }
 

@@ -1,10 +1,12 @@
 @page "/sentinel/share/{Token}"
 @attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@using GwsBusinessSuite.Application.Automation
 @using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Domain.Entities
 @inject ISentinelAccessService AccessService
 @inject IWikiService WikiService
 @inject IWikiDatabaseService WikiDatabaseService
+@inject IAutomationWorkflowService AutomationWorkflowService
 @inject IJSRuntime JS
 
 <PageTitle>@(_title ?? "Shared Sentinel page")</PageTitle>
@@ -66,6 +68,46 @@
             </div>
         </article>
     }
+    else if (_automationStatus is not null)
+    {
+        <article>
+            <div class="sentinel-public-brand">AUTOMATION STATUS</div>
+            <h1><i class="bi bi-diagram-3-fill me-2"></i>@_automationStatus.Name</h1>
+            @if (!string.IsNullOrWhiteSpace(_automationStatus.Description))
+            {
+                <p class="sentinel-public-automation-description">@_automationStatus.Description</p>
+            }
+            <div class="sentinel-public-automation-summary">
+                <span class="badge @(_automationStatus.Status == "Active" ? "text-bg-success" : "text-bg-secondary")">@_automationStatus.Status</span>
+                <span class="text-secondary small ms-2">
+                    @(_automationStatus.LastExecutedAt is { } lastRun ? $"Last ran {lastRun.ToLocalTime():MMM d, h:mm tt}" : "Never run")
+                </span>
+            </div>
+            <div class="sentinel-public-automation-runs">
+                <h2 class="h6 text-secondary text-uppercase small fw-bold mt-4 mb-2">Recent runs</h2>
+                @if (_automationStatus.RecentRuns.Count == 0)
+                {
+                    <p class="text-secondary small">No runs recorded yet.</p>
+                }
+                else
+                {
+                    <table class="table table-sm">
+                        <thead><tr><th>Status</th><th>Started</th><th>Duration</th></tr></thead>
+                        <tbody>
+                            @foreach (var run in _automationStatus.RecentRuns)
+                            {
+                                <tr>
+                                    <td><span class="badge @(run.Status == "Succeeded" ? "text-bg-success" : run.Status == "Failed" ? "text-bg-danger" : "text-bg-secondary")">@run.Status</span></td>
+                                    <td>@(run.StartedAt?.ToLocalTime().ToString("MMM d, h:mm tt") ?? "—")</td>
+                                    <td>@(run.StartedAt is { } started && run.FinishedAt is { } finished ? $"{(finished - started).TotalSeconds:0.#}s" : "—")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </article>
+    }
 </main>
 
 @code {
@@ -73,6 +115,7 @@
     private SentinelShareView? _share;
     private WikiPage? _page;
     private WikiDatabase? _database;
+    private AutomationPublicStatusView? _automationStatus;
     private bool _loading = true;
     private string? _title;
     private bool _unlocked;
@@ -93,9 +136,10 @@
     private async Task LoadTargetAsync()
     {
         if (_share is null) return;
-        if (_share.IsDatabase) _database = await WikiDatabaseService.GetDatabaseAsync(_share.TargetId);
+        if (_share.IsAutomationWorkflow) _automationStatus = await AutomationWorkflowService.GetPublicStatusAsync(_share.TargetId);
+        else if (_share.IsDatabase) _database = await WikiDatabaseService.GetDatabaseAsync(_share.TargetId);
         else _page = await WikiService.GetPageAsync(_share.TargetId);
-        _title = _database?.Title ?? _page?.Title;
+        _title = _automationStatus?.Name ?? _database?.Title ?? _page?.Title;
         await AccessService.RecordShareViewAsync(_share.Id);
     }
 

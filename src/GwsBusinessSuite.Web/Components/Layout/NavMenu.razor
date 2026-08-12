@@ -11,6 +11,13 @@
         <i class="bi bi-grid-1x2-fill" aria-hidden="true"></i>
         <span class="gws-nav-link-copy"><span>Home</span><small>Your work at a glance</small></span>
     </NavLink>
+    @if (IsAdmin)
+    {
+        <NavLink class="gws-nav-link" href="admin/mission-control" title="Mission Control">
+            <i class="bi bi-speedometer2" aria-hidden="true"></i>
+            <span class="gws-nav-link-copy"><span>Mission Control</span><small>Automation, CRM, affiliate, health</small></span>
+        </NavLink>
+    }
 
     <details class="gws-nav-group" open="@IsGroupOpen(PublishingPrefixes)">
         <summary><span>Publishing</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>

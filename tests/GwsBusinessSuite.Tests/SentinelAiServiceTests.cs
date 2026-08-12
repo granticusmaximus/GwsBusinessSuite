@@ -510,6 +510,41 @@ public sealed class SentinelAiServiceTests
     }
 
     [Fact]
+    public async Task StreamAgentConversationAsync_ShouldGroundQuestionsAboutASpecificDealInItsStageAndNotes()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var contact = new GwsBusinessSuite.Domain.Entities.Contact { FullName = "Ada Lovelace", CreatedBy = "grant" };
+        db.Contacts.Add(contact);
+        await db.SaveChangesAsync();
+        db.Deals.Add(new GwsBusinessSuite.Domain.Entities.Deal
+        {
+            ContactId = contact.Id,
+            Title = "Acme Renewal",
+            Stage = GwsBusinessSuite.Domain.Entities.DealStages.Negotiation,
+            ValueUsd = 15000,
+            Notes = "Waiting on legal sign-off before they'll move forward.",
+            CreatedBy = "grant"
+        });
+        await db.SaveChangesAsync();
+
+        var ollama = new FakeStreamingOllamaService(["Answer."]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache());
+
+        await DrainAgentResponseAsync(service, "Why did Acme Renewal stall?");
+
+        ollama.LastUserPrompt.Should().Contain("Acme Renewal");
+        ollama.LastUserPrompt.Should().Contain(GwsBusinessSuite.Domain.Entities.DealStages.Negotiation);
+        ollama.LastUserPrompt.Should().Contain("legal sign-off");
+    }
+
+    [Fact]
     public async Task ExecuteModelCommandAsync_ShouldRequireConfirmationBeforeUpdatingAModel()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -878,6 +913,131 @@ public sealed class SentinelAiServiceTests
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*already*");
     }
 
+    // --- Part 4.1: agentic workflow authoring (propose_create_automation_workflow) ---
+
+    [Fact]
+    public async Task StreamToolCallingConversationAsync_ProposeCreateAutomationWorkflow_ShouldPersistAPendingRunWithoutCreatingAnything()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        db.AppUsers.Add(new AppUser { Username = "grant", Role = AppRoles.Admin, IsActive = true });
+        await db.SaveChangesAsync();
+
+        var registry = new GwsBusinessSuite.Application.Automation.AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new GwsBusinessSuite.Application.Automation.AutomationWorkflowService(db, registry, TimeProvider.System);
+        var nodesJson = """[{"name":"Big deal","typeKey":"crm.dealStageChangedTrigger","parametersJson":"{\"toStage\":\"Won\"}"},{"name":"Alert","typeKey":"core.notify"}]""";
+        var connectionsJson = """[{"from":"Big deal","to":"Alert"}]""";
+        var ollama = new ScriptedToolCallingOllamaService(
+        [
+            new(string.Empty,
+            [
+                new OllamaToolCall(
+                    "propose_create_automation_workflow",
+                    $$"""{"name":"Big deal alert","description":"Notify on big wins","nodes":{{nodesJson}},"connections":{{connectionsJson}}}""")
+            ])
+        ]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache(),
+            automationNodeRegistry: registry, automationWorkflowService: workflowService);
+
+        var chunks = new List<SentinelAiStreamChunk>();
+        await foreach (var chunk in service.StreamToolCallingConversationAsync(Guid.NewGuid(), null, "Build a workflow for big deals", "grant"))
+        {
+            chunks.Add(chunk);
+        }
+
+        chunks[^1].CompletedRun!.Status.Should().Be(SentinelAiRunStatuses.Pending);
+        chunks[^1].CompletedRun!.Output.Should().Contain("Big deal alert").And.Contain("draft");
+        (await workflowService.ListAsync()).Should().BeEmpty("nothing should be created until the proposal is confirmed");
+    }
+
+    [Fact]
+    public async Task ResolvePendingToolActionAsync_ApprovedWorkflowProposal_ShouldCreateAnInactiveDraftWithTheProposedGraph()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        db.AppUsers.Add(new AppUser { Username = "grant", Role = AppRoles.Admin, IsActive = true });
+        await db.SaveChangesAsync();
+
+        var registry = new GwsBusinessSuite.Application.Automation.AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new GwsBusinessSuite.Application.Automation.AutomationWorkflowService(db, registry, TimeProvider.System);
+        var nodesJson = """[{"name":"Big deal","typeKey":"crm.dealStageChangedTrigger","parametersJson":"{\"toStage\":\"Won\"}"},{"name":"Alert","typeKey":"core.notify"}]""";
+        var connectionsJson = """[{"from":"Big deal","to":"Alert"}]""";
+        var ollama = new ScriptedToolCallingOllamaService(
+        [
+            new(string.Empty,
+            [
+                new OllamaToolCall(
+                    "propose_create_automation_workflow",
+                    $$"""{"name":"Big deal alert","description":"Notify on big wins","nodes":{{nodesJson}},"connections":{{connectionsJson}}}""")
+            ])
+        ]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache(),
+            automationNodeRegistry: registry, automationWorkflowService: workflowService);
+
+        SentinelAiRunView? pending = null;
+        await foreach (var chunk in service.StreamToolCallingConversationAsync(Guid.NewGuid(), null, "Build a workflow for big deals", "grant"))
+        {
+            if (chunk.CompletedRun is not null) pending = chunk.CompletedRun;
+        }
+
+        var resolved = await service.ResolvePendingToolActionAsync(pending!.Id, approved: true, "grant");
+
+        resolved.Status.Should().Be(SentinelAiRunStatuses.Completed);
+        var created = (await workflowService.ListAsync()).Should().ContainSingle().Subject;
+        created.Name.Should().Be("Big deal alert");
+        created.Status.Should().Be(AutomationWorkflowStatuses.Draft, "an AI-authored graph must never activate itself");
+        (await db.AutomationNodes.CountAsync(node => node.WorkflowId == created.Id)).Should().Be(2);
+        (await db.AutomationConnections.CountAsync(connection => connection.WorkflowId == created.Id)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task StreamToolCallingConversationAsync_ProposeCreateAutomationWorkflow_ShouldRejectAnUnknownNodeType()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        db.AppUsers.Add(new AppUser { Username = "grant", Role = AppRoles.Admin, IsActive = true });
+        await db.SaveChangesAsync();
+
+        var registry = new GwsBusinessSuite.Application.Automation.AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new GwsBusinessSuite.Application.Automation.AutomationWorkflowService(db, registry, TimeProvider.System);
+        var ollama = new ScriptedToolCallingOllamaService(
+        [
+            new(string.Empty,
+            [
+                new OllamaToolCall(
+                    "propose_create_automation_workflow",
+                    """{"name":"Bogus","nodes":[{"name":"Start","typeKey":"not.a.real.type"}]}""")
+            ])
+        ]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache(),
+            automationNodeRegistry: registry, automationWorkflowService: workflowService);
+
+        var chunks = new List<SentinelAiStreamChunk>();
+        await foreach (var chunk in service.StreamToolCallingConversationAsync(Guid.NewGuid(), null, "Build something", "grant"))
+        {
+            chunks.Add(chunk);
+        }
+
+        chunks[^1].CompletedRun!.Status.Should().Be(SentinelAiRunStatuses.Failed);
+        chunks[^1].CompletedRun!.Output.Should().Contain("not.a.real.type");
+        (await workflowService.ListAsync()).Should().BeEmpty();
+    }
+
     [Fact]
     public async Task StreamToolCallingConversationAsync_ProposeWrite_ShouldFailWithoutEditAccess()
     {
@@ -1087,5 +1247,12 @@ public sealed class SentinelAiServiceTests
 
         public Task<OllamaWebSearchResult> FetchAsync(string url, CancellationToken ct = default) =>
             Task.FromResult(results[0]);
+    }
+
+    private sealed class FakeHttpClient : GwsBusinessSuite.Application.Automation.IAutomationHttpClient
+    {
+        public Task<GwsBusinessSuite.Application.Automation.AutomationHttpResponse> SendAsync(
+            GwsBusinessSuite.Application.Automation.AutomationHttpRequest request, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 }

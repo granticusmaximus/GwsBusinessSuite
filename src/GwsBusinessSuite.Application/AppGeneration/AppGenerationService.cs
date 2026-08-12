@@ -209,7 +209,7 @@ public sealed class AppGenerationService(
                     BlocksJson = CmsBuilderJson.Serialize(page.Layout),
                     MetaDescription = page.MetaDescription,
                     Status = CmsPageStatuses.Draft
-                }, cancellationToken);
+                }, cancellationToken: cancellationToken);
             }
 
             var username = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);

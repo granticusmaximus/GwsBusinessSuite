@@ -27,6 +27,9 @@ public sealed class AutomationExecutionService(
         string mode = AutomationExecutionModes.Manual,
         Guid? retryOfExecutionId = null,
         IReadOnlySet<Guid>? subWorkflowChain = null,
+        bool isDryRun = false,
+        IReadOnlyDictionary<Guid, string>? historicalOutputByNodeId = null,
+        string? triggerTypeKeyOverride = null,
         CancellationToken cancellationToken = default)
     {
         JsonElement input;
@@ -54,11 +57,13 @@ public sealed class AutomationExecutionService(
 
         return await RunToCompletionAsync(execution, snapshot, () =>
         {
-            var triggerType = mode switch
+            var triggerType = triggerTypeKeyOverride ?? mode switch
             {
                 AutomationExecutionModes.Webhook => "core.webhookTrigger",
                 AutomationExecutionModes.Schedule => "core.scheduleTrigger",
                 AutomationExecutionModes.DatabaseTrigger => "database.rowChangedTrigger",
+                AutomationExecutionModes.CrmDealStageChanged => "crm.dealStageChangedTrigger",
+                AutomationExecutionModes.CmsPagePublished => "cms.pagePublishedTrigger",
                 _ => "core.manualTrigger"
             };
             var startNodes = snapshot.Nodes.Where(node => node.TypeKey == triggerType && !node.IsDisabled).ToList();
@@ -67,7 +72,31 @@ public sealed class AutomationExecutionService(
             var frontier = new Frontier { LastOutput = input.Clone() };
             foreach (var trigger in startNodes) frontier.Queue.Enqueue((trigger.Id, input.Clone(), "main"));
             return frontier;
-        }, subWorkflowChain, cancellationToken);
+        }, subWorkflowChain, isDryRun, historicalOutputByNodeId, cancellationToken);
+    }
+
+    // Re-runs a past execution's exact recorded trigger input against the current published
+    // graph as a sandboxed dry run - see IAutomationExecutionService.ExecuteAsync's isDryRun doc
+    // comment for exactly what "sandboxed" guarantees. Reuses the same evidence/checkpoint
+    // machinery as a real run so a replay's per-node trail is inspectable the same way.
+    public async Task<AutomationExecutionView> ReplayAsync(Guid sourceExecutionId, CancellationToken cancellationToken = default)
+    {
+        var source = await db.AutomationExecutions.AsNoTracking()
+            .Include(item => item.NodeExecutions)
+            .FirstOrDefaultAsync(item => item.Id == sourceExecutionId, cancellationToken)
+            ?? throw new KeyNotFoundException("Execution was not found.");
+        if (source.NodeExecutions.Count == 0)
+            throw new InvalidOperationException("This execution has no recorded node history to replay.");
+
+        var historicalOutputByNodeId = source.NodeExecutions
+            .GroupBy(item => item.NodeId)
+            .ToDictionary(group => group.Key, group => group.OrderByDescending(item => item.Attempt).First().OutputJson);
+        var originalTriggerTypeKey = source.NodeExecutions.OrderBy(item => item.StartedAtUnixSeconds).First().NodeTypeKey;
+
+        return await ExecuteAsync(
+            source.WorkflowId, source.InputJson, AutomationExecutionModes.Replay,
+            isDryRun: true, historicalOutputByNodeId: historicalOutputByNodeId,
+            triggerTypeKeyOverride: originalTriggerTypeKey, cancellationToken: cancellationToken);
     }
 
     public async Task<AutomationExecutionView> ResumeAsync(
@@ -140,7 +169,7 @@ public sealed class AutomationExecutionService(
                 execution.ResumeToken = null;
             }
             return frontier;
-        }, null, cancellationToken);
+        }, null, isDryRun: false, historicalOutputByNodeId: null, cancellationToken);
     }
 
     public async Task<AutomationExecutionView> CancelAsync(Guid executionId, CancellationToken cancellationToken = default)
@@ -187,13 +216,15 @@ public sealed class AutomationExecutionService(
         AutomationWorkflowSnapshot snapshot,
         Func<Frontier> buildFrontier,
         IReadOnlySet<Guid>? subWorkflowChain,
+        bool isDryRun,
+        IReadOnlyDictionary<Guid, string>? historicalOutputByNodeId,
         CancellationToken cancellationToken)
     {
         Frontier? frontier = null;
         try
         {
             frontier = buildFrontier();
-            var paused = await RunLoopAsync(execution, snapshot, frontier, subWorkflowChain, cancellationToken);
+            var paused = await RunLoopAsync(execution, snapshot, frontier, subWorkflowChain, isDryRun, historicalOutputByNodeId, cancellationToken);
             if (!paused)
             {
                 execution.Status = AutomationExecutionStatuses.Succeeded;
@@ -227,10 +258,16 @@ public sealed class AutomationExecutionService(
             var finishedAt = timeProvider.GetUtcNow();
             execution.FinishedAt = finishedAt;
             execution.FinishedAtUnixSeconds = finishedAt.ToUnixTimeSeconds();
-            var workflow = await db.AutomationWorkflows.FirstAsync(item => item.Id == execution.WorkflowId, CancellationToken.None);
-            workflow.LastExecutedAt = finishedAt;
-            workflow.UpdatedAt = finishedAt;
-            workflow.UpdatedBy = "automation-engine";
+            // A dry run is a sandboxed simulation, not a real run - it must not affect
+            // LastExecutedAt, which the workflow list/Mission Control read as "did this actually
+            // run recently."
+            if (!isDryRun)
+            {
+                var workflow = await db.AutomationWorkflows.FirstAsync(item => item.Id == execution.WorkflowId, CancellationToken.None);
+                workflow.LastExecutedAt = finishedAt;
+                workflow.UpdatedAt = finishedAt;
+                workflow.UpdatedBy = "automation-engine";
+            }
         }
         await db.SaveChangesAsync(CancellationToken.None);
 
@@ -254,6 +291,8 @@ public sealed class AutomationExecutionService(
         AutomationWorkflowSnapshot snapshot,
         Frontier frontier,
         IReadOnlySet<Guid>? subWorkflowChain,
+        bool isDryRun,
+        IReadOnlyDictionary<Guid, string>? historicalOutputByNodeId,
         CancellationToken cancellationToken)
     {
         // Resolved once per run (not per node) and threaded down to nodes that need to check
@@ -261,10 +300,15 @@ public sealed class AutomationExecutionService(
         // see ExecuteSetRowPropertyAsync's ownership/scoping check for why this matters: a
         // workflow author could otherwise write to any Sentinel database regardless of who
         // owns it.
-        var workflowOwnerUsername = await db.AutomationWorkflows.AsNoTracking()
+        var workflowMeta = await db.AutomationWorkflows.AsNoTracking()
             .Where(item => item.Id == execution.WorkflowId)
-            .Select(item => item.CreatedBy)
+            .Select(item => new { item.CreatedBy, item.AllowDownstreamAutomationTriggers })
             .FirstOrDefaultAsync(cancellationToken);
+        var workflowOwnerUsername = workflowMeta?.CreatedBy;
+        // A dry run must have zero real side effects, full stop - forced off here regardless of
+        // the workflow's own AllowDownstreamAutomationTriggers setting (which only matters for
+        // nodes that actually execute for real, none of which run during a dry run).
+        var allowDownstreamTriggers = !isDryRun && (workflowMeta?.AllowDownstreamAutomationTriggers ?? false);
 
         var nodesById = snapshot.Nodes.ToDictionary(node => node.Id);
         var outgoing = snapshot.Connections.GroupBy(connection => connection.SourceNodeId).ToDictionary(group => group.Key, group => group.ToList());
@@ -284,6 +328,12 @@ public sealed class AutomationExecutionService(
 
             if (!node.IsDisabled && node.TypeKey is "core.wait" or "core.approval")
             {
+                if (isDryRun)
+                {
+                    throw new InvalidOperationException(
+                        $"\"{node.Name}\" pauses for a human or external signal - time-travel replay doesn't support " +
+                        "workflows that pause during a dry run.");
+                }
                 await PauseAsync(execution, node, work.Input, frontier, cancellationToken);
                 return true;
             }
@@ -305,7 +355,7 @@ public sealed class AutomationExecutionService(
 
             var result = node.IsDisabled
                 ? SingleItemResult("main", nodeInput)
-                : await ExecuteNodeWithEvidenceAsync(execution, node, nodeInput, workflowOwnerUsername, subWorkflowChain, frontier.NodeOutputsByName, cancellationToken);
+                : await ExecuteNodeWithEvidenceAsync(execution, node, nodeInput, workflowOwnerUsername, subWorkflowChain, frontier.NodeOutputsByName, allowDownstreamTriggers, isDryRun, historicalOutputByNodeId, cancellationToken);
             var latestItem = result.Outputs.Values.SelectMany(items => items).LastOrDefault();
             if (latestItem.ValueKind != JsonValueKind.Undefined)
             {
@@ -415,8 +465,12 @@ public sealed class AutomationExecutionService(
         string? workflowOwnerUsername,
         IReadOnlySet<Guid>? subWorkflowChain,
         IReadOnlyDictionary<string, JsonElement> nodeOutputsByName,
+        bool allowDownstreamTriggers,
+        bool isDryRun,
+        IReadOnlyDictionary<Guid, string>? historicalOutputByNodeId,
         CancellationToken cancellationToken)
     {
+        var isSimulated = isDryRun && nodeRegistry.HasRealSideEffect(node.TypeKey, node.TypeVersion);
         var maxAttempts = node.RetryOnFail ? Math.Clamp(node.MaxTries, 1, 10) : 1;
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
@@ -432,6 +486,7 @@ public sealed class AutomationExecutionService(
                 InputJson = input.GetRawText(),
                 StartedAt = startedAt,
                 StartedAtUnixSeconds = startedAt.ToUnixTimeSeconds(),
+                IsSimulated = isSimulated,
                 CreatedBy = "automation-engine"
             };
             db.AutomationNodeExecutions.Add(evidence);
@@ -443,8 +498,8 @@ public sealed class AutomationExecutionService(
                     ? await credentialService.GetDecryptedDataAsync(node.CredentialId.Value, cancellationToken)
                     : null;
                 var result = node.TimeoutMs > 0
-                    ? await ExecuteWithTimeoutAsync(node, input, credentialJson, workflowOwnerUsername, subWorkflowChain, nodeOutputsByName, cancellationToken)
-                    : await nodeRegistry.ExecuteAsync(node, input, credentialJson, workflowOwnerUsername, subWorkflowChain, nodeOutputsByName, cancellationToken);
+                    ? await ExecuteWithTimeoutAsync(node, input, credentialJson, workflowOwnerUsername, subWorkflowChain, nodeOutputsByName, allowDownstreamTriggers, isDryRun, historicalOutputByNodeId, cancellationToken)
+                    : await nodeRegistry.ExecuteAsync(node, input, credentialJson, workflowOwnerUsername, subWorkflowChain, nodeOutputsByName, allowDownstreamTriggers, isDryRun, historicalOutputByNodeId, cancellationToken);
                 var finishedAt = timeProvider.GetUtcNow();
                 evidence.Status = AutomationExecutionStatuses.Succeeded;
                 evidence.OutputJson = result.DisplayOutputJson;
@@ -484,6 +539,9 @@ public sealed class AutomationExecutionService(
         string? workflowOwnerUsername,
         IReadOnlySet<Guid>? subWorkflowChain,
         IReadOnlyDictionary<string, JsonElement> nodeOutputsByName,
+        bool allowDownstreamTriggers,
+        bool isDryRun,
+        IReadOnlyDictionary<Guid, string>? historicalOutputByNodeId,
         CancellationToken cancellationToken)
     {
         var timeoutMs = Math.Clamp(node.TimeoutMs, 100, 600_000);
@@ -491,7 +549,7 @@ public sealed class AutomationExecutionService(
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token);
         try
         {
-            return await nodeRegistry.ExecuteAsync(node, input, credentialJson, workflowOwnerUsername, subWorkflowChain, nodeOutputsByName, linked.Token);
+            return await nodeRegistry.ExecuteAsync(node, input, credentialJson, workflowOwnerUsername, subWorkflowChain, nodeOutputsByName, allowDownstreamTriggers, isDryRun, historicalOutputByNodeId, linked.Token);
         }
         catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
@@ -630,7 +688,7 @@ public sealed class AutomationExecutionService(
             foreach (var pair in preserved.NodeOutputsByName) frontier.NodeOutputsByName[pair.Key] = pair.Value;
             if (preserved.LastOutput.ValueKind != JsonValueKind.Undefined) frontier.LastOutput = preserved.LastOutput;
             return frontier;
-        }, null, cancellationToken);
+        }, null, isDryRun: false, historicalOutputByNodeId: null, cancellationToken);
     }
 
     private async Task<AutomationExecutionView> LoadExecutionAsync(Guid executionId, CancellationToken cancellationToken)

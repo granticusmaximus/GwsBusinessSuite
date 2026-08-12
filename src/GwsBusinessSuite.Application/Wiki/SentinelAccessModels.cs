@@ -12,7 +12,8 @@ public sealed record SentinelShareView(
     bool IsRevoked,
     bool RequiresPassword = false,
     int ViewCount = 0,
-    DateTimeOffset? LastAccessedAt = null);
+    DateTimeOffset? LastAccessedAt = null,
+    bool IsAutomationWorkflow = false);
 
 public sealed record SentinelAccessSnapshot(
     IReadOnlyList<SentinelPermissionView> Permissions,
@@ -28,7 +29,9 @@ public interface ISentinelAccessService
     Task<SentinelAccessSnapshot> GetAccessAsync(Guid targetId, bool isDatabase, CancellationToken cancellationToken = default);
     Task SetPermissionAsync(Guid targetId, bool isDatabase, string username, string accessLevel, string performedBy, CancellationToken cancellationToken = default);
     Task RemovePermissionAsync(Guid permissionId, string performedBy, CancellationToken cancellationToken = default);
-    Task<SentinelShareView> CreatePublicShareAsync(Guid targetId, bool isDatabase, DateTimeOffset? expiresAt, bool allowSearchIndexing, string? password, string performedBy, CancellationToken cancellationToken = default);
+    Task<SentinelShareView> CreatePublicShareAsync(
+        Guid targetId, bool isDatabase, DateTimeOffset? expiresAt, bool allowSearchIndexing, string? password, string performedBy,
+        bool isAutomationWorkflow = false, CancellationToken cancellationToken = default);
     Task RevokePublicShareAsync(Guid shareId, string performedBy, CancellationToken cancellationToken = default);
     Task<SentinelShareView?> ResolvePublicShareAsync(string token, CancellationToken cancellationToken = default);
     // Separate from ResolvePublicShareAsync so a caller can show/gate a password prompt

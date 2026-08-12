@@ -4,8 +4,10 @@ using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.Crm;
 using GwsBusinessSuite.Application.Growth;
+using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
+using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -68,6 +70,37 @@ public sealed class AutomationWorkflowTests
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*cycle*");
         (await db.AutomationConnections.CountAsync()).Should().Be(2);
+    }
+
+    [Theory]
+    [InlineData("crm-deal-won-notify")]
+    [InlineData("scheduled-digest")]
+    [InlineData("webhook-relay")]
+    public async Task StarterWorkflow_ShouldInstantiateWithFreshIdsAndValidate(string key)
+    {
+        var starter = AutomationStarterWorkflows.Find(key);
+        starter.Should().NotBeNull();
+
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+
+        var created = await workflowService.CreateFromGraphAsync(
+            starter!.Graph.Name, starter.Graph.Description, starter.Graph.Nodes, starter.Graph.Connections, "user");
+
+        created.Nodes.Should().HaveCount(starter.Graph.Nodes.Count);
+        created.Connections.Should().HaveCount(starter.Graph.Connections.Count);
+        created.Nodes.Select(node => node.Id).Should().OnlyHaveUniqueItems()
+            .And.NotContain(starter.Graph.Nodes.Select(node => node.Id));
+
+        var validation = await workflowService.ValidateAsync(created.Id);
+        validation.Errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void StarterWorkflows_ShouldHaveUniqueKeys()
+    {
+        AutomationStarterWorkflows.All.Select(starter => starter.Key).Should().OnlyHaveUniqueItems();
     }
 
     [Fact]
@@ -870,6 +903,659 @@ public sealed class AutomationWorkflowTests
         lesson.Output.Should().Contain("Sentinel synthesis");
     }
 
+    // --- Part 2: cron scheduling ---
+
+    [Fact]
+    public async Task PublishAsync_ShouldPreferCronExpressionOverIntervalMinutesWhenBothAreSet()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var timeProvider = new FakeTimeProvider { UtcNow = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero) };
+        var service = new AutomationWorkflowService(db, registry, timeProvider);
+        var workflow = await service.CreateAsync("Cron schedule");
+        await service.DeleteNodeAsync(workflow.Id, workflow.Nodes.Single().Id);
+        await service.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Schedule", TypeKey = "core.scheduleTrigger", PositionX = 100, PositionY = 100,
+            ParametersJson = "{\"intervalMinutes\":60,\"cronExpression\":\"0 9 * * *\"}"
+        });
+
+        await service.PublishAsync(workflow.Id, "v1");
+
+        var reloaded = (await service.GetAsync(workflow.Id))!;
+        reloaded.PublishedAt.Should().NotBeNull();
+        var row = await db.AutomationWorkflows.AsNoTracking().SingleAsync(item => item.Id == workflow.Id);
+        row.ScheduleCronExpression.Should().Be("0 9 * * *");
+        row.NextScheduledAt.Should().Be(new DateTimeOffset(2026, 1, 1, 9, 0, 0, TimeSpan.Zero));
+    }
+
+    [Fact]
+    public async Task ValidateAsync_ShouldRejectAnInvalidCronExpression()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var service = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var workflow = await service.CreateAsync("Bad cron");
+        await service.DeleteNodeAsync(workflow.Id, workflow.Nodes.Single().Id);
+        await service.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Schedule", TypeKey = "core.scheduleTrigger", PositionX = 100, PositionY = 100,
+            ParametersJson = "{\"cronExpression\":\"not a cron\"}"
+        });
+
+        var result = await service.ValidateAsync(workflow.Id);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(error => error.Contains("cronExpression"));
+    }
+
+    [Fact]
+    public async Task RunDueSchedulesAsync_ShouldRecomputeNextOccurrenceUsingCron()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var timeProvider = new FakeTimeProvider { UtcNow = new DateTimeOffset(2026, 1, 1, 8, 59, 0, TimeSpan.Zero) };
+        var workflowService = new AutomationWorkflowService(db, registry, timeProvider);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), timeProvider);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, timeProvider);
+        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, timeProvider, NullLogger<AutomationTriggerService>.Instance);
+        var workflow = await workflowService.CreateAsync("Daily cron");
+        await workflowService.DeleteNodeAsync(workflow.Id, workflow.Nodes.Single().Id);
+        await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Schedule", TypeKey = "core.scheduleTrigger", PositionX = 100, PositionY = 100,
+            ParametersJson = "{\"cronExpression\":\"0 9 * * *\"}"
+        });
+        await workflowService.PublishAsync(workflow.Id, "v1");
+        await workflowService.SetActiveAsync(workflow.Id, true);
+
+        timeProvider.UtcNow = new DateTimeOffset(2026, 1, 1, 9, 0, 0, TimeSpan.Zero);
+        var firedCount = await triggerService.RunDueSchedulesAsync();
+
+        firedCount.Should().Be(1);
+        var row = await db.AutomationWorkflows.AsNoTracking().SingleAsync(item => item.Id == workflow.Id);
+        row.NextScheduledAt.Should().Be(new DateTimeOffset(2026, 1, 2, 9, 0, 0, TimeSpan.Zero));
+    }
+
+    // --- Part 2: multi-condition database triggers ---
+
+    [Fact]
+    public async Task TriggerDatabaseRowChangedAsync_ShouldSkipWorkflowsWhoseConditionsDoNotMatch()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+        var wikiDatabaseId = Guid.NewGuid();
+        var propertyId = Guid.NewGuid();
+
+        var workflow = await workflowService.CreateAsync("Conditional trigger");
+        var trigger = workflow.Nodes.Single();
+        await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Id = trigger.Id, Name = trigger.Name, TypeKey = "database.rowChangedTrigger", PositionX = 100, PositionY = 100,
+            ParametersJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                wikiDatabaseId,
+                conditions = new[] { new { propertyId, @operator = "equals", value = "Done" } }
+            })
+        });
+        await workflowService.PublishAsync(workflow.Id, "v1");
+        await workflowService.SetActiveAsync(workflow.Id, true);
+
+        var nonMatchingPayload = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            wikiDatabaseId, rowId = Guid.NewGuid(), isNew = false,
+            values = new Dictionary<string, string> { [propertyId.ToString()] = "In progress" }
+        });
+        var matchingPayload = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            wikiDatabaseId, rowId = Guid.NewGuid(), isNew = false,
+            values = new Dictionary<string, string> { [propertyId.ToString()] = "Done" }
+        });
+
+        var skippedCount = await triggerService.TriggerDatabaseRowChangedAsync(wikiDatabaseId, nonMatchingPayload);
+        var matchedCount = await triggerService.TriggerDatabaseRowChangedAsync(wikiDatabaseId, matchingPayload);
+
+        skippedCount.Should().Be(0);
+        matchedCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task TriggerDatabaseRowChangedAsync_ShouldFireOnAnyChangeWhenNoConditionsAreSet()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+        var wikiDatabaseId = Guid.NewGuid();
+
+        var workflow = await workflowService.CreateAsync("Unconditional trigger");
+        var trigger = workflow.Nodes.Single();
+        await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Id = trigger.Id, Name = trigger.Name, TypeKey = "database.rowChangedTrigger", PositionX = 100, PositionY = 100,
+            ParametersJson = System.Text.Json.JsonSerializer.Serialize(new { wikiDatabaseId })
+        });
+        await workflowService.PublishAsync(workflow.Id, "v1");
+        await workflowService.SetActiveAsync(workflow.Id, true);
+
+        var payload = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            wikiDatabaseId, rowId = Guid.NewGuid(), isNew = false, values = new Dictionary<string, string>()
+        });
+        var firedCount = await triggerService.TriggerDatabaseRowChangedAsync(wikiDatabaseId, payload);
+
+        firedCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_ShouldRejectAConditionWithAnUnsupportedOperator()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var service = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var workflow = await service.CreateAsync("Bad condition");
+        var trigger = workflow.Nodes.Single();
+        await service.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Id = trigger.Id, Name = trigger.Name, TypeKey = "database.rowChangedTrigger", PositionX = 100, PositionY = 100,
+            ParametersJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                wikiDatabaseId = Guid.NewGuid(),
+                conditions = new[] { new { propertyId = Guid.NewGuid(), @operator = "greaterThan", value = "5" } }
+            })
+        });
+
+        var result = await service.ValidateAsync(workflow.Id);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(error => error.Contains("operator"));
+    }
+
+    // --- Part 2: OAuth2 credential refresh ---
+
+    [Fact]
+    public async Task RefreshOAuthCredentialAsync_ShouldRotateAccessTokenAndPreserveRefreshTokenWhenNotReturned()
+    {
+        await using var db = await CreateDbAsync();
+        var httpClient = new ScriptedHttpClient([new AutomationHttpResponse(200, "{\"access_token\":\"new-access\",\"expires_in\":3600}", new Dictionary<string, string>())]);
+        var timeProvider = new FakeTimeProvider { UtcNow = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero) };
+        var service = new AutomationCredentialService(db, new FakeSecretProtector(), timeProvider, httpClient);
+        var id = await service.SaveAsync(null, "Provider OAuth", AutomationCredentialService.OAuth2TypeKey,
+            "{\"accessToken\":\"old-access\",\"refreshToken\":\"refresh-1\",\"tokenEndpoint\":\"https://provider.example.com/token\",\"clientId\":\"abc\",\"clientSecret\":\"xyz\"}");
+
+        var refreshed = await service.RefreshOAuthCredentialAsync(id);
+
+        refreshed.Should().BeTrue();
+        httpClient.Requests.Should().ContainSingle();
+        httpClient.Requests[0].Headers.Should().ContainKey("Authorization");
+        var updated = System.Text.Json.JsonDocument.Parse((await service.GetDecryptedDataAsync(id))!).RootElement;
+        updated.GetProperty("accessToken").GetString().Should().Be("new-access");
+        updated.GetProperty("refreshToken").GetString().Should().Be("refresh-1");
+        updated.GetProperty("expiresAt").GetString().Should().Be(new DateTimeOffset(2026, 1, 1, 1, 0, 0, TimeSpan.Zero).ToString("O"));
+    }
+
+    [Fact]
+    public async Task RefreshOAuthCredentialAsync_ShouldReturnFalseForNonOAuthCredentials()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System, new ScriptedHttpClient([]));
+        var id = await service.SaveAsync(null, "Header cred", "httpHeader", "{\"headers\":{}}");
+
+        var refreshed = await service.RefreshOAuthCredentialAsync(id);
+
+        refreshed.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RefreshExpiringOAuthCredentialsAsync_ShouldOnlyRefreshCredentialsDueWithinTheWindow()
+    {
+        await using var db = await CreateDbAsync();
+        var httpClient = new ScriptedHttpClient([new AutomationHttpResponse(200, "{\"access_token\":\"refreshed\"}", new Dictionary<string, string>())]);
+        var timeProvider = new FakeTimeProvider { UtcNow = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero) };
+        var service = new AutomationCredentialService(db, new FakeSecretProtector(), timeProvider, httpClient);
+        var dueId = await service.SaveAsync(null, "Due soon", AutomationCredentialService.OAuth2TypeKey,
+            "{\"accessToken\":\"a\",\"refreshToken\":\"r\",\"tokenEndpoint\":\"https://provider.example.com/token\",\"expiresAt\":\"2026-01-01T00:10:00Z\"}");
+        var notDueId = await service.SaveAsync(null, "Far future", AutomationCredentialService.OAuth2TypeKey,
+            "{\"accessToken\":\"a\",\"refreshToken\":\"r\",\"tokenEndpoint\":\"https://provider.example.com/token\",\"expiresAt\":\"2026-06-01T00:00:00Z\"}");
+
+        var refreshedCount = await service.RefreshExpiringOAuthCredentialsAsync(TimeSpan.FromHours(1));
+
+        refreshedCount.Should().Be(1);
+        httpClient.Requests.Should().ContainSingle();
+        (await service.GetDecryptedDataAsync(dueId))!.Should().Contain("refreshed");
+        (await service.GetDecryptedDataAsync(notDueId))!.Should().NotContain("refreshed");
+    }
+
+    private sealed class ScriptedHttpClient(IReadOnlyList<AutomationHttpResponse> responses) : IAutomationHttpClient
+    {
+        private int _index;
+        public List<AutomationHttpRequest> Requests { get; } = [];
+        public Task<AutomationHttpResponse> SendAsync(AutomationHttpRequest request, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            var response = responses.Count == 0 ? new AutomationHttpResponse(200, "{}", new Dictionary<string, string>()) : responses[Math.Min(_index++, responses.Count - 1)];
+            return Task.FromResult(response);
+        }
+    }
+
+    // --- Part 2: workflow organization (tags surfaced via ListAsync; duplicate) ---
+
+    [Fact]
+    public async Task ListAsync_ShouldSurfaceTagsCsv()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var service = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var workflow = await service.CreateAsync("Tagged workflow");
+        await service.UpdateMetadataAsync(workflow.Id, workflow.Name, workflow.Description, "sales, notifications");
+
+        var summaries = await service.ListAsync();
+
+        summaries.Should().ContainSingle(item => item.Id == workflow.Id && item.TagsCsv == "sales, notifications");
+    }
+
+    [Fact]
+    public async Task DuplicateAsync_ShouldCloneTheLiveDraftWithFreshIdentities()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var service = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var source = await service.CreateAsync("Original", "desc");
+        var setNode = await service.SaveNodeAsync(source.Id, NewSetNode("Prep", 400));
+        await service.AddConnectionAsync(source.Id, source.Nodes.Single().Id, "main", setNode.Id);
+
+        var duplicate = await service.DuplicateAsync(source.Id, "Copy of Original", "user");
+
+        duplicate.Id.Should().NotBe(source.Id);
+        duplicate.Nodes.Should().HaveCount(2);
+        duplicate.Nodes.Should().OnlyContain(node => node.Id != source.Nodes.Single().Id && node.Id != setNode.Id);
+        duplicate.Connections.Should().ContainSingle();
+    }
+
+    // --- Part 2: opt-in automation chaining ---
+
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(true, 1)]
+    public async Task DatabaseWrite_ShouldOnlyChainIntoAnotherWorkflowWhenAllowed(bool allowDownstreamTriggers, int expectedWatcherExecutions)
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        db.AppUsers.Add(new AppUser { Username = "user", Role = AppRoles.Admin, IsActive = true });
+        await db.SaveChangesAsync();
+
+        var serviceProvider = new FakeServiceProvider();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), dbContextFactory: new FakeAppDbContextFactory(options), serviceProvider: serviceProvider);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+        var wikiDatabaseService = new WikiDatabaseService(db, triggerService);
+        serviceProvider.Register<IWikiDatabaseService>(wikiDatabaseService);
+
+        var database = await wikiDatabaseService.CreateDatabaseAsync("Tasks", null, "user");
+        var titleProperty = database.Properties.Single(p => p.Type == WikiDatabasePropertyTypes.Title);
+        var statusProperty = await wikiDatabaseService.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Status", Type = WikiDatabasePropertyTypes.Text }, "user");
+        var titledRow = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(titledRow, titleProperty.Id, "Ship it");
+        var row = await wikiDatabaseService.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = titledRow.ToDictionary(kv => kv.Key, kv => kv.Value) }, "user");
+
+        var watcher = await workflowService.CreateAsync("Watcher");
+        await workflowService.SaveNodeAsync(watcher.Id, new AutomationNodeEditor
+        {
+            Id = watcher.Nodes.Single().Id, Name = watcher.Nodes.Single().Name, TypeKey = "database.rowChangedTrigger",
+            PositionX = 100, PositionY = 100, ParametersJson = $"{{\"wikiDatabaseId\":\"{database.Id}\"}}"
+        });
+        await workflowService.PublishAsync(watcher.Id, "v1");
+        await workflowService.SetActiveAsync(watcher.Id, true);
+
+        var writer = await workflowService.CreateAsync("Writer");
+        var writeNode = await workflowService.SaveNodeAsync(writer.Id, new AutomationNodeEditor
+        {
+            Name = "Set status", TypeKey = "database.setRowProperty", PositionX = 350, PositionY = 100,
+            ParametersJson = $"{{\"wikiDatabaseId\":\"{database.Id}\",\"rowId\":\"{row.Id}\",\"propertyId\":\"{statusProperty.Id}\",\"value\":\"Done\"}}"
+        });
+        await workflowService.AddConnectionAsync(writer.Id, writer.Nodes.Single().Id, "main", writeNode.Id);
+        await workflowService.PublishAsync(writer.Id, "v1");
+        await workflowService.SetAllowDownstreamAutomationTriggersAsync(writer.Id, allowDownstreamTriggers);
+
+        var execution = await executionService.ExecuteAsync(writer.Id);
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == watcher.Id)).Should().Be(expectedWatcherExecutions);
+    }
+
+    // --- Part 4.2: cross-module triggers (CRM deal stage changed, CMS page published) ---
+
+    [Fact]
+    public async Task CrmDealStageChangedTrigger_ShouldFireOnlyForActiveSubscribersMatchingToStageFilter()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+        var crmService = new CrmService(db, automationTriggerService: triggerService);
+
+        async Task<Guid> CreateSubscribedWorkflowAsync(string name, string toStage, bool active)
+        {
+            var workflow = await workflowService.CreateAsync(name);
+            await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+            {
+                Id = workflow.Nodes.Single().Id, Name = "Stage changed", TypeKey = "crm.dealStageChangedTrigger",
+                PositionX = 100, PositionY = 100, ParametersJson = $"{{\"toStage\":\"{toStage}\"}}"
+            });
+            await workflowService.PublishAsync(workflow.Id, "v1");
+            if (active) await workflowService.SetActiveAsync(workflow.Id, true);
+            return workflow.Id;
+        }
+
+        var wonWatcherActive = await CreateSubscribedWorkflowAsync("Won watcher", "Won", active: true);
+        var wonWatcherInactive = await CreateSubscribedWorkflowAsync("Inactive won watcher", "Won", active: false);
+        var anyStageWatcherActive = await CreateSubscribedWorkflowAsync("Any stage watcher", "", active: true);
+
+        var contact = new Contact { FullName = "Test Contact" };
+        db.Contacts.Add(contact);
+        await db.SaveChangesAsync();
+        var deal = await crmService.SaveDealAsync(new DealEditorModel { ContactId = contact.Id, Title = "Deal", Stage = DealStages.Lead });
+
+        await crmService.SetDealStageAsync(deal.Id, DealStages.Won);
+
+        (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == wonWatcherActive)).Should().Be(1);
+        (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == wonWatcherInactive)).Should().Be(0);
+        // Fires twice for the unfiltered watcher: once when the deal was created (Lead), once
+        // when it moved to Won - both count as a "deal stage changed" event.
+        (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == anyStageWatcherActive)).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task CrmSetDealStageActionNode_ShouldNotReTriggerWatcherUnlessChainingIsAllowed()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        db.AppUsers.Add(new AppUser { Username = "user", Role = AppRoles.Admin, IsActive = true });
+        await db.SaveChangesAsync();
+
+        var serviceProvider = new FakeServiceProvider();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), serviceProvider: serviceProvider);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+        var crmService = new CrmService(db, automationTriggerService: triggerService);
+        serviceProvider.Register<ICrmService>(crmService);
+
+        var contact = new Contact { FullName = "Test Contact" };
+        db.Contacts.Add(contact);
+        await db.SaveChangesAsync();
+        var deal = await crmService.SaveDealAsync(new DealEditorModel { ContactId = contact.Id, Title = "Deal", Stage = DealStages.Lead });
+
+        var watcher = await workflowService.CreateAsync("Watcher");
+        await workflowService.SaveNodeAsync(watcher.Id, new AutomationNodeEditor
+        {
+            Id = watcher.Nodes.Single().Id, Name = watcher.Nodes.Single().Name, TypeKey = "crm.dealStageChangedTrigger",
+            PositionX = 100, PositionY = 100, ParametersJson = "{\"toStage\":\"\"}"
+        });
+        await workflowService.PublishAsync(watcher.Id, "v1");
+        await workflowService.SetActiveAsync(watcher.Id, true);
+
+        var writer = await workflowService.CreateAsync("Writer");
+        var writeNode = await workflowService.SaveNodeAsync(writer.Id, new AutomationNodeEditor
+        {
+            Name = "Set stage", TypeKey = "crm.setDealStage", PositionX = 350, PositionY = 100,
+            ParametersJson = $"{{\"dealId\":\"{deal.Id}\",\"stage\":\"Won\"}}"
+        });
+        await workflowService.AddConnectionAsync(writer.Id, writer.Nodes.Single().Id, "main", writeNode.Id);
+        await workflowService.PublishAsync(writer.Id, "v1");
+
+        var undisallowed = await executionService.ExecuteAsync(writer.Id);
+        undisallowed.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == watcher.Id)).Should().Be(0);
+
+        await workflowService.SetAllowDownstreamAutomationTriggersAsync(writer.Id, true);
+        // Move the deal back to a stage the trigger will treat as a real change before firing
+        // again - actor "automation-engine" keeps this setup step itself from counting as a fire.
+        await crmService.SetDealStageAsync(deal.Id, DealStages.Lead, "automation-engine");
+        var allowed = await executionService.ExecuteAsync(writer.Id);
+        allowed.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == watcher.Id)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task CmsPagePublishedTrigger_ShouldFireOnlyOnDraftToPublishedTransition()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+        var cmsBuilderService = new CmsBuilderService(db, automationTriggerService: triggerService);
+
+        var site = new CmsSite { Name = "Site", Slug = "site" };
+        db.CmsSites.Add(site);
+        await db.SaveChangesAsync();
+
+        var watcher = await workflowService.CreateAsync("Publish watcher");
+        await workflowService.SaveNodeAsync(watcher.Id, new AutomationNodeEditor
+        {
+            Id = watcher.Nodes.Single().Id, Name = "Published", TypeKey = "cms.pagePublishedTrigger",
+            PositionX = 100, PositionY = 100, ParametersJson = "{}"
+        });
+        await workflowService.PublishAsync(watcher.Id, "v1");
+        await workflowService.SetActiveAsync(watcher.Id, true);
+
+        var draft = await cmsBuilderService.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id, Title = "Page", Slug = "page", Status = CmsPageStatuses.Draft
+        });
+        (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == watcher.Id)).Should().Be(0);
+
+        await cmsBuilderService.SavePageAsync(new CmsPageEditorModel
+        {
+            PageId = draft.Id, SiteId = site.Id, Title = "Page", Slug = "page", Status = CmsPageStatuses.Published
+        });
+        (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == watcher.Id)).Should().Be(1);
+
+        // Re-saving while already published must not re-fire the trigger.
+        await cmsBuilderService.SavePageAsync(new CmsPageEditorModel
+        {
+            PageId = draft.Id, SiteId = site.Id, Title = "Page (edited)", Slug = "page", Status = CmsPageStatuses.Published
+        });
+        (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == watcher.Id)).Should().Be(1);
+    }
+
+    // --- Part 4.4: execution time-travel replay ---
+
+    [Fact]
+    public async Task ReplayAsync_ShouldSimulateSideEffectingNodesWithoutRealCallsOrTouchingLastExecutedAt()
+    {
+        await using var db = await CreateDbAsync();
+        var httpClient = new FakeHttpClient();
+        var registry = new AutomationNodeRegistry(httpClient);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+
+        var workflow = await workflowService.CreateAsync("Replay target");
+        var httpNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Call API", TypeKey = "core.httpRequest", PositionX = 350, PositionY = 100,
+            ParametersJson = "{\"method\":\"GET\",\"url\":\"https://example.com\",\"headers\":{},\"body\":\"\"}"
+        });
+        var setNode = await workflowService.SaveNodeAsync(workflow.Id, NewSetNode("After call", 650));
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", httpNode.Id);
+        await workflowService.AddConnectionAsync(workflow.Id, httpNode.Id, "main", setNode.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var original = await executionService.ExecuteAsync(workflow.Id);
+        original.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        httpClient.CallCount.Should().Be(1);
+        var lastExecutedAtAfterRealRun = (await db.AutomationWorkflows.AsNoTracking().SingleAsync(item => item.Id == workflow.Id)).LastExecutedAt;
+
+        var replay = await executionService.ReplayAsync(original.Id);
+
+        replay.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        replay.Mode.Should().Be(AutomationExecutionModes.Replay);
+        httpClient.CallCount.Should().Be(1, "the HTTP node must be simulated, not actually called again");
+        replay.Nodes.Single(node => node.NodeId == httpNode.Id).IsSimulated.Should().BeTrue();
+        replay.Nodes.Single(node => node.NodeId == setNode.Id).IsSimulated.Should().BeFalse("core.set has no real side effect and should always run for real");
+        (await db.AutomationWorkflows.AsNoTracking().SingleAsync(item => item.Id == workflow.Id)).LastExecutedAt
+            .Should().Be(lastExecutedAtAfterRealRun, "a dry run must not count as a real execution");
+    }
+
+    [Fact]
+    public async Task ReplayAsync_ShouldFailClearlyWhenTodaysLogicReachesASideEffectingNodeTheOriginalRunNeverRecorded()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+
+        var workflow = await workflowService.CreateAsync("Branch-sensitive");
+        var ifNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Check value", TypeKey = "core.if", PositionX = 350, PositionY = 100,
+            ParametersJson = "{\"left\":\"{{ $json.value }}\",\"operator\":\"equals\",\"right\":\"yes\"}"
+        });
+        var safeNode = await workflowService.SaveNodeAsync(workflow.Id, NewSetNode("Safe path", 650));
+        var riskyNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Risky call", TypeKey = "core.httpRequest", PositionX = 650, PositionY = 250,
+            ParametersJson = "{\"method\":\"GET\",\"url\":\"https://example.com\",\"headers\":{},\"body\":\"\"}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", ifNode.Id);
+        await workflowService.AddConnectionAsync(workflow.Id, ifNode.Id, "false", safeNode.Id);
+        await workflowService.AddConnectionAsync(workflow.Id, ifNode.Id, "true", riskyNode.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var original = await executionService.ExecuteAsync(workflow.Id, "{\"value\":\"no\"}");
+        original.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        original.Nodes.Should().NotContain(node => node.NodeId == riskyNode.Id, "the original run took the safe branch");
+
+        // Today's logic now takes the opposite branch for the exact same recorded input.
+        await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Id = ifNode.Id, Name = ifNode.Name, TypeKey = ifNode.TypeKey, PositionX = ifNode.PositionX, PositionY = ifNode.PositionY,
+            ParametersJson = "{\"left\":\"{{ $json.value }}\",\"operator\":\"equals\",\"right\":\"no\"}"
+        });
+        await workflowService.PublishAsync(workflow.Id, "v2 - flipped condition");
+
+        var replay = await executionService.ReplayAsync(original.Id);
+
+        replay.Status.Should().Be(AutomationExecutionStatuses.Failed);
+        replay.ErrorMessage.Should().Contain("Risky call").And.Contain("no recorded output");
+    }
+
+    [Fact]
+    public async Task ReplayAsync_ShouldFailClearlyWhenTheGraphPausesOnAWaitNode()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+
+        var workflow = await workflowService.CreateAsync("Pausing workflow");
+        var waitNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Pause", TypeKey = "core.wait", PositionX = 350, PositionY = 100,
+            ParametersJson = "{\"mode\":\"duration\",\"durationMs\":60000}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", waitNode.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var original = await executionService.ExecuteAsync(workflow.Id);
+        original.Status.Should().Be(AutomationExecutionStatuses.Waiting);
+
+        var replay = await executionService.ReplayAsync(original.Id);
+
+        replay.Status.Should().Be(AutomationExecutionStatuses.Failed);
+        replay.ErrorMessage.Should().Contain("Pause").And.Contain("pause");
+    }
+
+    [Fact]
+    public async Task GetPublicStatusAsync_ShouldReturnOnlySanitizedFields()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+
+        var workflow = await workflowService.CreateAsync("Client-facing workflow", "Internal description with sensitive detail");
+        var setNode = await workflowService.SaveNodeAsync(workflow.Id, NewSetNode("Prep", 400));
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", setNode.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+        await executionService.ExecuteAsync(workflow.Id, "{\"secret\":\"do-not-leak\"}");
+
+        var status = await workflowService.GetPublicStatusAsync(workflow.Id);
+
+        status.Should().NotBeNull();
+        status!.Name.Should().Be("Client-facing workflow");
+        status.RecentRuns.Should().ContainSingle();
+        status.RecentRuns[0].Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        // The public view type has no InputJson/OutputJson/ErrorMessage members at all - this
+        // assertion (rather than checking their absence) is the actual compile-time guarantee.
+        typeof(AutomationPublicStatusRun).GetProperty("InputJson").Should().BeNull();
+        typeof(AutomationPublicStatusRun).GetProperty("OutputJson").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetPublicStatusAsync_ShouldReturnNullForAMissingWorkflow()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+
+        (await workflowService.GetPublicStatusAsync(Guid.NewGuid())).Should().BeNull();
+    }
+
+    // --- Part 2: notify action ---
+
+    [Fact]
+    public async Task Notify_ShouldSendAnEmailWithResolvedExpressions()
+    {
+        await using var db = await CreateDbAsync();
+        var emailSender = new FakeGrowthReportEmailSender();
+        var serviceProvider = new FakeServiceProvider().Register<IGrowthReportEmailSender>(emailSender);
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), serviceProvider: serviceProvider);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Notify test");
+        var node = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Send alert", TypeKey = "core.notify", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"to\":\"{{ $json.email }}\",\"subject\":\"Deal update\",\"message\":\"{{ $json.dealName }} moved.\"}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", node.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var execution = await executionService.ExecuteAsync(
+            workflow.Id, "{\"email\":\"owner@example.com\",\"dealName\":\"Acme Renewal\"}");
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        emailSender.SentEmails.Should().ContainSingle(email =>
+            email.RecipientEmail == "owner@example.com" && email.PlainTextBody.Contains("Acme Renewal"));
+    }
+
     // --- Part 1: sub-workflows ---
 
     [Fact]
@@ -1405,9 +2091,11 @@ public sealed class AutomationWorkflowTests
     private sealed class FakeHttpClient : IAutomationHttpClient
     {
         public TimeSpan Delay { get; set; } = TimeSpan.Zero;
+        public int CallCount { get; private set; }
 
         public async Task<AutomationHttpResponse> SendAsync(AutomationHttpRequest request, CancellationToken cancellationToken = default)
         {
+            CallCount++;
             if (Delay > TimeSpan.Zero) await Task.Delay(Delay, cancellationToken);
             return new AutomationHttpResponse(200, "{}", new Dictionary<string, string>());
         }
@@ -1461,7 +2149,7 @@ public sealed class AutomationWorkflowTests
         public List<(Guid DealId, string Stage)> StagedDeals { get; } = [];
         public List<ContactEditorModel> SavedContacts { get; } = [];
 
-        public Task<DealView> SetDealStageAsync(Guid dealId, string stage, CancellationToken cancellationToken = default)
+        public Task<DealView> SetDealStageAsync(Guid dealId, string stage, string? actor = null, CancellationToken cancellationToken = default)
         {
             StagedDeals.Add((dealId, stage));
             return Task.FromResult(new DealView { Id = dealId, ContactId = Guid.NewGuid(), Title = "Deal", Stage = stage, CreatedAt = DateTimeOffset.UtcNow });
@@ -1489,7 +2177,7 @@ public sealed class AutomationWorkflowTests
         public Task<int> CountDueFollowUpsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<DealView>> ListDealsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<DealView>> ListDealsForContactAsync(Guid contactId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<DealView> SaveDealAsync(DealEditorModel editor, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<DealView> SaveDealAsync(DealEditorModel editor, string? actor = null, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task DeleteDealAsync(Guid dealId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
 
@@ -1497,7 +2185,7 @@ public sealed class AutomationWorkflowTests
     {
         public List<CmsPageEditorModel> SavedPages { get; } = [];
 
-        public Task<CmsPage> SavePageAsync(CmsPageEditorModel editor, CancellationToken cancellationToken = default)
+        public Task<CmsPage> SavePageAsync(CmsPageEditorModel editor, string? actor = null, CancellationToken cancellationToken = default)
         {
             SavedPages.Add(editor);
             return Task.FromResult(new CmsPage
@@ -1524,6 +2212,17 @@ public sealed class AutomationWorkflowTests
         public Task DeletePageAsync(Guid pageId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<CmsWorkflowBlueprintSummary>> ListWorkflowBlueprintsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<CmsPage> ApplyWorkflowBlueprintAsync(Guid pageId, string blueprintKey, bool replaceExistingBlocks, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    }
+
+    private sealed class FakeGrowthReportEmailSender : IGrowthReportEmailSender
+    {
+        public List<GrowthReportEmail> SentEmails { get; } = [];
+        public GrowthReportDeliveryConfiguration Configuration => new(true, "Configured for tests.");
+        public Task SendAsync(GrowthReportEmail email, CancellationToken cancellationToken = default)
+        {
+            SentEmails.Add(email);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakeSocialPublishingService : ISocialPublishingService

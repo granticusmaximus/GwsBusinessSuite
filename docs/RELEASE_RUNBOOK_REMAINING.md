@@ -28,6 +28,11 @@ invoked from.
 - **Migration-copy rehearsal**: copy the *production* `gws-suite.db` (from a fresh backup, not
   the live file) into an isolated environment and apply the latest migration to that copy
   specifically, not just a synthetic empty/upgraded test database.
+- **SentinelGPT production latency objectives** (added 2026-08-12, `RELEASE_READINESS.md`'s
+  SentinelGPT section): establish first-token and total-response-time objectives from actual
+  droplet measurements against the deployed Ollama instance, then confirm they're met. No local
+  test can substitute — this needs the real droplet's hardware and model-loading behavior, not a
+  synthetic benchmark.
 
 ## 2. Deployed acceptance journeys (needs a real browser session against the live app)
 

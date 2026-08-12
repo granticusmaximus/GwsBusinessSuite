@@ -69,12 +69,14 @@ public sealed class AutomationTriggerService(
             var nowUnix = now.ToUnixTimeSeconds();
             var due = await db.AutomationWorkflows.Where(item =>
                 item.Status == AutomationWorkflowStatuses.Active
-                && item.ScheduleIntervalMinutes != null
+                && (item.ScheduleIntervalMinutes != null || item.ScheduleCronExpression != null)
                 && item.NextScheduledAtUnixSeconds != null
                 && item.NextScheduledAtUnixSeconds <= nowUnix).ToListAsync(cancellationToken);
             foreach (var workflow in due)
             {
-                workflow.NextScheduledAt = now.AddMinutes(workflow.ScheduleIntervalMinutes!.Value);
+                workflow.NextScheduledAt = workflow.ScheduleCronExpression is not null
+                    ? CronSchedule.GetNextOccurrence(workflow.ScheduleCronExpression, now)
+                    : now.AddMinutes(workflow.ScheduleIntervalMinutes!.Value);
                 workflow.NextScheduledAtUnixSeconds = workflow.NextScheduledAt.Value.ToUnixTimeSeconds();
                 workflow.UpdatedAt = now;
                 workflow.UpdatedBy = "automation-scheduler";
@@ -129,6 +131,13 @@ public sealed class AutomationTriggerService(
         {
             try
             {
+                // Published snapshots are memory-cached indefinitely per (workflowId, version)
+                // (AutomationWorkflowService's own cache comment), so this per-subscriber lookup
+                // is cheap in the common case of the same workflow firing repeatedly.
+                var snapshot = await workflowService.GetPublishedSnapshotAsync(workflowId, cancellationToken);
+                var triggerNode = snapshot?.Nodes.FirstOrDefault(node => node.TypeKey == "database.rowChangedTrigger" && !node.IsDisabled);
+                if (triggerNode is not null && !DatabaseTriggerConditions.Matches(triggerNode.ParametersJson, inputJson)) continue;
+
                 await executionService.ExecuteAsync(workflowId, inputJson, AutomationExecutionModes.DatabaseTrigger, cancellationToken: cancellationToken);
                 triggered++;
             }
@@ -142,6 +151,68 @@ public sealed class AutomationTriggerService(
             }
         }
         return triggered;
+    }
+
+    public async Task<int> TriggerCrmDealStageChangedAsync(string stage, string inputJson, CancellationToken cancellationToken = default)
+    {
+        var subscribers = await db.AutomationWorkflows.AsNoTracking().Where(item =>
+            item.Status == AutomationWorkflowStatuses.Active && item.TriggerCrmDealStageChanged)
+            .Select(item => item.Id).ToListAsync(cancellationToken);
+
+        var triggered = 0;
+        foreach (var workflowId in subscribers)
+        {
+            try
+            {
+                var snapshot = await workflowService.GetPublishedSnapshotAsync(workflowId, cancellationToken);
+                var triggerNode = snapshot?.Nodes.FirstOrDefault(node => node.TypeKey == "crm.dealStageChangedTrigger" && !node.IsDisabled);
+                if (triggerNode is null) continue;
+                var toStage = ReadStringParameter(triggerNode.ParametersJson, "toStage");
+                if (!string.IsNullOrWhiteSpace(toStage) && !string.Equals(toStage, stage, StringComparison.OrdinalIgnoreCase)) continue;
+
+                await executionService.ExecuteAsync(workflowId, inputJson, AutomationExecutionModes.CrmDealStageChanged, cancellationToken: cancellationToken);
+                triggered++;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "CRM deal-stage-changed trigger failed for automation workflow {WorkflowId}.", workflowId);
+            }
+        }
+        return triggered;
+    }
+
+    public async Task<int> TriggerCmsPagePublishedAsync(Guid siteId, string inputJson, CancellationToken cancellationToken = default)
+    {
+        var subscribers = await db.AutomationWorkflows.AsNoTracking().Where(item =>
+            item.Status == AutomationWorkflowStatuses.Active && item.TriggerCmsPagePublished)
+            .Select(item => item.Id).ToListAsync(cancellationToken);
+
+        var triggered = 0;
+        foreach (var workflowId in subscribers)
+        {
+            try
+            {
+                var snapshot = await workflowService.GetPublishedSnapshotAsync(workflowId, cancellationToken);
+                var triggerNode = snapshot?.Nodes.FirstOrDefault(node => node.TypeKey == "cms.pagePublishedTrigger" && !node.IsDisabled);
+                if (triggerNode is null) continue;
+
+                await executionService.ExecuteAsync(workflowId, inputJson, AutomationExecutionModes.CmsPagePublished, cancellationToken: cancellationToken);
+                triggered++;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "CMS page-published trigger failed for automation workflow {WorkflowId}.", workflowId);
+            }
+        }
+        return triggered;
+    }
+
+    private static string? ReadStringParameter(string parametersJson, string propertyName)
+    {
+        using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(parametersJson) ? "{}" : parametersJson);
+        return document.RootElement.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
     }
 
     public async Task<AutomationExecutionView?> ResumeViaWebhookAsync(string token, string bodyJson, CancellationToken cancellationToken = default)

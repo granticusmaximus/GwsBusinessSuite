@@ -26,11 +26,14 @@ public sealed partial class AutomationNodeRegistry(
     [
         new("core.manualTrigger", 1, "Manual Trigger", "Starts when you select Run workflow.", "Triggers", "bi-play-circle-fill", true, ["main"], "{}"),
         new("core.webhookTrigger", 1, "Webhook Trigger", "Starts an active workflow from its public webhook path.", "Triggers", "bi-broadcast-pin", true, ["main"], "{\"path\":\"incoming-event\"}"),
-        new("core.scheduleTrigger", 1, "Schedule Trigger", "Starts an active workflow at a recurring minute interval.", "Triggers", "bi-clock-fill", true, ["main"], "{\"intervalMinutes\":60}"),
-        new("database.rowChangedTrigger", 1, "Database Row Changed", "Starts an active workflow when a row's properties change in a Sentinel database. Paste the database's id (visible in its Sentinel URL) into wikiDatabaseId.", "Triggers", "bi-table", true, ["main"], "{\"wikiDatabaseId\":\"\"}"),
+        new("core.scheduleTrigger", 1, "Schedule Trigger", "Starts an active workflow at a recurring minute interval, or on a cron schedule. Set cronExpression (5 fields: minute hour day-of-month month day-of-week - '*', numbers, comma lists, 'N-M' ranges, and '*/S' steps only, e.g. \"0 9 * * 1\" for every Monday at 9am) to use cron instead of intervalMinutes; cronExpression wins if both are set.", "Triggers", "bi-clock-fill", true, ["main"], "{\"intervalMinutes\":60,\"cronExpression\":\"\"}"),
+        new("database.rowChangedTrigger", 1, "Database Row Changed", "Starts an active workflow when a row's properties change in a Sentinel database. Paste the database's id (visible in its Sentinel URL) into wikiDatabaseId. Optionally add a conditions array (each {propertyId, operator: equals|notEquals|contains, value}, ANDed together) so the workflow only starts when the row's new values match - leave conditions empty/absent to fire on any change, as before.", "Triggers", "bi-table", true, ["main"], "{\"wikiDatabaseId\":\"\",\"conditions\":[]}"),
+        new("crm.dealStageChangedTrigger", 1, "CRM Deal Stage Changed", "Starts an active workflow when a CRM deal's pipeline stage changes. Leave toStage empty to fire on any stage change, or set it (e.g. \"Won\") to fire only when a deal reaches that stage.", "Triggers", "bi-graph-up-arrow", true, ["main"], "{\"toStage\":\"\"}"),
+        new("cms.pagePublishedTrigger", 1, "CMS Page Published", "Starts an active workflow when a CMS page transitions from draft to published.", "Triggers", "bi-file-earmark-richtext", true, ["main"], "{}"),
         new("database.setRowProperty", 1, "Set Database Row Property", "Sets one property on a Sentinel database row. Paste the database, row, and property ids and an optional {{ $json.path }} expression for the value. Never re-triggers a Database Row Changed workflow, so it cannot cause an automation loop - chaining a second workflow off this write is not supported.", "Actions", "bi-pencil-square", false, ["main"], "{\"wikiDatabaseId\":\"\",\"rowId\":\"{{ $json.rowId }}\",\"propertyId\":\"\",\"value\":\"\"}", IsIdempotent: false),
         new("database.addRow", 1, "Add Database Row", "Creates a new row in a Sentinel database. propertyValues maps property ids to values (string values support {{ $json.path }} expressions); parentRowId is optional and nests the new row as a sub-item. Like Set Database Row Property, this never re-triggers a Database Row Changed workflow.", "Actions", "bi-plus-square", false, ["main"], "{\"wikiDatabaseId\":\"\",\"parentRowId\":\"\",\"propertyValues\":{}}", IsIdempotent: false),
         new("automation.subWorkflow", 1, "Execute Workflow", "Runs another published workflow to completion and returns its output. The child must not pause on a Wait or Approval node. workflowId is the id shown in the target workflow's URL.", "Flow", "bi-diagram-3", false, ["main"], "{\"workflowId\":\"\"}", IsIdempotent: false),
+        new("core.notify", 1, "Notify", "Sends an email to a person. to/subject/message support {{ $json.path }} expressions. For webhook-style alerts, use HTTP Request instead - this node is specifically for email.", "Actions", "bi-envelope-fill", false, ["main"], "{\"to\":\"\",\"subject\":\"GWS Automation Notification\",\"message\":\"{{ $json }}\"}", IsIdempotent: false),
         new("crm.setDealStage", 1, "CRM: Set Deal Stage", "Moves a CRM deal to a new pipeline stage. dealId and stage support {{ $json.path }} expressions.", "Actions", "bi-graph-up-arrow", false, ["main"], "{\"dealId\":\"{{ $json.dealId }}\",\"stage\":\"\"}", IsIdempotent: false),
         new("crm.saveContact", 1, "CRM: Save Contact", "Creates or updates a CRM contact. contactId is optional (omit to create); other fields support {{ $json.path }} expressions.", "Actions", "bi-person-lines-fill", false, ["main"], "{\"contactId\":\"\",\"fullName\":\"{{ $json.fullName }}\",\"email\":\"{{ $json.email }}\",\"company\":\"\",\"status\":\"Lead\"}", IsIdempotent: false),
         new("cms.savePage", 1, "CMS: Save Page", "Creates or updates a CMS page on a site. pageId is optional (omit to create); other fields support {{ $json.path }} expressions.", "Actions", "bi-file-earmark-richtext", false, ["main"], "{\"siteId\":\"\",\"pageId\":\"\",\"title\":\"{{ $json.title }}\",\"blocksJson\":\"[]\"}", IsIdempotent: false),
@@ -87,6 +90,9 @@ public sealed partial class AutomationNodeRegistry(
     public AutomationNodeDefinition? Find(string typeKey, int version = 1) => Definitions.FirstOrDefault(
         definition => definition.Version == version && definition.TypeKey.Equals(typeKey, StringComparison.OrdinalIgnoreCase));
 
+    public bool HasRealSideEffect(string typeKey, int version = 1) =>
+        Find(typeKey, version) is { IsIdempotent: false } || typeKey.StartsWith("ai.", StringComparison.Ordinal);
+
     public async Task<AutomationNodeRunResult> ExecuteAsync(
         AutomationNodeSnapshot node,
         JsonElement input,
@@ -94,20 +100,40 @@ public sealed partial class AutomationNodeRegistry(
         string? workflowOwnerUsername = null,
         IReadOnlySet<Guid>? subWorkflowChain = null,
         IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName = null,
+        bool allowDownstreamTriggers = false,
+        bool isDryRun = false,
+        IReadOnlyDictionary<Guid, string>? historicalOutputByNodeId = null,
         CancellationToken cancellationToken = default)
     {
+        if (isDryRun && HasRealSideEffect(node.TypeKey, node.TypeVersion))
+        {
+            if (historicalOutputByNodeId is null || !historicalOutputByNodeId.TryGetValue(node.Id, out var historicalOutputJson))
+            {
+                throw new InvalidOperationException(
+                    $"\"{node.Name}\" has no recorded output from the original run to simulate - it may be new or " +
+                    "changed since then, so time-travel replay can't safely dry-run it.");
+            }
+            JsonElement historicalOutput;
+            try { historicalOutput = JsonDocument.Parse(string.IsNullOrWhiteSpace(historicalOutputJson) ? "{}" : historicalOutputJson).RootElement.Clone(); }
+            catch (JsonException) { historicalOutput = JsonDocument.Parse("{}").RootElement.Clone(); }
+            return SingleOutput("main", historicalOutput);
+        }
+
         return node.TypeKey switch
         {
             "core.manualTrigger" => SingleOutput("main", input),
             "core.webhookTrigger" => SingleOutput("main", input),
             "core.scheduleTrigger" => SingleOutput("main", input),
             "database.rowChangedTrigger" => SingleOutput("main", input),
-            "database.setRowProperty" => await ExecuteSetRowPropertyAsync(node, input, workflowOwnerUsername, nodeOutputsByName, cancellationToken),
-            "database.addRow" => await ExecuteAddRowAsync(node, input, workflowOwnerUsername, nodeOutputsByName, cancellationToken),
+            "crm.dealStageChangedTrigger" => SingleOutput("main", input),
+            "cms.pagePublishedTrigger" => SingleOutput("main", input),
+            "database.setRowProperty" => await ExecuteSetRowPropertyAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
+            "database.addRow" => await ExecuteAddRowAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
             "automation.subWorkflow" => await ExecuteSubWorkflowAsync(node, input, subWorkflowChain, cancellationToken),
-            "crm.setDealStage" => await ExecuteCrmSetDealStageAsync(node, input, nodeOutputsByName, cancellationToken),
+            "core.notify" => await ExecuteNotifyAsync(node, input, nodeOutputsByName, cancellationToken),
+            "crm.setDealStage" => await ExecuteCrmSetDealStageAsync(node, input, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
             "crm.saveContact" => await ExecuteCrmSaveContactAsync(node, input, nodeOutputsByName, cancellationToken),
-            "cms.savePage" => await ExecuteCmsSavePageAsync(node, input, nodeOutputsByName, cancellationToken),
+            "cms.savePage" => await ExecuteCmsSavePageAsync(node, input, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
             "growth.publishSocialPost" => await ExecuteGrowthPublishSocialPostAsync(node, input, nodeOutputsByName, cancellationToken),
             "core.set" => ExecuteSet(node, input, nodeOutputsByName),
             "core.if" => ExecuteIf(node, input, nodeOutputsByName),
@@ -257,6 +283,7 @@ public sealed partial class AutomationNodeRegistry(
         JsonElement input,
         string? workflowOwnerUsername,
         IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName,
+        bool allowDownstreamTriggers,
         CancellationToken cancellationToken)
     {
         var wikiDatabaseService = serviceProvider?.GetService(typeof(IWikiDatabaseService)) as IWikiDatabaseService
@@ -282,9 +309,13 @@ public sealed partial class AutomationNodeRegistry(
         await EnsureCanEditDatabaseAsync(wikiDatabaseId, workflowOwnerUsername, node.Name, cancellationToken);
 
         // "automation-engine" (see WikiDatabaseService.SaveRowAsync) is the actor that skips
-        // re-firing database.rowChangedTrigger - required so this node can never chain into an
-        // automation loop, including its own workflow's trigger on the same database.
-        await wikiDatabaseService.SaveInlineCellAsync(wikiDatabaseId, rowId, propertyId, value, "automation-engine", cancellationToken);
+        // re-firing database.rowChangedTrigger, preventing an automation loop. When the
+        // workflow has explicitly opted in (AllowDownstreamAutomationTriggers), use a
+        // different actor instead so the trigger DOES fire for downstream automations -
+        // WikiDatabaseService's actor check only special-cases the literal string
+        // "automation-engine", so any other value already gets this for free.
+        await wikiDatabaseService.SaveInlineCellAsync(
+            wikiDatabaseId, rowId, propertyId, value, ChainingActor(allowDownstreamTriggers), cancellationToken);
 
         var output = source.DeepClone().AsObject();
         output["databaseWrite"] = new JsonObject
@@ -302,6 +333,7 @@ public sealed partial class AutomationNodeRegistry(
         JsonElement input,
         string? workflowOwnerUsername,
         IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName,
+        bool allowDownstreamTriggers,
         CancellationToken cancellationToken)
     {
         var wikiDatabaseService = serviceProvider?.GetService(typeof(IWikiDatabaseService)) as IWikiDatabaseService
@@ -331,13 +363,12 @@ public sealed partial class AutomationNodeRegistry(
             }
         }
 
-        // "automation-engine" (see WikiDatabaseService.SaveRowAsync) is the actor that skips
-        // re-firing database.rowChangedTrigger - same loop guard as Set Database Row Property.
+        // Same actor-selection rule as Set Database Row Property - see ChainingActor.
         var row = await wikiDatabaseService.SaveRowAsync(wikiDatabaseId, new WikiDatabaseRowEditor
         {
             ParentRowId = parentRowId,
             Values = values.ToDictionary(pair => pair.Key, pair => pair.Value)
-        }, "automation-engine", cancellationToken);
+        }, ChainingActor(allowDownstreamTriggers), cancellationToken);
 
         var output = source.DeepClone().AsObject();
         output["databaseRow"] = new JsonObject
@@ -389,7 +420,7 @@ public sealed partial class AutomationNodeRegistry(
 
         var nextChain = new HashSet<Guid>(chain) { childWorkflowId };
         var childExecution = await executionService.ExecuteAsync(
-            childWorkflowId, input.GetRawText(), AutomationExecutionModes.SubWorkflow, null, nextChain, cancellationToken);
+            childWorkflowId, input.GetRawText(), AutomationExecutionModes.SubWorkflow, null, nextChain, cancellationToken: cancellationToken);
 
         if (childExecution.Status == AutomationExecutionStatuses.Waiting)
         {
@@ -416,6 +447,7 @@ public sealed partial class AutomationNodeRegistry(
         AutomationNodeSnapshot node,
         JsonElement input,
         IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName,
+        bool allowDownstreamTriggers,
         CancellationToken cancellationToken)
     {
         var crmService = serviceProvider?.GetService(typeof(ICrmService)) as ICrmService
@@ -428,7 +460,7 @@ public sealed partial class AutomationNodeRegistry(
         var stage = ResolveText(parameters["stage"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
         if (string.IsNullOrWhiteSpace(stage)) throw new InvalidOperationException($"{node.Name} requires a stage.");
 
-        var deal = await crmService.SetDealStageAsync(dealId, stage, cancellationToken);
+        var deal = await crmService.SetDealStageAsync(dealId, stage, ChainingActor(allowDownstreamTriggers), cancellationToken);
 
         var output = source.DeepClone().AsObject();
         output["crmDeal"] = new JsonObject { ["dealId"] = deal.Id.ToString(), ["stage"] = deal.Stage };
@@ -469,6 +501,7 @@ public sealed partial class AutomationNodeRegistry(
         AutomationNodeSnapshot node,
         JsonElement input,
         IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName,
+        bool allowDownstreamTriggers,
         CancellationToken cancellationToken)
     {
         var cmsBuilderService = serviceProvider?.GetService(typeof(ICmsBuilderService)) as ICmsBuilderService
@@ -489,7 +522,7 @@ public sealed partial class AutomationNodeRegistry(
             Slug = ResolveText(parameters["slug"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName),
             BlocksJson = parameters["blocksJson"]?.GetValue<string>() ?? "[]"
         };
-        var page = await cmsBuilderService.SavePageAsync(editor, cancellationToken);
+        var page = await cmsBuilderService.SavePageAsync(editor, ChainingActor(allowDownstreamTriggers), cancellationToken);
 
         var output = source.DeepClone().AsObject();
         output["cmsPage"] = new JsonObject { ["pageId"] = page.Id.ToString(), ["title"] = page.Title };
@@ -518,7 +551,37 @@ public sealed partial class AutomationNodeRegistry(
         return SingleOutput("main", JsonSerializer.SerializeToElement(output));
     }
 
+    private async Task<AutomationNodeRunResult> ExecuteNotifyAsync(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName,
+        CancellationToken cancellationToken)
+    {
+        var emailSender = serviceProvider?.GetService(typeof(IGrowthReportEmailSender)) as IGrowthReportEmailSender
+            ?? throw new InvalidOperationException("Email notifications are not available to the automation engine.");
+        var parameters = ParseObject(node.ParametersJson, node.Name);
+        var source = RequireObject(input, node.Name);
+
+        var to = ResolveText(parameters["to"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
+        if (string.IsNullOrWhiteSpace(to)) throw new InvalidOperationException($"{node.Name} requires a recipient email address.");
+        var subject = ResolveText(parameters["subject"]?.GetValue<string>() ?? "GWS Automation Notification", input, nodeOutputsByName);
+        var message = ResolveText(parameters["message"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
+
+        await emailSender.SendAsync(new GrowthReportEmail(to, subject, message, string.Empty), cancellationToken);
+
+        var output = source.DeepClone().AsObject();
+        output["notified"] = new JsonObject { ["to"] = to, ["subject"] = subject };
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
     private static string? NullIfBlank(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    // "automation-engine" suppresses database.rowChangedTrigger re-firing (WikiDatabaseService
+    // .SaveRowAsync's exact-string actor check); any other value doesn't. This is the one place
+    // that decision is made, so both write nodes stay in sync automatically if the opt-in flag's
+    // implementation ever changes.
+    private static string ChainingActor(bool allowDownstreamTriggers) =>
+        allowDownstreamTriggers ? "automation-engine:chained" : "automation-engine";
 
     private static Guid ParseRequiredGuid(string? value, string nodeName, string parameterName) =>
         Guid.TryParse(value, out var parsed)

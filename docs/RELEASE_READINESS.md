@@ -69,7 +69,7 @@ manual entries with generated evidence where practical.
 | Full automated suite | P0 | 0 failed on 2026-08-12 local Release validation, via `verify-release.sh` (adds 16 new Workflow Automation cases to the 2026-08-11 baseline of 1098) | Pass |
 | Direct/transitive NuGet vulnerability audit | P0 | No known vulnerable packages on 2026-08-11 | Pass |
 | Docker Compose rendering | P0 | `docker compose config --quiet` on 2026-08-11 | Pass |
-| SentinelGPT response-length UI | P1 | Authenticated desktop and 390px Playwright smoke on 2026-08-11 (part of the full automated suite) | Pass |
+| SentinelGPT response-length UI | P1 | Corrected 2026-08-12: this row previously claimed "desktop and 390px Playwright smoke" evidence that does not exist anywhere in the repo or its git history - no test loads `SentinelGpt.razor` at all, and no test in the whole suite sets a 390px viewport (confirmed by a fresh audit). Only the backend response-budget plumbing is tested (`SentinelAiServiceTests.cs`, `SentinelGptGenerationCoordinatorTests.cs`) | Not run |
 | HTTP security headers (CSP/X-Frame-Options/Referrer-Policy/Permissions-Policy/HSTS) | P0 | Confirmed present on `https://admin.gwsapp.net` response headers on 2026-08-11 | Pass |
 | Disk-space health check | P0 | `DiskSpaceHealthCheck` unit-tested (path selection, missing-directory fallback, connection-string parsing) 2026-08-11; `/health/ready` returns Healthy in production with the check wired in | Local pass; deployed low-disk (Degraded/Unhealthy) branch not exercised, by construction |
 | Operational failure alerting (email on background-job/backup/automation failure) | P1 | `OperationalAlertService` unit-tested (send, per-source cooldown throttling, opt-in-only, never-throws) on 2026-08-11 | Local pass; no controlled failure has been triggered against the deployed SMTP config |
@@ -77,6 +77,7 @@ manual entries with generated evidence where practical.
 | CRM deal/pipeline board | P1 | `CrmService` deal create/update/stage-move/delete and dashboard cache-invalidation unit-tested on 2026-08-11 | Local pass; no browser journey yet |
 | Workflow Automation engine additions (sub-workflows, failed-node retry, templates, import/export, version diff/rollback, `$node(...)` expression references, CRM/CMS/Growth action nodes) | P1 | 16 new `AutomationWorkflowTests` cases plus the existing suite unit-test each addition on 2026-08-12; full `verify-release.sh` run (build, audit, Compose, full suite) passed the same day | Local pass; no browser journey against the new UI (Save as template, Import/Export, Versions tab, Retry from failed node) yet; pinned/mock execution data and CJ/storage nodes remain unbuilt |
 | SentinelGPT governed write tool (`propose_set_database_row_property`: authorization, structured input, preview/confirm, idempotency, audit evidence) | P1 | 5 new `SentinelAiServiceTests` cases (propose-without-writing, confirm-executes, decline-leaves-untouched, double-resolve rejected, access-denied) on 2026-08-12 | Local pass; no browser journey through the Confirm/Decline UI yet; this is one action, not the full "every enabled action" gate |
+| Workflow Automation editor/lifecycle/credential additions (cron + multi-condition triggers, notify action, opt-in chaining, tags/duplicate, OAuth2 credential refresh, editor undo/redo/multi-select/copy-paste/minimap) | P1/P2 | 25 new `AutomationWorkflowTests`/`CronScheduleTests` cases on 2026-08-12; full `verify-release.sh` passed the same day | Local pass for everything service-layer; the editor UX items (undo/redo, multi-select, copy/paste, minimap) are Blazor code-behind with no automated coverage of any kind, consistent with every other Razor page in this app - no browser journey exists for any of it |
 | Mandatory portal MFA | P0 | TOTP/recovery/replay tests plus local browser enrollment and returning-login journeys | Local pass; deployed acceptance required |
 | Security audit ledger | P0 | Hash-chain, secret-metadata rejection, encrypted-network, account-event tests and local admin browser journey | Local pass; deployed acceptance required |
 | Privacy and incident operations | P0 | Identity-gated subject export, one-month rights clock, retention preview, incident register, and 72-hour breach clock tests | Local pass; legal policy approval and deployed acceptance required |
@@ -137,26 +138,90 @@ manual entries with generated evidence where practical.
 
 ### Sentinel and Notion
 
+<!-- 2026-08-12 evidence audit (applies to every bullet below): only one Playwright test file
+exists in the repo, WikiBlockEditorBrowserTests.cs, and it drives an isolated block-editor
+harness, never the real routed Wiki.razor/SentinelGpt.razor pages. No test anywhere in the
+codebase sets a 390px viewport, so the "Browser" evidence bar this doc itself defines (desktop
+AND 390px) is not met by anything today, even where a Playwright test nominally exists. Per-bullet
+notes below cite what's genuinely covered (Automated, and desktop-only Browser where it exists)
+and name what isn't - "partially covered" everywhere, nothing here clears the bar to check yet. -->
+
 - [ ] Page navigation, last-page restoration, breadcrumbs, working links, editing, autosave,
   history, templates, discussions, sharing, and responsive behavior pass.
+  <!-- Automated only, and only for some: breadcrumb logic (SentinelTreeNavigationTests.cs),
+  page/row history (PageRevisionServiceTests.cs), page/database/block templates
+  (SentinelTemplateServiceTests.cs), discussion anchor logic (SentinelDiscussionAnchorRebaserTests.cs),
+  and public-share access (SentinelAccessServiceTests.cs). Desktop-only Browser evidence for
+  editing (WikiBlockEditorBrowserTests.cs broadly) and for link-click intent / selection-comment
+  intent (same file). NOT COVERED by any test: page-to-page navigation, last-page restoration
+  behavior itself, autosave, and responsive behavior at any viewport. -->
 - [ ] Table and board databases support row creation, editing, drag/drop, views, formulas,
   relations, rollups, row pages, and history in browser tests.
+  <!-- Desktop-only Browser evidence (WikiBlockEditorBrowserTests.cs) for row creation, editing,
+  drag/drop, and Board/List/Table views. Formulas, relations, rollups, row pages (as their own
+  page), and row history have real Automated/unit coverage (WikiDatabaseServiceTests.cs) but zero
+  Browser evidence - this bullet explicitly asks for "in browser tests," which unit coverage
+  doesn't satisfy. Relation-cell editing has no interactive UI yet (renders read-only). -->
 - [ ] OAuth and manual-token connection paths work without accepting Notion credentials.
+  <!-- FULLY COVERED at the Automated tier: NotionOAuthServiceTests.cs (authorize/exchange/refresh/
+  disconnect) and NotionSyncServiceTests.cs (manual-token save/validate/replace). No UI path
+  anywhere solicits a Notion username/password. No Browser evidence for the connect-button flow,
+  but the bullet doesn't explicitly require it - closest to checkable of any bullet in this
+  section, held back only by the section's shared lack of Browser coverage elsewhere. -->
 - [ ] Discovery, selective sync, stable unchanged counts, imported blocks/files, covers/icons,
   typed properties, conflicts, archival, webhook refresh, and ZIP fallback pass against a
   controlled Notion workspace.
+  <!-- STRUCTURALLY EXTERNAL - needs a real Notion workspace, tracked in
+  docs/RELEASE_RUNBOOK_REMAINING.md. Every named sub-behavior already has extensive Automated
+  (mocked-API) coverage in NotionSyncServiceTests.cs/NotionWebhookServiceTests.cs/
+  SentinelWorkspaceImportServiceTests.cs, so this is ready to run the moment real credentials are
+  available - not a code gap, a credentials gap. -->
 - [ ] Explicit page/row write-back is authorized, confirmed, idempotent, and audited.
+  <!-- Only "authorized" (SyncDirection/AllowTwoWayWrites gating) has test evidence
+  (NotionSyncServiceTests.cs PushDatabaseRowAsync/PushDatabaseSchemaAsync tests). "Confirmed,"
+  "idempotent," and "audited" are all NOT COVERED - no confirmation dialog wraps the one UI
+  caller (Wiki.razor's PushPageAsync), no test exercises a repeat push for idempotency, and
+  neither push method writes to SecurityAuditService. Distinct gap from the SentinelGPT
+  propose_set_database_row_property tool below, which does have all four properties. -->
 
 ### SentinelGPT
 
+<!-- 2026-08-12 evidence audit: no test anywhere loads SentinelGpt.razor - every UI-facing claim
+below (streaming render, scrolling, keyboard send, bottom scroll) has zero test evidence
+regardless of whether the code exists, per this doc's own "Not run is incomplete even when code
+exists" rule. What's tested is backend/coordinator mechanics one layer down. This pass also found
+and corrected a false evidence claim in the baseline table above ("SentinelGPT response-length
+UI... Pass") that cited a Playwright test which does not exist anywhere in the repo or its git
+history - flagging here since it's the same integrity question this whole section is about. -->
+
 - [ ] Streaming, scrolling, keyboard send/newline, cancellation, response length,
   conversation reopening, bottom scroll, circuit recovery, and restart failure states pass.
+  <!-- Automated backend-mechanics evidence only, for some: streaming chunks
+  (SentinelAiServiceTests.cs StreamAsync test), cancellation gate and response-length plumbing
+  (SentinelGptGenerationCoordinatorTests.cs), circuit recovery mechanism ("continue without a
+  waiting caller," same file). NOT COVERED by any test: scrolling, keyboard send/newline, bottom
+  scroll, and the restart-failure catch branch in SentinelGptGenerationCoordinator.cs (the code
+  path exists but no test ever cancels the host's ApplicationStopping token to exercise it).
+  Zero Browser evidence for any of these - no test opens the actual chat page. -->
 - [ ] Web research, official Microsoft-source filtering, sanitized GWS grounding, approved
   memory, teacher-panel Deep mode, and model management pass success/failure tests.
+  <!-- Strong Automated coverage for five of six: web research, MS-source filtering (including an
+  explicit test that an impersonating non-Microsoft domain is excluded from citations), sanitized
+  grounding (asserts a seeded secret/PII field never enters the prompt), approved memory, and Deep
+  mode - all in SentinelAiServiceTests.cs, largely one comprehensive test plus skip-path tests.
+  Model management has success-path coverage only (install/update-confirm, switch-to-installed);
+  its explicit failure branch - reject a switch to a non-installed model - has no test despite the
+  bullet asking for "success/failure." No Browser evidence for any of the six. -->
 - [ ] A sanitized incremental repository index provides file/line citations without indexing
   secrets, build output, databases, binaries, or user-private content.
+  <!-- Confirmed still not built anywhere in the codebase as of 2026-08-12 (repo-wide search for
+  any repository/code-index service, empty). Not a test gap - a feature gap. -->
 - [ ] A GWS evaluation suite measures correctness, grounding, citation validity, assumption
   correction, refusal boundaries, first-token latency, and total response time.
+  <!-- Confirmed still not built anywhere in the codebase as of 2026-08-12. General HTTP
+  request-latency aggregation infrastructure exists (PerformanceInfrastructureTests.cs) but is
+  unrelated general-purpose telemetry, not a SentinelGPT-specific versioned eval harness - not
+  partial credit toward this bullet. -->
 - [ ] Every enabled action uses authorization, structured input, preview/confirmation where
   consequential, idempotency, audit evidence, and a confirmed result.
   <!-- 2026-08-12: the tool-calling loop's first write-capable tool,
@@ -166,6 +231,9 @@ manual entries with generated evidence where practical.
   one action, not "every enabled action" as a category, and none of it has Browser-class evidence
   (a Playwright journey through the Confirm/Decline UI) yet. -->
 - [ ] Production latency objectives are established from actual droplet measurements and met.
+  <!-- STRUCTURALLY EXTERNAL - needs real droplet-measured production latency, same class of gap
+  as the backup-restore/rollback/migration-copy rehearsals docs/RELEASE_RUNBOOK_REMAINING.md
+  already itemizes. Not yet itemized there itself, though - added below. -->
 
 ### Growth Studio
 

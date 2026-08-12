@@ -1,4 +1,6 @@
+using System.Text.Json;
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -8,7 +10,13 @@ namespace GwsBusinessSuite.Application.Crm;
 public sealed class CrmService(
     IAppDbContext dbContext,
     ICurrentUserAccessor? currentUserAccessor = null,
-    IMemoryCache? cache = null) : ICrmService
+    IMemoryCache? cache = null,
+    // Optional, resolved by DI in production - same fire-and-forget pattern as
+    // WikiDatabaseService's automationTriggerService: fires crm.dealStageChangedTrigger
+    // subscribers after a deal's stage actually changes, skipped when actor is
+    // "automation-engine" (see SetDealStageAsync) to prevent an automation-caused stage
+    // change from re-triggering itself.
+    IAutomationTriggerService? automationTriggerService = null) : ICrmService
 {
     private readonly ICurrentUserAccessor _currentUserAccessor = currentUserAccessor ?? FixedCurrentUserAccessor.Unknown;
     // Falls back to a private, per-instance cache when constructed without DI (existing
@@ -285,7 +293,7 @@ public sealed class CrmService(
             .ToList();
     }
 
-    public async Task<DealView> SaveDealAsync(DealEditorModel editor, CancellationToken cancellationToken = default)
+    public async Task<DealView> SaveDealAsync(DealEditorModel editor, string? actor = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(editor);
 
@@ -295,6 +303,9 @@ public sealed class CrmService(
 
         var now = DateTimeOffset.UtcNow;
         var performedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
+        var previousStage = editor.DealId is { } existingDealId
+            ? await dbContext.Deals.AsNoTracking().Where(item => item.Id == existingDealId).Select(item => item.Stage).FirstOrDefaultAsync(cancellationToken)
+            : null;
         var deal = editor.DealId is { } dealId
             ? await dbContext.Deals.FirstOrDefaultAsync(item => item.Id == dealId, cancellationToken)
                 ?? throw new KeyNotFoundException("Deal was not found.")
@@ -316,10 +327,15 @@ public sealed class CrmService(
         if (isNew) await dbContext.Deals.AddAsync(deal, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         _cache.Remove(DashboardCacheKey);
+        if ((isNew || !string.Equals(previousStage, deal.Stage, StringComparison.Ordinal)) && automationTriggerService is not null && actor != "automation-engine")
+        {
+            var triggerPayload = JsonSerializer.Serialize(new { dealId = deal.Id, stage = deal.Stage, contactId = deal.ContactId });
+            await automationTriggerService.TriggerCrmDealStageChangedAsync(deal.Stage, triggerPayload, cancellationToken);
+        }
         return ToDealView(deal, contact.FullName);
     }
 
-    public async Task<DealView> SetDealStageAsync(Guid dealId, string stage, CancellationToken cancellationToken = default)
+    public async Task<DealView> SetDealStageAsync(Guid dealId, string stage, string? actor = null, CancellationToken cancellationToken = default)
     {
         if (!DealStages.All.Contains(stage)) throw new ArgumentException($"'{stage}' is not a recognized deal stage.", nameof(stage));
 
@@ -329,12 +345,18 @@ public sealed class CrmService(
             .FirstOrDefaultAsync(item => item.Id == deal.ContactId, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
+        var previousStage = deal.Stage;
         deal.Stage = stage;
         deal.ClosedAt = stage is DealStages.Won or DealStages.Lost ? now : null;
         deal.UpdatedAt = now;
         deal.UpdatedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         _cache.Remove(DashboardCacheKey);
+        if (!string.Equals(previousStage, deal.Stage, StringComparison.Ordinal) && automationTriggerService is not null && actor != "automation-engine")
+        {
+            var triggerPayload = JsonSerializer.Serialize(new { dealId = deal.Id, stage = deal.Stage, contactId = deal.ContactId });
+            await automationTriggerService.TriggerCrmDealStageChangedAsync(deal.Stage, triggerPayload, cancellationToken);
+        }
         return ToDealView(deal, contact?.FullName ?? "Unknown contact");
     }
 
