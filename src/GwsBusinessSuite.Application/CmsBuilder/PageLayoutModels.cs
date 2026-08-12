@@ -49,6 +49,32 @@ public sealed class LayoutWidget
     // tokens (Phase 5). A widget with every field left at its default renders with zero
     // extra markup — see ToInlineStyle — so existing pages are visually unaffected.
     public WidgetStyle Style { get; set; } = new();
+
+    // Part 6.3 (OrchardCore-style Layers) — a simple, no-code condition on whether this
+    // widget renders at all. Evaluated by CmsBlockHtmlRenderer.ShouldRenderWidget; a widget
+    // with Mode == Always (the default) always renders, so existing pages are unaffected.
+    public VisibilityRule Visibility { get; set; } = new();
+}
+
+public sealed class VisibilityRule
+{
+    public string Mode { get; set; } = VisibilityModes.Always;
+
+    // Only meaningful when Mode == UrlPattern. A simple glob ("*" matches any run of
+    // characters) matched against the page's full path (e.g. "blog/*", "services") -
+    // deliberately not a general regex, consistent with this codebase's preference for the
+    // narrowest matching mechanism that actually works (see CreateSlug, etc.).
+    public string UrlPattern { get; set; } = string.Empty;
+}
+
+public static class VisibilityModes
+{
+    public const string Always = "Always";
+    public const string LoggedInOnly = "LoggedInOnly";
+    public const string HomepageOnly = "HomepageOnly";
+    public const string UrlPattern = "UrlPattern";
+
+    public static readonly IReadOnlyList<string> All = [Always, LoggedInOnly, HomepageOnly, UrlPattern];
 }
 
 public sealed class WidgetStyle

@@ -148,7 +148,8 @@ public sealed record CjLinkRecord(
 
 public sealed record CjCommissionFetchResult(
     IReadOnlyCollection<CjCommissionFetchRecord> Commissions,
-    string Message);
+    string Message,
+    bool IsError = false);
 
 public sealed record CjCommissionFetchRecord(
     string ExternalId,

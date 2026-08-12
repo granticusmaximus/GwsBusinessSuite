@@ -238,7 +238,14 @@ else
             }
 
             var result = await CjAdsService.SyncCommissionsAsync();
-            StatusMessage = result.Message;
+            if (result.IsSuccess)
+            {
+                StatusMessage = result.Message;
+            }
+            else
+            {
+                ErrorMessage = result.Message;
+            }
             await LoadAsync();
         }
         catch (Exception ex)

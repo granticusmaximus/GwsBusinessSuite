@@ -65,9 +65,18 @@ public sealed class CjAdsSyncBackgroundService(
                 rotationResult.Message);
 
             var commissionResult = await cjAds.SyncCommissionsAsync(ct);
-            logger.LogInformation(
-                "CJ Ads: commission sync complete ({Imported} record(s)) - {Message}",
-                commissionResult.RecordsImported, commissionResult.Message);
+            if (commissionResult.IsSuccess)
+            {
+                logger.LogInformation(
+                    "CJ Ads: commission sync complete ({Imported} record(s)) - {Message}",
+                    commissionResult.RecordsImported, commissionResult.Message);
+            }
+            else
+            {
+                logger.LogWarning(
+                    "CJ Ads: commission sync failed - {Message}",
+                    commissionResult.Message);
+            }
         }
         catch (OperationCanceledException)
         {

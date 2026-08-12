@@ -1249,7 +1249,7 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     var articles = CmsBlockHtmlRenderer.LayoutContainsPostsGrid(layout)
         ? await LoadPublicArticleSummariesAsync(dbFactory)
         : [];
-    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, pageSlug, editMode, articles);
+    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, pageSlug, editMode, articles, isLoggedIn: includeUnpublished);
     var pageTitle = System.Net.WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle);
     var metaDescription = System.Net.WebUtility.HtmlEncode(page.MetaDescription);
     var ogImageTag = string.IsNullOrWhiteSpace(page.OgImageUrl)

@@ -679,6 +679,109 @@ public sealed class CmsBuilderServiceTests
         preview!.PublishedAt.Should().Be(scheduledAt);
     }
 
+    [Fact]
+    public async Task SiteRecipe_ShouldRoundTripStructureWithFreshIdsAndForceImportedPagesToDraft()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel
+        {
+            Name = "Source Site",
+            AccentColorHex = "#123456",
+            FontPairingKey = CmsFontPairings.Modern
+        });
+
+        var property = await service.SavePagePropertyAsync(new CmsPagePropertyEditor
+        {
+            SiteId = site.Id,
+            Name = "Price",
+            Type = CmsPagePropertyTypes.Text
+        });
+
+        var globalBlock = new GlobalBlock
+        {
+            SiteId = site.Id,
+            Name = "Shared footer",
+            Kind = GlobalBlockKinds.Widget,
+            WidgetType = "html",
+            Json = "{}",
+            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedBy = "test"
+        };
+        db.GlobalBlocks.Add(globalBlock);
+        await db.SaveChangesAsync();
+
+        var blocksJson = CmsBuilderJson.Serialize(new PageLayout
+        {
+            Sections =
+            [
+                new LayoutSection
+                {
+                    GlobalBlockId = globalBlock.Id,
+                    Columns = [new LayoutColumn { Widgets = [new LayoutWidget { GlobalBlockId = globalBlock.Id, WidgetType = "html" }] }]
+                }
+            ]
+        });
+
+        var parentPage = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id,
+            Title = "Parent",
+            Slug = "parent",
+            BlocksJson = "[]",
+            CategoryName = "Products",
+            Status = CmsPageStatuses.Published,
+            PublishedAt = DateTimeOffset.UtcNow
+        });
+
+        var childPage = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id,
+            ParentPageId = parentPage.Id,
+            Title = "Child",
+            Slug = "child",
+            BlocksJson = blocksJson,
+            CategoryName = "Products",
+            PropertyValues = new Dictionary<Guid, string> { [property.Id] = "19.99" }
+        });
+
+        var package = await service.ExportSiteRecipeAsync(site.Id);
+        var imported = await service.ImportSiteRecipeAsync(package, "tester");
+
+        imported.Id.Should().NotBe(site.Id);
+        imported.Slug.Should().NotBe(site.Slug);
+        imported.AccentColorHex.Should().Be("#123456");
+        imported.FontPairingKey.Should().Be(CmsFontPairings.Modern);
+
+        var importedPages = await service.ListPagesAsync(imported.Id);
+        importedPages.Should().HaveCount(2);
+        importedPages.Should().OnlyContain(page => page.Status == CmsPageStatuses.Draft);
+        importedPages.Select(page => page.Id).Should().NotContain([parentPage.Id, childPage.Id]);
+
+        var importedCategories = await service.ListPageCategoriesAsync(imported.Id);
+        importedCategories.Should().ContainSingle(category => category.Name == "Products");
+
+        var importedParent = importedPages.Single(page => page.Slug == "parent");
+        var importedChild = importedPages.Single(page => page.Slug == "child");
+        importedChild.ParentPageId.Should().Be(importedParent.Id);
+        importedParent.CategoryId.Should().Be(importedCategories.Single().Id);
+
+        var importedProperties = await service.ListPagePropertiesAsync(imported.Id);
+        var importedProperty = importedProperties.Should().ContainSingle(prop => prop.Name == "Price").Subject;
+        importedProperty.Id.Should().NotBe(property.Id);
+        CmsPropertyValues.GetText(CmsPropertyValues.ParseObject(importedChild.PropertyValuesJson), importedProperty.Id).Should().Be("19.99");
+
+        var importedGlobalBlocks = await db.GlobalBlocks.Where(block => block.SiteId == imported.Id).ToListAsync();
+        importedGlobalBlocks.Should().ContainSingle();
+        var importedGlobalBlockId = importedGlobalBlocks.Single().Id;
+        importedGlobalBlockId.Should().NotBe(globalBlock.Id);
+
+        var importedLayout = CmsBuilderJson.ParseLayoutOrEmpty(importedChild.BlocksJson);
+        importedLayout.Sections.Single().GlobalBlockId.Should().Be(importedGlobalBlockId);
+        importedLayout.Sections.Single().Columns.Single().Widgets.Single().GlobalBlockId.Should().Be(importedGlobalBlockId);
+    }
+
     private static async Task<ApplicationDbContext> CreateDbAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

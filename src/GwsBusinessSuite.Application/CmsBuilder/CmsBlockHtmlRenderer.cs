@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Markdig;
 
 namespace GwsBusinessSuite.Application.CmsBuilder;
@@ -34,10 +35,15 @@ public static class CmsBlockHtmlRenderer
     public static bool LayoutContainsPostsGrid(PageLayout? layout) =>
         layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "posts-grid")));
 
-    public static string Render(string blocksJson, string siteSlug = "", string pageSlug = "", bool editMode = false, IReadOnlyList<PublicArticleSummary>? articles = null)
-        => Render(CmsBuilderJson.ParseLayout(blocksJson), siteSlug, pageSlug, editMode, articles);
+    // isLoggedIn only matters for VisibilityModes.LoggedInOnly widgets and defaults to false
+    // (the safe default for the two call sites - static export and the fully-anonymous public
+    // canvas route - that have no concept of a logged-in visitor at all). The one route that
+    // does (admin.gwsapp.net's /cms/{siteSlug}/{**pageSlug} preview route) passes its own
+    // already-computed IsAuthenticated check through explicitly.
+    public static string Render(string blocksJson, string siteSlug = "", string pageSlug = "", bool editMode = false, IReadOnlyList<PublicArticleSummary>? articles = null, bool isLoggedIn = false)
+        => Render(CmsBuilderJson.ParseLayout(blocksJson), siteSlug, pageSlug, editMode, articles, isLoggedIn);
 
-    public static string Render(PageLayout? layout, string siteSlug = "", string pageSlug = "", bool editMode = false, IReadOnlyList<PublicArticleSummary>? articles = null)
+    public static string Render(PageLayout? layout, string siteSlug = "", string pageSlug = "", bool editMode = false, IReadOnlyList<PublicArticleSummary>? articles = null, bool isLoggedIn = false)
     {
         if (layout is null || layout.Sections.Count == 0)
         {
@@ -50,11 +56,40 @@ public static class CmsBlockHtmlRenderer
         var html = new StringBuilder();
         foreach (var section in layout.Sections)
         {
-            html.Append(RenderSection(section, siteSlug, pageSlug, editMode, effectiveArticles));
+            html.Append(RenderSection(section, siteSlug, pageSlug, editMode, effectiveArticles, isLoggedIn));
         }
 
         return html.ToString();
     }
+
+    // Part 6.3 - a widget with no visibility rule (Mode == Always, the default) always
+    // renders. In edit mode the caller (RenderSection) never calls this - Studio always shows
+    // every widget regardless of the rule, so an author can still see/select/edit it; a small
+    // badge (see VisibilityBadgeText) marks it as conditional instead.
+    public static bool ShouldRenderWidget(VisibilityRule visibility, string pageSlug, bool isLoggedIn) => visibility.Mode switch
+    {
+        VisibilityModes.LoggedInOnly => isLoggedIn,
+        VisibilityModes.HomepageOnly => string.Equals(pageSlug.Trim('/'), "home", StringComparison.OrdinalIgnoreCase),
+        VisibilityModes.UrlPattern => MatchesUrlPattern(pageSlug, visibility.UrlPattern),
+        _ => true
+    };
+
+    private static bool MatchesUrlPattern(string pageSlug, string pattern)
+    {
+        if (string.IsNullOrWhiteSpace(pattern)) return true;
+        var normalizedSlug = pageSlug.Trim('/');
+        var regexPattern = "^" + Regex.Escape(pattern.Trim('/')).Replace("\\*", ".*") + "$";
+        return Regex.IsMatch(normalizedSlug, regexPattern, RegexOptions.IgnoreCase);
+    }
+
+    private static string VisibilityBadgeText(VisibilityRule visibility) => visibility.Mode switch
+    {
+        VisibilityModes.LoggedInOnly => "Logged-in only",
+        VisibilityModes.HomepageOnly => "Homepage only",
+        VisibilityModes.UrlPattern when !string.IsNullOrWhiteSpace(visibility.UrlPattern) => $"URL: {visibility.UrlPattern}",
+        VisibilityModes.UrlPattern => "URL pattern",
+        _ => string.Empty
+    };
 
     // Emitted only when editMode is true (see Program.cs's /cms/{siteSlug}/{**pageSlug}
     // gating - never reaches a real visitor). Lets Canvas Studio's live-preview iframe
@@ -92,6 +127,13 @@ public static class CmsBlockHtmlRenderer
           }
           .gws-editable:hover .gws-drag-handle { opacity: 1; }
           .gws-drag-handle:active { cursor: grabbing; }
+          .gws-visibility-hint {
+            position: absolute; top: 4px; right: 4px; z-index: 39;
+            background: #f59e0b; color: #1c1917; font-size: 11px; line-height: 1.4;
+            padding: 1px 7px; border-radius: 999px; opacity: 0; transition: opacity 0.1s ease;
+            pointer-events: none; white-space: nowrap;
+          }
+          .gws-editable:hover .gws-visibility-hint { opacity: 1; }
         </style>
         <script>
         (function () {
@@ -436,7 +478,7 @@ public static class CmsBlockHtmlRenderer
         </script>
         """;
 
-    private static string RenderSection(LayoutSection section, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles)
+    private static string RenderSection(LayoutSection section, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, bool isLoggedIn)
     {
         var sectionClass = $"gws-section {BgClass(section.Background)} {PadClass(section.Padding)}".TrimEnd();
         var columnsClass = ColsClass(section.ColumnLayout);
@@ -457,13 +499,28 @@ public static class CmsBlockHtmlRenderer
             }
             foreach (var widget in column.Widgets)
             {
+                // Outside edit mode, a widget whose visibility rule doesn't match this
+                // request is skipped entirely - no DOM at all, not just hidden via CSS, so a
+                // "logged-in only" widget's content never reaches an anonymous response body
+                // (matters for the static export in particular, which has no auth boundary of
+                // its own to fall back on). In edit mode every widget always renders so an
+                // author can still find and edit it; VisibilityBadgeText marks it instead.
+                if (!editMode && !ShouldRenderWidget(widget.Visibility, pageSlug, isLoggedIn))
+                {
+                    continue;
+                }
+
                 var inner = WrapWithStyle(RenderWidget(widget, siteSlug, pageSlug, editMode, articles), widget.Style);
+                var visibilityBadge = editMode ? VisibilityBadgeText(widget.Visibility) : string.Empty;
+                var hiddenHint = visibilityBadge.Length > 0
+                    ? $"""<div class="gws-visibility-hint">{Html(visibilityBadge)}</div>"""
+                    : string.Empty;
                 // Wrapped OUTSIDE WrapWithStyle so a widget's own background/padding
                 // overrides can never clip the selection outline, and closest('[data-gws-
                 // widget-id]') in the edit-mode script always resolves reliably regardless
                 // of per-widget style config.
                 sb.Append(editMode
-                    ? $"""<div class="gws-editable" data-gws-widget-id="{Html(widget.Id)}" data-gws-widget-type="{Html(widget.WidgetType)}"><div class="gws-drag-handle" data-gws-drag-handle-for="{Html(widget.Id)}">&#10247;</div>{inner}</div>"""
+                    ? $"""<div class="gws-editable" data-gws-widget-id="{Html(widget.Id)}" data-gws-widget-type="{Html(widget.WidgetType)}">{hiddenHint}<div class="gws-drag-handle" data-gws-drag-handle-for="{Html(widget.Id)}">&#10247;</div>{inner}</div>"""
                     : inner);
             }
             sb.Append("</div>");

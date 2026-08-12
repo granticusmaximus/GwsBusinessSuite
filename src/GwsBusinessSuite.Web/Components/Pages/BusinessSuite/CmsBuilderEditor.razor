@@ -856,6 +856,34 @@ else
                             </div>
                         </div>
 
+                        @* Visibility — a simple, no-code condition on whether this widget
+                           renders at all (Part 6.3 / OrchardCore-style Layers). Always
+                           renders in Studio's own preview regardless of the rule, so an
+                           author never loses the ability to find and edit a conditionally-
+                           hidden widget - see CmsBlockHtmlRenderer's edit-mode badge. *@
+                        <hr class="my-2" />
+                        <div class="small text-secondary fw-semibold text-uppercase mb-1" style="letter-spacing:.05em;">Visibility</div>
+                        <div class="row g-2">
+                            <div class="col-12">
+                                <select class="form-select form-select-sm" value="@selWidget.Visibility.Mode"
+                                        @onchange='(e) => SetVisibilityMode(selWidget, e.Value?.ToString() ?? VisibilityModes.Always)'>
+                                    <option value="@VisibilityModes.Always">Always show</option>
+                                    <option value="@VisibilityModes.LoggedInOnly">Logged-in visitors only</option>
+                                    <option value="@VisibilityModes.HomepageOnly">Homepage only</option>
+                                    <option value="@VisibilityModes.UrlPattern">Matching URL pattern</option>
+                                </select>
+                            </div>
+                            @if (selWidget.Visibility.Mode == VisibilityModes.UrlPattern)
+                            {
+                                <div class="col-12">
+                                    <input class="form-control form-control-sm" placeholder="e.g. blog/* or services"
+                                           value="@selWidget.Visibility.UrlPattern"
+                                           @onchange='(e) => SetVisibilityUrlPattern(selWidget, e.Value?.ToString() ?? string.Empty)' />
+                                    <div class="form-text small">Matched against the page's full path. "*" matches any run of characters.</div>
+                                </div>
+                            }
+                        </div>
+
                         @* Action row *@
                         <div class="studio-action-row mt-1">
                             <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedWidgetUp"
@@ -2289,6 +2317,15 @@ else
         }
         _ = PushStyleToCanvasAsync(widget.Id, widget.Style);
     }
+
+    // ── Visibility helpers (Part 6.3) ───────────────────────────────────────
+    // No live-preview push needed (unlike Style) - the rule has no visual effect in edit
+    // mode itself beyond the badge, and QueueAutosave's full reload already refreshes that.
+    private void SetVisibilityMode(LayoutWidget widget, string value) =>
+        ApplyTrackedMutation($"{widget.Id}:visibility:mode", () => widget.Visibility.Mode = value, reloadPreview: true);
+
+    private void SetVisibilityUrlPattern(LayoutWidget widget, string value) =>
+        ApplyTrackedMutation($"{widget.Id}:visibility:urlPattern", () => widget.Visibility.UrlPattern = value, reloadPreview: true);
 
     private async Task PushStyleToCanvasAsync(string widgetId, WidgetStyle style)
     {

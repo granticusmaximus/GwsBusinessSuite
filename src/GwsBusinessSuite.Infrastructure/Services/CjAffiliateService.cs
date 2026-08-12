@@ -250,7 +250,8 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
         {
             return new CjCommissionFetchResult(
                 Array.Empty<CjCommissionFetchRecord>(),
-                "Commission import requires the CJ commissions.api.cj.com GraphQL endpoint.");
+                "Commission import requires the CJ commissions.api.cj.com GraphQL endpoint.",
+                IsError: true);
         }
 
         var publisherId = request.PublisherId.Trim();
@@ -293,9 +294,20 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
         var errorSource = bearerAttempt.ErrorMessages.Count > 0 ? bearerAttempt : rawAttempt;
         if (errorSource.ErrorMessages.Count > 0)
         {
+            // CJ's commissions GraphQL endpoint rejected both the Bearer-scheme and raw-header
+            // auth attempts with a real error from CJ itself (not a local request-construction
+            // bug - both header shapes were exercised above). This almost always means the
+            // stored credential is a legacy Developer Key rather than a commissions-API-scoped
+            // Personal Access Token, or that PAT has expired/been revoked/doesn't cover this
+            // Publisher ID - flagged as an error (not a routine status) so the UI doesn't bury
+            // it next to "0 new commissions, nothing to do" messages.
             return new CjCommissionFetchResult(
                 Array.Empty<CjCommissionFetchRecord>(),
-                $"CJ commission query returned an error: {string.Join(" | ", errorSource.ErrorMessages)}");
+                $"CJ commission query returned an error: {string.Join(" | ", errorSource.ErrorMessages)}. " +
+                "This is usually caused by an expired/invalid CJ Personal Access Token, or a token that " +
+                "doesn't have commissions API access for this Publisher ID - regenerate it in your CJ " +
+                "account and re-enter it in the CJ connector settings.",
+                IsError: true);
         }
 
         return new CjCommissionFetchResult(

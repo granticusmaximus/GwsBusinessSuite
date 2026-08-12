@@ -499,7 +499,7 @@ public sealed class CjAdsService(
 
         if (fetched.Commissions.Count == 0)
         {
-            return new CommissionSyncResult(true, fetched.Message, 0);
+            return new CommissionSyncResult(!fetched.IsError, fetched.Message, 0);
         }
 
         // Dedupe by ExternalId within this batch first - if CJ's API ever returns an

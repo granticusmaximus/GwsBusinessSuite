@@ -472,6 +472,37 @@ public sealed class CjAdsServiceTests
     }
 
     [Fact]
+    public async Task SyncCommissionsAsync_ShouldReportFailure_WhenCjApiReturnsAnAuthorizationError()
+    {
+        // Regression test: FetchCommissionsAsync returning zero commissions plus an error
+        // message (e.g. an expired/invalid CJ Personal Access Token) used to come back from
+        // SyncCommissionsAsync as IsSuccess=true, which the UI rendered as a neutral status
+        // banner indistinguishable from "zero new commissions, nothing to do" - masking a real
+        // auth failure as routine status text.
+        await using var db = await CreateDbAsync();
+        var fakeCj = new FakeCjAffiliateService
+        {
+            CommissionsMessage = "CJ commission query returned an error: Unauthorized",
+            CommissionsIsError = true
+        };
+        var service = new CjAdsService(db, fakeCj, new FakeSecretProtector(), NullLogger<CjAdsService>.Instance);
+        await service.SaveConnectorSettingsAsync(new CjConnectorSettingsView
+        {
+            DeveloperKey = "dev-key-123",
+            PublisherId = "pub-1",
+            WebsiteId = "site-1",
+            EndpointUrl = "https://commissions.api.cj.com/query",
+            MaxResults = 100
+        });
+
+        var result = await service.SyncCommissionsAsync();
+
+        result.IsSuccess.Should().BeFalse();
+        result.RecordsImported.Should().Be(0);
+        result.Message.Should().Contain("Unauthorized");
+    }
+
+    [Fact]
     public async Task SyncAllLinksAsync_ShouldReturnOneConfigurationError_WhenWebsiteIdIsMissing()
     {
         await using var db = await CreateDbAsync();
@@ -643,6 +674,8 @@ public sealed class CjAdsServiceTests
         public IReadOnlyCollection<CjCommissionFetchRecord> Commissions { get; set; } = Array.Empty<CjCommissionFetchRecord>();
         public IReadOnlyCollection<CjLinkRecord> Links { get; set; } = Array.Empty<CjLinkRecord>();
         public string LinksMessage { get; set; } = "ok";
+        public string CommissionsMessage { get; set; } = "ok";
+        public bool CommissionsIsError { get; set; }
 
         public FakeCjAffiliateService()
             : this(Array.Empty<CjPartnerRecord>())
@@ -672,7 +705,7 @@ public sealed class CjAdsServiceTests
 
         public Task<CjCommissionFetchResult> FetchCommissionsAsync(CjConnectionRequest request, CancellationToken ct = default)
         {
-            return Task.FromResult(new CjCommissionFetchResult(Commissions, "ok"));
+            return Task.FromResult(new CjCommissionFetchResult(Commissions, CommissionsMessage, CommissionsIsError));
         }
     }
 }

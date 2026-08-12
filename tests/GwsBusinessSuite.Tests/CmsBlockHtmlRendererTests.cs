@@ -361,4 +361,75 @@ public sealed class CmsBlockHtmlRendererTests
     {
         Assert.False(CmsBlockHtmlRenderer.LayoutContainsPostsGrid(null));
     }
+
+    [Fact]
+    public void Render_ShouldOmitLoggedInOnlyWidget_ForAnonymousVisitor()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"members-only"},"visibility":{"mode":"LoggedInOnly"}}"""),
+            isLoggedIn: false);
+
+        Assert.DoesNotContain("members-only", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderLoggedInOnlyWidget_ForLoggedInVisitor()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"members-only"},"visibility":{"mode":"LoggedInOnly"}}"""),
+            isLoggedIn: true);
+
+        Assert.Contains("members-only", html);
+    }
+
+    [Fact]
+    public void Render_ShouldOmitHomepageOnlyWidget_OnANonHomepagePage()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"welcome-banner"},"visibility":{"mode":"HomepageOnly"}}"""),
+            pageSlug: "about");
+
+        Assert.DoesNotContain("welcome-banner", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderHomepageOnlyWidget_OnTheHomePage()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"welcome-banner"},"visibility":{"mode":"HomepageOnly"}}"""),
+            pageSlug: "home");
+
+        Assert.Contains("welcome-banner", html);
+    }
+
+    [Theory]
+    [InlineData("blog/my-first-post", true)]
+    [InlineData("blog/nested/post", true)]
+    [InlineData("about", false)]
+    public void Render_ShouldEvaluateUrlPatternWildcardAgainstThePageSlug(string pageSlug, bool shouldRender)
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"blog-only-widget"},"visibility":{"mode":"UrlPattern","urlPattern":"blog/*"}}"""),
+            pageSlug: pageSlug);
+
+        Assert.Equal(shouldRender, html.Contains("blog-only-widget"));
+    }
+
+    [Fact]
+    public void Render_ShouldAlwaysRenderConditionalWidgets_InEditMode_AndShowAVisibilityBadge()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"members-only"},"visibility":{"mode":"LoggedInOnly"}}"""),
+            pageSlug: "about", editMode: true, isLoggedIn: false);
+
+        Assert.Contains("members-only", html);
+        Assert.Contains("gws-visibility-hint", html);
+        Assert.Contains("Logged-in only", html);
+    }
+
+    [Fact]
+    public void ShouldRenderWidget_ShouldReturnTrue_ForTheDefaultAlwaysMode()
+    {
+        Assert.True(CmsBlockHtmlRenderer.ShouldRenderWidget(new VisibilityRule(), "anything", isLoggedIn: false));
+    }
 }

@@ -5,8 +5,11 @@
 @using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Domain.Entities
 @using Microsoft.AspNetCore.Components.Forms
+@using GwsBusinessSuite.Application.Abstractions
+@using System.Text.Json
 @inject ICmsBuilderService CmsBuilderService
 @inject IConfiguration Configuration
+@inject ICurrentUserAccessor CurrentUserAccessor
 @inject ILogger<AppearanceCustomize> Logger
 
 <PageTitle>Customize</PageTitle>
@@ -66,7 +69,31 @@
                     <i class="bi bi-file-zip me-1"></i>Export ZIP
                 </a>
             }
+            @if (RecipeExportUrl is { } recipeUrl)
+            {
+                <a class="btn btn-sm btn-outline-secondary" href="@recipeUrl" download>
+                    <i class="bi bi-file-earmark-code me-1"></i>Export recipe
+                </a>
+            }
         </div>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm mt-3" style="max-width: 640px;">
+    <div class="card-body">
+        <label class="form-label fw-semibold small">Portable site recipe</label>
+        <p class="text-secondary small">A recipe is this site's structure - pages, categories, custom fields, global blocks, and design settings - as a portable JSON package. Importing always creates a <strong>brand-new site</strong> with fresh page/category/field ids, and every imported page starts as a Draft so nothing goes live until you review and publish it.</p>
+        <label class="btn btn-sm btn-outline-primary mb-0 @(IsBusy ? "disabled" : string.Empty)">
+            <i class="bi bi-file-earmark-arrow-up me-1"></i>Import recipe
+            <InputFile class="visually-hidden"
+                       accept=".json,application/json"
+                       disabled="@IsBusy"
+                       OnChange="ImportRecipeAsync" />
+        </label>
+        @if (!string.IsNullOrWhiteSpace(RecipeImportMessage))
+        {
+            <div class="small @(RecipeImportSucceeded ? "text-success" : "text-danger") mt-2">@RecipeImportMessage</div>
+        }
     </div>
 </div>
 
@@ -137,6 +164,10 @@
 
     private string? ExportUrl =>
         CurrentSite is { } site ? $"/admin/api/cms/{site.Slug}/export.zip" : null;
+    private string? RecipeExportUrl =>
+        CurrentSite is { } site ? $"/admin/api/cms/{site.Slug}/recipe.json" : null;
+    private string RecipeImportMessage { get; set; } = string.Empty;
+    private bool RecipeImportSucceeded { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
@@ -230,6 +261,47 @@
         {
             Logger.LogError(ex, "Unable to save site design settings.");
             ErrorMessage = $"Unable to save design settings. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task ImportRecipeAsync(InputFileChangeEventArgs args)
+    {
+        RecipeImportMessage = string.Empty;
+        RecipeImportSucceeded = false;
+        IsBusy = true;
+        try
+        {
+            var file = args.File;
+            if (!file.Name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Choose a .json site recipe file.");
+            }
+
+            await using var source = file.OpenReadStream(10 * 1024 * 1024);
+            using var buffer = new MemoryStream();
+            await source.CopyToAsync(buffer);
+
+            var envelope = JsonSerializer.Deserialize<CmsSiteRecipeEnvelope>(
+                buffer.ToArray(),
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            if (envelope is null || envelope.FormatVersion != 1)
+            {
+                throw new InvalidOperationException("This file isn't a recognized site recipe (unknown or missing format version).");
+            }
+
+            var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var imported = await CmsBuilderService.ImportSiteRecipeAsync(envelope.Site, user);
+            RecipeImportSucceeded = true;
+            RecipeImportMessage = $"Imported \"{imported.Name}\" as a new site. Review its pages (all created as Drafts) before publishing.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to import site recipe.");
+            RecipeImportMessage = $"Unable to import recipe. {ex.Message}";
         }
         finally
         {
