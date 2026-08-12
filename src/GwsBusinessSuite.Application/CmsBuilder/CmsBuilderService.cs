@@ -730,6 +730,136 @@ public sealed class CmsBuilderService(
         return due.Count;
     }
 
+    public async Task<CmsSiteRecipePackage> ExportSiteRecipeAsync(Guid siteId, CancellationToken cancellationToken = default)
+    {
+        var site = await dbContext.CmsSites.AsNoTracking().FirstOrDefaultAsync(item => item.Id == siteId, cancellationToken)
+            ?? throw new InvalidOperationException("The selected CMS site no longer exists.");
+        var categories = await dbContext.CmsPageCategories.AsNoTracking().Where(item => item.SiteId == siteId).ToListAsync(cancellationToken);
+        var properties = await dbContext.CmsPageProperties.AsNoTracking().Where(item => item.SiteId == siteId).ToListAsync(cancellationToken);
+        var globalBlocks = await dbContext.GlobalBlocks.AsNoTracking().Where(item => item.SiteId == siteId).ToListAsync(cancellationToken);
+        var pages = await dbContext.CmsPages.AsNoTracking().Where(item => item.SiteId == siteId && item.TrashedAt == null).ToListAsync(cancellationToken);
+
+        return new CmsSiteRecipePackage(
+            site.Name, site.Slug, site.Theme, site.CustomCss, site.NavMenuJson, site.FooterNavMenuJson, site.AccentColorHex, site.FontPairingKey,
+            categories.Select(item => new CmsPageCategoryRecipeItem(item.Id, item.Name, item.Slug)).ToList(),
+            properties.Select(item => new CmsPagePropertyRecipeItem(item.Id, item.Name, item.Type, item.SortOrder, item.ConfigJson)).ToList(),
+            globalBlocks.Select(item => new GlobalBlockRecipeItem(item.Id, item.Name, item.Kind, item.WidgetType, item.Json)).ToList(),
+            pages.Select(item => new CmsPageRecipeItem(
+                item.Id, item.ParentPageId, item.CategoryId, item.Title, item.Slug, item.BlocksJson,
+                item.MetaTitle, item.MetaDescription, item.OgImageUrl, item.CanonicalUrl, item.Tags, item.CustomCss, item.PropertyValuesJson)).ToList());
+    }
+
+    public async Task<CmsSite> ImportSiteRecipeAsync(CmsSiteRecipePackage package, string performedBy, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(package);
+        var now = _timeProvider.GetUtcNow();
+
+        var site = await SaveSiteAsync(new CmsSiteEditorModel
+        {
+            Name = $"{package.Name} (imported)",
+            Slug = package.Slug,
+            Theme = package.Theme,
+            CustomCss = package.CustomCss,
+            NavMenuJson = package.NavMenuJson,
+            FooterNavMenuJson = package.FooterNavMenuJson,
+            AccentColorHex = package.AccentColorHex,
+            FontPairingKey = package.FontPairingKey
+        }, cancellationToken);
+
+        var categoryIds = package.Categories.ToDictionary(item => item.Id, _ => Guid.NewGuid());
+        var propertyIds = package.Properties.ToDictionary(item => item.Id, _ => Guid.NewGuid());
+        var globalBlockIds = package.GlobalBlocks.ToDictionary(item => item.Id, _ => Guid.NewGuid());
+        var pageIds = package.Pages.ToDictionary(item => item.Id, _ => Guid.NewGuid());
+
+        foreach (var category in package.Categories)
+        {
+            await dbContext.CmsPageCategories.AddAsync(new CmsPageCategory
+            {
+                Id = categoryIds[category.Id], SiteId = site.Id, Name = category.Name, Slug = category.Slug,
+                CreatedAt = now, CreatedBy = performedBy
+            }, cancellationToken);
+        }
+        foreach (var property in package.Properties)
+        {
+            await dbContext.CmsPageProperties.AddAsync(new CmsPageProperty
+            {
+                Id = propertyIds[property.Id], SiteId = site.Id, Name = property.Name, Type = property.Type,
+                SortOrder = property.SortOrder, ConfigJson = property.ConfigJson, CreatedAt = now, CreatedBy = performedBy
+            }, cancellationToken);
+        }
+        foreach (var globalBlock in package.GlobalBlocks)
+        {
+            await dbContext.GlobalBlocks.AddAsync(new GlobalBlock
+            {
+                Id = globalBlockIds[globalBlock.Id], SiteId = site.Id, Name = globalBlock.Name, Kind = globalBlock.Kind,
+                WidgetType = globalBlock.WidgetType, Json = globalBlock.Json, CreatedAt = now, CreatedBy = performedBy
+            }, cancellationToken);
+        }
+        foreach (var page in package.Pages)
+        {
+            var propertyValues = new JsonObject();
+            var sourceValues = CmsPropertyValues.ParseObject(page.PropertyValuesJson);
+            foreach (var pair in sourceValues)
+            {
+                if (Guid.TryParse(pair.Key, out var oldPropertyId) && propertyIds.TryGetValue(oldPropertyId, out var newPropertyId))
+                {
+                    propertyValues[newPropertyId.ToString()] = pair.Value?.DeepClone();
+                }
+            }
+
+            await dbContext.CmsPages.AddAsync(new CmsPage
+            {
+                Id = pageIds[page.Id],
+                SiteId = site.Id,
+                ParentPageId = page.ParentPageId is { } parentId && pageIds.TryGetValue(parentId, out var newParentId) ? newParentId : null,
+                CategoryId = page.CategoryId is { } categoryId && categoryIds.TryGetValue(categoryId, out var newCategoryId) ? newCategoryId : null,
+                Title = page.Title,
+                Slug = page.Slug,
+                BlocksJson = RemapGlobalBlockReferences(page.BlocksJson, globalBlockIds),
+                MetaTitle = page.MetaTitle,
+                MetaDescription = page.MetaDescription,
+                OgImageUrl = page.OgImageUrl,
+                CanonicalUrl = page.CanonicalUrl,
+                Tags = page.Tags,
+                CustomCss = page.CustomCss,
+                PropertyValuesJson = CmsPropertyValues.Serialize(propertyValues),
+                // A freshly-imported site starts entirely in Draft, regardless of the source
+                // pages' own status - publishing (and any automation trigger that implies) is a
+                // deliberate decision for the new site, not something a site recipe should carry
+                // over silently.
+                Status = CmsPageStatuses.Draft,
+                CreatedAt = now,
+                CreatedBy = performedBy
+            }, cancellationToken);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return site;
+    }
+
+    // Rewrites every LayoutSection/LayoutWidget GlobalBlockId reference in a page's BlocksJson to
+    // the freshly-minted id it was given during import - same remap-embedded-references idea as
+    // WikiDatabaseService.CreateDatabaseFromTemplateAsync's Relation-value remap, applied to this
+    // domain's own cross-reference shape. A reference to a block that wasn't part of the exported
+    // set (shouldn't happen - GlobalBlocks are always site-scoped - but handled defensively) is
+    // dropped rather than left dangling.
+    private static string RemapGlobalBlockReferences(string blocksJson, IReadOnlyDictionary<Guid, Guid> globalBlockIds)
+    {
+        var layout = CmsBuilderJson.ParseLayoutOrEmpty(blocksJson);
+        foreach (var section in layout.Sections)
+        {
+            section.GlobalBlockId = section.GlobalBlockId is { } id && globalBlockIds.TryGetValue(id, out var newId) ? newId : null;
+            foreach (var column in section.Columns)
+            {
+                foreach (var widget in column.Widgets)
+                {
+                    widget.GlobalBlockId = widget.GlobalBlockId is { } widgetId && globalBlockIds.TryGetValue(widgetId, out var newWidgetId) ? newWidgetId : null;
+                }
+            }
+        }
+        return CmsBuilderJson.Serialize(layout);
+    }
+
     private static CmsPagePropertyView ToPropertyView(CmsPageProperty property)
     {
         var options = new List<string>();

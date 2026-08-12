@@ -46,4 +46,10 @@ public interface ICmsBuilderService
     // Called periodically by CmsScheduledPublishBackgroundService; returns the number of pages
     // triggered, for logging.
     Task<int> RunScheduledPublishSweepAsync(CancellationToken cancellationToken = default);
+
+    // Part 6.2: a portable snapshot of a site's structure (pages, categories, custom field
+    // definitions, global blocks, and design settings) that ImportSiteRecipeAsync can replay
+    // to set up a brand-new site with fresh identities - see CmsSiteRecipeModels.cs.
+    Task<CmsSiteRecipePackage> ExportSiteRecipeAsync(Guid siteId, CancellationToken cancellationToken = default);
+    Task<CmsSite> ImportSiteRecipeAsync(CmsSiteRecipePackage package, string performedBy, CancellationToken cancellationToken = default);
 }

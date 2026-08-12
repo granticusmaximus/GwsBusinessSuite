@@ -1893,6 +1893,28 @@ app.MapGet("/__not-found", async (HttpContext httpContext, ICmsBuilderService cm
     })
     .AllowAnonymous();
 
+// Part 6.2 - a portable structured recipe of a CmsSite (pages, categories, custom field
+// definitions, global blocks, design settings), distinct from export.zip below: that endpoint
+// renders publicly-visible pages to static HTML for deployment elsewhere, this one captures the
+// site's *editable structure* so ImportSiteRecipeAsync can recreate it (with fresh identities) as
+// a new site in this same app or another GWS instance - same portable-graph shape as the
+// Automation workflow export/import endpoint.
+app.MapGet("/admin/api/cms/{siteSlug}/recipe.json", async (
+    string siteSlug,
+    ICmsBuilderService cmsBuilderService,
+    CancellationToken cancellationToken) =>
+{
+    var site = await cmsBuilderService.GetSiteBySlugAsync(siteSlug, cancellationToken);
+    if (site is null) return Results.NotFound();
+
+    var package = await cmsBuilderService.ExportSiteRecipeAsync(site.Id, cancellationToken);
+    var envelope = new CmsSiteRecipeEnvelope(1, DateTimeOffset.UtcNow, package);
+    var json = JsonSerializer.Serialize(envelope, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true });
+    return Results.File(Encoding.UTF8.GetBytes(json), "application/json; charset=utf-8", $"{SlugForFileName(site.Name)}.site-recipe.json");
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("public-read");
+
 // Admin: exports a full CmsSite as a self-contained static ZIP so the output can be
 // deployed to any host that serves static files. Each page becomes its own HTML file
 // with all CSS inlined (no external links), making the archive fully portable.

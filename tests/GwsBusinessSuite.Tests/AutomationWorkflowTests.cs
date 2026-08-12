@@ -2259,6 +2259,8 @@ public sealed class AutomationWorkflowTests
         public Task<CmsPagePropertyView> SavePagePropertyAsync(CmsPagePropertyEditor editor, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task DeletePagePropertyAsync(Guid propertyId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<int> RunScheduledPublishSweepAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<CmsSiteRecipePackage> ExportSiteRecipeAsync(Guid siteId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<CmsSite> ImportSiteRecipeAsync(CmsSiteRecipePackage package, string performedBy, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
 
     private sealed class FakeGrowthReportEmailSender : IGrowthReportEmailSender
