@@ -42,6 +42,15 @@ public interface ISentinelAccessService
     // password attempt is never counted as a view.
     Task RecordShareViewAsync(Guid shareId, CancellationToken cancellationToken = default);
     Task<bool> CanAccessAsync(Guid targetId, bool isDatabase, string username, string requiredAccessLevel, CancellationToken cancellationToken = default);
+    // For targets outside the Sentinel page/database hierarchy CanAccessAsync/GetAccessibleTargetsAsync
+    // otherwise assume (automation workflows, Part 4.9) - checks only a direct permission row (no
+    // ancestor inheritance, since these targets have no parent/child tree) plus the same Admin
+    // bypass. Deliberately a separate method rather than teaching CanAccessAsync to fall back to a
+    // flat check: CanAccess_ShouldFailClosedForCyclicOrMissingAncestorChains already asserts a
+    // direct grant on a target absent from the page/database tables must be denied (a dangling
+    // reference, not a different resource kind) - conflating the two would silently break that
+    // invariant for real Sentinel targets.
+    Task<bool> HasDirectPermissionAsync(Guid targetId, bool isDatabase, string username, string requiredAccessLevel, CancellationToken cancellationToken = default);
     // Resolves a complete target set in one graph/permission load so tree and search callers do
     // not issue one authorization query per item. A direct target permission wins; otherwise the
     // nearest page-ancestor permission is inherited. Broken/cyclic ancestry fails closed.

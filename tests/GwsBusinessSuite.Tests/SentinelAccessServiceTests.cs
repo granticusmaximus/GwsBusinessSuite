@@ -43,6 +43,36 @@ public sealed class SentinelAccessServiceTests
     }
 
     [Fact]
+    public async Task HasDirectPermissionAsync_ShouldGrantOnlyAnExplicitDirectPermission_ForATargetWithNoPageOrDatabaseAncestry()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        // An automation workflow id - deliberately never added as a WikiPage/WikiDatabase, so
+        // CanAccessAsync's page/database ancestry walk would always deny it (see
+        // CanAccess_ShouldFailClosedForCyclicOrMissingAncestorChains, whose missingTargetId case
+        // is exactly this shape and must stay denied through CanAccessAsync).
+        var workflowId = Guid.NewGuid();
+
+        (await fixture.Service.HasDirectPermissionAsync(workflowId, false, "member", SentinelAccessLevels.View)).Should().BeFalse();
+
+        await fixture.Service.SetPermissionAsync(workflowId, false, "member", SentinelAccessLevels.FullAccess, "owner");
+
+        (await fixture.Service.HasDirectPermissionAsync(workflowId, false, "member", SentinelAccessLevels.View)).Should().BeTrue();
+        (await fixture.Service.HasDirectPermissionAsync(workflowId, false, "someone-else", SentinelAccessLevels.View)).Should().BeFalse();
+        // The pre-existing CanAccessAsync invariant is untouched by the new method.
+        (await fixture.Service.CanAccessAsync(workflowId, false, "member", SentinelAccessLevels.View)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task HasDirectPermissionAsync_ShouldAlwaysGrantAdmins()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Db.AppUsers.Add(new AppUser { Username = "root", Role = AppRoles.Admin, IsActive = true });
+        await fixture.Db.SaveChangesAsync();
+
+        (await fixture.Service.HasDirectPermissionAsync(Guid.NewGuid(), false, "root", SentinelAccessLevels.FullAccess)).Should().BeTrue();
+    }
+
+    [Fact]
     public async Task PublicShare_WithPassword_ShouldRequireTheCorrectPasswordAndNeverStoreItInPlaintext()
     {
         await using var fixture = await Fixture.CreateAsync();

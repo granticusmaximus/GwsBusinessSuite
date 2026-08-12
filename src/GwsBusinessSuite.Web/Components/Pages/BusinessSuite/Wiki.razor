@@ -383,9 +383,9 @@
                         {
                             <div class="wiki-tree-bulk-bar">
                                 <span>@_selectedTreeNodeIds.Count selected</span>
-                                <button type="button" class="btn btn-xs btn-link" @onclick="() => _selectedTreeNodeIds.Clear()">Clear</button>
-                                <button type="button" class="btn btn-xs btn-outline-secondary" @onclick="OpenBulkMoveModal" disabled="@IsBusy">Move to…</button>
-                                <button type="button" class="btn btn-xs btn-outline-danger" @onclick="() => _showBulkDeleteConfirm = true" disabled="@IsBusy">Move to Trash</button>
+                                <button type="button" class="btn btn-sm btn-link p-0" @onclick="() => _selectedTreeNodeIds.Clear()">Clear</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="OpenBulkMoveModal" disabled="@IsBusy">Move to…</button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => _showBulkDeleteConfirm = true" disabled="@IsBusy">Move to Trash</button>
                             </div>
                         }
                         @foreach (var node in FilteredAndOrderedNodes())

@@ -100,6 +100,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<SecurityIncidentUpdate> SecurityIncidentUpdates { get; }
     DbSet<CongressionalFloorTranscript> CongressionalFloorTranscripts { get; }
     DbSet<WikiSyncedBlockSource> WikiSyncedBlockSources { get; }
+    DbSet<MobileDeviceRegistration> MobileDeviceRegistrations { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     // For multi-step writes that must be all-or-nothing (e.g. AppGenerationService.ApproveAsync

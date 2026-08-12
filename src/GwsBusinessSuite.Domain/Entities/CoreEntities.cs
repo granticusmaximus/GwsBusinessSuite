@@ -1775,3 +1775,19 @@ public sealed class CongressionalFloorTranscript : AuditableEntity
     public string Excerpt { get; set; } = string.Empty;
     public DateTimeOffset FetchedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+// Part 4.8 (mobile push approvals) - server-side readiness only. This table and the
+// IPushNotificationSender abstraction it backs are the concrete contract a MAUI client can
+// register against and poll today (GET /admin/api/mobile/approvals/pending), but no real push
+// delivery is wired up: that needs APNs/FCM credentials and the separate MAUI client project,
+// neither available/verified in this session. NoOpPushNotificationSender logs instead of
+// sending, so that gap stays visible rather than silently pretending delivery happened.
+public sealed class MobileDeviceRegistration : AuditableEntity
+{
+    public required string Username { get; set; }
+    public required string Platform { get; set; }
+    public required string PushToken { get; set; }
+    public string DeviceName { get; set; } = string.Empty;
+    public DateTimeOffset RegisteredAt { get; set; }
+    public DateTimeOffset? LastSeenAt { get; set; }
+}

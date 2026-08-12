@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.SecurityAudit;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -13,7 +14,12 @@ public sealed class AutomationExecutionService(
     IAutomationNodeRegistry nodeRegistry,
     IAutomationCredentialService credentialService,
     TimeProvider timeProvider,
-    ILogger<AutomationExecutionService>? logger = null) : IAutomationExecutionService
+    ILogger<AutomationExecutionService>? logger = null,
+    // Optional, resolved by DI in production - records a human's approve/reject decision on a
+    // core.approval wait node into the unified security audit stream (Part 4.9). Same rationale
+    // as AutomationWorkflowService's own securityAudit param for why routine runs themselves
+    // aren't recorded here.
+    ISecurityAuditService? securityAudit = null) : IAutomationExecutionService
 {
     // A single stuck node step (e.g. a slow HTTP call) holds the heartbeat still without
     // crashing the process. The threshold must clear the longest a legitimate node can run —
@@ -208,7 +214,16 @@ public sealed class AutomationExecutionService(
             throw new InvalidOperationException("This execution is not waiting for an approval.");
 
         var mergeFields = JsonSerializer.Serialize(new { _approval = new { approved, comment = comment ?? string.Empty } });
-        return await ResumeAsync(executionId, approved ? "approved" : "rejected", mergeFields, cancellationToken);
+        var result = await ResumeAsync(executionId, approved ? "approved" : "rejected", mergeFields, cancellationToken);
+        if (securityAudit is not null)
+        {
+            await securityAudit.RecordAsync(new SecurityAuditInput(
+                SecurityAuditCategories.SecurityOperations, "AutomationApprovalResolved", SecurityAuditOutcomes.Succeeded,
+                TargetType: "AutomationExecution", TargetId: executionId.ToString(),
+                Details: new Dictionary<string, string?> { ["decision"] = approved ? "approved" : "rejected", ["workflowId"] = execution.WorkflowId.ToString() }),
+                cancellationToken);
+        }
+        return result;
     }
 
     private async Task<AutomationExecutionView> RunToCompletionAsync(

@@ -114,6 +114,47 @@
 		});
 	}
 
+	function appendResultEntries(container, entries) {
+		entries.forEach(function (entry) {
+			var link = document.createElement('a');
+			var index = document.querySelectorAll('[data-command-result]').length;
+			link.className = 'gws-command-result' + (index === commandIndex ? ' is-selected' : '');
+			link.href = entry.href;
+			link.dataset.commandResult = '';
+			link.innerHTML = '<i aria-hidden="true"></i><span><strong></strong><small></small></span><em></em>';
+			link.querySelector('i').className = entry.iconClass;
+			link.querySelector('strong').textContent = entry.title;
+			link.querySelector('small').textContent = entry.description;
+			link.querySelector('em').textContent = entry.group;
+			container.appendChild(link);
+		});
+	}
+
+	function clearCommandEmptyState() {
+		var elements = commandElements();
+		if (!elements.results) return;
+		var empty = elements.results.querySelector('.gws-command-empty');
+		if (empty) empty.remove();
+	}
+
+	function showCommandEmptyStateIfNoResults() {
+		var elements = commandElements();
+		if (!elements.results || elements.results.querySelector('[data-command-result]')) return;
+		if (elements.results.querySelector('.gws-command-empty')) return;
+		var empty = document.createElement('div');
+		empty.className = 'gws-command-empty';
+		empty.textContent = 'No pages, tools, or records match your search.';
+		elements.results.appendChild(empty);
+	}
+
+	// Nav entries (page/tool names) render instantly from the already-loaded DOM. Live records
+	// (CRM contacts/deals, Sentinel pages/databases, workflows, CMS pages, articles, affiliate
+	// offers) come from a separate, debounced /admin/api/suite-search fetch appended below them
+	// once it resolves - see fetchSuiteSearchResults. Keeping these two independent means the
+	// palette never feels laggy waiting on a network round trip just to jump to a known page.
+	var suiteSearchAbortController = null;
+	var suiteSearchDebounceTimer = null;
+
 	function renderCommandResults(query) {
 		var elements = commandElements();
 		if (!elements.results) return;
@@ -124,25 +165,41 @@
 
 		elements.results.replaceChildren();
 		commandIndex = entries.length ? 0 : -1;
-		entries.forEach(function (entry, index) {
-			var link = document.createElement('a');
-			link.className = 'gws-command-result' + (index === commandIndex ? ' is-selected' : '');
-			link.href = entry.href;
-			link.dataset.commandResult = '';
-			link.innerHTML = '<i aria-hidden="true"></i><span><strong></strong><small></small></span><em></em>';
-			link.querySelector('i').className = entry.iconClass;
-			link.querySelector('strong').textContent = entry.title;
-			link.querySelector('small').textContent = entry.description;
-			link.querySelector('em').textContent = entry.group;
-			elements.results.appendChild(link);
-		});
+		appendResultEntries(elements.results, entries);
+		showCommandEmptyStateIfNoResults();
+		scheduleSuiteSearch(query);
+	}
 
-		if (!entries.length) {
-			var empty = document.createElement('div');
-			empty.className = 'gws-command-empty';
-			empty.textContent = 'No pages or tools match your search.';
-			elements.results.appendChild(empty);
-		}
+	function scheduleSuiteSearch(query) {
+		window.clearTimeout(suiteSearchDebounceTimer);
+		if (suiteSearchAbortController) suiteSearchAbortController.abort();
+		var normalized = (query || '').trim();
+		if (normalized.length < 2) return;
+		suiteSearchDebounceTimer = window.setTimeout(function () { fetchSuiteSearchResults(normalized); }, 200);
+	}
+
+	function fetchSuiteSearchResults(query) {
+		var elements = commandElements();
+		if (!elements.results) return;
+		suiteSearchAbortController = new AbortController();
+		fetch('/admin/api/suite-search?q=' + encodeURIComponent(query), { signal: suiteSearchAbortController.signal, headers: { Accept: 'application/json' } })
+			.then(function (response) { return response.ok ? response.json() : []; })
+			.then(function (records) {
+				// The palette may have been closed, or the query may have changed, while this
+				// request was in flight - elements.input still reflects the live input value,
+				// so a stale response for an old query is silently dropped rather than appended.
+				if (!elements.input || elements.input.value.trim() !== query) return;
+				clearCommandEmptyState();
+				appendResultEntries(elements.results, (records || []).map(function (record) {
+					return { title: record.title, description: record.subtitle, group: record.category, href: record.url, iconClass: record.iconClass };
+				}));
+				if (commandIndex === -1 && elements.results.querySelector('[data-command-result]')) {
+					commandIndex = 0;
+					elements.results.querySelector('[data-command-result]').classList.add('is-selected');
+				}
+				showCommandEmptyStateIfNoResults();
+			})
+			.catch(function () { /* aborted or offline - nav-entry results already shown */ });
 	}
 
 	function openCommand() {

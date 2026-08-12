@@ -7,6 +7,7 @@ using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.Comments;
 using GwsBusinessSuite.Application.Growth;
 using GwsBusinessSuite.Application.LiveShow;
+using GwsBusinessSuite.Application.Mobile;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure;
 using GwsBusinessSuite.Application.ContentStudio;
@@ -14,6 +15,7 @@ using GwsBusinessSuite.Application.Resume;
 using GwsBusinessSuite.Application.Privacy;
 using GwsBusinessSuite.Application.SecurityAudit;
 using GwsBusinessSuite.Application.Settings;
+using GwsBusinessSuite.Application.SuiteSearch;
 using GwsBusinessSuite.Application.Users;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Infrastructure.Data;
@@ -788,6 +790,76 @@ app.MapGet("/admin/api/automation/{workflowId:guid}/export.json", async (
 })
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("public-read");
+
+// Backs MainLayout.razor's suite-wide Cmd/Ctrl+K command palette (app.js's renderCommandResults)
+// - a plain JSON GET rather than a Blazor circuit call since app.js runs outside any component's
+// lifecycle and needs to work identically on every admin page. Any signed-in user, not just
+// admins, since the existing nav-entry palette this widens is already available to every user.
+app.MapGet("/admin/api/suite-search", async (
+    string? q,
+    HttpContext httpContext,
+    ISuiteSearchService suiteSearchService,
+    CancellationToken cancellationToken) =>
+{
+    var username = httpContext.User.Identity?.Name ?? string.Empty;
+    var results = await suiteSearchService.SearchAsync(q ?? string.Empty, username, cancellationToken: cancellationToken);
+    return Results.Json(results);
+})
+    .RequireAuthorization()
+    .RequireRateLimiting("public-read");
+
+// Part 4.8 - server-side readiness for mobile push approvals only. A future MAUI client can
+// register a device, poll for pending core.approval waits, and resolve them today with no push
+// delivery required (poll-based, like many mobile apps' v1 before true push is wired up); actual
+// APNs/FCM delivery and the MAUI client itself are out of scope for this environment - see
+// IPushNotificationSender/NoOpPushNotificationSender. AdminOnly (not the broader ContentAccess
+// used elsewhere for automation) because these endpoints don't yet thread through the
+// per-workflow access grants Part 4.9 added to the web editor - a safe, conservative default
+// until that's built out, not an oversight.
+app.MapPost("/admin/api/mobile/devices", async (
+    MobileDeviceRegistrationRequest request,
+    HttpContext httpContext,
+    IMobilePushRegistrationService registrationService,
+    CancellationToken cancellationToken) =>
+{
+    var username = httpContext.User.Identity?.Name ?? string.Empty;
+    var device = await registrationService.RegisterDeviceAsync(username, request.Platform, request.PushToken, request.DeviceName ?? string.Empty, cancellationToken);
+    return Results.Json(device);
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("admin-mutation");
+
+app.MapDelete("/admin/api/mobile/devices/{pushToken}", async (
+    string pushToken,
+    HttpContext httpContext,
+    IMobilePushRegistrationService registrationService,
+    CancellationToken cancellationToken) =>
+{
+    var username = httpContext.User.Identity?.Name ?? string.Empty;
+    await registrationService.UnregisterDeviceAsync(username, pushToken, cancellationToken);
+    return Results.NoContent();
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("admin-mutation");
+
+app.MapGet("/admin/api/mobile/approvals/pending", async (
+    IMobileApprovalService approvalService,
+    CancellationToken cancellationToken) =>
+    Results.Json(await approvalService.ListPendingApprovalsAsync(cancellationToken)))
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("public-read");
+
+app.MapPost("/admin/api/mobile/approvals/{executionId:guid}/resolve", async (
+    Guid executionId,
+    MobileApprovalResolutionRequest request,
+    IAutomationExecutionService executionService,
+    CancellationToken cancellationToken) =>
+{
+    var execution = await executionService.ResolveApprovalAsync(executionId, request.Approved, request.Comment, cancellationToken);
+    return Results.Json(execution);
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("admin-mutation");
 
 // AllowAnonymous at the connection level - unauthenticated viewers must be able to open
 // this connection to call JoinAsViewer(inviteToken); JoinAsBroadcaster separately checks
@@ -3026,6 +3098,9 @@ record ArticleUpsertRequest(
     string HeroImageAltText,
     string HeroImageCaption,
     string BodyMarkdown);
+
+record MobileDeviceRegistrationRequest(string Platform, string PushToken, string? DeviceName);
+record MobileApprovalResolutionRequest(bool Approved, string? Comment);
 
 // Bundles both named theme locations (Primary/header, Footer) so callers that render a full
 // page shell only need one site lookup instead of two.

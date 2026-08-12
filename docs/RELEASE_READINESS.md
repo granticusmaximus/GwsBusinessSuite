@@ -258,10 +258,22 @@ history - flagging here since it's the same integrity question this whole sectio
   rules until both land. -->
 - [ ] GWS nodes cover Sentinel, CMS, CRM, Growth/social, CJ, storage, and governed AI.
   <!-- 2026-08-12: CRM (setDealStage, saveContact), CMS (savePage), and Growth (publishSocialPost)
-  action nodes now exist with automated test evidence. Still open: CJ and storage nodes, and any
-  CRM/CMS/Growth *trigger* nodes (only actions were built this pass - see docs/WORKFLOW_AUTOMATION.md). -->
+  action nodes now exist with automated test evidence. CRM Deal Stage Changed and CMS Page
+  Published *trigger* nodes were added in the same pass (automated test evidence: cross-module
+  trigger tests in AutomationWorkflowTests.cs) - closing the "no CRM/CMS/Growth trigger nodes" gap
+  noted here previously. Still open: CJ and storage nodes, and a Growth/social trigger node
+  (affiliate-conversion and security-audit-finding triggers were investigated and deliberately
+  not built - no live write path exists for either in this codebase yet, so a trigger would be
+  permanently unfireable; see docs/WORKFLOW_AUTOMATION.md). -->
 - [ ] Credential isolation, rotation/audit, projects/RBAC, concurrency, retention, metrics, and
   OpenTelemetry gates pass.
+  <!-- 2026-08-12: per-workflow access grants now exist (binary, not tiered - reuses Sentinel's
+  own SentinelResourcePermission table; automated test evidence in SentinelAccessServiceTests.cs)
+  plus unified security-audit-stream coverage for publish/activate/approval-resolution governance
+  actions (automated test evidence in AutomationAuditTrailTests.cs). Still open: tiered
+  View/Edit/Comment permissions (today's grant is full-access-or-nothing per workflow), projects,
+  concurrency controls, retention/metrics, OpenTelemetry, and credential rotation *audit* (refresh
+  itself already exists per the baseline table above). -->
 
 ### Native macOS client
 

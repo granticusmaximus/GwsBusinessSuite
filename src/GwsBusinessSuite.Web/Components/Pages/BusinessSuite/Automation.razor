@@ -1,10 +1,16 @@
 @page "/admin/automation"
 @rendermode InteractiveServer
-@attribute [Authorize(Policy = "AdminOnly")]
+@attribute [Authorize(Policy = "ContentAccess")]
 @using System.Text.Json
+@using GwsBusinessSuite.Application.Abstractions
 @using GwsBusinessSuite.Application.Automation
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+@using Microsoft.AspNetCore.Components.Authorization
 @inject IAutomationWorkflowService WorkflowService
 @inject IAutomationTemplateService TemplateService
+@inject ISentinelAccessService AccessService
+@inject ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
 @inject ILogger<Automation> Logger
 
@@ -209,11 +215,29 @@ else
     private static List<string> WorkflowTags(AutomationWorkflowSummary workflow) =>
         workflow.TagsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         try
         {
-            _workflows = (await WorkflowService.ListAsync()).ToList();
+            var workflows = (await WorkflowService.ListAsync()).ToList();
+            var isAdmin = AuthState is not null && (await AuthState).User.IsInRole(AppRoles.Admin);
+            if (!isAdmin)
+            {
+                // Part 4.9: an Author/Contributor sees only workflows an admin has explicitly
+                // shared with them, not the full suite-wide list - the same per-workflow grant
+                // AutomationEditor.razor's "Share this workflow" section creates.
+                var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+                var accessible = new List<AutomationWorkflowSummary>();
+                foreach (var workflow in workflows)
+                {
+                    if (await AccessService.HasDirectPermissionAsync(workflow.Id, isDatabase: false, username, SentinelAccessLevels.View))
+                        accessible.Add(workflow);
+                }
+                workflows = accessible;
+            }
+            _workflows = workflows;
             _recentFailures = (await WorkflowService.ListRecentFailuresAsync()).ToList();
         }
         catch (Exception ex) { Logger.LogError(ex, "Unable to load automation workflows."); _error = ex.Message; }

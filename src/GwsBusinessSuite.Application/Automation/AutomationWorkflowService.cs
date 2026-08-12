@@ -1,5 +1,6 @@
 using System.Text.Json;
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.SecurityAudit;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -10,7 +11,16 @@ public sealed class AutomationWorkflowService(
     IAppDbContext db,
     IAutomationNodeRegistry nodeRegistry,
     TimeProvider timeProvider,
-    IMemoryCache? cache = null) : IAutomationWorkflowService
+    IMemoryCache? cache = null,
+    // Optional, resolved by DI in production - records publish/activate governance actions into
+    // the unified security audit stream (Part 4.9). Routine execution runs are deliberately not
+    // recorded here: AutomationExecution/AutomationNodeExecution already durably capture every
+    // run's own full evidence trail, so duplicating that volume into the audit stream would just
+    // be noise: this only covers the governance actions "runs" don't already account for.
+    // ActorUsername is left unset on each RecordAsync call so SecurityAuditService resolves the
+    // real signed-in user itself via ICurrentUserAccessor, since this service's own UpdatedBy
+    // tracking is a pre-existing "user" placeholder, not a real actor.
+    ISecurityAuditService? securityAudit = null) : IAutomationWorkflowService
 {
     private static readonly JsonSerializerOptions SnapshotJsonOptions = new(JsonSerializerDefaults.Web);
     // Falls back to a private, per-instance cache when constructed without DI - existing
@@ -398,6 +408,13 @@ public sealed class AutomationWorkflowService(
         if (workflow.Status == AutomationWorkflowStatuses.Draft) workflow.Status = AutomationWorkflowStatuses.Inactive;
         Touch(workflow);
         await db.SaveChangesAsync(cancellationToken);
+        if (securityAudit is not null)
+        {
+            await securityAudit.RecordAsync(new SecurityAuditInput(
+                SecurityAuditCategories.DataLifecycle, "AutomationWorkflowPublished", SecurityAuditOutcomes.Succeeded,
+                TargetType: "AutomationWorkflow", TargetId: workflow.Id.ToString(),
+                Details: new Dictionary<string, string?> { ["version"] = versionNumber.ToString() }), cancellationToken);
+        }
         return versionNumber;
     }
 
@@ -409,6 +426,12 @@ public sealed class AutomationWorkflowService(
         workflow.Status = active ? AutomationWorkflowStatuses.Active : AutomationWorkflowStatuses.Inactive;
         Touch(workflow);
         await db.SaveChangesAsync(cancellationToken);
+        if (securityAudit is not null)
+        {
+            await securityAudit.RecordAsync(new SecurityAuditInput(
+                SecurityAuditCategories.DataLifecycle, active ? "AutomationWorkflowActivated" : "AutomationWorkflowDeactivated",
+                SecurityAuditOutcomes.Succeeded, TargetType: "AutomationWorkflow", TargetId: workflow.Id.ToString()), cancellationToken);
+        }
     }
 
     public async Task SetAllowDownstreamAutomationTriggersAsync(Guid workflowId, bool allow, CancellationToken cancellationToken = default)

@@ -1673,14 +1673,23 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 .wiki-tree-bulk-bar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.4rem 0.5rem;
     padding: 0.35rem 0.5rem;
     margin-bottom: 0.25rem;
     background: #fefce8;
     border: 1px solid #fde68a;
     border-radius: 0.5rem;
     font-size: 0.78rem;
+}
+.wiki-tree-bulk-bar > span {
+    white-space: nowrap;
+    margin-right: 0.15rem;
+}
+.wiki-tree-bulk-bar > button {
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 .wiki-move-target-list {
     max-height: 18rem;

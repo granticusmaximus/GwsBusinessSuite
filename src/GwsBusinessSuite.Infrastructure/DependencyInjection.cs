@@ -164,6 +164,9 @@ public static class DependencyInjection
         services.AddScoped<IContentStudioService, ContentStudioService>();
         services.AddScoped<ICrmService, CrmService>();
         services.AddScoped<GwsBusinessSuite.Application.MissionControl.IMissionControlService, MissionControlService>();
+        services.AddScoped<GwsBusinessSuite.Application.Mobile.IMobilePushRegistrationService, MobilePushRegistrationService>();
+        services.AddScoped<GwsBusinessSuite.Application.Mobile.IMobileApprovalService, MobileApprovalService>();
+        services.AddScoped<GwsBusinessSuite.Application.Mobile.IPushNotificationSender, NoOpPushNotificationSender>();
         services.AddScoped<IUserManagementService, UserManagementService>();
         services.AddScoped<ISecurityAuditService, SecurityAuditService>();
         services.AddScoped<IPrivacyOperationsService, PrivacyOperationsService>();
@@ -223,6 +226,7 @@ public static class DependencyInjection
         services.AddScoped<ISentinelTemplateService, SentinelTemplateService>();
         services.AddScoped<ISentinelWorkspaceImportService, SentinelWorkspaceImportService>();
         services.AddScoped<ISentinelWorkspaceService, SentinelWorkspaceService>();
+        services.AddScoped<GwsBusinessSuite.Application.SuiteSearch.ISuiteSearchService, SuiteSearchService>();
         services.AddScoped<ISentinelCollaborationService, SentinelCollaborationService>();
         services.AddScoped<ISentinelAccessService, SentinelAccessService>();
         services.AddScoped<ISentinelAiService, SentinelAiService>();

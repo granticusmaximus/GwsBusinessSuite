@@ -1,5 +1,6 @@
 using System.Text;
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.SecurityAudit;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -11,7 +12,13 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 // rather than a single Markdown string that read well as a prose diff. Originally trimmed with
 // a flat MaxRevisionsPerPage cap mirroring CmsPageRevision/PageRevisionService's own pattern;
 // see TrimOldRevisionsAsync for the time-tiered policy that replaced it.
-public sealed class WikiService(IAppDbContext dbContext, IWikiSyncedBlockService? syncedBlockService = null) : IWikiService
+public sealed class WikiService(
+    IAppDbContext dbContext,
+    IWikiSyncedBlockService? syncedBlockService = null,
+    // Optional, resolved by DI in production - records a page edit into the unified security
+    // audit stream (Part 4.9), but only for checkpoint-worthy saves (createRevisionCheckpoint),
+    // not every silent debounced autosave tick, which would flood the audit log with noise.
+    ISecurityAuditService? securityAudit = null) : IWikiService
 {
     // Was a flat 20-revision cap (hard-deleted anything past it); replaced in Phase 4.4 with a
     // time-tiered policy closer to Notion's own page history - see TrimOldRevisionsAsync.
@@ -251,6 +258,16 @@ public sealed class WikiService(IAppDbContext dbContext, IWikiSyncedBlockService
         if (createRevisionCheckpoint)
         {
             await CreateRevisionAsync(page, performedBy, cancellationToken);
+            if (securityAudit is not null)
+            {
+                await securityAudit.RecordAsync(new SecurityAuditInput(
+                    SecurityAuditCategories.DataLifecycle,
+                    isNew ? "SentinelPageCreated" : "SentinelPageEdited",
+                    SecurityAuditOutcomes.Succeeded,
+                    TargetType: "WikiPage",
+                    TargetId: page.Id.ToString(),
+                    ActorUsername: performedBy), cancellationToken);
+            }
         }
 
         return page;
