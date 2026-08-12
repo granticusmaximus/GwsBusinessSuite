@@ -727,6 +727,201 @@ public sealed class SentinelAiServiceTests
         (await db.SentinelAiRuns.CountAsync()).Should().Be(1, "the failed attempt should still be persisted for review");
     }
 
+    [Fact]
+    public async Task StreamToolCallingConversationAsync_ProposeWrite_ShouldPersistAPendingRunWithoutWritingYet()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        db.AppUsers.Add(new AppUser { Username = "grant", Role = AppRoles.Admin, IsActive = true });
+        await db.SaveChangesAsync();
+
+        var databases = new WikiDatabaseService(db);
+        var database = await databases.CreateDatabaseAsync("Tasks", null, "grant");
+        var titleProperty = database.Properties.Single(p => p.Type == WikiDatabasePropertyTypes.Title);
+        var statusProperty = await databases.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Status", Type = WikiDatabasePropertyTypes.Text }, "grant");
+        var titledRow = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(titledRow, titleProperty.Id, "Ship the release");
+        var row = await databases.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = titledRow.ToDictionary(kv => kv.Key, kv => kv.Value) }, "grant");
+
+        var ollama = new ScriptedToolCallingOllamaService(
+        [
+            new(string.Empty,
+            [
+                new OllamaToolCall(
+                    "propose_set_database_row_property",
+                    $$"""{"wikiDatabaseId":"{{database.Id}}","rowId":"{{row.Id}}","propertyId":"{{statusProperty.Id}}","value":"Done"}""")
+            ])
+        ]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache(),
+            accessService: new SentinelAccessService(db), wikiDatabaseService: databases);
+
+        var chunks = new List<SentinelAiStreamChunk>();
+        await foreach (var chunk in service.StreamToolCallingConversationAsync(Guid.NewGuid(), null, "Mark it done", "grant"))
+        {
+            chunks.Add(chunk);
+        }
+
+        chunks[^1].CompletedRun!.Status.Should().Be(SentinelAiRunStatuses.Pending);
+        chunks[^1].CompletedRun!.Output.Should().Contain("Status").And.Contain("Done");
+        ollama.Requests.Should().HaveCount(1, "the loop must stop after proposing, not keep calling the model");
+        var reloadedRow = (await databases.GetDatabaseAsync(database.Id))!.Rows.Single(r => r.Id == row.Id);
+        WikiPropertyValues.GetDisplayText(statusProperty, WikiPropertyValues.ParseObject(reloadedRow.PropertyValuesJson), reloadedRow.CreatedAt, reloadedRow.UpdatedAt, reloadedRow.CreatedBy, reloadedRow.UpdatedBy)
+            .Should().NotBe("Done");
+    }
+
+    [Fact]
+    public async Task ResolvePendingToolActionAsync_Approved_ShouldExecuteTheWriteAndMarkCompleted()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        db.AppUsers.Add(new AppUser { Username = "grant", Role = AppRoles.Admin, IsActive = true });
+        await db.SaveChangesAsync();
+
+        var databases = new WikiDatabaseService(db);
+        var database = await databases.CreateDatabaseAsync("Tasks", null, "grant");
+        var titleProperty = database.Properties.Single(p => p.Type == WikiDatabasePropertyTypes.Title);
+        var statusProperty = await databases.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Status", Type = WikiDatabasePropertyTypes.Text }, "grant");
+        var titledRow = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(titledRow, titleProperty.Id, "Ship the release");
+        var row = await databases.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = titledRow.ToDictionary(kv => kv.Key, kv => kv.Value) }, "grant");
+
+        var ollama = new ScriptedToolCallingOllamaService(
+        [
+            new(string.Empty,
+            [
+                new OllamaToolCall(
+                    "propose_set_database_row_property",
+                    $$"""{"wikiDatabaseId":"{{database.Id}}","rowId":"{{row.Id}}","propertyId":"{{statusProperty.Id}}","value":"Done"}""")
+            ])
+        ]);
+        var factory = new FakeAppDbContextFactory(options);
+        var service = new SentinelAiService(
+            factory, ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache(),
+            accessService: new SentinelAccessService(db), wikiDatabaseService: databases);
+
+        SentinelAiRunView? pending = null;
+        await foreach (var chunk in service.StreamToolCallingConversationAsync(Guid.NewGuid(), null, "Mark it done", "grant"))
+        {
+            if (chunk.CompletedRun is not null) pending = chunk.CompletedRun;
+        }
+
+        var resolved = await service.ResolvePendingToolActionAsync(pending!.Id, approved: true, "grant");
+
+        resolved.Status.Should().Be(SentinelAiRunStatuses.Completed);
+        var reloadedRow = (await databases.GetDatabaseAsync(database.Id))!.Rows.Single(r => r.Id == row.Id);
+        WikiPropertyValues.GetDisplayText(statusProperty, WikiPropertyValues.ParseObject(reloadedRow.PropertyValuesJson), reloadedRow.CreatedAt, reloadedRow.UpdatedAt, reloadedRow.CreatedBy, reloadedRow.UpdatedBy)
+            .Should().Be("Done");
+    }
+
+    [Fact]
+    public async Task ResolvePendingToolActionAsync_Declined_ShouldLeaveDataUntouchedAndMarkCancelled()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        db.AppUsers.Add(new AppUser { Username = "grant", Role = AppRoles.Admin, IsActive = true });
+        await db.SaveChangesAsync();
+
+        var databases = new WikiDatabaseService(db);
+        var database = await databases.CreateDatabaseAsync("Tasks", null, "grant");
+        var titleProperty = database.Properties.Single(p => p.Type == WikiDatabasePropertyTypes.Title);
+        var statusProperty = await databases.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Status", Type = WikiDatabasePropertyTypes.Text }, "grant");
+        var titledRow = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(titledRow, titleProperty.Id, "Ship the release");
+        var row = await databases.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = titledRow.ToDictionary(kv => kv.Key, kv => kv.Value) }, "grant");
+
+        var ollama = new ScriptedToolCallingOllamaService(
+        [
+            new(string.Empty,
+            [
+                new OllamaToolCall(
+                    "propose_set_database_row_property",
+                    $$"""{"wikiDatabaseId":"{{database.Id}}","rowId":"{{row.Id}}","propertyId":"{{statusProperty.Id}}","value":"Done"}""")
+            ])
+        ]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache(),
+            accessService: new SentinelAccessService(db), wikiDatabaseService: databases);
+
+        SentinelAiRunView? pending = null;
+        await foreach (var chunk in service.StreamToolCallingConversationAsync(Guid.NewGuid(), null, "Mark it done", "grant"))
+        {
+            if (chunk.CompletedRun is not null) pending = chunk.CompletedRun;
+        }
+
+        var resolved = await service.ResolvePendingToolActionAsync(pending!.Id, approved: false, "grant");
+
+        resolved.Status.Should().Be(SentinelAiRunStatuses.Cancelled);
+        var reloadedRow = (await databases.GetDatabaseAsync(database.Id))!.Rows.Single(r => r.Id == row.Id);
+        WikiPropertyValues.GetDisplayText(statusProperty, WikiPropertyValues.ParseObject(reloadedRow.PropertyValuesJson), reloadedRow.CreatedAt, reloadedRow.UpdatedAt, reloadedRow.CreatedBy, reloadedRow.UpdatedBy)
+            .Should().NotBe("Done");
+
+        var act = () => service.ResolvePendingToolActionAsync(pending.Id, approved: true, "grant");
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*already*");
+    }
+
+    [Fact]
+    public async Task StreamToolCallingConversationAsync_ProposeWrite_ShouldFailWithoutEditAccess()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        // No AppUsers/Owner seeded for "grant" - SentinelAccessService.CanAccessAsync denies by default.
+
+        var databases = new WikiDatabaseService(db);
+        var database = await databases.CreateDatabaseAsync("Tasks", null, "admin-seed");
+        var titleProperty = database.Properties.Single(p => p.Type == WikiDatabasePropertyTypes.Title);
+        var statusProperty = await databases.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Status", Type = WikiDatabasePropertyTypes.Text }, "admin-seed");
+        var titledRow = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(titledRow, titleProperty.Id, "Ship the release");
+        var row = await databases.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = titledRow.ToDictionary(kv => kv.Key, kv => kv.Value) }, "admin-seed");
+
+        var ollama = new ScriptedToolCallingOllamaService(
+        [
+            new(string.Empty,
+            [
+                new OllamaToolCall(
+                    "propose_set_database_row_property",
+                    $$"""{"wikiDatabaseId":"{{database.Id}}","rowId":"{{row.Id}}","propertyId":"{{statusProperty.Id}}","value":"Done"}""")
+            ])
+        ]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache(),
+            accessService: new SentinelAccessService(db), wikiDatabaseService: databases);
+
+        var chunks = new List<SentinelAiStreamChunk>();
+        await foreach (var chunk in service.StreamToolCallingConversationAsync(Guid.NewGuid(), null, "Mark it done", "grant"))
+        {
+            chunks.Add(chunk);
+        }
+
+        chunks[^1].CompletedRun!.Status.Should().Be(SentinelAiRunStatuses.Failed);
+        chunks[^1].CompletedRun!.Output.Should().Contain("access");
+    }
+
     private sealed class ScriptedToolCallingOllamaService(IReadOnlyList<OllamaChatResponse> responses)
         : GwsBusinessSuite.Application.Abstractions.IOllamaService
     {

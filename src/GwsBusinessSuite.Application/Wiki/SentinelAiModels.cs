@@ -137,6 +137,15 @@ public interface ISentinelAiService
         string performedBy,
         bool confirmed,
         CancellationToken cancellationToken = default);
+
+    // Resolves a run left Pending by StreamToolCallingConversationAsync's
+    // propose_set_database_row_property tool. approved:true re-checks Edit access (it may have
+    // changed since the proposal) and executes the exact write that was previewed, actor-tagged
+    // "sentinelgpt-tool" (distinct from "automation-engine") so it's honestly attributable in
+    // audit trails while still skipping database.rowChangedTrigger re-fires, same loop-prevention
+    // convention as every other automation-adjacent writer. approved:false leaves data untouched.
+    Task<SentinelAiRunView> ResolvePendingToolActionAsync(
+        Guid runId, bool approved, string performedBy, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SentinelAiRunView>> ListRunsAsync(Guid? wikiPageId, int maxResults = 20, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SentinelGptConversationView>> ListConversationsAsync(string requestedBy, int maxResults = 40, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SentinelAiRunView>> ListConversationRunsAsync(Guid conversationId, string requestedBy, CancellationToken cancellationToken = default);

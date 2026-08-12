@@ -226,13 +226,53 @@ Stopping cancels the server-owned generation token all the way through the Ollam
 stream, releases the active-response slot, and returns the composer to an idle state. Only
 the user who owns a generation can inspect or stop it.
 
+## Tool-calling loop
+
+When the composer's "Tools" toggle is on, chat routes to a bounded ReAct-style loop
+(`ISentinelAiService.StreamToolCallingConversationAsync`, capped at 5 rounds) instead of the
+pre-fetched grounded-context path: the model calls Ollama's `/api/chat` with a tool list and
+decides for itself whether to call a tool, see the result, and call another before giving a
+final answer. Each tool call streams to the UI as an activity line ("🔧 Searching the wiki
+for..."). Three tools are registered:
+
+- `search_wiki` - keyword search over Sentinel pages/databases (read-only).
+- `get_page` - fetch one page's plain-text content by id, access-checked (read-only).
+- `propose_set_database_row_property` - see "Governed write actions" below.
+
+## Governed write actions
+
+`propose_set_database_row_property` is the first write-capable tool wired into the loop, and
+follows the pattern every future consequential action should use:
+
+1. **Authorization** - `ISentinelAccessService.CanAccessAsync(..., SentinelAccessLevels.Edit)` is
+   checked before anything is proposed, and checked *again* at confirmation time (access could
+   have changed in between).
+2. **Structured input** - the tool's JSON schema requires `wikiDatabaseId`/`rowId`/`propertyId`/`value`,
+   not free text.
+3. **Preview and explicit confirmation** - calling the tool never writes. It resolves the
+   database/property/row, persists a `SentinelAiRun` with `Status = "pending"` and a
+   human-readable preview ("Set \"Status\" to \"Done\" on a row in \"Tasks\"..."), and the loop
+   ends there - the model does not get to call the tool again or claim the change happened. The
+   UI (`SentinelGpt.razor`) renders **Confirm**/**Decline** buttons for a pending run, calling
+   `ISentinelAiService.ResolvePendingToolActionAsync(runId, approved, performedBy)`.
+4. **Idempotency** - a run can only be resolved once (`ResolvePendingToolActionAsync` throws on a
+   non-Pending run), so a duplicate click or retried request can't double-apply the write.
+5. **Audit evidence** - the proposing and resolving `SentinelAiRun` row *is* the audit record
+   (`PendingToolName`/`PendingToolArgumentsJson` capture exactly what was proposed;
+   `ReviewedAt`/`ReviewedBy` capture who resolved it and when). The actual write is actor-tagged
+   `"sentinelgpt-tool"` (not `"automation-engine"`), so it's honestly attributable in
+   `WikiDatabaseService`'s own history and - unlike an automation-engine write - intentionally
+   still fires any configured `database.rowChangedTrigger` automation, since a human just
+   confirmed it.
+
 ## Current safety boundary
 
-SentinelGPT's broad GWS access is read-only. Dedicated GWS workflows can still create
-drafts or perform their existing reviewed actions, but general chat cannot publish,
-delete, deploy, run automations, resync connectors, or edit business records. Those
-capabilities should be added individually with server-side authorization, an action
-preview, explicit confirmation, idempotency, and an audit record.
+Outside the one governed write tool above, SentinelGPT's broad GWS access is read-only.
+Dedicated GWS workflows can still create drafts or perform their existing reviewed actions, but
+general chat cannot publish, delete, deploy, run automations, resync connectors, or edit
+business records beyond that one database-row-property action. Additional capabilities should
+be added the same way: server-side authorization, structured input, an action preview, explicit
+confirmation, idempotency, and an audit record.
 
 The live application context describes persisted GWS data and module state. It does not
 automatically expose the repository's source tree in production; source-code retrieval

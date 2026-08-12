@@ -208,6 +208,26 @@
                                 </div>
                             </div>
                         }
+                        else if (run.Status == SentinelAiRunStatuses.Pending)
+                        {
+                            <div>
+                                <div class="sentinel-gpt-message sentinel-gpt-assistant-message">@run.Output</div>
+                                <div class="sentinel-gpt-confirmation">
+                                    <div><i class="bi bi-exclamation-triangle"></i><span><strong>Confirmation required</strong>SentinelGPT wants to write to a Sentinel database - review the change above before it's applied.</span></div>
+                                    <div>
+                                        <button type="button" class="sentinel-gpt-confirm" disabled="@_reviewingRunIds.Contains(run.Id)" @onclick="() => ResolvePendingToolAsync(run, true)">Confirm</button>
+                                        <button type="button" disabled="@_reviewingRunIds.Contains(run.Id)" @onclick="() => ResolvePendingToolAsync(run, false)">Decline</button>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                        else if (run.Status == SentinelAiRunStatuses.Cancelled)
+                        {
+                            <div>
+                                <div class="sentinel-gpt-message sentinel-gpt-assistant-message">@run.Output</div>
+                                <div class="sentinel-gpt-response-meta"><time>@run.CreatedAt.ToLocalTime().ToString("t") · @run.Model</time></div>
+                            </div>
+                        }
                         else
                         {
                             <div>
@@ -567,6 +587,27 @@
         {
             Logger.LogWarning(ex, "SentinelGPT feedback could not be saved for run {RunId}", run.Id);
             _error = $"The learning feedback could not be saved: {ex.Message}";
+        }
+        finally
+        {
+            _reviewingRunIds.Remove(run.Id);
+        }
+    }
+
+    private async Task ResolvePendingToolAsync(SentinelAiRunView run, bool approved)
+    {
+        if (!_reviewingRunIds.Add(run.Id)) return;
+        _error = string.Empty;
+        try
+        {
+            var updated = await SentinelGptService.ResolvePendingToolActionAsync(run.Id, approved, _username);
+            var index = _runs.FindIndex(item => item.Id == run.Id);
+            if (index >= 0) _runs[index] = updated;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "SentinelGPT pending action could not be resolved for run {RunId}", run.Id);
+            _error = $"That action could not be resolved: {ex.Message}";
         }
         finally
         {

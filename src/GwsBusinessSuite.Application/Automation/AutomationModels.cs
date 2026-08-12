@@ -188,3 +188,43 @@ public sealed record AutomationHttpRequest(
     IReadOnlyDictionary<string, string> Headers);
 
 public sealed record AutomationHttpResponse(int StatusCode, string Body, IReadOnlyDictionary<string, string> Headers);
+
+public sealed record AutomationWorkflowVersionSummary(
+    int VersionNumber,
+    DateTimeOffset CreatedAt,
+    string ChangeSummary,
+    string CreatedBy,
+    int NodeCount);
+
+// A coarse, node/connection-level diff between two published versions - not a generic
+// property-level JSON diff. Sufficient for "what changed" review without a diff engine; a
+// modified node is one whose Id exists in both versions but whose snapshot content differs.
+public sealed record AutomationWorkflowDiff(
+    IReadOnlyList<AutomationNodeSnapshot> AddedNodes,
+    IReadOnlyList<AutomationNodeSnapshot> RemovedNodes,
+    IReadOnlyList<AutomationNodeDiffChange> ModifiedNodes,
+    IReadOnlyList<AutomationConnectionSnapshot> AddedConnections,
+    IReadOnlyList<AutomationConnectionSnapshot> RemovedConnections);
+
+public sealed record AutomationNodeDiffChange(Guid NodeId, string Name, AutomationNodeSnapshot Before, AutomationNodeSnapshot After);
+
+public sealed record AutomationWorkflowTemplateSummary(
+    Guid Id,
+    string Name,
+    string Description,
+    string TagsCsv,
+    int NodeCount,
+    DateTimeOffset UpdatedAt);
+
+// Portable node/connection graph shared by export/import and workflow templates - the editor
+// views (not the position-free publish snapshot) so canvas layout survives the round trip.
+public sealed record AutomationWorkflowGraphPackage(
+    string Name,
+    string Description,
+    IReadOnlyList<AutomationNodeView> Nodes,
+    IReadOnlyList<AutomationConnectionView> Connections);
+
+public sealed record AutomationWorkflowExportEnvelope(
+    int FormatVersion,
+    DateTimeOffset ExportedAt,
+    AutomationWorkflowGraphPackage Workflow);

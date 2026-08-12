@@ -2,6 +2,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.CmsBuilder;
+using GwsBusinessSuite.Application.Crm;
+using GwsBusinessSuite.Application.Growth;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -27,6 +30,11 @@ public sealed partial class AutomationNodeRegistry(
         new("database.rowChangedTrigger", 1, "Database Row Changed", "Starts an active workflow when a row's properties change in a Sentinel database. Paste the database's id (visible in its Sentinel URL) into wikiDatabaseId.", "Triggers", "bi-table", true, ["main"], "{\"wikiDatabaseId\":\"\"}"),
         new("database.setRowProperty", 1, "Set Database Row Property", "Sets one property on a Sentinel database row. Paste the database, row, and property ids and an optional {{ $json.path }} expression for the value. Never re-triggers a Database Row Changed workflow, so it cannot cause an automation loop - chaining a second workflow off this write is not supported.", "Actions", "bi-pencil-square", false, ["main"], "{\"wikiDatabaseId\":\"\",\"rowId\":\"{{ $json.rowId }}\",\"propertyId\":\"\",\"value\":\"\"}", IsIdempotent: false),
         new("database.addRow", 1, "Add Database Row", "Creates a new row in a Sentinel database. propertyValues maps property ids to values (string values support {{ $json.path }} expressions); parentRowId is optional and nests the new row as a sub-item. Like Set Database Row Property, this never re-triggers a Database Row Changed workflow.", "Actions", "bi-plus-square", false, ["main"], "{\"wikiDatabaseId\":\"\",\"parentRowId\":\"\",\"propertyValues\":{}}", IsIdempotent: false),
+        new("automation.subWorkflow", 1, "Execute Workflow", "Runs another published workflow to completion and returns its output. The child must not pause on a Wait or Approval node. workflowId is the id shown in the target workflow's URL.", "Flow", "bi-diagram-3", false, ["main"], "{\"workflowId\":\"\"}", IsIdempotent: false),
+        new("crm.setDealStage", 1, "CRM: Set Deal Stage", "Moves a CRM deal to a new pipeline stage. dealId and stage support {{ $json.path }} expressions.", "Actions", "bi-graph-up-arrow", false, ["main"], "{\"dealId\":\"{{ $json.dealId }}\",\"stage\":\"\"}", IsIdempotent: false),
+        new("crm.saveContact", 1, "CRM: Save Contact", "Creates or updates a CRM contact. contactId is optional (omit to create); other fields support {{ $json.path }} expressions.", "Actions", "bi-person-lines-fill", false, ["main"], "{\"contactId\":\"\",\"fullName\":\"{{ $json.fullName }}\",\"email\":\"{{ $json.email }}\",\"company\":\"\",\"status\":\"Lead\"}", IsIdempotent: false),
+        new("cms.savePage", 1, "CMS: Save Page", "Creates or updates a CMS page on a site. pageId is optional (omit to create); other fields support {{ $json.path }} expressions.", "Actions", "bi-file-earmark-richtext", false, ["main"], "{\"siteId\":\"\",\"pageId\":\"\",\"title\":\"{{ $json.title }}\",\"blocksJson\":\"[]\"}", IsIdempotent: false),
+        new("growth.publishSocialPost", 1, "Growth: Publish Social Post", "Publishes an already-drafted social post (see Growth Studio's post composer for creating the draft). postId supports {{ $json.path }} expressions.", "Actions", "bi-send-fill", false, ["main"], "{\"postId\":\"{{ $json.postId }}\"}", IsIdempotent: false),
         new("core.set", 1, "Set Fields", "Adds or replaces JSON fields using literal values or expressions.", "Data", "bi-braces", false, ["main"], "{\"values\":{\"message\":\"Hello from GWS\"}}"),
         new("core.if", 1, "If", "Routes an item to the true or false output.", "Flow", "bi-signpost-split-fill", false, ["true", "false"], "{\"left\":\"{{ $json.enabled }}\",\"operator\":\"equals\",\"right\":\"true\"}"),
         new("core.httpRequest", 1, "HTTP Request", "Calls an HTTP API and returns status, headers, and response data.", "Actions", "bi-globe2", false, ["main"], "{\"method\":\"GET\",\"url\":\"https://example.com\",\"headers\":{},\"body\":\"\"}", IsIdempotent: false),
@@ -84,6 +92,8 @@ public sealed partial class AutomationNodeRegistry(
         JsonElement input,
         string? credentialJson,
         string? workflowOwnerUsername = null,
+        IReadOnlySet<Guid>? subWorkflowChain = null,
+        IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName = null,
         CancellationToken cancellationToken = default)
     {
         return node.TypeKey switch
@@ -92,21 +102,26 @@ public sealed partial class AutomationNodeRegistry(
             "core.webhookTrigger" => SingleOutput("main", input),
             "core.scheduleTrigger" => SingleOutput("main", input),
             "database.rowChangedTrigger" => SingleOutput("main", input),
-            "database.setRowProperty" => await ExecuteSetRowPropertyAsync(node, input, workflowOwnerUsername, cancellationToken),
-            "database.addRow" => await ExecuteAddRowAsync(node, input, workflowOwnerUsername, cancellationToken),
-            "core.set" => ExecuteSet(node, input),
-            "core.if" => ExecuteIf(node, input),
-            "core.httpRequest" => await ExecuteHttpAsync(node, input, credentialJson, cancellationToken),
+            "database.setRowProperty" => await ExecuteSetRowPropertyAsync(node, input, workflowOwnerUsername, nodeOutputsByName, cancellationToken),
+            "database.addRow" => await ExecuteAddRowAsync(node, input, workflowOwnerUsername, nodeOutputsByName, cancellationToken),
+            "automation.subWorkflow" => await ExecuteSubWorkflowAsync(node, input, subWorkflowChain, cancellationToken),
+            "crm.setDealStage" => await ExecuteCrmSetDealStageAsync(node, input, nodeOutputsByName, cancellationToken),
+            "crm.saveContact" => await ExecuteCrmSaveContactAsync(node, input, nodeOutputsByName, cancellationToken),
+            "cms.savePage" => await ExecuteCmsSavePageAsync(node, input, nodeOutputsByName, cancellationToken),
+            "growth.publishSocialPost" => await ExecuteGrowthPublishSocialPostAsync(node, input, nodeOutputsByName, cancellationToken),
+            "core.set" => ExecuteSet(node, input, nodeOutputsByName),
+            "core.if" => ExecuteIf(node, input, nodeOutputsByName),
+            "core.httpRequest" => await ExecuteHttpAsync(node, input, credentialJson, nodeOutputsByName, cancellationToken),
             "core.splitOut" => ExecuteSplitOut(node, input),
             "core.batch" => ExecuteBatch(node, input),
             "core.merge" => SingleOutput("main", input),
             "core.limit" => ExecuteLimit(node, input),
             "core.sort" => ExecuteSort(node, input),
             "core.removeDuplicates" => ExecuteRemoveDuplicates(node, input),
-            "core.template" => ExecuteTemplate(node, input),
+            "core.template" => ExecuteTemplate(node, input, nodeOutputsByName),
             "core.dateTime" => ExecuteDateTime(node, input),
             "core.noOp" => SingleOutput("main", input),
-            "core.stopError" => throw new InvalidOperationException(ResolveText(ParseObject(node.ParametersJson, node.Name)["message"]?.GetValue<string>() ?? "Workflow stopped.", input)),
+            "core.stopError" => throw new InvalidOperationException(ResolveText(ParseObject(node.ParametersJson, node.Name)["message"]?.GetValue<string>() ?? "Workflow stopped.", input, nodeOutputsByName)),
             "core.wait" or "core.approval" => throw new InvalidOperationException($"{node.Name} must be paused and resumed by the execution engine, not called directly."),
             "ai.modelAdvisor" => await ExecuteModelAdvisorAsync(node, input, cancellationToken),
             "ai.sentinelSynthesize" => await ExecuteSentinelSynthesisAsync(node, input, cancellationToken),
@@ -241,6 +256,7 @@ public sealed partial class AutomationNodeRegistry(
         AutomationNodeSnapshot node,
         JsonElement input,
         string? workflowOwnerUsername,
+        IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName,
         CancellationToken cancellationToken)
     {
         var wikiDatabaseService = serviceProvider?.GetService(typeof(IWikiDatabaseService)) as IWikiDatabaseService
@@ -249,10 +265,10 @@ public sealed partial class AutomationNodeRegistry(
         var source = RequireObject(input, node.Name);
 
         var wikiDatabaseId = ParseRequiredGuid(parameters["wikiDatabaseId"]?.GetValue<string>(), node.Name, "wikiDatabaseId");
-        var rowIdText = ResolveText(parameters["rowId"]?.GetValue<string>() ?? string.Empty, input);
+        var rowIdText = ResolveText(parameters["rowId"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
         var rowId = ParseRequiredGuid(rowIdText, node.Name, "rowId");
         var propertyId = ParseRequiredGuid(parameters["propertyId"]?.GetValue<string>(), node.Name, "propertyId");
-        var value = ResolveText(parameters["value"]?.GetValue<string>() ?? string.Empty, input);
+        var value = ResolveText(parameters["value"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
 
         // This node can write to ANY Sentinel database/row by id, with no ownership or scoping
         // check - previously contained only by both Automation and Wiki being AdminOnly routes
@@ -285,6 +301,7 @@ public sealed partial class AutomationNodeRegistry(
         AutomationNodeSnapshot node,
         JsonElement input,
         string? workflowOwnerUsername,
+        IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName,
         CancellationToken cancellationToken)
     {
         var wikiDatabaseService = serviceProvider?.GetService(typeof(IWikiDatabaseService)) as IWikiDatabaseService
@@ -297,7 +314,7 @@ public sealed partial class AutomationNodeRegistry(
         // comment for why an Admin-authored workflow bypasses this while others don't.
         await EnsureCanEditDatabaseAsync(wikiDatabaseId, workflowOwnerUsername, node.Name, cancellationToken);
 
-        var parentRowIdText = ResolveText(parameters["parentRowId"]?.GetValue<string>() ?? string.Empty, input);
+        var parentRowIdText = ResolveText(parameters["parentRowId"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
         var parentRowId = Guid.TryParse(parentRowIdText, out var parsedParentRowId) ? parsedParentRowId : (Guid?)null;
 
         // Same per-key resolution as core.set's "values": string leaves support {{ $json.path }}
@@ -309,7 +326,7 @@ public sealed partial class AutomationNodeRegistry(
             foreach (var pair in propertyValues)
             {
                 values[pair.Key] = pair.Value is JsonValue value && value.TryGetValue<string>(out var text)
-                    ? JsonValue.Create(ResolveText(text, input))
+                    ? JsonValue.Create(ResolveText(text, input, nodeOutputsByName))
                     : pair.Value?.DeepClone();
             }
         }
@@ -331,6 +348,177 @@ public sealed partial class AutomationNodeRegistry(
         };
         return SingleOutput("main", JsonSerializer.SerializeToElement(output));
     }
+
+    // Bounds automation.subWorkflow's ancestor chain - a flat depth cap rather than attempted
+    // static cycle detection across workflow graphs (that would need to walk every other
+    // workflow's own graph, including ones that could change after this workflow was last
+    // saved). Mutual/self recursion (A -> B -> A) is rejected outright by the chain-membership
+    // check in ExecuteSubWorkflowAsync; this only caps otherwise-acyclic chains that go too deep.
+    private const int MaxSubWorkflowDepth = 10;
+
+    private async Task<AutomationNodeRunResult> ExecuteSubWorkflowAsync(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        IReadOnlySet<Guid>? subWorkflowChain,
+        CancellationToken cancellationToken)
+    {
+        var parameters = ParseObject(node.ParametersJson, node.Name);
+        var childWorkflowId = ParseRequiredGuid(parameters["workflowId"]?.GetValue<string>(), node.Name, "workflowId");
+
+        // Checked before touching serviceProvider so a cycle/depth violation always fails with
+        // this specific, actionable message rather than a generic "not available" error on
+        // whichever service happens to resolve first.
+        var chain = subWorkflowChain ?? new HashSet<Guid>();
+        if (chain.Contains(childWorkflowId))
+        {
+            throw new InvalidOperationException(
+                $"{node.Name} would create a recursive sub-workflow cycle - workflow {childWorkflowId} is already running earlier in this call chain.");
+        }
+        if (chain.Count >= MaxSubWorkflowDepth)
+        {
+            throw new InvalidOperationException($"{node.Name} exceeded the maximum sub-workflow call depth of {MaxSubWorkflowDepth}.");
+        }
+
+        var executionService = serviceProvider?.GetService(typeof(IAutomationExecutionService)) as IAutomationExecutionService
+            ?? throw new InvalidOperationException("Sub-workflow execution is not available to the automation engine.");
+        var workflowService = serviceProvider?.GetService(typeof(IAutomationWorkflowService)) as IAutomationWorkflowService
+            ?? throw new InvalidOperationException("Sub-workflow lookup is not available to the automation engine.");
+
+        var childSnapshot = await workflowService.GetPublishedSnapshotAsync(childWorkflowId, cancellationToken)
+            ?? throw new InvalidOperationException($"{node.Name} targets a workflow that has never been published.");
+
+        var nextChain = new HashSet<Guid>(chain) { childWorkflowId };
+        var childExecution = await executionService.ExecuteAsync(
+            childWorkflowId, input.GetRawText(), AutomationExecutionModes.SubWorkflow, null, nextChain, cancellationToken);
+
+        if (childExecution.Status == AutomationExecutionStatuses.Waiting)
+        {
+            throw new InvalidOperationException(
+                $"{node.Name} cannot call '{childSnapshot.Name}' because it paused on a Wait or Approval node - sub-workflows must " +
+                "complete synchronously. Redesign the child workflow to avoid pausing, or move that step into this workflow directly.");
+        }
+        if (childExecution.Status != AutomationExecutionStatuses.Succeeded)
+        {
+            throw new InvalidOperationException($"{node.Name}'s sub-workflow '{childSnapshot.Name}' failed: {childExecution.ErrorMessage}");
+        }
+
+        var childOutputJson = string.IsNullOrWhiteSpace(childExecution.OutputJson) ? "{}" : childExecution.OutputJson;
+        var output = new JsonObject
+        {
+            ["result"] = JsonNode.Parse(childOutputJson),
+            ["subWorkflowExecutionId"] = childExecution.Id.ToString(),
+            ["subWorkflowId"] = childWorkflowId.ToString()
+        };
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    private async Task<AutomationNodeRunResult> ExecuteCrmSetDealStageAsync(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName,
+        CancellationToken cancellationToken)
+    {
+        var crmService = serviceProvider?.GetService(typeof(ICrmService)) as ICrmService
+            ?? throw new InvalidOperationException("CRM writes are not available to the automation engine.");
+        var parameters = ParseObject(node.ParametersJson, node.Name);
+        var source = RequireObject(input, node.Name);
+
+        var dealIdText = ResolveText(parameters["dealId"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
+        var dealId = ParseRequiredGuid(dealIdText, node.Name, "dealId");
+        var stage = ResolveText(parameters["stage"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
+        if (string.IsNullOrWhiteSpace(stage)) throw new InvalidOperationException($"{node.Name} requires a stage.");
+
+        var deal = await crmService.SetDealStageAsync(dealId, stage, cancellationToken);
+
+        var output = source.DeepClone().AsObject();
+        output["crmDeal"] = new JsonObject { ["dealId"] = deal.Id.ToString(), ["stage"] = deal.Stage };
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    private async Task<AutomationNodeRunResult> ExecuteCrmSaveContactAsync(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName,
+        CancellationToken cancellationToken)
+    {
+        var crmService = serviceProvider?.GetService(typeof(ICrmService)) as ICrmService
+            ?? throw new InvalidOperationException("CRM writes are not available to the automation engine.");
+        var parameters = ParseObject(node.ParametersJson, node.Name);
+        var source = RequireObject(input, node.Name);
+
+        var contactIdText = ResolveText(parameters["contactId"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
+        var fullName = ResolveText(parameters["fullName"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
+        if (string.IsNullOrWhiteSpace(fullName)) throw new InvalidOperationException($"{node.Name} requires a fullName.");
+
+        var editor = new ContactEditorModel
+        {
+            ContactId = Guid.TryParse(contactIdText, out var parsedContactId) ? parsedContactId : null,
+            FullName = fullName,
+            Email = NullIfBlank(ResolveText(parameters["email"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName)),
+            Company = NullIfBlank(ResolveText(parameters["company"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName)),
+            Status = ResolveText(parameters["status"]?.GetValue<string>() ?? ContactStatuses.Lead, input, nodeOutputsByName)
+        };
+        var contact = await crmService.SaveContactAsync(editor, cancellationToken);
+
+        var output = source.DeepClone().AsObject();
+        output["crmContact"] = new JsonObject { ["contactId"] = contact.Id.ToString(), ["fullName"] = contact.FullName };
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    private async Task<AutomationNodeRunResult> ExecuteCmsSavePageAsync(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName,
+        CancellationToken cancellationToken)
+    {
+        var cmsBuilderService = serviceProvider?.GetService(typeof(ICmsBuilderService)) as ICmsBuilderService
+            ?? throw new InvalidOperationException("CMS writes are not available to the automation engine.");
+        var parameters = ParseObject(node.ParametersJson, node.Name);
+        var source = RequireObject(input, node.Name);
+
+        var siteId = ParseRequiredGuid(parameters["siteId"]?.GetValue<string>(), node.Name, "siteId");
+        var pageIdText = ResolveText(parameters["pageId"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
+        var title = ResolveText(parameters["title"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
+        if (string.IsNullOrWhiteSpace(title)) throw new InvalidOperationException($"{node.Name} requires a title.");
+
+        var editor = new CmsPageEditorModel
+        {
+            PageId = Guid.TryParse(pageIdText, out var parsedPageId) ? parsedPageId : null,
+            SiteId = siteId,
+            Title = title,
+            Slug = ResolveText(parameters["slug"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName),
+            BlocksJson = parameters["blocksJson"]?.GetValue<string>() ?? "[]"
+        };
+        var page = await cmsBuilderService.SavePageAsync(editor, cancellationToken);
+
+        var output = source.DeepClone().AsObject();
+        output["cmsPage"] = new JsonObject { ["pageId"] = page.Id.ToString(), ["title"] = page.Title };
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    private async Task<AutomationNodeRunResult> ExecuteGrowthPublishSocialPostAsync(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName,
+        CancellationToken cancellationToken)
+    {
+        var socialPublishingService = serviceProvider?.GetService(typeof(ISocialPublishingService)) as ISocialPublishingService
+            ?? throw new InvalidOperationException("Social publishing is not available to the automation engine.");
+        var parameters = ParseObject(node.ParametersJson, node.Name);
+        var source = RequireObject(input, node.Name);
+
+        var postIdText = ResolveText(parameters["postId"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
+        var postId = ParseRequiredGuid(postIdText, node.Name, "postId");
+
+        var result = await socialPublishingService.PublishAsync(postId, cancellationToken);
+        if (!result.IsSuccess) throw new InvalidOperationException($"{node.Name} failed to publish post {postId}: {result.Message}");
+
+        var output = source.DeepClone().AsObject();
+        output["socialPublish"] = new JsonObject { ["postId"] = postId.ToString(), ["message"] = result.Message };
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    private static string? NullIfBlank(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
     private static Guid ParseRequiredGuid(string? value, string nodeName, string parameterName) =>
         Guid.TryParse(value, out var parsed)
@@ -466,11 +654,12 @@ public sealed partial class AutomationNodeRegistry(
         return SingleOutput("main", ReplaceArray(source, field, values));
     }
 
-    private static AutomationNodeRunResult ExecuteTemplate(AutomationNodeSnapshot node, JsonElement input)
+    private static AutomationNodeRunResult ExecuteTemplate(
+        AutomationNodeSnapshot node, JsonElement input, IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName)
     {
         var root = ParseObject(node.ParametersJson, node.Name);
         var output = input.ValueKind == JsonValueKind.Object ? JsonNode.Parse(input.GetRawText())!.AsObject() : new JsonObject { ["value"] = JsonNode.Parse(input.GetRawText()) };
-        output[root["outputField"]?.GetValue<string>()?.Trim() ?? "text"] = ResolveText(root["template"]?.GetValue<string>() ?? string.Empty, input);
+        output[root["outputField"]?.GetValue<string>()?.Trim() ?? "text"] = ResolveText(root["template"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
         return SingleOutput("main", JsonSerializer.SerializeToElement(output));
     }
 
@@ -484,7 +673,8 @@ public sealed partial class AutomationNodeRegistry(
         return SingleOutput("main", JsonSerializer.SerializeToElement(output));
     }
 
-    private static AutomationNodeRunResult ExecuteSet(AutomationNodeSnapshot node, JsonElement input)
+    private static AutomationNodeRunResult ExecuteSet(
+        AutomationNodeSnapshot node, JsonElement input, IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName)
     {
         var root = ParseObject(node.ParametersJson, node.Name);
         var output = input.ValueKind == JsonValueKind.Object
@@ -495,18 +685,19 @@ public sealed partial class AutomationNodeRegistry(
             foreach (var pair in values)
             {
                 output[pair.Key] = pair.Value is JsonValue value && value.TryGetValue<string>(out var text)
-                    ? JsonValue.Create(ResolveText(text, input))
+                    ? JsonValue.Create(ResolveText(text, input, nodeOutputsByName))
                     : pair.Value?.DeepClone();
             }
         }
         return SingleOutput("main", JsonSerializer.SerializeToElement(output));
     }
 
-    private static AutomationNodeRunResult ExecuteIf(AutomationNodeSnapshot node, JsonElement input)
+    private static AutomationNodeRunResult ExecuteIf(
+        AutomationNodeSnapshot node, JsonElement input, IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName)
     {
         var root = ParseObject(node.ParametersJson, node.Name);
-        var left = ResolveText(root["left"]?.GetValue<string>() ?? string.Empty, input);
-        var right = ResolveText(root["right"]?.GetValue<string>() ?? string.Empty, input);
+        var left = ResolveText(root["left"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
+        var right = ResolveText(root["right"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
         var op = root["operator"]?.GetValue<string>()?.Trim().ToLowerInvariant() ?? "equals";
         var isTrue = op switch
         {
@@ -525,16 +716,17 @@ public sealed partial class AutomationNodeRegistry(
         AutomationNodeSnapshot node,
         JsonElement input,
         string? credentialJson,
+        IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName,
         CancellationToken cancellationToken)
     {
         var root = ParseObject(node.ParametersJson, node.Name);
         var methodText = root["method"]?.GetValue<string>()?.Trim().ToUpperInvariant() ?? "GET";
-        var url = ResolveText(root["url"]?.GetValue<string>() ?? string.Empty, input);
+        var url = ResolveText(root["url"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
             throw new InvalidOperationException("HTTP Request URL must be an absolute HTTP or HTTPS URL.");
 
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        AddHeaders(headers, root["headers"] as JsonObject, input);
+        AddHeaders(headers, root["headers"] as JsonObject, input, nodeOutputsByName);
         // Node evidence (AutomationNodeExecution.OutputJson) stores this method's return value
         // verbatim, at-rest-unencrypted, visible in the Automation UI's execution history. A
         // credential's decrypted header VALUES are real secrets - an endpoint that reflects
@@ -546,18 +738,18 @@ public sealed partial class AutomationNodeRegistry(
         if (!string.IsNullOrWhiteSpace(credentialJson))
         {
             var credential = ParseObject(credentialJson, "Credential");
-            AddHeaders(headers, credential["headers"] as JsonObject, input);
+            AddHeaders(headers, credential["headers"] as JsonObject, input, nodeOutputsByName);
             if (credential["headers"] is JsonObject credentialHeaders)
             {
                 foreach (var pair in credentialHeaders)
                 {
                     if (pair.Value is JsonValue value && value.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text))
-                        credentialSecretValues.Add(ResolveText(text, input));
+                        credentialSecretValues.Add(ResolveText(text, input, nodeOutputsByName));
                 }
             }
         }
         var body = root["body"] is JsonValue bodyValue && bodyValue.TryGetValue<string>(out var bodyText)
-            ? ResolveText(bodyText, input)
+            ? ResolveText(bodyText, input, nodeOutputsByName)
             : root["body"]?.ToJsonString();
         var response = await httpClient.SendAsync(new AutomationHttpRequest(
             new HttpMethod(methodText), uri.ToString(), body, headers), cancellationToken);
@@ -597,12 +789,13 @@ public sealed partial class AutomationNodeRegistry(
         return text;
     }
 
-    private static void AddHeaders(Dictionary<string, string> destination, JsonObject? source, JsonElement input)
+    private static void AddHeaders(
+        Dictionary<string, string> destination, JsonObject? source, JsonElement input, IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName)
     {
         if (source is null) return;
         foreach (var pair in source)
             if (pair.Value is JsonValue value && value.TryGetValue<string>(out var text))
-                destination[pair.Key] = ResolveText(text, input);
+                destination[pair.Key] = ResolveText(text, input, nodeOutputsByName);
     }
 
     private static AutomationNodeRunResult SingleOutput(string port, JsonElement value)
@@ -746,9 +939,24 @@ public sealed partial class AutomationNodeRegistry(
         }
     }
 
-    private static string ResolveText(string template, JsonElement input)
+    // Two forms: {{ $json.path }} (the current node's own input - unchanged) and
+    // {{ $node("Name").json.path }} (any earlier node's last output this run, by editor-visible
+    // Name - see IAutomationNodeRegistry.ExecuteAsync's nodeOutputsByName doc comment). This is
+    // deliberately still string-interpolation only, not a general expression language - no
+    // operators/functions/array indexing - matching docs/WORKFLOW_AUTOMATION.md's capability
+    // matrix framing of this as "node references," not a "full expression editor."
+    private static string ResolveText(string template, JsonElement input, IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName = null)
     {
-        return ExpressionPattern().Replace(template, match => ResolvePath(input, match.Groups[1].Value));
+        return ExpressionPattern().Replace(template, match =>
+        {
+            if (match.Groups["node"].Success)
+            {
+                if (nodeOutputsByName is null || !nodeOutputsByName.TryGetValue(match.Groups["node"].Value, out var nodeOutput))
+                    return string.Empty;
+                return ResolvePath(nodeOutput, match.Groups["nodePath"].Value);
+            }
+            return ResolvePath(input, match.Groups["path"].Value);
+        });
     }
 
     private static string ResolvePath(JsonElement input, string path)
@@ -761,6 +969,8 @@ public sealed partial class AutomationNodeRegistry(
         return current.ValueKind == JsonValueKind.String ? current.GetString() ?? string.Empty : current.GetRawText();
     }
 
-    [GeneratedRegex(@"\{\{\s*\$json(?:\.([A-Za-z0-9_.-]+))?\s*\}\}", RegexOptions.Compiled)]
+    [GeneratedRegex(
+        @"\{\{\s*(?:\$json(?:\.(?<path>[A-Za-z0-9_.-]+))?|\$node\(\s*[""'](?<node>[^""']+)[""']\s*\)\.json(?:\.(?<nodePath>[A-Za-z0-9_.-]+))?)\s*\}\}",
+        RegexOptions.Compiled)]
     private static partial Regex ExpressionPattern();
 }

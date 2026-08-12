@@ -379,6 +379,13 @@ public sealed class SentinelGptGenerationCoordinatorTests
             string performedBy,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+
+        public Task<SentinelAiRunView> ResolvePendingToolActionAsync(
+            Guid runId,
+            bool approved,
+            string performedBy,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class TestHostApplicationLifetime : IHostApplicationLifetime

@@ -760,6 +760,35 @@ app.MapGet("/admin/sentinel/databases/{wikiDatabaseId:guid}/export.csv", async (
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("public-read");
 
+// Portable JSON export of a workflow's live draft (positions/notes included, unlike the
+// position-free publish snapshot) - imported back via AutomationTemplateService-style graph
+// rebuild (Automation.razor's Import button), which mints fresh node/connection ids and never
+// carries CredentialId across. Same Results.File download pattern as the Sentinel export
+// endpoints above.
+app.MapGet("/admin/api/automation/{workflowId:guid}/export.json", async (
+    Guid workflowId,
+    IAutomationWorkflowService workflowService,
+    CancellationToken cancellationToken) =>
+{
+    var workflow = await workflowService.GetAsync(workflowId, cancellationToken);
+    if (workflow is null)
+    {
+        return Results.NotFound();
+    }
+
+    var envelope = new AutomationWorkflowExportEnvelope(
+        1,
+        DateTimeOffset.UtcNow,
+        new AutomationWorkflowGraphPackage(workflow.Name, workflow.Description, workflow.Nodes, workflow.Connections));
+    var json = JsonSerializer.Serialize(envelope, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true });
+    return Results.File(
+        Encoding.UTF8.GetBytes(json),
+        "application/json; charset=utf-8",
+        $"{SlugForFileName(workflow.Name)}.workflow.json");
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("public-read");
+
 // AllowAnonymous at the connection level - unauthenticated viewers must be able to open
 // this connection to call JoinAsViewer(inviteToken); JoinAsBroadcaster separately checks
 // Context.User's role itself (see LiveShowHub) since the two roles share one hub.

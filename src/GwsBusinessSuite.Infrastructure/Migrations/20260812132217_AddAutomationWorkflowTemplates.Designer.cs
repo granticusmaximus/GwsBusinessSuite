@@ -3,6 +3,7 @@ using System;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GwsBusinessSuite.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260812132217_AddAutomationWorkflowTemplates")]
+    partial class AddAutomationWorkflowTemplates
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
@@ -3491,12 +3494,6 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
                     b.Property<string>("Output")
                         .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PendingToolArgumentsJson")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PendingToolName")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset?>("ReviewedAt")

@@ -111,6 +111,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<AutomationCredential> AutomationCredentials => Set<AutomationCredential>();
     public DbSet<AutomationExecution> AutomationExecutions => Set<AutomationExecution>();
     public DbSet<AutomationNodeExecution> AutomationNodeExecutions => Set<AutomationNodeExecution>();
+    public DbSet<AutomationWorkflowTemplate> AutomationWorkflowTemplates => Set<AutomationWorkflowTemplate>();
     public DbSet<SecurityAuditEvent> SecurityAuditEvents => Set<SecurityAuditEvent>();
     public DbSet<PrivacyRetentionPolicy> PrivacyRetentionPolicies => Set<PrivacyRetentionPolicy>();
     public DbSet<PrivacyRequest> PrivacyRequests => Set<PrivacyRequest>();
@@ -200,6 +201,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<SentinelDatabaseTemplate>().Property(x => x.Name).HasMaxLength(120);
         modelBuilder.Entity<SentinelDatabaseTemplate>().Property(x => x.NormalizedName).HasMaxLength(120);
         modelBuilder.Entity<SentinelDatabaseTemplate>().Property(x => x.DatabaseTitle).HasMaxLength(240);
+        modelBuilder.Entity<AutomationWorkflowTemplate>().HasIndex(x => x.NormalizedName).IsUnique();
+        modelBuilder.Entity<AutomationWorkflowTemplate>().Property(x => x.Name).HasMaxLength(120);
+        modelBuilder.Entity<AutomationWorkflowTemplate>().Property(x => x.NormalizedName).HasMaxLength(120);
         modelBuilder.Entity<SentinelNavigationEntry>()
             .HasIndex(x => new { x.Username, x.IsDatabase, x.TargetId })
             .IsUnique();

@@ -9,6 +9,7 @@
 @inject IAutomationExecutionService ExecutionService
 @inject IAutomationNodeRegistry NodeRegistry
 @inject IAutomationCredentialService CredentialService
+@inject IAutomationTemplateService TemplateService
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
 @inject ILogger<AutomationEditor> Logger
@@ -37,6 +38,8 @@ else
             <div class="d-flex flex-wrap align-items-center justify-content-end gap-2">
                 <button class="btn btn-sm btn-outline-secondary" @onclick="SaveMetadata" disabled="@_busy"><i class="bi bi-floppy me-1"></i>Save</button>
                 <button class="btn btn-sm btn-outline-secondary" @onclick="Validate" disabled="@_busy"><i class="bi bi-check2-circle me-1"></i>Validate</button>
+                <a class="btn btn-sm btn-outline-secondary" href="/admin/api/automation/@WorkflowId/export.json"><i class="bi bi-download me-1"></i>Export</a>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="OpenSaveTemplate" disabled="@_busy"><i class="bi bi-collection me-1"></i>Save as template</button>
                 <button class="btn btn-sm btn-outline-primary" @onclick="Publish" disabled="@_busy"><i class="bi bi-cloud-arrow-up me-1"></i>Publish</button>
                 <button class="btn btn-sm @(_view.Status == AutomationWorkflowStatuses.Active ? "btn-success" : "btn-outline-success")" @onclick="ToggleActive" disabled="@(_busy || _view.CurrentVersion == 0)">
                     <i class="bi @(_view.Status == AutomationWorkflowStatuses.Active ? "bi-toggle-on" : "bi-toggle-off") me-1"></i>@(_view.Status == AutomationWorkflowStatuses.Active ? "Active" : "Inactive")
@@ -136,6 +139,7 @@ else
             <div class="bottom-panel-tabs">
                 <button class="@(_bottomTab == "connections" ? "active" : "")" @onclick="ShowConnections">Connections</button>
                 <button class="@(_bottomTab == "runs" ? "active" : "")" @onclick="ShowRuns">Executions <span>@_view.RecentExecutions.Count</span></button>
+                <button class="@(_bottomTab == "versions" ? "active" : "")" @onclick="ShowVersions">Versions</button>
                 <button class="@(_bottomTab == "settings" ? "active" : "")" @onclick="ShowSettings">Workflow settings</button>
             </div>
             <div class="bottom-panel-body">
@@ -183,11 +187,46 @@ else
                         {
                             <div class="execution-wait-actions mb-3"><button class="btn btn-sm btn-outline-secondary" @onclick="CancelLatestExecution" disabled="@_busy">Cancel</button></div>
                         }
+                        else if (_latestExecution.Status == AutomationExecutionStatuses.Failed)
+                        {
+                            <div class="execution-wait-actions mb-3"><button class="btn btn-sm btn-outline-warning" @onclick="RetryFromFailedNode" disabled="@_busy"><i class="bi bi-arrow-repeat me-1"></i>Retry from failed node</button></div>
+                        }
                     }
                     <div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Status</th><th>Mode</th><th>Started</th><th>Duration</th><th></th></tr></thead><tbody>
                         @foreach (var run in _view.RecentExecutions)
                         {
                             <tr><td><span class="badge @(run.Status == AutomationExecutionStatuses.Succeeded ? "text-bg-success" : run.Status == AutomationExecutionStatuses.Failed ? "text-bg-danger" : run.Status == AutomationExecutionStatuses.Waiting ? "text-bg-warning" : "text-bg-secondary")">@run.Status</span></td><td>@run.Mode</td><td>@FormatDate(run.StartedAt)</td><td>@Duration(run.StartedAt, run.FinishedAt)</td><td class="text-end"><button class="btn btn-sm btn-link" @onclick="() => LoadExecution(run.Id)">Inspect</button></td></tr>
+                        }
+                    </tbody></table></div>
+                }
+                else if (_bottomTab == "versions")
+                {
+                    <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+                        <div><label class="form-label small fw-semibold">Compare from</label><select class="form-select form-select-sm" @bind="_diffFromVersion"><option value="0">Version…</option>@foreach (var version in _versions) { <option value="@version.VersionNumber">v@version.VersionNumber</option> }</select></div>
+                        <div><label class="form-label small fw-semibold">to</label><select class="form-select form-select-sm" @bind="_diffToVersion"><option value="0">Version…</option>@foreach (var version in _versions) { <option value="@version.VersionNumber">v@version.VersionNumber</option> }</select></div>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="ShowDiff" disabled="@(_busy || _diffFromVersion == 0 || _diffToVersion == 0)">Show diff</button>
+                    </div>
+                    @if (_diff is not null)
+                    {
+                        <div class="version-diff mb-3">
+                            @if (_diff.AddedNodes.Count == 0 && _diff.RemovedNodes.Count == 0 && _diff.ModifiedNodes.Count == 0 && _diff.AddedConnections.Count == 0 && _diff.RemovedConnections.Count == 0)
+                            {
+                                <p class="text-secondary mb-0">No differences between v@_diffFromVersion and v@_diffToVersion.</p>
+                            }
+                            else
+                            {
+                                @foreach (var node in _diff.AddedNodes) { <div class="text-success"><i class="bi bi-plus-circle me-1"></i>Added node "@node.Name" (@node.TypeKey)</div> }
+                                @foreach (var node in _diff.RemovedNodes) { <div class="text-danger"><i class="bi bi-dash-circle me-1"></i>Removed node "@node.Name" (@node.TypeKey)</div> }
+                                @foreach (var change in _diff.ModifiedNodes) { <div class="text-warning-emphasis"><i class="bi bi-pencil-square me-1"></i>Changed node "@change.Name"</div> }
+                                @foreach (var connection in _diff.AddedConnections) { <div class="text-success"><i class="bi bi-plus-circle me-1"></i>Added connection @NodeName(connection.SourceNodeId) → @NodeName(connection.TargetNodeId)</div> }
+                                @foreach (var connection in _diff.RemovedConnections) { <div class="text-danger"><i class="bi bi-dash-circle me-1"></i>Removed connection @NodeName(connection.SourceNodeId) → @NodeName(connection.TargetNodeId)</div> }
+                            }
+                        </div>
+                    }
+                    <div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Version</th><th>Published</th><th>Change summary</th><th>Nodes</th><th></th></tr></thead><tbody>
+                        @foreach (var version in _versions)
+                        {
+                            <tr><td>v@version.VersionNumber</td><td>@FormatDate(version.CreatedAt)</td><td>@version.ChangeSummary</td><td>@version.NodeCount</td><td class="text-end"><button class="btn btn-sm btn-link text-warning" disabled="@_busy" @onclick="() => RestoreVersion(version.VersionNumber)">Restore to draft</button></td></tr>
                         }
                     </tbody></table></div>
                 }
@@ -198,6 +237,23 @@ else
             </div>
         </section>
     </div>
+
+    @if (_showSaveTemplate)
+    {
+        <div class="modal-backdrop fade show"></div>
+        <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+            <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+                <div class="modal-header"><h2 class="modal-title h5">Save as template</h2><button class="btn-close" @onclick="CloseSaveTemplate" aria-label="Close"></button></div>
+                <div class="modal-body">
+                    <label class="form-label fw-semibold" for="templateName">Template name</label>
+                    <input id="templateName" class="form-control mb-3" @bind="_templateName" />
+                    <label class="form-label fw-semibold" for="templateDescription">Description</label>
+                    <textarea id="templateDescription" class="form-control" rows="3" @bind="_templateDescription"></textarea>
+                </div>
+                <div class="modal-footer"><button class="btn btn-outline-secondary" @onclick="CloseSaveTemplate">Cancel</button><button class="btn btn-primary" @onclick="SaveAsTemplate" disabled="@_busy">Save template</button></div>
+            </div></div>
+        </div>
+    }
 }
 
 @code {
@@ -217,6 +273,11 @@ else
     private int _nodeMaxTries = 1, _nodeWaitMs, _nodeTimeoutMs;
     private Guid? _connectionSource, _connectionTarget;
     private string _connectionOutput = "main", _connectionTargetInput = "main";
+    private bool _showSaveTemplate;
+    private string _templateName = "", _templateDescription = "";
+    private List<AutomationWorkflowVersionSummary> _versions = [];
+    private int _diffFromVersion, _diffToVersion;
+    private AutomationWorkflowDiff? _diff;
     private ElementReference _canvas;
     private IJSObjectReference? _module;
     private DotNetObjectReference<AutomationEditor>? _dotNetRef;
@@ -265,6 +326,12 @@ else
     private void ShowConnections() => _bottomTab = "connections";
     private void ShowRuns() => _bottomTab = "runs";
     private void ShowSettings() => _bottomTab = "settings";
+    private async Task ShowVersions()
+    {
+        _bottomTab = "versions";
+        try { _versions = (await WorkflowService.ListVersionsAsync(WorkflowId)).ToList(); }
+        catch (Exception ex) { Fail(ex, "Unable to load version history."); }
+    }
 
     private async Task AddNode(AutomationNodeDefinition definition) => await Work(async () =>
     {
@@ -312,6 +379,33 @@ else
         _latestExecution = await ExecutionService.CancelAsync(_latestExecution.Id);
         await Reload();
         _message = "Execution canceled.";
+    });
+    private async Task RetryFromFailedNode() => await Work(async () =>
+    {
+        if (_latestExecution is null) return;
+        _latestExecution = await ExecutionService.RetryFromFailedNodeAsync(_latestExecution.Id);
+        await Reload();
+        Show(_latestExecution.Status == AutomationExecutionStatuses.Succeeded ? "Retry succeeded." : _latestExecution.ErrorMessage, _latestExecution.Status != AutomationExecutionStatuses.Succeeded);
+    });
+
+    private void OpenSaveTemplate() { _templateName = _view?.Name ?? ""; _templateDescription = _view?.Description ?? ""; _showSaveTemplate = true; }
+    private void CloseSaveTemplate() => _showSaveTemplate = false;
+    private async Task SaveAsTemplate() => await Work(async () =>
+    {
+        await TemplateService.CreateFromWorkflowAsync(WorkflowId, _templateName, _templateDescription, "user");
+        _showSaveTemplate = false;
+        Show($"Saved as template \"{_templateName}\".");
+    });
+
+    private async Task ShowDiff() => await Work(async () =>
+    {
+        _diff = await WorkflowService.DiffVersionsAsync(WorkflowId, _diffFromVersion, _diffToVersion);
+    });
+    private async Task RestoreVersion(int versionNumber) => await Work(async () =>
+    {
+        await WorkflowService.RollbackToVersionAsync(WorkflowId, versionNumber, "user");
+        await Reload();
+        Show($"Restored v{versionNumber} into the editor. Publish again to make it live.");
     });
 
     private async Task Work(Func<Task> action)

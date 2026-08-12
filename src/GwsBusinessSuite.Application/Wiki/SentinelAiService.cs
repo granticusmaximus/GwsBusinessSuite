@@ -122,9 +122,14 @@ public sealed class SentinelAiService(
     private const string ToolCallingSystemPrompt =
         "You are SentinelGPT with tool access. Use search_wiki to find relevant Sentinel pages/databases and get_page to " +
         "read one specific page's full content before answering questions that need current Sentinel workspace data you " +
-        "don't already have. Call one tool at a time and stop calling tools as soon as you have enough information. " +
-        "These tools are read-only - never claim you changed application state. " +
+        "don't already have. If the user explicitly asks you to change a database row's value, call " +
+        "propose_set_database_row_property - it never writes immediately, it only records a proposal for a human to " +
+        "confirm or decline in the UI, so call it at most once per turn and then stop; do not claim the change happened " +
+        "and do not call it again to 'check' whether it was applied. search_wiki and get_page are read-only and never " +
+        "change application state. Call one tool at a time and stop calling tools as soon as you have enough information. " +
         "Give a direct, concise final answer, noting what you found and where.";
+
+    private const string ProposeSetDatabaseRowPropertyToolName = "propose_set_database_row_property";
 
     private static IReadOnlyList<OllamaToolDefinition> BuildToolCallingTools() =>
     [
@@ -135,7 +140,13 @@ public sealed class SentinelAiService(
         new(
             "get_page",
             "Fetch the full plain-text content of one Sentinel wiki page by its id (a GUID, usually taken from a prior search_wiki result).",
-            """{"type":"object","properties":{"pageId":{"type":"string","description":"The page's GUID id"}},"required":["pageId"]}""")
+            """{"type":"object","properties":{"pageId":{"type":"string","description":"The page's GUID id"}},"required":["pageId"]}"""),
+        new(
+            ProposeSetDatabaseRowPropertyToolName,
+            "Propose setting one property on a Sentinel database row. Does not write immediately - returns a preview " +
+            "that pauses the conversation for a human to confirm or decline. Only call this when the user has " +
+            "explicitly asked for a value to be changed, not merely discussed.",
+            """{"type":"object","properties":{"wikiDatabaseId":{"type":"string","description":"The database's GUID id"},"rowId":{"type":"string","description":"The row's GUID id"},"propertyId":{"type":"string","description":"The property's GUID id"},"value":{"type":"string","description":"The new value to propose"}},"required":["wikiDatabaseId","rowId","propertyId","value"]}""")
     ];
 
     public async IAsyncEnumerable<SentinelAiStreamChunk> StreamToolCallingConversationAsync(
@@ -211,6 +222,20 @@ public sealed class SentinelAiService(
             foreach (var toolCall in response.ToolCalls)
             {
                 yield return new SentinelAiStreamChunk(string.Empty, null, DescribeToolCall(toolCall));
+
+                // A write proposal ends the generation outright rather than feeding a tool
+                // result back for another model round - the human decides next, not the model,
+                // so there is no "next round" to continue into until ResolvePendingToolActionAsync
+                // is called separately from the UI.
+                if (toolCall.Name == ProposeSetDatabaseRowPropertyToolName)
+                {
+                    var previewText = await ProposeSetDatabaseRowPropertyAsync(db, toolCall, run, cancellationToken);
+                    db.SentinelAiRuns.Add(run);
+                    await db.SaveChangesAsync(cancellationToken);
+                    yield return new SentinelAiStreamChunk(previewText, ToView(run, citations));
+                    yield break;
+                }
+
                 var toolResult = await ExecuteToolCallAsync(db, toolCall, performedBy, citations, cancellationToken);
                 messages.Add(new OllamaChatMessage("tool", toolResult));
             }
@@ -299,6 +324,128 @@ public sealed class SentinelAiService(
             logger?.LogWarning(ex, "SentinelGPT tool call '{Tool}' failed.", toolCall.Name);
             return """{"error":"Tool execution failed"}""";
         }
+    }
+
+    // Never writes - only validates and records what WOULD be written, mutating run into either
+    // a Pending proposal (success) or a Failed one (bad ids/no access/missing target), so the
+    // caller can persist+yield+break uniformly either way. The actual write happens later, only
+    // if a human calls ResolvePendingToolActionAsync(approved: true).
+    private async Task<string> ProposeSetDatabaseRowPropertyAsync(
+        IAppDbContext db, OllamaToolCall toolCall, SentinelAiRun run, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var arguments = JsonNode.Parse(toolCall.ArgumentsJson) as JsonObject ?? [];
+            if (!Guid.TryParse(arguments["wikiDatabaseId"]?.GetValue<string>(), out var wikiDatabaseId)
+                || !Guid.TryParse(arguments["rowId"]?.GetValue<string>(), out var rowId)
+                || !Guid.TryParse(arguments["propertyId"]?.GetValue<string>(), out var propertyId))
+            {
+                run.Status = SentinelAiRunStatuses.Failed;
+                run.Output = "That proposal referenced an invalid database, row, or property id.";
+                return run.Output;
+            }
+            var value = arguments["value"]?.GetValue<string>() ?? string.Empty;
+
+            if (wikiDatabaseService is null || accessService is null)
+            {
+                run.Status = SentinelAiRunStatuses.Failed;
+                run.Output = "Proposing database changes is not available right now.";
+                return run.Output;
+            }
+            if (!await accessService.CanAccessAsync(wikiDatabaseId, isDatabase: true, run.CreatedBy, SentinelAccessLevels.Edit, cancellationToken))
+            {
+                run.Status = SentinelAiRunStatuses.Failed;
+                run.Output = "You don't have edit access to that database.";
+                return run.Output;
+            }
+
+            var database = await wikiDatabaseService.GetDatabaseAsync(wikiDatabaseId, cancellationToken);
+            var property = database?.Properties.FirstOrDefault(item => item.Id == propertyId);
+            var row = database?.Rows.FirstOrDefault(item => item.Id == rowId);
+            if (database is null || property is null || row is null)
+            {
+                run.Status = SentinelAiRunStatuses.Failed;
+                run.Output = "That database, row, or property no longer exists.";
+                return run.Output;
+            }
+
+            run.Status = SentinelAiRunStatuses.Pending;
+            run.PendingToolName = ProposeSetDatabaseRowPropertyToolName;
+            run.PendingToolArgumentsJson = JsonSerializer.Serialize(new { wikiDatabaseId, rowId, propertyId, value });
+            run.Output =
+                $"I'd like to set \"{property.Name}\" to \"{value}\" on a row in \"{database.Title}\". " +
+                "Confirm to apply this change, or decline to leave it as-is.";
+            return run.Output;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "SentinelGPT propose-write tool call failed.");
+            run.Status = SentinelAiRunStatuses.Failed;
+            run.Output = "That proposal could not be prepared.";
+            return run.Output;
+        }
+    }
+
+    public async Task<SentinelAiRunView> ResolvePendingToolActionAsync(
+        Guid runId, bool approved, string performedBy, CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var run = await db.SentinelAiRuns.FirstOrDefaultAsync(item => item.Id == runId, cancellationToken)
+            ?? throw new KeyNotFoundException("This response was not found.");
+        if (run.Status != SentinelAiRunStatuses.Pending)
+        {
+            throw new InvalidOperationException("This proposal has already been resolved.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (!approved)
+        {
+            run.Status = SentinelAiRunStatuses.Cancelled;
+            run.Output = "Declined - no change was made.";
+            run.ReviewedAt = now;
+            run.ReviewedBy = performedBy;
+            run.PendingToolName = null;
+            run.PendingToolArgumentsJson = null;
+            await db.SaveChangesAsync(cancellationToken);
+            return ToView(run, []);
+        }
+
+        if (wikiDatabaseService is null || accessService is null)
+        {
+            throw new InvalidOperationException("Database writes are not available right now.");
+        }
+        if (string.IsNullOrWhiteSpace(run.PendingToolArgumentsJson))
+        {
+            throw new InvalidOperationException("This proposal's details are no longer available.");
+        }
+        var arguments = JsonSerializer.Deserialize<JsonElement>(run.PendingToolArgumentsJson);
+        var wikiDatabaseId = arguments.GetProperty("wikiDatabaseId").GetGuid();
+        var rowId = arguments.GetProperty("rowId").GetGuid();
+        var propertyId = arguments.GetProperty("propertyId").GetGuid();
+        var value = arguments.GetProperty("value").GetString() ?? string.Empty;
+
+        // Re-checked here rather than trusted from proposal time - access could have changed in
+        // the interval, and confirmation is the moment the write actually happens.
+        if (!await accessService.CanAccessAsync(wikiDatabaseId, isDatabase: true, performedBy, SentinelAccessLevels.Edit, cancellationToken))
+        {
+            throw new InvalidOperationException("You don't have edit access to that database.");
+        }
+
+        // "sentinelgpt-tool", not "automation-engine": WikiDatabaseService.SaveRowAsync's
+        // loop-prevention check only skips re-firing database.rowChangedTrigger for the literal
+        // actor "automation-engine" - this write intentionally still fires any configured
+        // trigger, since a human just confirmed it and a downstream automation reacting to it is
+        // the desired outcome, not a robotic loop.
+        await wikiDatabaseService.SaveInlineCellAsync(wikiDatabaseId, rowId, propertyId, value, "sentinelgpt-tool", cancellationToken);
+
+        run.Status = SentinelAiRunStatuses.Completed;
+        run.Output = "Done - the change was applied.";
+        run.ReviewedAt = now;
+        run.ReviewedBy = performedBy;
+        run.PendingToolName = null;
+        run.PendingToolArgumentsJson = null;
+        await db.SaveChangesAsync(cancellationToken);
+        return ToView(run, []);
     }
 
     private async IAsyncEnumerable<SentinelAiStreamChunk> StreamGroundedConversationAsync(

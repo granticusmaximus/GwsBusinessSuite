@@ -65,8 +65,8 @@ manual entries with generated evidence where practical.
 
 | Check | Priority | Current evidence | Status |
 | --- | --- | --- | --- |
-| Release solution build | P0 | 0 warnings/errors on 2026-08-11 (commit `4b993ee`) | Pass |
-| Full automated suite | P0 | 1098 passed, 0 failed on 2026-08-11 local Release validation, via `verify-release.sh` | Pass |
+| Release solution build | P0 | 0 warnings/errors on 2026-08-12 (Workflow Automation engine additions) | Pass |
+| Full automated suite | P0 | 0 failed on 2026-08-12 local Release validation, via `verify-release.sh` (adds 16 new Workflow Automation cases to the 2026-08-11 baseline of 1098) | Pass |
 | Direct/transitive NuGet vulnerability audit | P0 | No known vulnerable packages on 2026-08-11 | Pass |
 | Docker Compose rendering | P0 | `docker compose config --quiet` on 2026-08-11 | Pass |
 | SentinelGPT response-length UI | P1 | Authenticated desktop and 390px Playwright smoke on 2026-08-11 (part of the full automated suite) | Pass |
@@ -75,6 +75,8 @@ manual entries with generated evidence where practical.
 | Operational failure alerting (email on background-job/backup/automation failure) | P1 | `OperationalAlertService` unit-tested (send, per-source cooldown throttling, opt-in-only, never-throws) on 2026-08-11 | Local pass; no controlled failure has been triggered against the deployed SMTP config |
 | Operational data retention purge (automation/social-alert/live-show/app-gen/news/CJ-commission/podcast tables) | P1 | `OperationalDataRetentionService` unit-tested (per-table cutoffs, terminal-status-only automation purge, node-execution cascade, live-show file deletion) on 2026-08-11 | Local pass |
 | CRM deal/pipeline board | P1 | `CrmService` deal create/update/stage-move/delete and dashboard cache-invalidation unit-tested on 2026-08-11 | Local pass; no browser journey yet |
+| Workflow Automation engine additions (sub-workflows, failed-node retry, templates, import/export, version diff/rollback, `$node(...)` expression references, CRM/CMS/Growth action nodes) | P1 | 16 new `AutomationWorkflowTests` cases plus the existing suite unit-test each addition on 2026-08-12; full `verify-release.sh` run (build, audit, Compose, full suite) passed the same day | Local pass; no browser journey against the new UI (Save as template, Import/Export, Versions tab, Retry from failed node) yet; pinned/mock execution data and CJ/storage nodes remain unbuilt |
+| SentinelGPT governed write tool (`propose_set_database_row_property`: authorization, structured input, preview/confirm, idempotency, audit evidence) | P1 | 5 new `SentinelAiServiceTests` cases (propose-without-writing, confirm-executes, decline-leaves-untouched, double-resolve rejected, access-denied) on 2026-08-12 | Local pass; no browser journey through the Confirm/Decline UI yet; this is one action, not the full "every enabled action" gate |
 | Mandatory portal MFA | P0 | TOTP/recovery/replay tests plus local browser enrollment and returning-login journeys | Local pass; deployed acceptance required |
 | Security audit ledger | P0 | Hash-chain, secret-metadata rejection, encrypted-network, account-event tests and local admin browser journey | Local pass; deployed acceptance required |
 | Privacy and incident operations | P0 | Identity-gated subject export, one-month rights clock, retention preview, incident register, and 72-hour breach clock tests | Local pass; legal policy approval and deployed acceptance required |
@@ -157,6 +159,12 @@ manual entries with generated evidence where practical.
   correction, refusal boundaries, first-token latency, and total response time.
 - [ ] Every enabled action uses authorization, structured input, preview/confirmation where
   consequential, idempotency, audit evidence, and a confirmed result.
+  <!-- 2026-08-12: the tool-calling loop's first write-capable tool,
+  propose_set_database_row_property, now has all five properties with automated (unit) test
+  evidence - see docs/SENTINELGPT_AGENT_SETUP.md's "Governed write actions" section. search_wiki
+  and get_page (read-only) predate this and needed none of the five. Box stays unchecked: this is
+  one action, not "every enabled action" as a category, and none of it has Browser-class evidence
+  (a Playwright journey through the Confirm/Decline UI) yet. -->
 - [ ] Production latency objectives are established from actual droplet measurements and met.
 
 ### Growth Studio
@@ -175,7 +183,15 @@ manual entries with generated evidence where practical.
   approvals, cancellation, timeout, checkpoint, restart recovery, and evidence pass.
 - [ ] Sub-workflows, partial execution, failed-node retry, templates, import/export,
   diff/restore, pinned data, and expression tooling pass.
+  <!-- 2026-08-12: sub-workflows, failed-node retry, templates, import/export, diff/restore, and
+  $node(...) expression references are built with automated (unit) test evidence - see the
+  Workflow Automation engine additions row in the baseline table above. Still open: pinned/mock
+  execution data, and Browser-class evidence for the new UI. Box stays unchecked per the evidence
+  rules until both land. -->
 - [ ] GWS nodes cover Sentinel, CMS, CRM, Growth/social, CJ, storage, and governed AI.
+  <!-- 2026-08-12: CRM (setDealStage, saveContact), CMS (savePage), and Growth (publishSocialPost)
+  action nodes now exist with automated test evidence. Still open: CJ and storage nodes, and any
+  CRM/CMS/Growth *trigger* nodes (only actions were built this pass - see docs/WORKFLOW_AUTOMATION.md). -->
 - [ ] Credential isolation, rotation/audit, projects/RBAC, concurrency, retention, metrics, and
   OpenTelemetry gates pass.
 

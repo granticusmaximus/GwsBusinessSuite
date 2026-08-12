@@ -365,6 +365,14 @@ public static class SentinelAiRunStatuses
     public const string Approved = "approved";
     public const string Rejected = "rejected";
     public const string Failed = "failed";
+    // A tool-calling-loop write proposal (see SentinelAiService.ProposeSetDatabaseRowPropertyAsync)
+    // awaiting human confirmation - distinct from Approved/Rejected, which are the unrelated
+    // "teach SentinelGPT from this answer" learning-memory review states on a completed chat
+    // turn (SentinelGpt.razor's thumbs up/down). Resolved via
+    // ISentinelAiService.ResolvePendingToolActionAsync into either Completed (executed) or
+    // Cancelled (declined) - never Approved/Rejected, to avoid colliding with that separate flow.
+    public const string Pending = "pending";
+    public const string Cancelled = "cancelled";
 }
 
 public sealed class SentinelAiRun : AuditableEntity
@@ -383,6 +391,11 @@ public sealed class SentinelAiRun : AuditableEntity
     // the answer is (and isn't) backed by. A lightweight JSON column rather than a child
     // table, same tier of complexity as AutomationNode.ParametersJson.
     public string CitationsJson { get; set; } = "[]";
+    // Set only when Status == Pending: the exact tool call to execute if a human confirms it,
+    // captured at proposal time so confirmation always executes precisely what was previewed
+    // rather than re-deriving it from a later model turn. Null once resolved (Completed/Cancelled).
+    public string? PendingToolName { get; set; }
+    public string? PendingToolArgumentsJson { get; set; }
 }
 
 // Durable copy of a Notion-hosted file. Notion API file URLs are signed and expire, so
@@ -1580,6 +1593,7 @@ public static class AutomationExecutionModes
     public const string Schedule = "Schedule";
     public const string Retry = "Retry";
     public const string DatabaseTrigger = "DatabaseTrigger";
+    public const string SubWorkflow = "SubWorkflow";
 }
 
 public sealed class AutomationWorkflow : AuditableEntity
@@ -1696,6 +1710,21 @@ public sealed class AutomationNodeExecution : AuditableEntity
     public DateTimeOffset? FinishedAt { get; set; }
     public long? FinishedAtUnixSeconds { get; set; }
     public AutomationExecution? Execution { get; set; }
+}
+
+// A point-in-time copy of a workflow's editable draft (node positions/notes included, unlike
+// the position-free publish snapshot in AutomationWorkflowVersion), captured via
+// AutomationTemplateService.CreateFromWorkflowAsync. Instantiating a template always mints
+// fresh node/connection identities (AutomationWorkflowService.CreateFromGraphAsync) so the new
+// workflow is fully independent of both the source workflow and every other instantiation -
+// same convention as SentinelDatabaseTemplate/SentinelPageTemplate.
+public sealed class AutomationWorkflowTemplate : AuditableEntity
+{
+    public required string Name { get; set; }
+    public string NormalizedName { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string TagsCsv { get; set; } = string.Empty;
+    public string SnapshotJson { get; set; } = "{}";
 }
 
 // Congressional Record floor-proceedings text for a single chamber/day, "saved for future

@@ -1,8 +1,10 @@
 @page "/admin/automation"
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "AdminOnly")]
+@using System.Text.Json
 @using GwsBusinessSuite.Application.Automation
 @inject IAutomationWorkflowService WorkflowService
+@inject IAutomationTemplateService TemplateService
 @inject NavigationManager Navigation
 @inject ILogger<Automation> Logger
 
@@ -13,7 +15,13 @@
         <h1><i class="bi bi-diagram-3-fill me-2 text-primary"></i>Workflow Automation</h1>
         <p>Build, publish, run, and inspect durable business automations.</p>
     </div>
-    <div class="d-flex gap-2"><a class="btn btn-outline-secondary" href="/admin/automation/credentials"><i class="bi bi-key-fill me-1"></i>Credentials</a><button class="btn btn-primary" @onclick="OpenCreate"><i class="bi bi-plus-lg me-1"></i>New workflow</button></div>
+    <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary" href="/admin/automation/credentials"><i class="bi bi-key-fill me-1"></i>Credentials</a>
+        <label class="btn btn-outline-secondary mb-0" for="importWorkflowFile"><i class="bi bi-upload me-1"></i>Import @if (_importing) { <span class="spinner-border spinner-border-sm ms-1"></span> }</label>
+        <InputFile id="importWorkflowFile" class="visually-hidden" OnChange="ImportWorkflowAsync" accept=".json,application/json" />
+        <button class="btn btn-outline-secondary" @onclick="OpenTemplates"><i class="bi bi-collection me-1"></i>New from template</button>
+        <button class="btn btn-primary" @onclick="OpenCreate"><i class="bi bi-plus-lg me-1"></i>New workflow</button>
+    </div>
 </div>
 
 @if (!string.IsNullOrWhiteSpace(_error))
@@ -117,11 +125,45 @@ else
     </div>
 }
 
+@if (_showTemplates)
+{
+    <div class="modal-backdrop fade show"></div>
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+        <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+            <div class="modal-header"><h2 class="modal-title h5">New workflow from template</h2><button class="btn-close" @onclick="CloseTemplates" aria-label="Close"></button></div>
+            <div class="modal-body">
+                @if (_templates.Count == 0)
+                {
+                    <p class="text-secondary mb-0">No templates yet. Open a workflow and use "Save as template" to create one.</p>
+                }
+                else
+                {
+                    <div class="list-group">
+                        @foreach (var template in _templates)
+                        {
+                            <div class="list-group-item d-flex justify-content-between align-items-center gap-2">
+                                <div>
+                                    <div class="fw-semibold">@template.Name</div>
+                                    <div class="small text-secondary">@template.NodeCount nodes @(string.IsNullOrWhiteSpace(template.Description) ? "" : $"· {template.Description}")</div>
+                                </div>
+                                <button class="btn btn-sm btn-outline-primary flex-shrink-0" disabled="@_busy" @onclick="() => UseTemplate(template.Id)">Use template</button>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="modal-footer"><button class="btn btn-outline-secondary" @onclick="CloseTemplates">Close</button></div>
+        </div></div>
+    </div>
+}
+
 @code {
     private List<AutomationWorkflowSummary> _workflows = [];
     private List<AutomationRecentFailureView> _recentFailures = [];
-    private bool _loading = true, _busy, _showCreate;
+    private List<AutomationWorkflowTemplateSummary> _templates = [];
+    private bool _loading = true, _busy, _showCreate, _showTemplates, _importing;
     private string _search = "", _statusFilter = "", _newName = "", _newDescription = "", _error = "";
+    private const long MaxImportBytes = 5 * 1024 * 1024;
 
     private List<AutomationWorkflowSummary> FilteredWorkflows => _workflows.Where(workflow =>
         (string.IsNullOrWhiteSpace(_search) || workflow.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) || workflow.Description.Contains(_search, StringComparison.OrdinalIgnoreCase))
@@ -147,6 +189,49 @@ else
         try { var created = await WorkflowService.CreateAsync(_newName, _newDescription); Navigation.NavigateTo($"/admin/automation/{created.Id}"); }
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; }
+    }
+
+    private async Task OpenTemplates()
+    {
+        _error = "";
+        try { _templates = (await TemplateService.ListAsync()).ToList(); _showTemplates = true; }
+        catch (Exception ex) { Logger.LogError(ex, "Unable to load workflow templates."); _error = ex.Message; }
+    }
+    private void CloseTemplates() => _showTemplates = false;
+    private async Task UseTemplate(Guid templateId)
+    {
+        _busy = true; _error = "";
+        try
+        {
+            var created = await TemplateService.InstantiateAsync(templateId, string.Empty, "user");
+            Navigation.NavigateTo($"/admin/automation/{created.Id}");
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    // Import always creates a brand-new workflow with fresh node/connection ids
+    // (IAutomationWorkflowService.CreateFromGraphAsync) rather than merging into an existing
+    // draft - a v1 scope decision to avoid the risk of corrupting an in-progress graph.
+    private async Task ImportWorkflowAsync(InputFileChangeEventArgs args)
+    {
+        if (args.File.Size > MaxImportBytes) { _error = $"Workflow export files are limited to {MaxImportBytes / 1024 / 1024} MB."; return; }
+        _importing = true; _error = "";
+        try
+        {
+            await using var stream = args.File.OpenReadStream(MaxImportBytes);
+            using var reader = new StreamReader(stream, detectEncodingFromByteOrderMarks: true);
+            var json = await reader.ReadToEndAsync();
+            var envelope = JsonSerializer.Deserialize<AutomationWorkflowExportEnvelope>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                ?? throw new InvalidOperationException("This file could not be read as a workflow export.");
+            if (envelope.FormatVersion != 1) throw new InvalidOperationException($"Unsupported export format version {envelope.FormatVersion}.");
+
+            var created = await WorkflowService.CreateFromGraphAsync(
+                envelope.Workflow.Name, envelope.Workflow.Description, envelope.Workflow.Nodes, envelope.Workflow.Connections, "user");
+            Navigation.NavigateTo($"/admin/automation/{created.Id}");
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Unable to import workflow export."); _error = ex.Message; }
+        finally { _importing = false; }
     }
     private static string StatusClass(string status) => status == "Active" ? "text-bg-success" : status == "Inactive" ? "text-bg-secondary" : "text-bg-warning";
     private static string FormatLastRun(DateTimeOffset? value) => value is null ? "Never run" : value.Value.ToLocalTime().ToString("MMM d, h:mm tt");

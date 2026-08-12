@@ -26,6 +26,7 @@ public sealed class AutomationExecutionService(
         string inputJson = "{}",
         string mode = AutomationExecutionModes.Manual,
         Guid? retryOfExecutionId = null,
+        IReadOnlySet<Guid>? subWorkflowChain = null,
         CancellationToken cancellationToken = default)
     {
         JsonElement input;
@@ -66,7 +67,7 @@ public sealed class AutomationExecutionService(
             var frontier = new Frontier { LastOutput = input.Clone() };
             foreach (var trigger in startNodes) frontier.Queue.Enqueue((trigger.Id, input.Clone(), "main"));
             return frontier;
-        }, cancellationToken);
+        }, subWorkflowChain, cancellationToken);
     }
 
     public async Task<AutomationExecutionView> ResumeAsync(
@@ -139,7 +140,7 @@ public sealed class AutomationExecutionService(
                 execution.ResumeToken = null;
             }
             return frontier;
-        }, cancellationToken);
+        }, null, cancellationToken);
     }
 
     public async Task<AutomationExecutionView> CancelAsync(Guid executionId, CancellationToken cancellationToken = default)
@@ -185,12 +186,14 @@ public sealed class AutomationExecutionService(
         AutomationExecution execution,
         AutomationWorkflowSnapshot snapshot,
         Func<Frontier> buildFrontier,
+        IReadOnlySet<Guid>? subWorkflowChain,
         CancellationToken cancellationToken)
     {
+        Frontier? frontier = null;
         try
         {
-            var frontier = buildFrontier();
-            var paused = await RunLoopAsync(execution, snapshot, frontier, cancellationToken);
+            frontier = buildFrontier();
+            var paused = await RunLoopAsync(execution, snapshot, frontier, subWorkflowChain, cancellationToken);
             if (!paused)
             {
                 execution.Status = AutomationExecutionStatuses.Succeeded;
@@ -212,7 +215,11 @@ public sealed class AutomationExecutionService(
         {
             execution.Status = AutomationExecutionStatuses.Failed;
             execution.ErrorMessage = ex.Message;
-            execution.PendingStateJson = "{}";
+            // Preserves whatever siblings/merge-buffers/node-outputs hadn't run yet at the
+            // moment of failure (mirrors PauseAsync's checkpoint) instead of discarding it -
+            // RetryFromFailedNodeAsync reconstructs a frontier from this plus the failed node's
+            // own persisted AutomationNodeExecution.InputJson.
+            execution.PendingStateJson = SerializeFrontier(frontier ?? new Frontier());
         }
 
         if (execution.Status is AutomationExecutionStatuses.Succeeded or AutomationExecutionStatuses.Failed or AutomationExecutionStatuses.Canceled)
@@ -246,6 +253,7 @@ public sealed class AutomationExecutionService(
         AutomationExecution execution,
         AutomationWorkflowSnapshot snapshot,
         Frontier frontier,
+        IReadOnlySet<Guid>? subWorkflowChain,
         CancellationToken cancellationToken)
     {
         // Resolved once per run (not per node) and threaded down to nodes that need to check
@@ -297,9 +305,17 @@ public sealed class AutomationExecutionService(
 
             var result = node.IsDisabled
                 ? SingleItemResult("main", nodeInput)
-                : await ExecuteNodeWithEvidenceAsync(execution, node, nodeInput, workflowOwnerUsername, cancellationToken);
+                : await ExecuteNodeWithEvidenceAsync(execution, node, nodeInput, workflowOwnerUsername, subWorkflowChain, frontier.NodeOutputsByName, cancellationToken);
             var latestItem = result.Outputs.Values.SelectMany(items => items).LastOrDefault();
-            if (latestItem.ValueKind != JsonValueKind.Undefined) frontier.LastOutput = latestItem.Clone();
+            if (latestItem.ValueKind != JsonValueKind.Undefined)
+            {
+                frontier.LastOutput = latestItem.Clone();
+                // Keyed by Name (not Id) so {{ $node("Name").json.path }} expressions can address
+                // it - see IAutomationNodeRegistry.ExecuteAsync's nodeOutputsByName doc comment.
+                // "Last output" only, matching frontier.LastOutput's own single-item semantics -
+                // a fan-out node's earlier items aren't individually addressable this way.
+                frontier.NodeOutputsByName[node.Name] = latestItem.Clone();
+            }
 
             if (outgoing.TryGetValue(node.Id, out var connections))
             {
@@ -397,6 +413,8 @@ public sealed class AutomationExecutionService(
         AutomationNodeSnapshot node,
         JsonElement input,
         string? workflowOwnerUsername,
+        IReadOnlySet<Guid>? subWorkflowChain,
+        IReadOnlyDictionary<string, JsonElement> nodeOutputsByName,
         CancellationToken cancellationToken)
     {
         var maxAttempts = node.RetryOnFail ? Math.Clamp(node.MaxTries, 1, 10) : 1;
@@ -425,8 +443,8 @@ public sealed class AutomationExecutionService(
                     ? await credentialService.GetDecryptedDataAsync(node.CredentialId.Value, cancellationToken)
                     : null;
                 var result = node.TimeoutMs > 0
-                    ? await ExecuteWithTimeoutAsync(node, input, credentialJson, workflowOwnerUsername, cancellationToken)
-                    : await nodeRegistry.ExecuteAsync(node, input, credentialJson, workflowOwnerUsername, cancellationToken);
+                    ? await ExecuteWithTimeoutAsync(node, input, credentialJson, workflowOwnerUsername, subWorkflowChain, nodeOutputsByName, cancellationToken)
+                    : await nodeRegistry.ExecuteAsync(node, input, credentialJson, workflowOwnerUsername, subWorkflowChain, nodeOutputsByName, cancellationToken);
                 var finishedAt = timeProvider.GetUtcNow();
                 evidence.Status = AutomationExecutionStatuses.Succeeded;
                 evidence.OutputJson = result.DisplayOutputJson;
@@ -464,6 +482,8 @@ public sealed class AutomationExecutionService(
         JsonElement input,
         string? credentialJson,
         string? workflowOwnerUsername,
+        IReadOnlySet<Guid>? subWorkflowChain,
+        IReadOnlyDictionary<string, JsonElement> nodeOutputsByName,
         CancellationToken cancellationToken)
     {
         var timeoutMs = Math.Clamp(node.TimeoutMs, 100, 600_000);
@@ -471,7 +491,7 @@ public sealed class AutomationExecutionService(
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token);
         try
         {
-            return await nodeRegistry.ExecuteAsync(node, input, credentialJson, workflowOwnerUsername, linked.Token);
+            return await nodeRegistry.ExecuteAsync(node, input, credentialJson, workflowOwnerUsername, subWorkflowChain, nodeOutputsByName, linked.Token);
         }
         catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
@@ -531,7 +551,8 @@ public sealed class AutomationExecutionService(
             frontier.Queue.Select(item => new FrontierItemDto(item.NodeId, item.Input, item.TargetInput)).ToList(),
             frontier.MergeBuffers.SelectMany(nodeEntry => nodeEntry.Value.Select(portEntry =>
                 new MergeBufferDto(nodeEntry.Key, portEntry.Key, portEntry.Value.ToList()))).ToList(),
-            frontier.LastOutput.ValueKind == JsonValueKind.Undefined ? null : frontier.LastOutput);
+            frontier.LastOutput.ValueKind == JsonValueKind.Undefined ? null : frontier.LastOutput,
+            frontier.NodeOutputsByName.Count == 0 ? null : new Dictionary<string, JsonElement>(frontier.NodeOutputsByName));
         return JsonSerializer.Serialize(dto);
     }
 
@@ -549,7 +570,67 @@ public sealed class AutomationExecutionService(
             ports[buffer.Port] = new Queue<JsonElement>(buffer.Items.Select(value => value.Clone()));
         }
         if (dto.LastOutput.HasValue) frontier.LastOutput = dto.LastOutput.Value.Clone();
+        if (dto.NodeOutputsByName is not null)
+            foreach (var pair in dto.NodeOutputsByName) frontier.NodeOutputsByName[pair.Key] = pair.Value.Clone();
         return frontier;
+    }
+
+    // Reconstructs a frontier for a failed execution and re-runs it from the node that failed,
+    // instead of the whole workflow - the same underlying primitive ResumeAsync already uses
+    // ("deserialize a frontier, feed it to RunLoopAsync"), seeded differently: prepend one new
+    // item for the failed node using its own persisted AutomationNodeExecution.InputJson, ahead
+    // of whatever the execution's failure-time checkpoint preserved for its still-pending
+    // siblings/merge buffers.
+    public async Task<AutomationExecutionView> RetryFromFailedNodeAsync(Guid executionId, CancellationToken cancellationToken = default)
+    {
+        var original = await db.AutomationExecutions.AsNoTracking().FirstOrDefaultAsync(item => item.Id == executionId, cancellationToken)
+            ?? throw new KeyNotFoundException("Execution was not found.");
+        if (original.Status != AutomationExecutionStatuses.Failed)
+            throw new InvalidOperationException($"Execution is {original.Status}, not Failed, and cannot be retried from its failed node.");
+
+        var failedNode = await db.AutomationNodeExecutions.AsNoTracking()
+            .Where(item => item.ExecutionId == executionId && item.Status == AutomationExecutionStatuses.Failed)
+            .OrderByDescending(item => item.Attempt)
+            .ThenByDescending(item => item.StartedAtUnixSeconds)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException("This execution has no failed node to retry from.");
+
+        var snapshot = await workflowService.GetSnapshotByVersionAsync(original.WorkflowId, original.WorkflowVersion, cancellationToken)
+            ?? throw new InvalidOperationException("The workflow version this execution ran on is no longer available.");
+
+        var now = timeProvider.GetUtcNow();
+        var retry = new AutomationExecution
+        {
+            WorkflowId = original.WorkflowId,
+            WorkflowVersion = original.WorkflowVersion,
+            Mode = AutomationExecutionModes.Retry,
+            Status = AutomationExecutionStatuses.Running,
+            InputJson = original.InputJson,
+            StartedAt = now,
+            StartedAtUnixSeconds = now.ToUnixTimeSeconds(),
+            RetryOfExecutionId = original.Id,
+            HeartbeatAtUnixSeconds = now.ToUnixTimeSeconds(),
+            CreatedBy = "automation-engine"
+        };
+        db.AutomationExecutions.Add(retry);
+        await db.SaveChangesAsync(cancellationToken);
+
+        var failedInput = JsonDocument.Parse(
+            string.IsNullOrWhiteSpace(failedNode.InputJson) ? "{}" : failedNode.InputJson).RootElement.Clone();
+
+        return await RunToCompletionAsync(retry, snapshot, () =>
+        {
+            var preserved = DeserializeFrontier(original.PendingStateJson);
+            var frontier = new Frontier { LastOutput = failedInput.Clone() };
+            // The failed node goes first so it runs before whatever sibling/merge work the
+            // execution had already checkpointed as still-pending at the moment it failed.
+            frontier.Queue.Enqueue((failedNode.NodeId, failedInput.Clone(), "main"));
+            foreach (var item in preserved.Queue) frontier.Queue.Enqueue(item);
+            foreach (var pair in preserved.MergeBuffers) frontier.MergeBuffers[pair.Key] = pair.Value;
+            foreach (var pair in preserved.NodeOutputsByName) frontier.NodeOutputsByName[pair.Key] = pair.Value;
+            if (preserved.LastOutput.ValueKind != JsonValueKind.Undefined) frontier.LastOutput = preserved.LastOutput;
+            return frontier;
+        }, null, cancellationToken);
     }
 
     private async Task<AutomationExecutionView> LoadExecutionAsync(Guid executionId, CancellationToken cancellationToken)
@@ -565,13 +646,22 @@ public sealed class AutomationExecutionService(
         public Queue<(Guid NodeId, JsonElement Input, string TargetInput)> Queue { get; } = new();
         public Dictionary<Guid, Dictionary<string, Queue<JsonElement>>> MergeBuffers { get; } = new();
         public JsonElement LastOutput { get; set; }
+        // Keyed by node Name, not Id - see IAutomationNodeRegistry.ExecuteAsync's
+        // nodeOutputsByName doc comment for why. Persisted through checkpoint/resume so
+        // {{ $node("Name").json.path }} expressions keep working across a Wait/Approval pause,
+        // not just within a single unbroken run.
+        public Dictionary<string, JsonElement> NodeOutputsByName { get; } = new();
     }
 
     private sealed record FrontierItemDto(Guid NodeId, JsonElement Input, string TargetInput);
 
     private sealed record MergeBufferDto(Guid NodeId, string Port, List<JsonElement> Items);
 
-    private sealed record FrontierDto(List<FrontierItemDto> Queue, List<MergeBufferDto> MergeBuffers, JsonElement? LastOutput);
+    private sealed record FrontierDto(
+        List<FrontierItemDto> Queue,
+        List<MergeBufferDto> MergeBuffers,
+        JsonElement? LastOutput,
+        Dictionary<string, JsonElement>? NodeOutputsByName = null);
 
     private sealed class ExecutionCanceledExternallyException : Exception;
 }

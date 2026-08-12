@@ -23,6 +23,27 @@ public interface IAutomationWorkflowService
     // Failed executions across every workflow, most recent first - an admin currently has no
     // way to see this without opening each workflow's own Executions tab individually.
     Task<IReadOnlyList<AutomationRecentFailureView>> ListRecentFailuresAsync(int take = 20, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<AutomationWorkflowVersionSummary>> ListVersionsAsync(Guid workflowId, CancellationToken cancellationToken = default);
+    Task<AutomationWorkflowDiff> DiffVersionsAsync(Guid workflowId, int fromVersion, int toVersion, CancellationToken cancellationToken = default);
+
+    // Replaces the live draft (AutomationNodes/AutomationConnections) with the target published
+    // version's content. Does not rewrite already-published history - the workflow must be
+    // Published again to make the restored draft live, same as a git revert rather than a
+    // history rewrite.
+    Task RollbackToVersionAsync(Guid workflowId, int targetVersion, string performedBy, CancellationToken cancellationToken = default);
+
+    // Builds a brand-new workflow from a portable node/connection graph, minting fresh node and
+    // connection identities so the result is fully independent of wherever the graph came from
+    // (an uploaded export file or a workflow template). Shared by import and
+    // IAutomationTemplateService.InstantiateAsync rather than duplicating the remap logic.
+    Task<AutomationWorkflowView> CreateFromGraphAsync(
+        string name,
+        string description,
+        IReadOnlyList<AutomationNodeView> nodes,
+        IReadOnlyList<AutomationConnectionView> connections,
+        string performedBy,
+        CancellationToken cancellationToken = default);
 }
 
 public interface IAutomationExecutionService
@@ -32,6 +53,11 @@ public interface IAutomationExecutionService
         string inputJson = "{}",
         string mode = "Manual",
         Guid? retryOfExecutionId = null,
+        // The chain of ancestor workflow ids currently executing, used only by
+        // automation.subWorkflow's handler to reject self/mutual recursion and cap call depth -
+        // every other caller (manual run, webhook, schedule, database trigger) leaves this null,
+        // meaning "this is a root execution."
+        IReadOnlySet<Guid>? subWorkflowChain = null,
         CancellationToken cancellationToken = default);
 
     Task<AutomationExecutionView> ResumeAsync(
@@ -47,6 +73,14 @@ public interface IAutomationExecutionService
         bool approved,
         string? comment = null,
         CancellationToken cancellationToken = default);
+
+    // Re-runs a Failed execution starting from its failed node instead of from scratch, reusing
+    // the failed AutomationNodeExecution's persisted InputJson and whatever sibling/merge state
+    // the execution preserved at the moment it failed (see AutomationExecutionService
+    // .RunToCompletionAsync's catch block, which now checkpoints on failure instead of
+    // discarding PendingStateJson). A node that failed mid-merge (one of several labeled inputs
+    // still in flight) may not reconstruct perfectly - a known, documented v1 limitation.
+    Task<AutomationExecutionView> RetryFromFailedNodeAsync(Guid executionId, CancellationToken cancellationToken = default);
 }
 
 public interface IAutomationNodeRegistry
@@ -64,7 +98,24 @@ public interface IAutomationNodeRegistry
         JsonElement input,
         string? credentialJson,
         string? workflowOwnerUsername = null,
+        // Ancestor workflow ids for the currently-running call chain - see
+        // IAutomationExecutionService.ExecuteAsync's own doc comment. Only automation.subWorkflow
+        // reads this.
+        IReadOnlySet<Guid>? subWorkflowChain = null,
+        // Every other node's last output this run, keyed by node Name (not Id - matches how
+        // {{ $node("Name").json.path }} expressions address them). Only populated by
+        // AutomationExecutionService; null when a node is unit-tested directly against the
+        // registry, in which case $node(...) expressions simply resolve to empty.
+        IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName = null,
         CancellationToken cancellationToken = default);
+}
+
+public interface IAutomationTemplateService
+{
+    Task<IReadOnlyList<AutomationWorkflowTemplateSummary>> ListAsync(CancellationToken cancellationToken = default);
+    Task<Guid> CreateFromWorkflowAsync(Guid workflowId, string name, string description, string performedBy, CancellationToken cancellationToken = default);
+    Task<AutomationWorkflowView> InstantiateAsync(Guid templateId, string newWorkflowName, string performedBy, CancellationToken cancellationToken = default);
+    Task DeleteTemplateAsync(Guid templateId, CancellationToken cancellationToken = default);
 }
 
 public interface IAutomationCredentialService

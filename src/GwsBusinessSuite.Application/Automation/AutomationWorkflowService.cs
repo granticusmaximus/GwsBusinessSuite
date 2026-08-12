@@ -438,6 +438,175 @@ public sealed class AutomationWorkflowService(
             .ToList();
     }
 
+    public async Task<IReadOnlyList<AutomationWorkflowVersionSummary>> ListVersionsAsync(Guid workflowId, CancellationToken cancellationToken = default)
+    {
+        var versions = await db.AutomationWorkflowVersions.AsNoTracking()
+            .Where(item => item.WorkflowId == workflowId)
+            .OrderByDescending(item => item.VersionNumber)
+            .Select(item => new { item.VersionNumber, item.CreatedAt, item.ChangeSummary, item.CreatedBy, item.SnapshotJson })
+            .ToListAsync(cancellationToken);
+
+        return versions.Select(version =>
+        {
+            var nodeCount = 0;
+            try
+            {
+                nodeCount = JsonSerializer.Deserialize<AutomationWorkflowSnapshot>(version.SnapshotJson, SnapshotJsonOptions)?.Nodes.Count ?? 0;
+            }
+            catch (JsonException) { /* A version predating a snapshot-shape change - report 0 rather than fail the whole list. */ }
+            return new AutomationWorkflowVersionSummary(version.VersionNumber, version.CreatedAt, version.ChangeSummary, version.CreatedBy, nodeCount);
+        }).ToList();
+    }
+
+    // A coarse, node/connection-level diff (AutomationNodeSnapshot/AutomationConnectionSnapshot
+    // are records, so `!=` is already a full-value comparison) - not a generic property-level
+    // JSON diff. Sufficient for "what changed" review without a diff engine.
+    public async Task<AutomationWorkflowDiff> DiffVersionsAsync(Guid workflowId, int fromVersion, int toVersion, CancellationToken cancellationToken = default)
+    {
+        var from = await GetSnapshotByVersionAsync(workflowId, fromVersion, cancellationToken)
+            ?? throw new KeyNotFoundException($"Version {fromVersion} was not found.");
+        var to = await GetSnapshotByVersionAsync(workflowId, toVersion, cancellationToken)
+            ?? throw new KeyNotFoundException($"Version {toVersion} was not found.");
+
+        var fromNodesById = from.Nodes.ToDictionary(node => node.Id);
+        var toNodesById = to.Nodes.ToDictionary(node => node.Id);
+
+        var addedNodes = to.Nodes.Where(node => !fromNodesById.ContainsKey(node.Id)).ToList();
+        var removedNodes = from.Nodes.Where(node => !toNodesById.ContainsKey(node.Id)).ToList();
+        var modifiedNodes = to.Nodes
+            .Where(node => fromNodesById.TryGetValue(node.Id, out var before) && before != node)
+            .Select(node => new AutomationNodeDiffChange(node.Id, node.Name, fromNodesById[node.Id], node))
+            .ToList();
+
+        var fromConnections = from.Connections.ToHashSet();
+        var toConnections = to.Connections.ToHashSet();
+        var addedConnections = to.Connections.Where(connection => !fromConnections.Contains(connection)).ToList();
+        var removedConnections = from.Connections.Where(connection => !toConnections.Contains(connection)).ToList();
+
+        return new AutomationWorkflowDiff(addedNodes, removedNodes, modifiedNodes, addedConnections, removedConnections);
+    }
+
+    public async Task RollbackToVersionAsync(Guid workflowId, int targetVersion, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var snapshot = await GetSnapshotByVersionAsync(workflowId, targetVersion, cancellationToken)
+            ?? throw new KeyNotFoundException($"Version {targetVersion} was not found.");
+        var workflow = await db.AutomationWorkflows
+            .Include(item => item.Nodes)
+            .Include(item => item.Connections)
+            .FirstOrDefaultAsync(item => item.Id == workflowId, cancellationToken)
+            ?? throw new KeyNotFoundException("Workflow was not found.");
+
+        db.AutomationConnections.RemoveRange(workflow.Connections);
+        db.AutomationNodes.RemoveRange(workflow.Nodes);
+
+        // Reuses the snapshot's own node/connection ids rather than minting new ones (unlike
+        // CreateFromGraphAsync below) - this restores the workflow's draft in place, it isn't
+        // creating a new independent workflow, so there's no reason to disturb identities.
+        // Position/Notes reset to defaults: the publish snapshot never carried them
+        // (AutomationNodeSnapshot has no PositionX/PositionY/Notes fields), so any version
+        // predates that data by construction - not a rollback-specific regression.
+        foreach (var node in snapshot.Nodes)
+        {
+            db.AutomationNodes.Add(new AutomationNode
+            {
+                Id = node.Id,
+                WorkflowId = workflowId,
+                Name = node.Name,
+                TypeKey = node.TypeKey,
+                TypeVersion = node.TypeVersion,
+                ParametersJson = node.ParametersJson,
+                CredentialId = node.CredentialId,
+                IsDisabled = node.IsDisabled,
+                ContinueOnFail = node.ContinueOnFail,
+                RetryOnFail = node.RetryOnFail,
+                MaxTries = node.MaxTries,
+                WaitBetweenTriesMs = node.WaitBetweenTriesMs,
+                TimeoutMs = node.TimeoutMs,
+                CreatedBy = performedBy
+            });
+        }
+        foreach (var connection in snapshot.Connections)
+        {
+            db.AutomationConnections.Add(new AutomationConnection
+            {
+                WorkflowId = workflowId,
+                SourceNodeId = connection.SourceNodeId,
+                SourceOutput = connection.SourceOutput,
+                TargetNodeId = connection.TargetNodeId,
+                TargetInput = connection.TargetInput,
+                CreatedBy = performedBy
+            });
+        }
+        Touch(workflow);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    // Builds a brand-new, independent workflow from a portable node/connection graph - shared by
+    // AutomationTemplateService.InstantiateAsync and the export/import endpoint rather than
+    // duplicating the remap logic. Always mints fresh node/connection ids (unlike
+    // RollbackToVersionAsync above, which restores a specific workflow's own history in place)
+    // and never carries CredentialId across, since a credential reference is only meaningful to
+    // the workflow/instance that originally held it - the new workflow starts uncredentialed and
+    // those nodes need reattaching manually.
+    public async Task<AutomationWorkflowView> CreateFromGraphAsync(
+        string name,
+        string description,
+        IReadOnlyList<AutomationNodeView> nodes,
+        IReadOnlyList<AutomationConnectionView> connections,
+        string performedBy,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Workflow name is required.", nameof(name));
+        if (nodes.Count == 0) throw new ArgumentException("The graph must contain at least one node.", nameof(nodes));
+
+        var workflow = new AutomationWorkflow { Name = name.Trim(), Description = description?.Trim() ?? string.Empty, CreatedBy = performedBy };
+        db.AutomationWorkflows.Add(workflow);
+
+        var idMap = new Dictionary<Guid, Guid>();
+        foreach (var node in nodes)
+        {
+            if (nodeRegistry.Find(node.TypeKey, node.TypeVersion) is null)
+                throw new InvalidOperationException($"Node type '{node.TypeKey}' version {node.TypeVersion} is not registered.");
+            var newId = Guid.NewGuid();
+            idMap[node.Id] = newId;
+            db.AutomationNodes.Add(new AutomationNode
+            {
+                Id = newId,
+                WorkflowId = workflow.Id,
+                Name = node.Name,
+                TypeKey = node.TypeKey,
+                TypeVersion = node.TypeVersion,
+                PositionX = Math.Clamp(node.PositionX, 0, 5000),
+                PositionY = Math.Clamp(node.PositionY, 0, 5000),
+                ParametersJson = string.IsNullOrWhiteSpace(node.ParametersJson) ? "{}" : node.ParametersJson,
+                CredentialId = null,
+                IsDisabled = node.IsDisabled,
+                ContinueOnFail = node.ContinueOnFail,
+                RetryOnFail = node.RetryOnFail,
+                MaxTries = Math.Clamp(node.MaxTries, 1, 10),
+                WaitBetweenTriesMs = Math.Clamp(node.WaitBetweenTriesMs, 0, 60_000),
+                TimeoutMs = Math.Clamp(node.TimeoutMs, 0, 600_000),
+                Notes = node.Notes,
+                CreatedBy = performedBy
+            });
+        }
+        foreach (var connection in connections)
+        {
+            if (!idMap.TryGetValue(connection.SourceNodeId, out var sourceId) || !idMap.TryGetValue(connection.TargetNodeId, out var targetId)) continue;
+            db.AutomationConnections.Add(new AutomationConnection
+            {
+                WorkflowId = workflow.Id,
+                SourceNodeId = sourceId,
+                SourceOutput = connection.SourceOutput,
+                TargetNodeId = targetId,
+                TargetInput = connection.TargetInput,
+                CreatedBy = performedBy
+            });
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        return (await GetAsync(workflow.Id, cancellationToken))!;
+    }
+
     private async Task<AutomationWorkflow> GetWorkflowAsync(Guid id, CancellationToken cancellationToken) =>
         await db.AutomationWorkflows.FirstOrDefaultAsync(item => item.Id == id, cancellationToken)
         ?? throw new KeyNotFoundException("Workflow was not found.");

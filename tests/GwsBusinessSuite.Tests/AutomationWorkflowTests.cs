@@ -1,6 +1,9 @@
 using FluentAssertions;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Automation;
+using GwsBusinessSuite.Application.CmsBuilder;
+using GwsBusinessSuite.Application.Crm;
+using GwsBusinessSuite.Application.Growth;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.Data.Sqlite;
@@ -867,6 +870,497 @@ public sealed class AutomationWorkflowTests
         lesson.Output.Should().Contain("Sentinel synthesis");
     }
 
+    // --- Part 1: sub-workflows ---
+
+    [Fact]
+    public async Task SubWorkflow_ShouldRunChildToCompletionAndWrapItsOutput()
+    {
+        await using var db = await CreateDbAsync();
+        var serviceProvider = new FakeServiceProvider();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), serviceProvider: serviceProvider);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        serviceProvider.Register<IAutomationExecutionService>(executionService);
+        serviceProvider.Register<IAutomationWorkflowService>(workflowService);
+
+        var child = await workflowService.CreateAsync("Child workflow");
+        var childSet = await workflowService.SaveNodeAsync(child.Id, new AutomationNodeEditor
+        {
+            Name = "Child output", TypeKey = "core.set", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"values\":{\"childRan\":true}}"
+        });
+        await workflowService.AddConnectionAsync(child.Id, child.Nodes.Single().Id, "main", childSet.Id);
+        await workflowService.PublishAsync(child.Id, "child v1");
+
+        var parent = await workflowService.CreateAsync("Parent workflow");
+        var subWorkflowNode = await workflowService.SaveNodeAsync(parent.Id, new AutomationNodeEditor
+        {
+            Name = "Call child", TypeKey = "automation.subWorkflow", PositionX = 350, PositionY = 180,
+            ParametersJson = $"{{\"workflowId\":\"{child.Id}\"}}"
+        });
+        await workflowService.AddConnectionAsync(parent.Id, parent.Nodes.Single().Id, "main", subWorkflowNode.Id);
+        await workflowService.PublishAsync(parent.Id, "parent v1");
+
+        var execution = await executionService.ExecuteAsync(parent.Id);
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        execution.OutputJson.Should().Contain("childRan");
+        execution.OutputJson.Should().Contain("subWorkflowId");
+        (await db.AutomationExecutions.CountAsync(item => item.WorkflowId == child.Id && item.Mode == AutomationExecutionModes.SubWorkflow))
+            .Should().Be(1);
+    }
+
+    [Fact]
+    public async Task SubWorkflow_ShouldFailTheParentWhenTheChildFails()
+    {
+        await using var db = await CreateDbAsync();
+        var serviceProvider = new FakeServiceProvider();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), serviceProvider: serviceProvider);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        serviceProvider.Register<IAutomationExecutionService>(executionService);
+        serviceProvider.Register<IAutomationWorkflowService>(workflowService);
+
+        var child = await workflowService.CreateAsync("Failing child");
+        var stopNode = await workflowService.SaveNodeAsync(child.Id, new AutomationNodeEditor
+        {
+            Name = "Stop", TypeKey = "core.stopError", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"message\":\"child exploded\"}"
+        });
+        await workflowService.AddConnectionAsync(child.Id, child.Nodes.Single().Id, "main", stopNode.Id);
+        await workflowService.PublishAsync(child.Id, "child v1");
+
+        var parent = await workflowService.CreateAsync("Parent of failing child");
+        var subWorkflowNode = await workflowService.SaveNodeAsync(parent.Id, new AutomationNodeEditor
+        {
+            Name = "Call child", TypeKey = "automation.subWorkflow", PositionX = 350, PositionY = 180,
+            ParametersJson = $"{{\"workflowId\":\"{child.Id}\"}}"
+        });
+        await workflowService.AddConnectionAsync(parent.Id, parent.Nodes.Single().Id, "main", subWorkflowNode.Id);
+        await workflowService.PublishAsync(parent.Id, "parent v1");
+
+        var execution = await executionService.ExecuteAsync(parent.Id);
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Failed);
+        execution.ErrorMessage.Should().Contain("child exploded");
+    }
+
+    [Fact]
+    public async Task SubWorkflow_ShouldFailTheParentWhenTheChildPauses()
+    {
+        await using var db = await CreateDbAsync();
+        var serviceProvider = new FakeServiceProvider();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), serviceProvider: serviceProvider);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        serviceProvider.Register<IAutomationExecutionService>(executionService);
+        serviceProvider.Register<IAutomationWorkflowService>(workflowService);
+
+        var child = await workflowService.CreateAsync("Pausing child");
+        var waitNode = await workflowService.SaveNodeAsync(child.Id, new AutomationNodeEditor
+        {
+            Name = "Wait", TypeKey = "core.wait", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"mode\":\"duration\",\"durationMs\":60000}"
+        });
+        await workflowService.AddConnectionAsync(child.Id, child.Nodes.Single().Id, "main", waitNode.Id);
+        await workflowService.PublishAsync(child.Id, "child v1");
+
+        var parent = await workflowService.CreateAsync("Parent of pausing child");
+        var subWorkflowNode = await workflowService.SaveNodeAsync(parent.Id, new AutomationNodeEditor
+        {
+            Name = "Call child", TypeKey = "automation.subWorkflow", PositionX = 350, PositionY = 180,
+            ParametersJson = $"{{\"workflowId\":\"{child.Id}\"}}"
+        });
+        await workflowService.AddConnectionAsync(parent.Id, parent.Nodes.Single().Id, "main", subWorkflowNode.Id);
+        await workflowService.PublishAsync(parent.Id, "parent v1");
+
+        var execution = await executionService.ExecuteAsync(parent.Id);
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Failed);
+        execution.ErrorMessage.Should().Contain("paused");
+    }
+
+    [Fact]
+    public async Task SubWorkflow_ShouldRejectASelfReferentialCycle()
+    {
+        var node = Node("automation.subWorkflow", "{}");
+        var loopingNode = node with { ParametersJson = $"{{\"workflowId\":\"{node.Id}\"}}" };
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+
+        var act = () => registry.ExecuteAsync(
+            loopingNode, System.Text.Json.JsonDocument.Parse("{}").RootElement, null, subWorkflowChain: new HashSet<Guid> { loopingNode.Id });
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*cycle*");
+    }
+
+    [Fact]
+    public async Task SubWorkflow_ShouldRejectExceedingMaxCallDepth()
+    {
+        var targetId = Guid.NewGuid();
+        var node = Node("automation.subWorkflow", $"{{\"workflowId\":\"{targetId}\"}}");
+        var deepChain = Enumerable.Range(0, 10).Select(_ => Guid.NewGuid()).ToHashSet();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+
+        var act = () => registry.ExecuteAsync(node, System.Text.Json.JsonDocument.Parse("{}").RootElement, null, subWorkflowChain: deepChain);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*maximum sub-workflow call depth*");
+    }
+
+    // --- Part 1: retry-from-failed-node ---
+
+    [Fact]
+    public async Task RetryFromFailedNodeAsync_ShouldResumeFromTheFailedNodeNotFromScratch()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Retry target");
+        var trigger = workflow.Nodes.Single();
+        var setNode = await workflowService.SaveNodeAsync(workflow.Id, NewSetNode("Prep", 350));
+        var failNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Always fails", TypeKey = "core.stopError", PositionX = 600, PositionY = 180,
+            ParametersJson = "{\"message\":\"boom\"}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, trigger.Id, "main", setNode.Id);
+        await workflowService.AddConnectionAsync(workflow.Id, setNode.Id, "main", failNode.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var execution = await executionService.ExecuteAsync(workflow.Id);
+        execution.Status.Should().Be(AutomationExecutionStatuses.Failed);
+        execution.Nodes.Should().HaveCount(3); // manual trigger + Prep + the failing node
+
+        var retried = await executionService.RetryFromFailedNodeAsync(execution.Id);
+
+        retried.Mode.Should().Be(AutomationExecutionModes.Retry);
+        retried.Status.Should().Be(AutomationExecutionStatuses.Failed);
+        retried.Nodes.Should().ContainSingle();
+        retried.Nodes.Single().NodeTypeKey.Should().Be("core.stopError");
+        var retriedRow = await db.AutomationExecutions.AsNoTracking().SingleAsync(item => item.Id == retried.Id);
+        retriedRow.RetryOfExecutionId.Should().Be(execution.Id);
+    }
+
+    [Fact]
+    public async Task RetryFromFailedNodeAsync_ShouldRejectAnExecutionThatDidNotFail()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Succeeding workflow");
+        await workflowService.PublishAsync(workflow.Id, "v1");
+        var execution = await executionService.ExecuteAsync(workflow.Id);
+        execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+
+        var act = () => executionService.RetryFromFailedNodeAsync(execution.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not Failed*");
+    }
+
+    // --- Part 1: workflow templates ---
+
+    [Fact]
+    public async Task Templates_ShouldCaptureDraftAndInstantiateWithFreshIdentities()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var templateService = new AutomationTemplateService(db, workflowService);
+        var workflow = await workflowService.CreateAsync("Source workflow", "desc");
+        var trigger = workflow.Nodes.Single();
+        var setNode = await workflowService.SaveNodeAsync(workflow.Id, NewSetNode("Prep", 400));
+        await workflowService.AddConnectionAsync(workflow.Id, trigger.Id, "main", setNode.Id);
+
+        var templateId = await templateService.CreateFromWorkflowAsync(workflow.Id, "My Template", "template desc", "user");
+        var templates = await templateService.ListAsync();
+        templates.Should().ContainSingle(t => t.Id == templateId && t.NodeCount == 2);
+
+        var instantiated = await templateService.InstantiateAsync(templateId, "New From Template", "user");
+
+        instantiated.Nodes.Should().HaveCount(2);
+        instantiated.Nodes.Should().OnlyContain(node => node.Id != trigger.Id && node.Id != setNode.Id);
+        instantiated.Connections.Should().ContainSingle();
+        instantiated.Id.Should().NotBe(workflow.Id);
+    }
+
+    [Fact]
+    public async Task Templates_ShouldRejectDuplicateNames()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var templateService = new AutomationTemplateService(db, workflowService);
+        var workflow = await workflowService.CreateAsync("Dup source");
+        await templateService.CreateFromWorkflowAsync(workflow.Id, "Dup", "", "user");
+
+        var act = () => templateService.CreateFromWorkflowAsync(workflow.Id, "Dup", "", "user");
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*already exists*");
+    }
+
+    [Fact]
+    public async Task Templates_DeleteTemplateAsync_ShouldRemoveIt()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var templateService = new AutomationTemplateService(db, workflowService);
+        var workflow = await workflowService.CreateAsync("Deletable template source");
+        var templateId = await templateService.CreateFromWorkflowAsync(workflow.Id, "Deletable", "", "user");
+
+        await templateService.DeleteTemplateAsync(templateId);
+
+        (await templateService.ListAsync()).Should().BeEmpty();
+    }
+
+    // --- Part 1: import/export ---
+
+    [Fact]
+    public async Task CreateFromGraphAsync_ShouldRebuildWorkflowWithFreshIdsAndNoCredential()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var credentialId = await credentials.SaveAsync(null, "Some cred", "httpHeader", "{\"headers\":{}}");
+        var source = await workflowService.CreateAsync("Export source");
+        var trigger = source.Nodes.Single();
+        var httpNode = await workflowService.SaveNodeAsync(source.Id, new AutomationNodeEditor
+        {
+            Name = "Call API", TypeKey = "core.httpRequest", PositionX = 400, PositionY = 200,
+            ParametersJson = "{\"method\":\"GET\",\"url\":\"https://example.com\"}", CredentialId = credentialId
+        });
+        await workflowService.AddConnectionAsync(source.Id, trigger.Id, "main", httpNode.Id);
+        var reloaded = (await workflowService.GetAsync(source.Id))!;
+
+        var rebuilt = await workflowService.CreateFromGraphAsync("Rebuilt", reloaded.Description, reloaded.Nodes, reloaded.Connections, "user");
+
+        rebuilt.Id.Should().NotBe(source.Id);
+        rebuilt.Nodes.Should().HaveCount(2);
+        rebuilt.Nodes.Should().OnlyContain(node => node.CredentialId == null);
+        rebuilt.Connections.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task CreateFromGraphAsync_ShouldRejectAnUnregisteredNodeType()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var nodes = new List<AutomationNodeView> { new(Guid.NewGuid(), "Bogus", "not.a.real.type", 1, 0, 0, "{}", null, false, false, false, 1, 0, 0, "") };
+
+        var act = () => workflowService.CreateFromGraphAsync("Imported", "", nodes, [], "user");
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not registered*");
+    }
+
+    // --- Part 1: version diff & rollback ---
+
+    [Fact]
+    public async Task DiffAndRollback_ShouldReportChangesAndRestoreDraft()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Versioned workflow");
+        var trigger = workflow.Nodes.Single();
+        var v1 = await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var extraNode = await workflowService.SaveNodeAsync(workflow.Id, NewSetNode("Extra", 400));
+        await workflowService.AddConnectionAsync(workflow.Id, trigger.Id, "main", extraNode.Id);
+        var v2 = await workflowService.PublishAsync(workflow.Id, "v2");
+
+        var diff = await workflowService.DiffVersionsAsync(workflow.Id, v1, v2);
+        diff.AddedNodes.Should().ContainSingle(node => node.Id == extraNode.Id);
+        diff.RemovedNodes.Should().BeEmpty();
+        diff.AddedConnections.Should().ContainSingle();
+
+        var versions = await workflowService.ListVersionsAsync(workflow.Id);
+        versions.Select(version => version.VersionNumber).Should().BeEquivalentTo([v1, v2]);
+
+        await workflowService.RollbackToVersionAsync(workflow.Id, v1, "user");
+
+        var current = await workflowService.GetAsync(workflow.Id);
+        current!.Nodes.Should().ContainSingle(node => node.Id == trigger.Id);
+        current.Nodes.Should().NotContain(node => node.Id == extraNode.Id);
+    }
+
+    // --- Part 1: node-reference expression tooling ---
+
+    [Fact]
+    public async Task NodeReferenceExpression_ShouldResolveAnEarlierNodesOutputPastAReplacingNode()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Node reference test");
+        var trigger = workflow.Nodes.Single();
+        var firstNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "First", TypeKey = "core.set", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"values\":{\"greeting\":\"hello\"}}"
+        });
+        // core.httpRequest replaces the whole item ({statusCode, body, headers}) rather than
+        // merging onto it - unlike every other data node, so it's the one node type that can
+        // prove $node(...) reaches past the immediate predecessor instead of just re-resolving
+        // $json against something that still happens to carry the same field.
+        var replacingNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Replace shape", TypeKey = "core.httpRequest", PositionX = 550, PositionY = 180,
+            ParametersJson = "{\"method\":\"GET\",\"url\":\"https://example.com\"}"
+        });
+        var secondNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Second", TypeKey = "core.template", PositionX = 750, PositionY = 180,
+            ParametersJson = "{\"outputField\":\"combined\",\"template\":\"{{ $node(\\\"First\\\").json.greeting }} world\"}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, trigger.Id, "main", firstNode.Id);
+        await workflowService.AddConnectionAsync(workflow.Id, firstNode.Id, "main", replacingNode.Id);
+        await workflowService.AddConnectionAsync(workflow.Id, replacingNode.Id, "main", secondNode.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var execution = await executionService.ExecuteAsync(workflow.Id);
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        execution.OutputJson.Should().Contain("hello world");
+    }
+
+    [Fact]
+    public async Task NodeReferenceExpression_ShouldResolveToEmptyForAnUnknownNodeName()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Missing node reference");
+        var templateNode = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Only node", TypeKey = "core.template", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"outputField\":\"combined\",\"template\":\"{{ $node(\\\"Nonexistent\\\").json.x }} world\"}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", templateNode.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var execution = await executionService.ExecuteAsync(workflow.Id);
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        execution.OutputJson.Should().Contain("\" world\"");
+    }
+
+    // --- Part 1: cross-module action nodes ---
+
+    [Fact]
+    public async Task CrmSetDealStage_ShouldCallCrmServiceWithResolvedExpressions()
+    {
+        await using var db = await CreateDbAsync();
+        var crm = new FakeCrmService();
+        var serviceProvider = new FakeServiceProvider().Register<ICrmService>(crm);
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), serviceProvider: serviceProvider);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("CRM stage move");
+        var dealId = Guid.NewGuid();
+        var node = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Move stage", TypeKey = "crm.setDealStage", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"dealId\":\"{{ $json.dealId }}\",\"stage\":\"Won\"}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", node.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var execution = await executionService.ExecuteAsync(workflow.Id, $"{{\"dealId\":\"{dealId}\"}}");
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        crm.StagedDeals.Should().ContainSingle(entry => entry.DealId == dealId && entry.Stage == "Won");
+    }
+
+    [Fact]
+    public async Task CrmSaveContact_ShouldCallCrmServiceWithResolvedExpressions()
+    {
+        await using var db = await CreateDbAsync();
+        var crm = new FakeCrmService();
+        var serviceProvider = new FakeServiceProvider().Register<ICrmService>(crm);
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), serviceProvider: serviceProvider);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("CRM save contact");
+        var node = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Save contact", TypeKey = "crm.saveContact", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"fullName\":\"{{ $json.name }}\",\"email\":\"{{ $json.email }}\"}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", node.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var execution = await executionService.ExecuteAsync(workflow.Id, "{\"name\":\"Ada Lovelace\",\"email\":\"ada@example.com\"}");
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        crm.SavedContacts.Should().ContainSingle(entry => entry.FullName == "Ada Lovelace" && entry.Email == "ada@example.com");
+    }
+
+    [Fact]
+    public async Task CmsSavePage_ShouldCallCmsBuilderServiceWithResolvedExpressions()
+    {
+        await using var db = await CreateDbAsync();
+        var cms = new FakeCmsBuilderService();
+        var serviceProvider = new FakeServiceProvider().Register<ICmsBuilderService>(cms);
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), serviceProvider: serviceProvider);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("CMS save page");
+        var siteId = Guid.NewGuid();
+        var node = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Save page", TypeKey = "cms.savePage", PositionX = 350, PositionY = 180,
+            ParametersJson = $"{{\"siteId\":\"{siteId}\",\"title\":\"{{{{ $json.title }}}}\",\"blocksJson\":\"[]\"}}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", node.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var execution = await executionService.ExecuteAsync(workflow.Id, "{\"title\":\"Launch announcement\"}");
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        cms.SavedPages.Should().ContainSingle(entry => entry.SiteId == siteId && entry.Title == "Launch announcement");
+    }
+
+    [Fact]
+    public async Task GrowthPublishSocialPost_ShouldThrowWhenThePublishCallFails()
+    {
+        await using var db = await CreateDbAsync();
+        var social = new FakeSocialPublishingService { ShouldSucceed = false };
+        var serviceProvider = new FakeServiceProvider().Register<ISocialPublishingService>(social);
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), serviceProvider: serviceProvider);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Growth publish");
+        var postId = Guid.NewGuid();
+        var node = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Publish", TypeKey = "growth.publishSocialPost", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"postId\":\"{{ $json.postId }}\"}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", node.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var execution = await executionService.ExecuteAsync(workflow.Id, $"{{\"postId\":\"{postId}\"}}");
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Failed);
+        social.PublishedPostIds.Should().Contain(postId);
+    }
+
     private static AutomationNodeEditor NewSetNode(string name, double x) => new()
     {
         Name = name,
@@ -944,6 +1438,118 @@ public sealed class AutomationWorkflowTests
     {
         public Task<IAppDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IAppDbContext>(new ApplicationDbContext(options));
+    }
+
+    // Registered lazily after construction (mirrors the real circular-dependency pattern
+    // AutomationNodeRegistry's own doc comment describes for IWikiDatabaseService): the
+    // registry is built first with an empty provider, then IAutomationExecutionService/
+    // IAutomationWorkflowService are added to it once they exist, since GetService is only
+    // ever called at node-execution time, not at registry construction time.
+    private sealed class FakeServiceProvider : IServiceProvider
+    {
+        private readonly Dictionary<Type, object> _services = new();
+        public FakeServiceProvider Register<TService>(TService instance) where TService : notnull
+        {
+            _services[typeof(TService)] = instance;
+            return this;
+        }
+        public object? GetService(Type serviceType) => _services.TryGetValue(serviceType, out var instance) ? instance : null;
+    }
+
+    private sealed class FakeCrmService : ICrmService
+    {
+        public List<(Guid DealId, string Stage)> StagedDeals { get; } = [];
+        public List<ContactEditorModel> SavedContacts { get; } = [];
+
+        public Task<DealView> SetDealStageAsync(Guid dealId, string stage, CancellationToken cancellationToken = default)
+        {
+            StagedDeals.Add((dealId, stage));
+            return Task.FromResult(new DealView { Id = dealId, ContactId = Guid.NewGuid(), Title = "Deal", Stage = stage, CreatedAt = DateTimeOffset.UtcNow });
+        }
+
+        public Task<Contact> SaveContactAsync(ContactEditorModel editor, CancellationToken cancellationToken = default)
+        {
+            SavedContacts.Add(editor);
+            return Task.FromResult(new Contact
+            {
+                Id = editor.ContactId ?? Guid.NewGuid(), FullName = editor.FullName, Email = editor.Email, Company = editor.Company, Status = editor.Status
+            });
+        }
+
+        public Task<CrmDashboardData> GetDashboardAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<Contact>> ListContactsAsync(bool includeTrashed = false, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<Contact>> ListTrashedContactsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Contact?> GetContactAsync(Guid contactId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task TrashContactAsync(Guid contactId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task RestoreContactAsync(Guid contactId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task DeleteContactPermanentlyAsync(Guid contactId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<ContactActivityView>> ListActivitiesAsync(Guid contactId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<ContactActivityView> AddActivityAsync(Guid contactId, string note, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<Contact>> ListDueFollowUpsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<int> CountDueFollowUpsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<DealView>> ListDealsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<DealView>> ListDealsForContactAsync(Guid contactId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<DealView> SaveDealAsync(DealEditorModel editor, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task DeleteDealAsync(Guid dealId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    }
+
+    private sealed class FakeCmsBuilderService : ICmsBuilderService
+    {
+        public List<CmsPageEditorModel> SavedPages { get; } = [];
+
+        public Task<CmsPage> SavePageAsync(CmsPageEditorModel editor, CancellationToken cancellationToken = default)
+        {
+            SavedPages.Add(editor);
+            return Task.FromResult(new CmsPage
+            {
+                Id = editor.PageId ?? Guid.NewGuid(), SiteId = editor.SiteId ?? Guid.Empty, Title = editor.Title,
+                Slug = string.IsNullOrWhiteSpace(editor.Slug) ? "page" : editor.Slug, BlocksJson = editor.BlocksJson
+            });
+        }
+
+        public Task<IReadOnlyList<CmsSite>> ListSitesAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<CmsSite?> GetSiteAsync(Guid siteId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<CmsSite?> GetSiteBySlugAsync(string siteSlug, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<CmsSite> SaveSiteAsync(CmsSiteEditorModel editor, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task DeleteSiteAsync(Guid siteId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<CmsPage>> ListPagesAsync(Guid? siteId = null, bool includeTrashed = false, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<CmsPage>> ListTrashedPagesAsync(Guid siteId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<CmsPageCategory>> ListPageCategoriesAsync(Guid siteId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<CmsPage?> GetPageAsync(Guid pageId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<CmsPage?> GetPageBySlugAsync(Guid siteId, string pageSlug, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<CmsPage?> GetPageByFullPathAsync(Guid siteId, string fullPath, bool includeUnpublished = false, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public string BuildFullPath(CmsPage page, IReadOnlyList<CmsPage> allPagesInSite) => throw new NotImplementedException();
+        public Task TrashPageAsync(Guid pageId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task RestorePageAsync(Guid pageId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task DeletePageAsync(Guid pageId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<CmsWorkflowBlueprintSummary>> ListWorkflowBlueprintsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<CmsPage> ApplyWorkflowBlueprintAsync(Guid pageId, string blueprintKey, bool replaceExistingBlocks, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    }
+
+    private sealed class FakeSocialPublishingService : ISocialPublishingService
+    {
+        public bool ShouldSucceed { get; set; } = true;
+        public List<Guid> PublishedPostIds { get; } = [];
+
+        public Task<SocialPublishResult> PublishAsync(Guid postId, CancellationToken cancellationToken = default)
+        {
+            PublishedPostIds.Add(postId);
+            return Task.FromResult(ShouldSucceed
+                ? new SocialPublishResult(true, "Published")
+                : new SocialPublishResult(false, "Provider rejected the post"));
+        }
+
+        public Task<IReadOnlyList<SocialAccountView>> GetAccountsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task SaveAccountAsync(SocialAccountInput input, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task RemoveAccountAsync(Guid accountId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<SocialPostView>> GetPostsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyDictionary<Guid, string>> GenerateVariantsAsync(string topic, string sourceUrl, IReadOnlyCollection<Guid> accountIds, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Guid> SaveDraftAsync(string title, string sourceUrl, IReadOnlyCollection<SocialTargetDraft> targets, DateTimeOffset? scheduledFor, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task PublishDueAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<SocialPostAlertView>> ListAlertsAsync(bool unreadOnly, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task MarkAlertReadAsync(Guid alertId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task MarkAllAlertsReadAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<int> CountUnreadAlertsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
 
     private sealed class FakeOllamaService : IOllamaService
