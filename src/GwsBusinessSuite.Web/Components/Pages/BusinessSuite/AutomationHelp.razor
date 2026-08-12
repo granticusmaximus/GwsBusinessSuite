@@ -1,0 +1,66 @@
+@page "/admin/automation/help"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContentAccess")]
+@using Markdig
+@using Microsoft.AspNetCore.Hosting
+@inject IWebHostEnvironment Environment
+@inject ILogger<AutomationHelp> Logger
+
+<PageTitle>Automation Help</PageTitle>
+
+<div class="page-header">
+    <h1><i class="bi bi-question-circle me-2 text-primary"></i>Automation Help</h1>
+    <p>The complete, screenshot-illustrated guide to Workflow Automation. The same content also lives at <code>docs/AUTOMATION_USER_GUIDE.md</code> in the repository, for anyone reading it outside the app.</p>
+</div>
+
+@if (_renderedHtml is not null)
+{
+    <div class="card border-0 shadow-sm">
+        <div class="card-body automation-help-content">
+            @((MarkupString)_renderedHtml)
+        </div>
+    </div>
+}
+else
+{
+    <div class="alert alert-warning">
+        This deployment doesn't have the documentation source available (<code>docs/AUTOMATION_USER_GUIDE.md</code> wasn't found next to the running app). The guide is still available in the GWS Business Suite git repository.
+    </div>
+}
+
+<style>
+    .automation-help-content { line-height: 1.7; }
+    .automation-help-content h1 { margin-top: 0; }
+    .automation-help-content h2 { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--gws-panel-border); }
+    .automation-help-content h3 { margin-top: 1.75rem; }
+    .automation-help-content img { max-width: 100%; border: 1px solid var(--gws-panel-border); border-radius: .5rem; margin: .75rem 0; }
+    .automation-help-content table { width: 100%; margin: 1rem 0; }
+    .automation-help-content code { color: #f59e0b; }
+    .automation-help-content pre code { color: inherit; }
+</style>
+
+@code {
+    private string? _renderedHtml;
+    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
+
+    protected override void OnInitialized()
+    {
+        // The content root is src/GwsBusinessSuite.Web; docs/ sits two levels up at the repo
+        // root. Read at request time (not embedded) so the guide never drifts out of sync with
+        // its own git-tracked source - a missing file here just means this specific deployment
+        // doesn't ship the docs folder, not that the content was duplicated and could go stale.
+        var docsPath = Path.Combine(Environment.ContentRootPath, "..", "..", "docs", "AUTOMATION_USER_GUIDE.md");
+        try
+        {
+            if (File.Exists(docsPath))
+            {
+                var markdown = File.ReadAllText(docsPath).Replace("images/automation/", "/docs-images/automation/");
+                _renderedHtml = Markdown.ToHtml(markdown, Pipeline);
+            }
+        }
+        catch (IOException ex)
+        {
+            Logger.LogWarning(ex, "Unable to read the Automation Help documentation source.");
+        }
+    }
+}

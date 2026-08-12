@@ -22,6 +22,7 @@
         <p>Build, publish, run, and inspect durable business automations.</p>
     </div>
     <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary" href="/admin/automation/help"><i class="bi bi-question-circle me-1"></i>Help</a>
         <a class="btn btn-outline-secondary" href="/admin/automation/credentials"><i class="bi bi-key-fill me-1"></i>Credentials</a>
         <label class="btn btn-outline-secondary mb-0" for="importWorkflowFile"><i class="bi bi-upload me-1"></i>Import @if (_importing) { <span class="spinner-border spinner-border-sm ms-1"></span> }</label>
         <InputFile id="importWorkflowFile" class="visually-hidden" OnChange="ImportWorkflowAsync" accept=".json,application/json" />

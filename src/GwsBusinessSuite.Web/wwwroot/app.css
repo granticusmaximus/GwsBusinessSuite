@@ -1213,14 +1213,24 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .sentinel-public-share article { width: min(52rem,calc(100% - 2rem)); margin: 0 auto; padding: 4rem 0; }
 .sentinel-public-cover { display: block; width: 100%; height: min(34vh,22rem); object-fit: cover; }
 .sentinel-public-brand { margin-bottom: 1.5rem; color: #a8a29e; font-size: .72rem; font-weight: 800; letter-spacing: .16em; }
-.sentinel-public-share h1 { margin-bottom: 2.5rem; font-size: clamp(2rem,5vw,3.5rem); letter-spacing: -.04em; }
+/* This whole page is deliberately light-themed regardless of the admin shell's own dark theme
+   (an external, often logged-out audience views it), but Bootstrap's own heading/table CSS reads
+   app-wide dark-mode custom properties (--bs-heading-color, .table's --bs-table-color, etc. - see
+   the "Bootstrap component dark-mode overrides" block above) rather than inheriting color from an
+   ancestor, so headings and any Bootstrap .table used here need an explicit color of their own to
+   win the cascade - inheriting from .sentinel-public-share's own color alone isn't enough. */
+.sentinel-public-share h1 { margin-bottom: 2.5rem; font-size: clamp(2rem,5vw,3.5rem); letter-spacing: -.04em; color: #1c1917; }
 .sentinel-public-content { font-size: 1.04rem; line-height: 1.75; }
 .sentinel-public-content img { max-width: 100%; }
 .sentinel-public-database { display: grid; gap: .6rem; }
 .sentinel-public-database section { display: grid; gap: .2rem; padding: .8rem 1rem; border: 1px solid #e7e5e4; border-radius: .5rem; background: white; }
 .sentinel-public-database span { color: #78716c; font-size: .82rem; }
 .sentinel-public-automation-description { color: #57534e; font-size: 1.02rem; margin-top: -1.5rem; margin-bottom: 1.5rem; }
-.sentinel-public-automation-runs table { background: white; border: 1px solid #e7e5e4; border-radius: .5rem; overflow: hidden; }
+.sentinel-public-automation-runs table {
+    background: white; border: 1px solid #e7e5e4; border-radius: .5rem; overflow: hidden;
+    color: #292524; --bs-table-color: #292524; --bs-table-hover-color: #292524; --bs-table-bg: white;
+}
+.sentinel-public-automation-runs th { color: #78716c; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
 .sentinel-public-share-error { display: grid; place-content: center; min-height: 100vh; text-align: center; }
 .sentinel-ai-panel { margin: .5rem 0 1rem; border: 1px solid rgba(245,158,11,.18); border-radius: .65rem; background: linear-gradient(135deg,rgba(245,158,11,.05),rgba(124,58,237,.04)); overflow: hidden; }
 .sentinel-ai-toggle { display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: .55rem; width: 100%; padding: .65rem .8rem; border: 0; background: transparent; color: inherit; text-align: left; }
