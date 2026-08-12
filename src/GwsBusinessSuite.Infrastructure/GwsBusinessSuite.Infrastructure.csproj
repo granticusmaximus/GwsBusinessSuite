@@ -23,7 +23,11 @@
     <!-- Pin above the version Microsoft.Data.Sqlite.Core pulls in transitively (2.1.11),
          which has a known SQLite memory-corruption vulnerability (GHSA-2m69-gcr7-jv3q). -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
-    <PackageReference Include="SSH.NET" Version="2025.1.0" />
+    <!-- 2025.1.0 and earlier have a high-severity ScpClient path-traversal vulnerability
+         (GHSA-q939-rpr3-3284 / CVE-2026-48798); 2026.0.0 is the first patched release. This app
+         only uses SshClient/SftpClient (see SshTerminalService.cs, DatabaseBackupService.cs),
+         never ScpClient, but the NuGet audit flags the package regardless of which APIs are used. -->
+    <PackageReference Include="SSH.NET" Version="2026.0.0" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.10" />
     <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.8.0" />
     <PackageReference Include="SkiaSharp" Version="3.119.4" />

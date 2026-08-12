@@ -291,8 +291,81 @@
 		window.addEventListener('resize', applySidebarState);
 	}
 
+	// Makes every modal in the admin portal draggable by its header, with zero per-modal
+	// wiring: every modal here is hand-rolled Bootstrap-flavored markup
+	// (.modal.d-block > .modal-dialog > .modal-content > .modal-header, no Bootstrap JS - see
+	// ConfirmModal.razor and every page's own modal markup), and that structure is consistent
+	// enough app-wide that one delegated listener on document covers all of them, including
+	// modals that don't exist yet at page-load time (Blazor renders them in/out via @if).
+	var draggableModalsBound = false;
+	var activeModalDrag = null; // { dialog, pointerId, startX, startY, baseLeft, baseTop }
+
+	function isInteractiveTarget(element) {
+		return !!(element instanceof Element && element.closest('button, a, input, select, textarea, [role="button"]'));
+	}
+
+	function bindDraggableModalsOnce() {
+		if (draggableModalsBound) return;
+		draggableModalsBound = true;
+
+		document.addEventListener('pointerdown', function (event) {
+			if (event.pointerType === 'mouse' && event.button !== 0) return;
+			if (isInteractiveTarget(event.target)) return;
+			var header = event.target instanceof Element ? event.target.closest('.modal-header') : null;
+			if (!header) return;
+			var dialog = header.closest('.modal-dialog');
+			if (!dialog) return;
+
+			var rect = dialog.getBoundingClientRect();
+			activeModalDrag = {
+				dialog: dialog,
+				pointerId: event.pointerId,
+				startX: event.clientX,
+				startY: event.clientY,
+				baseLeft: rect.left,
+				baseTop: rect.top
+			};
+			// Freezes the dialog at its current rendered position (which may have come from
+			// Bootstrap's flexbox centering, .modal-dialog-centered, etc.) with an explicit
+			// fixed left/top, then every subsequent frame only adjusts that offset - this
+			// works identically regardless of which modal-dialog variant classes are present,
+			// without fighting their own centering logic.
+			dialog.style.position = 'fixed';
+			dialog.style.left = rect.left + 'px';
+			dialog.style.top = rect.top + 'px';
+			dialog.style.margin = '0';
+			dialog.classList.add('gws-modal-dragging');
+			document.body.classList.add('gws-modal-dragging-active');
+			if (header.setPointerCapture) header.setPointerCapture(event.pointerId);
+			event.preventDefault();
+		});
+
+		document.addEventListener('pointermove', function (event) {
+			if (!activeModalDrag || event.pointerId !== activeModalDrag.pointerId) return;
+			var dialog = activeModalDrag.dialog;
+			var minVisible = 60; // keeps at least a corner grabbable so a modal can never be dragged fully unrecoverable off-screen
+			var newLeft = activeModalDrag.baseLeft + (event.clientX - activeModalDrag.startX);
+			var newTop = activeModalDrag.baseTop + (event.clientY - activeModalDrag.startY);
+			newLeft = Math.max(minVisible - dialog.offsetWidth, Math.min(newLeft, window.innerWidth - minVisible));
+			newTop = Math.max(0, Math.min(newTop, window.innerHeight - minVisible));
+			dialog.style.left = newLeft + 'px';
+			dialog.style.top = newTop + 'px';
+		});
+
+		function endModalDrag(event) {
+			if (!activeModalDrag || (event.pointerId !== undefined && event.pointerId !== activeModalDrag.pointerId)) return;
+			activeModalDrag.dialog.classList.remove('gws-modal-dragging');
+			document.body.classList.remove('gws-modal-dragging-active');
+			activeModalDrag = null;
+		}
+
+		document.addEventListener('pointerup', endModalDrag);
+		document.addEventListener('pointercancel', endModalDrag);
+	}
+
 	function initializeAdminShell() {
 		bindShellEventsOnce();
+		bindDraggableModalsOnce();
 		applySidebarState();
 	}
 

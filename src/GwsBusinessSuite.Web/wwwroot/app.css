@@ -689,6 +689,18 @@ h1:focus { outline: none; }
 
 .modal-backdrop.show { opacity: .65; }
 
+/* Every modal in the admin portal is draggable by its header - see app.js's
+   pointerdown/pointermove delegation, which needs no per-modal wiring since it listens on
+   document and matches any ".modal-header" that appears. */
+.modal-header { cursor: move; -webkit-user-select: none; user-select: none; touch-action: none; }
+.modal-header button,
+.modal-header a,
+.modal-header input,
+.modal-header select,
+.modal-header textarea { cursor: pointer; }
+.gws-modal-dragging { cursor: grabbing; }
+body.gws-modal-dragging-active { -webkit-user-select: none; user-select: none; }
+
 .btn-close { filter: invert(1) grayscale(100%) brightness(1.6); }
 
 .dropdown-menu {
