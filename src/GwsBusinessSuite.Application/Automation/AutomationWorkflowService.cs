@@ -114,6 +114,37 @@ public sealed class AutomationWorkflowService(
         return (await GetAsync(workflow.Id, cancellationToken))!;
     }
 
+    public async Task DeleteWorkflowAsync(Guid workflowId, CancellationToken cancellationToken = default)
+    {
+        var workflow = await db.AutomationWorkflows.FirstOrDefaultAsync(item => item.Id == workflowId, cancellationToken);
+        if (workflow is null)
+        {
+            return;
+        }
+
+        var permissions = await db.SentinelResourcePermissions
+            .Where(item => item.TargetId == workflowId)
+            .ToListAsync(cancellationToken);
+        db.SentinelResourcePermissions.RemoveRange(permissions);
+
+        var shares = await db.SentinelPublicShares
+            .Where(item => item.TargetId == workflowId && item.IsAutomationWorkflow)
+            .ToListAsync(cancellationToken);
+        db.SentinelPublicShares.RemoveRange(shares);
+
+        var workflowName = workflow.Name;
+        db.AutomationWorkflows.Remove(workflow);
+        await db.SaveChangesAsync(cancellationToken);
+
+        if (securityAudit is not null)
+        {
+            await securityAudit.RecordAsync(new SecurityAuditInput(
+                SecurityAuditCategories.DataLifecycle, "AutomationWorkflowDeleted", SecurityAuditOutcomes.Succeeded,
+                TargetType: "AutomationWorkflow", TargetId: workflowId.ToString(),
+                Details: new Dictionary<string, string?> { ["name"] = workflowName }), cancellationToken);
+        }
+    }
+
     public async Task<AutomationWorkflowView> DuplicateAsync(
         Guid workflowId, string newName, string performedBy, CancellationToken cancellationToken = default)
     {

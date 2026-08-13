@@ -8,6 +8,14 @@ public interface IAutomationWorkflowService
     Task<AutomationWorkflowView?> GetAsync(Guid workflowId, CancellationToken cancellationToken = default);
     Task<AutomationWorkflowView> CreateAsync(string name, string description = "", CancellationToken cancellationToken = default);
 
+    // Permanently removes the workflow. AutomationNode/AutomationConnection/
+    // AutomationWorkflowVersion/AutomationExecution (and AutomationNodeExecution beneath it) all
+    // cascade-delete via FK configuration in ApplicationDbContext; SentinelResourcePermission and
+    // SentinelPublicShare grants referencing this workflow (loosely-typed TargetId, no real FK -
+    // the same shape shared with Sentinel pages/databases) are cleaned up explicitly. No-op if
+    // the workflow no longer exists.
+    Task DeleteWorkflowAsync(Guid workflowId, CancellationToken cancellationToken = default);
+
     // Clones a workflow's current live draft (not its published history) into a brand-new
     // workflow with fresh node/connection ids - built directly on CreateFromGraphAsync below,
     // same "portable graph + fresh identity" pattern as templates and import.

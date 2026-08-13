@@ -61,6 +61,55 @@ public sealed class AutomationAuditTrailTests
     }
 
     [Fact]
+    public async Task DeleteWorkflowAsync_ShouldRemoveTheWorkflowAndCascadeItsNodesConnectionsAndPermissions()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(fixture.Db, registry, TimeProvider.System, securityAudit: fixture.SecurityAudit);
+        var workflow = await workflowService.CreateAsync("Doomed workflow");
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        // A direct permission grant and a public status share, both referencing the workflow
+        // by a loosely-typed TargetId (no real FK - the same shape shared with Sentinel
+        // pages/databases) rather than cascade-deleting automatically.
+        fixture.Db.SentinelResourcePermissions.Add(new SentinelResourcePermission
+        {
+            TargetId = workflow.Id, IsDatabase = false, Username = "author1", AccessLevel = SentinelAccessLevels.View, CreatedBy = "grant"
+        });
+        fixture.Db.SentinelPublicShares.Add(new SentinelPublicShare
+        {
+            TargetId = workflow.Id, IsDatabase = false, IsAutomationWorkflow = true, TokenHash = "hash", CreatedBy = "grant"
+        });
+        await fixture.Db.SaveChangesAsync();
+
+        (await fixture.Db.AutomationNodes.CountAsync(n => n.WorkflowId == workflow.Id)).Should().BeGreaterThan(0);
+        (await fixture.Db.AutomationWorkflowVersions.CountAsync(v => v.WorkflowId == workflow.Id)).Should().Be(1);
+
+        await workflowService.DeleteWorkflowAsync(workflow.Id);
+
+        (await fixture.Db.AutomationWorkflows.AnyAsync(w => w.Id == workflow.Id)).Should().BeFalse();
+        (await fixture.Db.AutomationNodes.AnyAsync(n => n.WorkflowId == workflow.Id)).Should().BeFalse();
+        (await fixture.Db.AutomationWorkflowVersions.AnyAsync(v => v.WorkflowId == workflow.Id)).Should().BeFalse();
+        (await fixture.Db.SentinelResourcePermissions.AnyAsync(p => p.TargetId == workflow.Id)).Should().BeFalse();
+        (await fixture.Db.SentinelPublicShares.AnyAsync(s => s.TargetId == workflow.Id)).Should().BeFalse();
+
+        var page = await fixture.SecurityAudit.QueryAsync(new SecurityAuditQuery(Category: SecurityAuditCategories.DataLifecycle));
+        page.Events.Should().Contain(item => item.Action == "AutomationWorkflowDeleted" && item.TargetId == workflow.Id.ToString());
+    }
+
+    [Fact]
+    public async Task DeleteWorkflowAsync_ShouldNoOp_WhenTheWorkflowNoLongerExists()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(fixture.Db, registry, TimeProvider.System, securityAudit: fixture.SecurityAudit);
+
+        var act = async () => await workflowService.DeleteWorkflowAsync(Guid.NewGuid());
+
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
     public async Task SavePageAsync_ShouldAuditOnlyCheckpointWorthySaves_NotSilentAutosaves()
     {
         await using var fixture = await Fixture.CreateAsync();

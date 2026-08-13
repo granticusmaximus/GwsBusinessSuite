@@ -122,10 +122,16 @@ else
                             </div>
                         }
                     </button>
-                    <div class="card-footer bg-transparent border-0 pt-0 px-3 pb-3 d-flex justify-content-end">
+                    <div class="card-footer bg-transparent border-0 pt-0 px-3 pb-3 d-flex justify-content-end gap-1">
                         <button type="button" class="btn btn-sm btn-link" disabled="@_busy" @onclick="() => DuplicateWorkflowAsync(workflow)">
                             <i class="bi bi-copy me-1"></i>Duplicate
                         </button>
+                        @if (_isAdmin)
+                        {
+                            <button type="button" class="btn btn-sm btn-link text-danger" disabled="@_busy" @onclick="() => RequestDeleteWorkflow(workflow)">
+                                <i class="bi bi-trash me-1"></i>Delete
+                            </button>
+                        }
                     </div>
                 </div>
             </div>
@@ -196,6 +202,12 @@ else
     </div>
 }
 
+<ConfirmModal Show="_showDeleteConfirm"
+              Title="Delete workflow"
+              Message="@($"Permanently delete \"{_pendingDeleteWorkflow?.Name}\"? This removes its nodes, connections, published versions, and execution history. This can't be undone.")"
+              ConfirmText="Delete" ConfirmButtonClass="btn-danger" Busy="_busy"
+              OnConfirm="ConfirmDeleteWorkflowAsync" OnCancel="CancelDeleteWorkflow" />
+
 @code {
     private List<AutomationWorkflowSummary> _workflows = [];
     private List<AutomationRecentFailureView> _recentFailures = [];
@@ -203,6 +215,12 @@ else
     private bool _loading = true, _busy, _showCreate, _showTemplates, _importing;
     private string _search = "", _statusFilter = "", _tagFilter = "", _newName = "", _newDescription = "", _error = "";
     private const long MaxImportBytes = 5 * 1024 * 1024;
+    private bool _isAdmin;
+    // Whole-workflow delete is admin-only (same gate as the per-workflow "Share this
+    // workflow" grant UI) and permanently destroys the workflow's nodes, connections,
+    // versions, and execution history - see AutomationWorkflowService.DeleteWorkflowAsync.
+    private bool _showDeleteConfirm;
+    private AutomationWorkflowSummary? _pendingDeleteWorkflow;
 
     private List<AutomationWorkflowSummary> FilteredWorkflows => _workflows.Where(workflow =>
         (string.IsNullOrWhiteSpace(_search) || workflow.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) || workflow.Description.Contains(_search, StringComparison.OrdinalIgnoreCase))
@@ -224,6 +242,7 @@ else
         {
             var workflows = (await WorkflowService.ListAsync()).ToList();
             var isAdmin = AuthState is not null && (await AuthState).User.IsInRole(AppRoles.Admin);
+            _isAdmin = isAdmin;
             if (!isAdmin)
             {
                 // Part 4.9: an Author/Contributor sees only workflows an admin has explicitly
@@ -265,6 +284,34 @@ else
             Navigation.NavigateTo($"/admin/automation/{created.Id}");
         }
         catch (Exception ex) { Logger.LogError(ex, "Unable to duplicate workflow {WorkflowId}.", workflow.Id); _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private void RequestDeleteWorkflow(AutomationWorkflowSummary workflow)
+    {
+        _pendingDeleteWorkflow = workflow;
+        _showDeleteConfirm = true;
+    }
+
+    private void CancelDeleteWorkflow()
+    {
+        _showDeleteConfirm = false;
+        _pendingDeleteWorkflow = null;
+    }
+
+    private async Task ConfirmDeleteWorkflowAsync()
+    {
+        if (_pendingDeleteWorkflow is not { } workflow) return;
+
+        _busy = true; _error = "";
+        try
+        {
+            await WorkflowService.DeleteWorkflowAsync(workflow.Id);
+            _workflows.RemoveAll(item => item.Id == workflow.Id);
+            _showDeleteConfirm = false;
+            _pendingDeleteWorkflow = null;
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Unable to delete workflow {WorkflowId}.", workflow.Id); _error = ex.Message; }
         finally { _busy = false; }
     }
 

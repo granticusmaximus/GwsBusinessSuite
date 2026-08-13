@@ -460,39 +460,6 @@
             </div>
         </div>
 
-        <ConfirmModal Show="_showSingleDeleteConfirm"
-                      Title="Move to Trash"
-                      Message="@(_pendingSingleDelete is { IsDatabase: true } ? "Move this database and all its rows to Trash?" : "Move this page (and its sub-pages) to Trash?")"
-                      ConfirmText="Move to Trash" ConfirmButtonClass="btn-danger" Busy="IsBusy"
-                      OnConfirm="ConfirmSingleDeleteAsync" OnCancel="CancelSingleDelete" />
-
-        <ConfirmModal Show="_showBulkDeleteConfirm"
-                      Title="Move to Trash"
-                      Message="@($"Move {_selectedTreeNodeIds.Count} selected item(s) (and any sub-pages) to Trash?")"
-                      ConfirmText="Move to Trash" ConfirmButtonClass="btn-danger" Busy="_bulkActionBusy"
-                      OnConfirm="ConfirmBulkDeleteAsync" OnCancel="CancelBulkDelete" />
-
-        <ConfirmModal Show="_showBulkMoveModal"
-                      Title="Move selected items"
-                      ConfirmText="Move here" ConfirmButtonClass="btn-primary" Busy="_bulkActionBusy"
-                      OnConfirm="ConfirmBulkMoveAsync" OnCancel="CloseBulkMoveModal">
-            <ChildContent>
-                <p class="small text-secondary">Choose a destination for the @_selectedTreeNodeIds.Count selected item(s). Moving a page under its own selected sub-page isn't allowed and will be skipped.</p>
-                <div class="wiki-move-target-list">
-                    <button type="button" class="wiki-move-target-option @(_bulkMoveTargetParentId is null ? "is-selected" : "")" @onclick="() => _bulkMoveTargetParentId = null">
-                        <i class="bi bi-house me-2"></i>Top level
-                    </button>
-                    @foreach (var candidate in AllTreeNodes().Where(n => !_selectedTreeNodeIds.Contains(n.Id)).OrderBy(n => n.Title))
-                    {
-                        <button type="button" class="wiki-move-target-option @(_bulkMoveTargetParentId == candidate.Id ? "is-selected" : "")" @onclick="() => _bulkMoveTargetParentId = candidate.Id">
-                            <span class="wiki-tree-icon">@(string.IsNullOrWhiteSpace(candidate.Icon) ? (candidate.IsDatabase ? "🗄️" : "📄") : candidate.Icon)</span>
-                            @candidate.Title
-                        </button>
-                    }
-                </div>
-            </ChildContent>
-        </ConfirmModal>
-
         <div class="sentinel-teamspaces">
             <div class="sentinel-nav-heading"><i class="bi bi-people"></i> Teamspaces</div>
             <button type="button" class="sentinel-nav-item" @onclick="OpenNotionModalAsync" disabled="@IsBusy">
@@ -861,6 +828,49 @@
         }
 </div>
 </div>
+
+@* These three ConfirmModal instances are deliberately rendered here, outside
+   .sentinel-workspace, rather than inline within the tree sidebar where the bulk-select
+   actions that trigger them live. .sentinel-workspace has `container-type: inline-size`
+   (for the @container query further down in app.css) - and per the CSS containment spec,
+   any container-type/contain:layout ancestor becomes the containing block for its
+   position:fixed descendants instead of the viewport. A modal rendered inside that
+   subtree was being positioned relative to .sentinel-workspace's own (scrolled, often
+   off-screen) box rather than the visible viewport, making it effectively invisible -
+   this is what made the bulk-delete confirmation unreachable. The Notion/Trash modals
+   just below were never affected because they already happened to be declared out here. *@
+<ConfirmModal Show="_showSingleDeleteConfirm"
+              Title="Move to Trash"
+              Message="@(_pendingSingleDelete is { IsDatabase: true } ? "Move this database and all its rows to Trash?" : "Move this page (and its sub-pages) to Trash?")"
+              ConfirmText="Move to Trash" ConfirmButtonClass="btn-danger" Busy="IsBusy"
+              OnConfirm="ConfirmSingleDeleteAsync" OnCancel="CancelSingleDelete" />
+
+<ConfirmModal Show="_showBulkDeleteConfirm"
+              Title="Move to Trash"
+              Message="@($"Move {_selectedTreeNodeIds.Count} selected item(s) (and any sub-pages) to Trash?")"
+              ConfirmText="Move to Trash" ConfirmButtonClass="btn-danger" Busy="_bulkActionBusy"
+              OnConfirm="ConfirmBulkDeleteAsync" OnCancel="CancelBulkDelete" />
+
+<ConfirmModal Show="_showBulkMoveModal"
+              Title="Move selected items"
+              ConfirmText="Move here" ConfirmButtonClass="btn-primary" Busy="_bulkActionBusy"
+              OnConfirm="ConfirmBulkMoveAsync" OnCancel="CloseBulkMoveModal">
+    <ChildContent>
+        <p class="small text-secondary">Choose a destination for the @_selectedTreeNodeIds.Count selected item(s). Moving a page under its own selected sub-page isn't allowed and will be skipped.</p>
+        <div class="wiki-move-target-list">
+            <button type="button" class="wiki-move-target-option @(_bulkMoveTargetParentId is null ? "is-selected" : "")" @onclick="() => _bulkMoveTargetParentId = null">
+                <i class="bi bi-house me-2"></i>Top level
+            </button>
+            @foreach (var candidate in AllTreeNodes().Where(n => !_selectedTreeNodeIds.Contains(n.Id)).OrderBy(n => n.Title))
+            {
+                <button type="button" class="wiki-move-target-option @(_bulkMoveTargetParentId == candidate.Id ? "is-selected" : "")" @onclick="() => _bulkMoveTargetParentId = candidate.Id">
+                    <span class="wiki-tree-icon">@(string.IsNullOrWhiteSpace(candidate.Icon) ? (candidate.IsDatabase ? "🗄️" : "📄") : candidate.Icon)</span>
+                    @candidate.Title
+                </button>
+            }
+        </div>
+    </ChildContent>
+</ConfirmModal>
 
 @if (ShowNotionModal)
 {
