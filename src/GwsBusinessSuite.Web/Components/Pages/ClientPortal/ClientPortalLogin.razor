@@ -1,0 +1,87 @@
+@page "/client-portal/login"
+@attribute [AllowAnonymous]
+@using Microsoft.AspNetCore.Authorization
+
+<PageTitle>Client Portal Sign In</PageTitle>
+
+<div class="gws-login-shell">
+    <div class="page-header">
+        <h1><i class="bi bi-person-badge-fill me-2 text-primary"></i>Client Portal</h1>
+        <p>Sign in to view your deals and shared content.</p>
+    </div>
+
+    <div class="card border-0 shadow-sm gws-login-card">
+        <div class="card-header border-bottom py-3">
+            <h2 class="h6 mb-0 fw-semibold">Sign In</h2>
+        </div>
+        <div class="card-body p-4">
+            @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+            {
+                <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+            }
+
+            @if (Sent)
+            {
+                <div class="alert alert-success" role="alert">
+                    If that email matches an account, a sign-in link is on its way. Check your
+                    inbox - the link expires in 15 minutes.
+                </div>
+            }
+            else
+            {
+                <form method="post" action="/client-portal/auth/request-link">
+                    <AntiforgeryToken />
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold small">Email</label>
+                        <input class="form-control" type="email" name="email" autocomplete="email" required />
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100">Email me a sign-in link</button>
+                </form>
+
+                <p class="text-secondary small mt-3 mb-0 gws-login-note">
+                    No password needed - we'll email you a one-time link.
+                </p>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sent")]
+    public string? SentFlag { get; set; }
+
+    private string ErrorMessage { get; set; } = string.Empty;
+    private bool Sent => string.Equals(SentFlag, "1", StringComparison.Ordinal);
+
+    protected override void OnParametersSet()
+    {
+        ErrorMessage = string.Equals(Error, "invalid", StringComparison.OrdinalIgnoreCase)
+            ? "That link is invalid or has expired. Request a new one below."
+            : string.Empty;
+    }
+}
+
+<style>
+    .gws-login-shell {
+        max-width: 42rem;
+        margin: 0 auto;
+        padding: 1rem 0 2rem;
+    }
+
+    .gws-login-card {
+        border: 1px solid var(--gws-panel-border);
+        border-radius: 14px;
+        overflow: hidden;
+    }
+
+    .gws-login-note {
+        border-top: 1px solid var(--gws-panel-border);
+        padding-top: .85rem;
+        color: var(--gws-text-soft);
+    }
+</style>

@@ -1,0 +1,121 @@
+@page "/client-portal"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "ClientPortalAccess")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Crm
+@using GwsBusinessSuite.Application.CmsBuilder
+@using GwsBusinessSuite.Web.Security
+@inject ICrmService CrmService
+@inject ICmsBuilderService CmsBuilderService
+
+<PageTitle>My Account</PageTitle>
+
+<div class="gws-portal-shell" style="@AccentStyle">
+    <div class="gws-portal-header">
+        @if (!string.IsNullOrWhiteSpace(LogoUrl))
+        {
+            <img src="@LogoUrl" alt="" class="gws-portal-logo" />
+        }
+        <div>
+            <h1 class="h4 mb-0">Welcome, @ContactName</h1>
+            <p class="text-secondary small mb-0">Here's where things stand.</p>
+        </div>
+        <a class="btn btn-outline-secondary btn-sm ms-auto" href="/client-portal/auth/logout">Sign out</a>
+    </div>
+
+    @if (Deals is null)
+    {
+        <p class="text-secondary">Loading...</p>
+    }
+    else if (Deals.Count == 0)
+    {
+        <div class="card border-0 shadow-sm">
+            <div class="card-body text-secondary">Nothing to show here yet.</div>
+        </div>
+    }
+    else
+    {
+        <div class="row g-3">
+            @foreach (var deal in Deals)
+            {
+                <div class="col-12 col-md-6 col-lg-4">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <h2 class="h6 mb-0">@deal.Title</h2>
+                                <span class="badge gws-portal-badge">@deal.Stage</span>
+                            </div>
+                            <p class="mb-1 fw-semibold">@deal.ValueUsd.ToString("C0")</p>
+                            @if (deal.ExpectedCloseDate is not null)
+                            {
+                                <p class="text-secondary small mb-0">
+                                    Expected close: @deal.ExpectedCloseDate.Value.ToString("MMM d, yyyy")
+                                </p>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [CascadingParameter]
+    private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? AuthStateTask { get; set; }
+
+    private Guid _contactId;
+    private string ContactName { get; set; } = string.Empty;
+    private IReadOnlyList<DealView>? Deals { get; set; }
+    private string LogoUrl { get; set; } = string.Empty;
+    private string AccentStyle { get; set; } = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthStateTask is not null)
+        {
+            var authState = await AuthStateTask;
+            ContactName = authState.User.Identity?.Name ?? "there";
+            Guid.TryParse(
+                authState.User.FindFirst(ClientPortalAuthenticationDefaults.ContactIdClaim)?.Value,
+                out _contactId);
+        }
+
+        Deals = await CrmService.ListDealsForContactAsync(_contactId);
+
+        var sites = await CmsBuilderService.ListSitesAsync();
+        var site = sites.FirstOrDefault();
+        if (site is not null)
+        {
+            LogoUrl = site.LogoUrl;
+            AccentStyle = $"--gws-portal-accent: {site.AccentColorHex};";
+        }
+    }
+}
+
+<style>
+    .gws-portal-shell {
+        max-width: 68rem;
+        margin: 0 auto;
+        padding: 1rem 0 2rem;
+        --gws-portal-accent: #f59e0b;
+    }
+
+    .gws-portal-header {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .gws-portal-logo {
+        max-height: 2.5rem;
+        width: auto;
+    }
+
+    .gws-portal-badge {
+        background: color-mix(in srgb, var(--gws-portal-accent) 20%, transparent);
+        color: var(--gws-portal-accent);
+        font-weight: 600;
+    }
+</style>

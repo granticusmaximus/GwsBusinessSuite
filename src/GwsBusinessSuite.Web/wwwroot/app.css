@@ -2819,10 +2819,23 @@ audio.wiki-embed-media { max-width: 100%; }
     backdrop-filter: blur(8px);
 }
 
+/* Both sidebars (.sentinel-local-sidebar, .sentinel-context-sidebar) are independently
+   viewport-height-capped scroll columns (position: sticky + a fixed 100dvh-relative height +
+   their own overflow-y: auto) - this was the one column of the three without a matching
+   height/overflow cap. A long page/large file's content had nothing bounding it, so it pushed
+   the whole grid row (.sentinel-layout) taller than the viewport; since .sentinel-layout's own
+   overflow:hidden isn't the element that actually scrolls (an ancestor further up the shell is),
+   the two sidebars' sticky positioning broke once the row grew past viewport height - they'd
+   scroll away with the rest of that now-oversized row instead of staying anchored full-height,
+   which is what read as "the sidebar gets shortened" on a large page. Capping this column the
+   same way makes all three scroll independently, matching the sidebars' own existing design. */
 .sentinel-document-canvas {
     width: min(100%, 1280px);
     margin: 0 auto;
     padding: clamp(2.1rem, 5vw, 4.6rem) clamp(1.25rem, 6vw, 5rem) 3rem;
+    height: calc(100dvh - var(--gws-admin-bar-height) - 4rem);
+    overflow-y: auto;
+    scrollbar-width: thin;
 }
 
 .sentinel-document-canvas.has-cover { padding-top: 0; }
@@ -4081,6 +4094,10 @@ audio.wiki-embed-media { max-width: 100%; }
     }
     .sentinel-context-heading { position: static; }
     .sentinel-context-sidebar.is-collapsed { max-height: 3.65rem; }
+    /* On mobile .sentinel-layout switches to normal block flow (not a grid of independently
+       scrolling columns), so the document canvas should scroll with the page like everything
+       else here, not keep its own internal scrollbar. */
+    .sentinel-document-canvas { height: auto; overflow-y: visible; }
 }
 
 @media (hover: none), (pointer: coarse) {

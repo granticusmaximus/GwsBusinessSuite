@@ -1105,6 +1105,77 @@ app.MapGet("/auth/logout", async (HttpContext httpContext, ISecurityAuditService
     return Results.LocalRedirect("/admin/login");
 }).AllowAnonymous();
 
+// Client portal passwordless login. Mirrors the /auth/login -> /auth/mfa/* split: the
+// SignInAsync call has to happen from a minimal-API endpoint, not an interactive Razor
+// component, because interactive Blazor Server components run over a SignalR circuit that
+// can't set HTTP response cookies directly.
+app.MapPost("/client-portal/auth/request-link", async (
+    HttpContext httpContext,
+    IAntiforgery antiforgery,
+    GwsBusinessSuite.Application.ClientPortal.IClientPortalAuthService clientPortalAuth) =>
+{
+    if (await ValidateAntiforgeryAsync(httpContext, antiforgery) is not null)
+        return Results.LocalRedirect("/client-portal/login?error=invalid");
+
+    var form = await httpContext.Request.ReadFormAsync();
+    var email = form["email"].ToString().Trim();
+    var consumeUrl = $"{httpContext.Request.Scheme}://{httpContext.Request.Host}/client-portal/auth/consume";
+
+    if (!string.IsNullOrWhiteSpace(email))
+    {
+        await clientPortalAuth.RequestLoginLinkAsync(
+            email, consumeUrl, httpContext.Connection.RemoteIpAddress?.ToString());
+    }
+
+    // Always the same redirect whether or not the email matched a real contact - never
+    // reveal which addresses are registered.
+    return Results.LocalRedirect("/client-portal/login?sent=1");
+}).AllowAnonymous().RequireRateLimiting("login");
+
+app.MapGet("/client-portal/auth/consume", async (
+    HttpContext httpContext,
+    string? token,
+    GwsBusinessSuite.Application.ClientPortal.IClientPortalAuthService clientPortalAuth,
+    ISecurityAuditService securityAudit) =>
+{
+    var contact = string.IsNullOrWhiteSpace(token)
+        ? null
+        : await clientPortalAuth.ConsumeLoginLinkAsync(token);
+
+    if (contact is null)
+    {
+        await securityAudit.RecordAsync(new SecurityAuditInput(
+            SecurityAuditCategories.Authentication, "ClientPortalLogin", SecurityAuditOutcomes.Failed,
+            SecurityAuditSeverities.Warning, "Contact",
+            NetworkAddress: httpContext.Connection.RemoteIpAddress?.ToString()));
+        return Results.LocalRedirect("/client-portal/login?error=invalid");
+    }
+
+    var claims = new List<Claim>
+    {
+        new(ClaimTypes.Name, contact.FullName),
+        new(ClientPortalAuthenticationDefaults.ContactIdClaim, contact.ContactId.ToString())
+    };
+    var identity = new ClaimsIdentity(claims, ClientPortalAuthenticationDefaults.Scheme);
+    await httpContext.SignInAsync(
+        ClientPortalAuthenticationDefaults.Scheme,
+        new ClaimsPrincipal(identity),
+        new AuthenticationProperties { IsPersistent = true, ExpiresUtc = DateTimeOffset.UtcNow.AddDays(14) });
+
+    await securityAudit.RecordAsync(new SecurityAuditInput(
+        SecurityAuditCategories.Authentication, "ClientPortalLogin", SecurityAuditOutcomes.Succeeded,
+        TargetType: "Contact", TargetId: contact.ContactId.ToString(),
+        NetworkAddress: httpContext.Connection.RemoteIpAddress?.ToString(), ActorUsername: contact.FullName));
+
+    return Results.LocalRedirect("/client-portal");
+}).AllowAnonymous().RequireRateLimiting("login");
+
+app.MapGet("/client-portal/auth/logout", async (HttpContext httpContext) =>
+{
+    await httpContext.SignOutAsync(ClientPortalAuthenticationDefaults.Scheme);
+    return Results.LocalRedirect("/client-portal/login");
+}).AllowAnonymous();
+
 app.MapGet("/auth/notion/connect", (
     HttpContext httpContext,
     INotionOAuthService notionOAuth,

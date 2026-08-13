@@ -10,9 +10,10 @@ public interface IClientPortalAuthService
 {
     // Always completes the same way regardless of whether email matches a real contact - never
     // reveals which addresses are registered. Silently no-ops (no token minted, no email sent)
-    // on a miss. loginBaseUrl is the caller's own page URL (e.g. NavigationManager.BaseUri +
-    // "client-portal/login") so the emailed link always points at whatever host actually served
-    // the request, rather than a hardcoded domain baked into config.
+    // on a miss. loginBaseUrl is the absolute URL of the GET /client-portal/auth/consume
+    // minimal-API endpoint (built from the current request's scheme+host) so the emailed link
+    // always points at whatever host actually served the request, rather than a hardcoded
+    // domain baked into config, and lands directly on the endpoint that performs SignInAsync.
     Task RequestLoginLinkAsync(string email, string loginBaseUrl, string? requestedFromIp = null, CancellationToken cancellationToken = default);
 
     // Null for an invalid, expired, or already-consumed token - the caller shows one generic
