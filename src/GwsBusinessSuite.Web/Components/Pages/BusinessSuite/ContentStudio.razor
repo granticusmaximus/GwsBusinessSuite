@@ -34,7 +34,7 @@
     </div>
 }
 
-@if (IsBusy)
+@if (IsBusy && !_isGeneratingDraft)
 {
     <div class="gws-busy-overlay" role="status" aria-live="polite" aria-busy="true">
         <div class="gws-busy-panel shadow">
@@ -185,6 +185,17 @@
                 <span>Refresh Draft List</span>
             </button>
         </div>
+
+        @if (_isGeneratingDraft)
+        {
+            <div class="mt-4">
+                <div class="d-flex align-items-center gap-2 small text-secondary mb-2">
+                    <div class="spinner-border spinner-border-sm text-primary" aria-hidden="true"></div>
+                    <span>Writing live - this can take several minutes on local hardware. The full draft is saved once generation finishes.</span>
+                </div>
+                <pre class="content-studio-live-preview">@_generatingMarkdownPreview<span class="content-studio-live-cursor">▌</span></pre>
+            </div>
+        }
     </div>
 </div>
 
@@ -470,6 +481,9 @@
         StatusMessage = $"Article Brief pre-filled from trend suggestion '{suggestion.Topic}'. Review it below and click Generate Draft With SentinelGPT.";
     }
 
+    private bool _isGeneratingDraft;
+    private string _generatingMarkdownPreview = string.Empty;
+
     private async Task GenerateDraft()
     {
         if (string.IsNullOrWhiteSpace(Topic))
@@ -481,22 +495,56 @@
 
         ErrorMessage = string.Empty;
         StatusMessage = $"Generating a draft for '{Topic.Trim()}' with SentinelGPT...";
-        BeginBusy("Generating article content and scoring affiliate placements. This can take up to a minute.");
+        _isGeneratingDraft = true;
+        _generatingMarkdownPreview = string.Empty;
+        BeginBusy("Generating article content and scoring affiliate placements. This can take several minutes on local hardware.");
         Logger.LogInformation("Content Studio generate button clicked for topic '{Topic}'.", Topic);
         await InvokeAsync(StateHasChanged);
 
         try
         {
-            var result = await ContentStudioService.GenerateArticleAsync(new ArticleGenerationRequest
+            ArticleGenerationResult? result = null;
+            var flaggedClaimCount = 0;
+            // Throttled re-render: Ollama streams roughly one small fragment per token, and
+            // re-rendering the Blazor Server circuit on every single one (potentially thousands
+            // for a full article) would be needlessly chatty over the SignalR connection. The
+            // accumulated text is never lost between renders either way.
+            var lastRenderAt = DateTimeOffset.UtcNow;
+            await foreach (var chunk in ContentStudioService.GenerateArticleStreamAsync(new ArticleGenerationRequest
             {
                 Topic = Topic,
                 TargetAudience = TargetAudience,
                 PrimaryKeyword = PrimaryKeyword,
                 SecondaryKeywords = SecondaryKeywords
-            });
+            }))
+            {
+                if (!string.IsNullOrEmpty(chunk.Delta))
+                {
+                    _generatingMarkdownPreview += chunk.Delta;
+                    var now = DateTimeOffset.UtcNow;
+                    if (now - lastRenderAt > TimeSpan.FromMilliseconds(200))
+                    {
+                        lastRenderAt = now;
+                        await InvokeAsync(StateHasChanged);
+                    }
+                }
+
+                if (chunk.CompletedDraft is not null)
+                {
+                    result = chunk.CompletedDraft;
+                    flaggedClaimCount = chunk.FlaggedClaimCount;
+                }
+            }
+
+            if (result is null)
+            {
+                throw new InvalidOperationException("Generation completed without producing a saved draft.");
+            }
 
             await RefreshDrafts(showOverlay: false);
-            StatusMessage = $"Draft generated successfully for '{result.Title}'. Use Open in the draft list to review and manage this draft on the detail page.";
+            StatusMessage = flaggedClaimCount > 0
+                ? $"Draft generated for '{result.Title}', but SentinelGPT flagged {flaggedClaimCount} claim(s) it couldn't verify while writing - review the Source Notes before publishing."
+                : $"Draft generated successfully for '{result.Title}'. Use Open in the draft list to review and manage this draft on the detail page.";
             Navigation.NavigateTo($"/admin/content-studio/draft/{result.DraftId}");
         }
         catch (Exception ex)
@@ -507,6 +555,8 @@
         }
         finally
         {
+            _isGeneratingDraft = false;
+            _generatingMarkdownPreview = string.Empty;
             EndBusy();
             await InvokeAsync(StateHasChanged);
         }

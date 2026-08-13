@@ -864,8 +864,35 @@
         if (_useDeepAnalysis)
         {
             _useTools = false;
+            WarmDeepAnalysisAdvisersInBackground();
         }
         _error = string.Empty;
+    }
+
+    // Deep Analysis's two adviser models are only warmed here, on demand, rather than
+    // unconditionally at app startup alongside the default sentinelgpt model - this is opt-in,
+    // rarely-used-per-session functionality on CPU-only hardware, so eagerly keeping two extra
+    // models resident would waste memory for a feature that might go untouched all session.
+    // Warming here just pays the cold-load cost once, the moment intent is actually signaled,
+    // instead of on the first real Deep Analysis request. Fire-and-forget: a failure here isn't
+    // surfaced to the user - the real generation call will fail (and get logged) on its own if
+    // the model genuinely can't load, so this is purely a latency head start when it works.
+    private void WarmDeepAnalysisAdvisersInBackground()
+    {
+        _ = WarmModelSafelyAsync(SentinelGptDefaults.CodeReviewAdviserModel);
+        _ = WarmModelSafelyAsync(SentinelGptDefaults.ReasoningAdviserModel);
+
+        async Task WarmModelSafelyAsync(string model)
+        {
+            try
+            {
+                await LocalModelService.WarmModelAsync(model);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Background warm-up failed for Deep Analysis adviser model '{Model}'.", model);
+            }
+        }
     }
 
     private void ToggleTools()

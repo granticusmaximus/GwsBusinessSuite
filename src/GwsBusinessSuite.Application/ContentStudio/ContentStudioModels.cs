@@ -96,6 +96,13 @@ public sealed class ArticleGenerationResult
     public IReadOnlyList<ContentStudioWorkflowEntry> WorkflowHistory { get; init; } = Array.Empty<ContentStudioWorkflowEntry>();
 }
 
+// Mirrors SentinelAiStreamChunk's Delta/CompletedRun shape for the same reason: lets
+// GenerateArticleStreamAsync's caller (ContentStudio.razor) render the article as it's written
+// instead of waiting on a blank screen for a multi-minute CPU-only generation, then swap in the
+// final persisted result once it lands. FlaggedClaimCount is only meaningful on the completion
+// chunk (Delta chunks always report 0) - see ContentStudioService.ExtractVerifyFlags.
+public sealed record ContentStudioGenerationChunk(string? Delta, ArticleGenerationResult? CompletedDraft, int FlaggedClaimCount = 0);
+
 public sealed class ScoredAffiliateOfferView
 {
     public string AdvertiserId { get; init; } = string.Empty;

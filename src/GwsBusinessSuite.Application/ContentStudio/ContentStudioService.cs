@@ -1,3 +1,6 @@
+using System.Runtime.CompilerServices;
+using System.Text;
+using System.Text.RegularExpressions;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.AffiliateSuggestions;
 using GwsBusinessSuite.Application.Articles;
@@ -186,9 +189,74 @@ public sealed class ContentStudioService(
             throw new InvalidOperationException("SentinelGPT returned an empty draft. Try again or switch models.");
         }
 
+        var (saved, _) = await PersistGeneratedDraftAsync(request, markdown, scoredOffers, cancellationToken);
+        return saved;
+    }
+
+    public async IAsyncEnumerable<ContentStudioGenerationChunk> GenerateArticleStreamAsync(
+        ArticleGenerationRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Topic);
+
+        var scoredOffers = await offerScoringService.ScoreOffersAsync(request, maxOffers: AffiliateSlotTokens.Length, cancellationToken);
+        var prompt = BuildPrompt(request, scoredOffers);
+        var model = await GetEffectiveModelAsync(cancellationToken);
+        var timeout = await GetEffectiveTimeoutAsync(cancellationToken);
+
+        logger.LogInformation(
+            "Generating Content Studio draft (streamed) for topic '{Topic}' using Ollama model '{Model}'.",
+            request.Topic,
+            model);
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(timeout);
+
+        var builder = new StringBuilder();
+        var stream = ollama.GenerateStreamAsync(model, BuildSystemPrompt(), prompt, timeoutCts.Token);
+        await foreach (var fragment in stream.WithCancellation(timeoutCts.Token))
+        {
+            builder.Append(fragment);
+            yield return new ContentStudioGenerationChunk(fragment, null);
+        }
+
+        var markdown = builder.ToString().Trim();
+        if (string.IsNullOrWhiteSpace(markdown))
+        {
+            logger.LogWarning("Ollama returned an empty draft for topic '{Topic}'.", request.Topic);
+            throw new InvalidOperationException("SentinelGPT returned an empty draft. Try again or switch models.");
+        }
+
+        var (saved, flaggedClaimCount) = await PersistGeneratedDraftAsync(request, markdown, scoredOffers, cancellationToken);
+        yield return new ContentStudioGenerationChunk(null, saved, flaggedClaimCount);
+    }
+
+    // Shared by GenerateArticleAsync and GenerateArticleStreamAsync so both persist identically
+    // (including [VERIFY:...] extraction below) regardless of which path produced the markdown.
+    private async Task<(ArticleGenerationResult Saved, int FlaggedClaimCount)> PersistGeneratedDraftAsync(
+        ArticleGenerationRequest request,
+        string markdown,
+        IReadOnlyList<ScoredAffiliateOfferView> scoredOffers,
+        CancellationToken cancellationToken)
+    {
         var markdownWithAffiliateSlots = EnsureAffiliatePlaceholders(markdown);
         var slug = CreateSlug(request.Topic);
         var title = request.Topic.Trim();
+
+        // BuildSystemPrompt instructs the model to insert a literal [VERIFY: ...] placeholder
+        // instead of guessing at anything it isn't sure of - that convention is already
+        // reliably followed, but until now nothing read it back out; it just sat in the raw
+        // markdown for a human to notice or miss. Surfacing the count/list here (cheap - a
+        // regex scan, no extra model call) turns "hopefully someone spots it" into an explicit
+        // checklist a reviewer can't accidentally skip past.
+        var flaggedClaims = ExtractVerifyFlags(markdownWithAffiliateSlots);
+        var sourceNotes = "Verify references against Microsoft Learn and official .NET docs before publishing.";
+        if (flaggedClaims.Count > 0)
+        {
+            sourceNotes = $"SentinelGPT flagged {flaggedClaims.Count} claim(s) it could not verify while writing - review each before publishing:\n"
+                + string.Join('\n', flaggedClaims.Select(claim => $"- {claim}"))
+                + $"\n\n{sourceNotes}";
+        }
 
         var draft = new SeoArticleDraft
         {
@@ -204,7 +272,7 @@ public sealed class ContentStudioService(
             OutlineMarkdown = ExtractSection(markdownWithAffiliateSlots, "## Outline"),
             ArticleMarkdown = markdownWithAffiliateSlots,
             SeoChecklistMarkdown = BuildDefaultChecklist(request.PrimaryKeyword, request.SecondaryKeywords),
-            SourceNotesMarkdown = "Verify references against Microsoft Learn and official .NET docs before publishing.",
+            SourceNotesMarkdown = sourceNotes,
             RevisionNumber = 0
         };
 
@@ -234,10 +302,11 @@ public sealed class ContentStudioService(
         await freshContext.SaveChangesAsync(cancellationToken);
 
         logger.LogInformation(
-            "Content Studio draft {DraftId} generated successfully for topic '{Topic}' with slug '{Slug}'.",
+            "Content Studio draft {DraftId} generated successfully for topic '{Topic}' with slug '{Slug}' ({FlaggedClaimCount} claim(s) flagged for verification).",
             draft.Id,
             request.Topic,
-            slug);
+            slug,
+            flaggedClaims.Count);
 
         var saved = await GetDraftCoreAsync(freshContext, draft.Id, cancellationToken);
         if (saved is null)
@@ -245,8 +314,18 @@ public sealed class ContentStudioService(
             throw new InvalidOperationException("The generated draft could not be reloaded from persistence.");
         }
 
-        return saved;
+        return (saved, flaggedClaims.Count);
     }
+
+    private static readonly Regex VerifyFlagPattern = new(@"\[VERIFY:\s*([^\]]*)\]", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static IReadOnlyList<string> ExtractVerifyFlags(string markdown) =>
+        VerifyFlagPattern.Matches(markdown)
+            .Select(match => match.Groups[1].Value.Trim())
+            .Where(value => value.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .ToList();
 
     public async Task<ArticleGenerationResult?> RequestRevisionAsync(
         DraftRevisionRequest request,

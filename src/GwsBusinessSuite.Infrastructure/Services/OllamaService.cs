@@ -17,16 +17,32 @@ public sealed class OllamaService(
 {
     private const string ModelKeepAlive = "30m";
 
-    public async Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
+    public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
+        GenerateCoreAsync(model, systemPrompt, userPrompt, numCtx: null, ct);
+
+    public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, int numCtx, CancellationToken ct = default) =>
+        GenerateCoreAsync(model, systemPrompt, userPrompt, numCtx, ct);
+
+    private async Task<string> GenerateCoreAsync(string model, string systemPrompt, string userPrompt, int? numCtx, CancellationToken ct)
     {
-        var payload = new
-        {
-            model,
-            stream = false,
-            system = systemPrompt,
-            prompt = userPrompt,
-            keep_alive = ModelKeepAlive
-        };
+        object payload = numCtx is { } contextSize
+            ? new
+            {
+                model,
+                stream = false,
+                system = systemPrompt,
+                prompt = userPrompt,
+                keep_alive = ModelKeepAlive,
+                options = new { num_ctx = contextSize }
+            }
+            : new
+            {
+                model,
+                stream = false,
+                system = systemPrompt,
+                prompt = userPrompt,
+                keep_alive = ModelKeepAlive
+            };
 
         try
         {

@@ -701,6 +701,27 @@ h1:focus { outline: none; }
 .gws-modal-dragging { cursor: grabbing; }
 body.gws-modal-dragging-active { -webkit-user-select: none; user-select: none; }
 
+/* Content Studio's live article-generation preview (see ContentStudio.razor's GenerateDraft) -
+   shows the article as Ollama streams it instead of a blank wait for a multi-minute
+   CPU-only generation. */
+.content-studio-live-preview {
+    max-height: 320px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: var(--gws-panel-bg-2);
+    border: 1px solid var(--gws-panel-border);
+    border-radius: .5rem;
+    padding: .75rem 1rem;
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: .8125rem;
+    line-height: 1.5;
+    margin: 0;
+    color: var(--gws-text-strong);
+}
+.content-studio-live-cursor { display: inline-block; animation: content-studio-cursor-blink 1s steps(2, start) infinite; }
+@keyframes content-studio-cursor-blink { to { visibility: hidden; } }
+
 .btn-close { filter: invert(1) grayscale(100%) brightness(1.6); }
 
 .dropdown-menu {

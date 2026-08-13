@@ -20,6 +20,12 @@ public static class SentinelGptDefaults
 {
     public const string Model = "sentinelgpt";
 
+    // Deep Analysis's two advisory models (SentinelAiService.TryConsultTeacherAsync). Named
+    // here (not inline string literals) so SentinelGpt.razor's Fast/Deep toggle can warm them
+    // lazily - see ToggleDeepAnalysis - without duplicating the model names and risking drift.
+    public const string CodeReviewAdviserModel = "qwen2.5-coder";
+    public const string ReasoningAdviserModel = "deepseek-r1";
+
     // Keep pasted documents below both the configured model context window and the
     // Blazor circuit's bounded inbound-message allowance. This is deliberately a
     // character limit (rather than a token estimate) so the browser and service can

@@ -47,7 +47,10 @@ public sealed class SentinelAiServiceTests
             chunks.Add(chunk);
         }
 
-        chunks.Where(chunk => chunk.CompletedRun is null).Select(chunk => chunk.Delta)
+        // Excludes empty-Delta activity/status chunks (e.g. the citation-gated verify pass's
+        // "Checking sources" progress update, which fires here since this citation exists) -
+        // this asserts the real content fragments only, not every chunk in the stream.
+        chunks.Where(chunk => chunk.CompletedRun is null && !string.IsNullOrEmpty(chunk.Delta)).Select(chunk => chunk.Delta)
             .Should().Equal("The ", "blue switch ", "starts the sequence.");
 
         var completed = chunks.Should().ContainSingle(chunk => chunk.CompletedRun != null).Subject.CompletedRun!;
@@ -1144,6 +1147,12 @@ public sealed class SentinelAiServiceTests
         public List<string> PulledModels { get; } = [];
         public List<string> RequestedModels { get; } = [];
         public int? LastMaxOutputTokens { get; private set; }
+        public int? LastNumCtx { get; private set; }
+        public int VerifyPassCallCount { get; private set; }
+        // Defaults to "VERIFIED" (no correction) so existing tests that don't know about the
+        // citation-gated verify pass (SentinelAiService.TryVerifyAnswerAsync) aren't affected by
+        // it - only tests that explicitly set this exercise the correction path.
+        public string VerifyPassResponse { get; set; } = "VERIFIED";
 
         public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
         {
@@ -1152,9 +1161,27 @@ public sealed class SentinelAiServiceTests
             return Task.FromResult(string.Join(string.Empty, fragments));
         }
 
+        public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, int numCtx, CancellationToken ct = default)
+        {
+            LastNumCtx = numCtx;
+            return GenerateAsync(model, systemPrompt, userPrompt, ct);
+        }
+
         public async IAsyncEnumerable<string> GenerateStreamAsync(
             string model, string systemPrompt, string userPrompt, [EnumeratorCancellation] CancellationToken ct = default)
         {
+            // TryVerifyAnswerAsync's system prompt is distinctively worded ("fact-checking
+            // layer") so this fake can tell a verify-pass call apart from the main answer call
+            // without either side needing to pass an explicit flag through the real interface.
+            if (systemPrompt.Contains("fact-checking layer", StringComparison.OrdinalIgnoreCase))
+            {
+                VerifyPassCallCount++;
+                RequestedModels.Add(model);
+                await Task.Yield();
+                yield return VerifyPassResponse;
+                yield break;
+            }
+
             WasCalled = true;
             RequestedModels.Add(model);
             LastSystemPrompt = systemPrompt;

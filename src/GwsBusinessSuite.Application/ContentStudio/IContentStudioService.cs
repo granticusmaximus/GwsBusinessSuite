@@ -8,6 +8,12 @@ public interface IContentStudioService
     Task<ArticleGenerationResult> GenerateArticleAsync(
         ArticleGenerationRequest request,
         CancellationToken cancellationToken = default);
+    // Same generation as GenerateArticleAsync, but yields markdown fragments as Ollama streams
+    // them so the UI can show the article being written rather than a blank wait for the whole
+    // multi-minute CPU-only generation - see ContentStudioGenerationChunk.
+    IAsyncEnumerable<ContentStudioGenerationChunk> GenerateArticleStreamAsync(
+        ArticleGenerationRequest request,
+        CancellationToken cancellationToken = default);
     Task<ArticleGenerationResult?> RequestRevisionAsync(
         DraftRevisionRequest request,
         CancellationToken cancellationToken = default);

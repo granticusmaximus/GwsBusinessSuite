@@ -55,6 +55,14 @@ public sealed class SentinelAiService(
     private const int HistoryOutputCharacterLimit = 4_000;
     private const int MaxContextualPromptCharacters = 40_000;
     private const int MaxGroundedContextCharacters = 24_000;
+    // A page's full block content used to flow into the grounded context uncapped (only each
+    // individual block was capped at 240 chars), so a page with many blocks could alone consume
+    // most of MaxGroundedContextCharacters and push the ~24k budget to its ceiling on real
+    // content - the documented cause of multi-minute CPU-only prefill times. The pinned page
+    // (the one actually open) stays fuller since it's clearly relevant; related search-result
+    // pages get a short snippet - enough to cite and reason about, not reproduce.
+    private const int PinnedPageContentCharacterLimit = 2_000;
+    private const int RelatedPageContentCharacterLimit = 400;
     private static readonly TimeSpan SuiteContextCacheDuration = TimeSpan.FromSeconds(20);
     private const string SuiteOverviewCacheKey = "sentinel-gpt:suite-overview:v1";
 
@@ -777,7 +785,7 @@ public sealed class SentinelAiService(
                 var advisoryContext = LimitRaw(context.ToString(), 18_000);
                 yield return new SentinelAiStreamChunk(string.Empty, null, "Consulting Qwen engineering adviser");
                 var qwenAdvice = await TryConsultTeacherAsync(
-                    "qwen2.5-coder",
+                    SentinelGptDefaults.CodeReviewAdviserModel,
                     "Act as a senior .NET, C#, Blazor, testing, security, and software architecture reviewer. Correct invalid APIs and identify implementation risks.",
                     instruction,
                     advisoryContext,
@@ -785,7 +793,7 @@ public sealed class SentinelAiService(
 
                 yield return new SentinelAiStreamChunk(string.Empty, null, "Consulting DeepSeek reasoning adviser");
                 var deepSeekAdvice = await TryConsultTeacherAsync(
-                    "deepseek-r1",
+                    SentinelGptDefaults.ReasoningAdviserModel,
                     "Audit the reasoning and premises. Identify missing evidence, counterexamples, hidden costs, and the most defensible conclusion.",
                     instruction,
                     advisoryContext,
@@ -901,6 +909,24 @@ public sealed class SentinelAiService(
             db.SentinelAiRuns.Add(run);
             await db.SaveChangesAsync(cancellationToken);
             throw new InvalidOperationException("SentinelGPT returned an empty response.");
+        }
+
+        // Self-correction, gated on citations actually existing: a casual/conversational answer
+        // with no grounded facts to check has nothing to verify, so it stays exactly as fast as
+        // before this was added. A citation-bearing answer gets one extra bounded, non-streaming
+        // pass that checks the draft against the same grounded context it was built from -
+        // roughly doubling latency for that subset of answers, which was the explicit,
+        // deliberate tradeoff (see the plan's "verify only factual/citation-bearing answers").
+        if (citations.Count > 0)
+        {
+            yield return new SentinelAiStreamChunk(string.Empty, null, "Checking sources");
+            var correction = await TryVerifyAnswerAsync(model, run.Output, boundedContext, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(correction))
+            {
+                var amendment = $"\n\n---\n**Self-check correction:** {correction}";
+                run.Output += amendment;
+                yield return new SentinelAiStreamChunk(amendment, null);
+            }
         }
 
         run.CitationsJson = JsonSerializer.Serialize(citations);
@@ -1361,14 +1387,14 @@ public sealed class SentinelAiService(
                 : null;
             if (pinnedPage is not null)
             {
-                AppendPage(builder, pinnedPage);
+                AppendPage(builder, pinnedPage, PinnedPageContentCharacterLimit);
                 citations.Add(new SentinelAiCitation(pinnedPage.Id, false, pinnedPage.Title));
                 citedIds.Add(pinnedPage.Id);
             }
         }
 
         var results = await workspaceService.SearchAsync(
-            instruction, performedBy, maxResults: 6, cancellationToken: cancellationToken);
+            instruction, performedBy, maxResults: 4, cancellationToken: cancellationToken);
         foreach (var result in results)
         {
             if (!citedIds.Add(result.Id)) continue;
@@ -1386,7 +1412,7 @@ public sealed class SentinelAiService(
             {
                 var page = await db.WikiPages.AsNoTracking().FirstOrDefaultAsync(item => item.Id == result.Id, cancellationToken);
                 if (page is null) continue;
-                AppendPage(builder, page);
+                AppendPage(builder, page, RelatedPageContentCharacterLimit);
             }
 
             citations.Add(new SentinelAiCitation(result.Id, result.IsDatabase, result.Title));
@@ -1442,6 +1468,15 @@ public sealed class SentinelAiService(
             }
         }
 
+        // Reverted an earlier "question-aware retrieval" attempt (pre-querying only modules
+        // whose fixed domain-keyword list matched the extracted terms) after real test failures
+        // showed it silently drops grounding for the single most common real query shape this
+        // app is built to support: asking about something by its own name ("why did Acme Renewal
+        // stall", "tell me about Ada") rather than by domain vocabulary ("deal", "contact").
+        // Since MatchesAny below already scopes each module down to nothing whenever there's no
+        // real match, always querying costs a handful of fast local SQLite round-trips, not
+        // prompt tokens - a false negative (silently missing real grounding) is a correctness
+        // regression, which is worse than that.
         var articles = await db.Articles.AsNoTracking()
             .Where(item => item.TrashedAt == null)
             .Select(item => new { item.Id, item.Title, item.Topic, item.Tags, item.MetaDescription, item.Status })
@@ -1613,10 +1648,10 @@ public sealed class SentinelAiService(
         return cached ?? "GWS BUSINESS SUITE LIVE OVERVIEW unavailable.\n";
     }
 
-    private static void AppendPage(StringBuilder builder, WikiPage page)
+    private static void AppendPage(StringBuilder builder, WikiPage page, int maxContentLength)
     {
         var text = string.Join(" ", WikiBlockJson.ParseBlocks(page.BlocksJson).Select(block => WikiBlockHtmlRenderer.PlainTextPreview(block, 240)));
-        builder.AppendLine($"PAGE: {page.Title}\n{text}");
+        builder.AppendLine($"PAGE: {page.Title}\n{Limit(text, maxContentLength)}");
     }
 
     private static void AppendDatabase(StringBuilder builder, WikiDatabase database)
@@ -1748,6 +1783,61 @@ public sealed class SentinelAiService(
         return memory.ToString();
     }
 
+    // Part of the "verify only citation-bearing answers" self-correction pass - see
+    // StreamGroundedConversationAsync's call site. Returns null when the draft is already fully
+    // supported by groundedContext (the model replies with exactly VERIFIED) or when the pass
+    // itself fails (never let a verify-pass failure take down an already-produced answer).
+    // Uses GenerateStreamAsync's maxOutputTokens overload purely to bound cost - the fragments
+    // are buffered internally rather than streamed to the caller, since a short verdict doesn't
+    // need progressive rendering.
+    private async Task<string?> TryVerifyAnswerAsync(
+        string model,
+        string draftAnswer,
+        string groundedContext,
+        CancellationToken cancellationToken)
+    {
+        const string verifiedMarker = "VERIFIED";
+        const string verifySystemPrompt =
+            "You are a fact-checking layer for SentinelGPT. You will be given GROUNDED CONTEXT and a " +
+            "DRAFT ANSWER that was supposed to be based on it. Check every factual claim in the draft " +
+            "against the context. If every claim is either directly supported by the context or clearly " +
+            "presented as inference, opinion, or an acknowledged unknown, reply with exactly the single " +
+            "word VERIFIED and nothing else. If the draft asserts something as fact that the context does " +
+            "not support, or contradicts the context, reply with a short correction (a few sentences) " +
+            "naming exactly what was wrong and stating the correct, supportable version instead. Do not " +
+            "restate the whole draft.";
+        var verifyUserPrompt =
+            $"GROUNDED CONTEXT:\n{LimitRaw(groundedContext, 12_000)}\n\nDRAFT ANSWER:\n{LimitRaw(draftAnswer, 6_000)}";
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(2));
+
+        string output;
+        try
+        {
+            var builder = new StringBuilder();
+            await foreach (var fragment in ollama.GenerateStreamAsync(model, verifySystemPrompt, verifyUserPrompt, maxOutputTokens: 600, timeoutCts.Token))
+            {
+                builder.Append(fragment);
+            }
+            output = builder.ToString().Trim();
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger?.LogWarning("SentinelGPT verify pass timed out; showing the unverified draft answer.");
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger?.LogWarning(ex, "SentinelGPT verify pass failed; showing the unverified draft answer.");
+            return null;
+        }
+
+        return output.Length == 0 || output.StartsWith(verifiedMarker, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : output;
+    }
+
     private async Task<string?> TryConsultTeacherAsync(
         string model,
         string role,
@@ -1764,11 +1854,18 @@ public sealed class SentinelAiService(
 
         try
         {
+            // Explicit num_ctx: this prompt (up to ~8,000 chars instruction + ~18,000 chars
+            // groundedContext, TryConsultTeacherAsync's callers cap advisoryContext at that)
+            // comfortably exceeds Ollama's stock default context window (often 2048 tokens) for
+            // a model with no Modelfile-baked override like sentinelgpt has - without this, the
+            // adviser would silently truncate its own input with no error surfaced. 8192 covers
+            // the ~7,500-token input/output total with headroom.
             var output = await ollama.GenerateAsync(
                 model,
                 $"{role} Return independent advisory analysis, not the final user-facing answer. " +
                 "Challenge unsupported assumptions, distinguish fact from inference, never claim an action ran, and stay under 650 words.",
                 $"REQUEST:\n{LimitRaw(instruction, 8_000)}\n\nSANITIZED GROUNDED CONTEXT:\n{groundedContext}",
+                numCtx: 8192,
                 timeoutCts.Token);
             return string.IsNullOrWhiteSpace(output) ? null : LimitRaw(output.Trim(), 7_000);
         }

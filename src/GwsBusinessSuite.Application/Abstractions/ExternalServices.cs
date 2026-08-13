@@ -17,6 +17,14 @@ public interface IOllamaService
 {
     Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default);
 
+    // Applies an explicit context-window size, guarding against Ollama's stock default (often a
+    // small num_ctx like 2048) silently truncating a large prompt with no error surfaced - see
+    // SentinelAiService.TryConsultTeacherAsync, the first caller with a large-enough prompt
+    // (~18,000 chars of advisory context) to actually risk that. Default implementation ignores
+    // numCtx and falls back to the original contract for older integrations/fakes.
+    Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, int numCtx, CancellationToken ct = default) =>
+        GenerateAsync(model, systemPrompt, userPrompt, ct);
+
     // Loads a model into memory without asking it to generate user-visible output. Fakes
     // and integrations that do not manage a local runtime may safely use this no-op default.
     Task WarmModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
