@@ -102,6 +102,24 @@ public sealed class ContactActivity : AuditableEntity
     public required string Note { get; set; }
 }
 
+// Passwordless client-portal sign-in. A contact enters their email; if it matches a real
+// Contact.Email, one of these is minted and emailed as a single-use link - no password is ever
+// created, stored, or reset for client-portal accounts. ContactId is a loose reference (no
+// FK/cascade), same convention as SentinelResourcePermission/SentinelPublicShare's own
+// TargetId, since a trashed Contact shouldn't be blocked by a stray token row.
+// Named "ClientPortal" (not "Portal") throughout this feature to stay unambiguous against the
+// unrelated, pre-existing "PortalAccess" policy and AdminPortal namespace, which refer to the
+// internal staff admin app shell (Home.razor's "/admin" dashboard) - a completely different
+// concept from this external, contact-facing surface.
+public sealed class ClientPortalLoginToken : AuditableEntity
+{
+    public Guid ContactId { get; set; }
+    public required string TokenHash { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public DateTimeOffset? ConsumedAt { get; set; }
+    public string? RequestedFromIp { get; set; }
+}
+
 public static class DealStages
 {
     public const string Lead = "Lead";

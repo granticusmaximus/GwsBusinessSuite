@@ -26,6 +26,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
 
     public DbSet<Contact> Contacts => Set<Contact>();
     public DbSet<ContactActivity> ContactActivities => Set<ContactActivity>();
+    public DbSet<ClientPortalLoginToken> ClientPortalLoginTokens => Set<ClientPortalLoginToken>();
     public DbSet<Deal> Deals => Set<Deal>();
     public DbSet<WikiPage> WikiPages => Set<WikiPage>();
     public DbSet<WikiPageRevision> WikiPageRevisions => Set<WikiPageRevision>();
@@ -246,6 +247,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .IsUnique();
         modelBuilder.Entity<SentinelPublicShare>().HasIndex(x => x.TokenHash).IsUnique();
         modelBuilder.Entity<SentinelPublicShare>().HasIndex(x => new { x.TargetId, x.IsDatabase, x.RevokedAt });
+        modelBuilder.Entity<ClientPortalLoginToken>().HasIndex(x => x.TokenHash).IsUnique();
+        modelBuilder.Entity<ClientPortalLoginToken>().HasIndex(x => new { x.ContactId, x.ExpiresAt });
         modelBuilder.Entity<SentinelPresenceLease>().HasIndex(x => new { x.WikiPageId, x.LastSeenAtUnixSeconds });
         modelBuilder.Entity<SentinelPresenceLease>().HasIndex(x => x.LastSeenAtUnixSeconds);
         modelBuilder.Entity<SentinelAiRun>().HasIndex(x => new { x.ConversationId, x.CreatedAt });

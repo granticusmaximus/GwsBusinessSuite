@@ -145,6 +145,20 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
         options.ExpireTimeSpan = TimeSpan.FromMinutes(10);
         options.SlidingExpiration = false;
+    })
+    // A wholly separate cookie/scheme from the internal staff admin login above - a client
+    // contact's session must never be usable against any admin-scoped policy, and vice versa.
+    // No MFA here: the passwordless magic-link flow (ClientPortalAuthService) is itself the
+    // second factor a real password login would otherwise need.
+    .AddCookie(ClientPortalAuthenticationDefaults.Scheme, options =>
+    {
+        options.Cookie.Name = "GwsBusinessSuite.ClientPortal";
+        options.LoginPath = "/client-portal/login";
+        options.AccessDeniedPath = "/client-portal/login";
+        options.SlidingExpiration = true;
+        options.ExpireTimeSpan = TimeSpan.FromDays(14);
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        options.Cookie.SameSite = SameSiteMode.Lax;
     });
 
 builder.Services.AddAuthorization(options =>
@@ -164,6 +178,14 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("MfaPending", policy =>
     {
         policy.AddAuthenticationSchemes(MfaAuthenticationDefaults.PendingScheme);
+        policy.RequireAuthenticatedUser();
+    });
+
+    // Deliberately named "ClientPortalAccess", not "PortalAccess" - that name is already taken
+    // by the internal staff admin dashboard's own policy above and means something unrelated.
+    options.AddPolicy("ClientPortalAccess", policy =>
+    {
+        policy.AddAuthenticationSchemes(ClientPortalAuthenticationDefaults.Scheme);
         policy.RequireAuthenticatedUser();
     });
 
