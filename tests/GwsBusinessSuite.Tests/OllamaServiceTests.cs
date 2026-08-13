@@ -124,6 +124,46 @@ public sealed class OllamaServiceTests
     }
 
     [Fact]
+    public async Task GenerateAsync_WithNumCtx_ShouldIncludeItInTheRequestOptions()
+    {
+        string? payload = null;
+        var logger = new RecordingLogger<OllamaService>();
+        var handler = new RecordingHandler(request =>
+        {
+            payload = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"response":"ok","done":true}""")
+            };
+        });
+        var service = CreateService(handler, logger);
+
+        await service.GenerateAsync("qwen2.5-coder", "system", "prompt", numCtx: 8192);
+
+        payload.Should().Contain("\"options\":{\"num_ctx\":8192}");
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WithoutNumCtx_ShouldNotIncludeAnOptionsBlock()
+    {
+        string? payload = null;
+        var logger = new RecordingLogger<OllamaService>();
+        var handler = new RecordingHandler(request =>
+        {
+            payload = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"response":"ok","done":true}""")
+            };
+        });
+        var service = CreateService(handler, logger);
+
+        await service.GenerateAsync("sentinelgpt", "system", "prompt");
+
+        payload.Should().NotContain("options");
+    }
+
+    [Fact]
     public async Task GenerateStreamAsync_ShouldNotCaptureBackgroundPerformance()
     {
         var scheduler = new OllamaWorkloadScheduler();

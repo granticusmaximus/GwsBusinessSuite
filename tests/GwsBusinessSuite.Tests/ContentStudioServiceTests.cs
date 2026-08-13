@@ -79,6 +79,70 @@ public sealed class ContentStudioServiceTests
     }
 
     [Fact]
+    public async Task GenerateArticleStreamAsync_ShouldYieldFragmentsThenPersistTheSameResultAsNonStreaming()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var ollama = new FakeOllamaService { GenerateStreamFragments = ["# Title\n\n", "Generated ", "body"] };
+        var service = CreateService(db, factory, ollama);
+
+        var deltas = new List<string>();
+        ArticleGenerationResult? completed = null;
+        await foreach (var chunk in service.GenerateArticleStreamAsync(new ArticleGenerationRequest
+        {
+            Topic = "Clean Architecture in Blazor",
+            TargetAudience = "Mid-level C# developers",
+            PrimaryKeyword = "Blazor clean architecture",
+            SecondaryKeywords = "ASP.NET Core, C#"
+        }))
+        {
+            if (chunk.Delta is { } delta) deltas.Add(delta);
+            if (chunk.CompletedDraft is { } draft) completed = draft;
+        }
+
+        Assert.Equal(["# Title\n\n", "Generated ", "body"], deltas);
+        Assert.NotNull(completed);
+        Assert.Contains("# Title", completed!.Markdown);
+        Assert.Contains("Generated body", completed.RenderedMarkdown);
+        Assert.Equal("clean-architecture-in-blazor", completed.Slug);
+
+        var savedDraft = await db.SeoArticleDrafts.SingleAsync();
+        Assert.Equal("PendingReview", savedDraft.Status);
+        Assert.Equal(1, await db.SeoArticleWorkflowEvents.CountAsync());
+    }
+
+    [Fact]
+    public async Task GenerateArticleAsync_ShouldSurfaceFlaggedVerifyClaims_InSourceNotes()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var ollama = new FakeOllamaService
+        {
+            GenerateTextResult = "# Title\n\nSome fact [VERIFY: exact benchmark number] and another " +
+                "claim [VERIFY: API signature] plus more body text."
+        };
+        var service = CreateService(db, factory, ollama);
+
+        await service.GenerateArticleAsync(new ArticleGenerationRequest { Topic = "Topic" });
+
+        var savedDraft = await db.SeoArticleDrafts.SingleAsync();
+        Assert.Contains("2 claim(s)", savedDraft.SourceNotesMarkdown);
+        Assert.Contains("exact benchmark number", savedDraft.SourceNotesMarkdown);
+        Assert.Contains("API signature", savedDraft.SourceNotesMarkdown);
+    }
+
+    [Fact]
+    public async Task GenerateArticleAsync_ShouldNotFlagAnything_WhenNoVerifyMarkersArePresent()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var ollama = new FakeOllamaService { GenerateTextResult = "# Title\n\nA clean, fully-supported article." };
+        var service = CreateService(db, factory, ollama);
+
+        await service.GenerateArticleAsync(new ArticleGenerationRequest { Topic = "Topic" });
+
+        var savedDraft = await db.SeoArticleDrafts.SingleAsync();
+        Assert.DoesNotContain("flagged", savedDraft.SourceNotesMarkdown);
+    }
+
+    [Fact]
     public async Task GenerateArticleAsync_ShouldUseSiteSettingsModelOverride_WhenSet()
     {
         var (db, factory) = await CreateDbAsync();
@@ -631,6 +695,10 @@ public sealed class ContentStudioServiceTests
     private sealed class FakeOllamaService : IOllamaService
     {
         public string GenerateTextResult { get; set; } = string.Empty;
+        // When set, GenerateStreamAsync yields these fragments one at a time instead of
+        // GenerateTextResult as a single chunk - lets streaming tests assert on individually
+        // observed fragments, not just the final joined markdown.
+        public IReadOnlyList<string>? GenerateStreamFragments { get; set; }
         public IReadOnlyCollection<string> Models { get; set; } = Array.Empty<string>();
         public string? LastRequestedModel { get; private set; }
         public string GenerateImageResult { get; set; } = string.Empty;
@@ -644,8 +712,12 @@ public sealed class ContentStudioServiceTests
 
         public async IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
         {
-            await Task.CompletedTask;
-            yield break;
+            LastRequestedModel = model;
+            foreach (var fragment in GenerateStreamFragments ?? [GenerateTextResult])
+            {
+                await Task.Yield();
+                yield return fragment;
+            }
         }
 
         public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default)

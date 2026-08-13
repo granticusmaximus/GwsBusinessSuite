@@ -392,6 +392,9 @@ public sealed class SentinelAiServiceTests
         ollama.LastSystemPrompt.Should().Contain("official Microsoft Learn");
         ollama.RequestedModels.Should().Contain("qwen2.5-coder");
         ollama.RequestedModels.Should().Contain("deepseek-r1");
+        // Deep Analysis advisers get an explicit num_ctx (TryConsultTeacherAsync) - without it,
+        // Ollama's stock default context window could silently truncate the advisory prompt.
+        ollama.LastNumCtx.Should().Be(8192);
         ollama.LastUserPrompt.Should().NotContain("private@example.test");
         ollama.LastUserPrompt.Should().NotContain("must-never-enter-the-prompt");
         web.Queries.Should().Contain(query => query.StartsWith("site:learn.microsoft.com"));
@@ -545,6 +548,144 @@ public sealed class SentinelAiServiceTests
         ollama.LastUserPrompt.Should().Contain("Acme Renewal");
         ollama.LastUserPrompt.Should().Contain(GwsBusinessSuite.Domain.Entities.DealStages.Negotiation);
         ollama.LastUserPrompt.Should().Contain("legal sign-off");
+    }
+
+    [Fact]
+    public async Task BuildGroundedContext_ShouldCapThePinnedPageAroundTwoThousandCharacters_NotTheWholePage()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var wiki = new WikiService(db);
+        // 30 short, uniquely-marked blocks - comfortably over the pinned-page character budget,
+        // so only the earliest markers should survive the cap.
+        var blocks = Enumerable.Range(0, 30)
+            .Select(i => new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, i,
+                [new WikiRichTextSpan($"MARKER{i:D3} {new string('x', 90)}")], new Dictionary<string, string>()))
+            .ToList();
+        var page = await wiki.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Runbook",
+            BlocksJson = WikiBlockJson.Serialize(blocks)
+        }, "u");
+
+        var ollama = new FakeStreamingOllamaService(["Answer."]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache());
+
+        var chunks = new List<SentinelAiStreamChunk>();
+        await foreach (var chunk in service.StreamAsync(page.Id, SentinelAiActions.Ask, "summarize this", "grant"))
+        {
+            chunks.Add(chunk);
+        }
+
+        ollama.LastUserPrompt.Should().Contain("MARKER000");
+        ollama.LastUserPrompt.Should().NotContain("MARKER029");
+    }
+
+    [Fact]
+    public async Task BuildGroundedContext_ShouldCapRelatedSearchResultPages_MoreTightlyThanThePinnedPage()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var wiki = new WikiService(db);
+        var blocks = Enumerable.Range(0, 10)
+            .Select(i => new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, i,
+                [new WikiRichTextSpan($"launch runbook MARKER{i:D3} {new string('x', 90)}")], new Dictionary<string, string>()))
+            .ToList();
+        await wiki.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "launch runbook",
+            BlocksJson = WikiBlockJson.Serialize(blocks)
+        }, "u");
+
+        var ollama = new FakeStreamingOllamaService(["Answer."]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache());
+
+        // Not pinned (null pageId) - found only via SentinelWorkspaceService.SearchAsync, so this
+        // exercises the related-result snippet cap (400 chars) rather than the pinned-page cap.
+        await foreach (var _ in service.StreamAsync(null, SentinelAiActions.Ask, "launch runbook", "grant"))
+        {
+        }
+
+        ollama.LastUserPrompt.Should().Contain("MARKER000");
+        ollama.LastUserPrompt.Should().NotContain("MARKER009");
+    }
+
+    [Fact]
+    public async Task VerifyPass_ShouldNotRun_WhenTheAnswerHasNoCitations()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var ollama = new FakeStreamingOllamaService(["A casual answer with nothing to check."]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache());
+
+        SentinelAiRunView? completed = null;
+        await foreach (var chunk in service.StreamAsync(null, SentinelAiActions.Ask, "totally unmatched nonsense query", "grant"))
+        {
+            completed ??= chunk.CompletedRun;
+        }
+
+        completed!.Citations.Should().BeEmpty();
+        ollama.VerifyPassCallCount.Should().Be(0);
+        completed.Output.Should().Be("A casual answer with nothing to check.");
+    }
+
+    [Fact]
+    public async Task VerifyPass_ShouldRunAndAppendACorrection_WhenACitedAnswerHasAnUnsupportedClaim()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        var wiki = new WikiService(db);
+        var page = await wiki.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Launch runbook",
+            BlocksJson = WikiBlockJson.Serialize([
+                new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0,
+                    [new WikiRichTextSpan("Flip the blue switch before liftoff.")], new Dictionary<string, string>())])
+        }, "u");
+
+        var ollama = new FakeStreamingOllamaService(["The red switch starts the sequence."])
+        {
+            VerifyPassResponse = "The source says the switch is blue, not red."
+        };
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache());
+
+        SentinelAiRunView? completed = null;
+        await foreach (var chunk in service.StreamAsync(page.Id, SentinelAiActions.Ask, "blue switch", "grant"))
+        {
+            completed ??= chunk.CompletedRun;
+        }
+
+        ollama.VerifyPassCallCount.Should().Be(1);
+        completed!.Output.Should().Contain("The red switch starts the sequence.");
+        completed.Output.Should().Contain("Self-check correction");
+        completed.Output.Should().Contain("The source says the switch is blue, not red.");
+
+        var persisted = await db.SentinelAiRuns.AsNoTracking().SingleAsync();
+        persisted.Output.Should().Contain("Self-check correction");
     }
 
     [Fact]
