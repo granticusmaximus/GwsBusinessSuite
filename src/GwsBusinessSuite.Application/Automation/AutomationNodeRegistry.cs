@@ -83,6 +83,39 @@ public sealed partial class AutomationNodeRegistry(
             false,
             ["main"],
             "{\"promptPath\":\"prompt\",\"answerPath\":\"sentinelAnswer\"}"),
+        new(
+            "slack.sendMessage",
+            1,
+            "Slack: Send Message",
+            "Posts a message to a Slack channel using a connected Slack OAuth credential.",
+            "Connectors",
+            "bi-slack",
+            false,
+            ["main"],
+            "{\"channel\":\"#general\",\"text\":\"Hello from GWS Automation\"}",
+            IsIdempotent: false),
+        new(
+            "gmail.sendEmail",
+            1,
+            "Gmail: Send Email",
+            "Sends an email through a connected Google OAuth credential's Gmail account.",
+            "Connectors",
+            "bi-envelope-at-fill",
+            false,
+            ["main"],
+            "{\"to\":\"\",\"subject\":\"\",\"body\":\"\"}",
+            IsIdempotent: false),
+        new(
+            "calendar.createEvent",
+            1,
+            "Google Calendar: Create Event",
+            "Creates an event on a connected Google OAuth credential's calendar.",
+            "Connectors",
+            "bi-calendar-plus-fill",
+            false,
+            ["main"],
+            "{\"calendarId\":\"primary\",\"summary\":\"\",\"description\":\"\",\"startsAt\":\"\",\"durationMinutes\":30}",
+            IsIdempotent: false),
     ];
 
     public IReadOnlyList<AutomationNodeDefinition> ListDefinitions() => Definitions;
@@ -152,6 +185,9 @@ public sealed partial class AutomationNodeRegistry(
             "ai.modelAdvisor" => await ExecuteModelAdvisorAsync(node, input, cancellationToken),
             "ai.sentinelSynthesize" => await ExecuteSentinelSynthesisAsync(node, input, cancellationToken),
             "ai.saveApprovedLesson" => await ExecuteSaveApprovedLessonAsync(node, input, cancellationToken),
+            "slack.sendMessage" => await ExecuteSlackSendMessageAsync(node, input, credentialJson, nodeOutputsByName, cancellationToken),
+            "gmail.sendEmail" => await ExecuteGmailSendEmailAsync(node, input, credentialJson, nodeOutputsByName, cancellationToken),
+            "calendar.createEvent" => await ExecuteCalendarCreateEventAsync(node, input, credentialJson, nodeOutputsByName, cancellationToken),
             _ => throw new InvalidOperationException($"Node type '{node.TypeKey}' is not executable.")
         };
     }

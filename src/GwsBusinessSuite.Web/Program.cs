@@ -1317,6 +1317,163 @@ app.MapGet("/auth/notion/callback", async (
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("admin-mutation");
 
+// Slack/Google automation connector OAuth - same signed-state, same redirect-target shape as
+// the Notion connect/callback pair immediately above, just landing back on the credentials
+// page instead of Sentinel.
+app.MapGet("/auth/slack/connect", (
+    HttpContext httpContext,
+    ISlackOAuthService slackOAuth,
+    IDataProtectionProvider dataProtectionProvider) =>
+{
+    if (!slackOAuth.IsConfigured)
+    {
+        return Results.LocalRedirect("/admin/automation/credentials?slackOAuth=not-configured");
+    }
+
+    var username = httpContext.User.Identity?.Name ?? string.Empty;
+    var statePayload = System.Text.Json.JsonSerializer.Serialize(new
+    {
+        username,
+        issuedAtUnixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+    });
+    var state = dataProtectionProvider
+        .CreateProtector("GwsBusinessSuite.SlackOAuth.State.v1")
+        .Protect(statePayload);
+    return Results.Redirect(slackOAuth.CreateAuthorizationUrl(state));
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("admin-mutation");
+
+app.MapGet("/auth/slack/callback", async (
+    HttpContext httpContext,
+    string? code,
+    string? state,
+    string? error,
+    ISlackOAuthService slackOAuth,
+    IDataProtectionProvider dataProtectionProvider,
+    CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrWhiteSpace(state))
+    {
+        return Results.LocalRedirect("/admin/automation/credentials?slackOAuth=invalid-state");
+    }
+
+    try
+    {
+        var stateJson = dataProtectionProvider
+            .CreateProtector("GwsBusinessSuite.SlackOAuth.State.v1")
+            .Unprotect(state);
+        using var stateDocument = System.Text.Json.JsonDocument.Parse(stateJson);
+        var root = stateDocument.RootElement;
+        var stateUsername = root.TryGetProperty("username", out var usernameElement) ? usernameElement.GetString() : null;
+        var issuedAt = root.TryGetProperty("issuedAtUnixSeconds", out var issuedElement)
+            && issuedElement.TryGetInt64(out var issuedAtUnixSeconds)
+                ? DateTimeOffset.FromUnixTimeSeconds(issuedAtUnixSeconds)
+                : DateTimeOffset.MinValue;
+        var currentUsername = httpContext.User.Identity?.Name;
+        if (!string.Equals(stateUsername, currentUsername, StringComparison.Ordinal)
+            || issuedAt < DateTimeOffset.UtcNow.AddMinutes(-10)
+            || issuedAt > DateTimeOffset.UtcNow.AddMinutes(1))
+        {
+            return Results.LocalRedirect("/admin/automation/credentials?slackOAuth=invalid-state");
+        }
+    }
+    catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException
+                                   or System.Text.Json.JsonException
+                                   or ArgumentOutOfRangeException)
+    {
+        return Results.LocalRedirect("/admin/automation/credentials?slackOAuth=invalid-state");
+    }
+
+    if (!string.IsNullOrWhiteSpace(error))
+    {
+        return Results.LocalRedirect("/admin/automation/credentials?slackOAuth=denied");
+    }
+
+    var result = await slackOAuth.CompleteAuthorizationAsync(code ?? string.Empty, cancellationToken);
+    return Results.LocalRedirect(
+        result.IsSuccess ? "/admin/automation/credentials?slackOAuth=connected" : "/admin/automation/credentials?slackOAuth=failed");
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("admin-mutation");
+
+app.MapGet("/auth/google/connect", (
+    HttpContext httpContext,
+    IGoogleOAuthService googleOAuth,
+    IDataProtectionProvider dataProtectionProvider) =>
+{
+    if (!googleOAuth.IsConfigured)
+    {
+        return Results.LocalRedirect("/admin/automation/credentials?googleOAuth=not-configured");
+    }
+
+    var username = httpContext.User.Identity?.Name ?? string.Empty;
+    var statePayload = System.Text.Json.JsonSerializer.Serialize(new
+    {
+        username,
+        issuedAtUnixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+    });
+    var state = dataProtectionProvider
+        .CreateProtector("GwsBusinessSuite.GoogleOAuth.State.v1")
+        .Protect(statePayload);
+    return Results.Redirect(googleOAuth.CreateAuthorizationUrl(state));
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("admin-mutation");
+
+app.MapGet("/auth/google/callback", async (
+    HttpContext httpContext,
+    string? code,
+    string? state,
+    string? error,
+    IGoogleOAuthService googleOAuth,
+    IDataProtectionProvider dataProtectionProvider,
+    CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrWhiteSpace(state))
+    {
+        return Results.LocalRedirect("/admin/automation/credentials?googleOAuth=invalid-state");
+    }
+
+    try
+    {
+        var stateJson = dataProtectionProvider
+            .CreateProtector("GwsBusinessSuite.GoogleOAuth.State.v1")
+            .Unprotect(state);
+        using var stateDocument = System.Text.Json.JsonDocument.Parse(stateJson);
+        var root = stateDocument.RootElement;
+        var stateUsername = root.TryGetProperty("username", out var usernameElement) ? usernameElement.GetString() : null;
+        var issuedAt = root.TryGetProperty("issuedAtUnixSeconds", out var issuedElement)
+            && issuedElement.TryGetInt64(out var issuedAtUnixSeconds)
+                ? DateTimeOffset.FromUnixTimeSeconds(issuedAtUnixSeconds)
+                : DateTimeOffset.MinValue;
+        var currentUsername = httpContext.User.Identity?.Name;
+        if (!string.Equals(stateUsername, currentUsername, StringComparison.Ordinal)
+            || issuedAt < DateTimeOffset.UtcNow.AddMinutes(-10)
+            || issuedAt > DateTimeOffset.UtcNow.AddMinutes(1))
+        {
+            return Results.LocalRedirect("/admin/automation/credentials?googleOAuth=invalid-state");
+        }
+    }
+    catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException
+                                   or System.Text.Json.JsonException
+                                   or ArgumentOutOfRangeException)
+    {
+        return Results.LocalRedirect("/admin/automation/credentials?googleOAuth=invalid-state");
+    }
+
+    if (!string.IsNullOrWhiteSpace(error))
+    {
+        return Results.LocalRedirect("/admin/automation/credentials?googleOAuth=denied");
+    }
+
+    var result = await googleOAuth.CompleteAuthorizationAsync(code ?? string.Empty, cancellationToken);
+    return Results.LocalRedirect(
+        result.IsSuccess ? "/admin/automation/credentials?googleOAuth=connected" : "/admin/automation/credentials?googleOAuth=failed");
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("admin-mutation");
+
 // Serve hero images stored as base64 data URIs as real image responses
 // so og:image tags have a cacheable URL that social crawlers can fetch.
 // Checks the Article table first (published articles), then falls back to SeoArticleDraft.

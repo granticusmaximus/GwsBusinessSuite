@@ -174,6 +174,18 @@ public static class DependencyInjection
         services.AddSingleton<GwsBusinessSuite.Application.Scheduling.IBookingEmailSender, BookingEmailSender>();
         services.AddScoped<GwsBusinessSuite.Application.Scheduling.IBookingService, BookingService>();
         services.AddScoped<GwsBusinessSuite.Application.Scoring.IDealScoringService, DealScoringService>();
+        services.AddOptions<SlackOAuthOptions>()
+            .Bind(configuration.GetSection(SlackOAuthOptions.SectionName));
+        services.AddHttpClient<GwsBusinessSuite.Application.Automation.ISlackOAuthService, SlackOAuthService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddOptions<GoogleOAuthOptions>()
+            .Bind(configuration.GetSection(GoogleOAuthOptions.SectionName));
+        services.AddHttpClient<GwsBusinessSuite.Application.Automation.IGoogleOAuthService, GoogleOAuthService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
         services.AddScoped<GwsBusinessSuite.Application.MissionControl.IMissionControlService, MissionControlService>();
         services.AddScoped<GwsBusinessSuite.Application.Mobile.IMobilePushRegistrationService, MobilePushRegistrationService>();
         services.AddScoped<GwsBusinessSuite.Application.Mobile.IMobileApprovalService, MobileApprovalService>();
