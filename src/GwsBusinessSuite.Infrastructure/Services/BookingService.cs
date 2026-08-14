@@ -107,13 +107,14 @@ public sealed class BookingService(
         if (fromUtc > earliestStart) earliestStart = fromUtc;
 
         var rangeEnd = fromUtc.AddDays(cappedDays);
-        var existingBookings = await db.Bookings.AsNoTracking()
-            .Where(booking => booking.BookingTypeId == bookingTypeId
-                && booking.Status == BookingStatuses.Confirmed
-                && booking.StartsAt < rangeEnd
-                && booking.EndsAt > fromUtc)
+        // SQLite/EF Core can't translate DateTimeOffset range comparisons - materialize this
+        // type's confirmed bookings first, then filter the range client-side.
+        var existingBookings = (await db.Bookings.AsNoTracking()
+            .Where(booking => booking.BookingTypeId == bookingTypeId && booking.Status == BookingStatuses.Confirmed)
             .Select(booking => new { booking.StartsAt, booking.EndsAt })
-            .ToListAsync(cancellationToken);
+            .ToListAsync(cancellationToken))
+            .Where(booking => booking.StartsAt < rangeEnd && booking.EndsAt > fromUtc)
+            .ToList();
 
         var slots = new List<BookingSlot>();
         for (var offset = 0; offset < cappedDays; offset++)
@@ -161,10 +162,13 @@ public sealed class BookingService(
 
         // Re-checked here (not just trusted from the earlier GetAvailableSlotsAsync call the
         // UI made) to close the race between two visitors booking the same slot at once.
-        var overlaps = await db.Bookings.AsNoTracking()
-            .AnyAsync(booking => booking.BookingTypeId == bookingTypeId
-                && booking.Status == BookingStatuses.Confirmed
-                && startsAtUtc < booking.EndsAt && endsAtUtc > booking.StartsAt, cancellationToken);
+        // SQLite/EF Core can't translate DateTimeOffset range comparisons - materialize this
+        // type's confirmed bookings first, then check the overlap client-side.
+        var confirmedBookings = await db.Bookings.AsNoTracking()
+            .Where(booking => booking.BookingTypeId == bookingTypeId && booking.Status == BookingStatuses.Confirmed)
+            .Select(booking => new { booking.StartsAt, booking.EndsAt })
+            .ToListAsync(cancellationToken);
+        var overlaps = confirmedBookings.Any(booking => startsAtUtc < booking.EndsAt && endsAtUtc > booking.StartsAt);
         if (overlaps) return null;
 
         var contactId = await FindOrCreateContactAsync(trimmedName, trimmedEmail, cancellationToken);
