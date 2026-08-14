@@ -2,11 +2,14 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "ClientPortalAccess")]
 @using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Billing
 @using GwsBusinessSuite.Application.Crm
+@using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Web.Security
 @inject ICrmService CrmService
 @inject ICmsBuilderService CmsBuilderService
+@inject IBillingService BillingService
 
 <PageTitle>My Account</PageTitle>
 
@@ -58,6 +61,39 @@
             }
         </div>
     }
+
+    @if (OpenInvoices.Count > 0)
+    {
+        <h2 class="h6 mt-4 mb-3">Invoices</h2>
+        <div class="row g-3">
+            @foreach (var invoice in OpenInvoices)
+            {
+                <div class="col-12 col-md-6 col-lg-4">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <h3 class="h6 mb-0">@invoice.Title</h3>
+                                <span class="badge gws-portal-badge">@invoice.Status</span>
+                            </div>
+                            <p class="mb-1 fw-semibold">@invoice.TotalUsd.ToString("C2")</p>
+                            @if (invoice.DueDate is not null)
+                            {
+                                <p class="text-secondary small mb-2">
+                                    Due @invoice.DueDate.Value.ToLocalTime().ToString("MMM d, yyyy")
+                                </p>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(invoice.StripeHostedInvoiceUrl))
+                            {
+                                <a class="btn btn-sm btn-primary" href="@invoice.StripeHostedInvoiceUrl" target="_blank" rel="noopener">
+                                    Pay now
+                                </a>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
 </div>
 
 @code {
@@ -67,6 +103,7 @@
     private Guid _contactId;
     private string ContactName { get; set; } = string.Empty;
     private IReadOnlyList<DealView>? Deals { get; set; }
+    private IReadOnlyList<InvoiceView> OpenInvoices { get; set; } = [];
     private string LogoUrl { get; set; } = string.Empty;
     private string AccentStyle { get; set; } = string.Empty;
 
@@ -82,6 +119,11 @@
         }
 
         Deals = await CrmService.ListDealsForContactAsync(_contactId);
+
+        // Only Sent (awaiting payment) invoices are worth surfacing here - a Draft doesn't
+        // exist to the contact yet, and Paid/Void invoices have nothing actionable left.
+        var invoices = await BillingService.ListInvoicesForContactAsync(_contactId);
+        OpenInvoices = invoices.Where(invoice => invoice.Status == InvoiceStatuses.Sent).ToList();
 
         var sites = await CmsBuilderService.ListSitesAsync();
         var site = sites.FirstOrDefault();

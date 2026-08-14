@@ -92,6 +92,10 @@ public sealed class Contact : AuditableEntity
     public string Status { get; set; } = ContactStatuses.Lead;
     public DateTimeOffset? FollowUpDate { get; set; }
     public DateTimeOffset? TrashedAt { get; set; }
+    // Set the first time an invoice is sent to this contact (BillingService creates the
+    // Stripe Customer lazily on first send, then reuses it for every later invoice) - null
+    // for every contact until then, including contacts who never get billed.
+    public string? StripeCustomerId { get; set; }
 }
 
 // Append-only note/activity log for a contact - CreatedAt/CreatedBy from AuditableEntity
@@ -150,6 +154,48 @@ public sealed class Deal : AuditableEntity
     // also changes for unrelated edits, e.g. fixing a typo in Notes long after closing).
     public DateTimeOffset? ClosedAt { get; set; }
     public string Notes { get; set; } = string.Empty;
+}
+
+public static class InvoiceStatuses
+{
+    // A Draft only ever exists locally - nothing is created in Stripe until SendAsync.
+    public const string Draft = "Draft";
+    public const string Sent = "Sent";
+    public const string Paid = "Paid";
+    public const string Void = "Void";
+
+    public static readonly string[] All = [Draft, Sent, Paid, Void];
+}
+
+// Billing header for a contact - line items are composed and edited locally while Draft, then
+// SendInvoiceAsync creates the matching Stripe Customer/InvoiceItems/Invoice on first send and
+// hands the customer a Stripe-hosted payment page (StripeHostedInvoiceUrl), so card data never
+// touches this app. StripeInvoiceId stays null for a Draft that's never been sent.
+public sealed class Invoice : AuditableEntity
+{
+    public Guid ContactId { get; set; }
+    // Optional - an invoice doesn't have to trace back to a specific pipeline deal.
+    public Guid? DealId { get; set; }
+    public required string Title { get; set; }
+    public string Status { get; set; } = InvoiceStatuses.Draft;
+    public string Currency { get; set; } = "usd";
+    public DateTimeOffset? DueDate { get; set; }
+    public DateTimeOffset? SentAt { get; set; }
+    public DateTimeOffset? PaidAt { get; set; }
+    public string Notes { get; set; } = string.Empty;
+    public string? StripeCustomerId { get; set; }
+    public string? StripeInvoiceId { get; set; }
+    public string? StripeHostedInvoiceUrl { get; set; }
+    public ICollection<InvoiceLineItem> LineItems { get; set; } = new List<InvoiceLineItem>();
+}
+
+public sealed class InvoiceLineItem : AuditableEntity
+{
+    public Guid InvoiceId { get; set; }
+    public required string Description { get; set; }
+    public int Quantity { get; set; } = 1;
+    public decimal UnitPriceUsd { get; set; }
+    public Invoice? Invoice { get; set; }
 }
 
 public sealed class WikiPage : AuditableEntity

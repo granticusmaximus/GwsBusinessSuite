@@ -3,6 +3,7 @@ using GwsBusinessSuite.Application.AffiliateAnalytics;
 using GwsBusinessSuite.Application.AffiliateRotations;
 using GwsBusinessSuite.Application.Articles;
 using GwsBusinessSuite.Application.Automation;
+using GwsBusinessSuite.Application.Billing;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.Comments;
 using GwsBusinessSuite.Application.Growth;
@@ -570,6 +571,65 @@ app.MapPost("/api/integrations/notion/webhook", async (
     return Results.Json(
         new { message = result.Message },
         statusCode: result.StatusCode);
+})
+    .AllowAnonymous()
+    .DisableAntiforgery()
+    .RequireRateLimiting("public-read");
+
+// Stripe billing webhooks - same anonymous-but-signature-verified shape as the Notion webhook
+// above. Stripe.Event/Stripe.EventUtility/Stripe.Invoice are referenced fully-qualified here
+// rather than via a top-level "using Stripe;" because GwsBusinessSuite.Domain.Entities already
+// defines its own unqualified "Invoice" (our local billing record), and this file is already
+// "using GwsBusinessSuite.Domain.Entities;".
+app.MapPost("/webhooks/stripe", async (
+    HttpContext context,
+    Microsoft.Extensions.Options.IOptions<GwsBusinessSuite.Infrastructure.Services.StripeBillingOptions> stripeOptions,
+    IBillingService billingService,
+    ILogger<Program> logger,
+    CancellationToken cancellationToken) =>
+{
+    var maxBodySizeFeature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
+    if (maxBodySizeFeature is { IsReadOnly: false })
+    {
+        maxBodySizeFeature.MaxRequestBodySize = 1024 * 1024;
+    }
+
+    string rawBody;
+    try
+    {
+        using var reader = new StreamReader(context.Request.Body, Encoding.UTF8);
+        rawBody = await reader.ReadToEndAsync(cancellationToken);
+    }
+    catch (Exception) when (!cancellationToken.IsCancellationRequested)
+    {
+        return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+    }
+
+    var webhookSecret = stripeOptions.Value.WebhookSecret;
+    if (string.IsNullOrWhiteSpace(webhookSecret))
+    {
+        logger.LogWarning("Received a Stripe webhook but Stripe:WebhookSecret is not configured.");
+        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    }
+
+    Stripe.Event stripeEvent;
+    try
+    {
+        stripeEvent = Stripe.EventUtility.ConstructEvent(
+            rawBody, context.Request.Headers["Stripe-Signature"], webhookSecret);
+    }
+    catch (Stripe.StripeException ex)
+    {
+        logger.LogWarning(ex, "Rejected a Stripe webhook with an invalid signature.");
+        return Results.BadRequest();
+    }
+
+    if (stripeEvent.Type == "invoice.paid" && stripeEvent.Data.Object is Stripe.Invoice stripeInvoice)
+    {
+        await billingService.MarkInvoicePaidByStripeIdAsync(stripeInvoice.Id, cancellationToken);
+    }
+
+    return Results.Ok();
 })
     .AllowAnonymous()
     .DisableAntiforgery()

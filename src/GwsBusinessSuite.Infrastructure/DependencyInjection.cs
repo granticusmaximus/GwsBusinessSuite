@@ -5,6 +5,7 @@ using GwsBusinessSuite.Application.AffiliateSuggestions;
 using GwsBusinessSuite.Application.AffiliateRotations;
 using GwsBusinessSuite.Application.AppGeneration;
 using GwsBusinessSuite.Application.Automation;
+using GwsBusinessSuite.Application.Billing;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.CmsKnowledge;
 using GwsBusinessSuite.Application.Comments;
@@ -52,6 +53,8 @@ public static class DependencyInjection
             .SetApplicationName("GwsBusinessSuite");
 
         services.Configure<ContentStudioOptions>(configuration.GetSection(ContentStudioOptions.SectionName));
+        services.AddOptions<StripeBillingOptions>()
+            .Bind(configuration.GetSection(StripeBillingOptions.SectionName));
         services.AddOptions<AnalyticsGeoIpOptions>()
             .Bind(configuration.GetSection(AnalyticsGeoIpOptions.SectionName));
         services.AddOptions<OllamaWebOptions>()
@@ -163,6 +166,8 @@ public static class DependencyInjection
         services.AddScoped<ICmsKnowledgeService, CmsKnowledgeService>();
         services.AddScoped<IContentStudioService, ContentStudioService>();
         services.AddScoped<ICrmService, CrmService>();
+        services.AddScoped<IStripeInvoicingClient, StripeInvoicingClient>();
+        services.AddScoped<IBillingService, BillingService>();
         services.AddScoped<GwsBusinessSuite.Application.MissionControl.IMissionControlService, MissionControlService>();
         services.AddScoped<GwsBusinessSuite.Application.Mobile.IMobilePushRegistrationService, MobilePushRegistrationService>();
         services.AddScoped<GwsBusinessSuite.Application.Mobile.IMobileApprovalService, MobileApprovalService>();

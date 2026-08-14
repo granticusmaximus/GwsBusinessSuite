@@ -1,0 +1,367 @@
+@page "/admin/billing"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Billing
+@using GwsBusinessSuite.Application.Crm
+@using GwsBusinessSuite.Domain.Entities
+@inject IBillingService BillingService
+@inject ICrmService CrmService
+
+<PageTitle>Billing</PageTitle>
+
+<div class="page-header">
+    <h1><i class="bi bi-receipt me-2 text-primary"></i>Billing</h1>
+    <p>Draft invoices locally, then send them through Stripe's hosted invoice page.</p>
+</div>
+
+@if (!BillingService.IsStripeConfigured)
+{
+    <div class="alert alert-warning d-flex align-items-start gap-2 mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>
+            Stripe is not configured yet. Drafts can still be composed here, but
+            <strong>Send</strong> is disabled until <code>Stripe:SecretKey</code> and
+            <code>Stripe:PublishableKey</code> are set in configuration.
+        </div>
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+}
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-info" role="alert">@StatusMessage</div>
+}
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+                <span class="fw-semibold">@(EditingId is null ? "New Draft" : "Edit Draft")</span>
+                @if (EditingId is not null)
+                {
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="ResetEditor">
+                        <i class="bi bi-plus-lg me-1"></i>New
+                    </button>
+                }
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold small">Contact</label>
+                    <select class="form-select" @bind="Editor.ContactId" @bind:after="OnContactChangedAsync">
+                        <option value="@Guid.Empty">Select a contact...</option>
+                        @foreach (var contact in Contacts)
+                        {
+                            <option value="@contact.Id">@contact.FullName</option>
+                        }
+                    </select>
+                </div>
+
+                @if (ContactDeals.Count > 0)
+                {
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold small">Related Deal (optional)</label>
+                        <select class="form-select" @bind="DealIdInput">
+                            <option value="">None</option>
+                            @foreach (var deal in ContactDeals)
+                            {
+                                <option value="@deal.Id">@deal.Title</option>
+                            }
+                        </select>
+                    </div>
+                }
+
+                <div class="mb-3">
+                    <label class="form-label fw-semibold small">Title</label>
+                    <input class="form-control" @bind="Editor.Title" placeholder="e.g. October retainer" />
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label fw-semibold small">Due Date (optional)</label>
+                    <input type="date" class="form-control" @bind="DueDateInput" />
+                </div>
+
+                <div class="mb-3">
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                        <label class="form-label fw-semibold small mb-0">Line Items</label>
+                        <button class="btn btn-sm btn-outline-primary" @onclick="AddLineItem">
+                            <i class="bi bi-plus-lg me-1"></i>Add
+                        </button>
+                    </div>
+                    @for (var i = 0; i < Editor.LineItems.Count; i++)
+                    {
+                        var index = i;
+                        var line = Editor.LineItems[index];
+                        <div class="row g-2 mb-2 align-items-center">
+                            <div class="col-6">
+                                <input class="form-control form-control-sm" placeholder="Description" @bind="line.Description" />
+                            </div>
+                            <div class="col-2">
+                                <input type="number" min="1" class="form-control form-control-sm" @bind="line.Quantity" />
+                            </div>
+                            <div class="col-3">
+                                <input type="number" min="0" step="0.01" class="form-control form-control-sm" @bind="line.UnitPriceUsd" />
+                            </div>
+                            <div class="col-1">
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveLineItem(index)">
+                                    <i class="bi bi-trash3"></i>
+                                </button>
+                            </div>
+                        </div>
+                    }
+                    @if (Editor.LineItems.Count == 0)
+                    {
+                        <p class="text-secondary small mb-0">No line items yet.</p>
+                    }
+                    else
+                    {
+                        <p class="text-end fw-semibold mb-0">
+                            Total: @Editor.LineItems.Sum(item => item.Quantity * item.UnitPriceUsd).ToString("C2")
+                        </p>
+                    }
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label fw-semibold small">Notes</label>
+                    <textarea class="form-control" rows="2" @bind="Editor.Notes"></textarea>
+                </div>
+
+                <button class="btn btn-primary w-100" disabled="@IsBusy" @onclick="SaveDraftAsync">
+                    <i class="bi bi-save me-1"></i>Save Draft
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3 fw-semibold">Invoices</div>
+            <div class="card-body p-0">
+                @if (Invoices.Count == 0)
+                {
+                    <div class="p-4 text-secondary">No invoices yet.</div>
+                }
+                else
+                {
+                    <div class="list-group list-group-flush">
+                        @foreach (var invoice in Invoices)
+                        {
+                            <div class="list-group-item">
+                                <div class="d-flex justify-content-between align-items-start gap-2">
+                                    <div>
+                                        <div class="fw-semibold">
+                                            @invoice.Title
+                                            <span class="badge @StatusBadgeClass(invoice.Status) ms-1">@invoice.Status</span>
+                                        </div>
+                                        <div class="text-secondary small">
+                                            @invoice.ContactName &middot; @invoice.TotalUsd.ToString("C2")
+                                            @if (invoice.DueDate is not null)
+                                            {
+                                                <span> &middot; due @invoice.DueDate.Value.ToLocalTime().ToString("MMM d, yyyy")</span>
+                                            }
+                                        </div>
+                                    </div>
+                                    <div class="d-flex gap-2 flex-shrink-0">
+                                        @if (invoice.Status == InvoiceStatuses.Draft)
+                                        {
+                                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => LoadIntoEditorAsync(invoice)" disabled="@IsBusy">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-primary" title="@(BillingService.IsStripeConfigured ? "Send via Stripe" : "Stripe is not configured")"
+                                                    disabled="@(IsBusy || !BillingService.IsStripeConfigured)" @onclick="() => SendInvoiceAsync(invoice.Id)">
+                                                <i class="bi bi-send me-1"></i>Send
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-danger" disabled="@IsBusy" @onclick="() => DeleteDraftAsync(invoice.Id)">
+                                                <i class="bi bi-trash3"></i>
+                                            </button>
+                                        }
+                                        else if (invoice.Status == InvoiceStatuses.Sent)
+                                        {
+                                            @if (!string.IsNullOrWhiteSpace(invoice.StripeHostedInvoiceUrl))
+                                            {
+                                                <a class="btn btn-sm btn-outline-secondary" href="@invoice.StripeHostedInvoiceUrl" target="_blank" rel="noopener">
+                                                    <i class="bi bi-box-arrow-up-right me-1"></i>View
+                                                </a>
+                                            }
+                                            <button class="btn btn-sm btn-outline-danger" disabled="@IsBusy" @onclick="() => VoidInvoiceAsync(invoice.Id)">
+                                                Void
+                                            </button>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<Contact> Contacts { get; set; } = [];
+    private IReadOnlyList<InvoiceView> Invoices { get; set; } = [];
+    private IReadOnlyList<DealView> ContactDeals { get; set; } = [];
+    private InvoiceEditorModel Editor { get; set; } = new();
+    private Guid? EditingId { get; set; }
+    private bool IsBusy { get; set; }
+    private string ErrorMessage { get; set; } = string.Empty;
+    private string StatusMessage { get; set; } = string.Empty;
+
+    private string DealIdInput
+    {
+        get => Editor.DealId?.ToString() ?? string.Empty;
+        set => Editor.DealId = Guid.TryParse(value, out var id) ? id : null;
+    }
+
+    private DateTime? DueDateInput
+    {
+        get => Editor.DueDate?.LocalDateTime.Date;
+        set => Editor.DueDate = value is { } date ? new DateTimeOffset(date, TimeSpan.Zero) : null;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Contacts = (await CrmService.ListContactsAsync()).ToList();
+        await RefreshInvoicesAsync();
+    }
+
+    private async Task RefreshInvoicesAsync()
+    {
+        Invoices = await BillingService.ListInvoicesAsync();
+    }
+
+    private async Task OnContactChangedAsync()
+    {
+        ContactDeals = Editor.ContactId != Guid.Empty
+            ? await CrmService.ListDealsForContactAsync(Editor.ContactId)
+            : [];
+        Editor.DealId = null;
+    }
+
+    private void AddLineItem() => Editor.LineItems.Add(new InvoiceLineItemEditorModel { Quantity = 1 });
+
+    private void RemoveLineItem(int index) => Editor.LineItems.RemoveAt(index);
+
+    private void ResetEditor()
+    {
+        Editor = new InvoiceEditorModel();
+        EditingId = null;
+        ContactDeals = [];
+        ErrorMessage = string.Empty;
+    }
+
+    private async Task LoadIntoEditorAsync(InvoiceView invoice)
+    {
+        Editor = new InvoiceEditorModel
+        {
+            Id = invoice.Id,
+            ContactId = invoice.ContactId,
+            DealId = invoice.DealId,
+            Title = invoice.Title,
+            DueDate = invoice.DueDate,
+            Notes = invoice.Notes,
+            LineItems = invoice.LineItems
+                .Select(item => new InvoiceLineItemEditorModel { Id = item.Id, Description = item.Description, Quantity = item.Quantity, UnitPriceUsd = item.UnitPriceUsd })
+                .ToList()
+        };
+        EditingId = invoice.Id;
+        ContactDeals = await CrmService.ListDealsForContactAsync(invoice.ContactId);
+        ErrorMessage = string.Empty;
+    }
+
+    private async Task SaveDraftAsync()
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        if (Editor.ContactId == Guid.Empty)
+        {
+            ErrorMessage = "Select a contact first.";
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            await BillingService.SaveDraftAsync(Editor);
+            StatusMessage = "Draft saved.";
+            ResetEditor();
+            await RefreshInvoicesAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task SendInvoiceAsync(Guid invoiceId)
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        IsBusy = true;
+        try
+        {
+            await BillingService.SendInvoiceAsync(invoiceId);
+            StatusMessage = "Invoice sent.";
+            await RefreshInvoicesAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task VoidInvoiceAsync(Guid invoiceId)
+    {
+        IsBusy = true;
+        try
+        {
+            await BillingService.VoidInvoiceAsync(invoiceId);
+            StatusMessage = "Invoice voided.";
+            await RefreshInvoicesAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task DeleteDraftAsync(Guid invoiceId)
+    {
+        IsBusy = true;
+        try
+        {
+            await BillingService.DeleteDraftAsync(invoiceId);
+            StatusMessage = "Draft deleted.";
+            await RefreshInvoicesAsync();
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private static string StatusBadgeClass(string status) => status switch
+    {
+        InvoiceStatuses.Draft => "text-bg-secondary",
+        InvoiceStatuses.Sent => "text-bg-primary",
+        InvoiceStatuses.Paid => "text-bg-success",
+        InvoiceStatuses.Void => "text-bg-danger",
+        _ => "text-bg-secondary"
+    };
+}

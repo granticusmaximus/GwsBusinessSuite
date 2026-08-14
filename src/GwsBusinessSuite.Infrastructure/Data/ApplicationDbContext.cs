@@ -28,6 +28,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<ContactActivity> ContactActivities => Set<ContactActivity>();
     public DbSet<ClientPortalLoginToken> ClientPortalLoginTokens => Set<ClientPortalLoginToken>();
     public DbSet<Deal> Deals => Set<Deal>();
+    public DbSet<Invoice> Invoices => Set<Invoice>();
+    public DbSet<InvoiceLineItem> InvoiceLineItems => Set<InvoiceLineItem>();
     public DbSet<WikiPage> WikiPages => Set<WikiPage>();
     public DbSet<WikiPageRevision> WikiPageRevisions => Set<WikiPageRevision>();
     public DbSet<SentinelPageTemplate> SentinelPageTemplates => Set<SentinelPageTemplate>();
@@ -146,6 +148,22 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<Deal>().HasIndex(x => x.ContactId);
         modelBuilder.Entity<Deal>().HasIndex(x => x.Stage);
+
+        modelBuilder.Entity<Invoice>()
+            .HasOne<Contact>()
+            .WithMany()
+            .HasForeignKey(x => x.ContactId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<Invoice>().HasIndex(x => x.ContactId);
+        modelBuilder.Entity<Invoice>().HasIndex(x => x.Status);
+        modelBuilder.Entity<Invoice>().HasIndex(x => x.StripeInvoiceId).IsUnique();
+
+        modelBuilder.Entity<InvoiceLineItem>()
+            .HasOne(x => x.Invoice)
+            .WithMany(x => x.LineItems)
+            .HasForeignKey(x => x.InvoiceId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<InvoiceLineItem>().HasIndex(x => x.InvoiceId);
 
         modelBuilder.Entity<MediaAsset>().HasIndex(x => x.CreatedAt);
         modelBuilder.Entity<WatchedTopic>().HasIndex(x => x.IsActive);

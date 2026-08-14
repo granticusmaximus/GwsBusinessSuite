@@ -10,6 +10,8 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<ContactActivity> ContactActivities { get; }
     DbSet<ClientPortalLoginToken> ClientPortalLoginTokens { get; }
     DbSet<Deal> Deals { get; }
+    DbSet<Invoice> Invoices { get; }
+    DbSet<InvoiceLineItem> InvoiceLineItems { get; }
     DbSet<WikiPage> WikiPages { get; }
     DbSet<WikiPageRevision> WikiPageRevisions { get; }
     DbSet<SentinelPageTemplate> SentinelPageTemplates { get; }
