@@ -21,7 +21,12 @@ public sealed record WikiDatabasePropertyConfiguration(
     Guid? AutomationWorkflowId = null,
     string? ButtonLabel = null,
     // UniqueId property only: optional short prefix shown before the number (e.g. "TASK-42").
-    string? UniqueIdPrefix = null)
+    string? UniqueIdPrefix = null,
+    // AiField property only: a template referencing other columns via "[Property Name]"
+    // (same bracket syntax WikiDatabaseComputation's formula engine already resolves by
+    // name) and the Ollama model to call - see WikiDatabaseService.GenerateAiFieldValueAsync.
+    string? AiPromptTemplate = null,
+    string? AiModel = null)
 {
     public static WikiDatabasePropertyConfiguration Empty { get; } = new([], null, null, null, null, null, null);
 }
@@ -234,6 +239,8 @@ public sealed class WikiDatabasePropertyEditor
     public Guid? AutomationWorkflowId { get; set; }
     public string? ButtonLabel { get; set; }
     public string? UniqueIdPrefix { get; set; }
+    public string? AiPromptTemplate { get; set; }
+    public string? AiModel { get; set; }
 }
 
 public sealed class WikiDatabaseRowEditor
@@ -419,7 +426,8 @@ public static class WikiDatabasePropertyConfig
                     parsed.Options ?? [], parsed.FormulaExpression, parsed.RelatedDatabaseId,
                     parsed.ReciprocalPropertyId, parsed.RelationPropertyId,
                     parsed.RollupPropertyId, parsed.RollupAggregation,
-                    parsed.AutomationWorkflowId, parsed.ButtonLabel, parsed.UniqueIdPrefix);
+                    parsed.AutomationWorkflowId, parsed.ButtonLabel, parsed.UniqueIdPrefix,
+                    parsed.AiPromptTemplate, parsed.AiModel);
         }
         catch (JsonException) { return WikiDatabasePropertyConfiguration.Empty; }
     }
@@ -441,7 +449,9 @@ public static class WikiDatabasePropertyConfig
             configuration.RollupAggregation,
             configuration.AutomationWorkflowId,
             configuration.ButtonLabel,
-            configuration.UniqueIdPrefix), WikiPropertyValues.Options);
+            configuration.UniqueIdPrefix,
+            configuration.AiPromptTemplate,
+            configuration.AiModel), WikiPropertyValues.Options);
 
     private sealed record PropertyConfigDto(
         IReadOnlyList<WikiDatabasePropertyOption>? Options,
@@ -453,7 +463,9 @@ public static class WikiDatabasePropertyConfig
         string? RollupAggregation = null,
         Guid? AutomationWorkflowId = null,
         string? ButtonLabel = null,
-        string? UniqueIdPrefix = null);
+        string? UniqueIdPrefix = null,
+        string? AiPromptTemplate = null,
+        string? AiModel = null);
 }
 
 // Pure, DB-free filter/sort/group logic over an already-loaded row list - same split as

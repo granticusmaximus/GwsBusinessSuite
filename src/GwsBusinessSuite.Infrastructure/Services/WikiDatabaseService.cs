@@ -11,12 +11,16 @@ using System.Text.RegularExpressions;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
-// automationTriggerService is optional (defaults to null, treated as no-op below) purely so
-// the three dozen existing WikiDatabaseServiceTests/SentinelWorkspaceServiceTests/
-// SentinelTemplateServiceTests call sites that construct this service directly - none of
-// which exercise database automations - don't all need a fake automation dependency graph
-// wired through them. Production DI always resolves the real registered instance.
-public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTriggerService? automationTriggerService = null) : IWikiDatabaseService
+// automationTriggerService and ollama are optional (default to null, treated as no-op/
+// unavailable below) purely so the three dozen existing WikiDatabaseServiceTests/
+// SentinelWorkspaceServiceTests/SentinelTemplateServiceTests call sites that construct this
+// service directly - none of which exercise database automations or AI fields - don't all
+// need a fake dependency graph wired through them. Production DI always resolves the real
+// registered instances.
+public sealed class WikiDatabaseService(
+    IAppDbContext dbContext,
+    IAutomationTriggerService? automationTriggerService = null,
+    IOllamaService? ollama = null) : IWikiDatabaseService
 {
     // Same bound as WikiService.MaxRevisionsPerPage - kept as an independent constant rather
     // than shared so each history table can be tuned separately later if needed.
@@ -787,7 +791,9 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
             string.IsNullOrWhiteSpace(editor.RollupAggregation) ? null : editor.RollupAggregation,
             editor.Type == WikiDatabasePropertyTypes.Button ? editor.AutomationWorkflowId : null,
             editor.Type == WikiDatabasePropertyTypes.Button && !string.IsNullOrWhiteSpace(editor.ButtonLabel) ? editor.ButtonLabel.Trim() : null,
-            editor.Type == WikiDatabasePropertyTypes.UniqueId && !string.IsNullOrWhiteSpace(editor.UniqueIdPrefix) ? editor.UniqueIdPrefix.Trim() : null);
+            editor.Type == WikiDatabasePropertyTypes.UniqueId && !string.IsNullOrWhiteSpace(editor.UniqueIdPrefix) ? editor.UniqueIdPrefix.Trim() : null,
+            editor.Type == WikiDatabasePropertyTypes.AiField && !string.IsNullOrWhiteSpace(editor.AiPromptTemplate) ? editor.AiPromptTemplate.Trim() : null,
+            editor.Type == WikiDatabasePropertyTypes.AiField && !string.IsNullOrWhiteSpace(editor.AiModel) ? editor.AiModel.Trim() : null);
         await ValidatePropertyConfigurationAsync(wikiDatabaseId, property.Id, editor.Type, configuration, cancellationToken);
         if (!isNew && editor.Type == WikiDatabasePropertyTypes.Relation
             && previousConfiguration.RelatedDatabaseId != configuration.RelatedDatabaseId)
@@ -828,6 +834,27 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
                 formulaProperty.UpdatedAt = now;
                 formulaProperty.UpdatedBy = performedBy;
             }
+
+            // Same rename propagation as Formula expressions above, since AiPromptTemplate
+            // reuses the identical "[Property Name]" bracket-reference syntax - otherwise a
+            // rename would silently break every AI field prompt that referenced the old name.
+            var aiProperties = await dbContext.WikiDatabaseProperties
+                .Where(item => item.WikiDatabaseId == wikiDatabaseId && item.Type == WikiDatabasePropertyTypes.AiField)
+                .ToListAsync(cancellationToken);
+            foreach (var aiProperty in aiProperties)
+            {
+                var aiConfig = WikiDatabasePropertyConfig.Parse(aiProperty);
+                if (string.IsNullOrWhiteSpace(aiConfig.AiPromptTemplate)) continue;
+                var updatedTemplate = Regex.Replace(
+                    aiConfig.AiPromptTemplate,
+                    $@"\[{Regex.Escape(previousName)}\]",
+                    $"[{property.Name}]",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                if (updatedTemplate == aiConfig.AiPromptTemplate) continue;
+                aiProperty.ConfigJson = WikiDatabasePropertyConfig.Serialize(aiConfig with { AiPromptTemplate = updatedTemplate });
+                aiProperty.UpdatedAt = now;
+                aiProperty.UpdatedBy = performedBy;
+            }
         }
 
         if (isNew)
@@ -856,6 +883,7 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         property.ConfigJson = editor.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect
             or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Relation or WikiDatabasePropertyTypes.Rollup
             or WikiDatabasePropertyTypes.Status or WikiDatabasePropertyTypes.Button or WikiDatabasePropertyTypes.UniqueId
+            or WikiDatabasePropertyTypes.AiField
             ? WikiDatabasePropertyConfig.Serialize(configuration)
             : "{}";
 
@@ -1032,13 +1060,20 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
         await ValidateParentRowAsync(wikiDatabaseId, row.Id, editor.ParentRowId, cancellationToken);
         row.ParentRowId = editor.ParentRowId;
 
+        // .ToLower() matters here, not just style - SQLite's CAST(blob AS TEXT) (what EF
+        // translates property.Id.ToString() to) renders a GUID's hex digits UPPERCASE, while
+        // every in-memory JSON key derived from Guid.ToString() (WikiPropertyValues.SetText
+        // and friends) is lowercase. Without normalizing, the membership/lookup checks below
+        // never match - silently breaking the "carry the previous value of a computed property
+        // forward on an edit" behavior for every computed type (UniqueId, Formula, Button, the
+        // new AiField, etc.), not just failing to reject a client-submitted override.
         var computedPropertyIds = await dbContext.WikiDatabaseProperties
             .Where(property => property.WikiDatabaseId == wikiDatabaseId
                 && (property.Type == WikiDatabasePropertyTypes.Formula || property.Type == WikiDatabasePropertyTypes.Rollup
                     || property.Type == WikiDatabasePropertyTypes.LastEditedTime || property.Type == WikiDatabasePropertyTypes.LastEditedBy
                     || property.Type == WikiDatabasePropertyTypes.CreatedBy || property.Type == WikiDatabasePropertyTypes.Button
-                    || property.Type == WikiDatabasePropertyTypes.UniqueId))
-            .Select(property => property.Id.ToString())
+                    || property.Type == WikiDatabasePropertyTypes.UniqueId || property.Type == WikiDatabasePropertyTypes.AiField))
+            .Select(property => property.Id.ToString().ToLower())
             .ToListAsync(cancellationToken);
         var values = new System.Text.Json.Nodes.JsonObject();
         foreach (var (key, value) in editor.Values)
@@ -2266,7 +2301,7 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
             ?? throw new KeyNotFoundException("The database row no longer exists.");
         if (property.Type is WikiDatabasePropertyTypes.CreatedTime or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup
             or WikiDatabasePropertyTypes.LastEditedTime or WikiDatabasePropertyTypes.LastEditedBy or WikiDatabasePropertyTypes.CreatedBy
-            or WikiDatabasePropertyTypes.Button or WikiDatabasePropertyTypes.UniqueId)
+            or WikiDatabasePropertyTypes.Button or WikiDatabasePropertyTypes.UniqueId or WikiDatabasePropertyTypes.AiField)
         {
             throw new InvalidOperationException("Computed properties are read-only.");
         }
@@ -2331,6 +2366,82 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
             ParentRowId = row.ParentRowId,
             Values = values.ToDictionary(item => item.Key, item => item.Value)
         }, performedBy, cancellationToken);
+
+        return await GetInlineDatabaseAsync(wikiDatabaseId, cancellationToken)
+            ?? throw new KeyNotFoundException("The database no longer exists.");
+    }
+
+    // Deliberately writes the generated value straight to the row rather than going through
+    // SaveRowAsync (the way SaveInlineCellAsync does above) - SaveRowAsync's own
+    // computedPropertyIds handling (now including AiField, see the guard in
+    // SaveInlineCellAsync above) always carries the *previous* value of a computed property
+    // forward on an edit, which would silently discard the freshly-generated value if this
+    // went through that same path. UniqueId's one-time assignment is the only other computed
+    // type with real write logic, and it's special-cased inside SaveRowAsync itself for the
+    // same reason.
+    public async Task<WikiInlineDatabaseSnapshot> GenerateAiFieldValueAsync(
+        Guid wikiDatabaseId,
+        Guid rowId,
+        Guid propertyId,
+        string performedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var ai = ollama ?? throw new InvalidOperationException("Ollama is not available to generate AI field values.");
+        var database = await GetDatabaseAsync(wikiDatabaseId, cancellationToken)
+            ?? throw new KeyNotFoundException("The database no longer exists.");
+        var property = database.Properties.FirstOrDefault(item => item.Id == propertyId)
+            ?? throw new KeyNotFoundException("The database property no longer exists.");
+        if (property.Type != WikiDatabasePropertyTypes.AiField)
+        {
+            throw new InvalidOperationException("This property is not an AI field.");
+        }
+        var row = database.Rows.FirstOrDefault(item => item.Id == rowId)
+            ?? throw new KeyNotFoundException("The database row no longer exists.");
+
+        var config = WikiDatabasePropertyConfig.Parse(property);
+        if (string.IsNullOrWhiteSpace(config.AiPromptTemplate))
+        {
+            throw new InvalidOperationException($"\"{property.Name}\" has no prompt configured yet.");
+        }
+        if (string.IsNullOrWhiteSpace(config.AiModel))
+        {
+            throw new InvalidOperationException($"\"{property.Name}\" has no Ollama model configured yet.");
+        }
+
+        var rowValues = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+        // Same "[Property Name]" bracket-reference syntax WikiDatabaseComputation's formula
+        // engine resolves (by case-insensitive name lookup) - reused here so a workspace only
+        // has to learn one column-referencing convention across Formula and AI fields.
+        var resolvedPrompt = Regex.Replace(config.AiPromptTemplate, @"\[([^\[\]]+)\]", match =>
+        {
+            var referenced = database.Properties.FirstOrDefault(candidate =>
+                string.Equals(candidate.Name, match.Groups[1].Value, StringComparison.OrdinalIgnoreCase));
+            return referenced is null ? match.Value : WikiPropertyValues.GetDisplayText(referenced, rowValues, row.CreatedAt);
+        });
+
+        const string systemPrompt =
+            "You generate the value of a single database field from the given prompt and referenced " +
+            "row data. Respond with ONLY the field's value - no preamble, no markdown formatting, no " +
+            "surrounding quotes.";
+        var generated = (await ai.GenerateAsync(config.AiModel, systemPrompt, resolvedPrompt, cancellationToken)).Trim();
+
+        var trackedRow = await dbContext.WikiDatabaseRows.FirstOrDefaultAsync(item => item.Id == rowId, cancellationToken)
+            ?? throw new KeyNotFoundException("The database row no longer exists.");
+        var values = WikiPropertyValues.ParseObject(trackedRow.PropertyValuesJson);
+        WikiPropertyValues.SetText(values, propertyId, generated);
+        trackedRow.PropertyValuesJson = WikiPropertyValues.Serialize(values);
+        var now = DateTimeOffset.UtcNow;
+        trackedRow.UpdatedAt = now;
+        trackedRow.UpdatedBy = performedBy;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        // Same anti-recursion convention SaveRowAsync's own trigger firing already uses -
+        // see its own comment on why "automation-engine" is excluded.
+        if (automationTriggerService is not null && performedBy != "automation-engine")
+        {
+            var triggerPayload = JsonSerializer.Serialize(new { wikiDatabaseId, rowId, isNew = false, values });
+            await automationTriggerService.TriggerDatabaseRowChangedAsync(wikiDatabaseId, triggerPayload, cancellationToken);
+        }
 
         return await GetInlineDatabaseAsync(wikiDatabaseId, cancellationToken)
             ?? throw new KeyNotFoundException("The database no longer exists.");
@@ -2552,7 +2663,8 @@ public sealed class WikiDatabaseService(IAppDbContext dbContext, IAutomationTrig
                 property.Type,
                 property.Type is WikiDatabasePropertyTypes.CreatedTime or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup
                     or WikiDatabasePropertyTypes.LastEditedTime or WikiDatabasePropertyTypes.LastEditedBy
-                    or WikiDatabasePropertyTypes.CreatedBy or WikiDatabasePropertyTypes.Button or WikiDatabasePropertyTypes.UniqueId,
+                    or WikiDatabasePropertyTypes.CreatedBy or WikiDatabasePropertyTypes.Button or WikiDatabasePropertyTypes.UniqueId
+                    or WikiDatabasePropertyTypes.AiField,
                 WikiDatabasePropertyConfig.GetOptions(property)))
             .ToList();
 

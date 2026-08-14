@@ -47,6 +47,13 @@ public interface IWikiDatabaseService
     Task<WikiInlineDatabaseSnapshot> AddInlineBoardRowAsync(Guid wikiDatabaseId, Guid groupByPropertyId, string? groupOptionId, string? title, string performedBy, CancellationToken cancellationToken = default);
     Task<WikiInlineDatabaseSnapshot> SaveInlineCellAsync(Guid wikiDatabaseId, Guid rowId, Guid propertyId, string? value, string performedBy, CancellationToken cancellationToken = default);
 
+    // Resolves an AiField property's prompt template against the row's other property
+    // values, calls the configured Ollama model, and persists the result - never
+    // client-writable via SaveInlineCellAsync (see its own computed-property guard).
+    // Throws if Ollama is unavailable, the property isn't an AiField, or it has no
+    // prompt/model configured yet.
+    Task<WikiInlineDatabaseSnapshot> GenerateAiFieldValueAsync(Guid wikiDatabaseId, Guid rowId, Guid propertyId, string performedBy, CancellationToken cancellationToken = default);
+
     // Board-drag move: reassigns the row's groupByProperty value and renumbers SortOrder
     // among the rows now sharing that value (mirrors WikiService.ReorderPageAsync's
     // reparent-and-renumber shape, scoped by "same group option" instead of "same parent").

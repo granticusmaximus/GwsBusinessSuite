@@ -733,6 +733,14 @@ public static class WikiDatabasePropertyTypes
     // User-togglable "Verified"/"Not verified" stamp carrying who verified it and when -
     // see WikiVerificationState.
     public const string Verification = "verification";
+    // Text-shaped storage (like Text/Email), but never client-writable - populated only by
+    // WikiDatabaseService.GenerateAiFieldValueAsync, triggered explicitly by a "Generate"
+    // click on the cell (never automatically on row save - an LLM call is slow and costs
+    // real inference time, unlike Formula/Rollup's cheap synchronous re-materialization on
+    // every read). ConfigJson carries AiPromptTemplate ("[Property Name]" references,
+    // resolved the same way WikiDatabaseComputation's formula engine already resolves
+    // bracketed property references) and AiModel (the Ollama model to call).
+    public const string AiField = "aiField";
 }
 
 public static class WikiDatabaseStatusGroups
