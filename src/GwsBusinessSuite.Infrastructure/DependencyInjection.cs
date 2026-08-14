@@ -1,6 +1,7 @@
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.AdminPortal;
 using GwsBusinessSuite.Application.AffiliateAnalytics;
+using GwsBusinessSuite.Application.BusinessIntelligence;
 using GwsBusinessSuite.Application.AffiliateSuggestions;
 using GwsBusinessSuite.Application.AffiliateRotations;
 using GwsBusinessSuite.Application.AppGeneration;
@@ -208,6 +209,7 @@ public static class DependencyInjection
         services.AddScoped<IResumePdfService, ResumePdfService>();
         services.AddScoped<IAffiliateSuggestionService, AffiliateSuggestionService>();
         services.AddScoped<IAffiliateAnalyticsService, AffiliateAnalyticsService>();
+        services.AddScoped<IBusinessIntelligenceService, BusinessIntelligenceService>();
         services.AddSingleton<IAnalyticsGeoLocationResolver, AnalyticsGeoLocationResolver>();
         services.AddScoped<IGrowthAnalyticsService, GrowthAnalyticsService>();
         services.AddOptions<GrowthReportEmailOptions>()

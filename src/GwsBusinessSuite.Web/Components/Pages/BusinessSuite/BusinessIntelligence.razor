@@ -1,0 +1,407 @@
+@page "/admin/business-intelligence"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using System.Globalization
+@using GwsBusinessSuite.Application.BusinessIntelligence
+@inject IBusinessIntelligenceService BusinessIntelligenceService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject IJSRuntime JS
+
+<PageTitle>Business Intelligence</PageTitle>
+
+<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-bar-chart-line-fill me-2 text-primary"></i>Business Intelligence</h1>
+        <p>Build safe reports from suite data and pin the charts that matter to your dashboard.</p>
+    </div>
+    <button type="button" class="btn btn-primary" @onclick="BeginCreate" disabled="@_isBusy">
+        <i class="bi bi-plus-lg me-1"></i>Build chart
+    </button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_errorMessage))
+{
+    <div class="alert alert-danger" role="alert">@_errorMessage</div>
+}
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert alert-success" role="status">@_statusMessage</div>
+}
+
+@if (_showBuilder)
+{
+    <section class="card border-0 shadow-sm mb-4 bi-builder" aria-labelledby="bi-builder-heading">
+        <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center">
+            <div>
+                <h2 id="bi-builder-heading" class="h5 mb-1">@(_editor.Id.HasValue ? "Edit chart" : "Build a chart")</h2>
+                <span class="small text-secondary">Choose from application-owned query shapes. No raw SQL is accepted.</span>
+            </div>
+            <button type="button" class="btn-close" aria-label="Close chart builder" @onclick="CloseBuilder"></button>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-lg-4">
+                    <label class="form-label small fw-semibold">Data source</label>
+                    <select class="form-select" @bind="_editor.QueryShape" @bind:after="OnShapeChanged" disabled="@_isBusy">
+                        @foreach (var shape in _queryShapes)
+                        {
+                            <option value="@shape.Value">@shape.Label</option>
+                        }
+                    </select>
+                    <div class="form-text">@SelectedShape.Description</div>
+                </div>
+                <div class="col-md-6 col-lg-4">
+                    <label class="form-label small fw-semibold">Metric</label>
+                    <select class="form-select" @bind="_editor.Metric" disabled="@_isBusy">
+                        @foreach (var metric in SelectedShape.Metrics)
+                        {
+                            <option value="@metric.Value">@metric.Label</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-6 col-lg-4">
+                    <label class="form-label small fw-semibold">Group by</label>
+                    <select class="form-select" @bind="_editor.Dimension" disabled="@_isBusy">
+                        @foreach (var dimension in SelectedShape.Dimensions)
+                        {
+                            <option value="@dimension.Value">@dimension.Label</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label small fw-semibold">Chart title</label>
+                    <input class="form-control" maxlength="120" @bind="_editor.Title" disabled="@_isBusy" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">Date range</label>
+                    <select class="form-select" @bind="_editor.RangeDays" disabled="@_isBusy">
+                        @foreach (var days in _rangeOptions)
+                        {
+                            <option value="@days">Last @days days</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold">Visualization</label>
+                    <select class="form-select" @bind="_editor.Visualization" disabled="@_isBusy">
+                        @foreach (var visualization in BiVisualizations.All)
+                        {
+                            <option value="@visualization">@visualization chart</option>
+                        }
+                    </select>
+                </div>
+            </div>
+
+            <div class="d-flex flex-wrap gap-2 mt-4">
+                <button type="button" class="btn btn-outline-primary" @onclick="PreviewAsync" disabled="@_isBusy">
+                    <i class="bi bi-eye me-1"></i>Preview
+                </button>
+                <button type="button" class="btn btn-primary" @onclick="SaveAsync" disabled="@(_isBusy || string.IsNullOrWhiteSpace(_editor.Title))">
+                    <i class="bi bi-pin-angle-fill me-1"></i>@(_editor.Id.HasValue ? "Save changes" : "Pin to dashboard")
+                </button>
+                <button type="button" class="btn btn-link text-secondary" @onclick="CloseBuilder" disabled="@_isBusy">Cancel</button>
+            </div>
+
+            @if (_preview is not null)
+            {
+                <div class="bi-preview mt-4">
+                    <div class="small text-uppercase fw-semibold text-secondary mb-2">Preview</div>
+                    @RenderChart(_editor.Visualization, _preview)
+                </div>
+            }
+        </div>
+    </section>
+}
+
+@if (!_loaded)
+{
+    <div class="text-secondary py-5 text-center"><span class="spinner-border spinner-border-sm me-2"></span>Loading your dashboard...</div>
+}
+else if (_widgets.Count == 0)
+{
+    <div class="card border-0 shadow-sm bi-empty">
+        <div class="card-body text-center py-5">
+            <i class="bi bi-bar-chart display-5 text-primary"></i>
+            <h2 class="h5 mt-3">Your dashboard is ready for its first chart</h2>
+            <p class="text-secondary mb-3">Start with CRM deals, article performance, or affiliate revenue.</p>
+            <button type="button" class="btn btn-primary" @onclick="BeginCreate">Build a chart</button>
+        </div>
+    </div>
+}
+else
+{
+    <div class="bi-dashboard">
+        @foreach (var widget in _widgets)
+        {
+            <article class="card border-0 shadow-sm bi-widget">
+                <div class="card-header bg-white border-bottom d-flex align-items-start justify-content-between gap-3">
+                    <div>
+                        <h2 class="h5 mb-1">@widget.Title</h2>
+                        <div class="small text-secondary">@widget.Chart.MetricLabel by @widget.Chart.DimensionLabel · Last @widget.RangeDays days</div>
+                    </div>
+                    <div class="dropdown">
+                        <button class="btn btn-sm btn-light" type="button" data-bs-toggle="dropdown" aria-label="Chart actions">
+                            <i class="bi bi-three-dots"></i>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><button class="dropdown-item" type="button" @onclick="() => BeginEdit(widget)"><i class="bi bi-pencil me-2"></i>Edit</button></li>
+                            <li><button class="dropdown-item text-danger" type="button" @onclick="() => DeleteAsync(widget)"><i class="bi bi-trash me-2"></i>Remove</button></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="bi-total">@FormatValue(widget.Chart.Total, widget.Chart.ValueFormat)</div>
+                    <div class="small text-secondary mb-3">Total for selected period · refreshed @DateTimeOffset.Now.ToString("h:mm tt")</div>
+                    @RenderChart(widget.Visualization, widget.Chart)
+                </div>
+            </article>
+        }
+    </div>
+}
+
+@code {
+    private IReadOnlyList<BiQueryShapeDefinition> _queryShapes = [];
+    private IReadOnlyList<int> _rangeOptions = [];
+    private IReadOnlyList<BiDashboardWidget> _widgets = [];
+    private BiWidgetEditor _editor = NewEditor();
+    private BiChartResult? _preview;
+    private string _owner = string.Empty;
+    private string? _errorMessage;
+    private string? _statusMessage;
+    private bool _loaded;
+    private bool _isBusy;
+    private bool _showBuilder;
+
+    private BiQueryShapeDefinition SelectedShape =>
+        _queryShapes.First(shape => shape.Value == _editor.QueryShape);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _queryShapes = BusinessIntelligenceService.GetQueryShapes();
+        _rangeOptions = BusinessIntelligenceService.GetRangeOptions();
+        _owner = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _isBusy = true;
+        try
+        {
+            _widgets = await BusinessIntelligenceService.GetDashboardAsync(_owner);
+            _loaded = true;
+        }
+        catch (InvalidOperationException ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private void BeginCreate()
+    {
+        _editor = NewEditor();
+        _preview = null;
+        _errorMessage = null;
+        _statusMessage = null;
+        _showBuilder = true;
+    }
+
+    private void BeginEdit(BiDashboardWidget widget)
+    {
+        _editor = new BiWidgetEditor
+        {
+            Id = widget.Id,
+            Title = widget.Title,
+            QueryShape = widget.QueryShape,
+            Metric = widget.Metric,
+            Dimension = widget.Dimension,
+            Visualization = widget.Visualization,
+            RangeDays = widget.RangeDays
+        };
+        _preview = widget.Chart;
+        _errorMessage = null;
+        _statusMessage = null;
+        _showBuilder = true;
+    }
+
+    private void CloseBuilder()
+    {
+        _showBuilder = false;
+        _preview = null;
+    }
+
+    private void OnShapeChanged()
+    {
+        _editor.Metric = SelectedShape.Metrics[0].Value;
+        _editor.Dimension = SelectedShape.Dimensions[0].Value;
+        _editor.Title = $"{SelectedShape.Metrics[0].Label} by {SelectedShape.Dimensions[0].Label}";
+        _preview = null;
+    }
+
+    private async Task PreviewAsync()
+    {
+        await RunBusyAsync(async () =>
+        {
+            _preview = await BusinessIntelligenceService.PreviewAsync(_editor);
+            _statusMessage = null;
+        });
+    }
+
+    private async Task SaveAsync()
+    {
+        await RunBusyAsync(async () =>
+        {
+            var editing = _editor.Id.HasValue;
+            await BusinessIntelligenceService.SaveWidgetAsync(_owner, _editor);
+            _showBuilder = false;
+            _preview = null;
+            _statusMessage = editing ? "Chart updated." : "Chart pinned to your dashboard.";
+            _widgets = await BusinessIntelligenceService.GetDashboardAsync(_owner);
+        });
+    }
+
+    private async Task DeleteAsync(BiDashboardWidget widget)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Remove '{widget.Title}' from your dashboard?")) return;
+        await RunBusyAsync(async () =>
+        {
+            await BusinessIntelligenceService.DeleteWidgetAsync(_owner, widget.Id);
+            _statusMessage = "Chart removed.";
+            _widgets = await BusinessIntelligenceService.GetDashboardAsync(_owner);
+        });
+    }
+
+    private async Task RunBusyAsync(Func<Task> action)
+    {
+        _isBusy = true;
+        _errorMessage = null;
+        try
+        {
+            await action();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private RenderFragment RenderChart(string visualization, BiChartResult chart) => builder =>
+    {
+        if (chart.Points.Count == 0)
+        {
+            builder.OpenElement(0, "div");
+            builder.AddAttribute(1, "class", "bi-no-data");
+            builder.AddContent(2, "No matching data in this period.");
+            builder.CloseElement();
+            return;
+        }
+
+        if (visualization == BiVisualizations.Line)
+        {
+            builder.OpenElement(10, "div");
+            builder.AddAttribute(11, "class", "bi-line-wrap");
+            builder.OpenElement(12, "svg");
+            builder.AddAttribute(13, "viewBox", "0 0 600 180");
+            builder.AddAttribute(14, "role", "img");
+            builder.AddAttribute(15, "aria-label", $"{chart.MetricLabel} by {chart.DimensionLabel}");
+            builder.OpenElement(16, "polyline");
+            builder.AddAttribute(17, "points", PolylinePoints(chart.Points));
+            builder.AddAttribute(18, "class", "bi-line");
+            builder.CloseElement();
+            builder.CloseElement();
+            builder.CloseElement();
+        }
+        else if (visualization == BiVisualizations.Bar)
+        {
+            builder.OpenElement(20, "div");
+            builder.AddAttribute(21, "class", "bi-bars");
+            var sequence = 22;
+            foreach (var point in chart.Points)
+            {
+                builder.OpenElement(sequence++, "div");
+                builder.AddAttribute(sequence++, "class", "bi-bar-row");
+                builder.OpenElement(sequence++, "span");
+                builder.AddAttribute(sequence++, "class", "bi-bar-label");
+                builder.AddAttribute(sequence++, "title", point.Label);
+                builder.AddContent(sequence++, point.Label);
+                builder.CloseElement();
+                builder.OpenElement(sequence++, "div");
+                builder.AddAttribute(sequence++, "class", "bi-bar-track");
+                builder.OpenElement(sequence++, "span");
+                builder.AddAttribute(sequence++, "class", "bi-bar-fill");
+                builder.AddAttribute(sequence++, "style", $"width:{BarPercent(point.Value, chart.Points):0.#}%");
+                builder.CloseElement();
+                builder.CloseElement();
+                builder.OpenElement(sequence++, "strong");
+                builder.AddContent(sequence++, FormatValue(point.Value, chart.ValueFormat));
+                builder.CloseElement();
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+        }
+
+        if (visualization is BiVisualizations.Table or BiVisualizations.Line)
+        {
+            builder.OpenElement(1000, "div");
+            builder.AddAttribute(1001, "class", "table-responsive bi-data-table");
+            builder.OpenElement(1002, "table");
+            builder.AddAttribute(1003, "class", "table table-sm mb-0");
+            builder.OpenElement(1004, "tbody");
+            var sequence = 1005;
+            foreach (var point in chart.Points)
+            {
+                builder.OpenElement(sequence++, "tr");
+                builder.OpenElement(sequence++, "td");
+                builder.AddContent(sequence++, point.Label);
+                builder.CloseElement();
+                builder.OpenElement(sequence++, "td");
+                builder.AddAttribute(sequence++, "class", "text-end fw-semibold");
+                builder.AddContent(sequence++, FormatValue(point.Value, chart.ValueFormat));
+                builder.CloseElement();
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+            builder.CloseElement();
+            builder.CloseElement();
+        }
+    };
+
+    private static decimal BarPercent(decimal value, IReadOnlyList<BiDataPoint> points)
+    {
+        var max = points.Max(point => point.Value);
+        return max <= 0 ? 0 : Math.Max(2, value / max * 100);
+    }
+
+    private static string PolylinePoints(IReadOnlyList<BiDataPoint> points)
+    {
+        var max = Math.Max(1m, points.Max(point => point.Value));
+        var divisor = Math.Max(1, points.Count - 1);
+        return string.Join(" ", points.Select((point, index) =>
+        {
+            var x = 12 + index * 576m / divisor;
+            var y = 168 - point.Value / max * 150m;
+            return $"{x.ToString("0.#", CultureInfo.InvariantCulture)},{y.ToString("0.#", CultureInfo.InvariantCulture)}";
+        }));
+    }
+
+    private static string FormatValue(decimal value, string format) =>
+        format == "Currency" ? value.ToString("C2") : value.ToString("N0");
+
+    private static BiWidgetEditor NewEditor() => new()
+    {
+        Title = "Deal count by Stage",
+        QueryShape = BiQueryShapes.Deals,
+        Metric = BiMetrics.Count,
+        Dimension = BiDimensions.Stage,
+        Visualization = BiVisualizations.Bar,
+        RangeDays = 30
+    };
+}

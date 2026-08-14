@@ -1489,6 +1489,22 @@ public sealed class WebAnalyticsEvent : AuditableEntity
     public long OccurredAtUnixSeconds { get; set; }
 }
 
+// A deliberately constrained, per-user BI tile. QueryShape, Metric, and Dimension are
+// validated against the application-owned catalogue before execution; they are never SQL or
+// arbitrary property names. This keeps self-serve reporting away from the live database query
+// surface while still letting each staff user compose their own dashboard.
+public sealed class BusinessIntelligenceWidget : AuditableEntity
+{
+    public required string OwnerUsername { get; set; }
+    public required string Title { get; set; }
+    public required string QueryShape { get; set; }
+    public required string Metric { get; set; }
+    public required string Dimension { get; set; }
+    public string Visualization { get; set; } = "Bar";
+    public int RangeDays { get; set; } = 30;
+    public int SortOrder { get; set; }
+}
+
 public static class AnalyticsGoalMatchTypes
 {
     public const string Event = "Event";

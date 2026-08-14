@@ -95,6 +95,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<ArticleAffiliateClick> ArticleAffiliateClicks => Set<ArticleAffiliateClick>();
     public DbSet<CjCommissionRecord> CjCommissionRecords => Set<CjCommissionRecord>();
     public DbSet<WebAnalyticsEvent> WebAnalyticsEvents => Set<WebAnalyticsEvent>();
+    public DbSet<BusinessIntelligenceWidget> BusinessIntelligenceWidgets => Set<BusinessIntelligenceWidget>();
     public DbSet<AnalyticsGoal> AnalyticsGoals => Set<AnalyticsGoal>();
     public DbSet<AnalyticsFunnel> AnalyticsFunnels => Set<AnalyticsFunnel>();
     public DbSet<AnalyticsFunnelStep> AnalyticsFunnelSteps => Set<AnalyticsFunnelStep>();
@@ -539,6 +540,15 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<WebAnalyticsEvent>().Property(x => x.CountryName).HasMaxLength(100);
         modelBuilder.Entity<WebAnalyticsEvent>().Property(x => x.RegionCode).HasMaxLength(16);
         modelBuilder.Entity<WebAnalyticsEvent>().Property(x => x.RegionName).HasMaxLength(120);
+
+        modelBuilder.Entity<BusinessIntelligenceWidget>()
+            .HasIndex(x => new { x.OwnerUsername, x.SortOrder });
+        modelBuilder.Entity<BusinessIntelligenceWidget>().Property(x => x.OwnerUsername).HasMaxLength(256);
+        modelBuilder.Entity<BusinessIntelligenceWidget>().Property(x => x.Title).HasMaxLength(120);
+        modelBuilder.Entity<BusinessIntelligenceWidget>().Property(x => x.QueryShape).HasMaxLength(40);
+        modelBuilder.Entity<BusinessIntelligenceWidget>().Property(x => x.Metric).HasMaxLength(40);
+        modelBuilder.Entity<BusinessIntelligenceWidget>().Property(x => x.Dimension).HasMaxLength(40);
+        modelBuilder.Entity<BusinessIntelligenceWidget>().Property(x => x.Visualization).HasMaxLength(20);
         modelBuilder.Entity<AnalyticsGoal>().HasIndex(x => x.Name).IsUnique();
         modelBuilder.Entity<AnalyticsGoal>().HasIndex(x => new { x.IsActive, x.MatchType });
         modelBuilder.Entity<AnalyticsGoal>().Property(x => x.Name).HasMaxLength(120);
