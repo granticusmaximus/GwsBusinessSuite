@@ -1,0 +1,201 @@
+@page "/client-portal/support"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "ClientPortalAccess")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Support
+@using GwsBusinessSuite.Domain.Entities
+@using GwsBusinessSuite.Web.Security
+@inject ISupportTicketService TicketService
+
+<PageTitle>Support</PageTitle>
+
+<div class="gws-portal-shell">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h1 class="h4 mb-0">Support</h1>
+        <a class="btn btn-outline-secondary btn-sm" href="/client-portal">Back to dashboard</a>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-4">
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white border-bottom py-3 fw-semibold">New Ticket</div>
+                <div class="card-body">
+                    @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+                    {
+                        <div class="alert alert-danger py-2 px-3 small">@ErrorMessage</div>
+                    }
+                    <div class="mb-2">
+                        <input class="form-control form-control-sm" placeholder="Subject" @bind="_newSubject" />
+                    </div>
+                    <div class="mb-2">
+                        <textarea class="form-control form-control-sm" rows="3" placeholder="How can we help?" @bind="_newMessage"></textarea>
+                    </div>
+                    <button class="btn btn-sm btn-primary w-100" disabled="@_isBusy" @onclick="CreateTicketAsync">
+                        <i class="bi bi-plus-lg me-1"></i>Send
+                    </button>
+                </div>
+            </div>
+
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white border-bottom py-3 fw-semibold">Your Tickets</div>
+                <div class="card-body p-0">
+                    @if (Tickets.Count == 0)
+                    {
+                        <div class="p-4 text-secondary">No tickets yet.</div>
+                    }
+                    else
+                    {
+                        <div class="list-group list-group-flush">
+                            @foreach (var ticket in Tickets)
+                            {
+                                <button type="button" class="list-group-item list-group-item-action @(SelectedTicketId == ticket.Id ? "active" : "")"
+                                        @onclick="() => SelectTicketAsync(ticket.Id)">
+                                    <div class="fw-semibold text-truncate">@ticket.Subject</div>
+                                    <span class="badge gws-portal-badge">@ticket.Status</span>
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-8">
+            @if (SelectedTicket is null)
+            {
+                <div class="card border-0 shadow-sm">
+                    <div class="card-body text-secondary">Select a ticket to view the conversation.</div>
+                </div>
+            }
+            else
+            {
+                <div class="card border-0 shadow-sm">
+                    <div class="card-header bg-white border-bottom py-3">
+                        <div class="fw-semibold">@SelectedTicket.Subject</div>
+                        <span class="badge gws-portal-badge">@SelectedTicket.Status</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            @foreach (var message in SelectedTicket.Messages)
+                            {
+                                <div class="mb-3 @(message.AuthorType == SupportTicketAuthorTypes.Contact ? "text-end" : "")">
+                                    <div class="small text-secondary">@message.AuthorName &middot; @message.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</div>
+                                    <div class="d-inline-block p-2 rounded @(message.AuthorType == SupportTicketAuthorTypes.Contact ? "bg-primary-subtle" : "bg-secondary-subtle")" style="max-width: 80%; text-align: left;">
+                                        @message.Body
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                        <div class="d-flex gap-2">
+                            <textarea class="form-control" rows="2" placeholder="Reply..." @bind="_replyBody"></textarea>
+                            <button class="btn btn-primary align-self-end" disabled="@_isBusy" @onclick="ReplyAsync">Send</button>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter]
+    private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? AuthStateTask { get; set; }
+
+    private Guid _contactId;
+    private string _contactName = "You";
+    private IReadOnlyList<SupportTicketView> Tickets { get; set; } = [];
+    private SupportTicketView? SelectedTicket { get; set; }
+    private Guid? SelectedTicketId { get; set; }
+    private string ErrorMessage { get; set; } = string.Empty;
+    private bool _isBusy;
+
+    private string _newSubject = string.Empty;
+    private string _newMessage = string.Empty;
+    private string _replyBody = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthStateTask is not null)
+        {
+            var authState = await AuthStateTask;
+            _contactName = authState.User.Identity?.Name ?? "You";
+            Guid.TryParse(
+                authState.User.FindFirst(ClientPortalAuthenticationDefaults.ContactIdClaim)?.Value,
+                out _contactId);
+        }
+
+        await RefreshTicketsAsync();
+    }
+
+    private async Task RefreshTicketsAsync()
+    {
+        Tickets = await TicketService.ListTicketsForContactAsync(_contactId);
+        if (SelectedTicketId is { } id)
+        {
+            SelectedTicket = Tickets.FirstOrDefault(ticket => ticket.Id == id);
+        }
+    }
+
+    private async Task SelectTicketAsync(Guid ticketId)
+    {
+        SelectedTicketId = ticketId;
+        SelectedTicket = await TicketService.GetTicketAsync(ticketId);
+        _replyBody = string.Empty;
+    }
+
+    private async Task CreateTicketAsync()
+    {
+        ErrorMessage = string.Empty;
+        _isBusy = true;
+        try
+        {
+            var created = await TicketService.CreateTicketAsync(
+                _contactId, _newSubject, _newMessage, SupportTicketAuthorTypes.Contact, _contactName);
+            _newSubject = string.Empty;
+            _newMessage = string.Empty;
+            await RefreshTicketsAsync();
+            await SelectTicketAsync(created.Id);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task ReplyAsync()
+    {
+        if (SelectedTicketId is not { } ticketId || string.IsNullOrWhiteSpace(_replyBody)) return;
+
+        _isBusy = true;
+        try
+        {
+            await TicketService.AddReplyAsync(ticketId, SupportTicketAuthorTypes.Contact, _contactName, _replyBody);
+            _replyBody = string.Empty;
+            await RefreshTicketsAsync();
+            await SelectTicketAsync(ticketId);
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+}
+
+<style>
+    .gws-portal-shell {
+        max-width: 68rem;
+        margin: 0 auto;
+        padding: 1rem 0 2rem;
+        --gws-portal-accent: #f59e0b;
+    }
+
+    .gws-portal-badge {
+        background: color-mix(in srgb, var(--gws-portal-accent) 20%, transparent);
+        color: var(--gws-portal-accent);
+        font-weight: 600;
+    }
+</style>

@@ -198,6 +198,64 @@ public sealed class InvoiceLineItem : AuditableEntity
     public Invoice? Invoice { get; set; }
 }
 
+public static class SupportTicketStatuses
+{
+    public const string Open = "Open";
+    // Waiting on the contact's own reply, not staff's - distinct from Open so the admin
+    // queue can be filtered down to "tickets actually needing a staff response".
+    public const string Pending = "Pending";
+    public const string Resolved = "Resolved";
+    public const string Closed = "Closed";
+
+    public static readonly string[] All = [Open, Pending, Resolved, Closed];
+    // A ticket a contact replies to while in either of these gets silently reopened to
+    // Open - see SupportTicketService.AddReplyAsync.
+    public static readonly string[] Terminal = [Resolved, Closed];
+}
+
+public static class SupportTicketPriorities
+{
+    public const string Low = "Low";
+    public const string Normal = "Normal";
+    public const string High = "High";
+    public const string Urgent = "Urgent";
+
+    public static readonly string[] All = [Low, Normal, High, Urgent];
+}
+
+// A contact-facing support thread - the client portal counterpart to the internal-only
+// AutomationExecution/ContactActivity logs. Every reply (from either side) is a
+// SupportTicketMessage; the ticket row itself only carries thread-level state.
+public sealed class SupportTicket : AuditableEntity
+{
+    public Guid ContactId { get; set; }
+    public required string Subject { get; set; }
+    public string Status { get; set; } = SupportTicketStatuses.Open;
+    public string Priority { get; set; } = SupportTicketPriorities.Normal;
+    // Free-text staff username, not a foreign key to AppUser - mirrors AuditableEntity's own
+    // CreatedBy/UpdatedBy convention rather than introducing a real FK relationship for what's
+    // just a display/filter label. Null means unassigned.
+    public string? AssignedToUsername { get; set; }
+    public DateTimeOffset? LastRepliedAt { get; set; }
+    public DateTimeOffset? ResolvedAt { get; set; }
+    public ICollection<SupportTicketMessage> Messages { get; set; } = new List<SupportTicketMessage>();
+}
+
+public static class SupportTicketAuthorTypes
+{
+    public const string Contact = "Contact";
+    public const string Staff = "Staff";
+}
+
+public sealed class SupportTicketMessage : AuditableEntity
+{
+    public Guid TicketId { get; set; }
+    public string AuthorType { get; set; } = SupportTicketAuthorTypes.Staff;
+    public required string AuthorName { get; set; }
+    public required string Body { get; set; }
+    public SupportTicket? Ticket { get; set; }
+}
+
 public sealed class WikiPage : AuditableEntity
 {
     public required string Title { get; set; }

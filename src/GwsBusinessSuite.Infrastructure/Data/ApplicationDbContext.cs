@@ -30,6 +30,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<Deal> Deals => Set<Deal>();
     public DbSet<Invoice> Invoices => Set<Invoice>();
     public DbSet<InvoiceLineItem> InvoiceLineItems => Set<InvoiceLineItem>();
+    public DbSet<SupportTicket> SupportTickets => Set<SupportTicket>();
+    public DbSet<SupportTicketMessage> SupportTicketMessages => Set<SupportTicketMessage>();
     public DbSet<WikiPage> WikiPages => Set<WikiPage>();
     public DbSet<WikiPageRevision> WikiPageRevisions => Set<WikiPageRevision>();
     public DbSet<SentinelPageTemplate> SentinelPageTemplates => Set<SentinelPageTemplate>();
@@ -164,6 +166,21 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .HasForeignKey(x => x.InvoiceId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<InvoiceLineItem>().HasIndex(x => x.InvoiceId);
+
+        modelBuilder.Entity<SupportTicket>()
+            .HasOne<Contact>()
+            .WithMany()
+            .HasForeignKey(x => x.ContactId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<SupportTicket>().HasIndex(x => x.ContactId);
+        modelBuilder.Entity<SupportTicket>().HasIndex(x => x.Status);
+
+        modelBuilder.Entity<SupportTicketMessage>()
+            .HasOne(x => x.Ticket)
+            .WithMany(x => x.Messages)
+            .HasForeignKey(x => x.TicketId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<SupportTicketMessage>().HasIndex(x => x.TicketId);
 
         modelBuilder.Entity<MediaAsset>().HasIndex(x => x.CreatedAt);
         modelBuilder.Entity<WatchedTopic>().HasIndex(x => x.IsActive);

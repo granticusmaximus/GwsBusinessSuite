@@ -168,6 +168,7 @@ public static class DependencyInjection
         services.AddScoped<ICrmService, CrmService>();
         services.AddScoped<IStripeInvoicingClient, StripeInvoicingClient>();
         services.AddScoped<IBillingService, BillingService>();
+        services.AddScoped<GwsBusinessSuite.Application.Support.ISupportTicketService, SupportTicketService>();
         services.AddScoped<GwsBusinessSuite.Application.MissionControl.IMissionControlService, MissionControlService>();
         services.AddScoped<GwsBusinessSuite.Application.Mobile.IMobilePushRegistrationService, MobilePushRegistrationService>();
         services.AddScoped<GwsBusinessSuite.Application.Mobile.IMobileApprovalService, MobileApprovalService>();

@@ -1,0 +1,274 @@
+@page "/admin/support"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Crm
+@using GwsBusinessSuite.Application.Support
+@using GwsBusinessSuite.Domain.Entities
+@inject ISupportTicketService TicketService
+@inject ICrmService CrmService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@using GwsBusinessSuite.Application.Abstractions
+
+<PageTitle>Support</PageTitle>
+
+<div class="page-header">
+    <h1><i class="bi bi-life-preserver me-2 text-primary"></i>Support</h1>
+    <p>Tickets raised by contacts through the client portal, plus anything opened on their behalf.</p>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-4">
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white border-bottom py-3 fw-semibold">New Ticket</div>
+            <div class="card-body">
+                @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+                {
+                    <div class="alert alert-danger py-2 px-3 small">@ErrorMessage</div>
+                }
+                <div class="mb-2">
+                    <select class="form-select form-select-sm" @bind="_newContactId">
+                        <option value="@Guid.Empty">Select a contact...</option>
+                        @foreach (var contact in Contacts)
+                        {
+                            <option value="@contact.Id">@contact.FullName</option>
+                        }
+                    </select>
+                </div>
+                <div class="mb-2">
+                    <input class="form-control form-control-sm" placeholder="Subject" @bind="_newSubject" />
+                </div>
+                <div class="mb-2">
+                    <textarea class="form-control form-control-sm" rows="3" placeholder="First message" @bind="_newMessage"></textarea>
+                </div>
+                <button class="btn btn-sm btn-primary w-100" disabled="@_isBusy" @onclick="CreateTicketAsync">
+                    <i class="bi bi-plus-lg me-1"></i>Open Ticket
+                </button>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+                <span class="fw-semibold">Tickets</span>
+                <select class="form-select form-select-sm w-auto" @bind="StatusFilter" @bind:after="RefreshTicketsAsync">
+                    <option value="">All</option>
+                    @foreach (var status in SupportTicketStatuses.All)
+                    {
+                        <option value="@status">@status</option>
+                    }
+                </select>
+            </div>
+            <div class="card-body p-0">
+                @if (Tickets.Count == 0)
+                {
+                    <div class="p-4 text-secondary">No tickets.</div>
+                }
+                else
+                {
+                    <div class="list-group list-group-flush">
+                        @foreach (var ticket in Tickets)
+                        {
+                            <button type="button" class="list-group-item list-group-item-action @(SelectedTicketId == ticket.Id ? "active" : "")"
+                                    @onclick="() => SelectTicketAsync(ticket.Id)">
+                                <div class="d-flex justify-content-between align-items-start gap-2">
+                                    <div class="min-w-0">
+                                        <div class="fw-semibold text-truncate">@ticket.Subject</div>
+                                        <div class="small text-truncate @(SelectedTicketId == ticket.Id ? "" : "text-secondary")">@ticket.ContactName</div>
+                                    </div>
+                                    <span class="badge @PriorityBadgeClass(ticket.Priority)">@ticket.Priority</span>
+                                </div>
+                                <span class="badge @StatusBadgeClass(ticket.Status) mt-1">@ticket.Status</span>
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-8">
+        @if (SelectedTicket is null)
+        {
+            <div class="card border-0 shadow-sm">
+                <div class="card-body text-secondary">Select a ticket to view the thread.</div>
+            </div>
+        }
+        else
+        {
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white border-bottom py-3">
+                    <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+                        <div>
+                            <div class="fw-semibold">@SelectedTicket.Subject</div>
+                            <div class="text-secondary small">@SelectedTicket.ContactName</div>
+                        </div>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <select class="form-select form-select-sm w-auto" value="@SelectedTicket.Status" @onchange="OnStatusChangedAsync">
+                                @foreach (var status in SupportTicketStatuses.All)
+                                {
+                                    <option value="@status">@status</option>
+                                }
+                            </select>
+                            <select class="form-select form-select-sm w-auto" value="@SelectedTicket.Priority" @onchange="OnPriorityChangedAsync">
+                                @foreach (var priority in SupportTicketPriorities.All)
+                                {
+                                    <option value="@priority">@priority</option>
+                                }
+                            </select>
+                            <input class="form-control form-control-sm w-auto" placeholder="Assign to..."
+                                   value="@SelectedTicket.AssignedToUsername" @onchange="OnAssignChangedAsync" />
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="qn-thread mb-3">
+                        @foreach (var message in SelectedTicket.Messages)
+                        {
+                            <div class="mb-3 @(message.AuthorType == SupportTicketAuthorTypes.Staff ? "text-end" : "")">
+                                <div class="small text-secondary">@message.AuthorName &middot; @message.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</div>
+                                <div class="d-inline-block p-2 rounded @(message.AuthorType == SupportTicketAuthorTypes.Staff ? "bg-primary-subtle" : "bg-secondary-subtle")" style="max-width: 80%; text-align: left;">
+                                    @message.Body
+                                </div>
+                            </div>
+                        }
+                    </div>
+                    <div class="d-flex gap-2">
+                        <textarea class="form-control" rows="2" placeholder="Reply..." @bind="_replyBody"></textarea>
+                        <button class="btn btn-primary align-self-end" disabled="@_isBusy" @onclick="ReplyAsync">Send</button>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<Contact> Contacts { get; set; } = [];
+    private IReadOnlyList<SupportTicketView> Tickets { get; set; } = [];
+    private SupportTicketView? SelectedTicket { get; set; }
+    private Guid? SelectedTicketId { get; set; }
+    private string StatusFilter { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+    private bool _isBusy;
+
+    private Guid _newContactId;
+    private string _newSubject = string.Empty;
+    private string _newMessage = string.Empty;
+    private string _replyBody = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Contacts = (await CrmService.ListContactsAsync()).ToList();
+        await RefreshTicketsAsync();
+    }
+
+    private async Task RefreshTicketsAsync()
+    {
+        Tickets = await TicketService.ListTicketsAsync(string.IsNullOrWhiteSpace(StatusFilter) ? null : StatusFilter);
+        if (SelectedTicketId is { } id)
+        {
+            SelectedTicket = Tickets.FirstOrDefault(ticket => ticket.Id == id);
+        }
+    }
+
+    private async Task SelectTicketAsync(Guid ticketId)
+    {
+        SelectedTicketId = ticketId;
+        SelectedTicket = await TicketService.GetTicketAsync(ticketId);
+        _replyBody = string.Empty;
+    }
+
+    private async Task CreateTicketAsync()
+    {
+        ErrorMessage = string.Empty;
+        if (_newContactId == Guid.Empty)
+        {
+            ErrorMessage = "Select a contact first.";
+            return;
+        }
+
+        _isBusy = true;
+        try
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var created = await TicketService.CreateTicketAsync(
+                _newContactId, _newSubject, _newMessage, SupportTicketAuthorTypes.Staff, performedBy);
+            _newContactId = Guid.Empty;
+            _newSubject = string.Empty;
+            _newMessage = string.Empty;
+            await RefreshTicketsAsync();
+            await SelectTicketAsync(created.Id);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task ReplyAsync()
+    {
+        if (SelectedTicketId is not { } ticketId || string.IsNullOrWhiteSpace(_replyBody)) return;
+
+        _isBusy = true;
+        try
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await TicketService.AddReplyAsync(ticketId, SupportTicketAuthorTypes.Staff, performedBy, _replyBody);
+            _replyBody = string.Empty;
+            await RefreshTicketsAsync();
+            await SelectTicketAsync(ticketId);
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task OnStatusChangedAsync(ChangeEventArgs e)
+    {
+        if (SelectedTicketId is not { } ticketId || e.Value is not string status) return;
+        var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        await TicketService.SetStatusAsync(ticketId, status, performedBy);
+        await RefreshTicketsAsync();
+        await SelectTicketAsync(ticketId);
+    }
+
+    private async Task OnPriorityChangedAsync(ChangeEventArgs e)
+    {
+        if (SelectedTicketId is not { } ticketId || e.Value is not string priority) return;
+        var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        await TicketService.SetPriorityAsync(ticketId, priority, performedBy);
+        await RefreshTicketsAsync();
+        await SelectTicketAsync(ticketId);
+    }
+
+    private async Task OnAssignChangedAsync(ChangeEventArgs e)
+    {
+        if (SelectedTicketId is not { } ticketId) return;
+        var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        await TicketService.AssignAsync(ticketId, e.Value as string, performedBy);
+        await RefreshTicketsAsync();
+        await SelectTicketAsync(ticketId);
+    }
+
+    private static string StatusBadgeClass(string status) => status switch
+    {
+        SupportTicketStatuses.Open => "text-bg-primary",
+        SupportTicketStatuses.Pending => "text-bg-warning",
+        SupportTicketStatuses.Resolved => "text-bg-success",
+        SupportTicketStatuses.Closed => "text-bg-secondary",
+        _ => "text-bg-secondary"
+    };
+
+    private static string PriorityBadgeClass(string priority) => priority switch
+    {
+        SupportTicketPriorities.Urgent => "text-bg-danger",
+        SupportTicketPriorities.High => "text-bg-warning",
+        SupportTicketPriorities.Low => "text-bg-secondary",
+        _ => "text-bg-info"
+    };
+}
