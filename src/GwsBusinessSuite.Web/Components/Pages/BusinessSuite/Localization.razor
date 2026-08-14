@@ -1,0 +1,333 @@
+@page "/admin/localization"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContributorAccess")]
+@using GwsBusinessSuite.Application.Localization
+@using GwsBusinessSuite.Domain.Entities
+@inject IContentLocalizationService LocalizationService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject IJSRuntime JS
+
+<PageTitle>Content Localization</PageTitle>
+
+<div class="page-header">
+    <h1><i class="bi bi-translate me-2 text-primary"></i>Content Localization</h1>
+    <p>Create, review, and publish translated copies of articles and CMS pages.</p>
+</div>
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <div class="alert alert-danger py-2 px-3 small" role="alert">@_errorMessage</div>
+        }
+        @if (!string.IsNullOrWhiteSpace(_statusMessage))
+        {
+            <div class="alert alert-success py-2 px-3 small" role="status">@_statusMessage</div>
+        }
+        <div class="row g-2 align-items-end">
+            <div class="col-lg-5">
+                <label class="form-label small fw-semibold">Content</label>
+                <select class="form-select form-select-sm" @bind="_selectedContentKey" @bind:after="OnContentChangedAsync" disabled="@_isBusy">
+                    <option value="">Select content to localize...</option>
+                    @foreach (var item in _content)
+                    {
+                        <option value="@ContentKey(item)">@item.Title (@item.ContentType)</option>
+                    }
+                </select>
+            </div>
+            <div class="col-sm-4 col-lg-2">
+                <label class="form-label small fw-semibold">Language code</label>
+                <input class="form-control form-control-sm" placeholder="e.g. es" @bind="_generateLanguageCode" disabled="@_isBusy" />
+            </div>
+            <div class="col-sm-5 col-lg-3">
+                <label class="form-label small fw-semibold">Ollama model</label>
+                <input class="form-control form-control-sm" placeholder="e.g. sentinelgpt" @bind="_model" disabled="@_isBusy" />
+            </div>
+            <div class="col-sm-3 col-lg-2">
+                <button type="button" class="btn btn-sm btn-primary w-100"
+                        disabled="@(_isBusy || !HasSelectedContent || string.IsNullOrWhiteSpace(_generateLanguageCode) || string.IsNullOrWhiteSpace(_model))"
+                        @onclick="GenerateAsync">
+                    <i class="bi bi-stars me-1"></i>Generate
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (HasSelectedContent)
+{
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="h5 mb-0">Translations</h2>
+        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="BeginAdd" disabled="@_isBusy">
+            <i class="bi bi-plus-lg me-1"></i>Add manually
+        </button>
+    </div>
+
+    @if (_isAdding || _editingId.HasValue)
+    {
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white border-bottom py-2 fw-semibold small">
+                @(_editingId.HasValue ? $"Edit {_editor.LanguageCode}" : "Add a translation")
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label small fw-semibold">Language code</label>
+                        <input class="form-control form-control-sm" @bind="_editor.LanguageCode" disabled="@(_isBusy || _editingId.HasValue)" />
+                    </div>
+                    <div class="col-md-9">
+                        <label class="form-label small fw-semibold">Translated title</label>
+                        <textarea class="form-control form-control-sm" rows="2" @bind="_editor.Title" disabled="@_isBusy"></textarea>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small fw-semibold">Translated body</label>
+                        <textarea class="form-control form-control-sm font-monospace" rows="12" @bind="_editor.Body" disabled="@_isBusy"></textarea>
+                        <div class="form-text">Article Markdown or CMS page layout JSON, depending on the selected content.</div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small fw-semibold">Translated meta description</label>
+                        <textarea class="form-control form-control-sm" rows="2" @bind="_editor.MetaDescription" disabled="@_isBusy"></textarea>
+                    </div>
+                </div>
+                <div class="d-flex gap-2 mt-3">
+                    <button type="button" class="btn btn-sm btn-primary" @onclick="SaveAsync"
+                            disabled="@(_isBusy || string.IsNullOrWhiteSpace(_editor.LanguageCode))">
+                        <i class="bi bi-floppy-fill me-1"></i>Save draft
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CancelEdit" disabled="@_isBusy">Cancel</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="card border-0 shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>Language</th>
+                        <th>Status</th>
+                        <th>Source</th>
+                        <th>Updated</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_localizations.Count == 0)
+                    {
+                        <tr><td colspan="5" class="text-secondary text-center py-4">No translations yet.</td></tr>
+                    }
+                    @foreach (var localization in _localizations)
+                    {
+                        <tr>
+                            <td class="fw-semibold">@localization.LanguageCode</td>
+                            <td><span class="badge @(localization.Status == ContentLocalizationStatuses.Published ? "text-bg-success" : "text-bg-secondary")">@localization.Status</span></td>
+                            <td>
+                                @if (localization.IsAiGenerated)
+                                {
+                                    <span class="badge text-bg-info">AI@(string.IsNullOrWhiteSpace(localization.AiModel) ? string.Empty : $" · {localization.AiModel}")</span>
+                                }
+                                else
+                                {
+                                    <span class="text-secondary small">Manual</span>
+                                }
+                            </td>
+                            <td class="small text-secondary">@localization.UpdatedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</td>
+                            <td class="text-end text-nowrap">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => BeginEditAsync(localization.Id)" disabled="@_isBusy">Edit</button>
+                                <button type="button" class="btn btn-sm @(localization.Status == ContentLocalizationStatuses.Published ? "btn-outline-warning" : "btn-outline-success")"
+                                        @onclick="() => ToggleStatusAsync(localization)" disabled="@_isBusy">
+                                    @(localization.Status == ContentLocalizationStatuses.Published ? "Unpublish" : "Publish")
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(localization.Id)" disabled="@_isBusy">Delete</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private List<LocalizableContent> _content = [];
+    private List<ContentLocalizationSummary> _localizations = [];
+    private string _selectedContentKey = string.Empty;
+    private string _generateLanguageCode = string.Empty;
+    private string _model = string.Empty;
+    private ContentLocalizationEditor _editor = new();
+    private Guid? _editingId;
+    private bool _isAdding;
+    private bool _isBusy;
+    private string _errorMessage = string.Empty;
+    private string _statusMessage = string.Empty;
+
+    private bool HasSelectedContent => TryGetSelectedContent(out _, out _);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _content = (await LocalizationService.ListLocalizableContentAsync()).ToList();
+    }
+
+    private static string ContentKey(LocalizableContent item) => $"{item.ContentType}:{item.Id}";
+
+    private bool TryGetSelectedContent(out string contentType, out Guid contentId)
+    {
+        var parts = _selectedContentKey.Split(':', 2);
+        contentType = parts.Length == 2 ? parts[0] : string.Empty;
+        contentId = Guid.Empty;
+        return parts.Length == 2 && Guid.TryParse(parts[1], out contentId);
+    }
+
+    private async Task OnContentChangedAsync()
+    {
+        CancelEdit();
+        _errorMessage = string.Empty;
+        _statusMessage = string.Empty;
+        await LoadLocalizationsAsync();
+    }
+
+    private async Task LoadLocalizationsAsync()
+    {
+        if (!TryGetSelectedContent(out var contentType, out var contentId))
+        {
+            _localizations = [];
+            return;
+        }
+
+        _localizations = (await LocalizationService.ListLocalizationsAsync(contentType, contentId)).ToList();
+    }
+
+    private void BeginAdd()
+    {
+        _editingId = null;
+        _isAdding = true;
+        _editor = new ContentLocalizationEditor();
+        ClearMessages();
+    }
+
+    private async Task BeginEditAsync(Guid id)
+    {
+        await RunBusyAsync(async () =>
+        {
+            var detail = await LocalizationService.GetAsync(id)
+                ?? throw new InvalidOperationException("The selected translation no longer exists.");
+            _editingId = id;
+            _isAdding = false;
+            _editor = new ContentLocalizationEditor
+            {
+                LanguageCode = detail.LanguageCode,
+                Title = detail.Title,
+                Body = detail.Body,
+                MetaDescription = detail.MetaDescription,
+                Status = detail.Status
+            };
+        });
+    }
+
+    private void CancelEdit()
+    {
+        _editingId = null;
+        _isAdding = false;
+        _editor = new ContentLocalizationEditor();
+    }
+
+    private async Task GenerateAsync()
+    {
+        if (!TryGetSelectedContent(out var contentType, out var contentId)) return;
+        await RunBusyAsync(async () =>
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var generated = await LocalizationService.GenerateTranslationAsync(
+                contentType, contentId, _generateLanguageCode, _model, performedBy);
+            _statusMessage = $"Generated a {generated.LanguageCode} draft for review.";
+            await LoadLocalizationsAsync();
+            await BeginEditCoreAsync(generated.Id);
+        });
+    }
+
+    private async Task BeginEditCoreAsync(Guid id)
+    {
+        var detail = await LocalizationService.GetAsync(id)
+            ?? throw new InvalidOperationException("The selected translation no longer exists.");
+        _editingId = id;
+        _isAdding = false;
+        _editor = new ContentLocalizationEditor
+        {
+            LanguageCode = detail.LanguageCode,
+            Title = detail.Title,
+            Body = detail.Body,
+            MetaDescription = detail.MetaDescription,
+            Status = detail.Status
+        };
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!TryGetSelectedContent(out var contentType, out var contentId)) return;
+        await RunBusyAsync(async () =>
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            _editor.Status = ContentLocalizationStatuses.Draft;
+            var saved = await LocalizationService.SaveAsync(contentType, contentId, _editor, performedBy);
+            _statusMessage = $"Saved the {saved.LanguageCode} translation as a draft.";
+            CancelEdit();
+            await LoadLocalizationsAsync();
+        });
+    }
+
+    private async Task ToggleStatusAsync(ContentLocalizationSummary localization)
+    {
+        await RunBusyAsync(async () =>
+        {
+            var nextStatus = localization.Status == ContentLocalizationStatuses.Published
+                ? ContentLocalizationStatuses.Draft
+                : ContentLocalizationStatuses.Published;
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await LocalizationService.SetStatusAsync(localization.Id, nextStatus, performedBy);
+            _statusMessage = nextStatus == ContentLocalizationStatuses.Published
+                ? $"Published the {localization.LanguageCode} translation."
+                : $"Unpublished the {localization.LanguageCode} translation.";
+            await LoadLocalizationsAsync();
+        });
+    }
+
+    private async Task DeleteAsync(Guid id)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", "Delete this translation? This cannot be undone.")) return;
+        await RunBusyAsync(async () =>
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await LocalizationService.DeleteAsync(id, performedBy);
+            if (_editingId == id) CancelEdit();
+            _statusMessage = "Deleted the translation.";
+            await LoadLocalizationsAsync();
+        });
+    }
+
+    private async Task RunBusyAsync(Func<Task> action)
+    {
+        if (_isBusy) return;
+        _isBusy = true;
+        _errorMessage = string.Empty;
+        _statusMessage = string.Empty;
+        try
+        {
+            await action();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private void ClearMessages()
+    {
+        _errorMessage = string.Empty;
+        _statusMessage = string.Empty;
+    }
+}

@@ -403,6 +403,32 @@ public sealed class SeoAuditRun : AuditableEntity
     public string AiSuggestionsJson { get; set; } = "[]";
 }
 
+// A translated copy of one Article or CmsPage, for one language. Loosely linked via
+// ContentType+ContentId (same shape as SeoAuditRun) rather than an FK, so it works across two
+// unrelated content tables without either of them knowing localization exists. Unlike
+// SeoAuditRun this is a live, unique-per-(content,language) record rather than a run history -
+// generating a new AI draft or saving an edit overwrites the existing row for that language.
+public sealed class ContentLocalization : AuditableEntity
+{
+    public required string ContentType { get; set; }
+    public Guid ContentId { get; set; }
+    // BCP-47-ish code, e.g. "es", "fr", "pt-BR" - not validated against a fixed list.
+    public required string LanguageCode { get; set; }
+    public string Title { get; set; } = string.Empty;
+    // Translated BodyMarkdown for an Article, or a translated copy of BlocksJson for a CmsPage.
+    public string Body { get; set; } = string.Empty;
+    public string? MetaDescription { get; set; }
+    public string Status { get; set; } = ContentLocalizationStatuses.Draft;
+    public bool IsAiGenerated { get; set; }
+    public string? AiModel { get; set; }
+}
+
+public static class ContentLocalizationStatuses
+{
+    public const string Draft = "Draft";
+    public const string Published = "Published";
+}
+
 public sealed class WikiPage : AuditableEntity
 {
     public required string Title { get; set; }

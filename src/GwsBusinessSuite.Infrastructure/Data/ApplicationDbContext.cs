@@ -39,6 +39,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<EmailCampaignEnrollment> EmailCampaignEnrollments => Set<EmailCampaignEnrollment>();
     public DbSet<EmailCampaignSendLog> EmailCampaignSendLogs => Set<EmailCampaignSendLog>();
     public DbSet<SeoAuditRun> SeoAuditRuns => Set<SeoAuditRun>();
+    public DbSet<ContentLocalization> ContentLocalizations => Set<ContentLocalization>();
     public DbSet<WikiPage> WikiPages => Set<WikiPage>();
     public DbSet<WikiPageRevision> WikiPageRevisions => Set<WikiPageRevision>();
     public DbSet<SentinelPageTemplate> SentinelPageTemplates => Set<SentinelPageTemplate>();
@@ -223,6 +224,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<EmailCampaignSendLog>().HasIndex(x => x.EnrollmentId);
 
         modelBuilder.Entity<SeoAuditRun>().HasIndex(x => new { x.ContentType, x.ContentId });
+
+        // Unique, unlike SeoAuditRun's index - one row per (content, language), not a history.
+        modelBuilder.Entity<ContentLocalization>().HasIndex(x => new { x.ContentType, x.ContentId, x.LanguageCode }).IsUnique();
 
         modelBuilder.Entity<MediaAsset>().HasIndex(x => x.CreatedAt);
         modelBuilder.Entity<WatchedTopic>().HasIndex(x => x.IsActive);

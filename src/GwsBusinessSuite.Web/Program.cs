@@ -8,6 +8,7 @@ using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.Comments;
 using GwsBusinessSuite.Application.Growth;
 using GwsBusinessSuite.Application.LiveShow;
+using GwsBusinessSuite.Application.Localization;
 using GwsBusinessSuite.Application.Mobile;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure;
@@ -1529,6 +1530,7 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     string pageSlug,
     HttpContext httpContext,
     ICmsBuilderService cmsBuilderService,
+    IContentLocalizationService contentLocalizationService,
     GlobalBlockResolver globalBlockResolver,
     IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
@@ -1538,6 +1540,19 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     var includeUnpublished = httpContext.User.Identity?.IsAuthenticated == true;
     var page = await cmsBuilderService.GetPageByFullPathAsync(site.Id, pageSlug, includeUnpublished);
     if (page is null) return Results.NotFound();
+
+    var languageCode = httpContext.Request.Query["lang"].ToString();
+    if (!string.IsNullOrWhiteSpace(languageCode))
+    {
+        var localized = await contentLocalizationService.GetPublishedAsync(
+            ContentLocalizationContentTypes.CmsPage, page.Id, languageCode, httpContext.RequestAborted);
+        if (localized is not null)
+        {
+            page.Title = localized.Title;
+            page.BlocksJson = localized.Body;
+            page.MetaDescription = localized.MetaDescription ?? page.MetaDescription;
+        }
+    }
 
     // Edit-mode markup/script (Canvas Studio's live-preview click-to-select) must never
     // reach a real visitor - gated on BOTH an explicit query flag AND the same role check
@@ -1864,6 +1879,7 @@ app.MapGet("/blog/{slug}", async (
         ICmsBuilderService cmsBuilderService,
         ICommentService commentService,
         IAffiliateRotationService affiliateRotationService,
+        IContentLocalizationService contentLocalizationService,
         IConfiguration configuration) =>
     {
         await using var db = await dbFactory.CreateDbContextAsync();
@@ -1890,6 +1906,19 @@ app.MapGet("/blog/{slug}", async (
                     logoUrl: navMenus.LogoUrl,
                     faviconUrl: navMenus.FaviconUrl),
                 "text/html", statusCode: StatusCodes.Status404NotFound);
+        }
+
+        var languageCode = request.Query["lang"].ToString();
+        if (!string.IsNullOrWhiteSpace(languageCode))
+        {
+            var localized = await contentLocalizationService.GetPublishedAsync(
+                ContentLocalizationContentTypes.Article, a.Id, languageCode, request.HttpContext.RequestAborted);
+            if (localized is not null)
+            {
+                a.Title = localized.Title;
+                a.BodyMarkdown = localized.Body;
+                a.MetaDescription = localized.MetaDescription ?? a.MetaDescription;
+            }
         }
 
         var heroImageUrl = a.HeroImageUrl ?? (a.HeroImageDataUri != "" ? $"/og-image/{a.Slug}" : null);
