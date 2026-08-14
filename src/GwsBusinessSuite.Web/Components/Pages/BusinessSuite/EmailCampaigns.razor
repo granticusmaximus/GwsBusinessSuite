@@ -1,0 +1,285 @@
+@page "/admin/email-campaigns"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Campaigns
+@using GwsBusinessSuite.Application.Crm
+@using GwsBusinessSuite.Domain.Entities
+@using GwsBusinessSuite.Application.Abstractions
+@inject IEmailCampaignService CampaignService
+@inject ICrmService CrmService
+@inject ICurrentUserAccessor CurrentUserAccessor
+
+<PageTitle>Email Campaigns</PageTitle>
+
+<div class="page-header">
+    <h1><i class="bi bi-envelope-paper-fill me-2 text-primary"></i>Email Campaigns</h1>
+    <p>Drip sequences enrolled contacts receive automatically, days apart. Every email includes an unsubscribe link.</p>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger py-2 px-3 small">@ErrorMessage</div>
+}
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-info py-2 px-3 small">@StatusMessage</div>
+}
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+                <span class="fw-semibold">@(Editor.Id is null ? "New Campaign" : "Edit Campaign")</span>
+                @if (Editor.Id is not null)
+                {
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="ResetEditor"><i class="bi bi-plus-lg me-1"></i>New</button>
+                }
+            </div>
+            <div class="card-body">
+                <div class="mb-2">
+                    <input class="form-control form-control-sm" placeholder="Campaign name" @bind="Editor.Name" />
+                </div>
+                <div class="mb-3">
+                    <textarea class="form-control form-control-sm" rows="2" placeholder="Description" @bind="Editor.Description"></textarea>
+                </div>
+
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <label class="form-label fw-semibold small mb-0">Steps</label>
+                    <button class="btn btn-sm btn-outline-primary" @onclick="AddStep"><i class="bi bi-plus-lg me-1"></i>Add Step</button>
+                </div>
+                @for (var i = 0; i < Editor.Steps.Count; i++)
+                {
+                    var index = i;
+                    var step = Editor.Steps[index];
+                    <div class="border rounded p-2 mb-2">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <span class="small text-secondary">Step @(index + 1) &middot; @(index == 0 ? "sends on enrollment" : $"{step.DelayDays} day(s) after step {index}")</span>
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => Editor.Steps.RemoveAt(index)"><i class="bi bi-trash3"></i></button>
+                        </div>
+                        <input class="form-control form-control-sm mb-1" placeholder="Subject" @bind="step.Subject" />
+                        <textarea class="form-control form-control-sm mb-1" rows="3" placeholder="Body - {{FirstName}} and {{FullName}} are supported" @bind="step.Body"></textarea>
+                        @if (index > 0)
+                        {
+                            <div class="input-group input-group-sm" style="max-width:12rem;">
+                                <span class="input-group-text">Delay (days)</span>
+                                <input type="number" min="0" class="form-control" @bind="step.DelayDays" />
+                            </div>
+                        }
+                    </div>
+                }
+
+                <button class="btn btn-sm btn-primary w-100 mt-2" disabled="@_isBusy" @onclick="SaveAsync">
+                    <i class="bi bi-save me-1"></i>Save
+                </button>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3 fw-semibold">Campaigns</div>
+            <div class="card-body p-0">
+                @if (Campaigns.Count == 0)
+                {
+                    <div class="p-4 text-secondary">No campaigns yet.</div>
+                }
+                else
+                {
+                    <div class="list-group list-group-flush">
+                        @foreach (var campaign in Campaigns)
+                        {
+                            <button type="button" class="list-group-item list-group-item-action @(SelectedCampaignId == campaign.Id ? "active" : "")" @onclick="() => SelectCampaignAsync(campaign.Id)">
+                                <div class="d-flex justify-content-between align-items-start gap-2">
+                                    <div>
+                                        <div class="fw-semibold">@campaign.Name</div>
+                                        <div class="small @(SelectedCampaignId == campaign.Id ? "" : "text-secondary")">@campaign.Steps.Count step(s) &middot; @campaign.ActiveEnrollmentCount active</div>
+                                    </div>
+                                    <span class="badge @StatusBadgeClass(campaign.Status)">@campaign.Status</span>
+                                </div>
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        @if (SelectedCampaign is null)
+        {
+            <div class="card border-0 shadow-sm"><div class="card-body text-secondary">Select a campaign to manage enrollments.</div></div>
+        }
+        else
+        {
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+                    <span class="fw-semibold">@SelectedCampaign.Name</span>
+                    <div class="d-flex gap-2">
+                        @if (SelectedCampaign.Status != EmailCampaignStatuses.Active)
+                        {
+                            <button class="btn btn-sm btn-outline-success" @onclick="() => SetStatusAsync(EmailCampaignStatuses.Active)">Activate</button>
+                        }
+                        @if (SelectedCampaign.Status == EmailCampaignStatuses.Active)
+                        {
+                            <button class="btn btn-sm btn-outline-warning" @onclick="() => SetStatusAsync(EmailCampaignStatuses.Paused)">Pause</button>
+                        }
+                        <button class="btn btn-sm btn-outline-danger" @onclick="DeleteAsync">Delete</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="d-flex gap-2 mb-3">
+                        <select class="form-select form-select-sm" @bind="_enrollContactId">
+                            <option value="@Guid.Empty">Enroll a contact...</option>
+                            @foreach (var contact in Contacts)
+                            {
+                                <option value="@contact.Id">@contact.FullName</option>
+                            }
+                        </select>
+                        <button class="btn btn-sm btn-primary text-nowrap" disabled="@_isBusy" @onclick="EnrollAsync">Enroll</button>
+                    </div>
+
+                    @if (Enrollments.Count == 0)
+                    {
+                        <p class="text-secondary small mb-0">No enrollments yet.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle">
+                                <thead><tr><th>Contact</th><th>Status</th><th>Next step</th><th>Next send</th></tr></thead>
+                                <tbody>
+                                    @foreach (var enrollment in Enrollments)
+                                    {
+                                        <tr>
+                                            <td>@enrollment.ContactName</td>
+                                            <td><span class="badge @EnrollmentBadgeClass(enrollment.Status)">@enrollment.Status</span></td>
+                                            <td>@(enrollment.NextStepIndex + 1) / @SelectedCampaign.Steps.Count</td>
+                                            <td>@(enrollment.NextSendAt?.ToLocalTime().ToString("MMM d, h:mm tt") ?? "—")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<EmailCampaignView> Campaigns { get; set; } = [];
+    private List<Contact> Contacts { get; set; } = [];
+    private EmailCampaignView? SelectedCampaign { get; set; }
+    private Guid? SelectedCampaignId { get; set; }
+    private IReadOnlyList<EmailCampaignEnrollmentView> Enrollments { get; set; } = [];
+    private EmailCampaignEditorModel Editor { get; set; } = new();
+    private string ErrorMessage { get; set; } = string.Empty;
+    private string StatusMessage { get; set; } = string.Empty;
+    private bool _isBusy;
+    private Guid _enrollContactId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Contacts = (await CrmService.ListContactsAsync()).ToList();
+        await RefreshCampaignsAsync();
+    }
+
+    private async Task RefreshCampaignsAsync()
+    {
+        Campaigns = (await CampaignService.ListCampaignsAsync()).ToList();
+        if (SelectedCampaignId is { } id)
+        {
+            SelectedCampaign = Campaigns.FirstOrDefault(campaign => campaign.Id == id);
+        }
+    }
+
+    private async Task SelectCampaignAsync(Guid campaignId)
+    {
+        SelectedCampaignId = campaignId;
+        SelectedCampaign = await CampaignService.GetCampaignAsync(campaignId);
+        Enrollments = await CampaignService.ListEnrollmentsAsync(campaignId);
+        _enrollContactId = Guid.Empty;
+    }
+
+    private void AddStep() => Editor.Steps.Add(new EmailCampaignStepEditorModel());
+
+    private void ResetEditor()
+    {
+        Editor = new EmailCampaignEditorModel();
+        ErrorMessage = string.Empty;
+    }
+
+    private async Task SaveAsync()
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        _isBusy = true;
+        try
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var saved = await CampaignService.SaveCampaignAsync(Editor, performedBy);
+            ResetEditor();
+            await RefreshCampaignsAsync();
+            await SelectCampaignAsync(saved.Id);
+            StatusMessage = "Campaign saved.";
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task SetStatusAsync(string status)
+    {
+        if (SelectedCampaignId is not { } id) return;
+        var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        await CampaignService.SetCampaignStatusAsync(id, status, performedBy);
+        await RefreshCampaignsAsync();
+        await SelectCampaignAsync(id);
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (SelectedCampaignId is not { } id) return;
+        await CampaignService.DeleteCampaignAsync(id);
+        SelectedCampaignId = null;
+        SelectedCampaign = null;
+        Enrollments = [];
+        await RefreshCampaignsAsync();
+    }
+
+    private async Task EnrollAsync()
+    {
+        if (SelectedCampaignId is not { } id || _enrollContactId == Guid.Empty) return;
+        _isBusy = true;
+        try
+        {
+            var enrolled = await CampaignService.EnrollContactAsync(id, _enrollContactId);
+            StatusMessage = enrolled ? "Contact enrolled." : "That contact is already enrolled, unsubscribed, or the campaign isn't active.";
+            await SelectCampaignAsync(id);
+            await RefreshCampaignsAsync();
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private static string StatusBadgeClass(string status) => status switch
+    {
+        EmailCampaignStatuses.Active => "text-bg-success",
+        EmailCampaignStatuses.Paused => "text-bg-warning",
+        _ => "text-bg-secondary"
+    };
+
+    private static string EnrollmentBadgeClass(string status) => status switch
+    {
+        EmailCampaignEnrollmentStatuses.Active => "text-bg-primary",
+        EmailCampaignEnrollmentStatuses.Completed => "text-bg-success",
+        _ => "text-bg-secondary"
+    };
+}

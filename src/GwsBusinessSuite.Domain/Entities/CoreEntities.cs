@@ -96,6 +96,14 @@ public sealed class Contact : AuditableEntity
     // Stripe Customer lazily on first send, then reuses it for every later invoice) - null
     // for every contact until then, including contacts who never get billed.
     public string? StripeCustomerId { get; set; }
+    // Null = subscribed. Set = suppressed from every campaign send, checked before each one -
+    // a global opt-out, not per-campaign, matching how most small-team marketing tools treat
+    // "unsubscribe" by default. The unsubscribe link itself needs no token storage at all -
+    // EmailCampaignService encrypts this contact's Id directly via IDataProtectionProvider
+    // (same mechanism as the OAuth connect-flow state elsewhere in this app) into a durable,
+    // non-expiring link that decrypts back to the Id on click, so every email ever sent keeps
+    // working rather than needing a stored, reusable token.
+    public DateTimeOffset? UnsubscribedFromCampaignsAt { get; set; }
 }
 
 // Append-only note/activity log for a contact - CreatedAt/CreatedBy from AuditableEntity
@@ -306,6 +314,70 @@ public sealed class Booking : AuditableEntity
     public string Status { get; set; } = BookingStatuses.Confirmed;
     public required string ManageTokenHash { get; set; }
     public DateTimeOffset? CancelledAt { get; set; }
+}
+
+public static class EmailCampaignStatuses
+{
+    // A Draft campaign never enrolls or sends anything - flipping to Active is what lets
+    // EnrollContactAsync accept enrollments and the background sweep start sending them.
+    public const string Draft = "Draft";
+    public const string Active = "Active";
+    // Paused freezes every enrollment's NextSendAt in place (the sweep simply skips a
+    // paused campaign's due sends) rather than cancelling them, so resuming picks up
+    // exactly where it left off.
+    public const string Paused = "Paused";
+
+    public static readonly string[] All = [Draft, Active, Paused];
+}
+
+// A drip/nurture sequence a Contact can be enrolled in - EmailCampaign is the header,
+// EmailCampaignStep the ordered emails, EmailCampaignEnrollment tracks one contact's progress
+// through it, and EmailCampaignSendLog is the audit trail of what was actually sent.
+public sealed class EmailCampaign : AuditableEntity
+{
+    public required string Name { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public string Status { get; set; } = EmailCampaignStatuses.Draft;
+    public ICollection<EmailCampaignStep> Steps { get; set; } = new List<EmailCampaignStep>();
+}
+
+public sealed class EmailCampaignStep : AuditableEntity
+{
+    public Guid CampaignId { get; set; }
+    public int StepOrder { get; set; }
+    public required string Subject { get; set; }
+    // Plain text with {{FirstName}}/{{FullName}} tokens - not the structured-block editor
+    // WikiPage/CmsPage use, since a campaign step is a single short email, not a document.
+    public string Body { get; set; } = string.Empty;
+    // Days after the PREVIOUS step (or after enrollment, for step 1) before this step sends.
+    public int DelayDays { get; set; }
+    public EmailCampaign? Campaign { get; set; }
+}
+
+public static class EmailCampaignEnrollmentStatuses
+{
+    public const string Active = "Active";
+    public const string Completed = "Completed";
+    public const string Cancelled = "Cancelled";
+}
+
+public sealed class EmailCampaignEnrollment : AuditableEntity
+{
+    public Guid CampaignId { get; set; }
+    public Guid ContactId { get; set; }
+    public string Status { get; set; } = EmailCampaignEnrollmentStatuses.Active;
+    // Index into the campaign's ordered Steps of the NEXT step to send - not yet sent.
+    public int NextStepIndex { get; set; }
+    public DateTimeOffset? NextSendAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+}
+
+public sealed class EmailCampaignSendLog : AuditableEntity
+{
+    public Guid EnrollmentId { get; set; }
+    public Guid StepId { get; set; }
+    public bool Succeeded { get; set; }
+    public string ErrorMessage { get; set; } = string.Empty;
 }
 
 public sealed class WikiPage : AuditableEntity
