@@ -116,6 +116,17 @@ public sealed partial class AutomationNodeRegistry(
             ["main"],
             "{\"calendarId\":\"primary\",\"summary\":\"\",\"description\":\"\",\"startsAt\":\"\",\"durationMinutes\":30}",
             IsIdempotent: false),
+        new(
+            "ai.agent",
+            1,
+            "AI Agent",
+            "Given a goal, autonomously calls other node types in a loop through a local Ollama model until it finishes or hits the step limit. Only node types listed in allowedTools may ever be called - every step (tool, parameters, result) is recorded in the output for audit. Any credential attached to this node is reused for every tool call it makes.",
+            "AI",
+            "bi-robot",
+            false,
+            ["main"],
+            "{\"model\":\"qwen2.5-coder\",\"goal\":\"\",\"allowedTools\":[],\"maxSteps\":5,\"outputField\":\"agentResult\"}",
+            IsIdempotent: false),
     ];
 
     public IReadOnlyList<AutomationNodeDefinition> ListDefinitions() => Definitions;
@@ -188,6 +199,7 @@ public sealed partial class AutomationNodeRegistry(
             "slack.sendMessage" => await ExecuteSlackSendMessageAsync(node, input, credentialJson, nodeOutputsByName, cancellationToken),
             "gmail.sendEmail" => await ExecuteGmailSendEmailAsync(node, input, credentialJson, nodeOutputsByName, cancellationToken),
             "calendar.createEvent" => await ExecuteCalendarCreateEventAsync(node, input, credentialJson, nodeOutputsByName, cancellationToken),
+            "ai.agent" => await ExecuteAgentAsync(node, input, credentialJson, cancellationToken),
             _ => throw new InvalidOperationException($"Node type '{node.TypeKey}' is not executable.")
         };
     }
