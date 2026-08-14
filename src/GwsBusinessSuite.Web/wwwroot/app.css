@@ -951,6 +951,13 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 }
 
 .EasyMDEContainer .editor-toolbar button { color: var(--gws-text-soft) !important; }
+.EasyMDEContainer .editor-toolbar button.bi::before {
+    display: inline-block;
+    margin: 0;
+    font-size: 1rem;
+    line-height: 1;
+    vertical-align: -.125em;
+}
 .EasyMDEContainer .editor-toolbar button:hover,
 .EasyMDEContainer .editor-toolbar button.active {
     background: var(--gws-sidebar-hover-bg);

@@ -369,6 +369,94 @@
 		applySidebarState();
 	}
 
+	// Quick Note uses browser-local pointer movement instead of sending each mousemove over
+	// the Blazor Server circuit. Pointer capture keeps the drag continuous outside the header,
+	// while the body class prevents accidental text selection on the dashboard underneath.
+	var quickNoteCleanups = {};
+	window.gwsQuickNote = {
+		init: function (elementId) {
+			if (quickNoteCleanups[elementId]) return;
+			var modal = document.getElementById(elementId);
+			var handle = modal && modal.querySelector('[data-qn-drag-handle]');
+			if (!modal || !handle) return;
+
+			var drag = null;
+			function pointerDown(event) {
+				if (event.pointerType === 'mouse' && event.button !== 0) return;
+				if (isInteractiveTarget(event.target)) return;
+				var rect = modal.getBoundingClientRect();
+				drag = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, left: rect.left, top: rect.top };
+				modal.classList.add('gws-modal-dragging');
+				document.body.classList.add('gws-modal-dragging-active');
+				handle.setPointerCapture(event.pointerId);
+				event.preventDefault();
+			}
+
+			function pointerMove(event) {
+				if (!drag || event.pointerId !== drag.pointerId) return;
+				var minVisible = 60;
+				var left = drag.left + event.clientX - drag.startX;
+				var top = drag.top + event.clientY - drag.startY;
+				left = Math.max(minVisible - modal.offsetWidth, Math.min(left, window.innerWidth - minVisible));
+				top = Math.max(0, Math.min(top, window.innerHeight - minVisible));
+				modal.style.left = left + 'px';
+				modal.style.top = top + 'px';
+				event.preventDefault();
+			}
+
+			function pointerUp(event) {
+				if (!drag || event.pointerId !== drag.pointerId) return;
+				drag = null;
+				modal.classList.remove('gws-modal-dragging');
+				document.body.classList.remove('gws-modal-dragging-active');
+			}
+
+			handle.addEventListener('pointerdown', pointerDown);
+			handle.addEventListener('pointermove', pointerMove);
+			handle.addEventListener('pointerup', pointerUp);
+			handle.addEventListener('pointercancel', pointerUp);
+			quickNoteCleanups[elementId] = function () {
+				handle.removeEventListener('pointerdown', pointerDown);
+				handle.removeEventListener('pointermove', pointerMove);
+				handle.removeEventListener('pointerup', pointerUp);
+				handle.removeEventListener('pointercancel', pointerUp);
+				document.body.classList.remove('gws-modal-dragging-active');
+			};
+		},
+		toggleExpanded: function (elementId) {
+			var modal = document.getElementById(elementId);
+			if (!modal) return;
+			var button = modal.querySelector('[data-qn-expand-button]');
+			var icon = button && button.querySelector('i');
+			if (modal.dataset.expanded === 'true') {
+				modal.style.left = modal.dataset.restoreLeft || '120px';
+				modal.style.top = modal.dataset.restoreTop || '100px';
+				modal.style.width = modal.dataset.restoreWidth || '380px';
+				modal.style.height = modal.dataset.restoreHeight || '';
+				modal.dataset.expanded = 'false';
+				if (button) { button.title = 'Expand Quick Note'; button.setAttribute('aria-label', 'Expand Quick Note'); }
+				if (icon) { icon.classList.remove('bi-fullscreen-exit'); icon.classList.add('bi-arrows-fullscreen'); }
+				return;
+			}
+			var rect = modal.getBoundingClientRect();
+			modal.dataset.restoreLeft = rect.left + 'px';
+			modal.dataset.restoreTop = rect.top + 'px';
+			modal.dataset.restoreWidth = rect.width + 'px';
+			modal.dataset.restoreHeight = modal.style.height;
+			modal.style.left = '2vw';
+			modal.style.top = '2vh';
+			modal.style.width = '96vw';
+			modal.style.height = '92vh';
+			modal.dataset.expanded = 'true';
+			if (button) { button.title = 'Restore Quick Note'; button.setAttribute('aria-label', 'Restore Quick Note'); }
+			if (icon) { icon.classList.remove('bi-arrows-fullscreen'); icon.classList.add('bi-fullscreen-exit'); }
+		},
+		destroy: function (elementId) {
+			if (quickNoteCleanups[elementId]) quickNoteCleanups[elementId]();
+			delete quickNoteCleanups[elementId];
+		}
+	};
+
 	document.addEventListener('DOMContentLoaded', initializeAdminShell);
 	document.addEventListener('blazor:enhancedload', initializeAdminShell);
 

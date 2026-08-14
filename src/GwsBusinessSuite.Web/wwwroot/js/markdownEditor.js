@@ -5,6 +5,36 @@ window.gwsMarkdownEditor = (function () {
     const instances = {};
     const suggestionBoxes = {};
 
+    function command(name, action, icon, title) {
+        return { name, action, className: `bi ${icon}`, title };
+    }
+
+    function toolbar(compact) {
+        const bold = command("bold", EasyMDE.toggleBold, "bi-type-bold", "Bold");
+        const italic = command("italic", EasyMDE.toggleItalic, "bi-type-italic", "Italic");
+        const heading = command("heading", EasyMDE.toggleHeadingSmaller, "bi-type-h2", "Heading");
+        const quote = command("quote", EasyMDE.toggleBlockquote, "bi-quote", "Quote");
+        const unordered = command("unordered-list", EasyMDE.toggleUnorderedList, "bi-list-ul", "Bulleted list");
+        const ordered = command("ordered-list", EasyMDE.toggleOrderedList, "bi-list-ol", "Numbered list");
+        const checklist = command("checklist", function (editor) {
+            editor.codemirror.getDoc().replaceSelection("- [ ] ");
+            editor.codemirror.focus();
+        }, "bi-check2-square", "Checklist");
+        const link = command("link", EasyMDE.drawLink, "bi-link-45deg", "Link");
+        const image = command("image", EasyMDE.drawImage, "bi-image", "Image");
+        const code = command("code", EasyMDE.toggleCodeBlock, "bi-code-slash", "Code block");
+        const table = command("table", EasyMDE.drawTable, "bi-table", "Table");
+        const rule = command("horizontal-rule", EasyMDE.drawHorizontalRule, "bi-hr", "Divider");
+        const preview = command("preview", EasyMDE.togglePreview, "bi-eye", "Preview");
+        const sideBySide = command("side-by-side", EasyMDE.toggleSideBySide, "bi-layout-split", "Side-by-side preview");
+        const fullscreen = command("fullscreen", EasyMDE.toggleFullScreen, "bi-arrows-fullscreen", "Fullscreen editor");
+        const guide = command("guide", "https://www.markdownguide.org/basic-syntax/", "bi-question-circle", "Markdown guide");
+
+        return compact
+            ? [bold, italic, heading, "|", unordered, ordered, checklist, quote, "|", link, code, preview, fullscreen]
+            : [bold, italic, heading, "|", quote, unordered, ordered, checklist, "|", link, image, code, table, rule, "|", preview, sideBySide, fullscreen, "|", guide];
+    }
+
     function init(elementId, dotNetHelper, options) {
         if (instances[elementId]) {
             return;
@@ -19,14 +49,8 @@ window.gwsMarkdownEditor = (function () {
             element: el,
             spellChecker: false,
             status: ["lines", "words"],
-            minHeight: "420px",
-            toolbar: [
-                "bold", "italic", "heading", "|",
-                "quote", "unordered-list", "ordered-list", "|",
-                "link", "image", "code", "table", "horizontal-rule", "|",
-                "preview", "side-by-side", "fullscreen", "|",
-                "guide"
-            ]
+            minHeight: options?.minHeight || "420px",
+            toolbar: toolbar(options?.compact === true)
         });
 
         editor.codemirror.on("change", () => {

@@ -1,9 +1,5 @@
-@* A small, draggable, resizable "quick capture" note. Dragging is done with a plain
-   mousedown/mousemove/mouseup overlay (no JS) - the same technique Sentinel's own
-   collaborative cursor tracking already relies on for live pointer broadcasting over
-   the Blazor Server circuit. Resizing is native CSS `resize: both`; growing the box past
-   a couple of width thresholds reveals extra formatting buttons via CSS container
-   queries, with no ResizeObserver/JS needed to detect the size change. *@
+@* A small, draggable, resizable "quick capture" note. Pointer dragging stays entirely in
+   the browser so movement remains smooth and cannot select the dashboard behind it. *@
 @using GwsBusinessSuite.Application.Abstractions
 @using GwsBusinessSuite.Application.Wiki
 @inject IQuickNoteService QuickNoteService
@@ -13,46 +9,22 @@
 
 @if (IsOpen)
 {
-    @if (_dragging)
-    {
-        <div class="qn-drag-overlay" @onmousemove="OnDragMove" @onmouseup="EndDrag" @onmouseleave="EndDrag"></div>
-    }
-
-    <div class="qn-modal" style="left:@(_left)px; top:@(_top)px;">
-        <div class="qn-header" @onmousedown="BeginDrag">
+    <div id="@ModalElementId" class="qn-modal">
+        <div class="qn-header" data-qn-drag-handle>
             <i class="bi bi-stickies-fill me-2" aria-hidden="true"></i>
             <span class="fw-semibold small">Quick Note</span>
-            <button type="button" class="btn-close btn-close-white ms-auto" aria-label="Close" @onclick="CloseAsync"></button>
+            <button type="button" class="qn-header-button ms-auto" data-qn-expand-button title="Expand Quick Note" aria-label="Expand Quick Note"
+                    @onclick="ToggleExpandedAsync">
+                <i class="bi bi-arrows-fullscreen" aria-hidden="true"></i>
+            </button>
+            <button type="button" class="btn-close btn-close-white ms-1" aria-label="Close" @onclick="CloseAsync"></button>
         </div>
 
         <div class="qn-body">
             <input class="form-control form-control-sm qn-title" placeholder="Title"
                    @bind="Title" @bind:event="oninput" />
 
-            <div class="qn-editor-row">
-                <textarea id="@EditorElementId" class="qn-textarea">@_body</textarea>
-
-                <div class="qn-side-rail qn-side-rail-1">
-                    <button type="button" class="btn btn-sm btn-outline-secondary" title="Checklist" @onclick='() => InsertAsync("\n- [ ] ")'>
-                        <i class="bi bi-check2-square"></i>
-                    </button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" title="Quote" @onclick='() => InsertAsync("\n> ")'>
-                        <i class="bi bi-quote"></i>
-                    </button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" title="Divider" @onclick='() => InsertAsync("\n\n---\n\n")'>
-                        <i class="bi bi-hr"></i>
-                    </button>
-                </div>
-
-                <div class="qn-side-rail qn-side-rail-2">
-                    <button type="button" class="btn btn-sm btn-outline-secondary" title="Code block" @onclick='() => InsertAsync("\n```\n\n```\n")'>
-                        <i class="bi bi-code-slash"></i>
-                    </button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" title="Table" @onclick='() => InsertAsync("\n| Column | Column |\n| --- | --- |\n| | |\n")'>
-                        <i class="bi bi-table"></i>
-                    </button>
-                </div>
-            </div>
+            <textarea id="@EditorElementId" class="qn-textarea">@_body</textarea>
 
             @if (!string.IsNullOrWhiteSpace(ErrorMessage))
             {
@@ -75,6 +47,7 @@
     [Parameter] public EventCallback OnSaved { get; set; }
 
     private const string EditorElementId = "quick-note-editor";
+    private const string ModalElementId = "quick-note-modal";
     private string Title { get; set; } = string.Empty;
     private string _body = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
@@ -82,20 +55,17 @@
     private bool _editorInitialized;
     private DotNetObjectReference<QuickNoteModal>? _editorRef;
 
-    private bool _dragging;
-    private double _left = 120;
-    private double _top = 100;
-    private double _dragOriginX;
-    private double _dragOriginY;
-    private double _dragOriginLeft;
-    private double _dragOriginTop;
-
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (IsOpen && !_editorInitialized)
         {
             _editorRef = DotNetObjectReference.Create(this);
-            await JS.InvokeVoidAsync("gwsMarkdownEditor.init", EditorElementId, _editorRef);
+            await JS.InvokeVoidAsync("gwsMarkdownEditor.init", EditorElementId, _editorRef, new
+            {
+                compact = true,
+                minHeight = "180px"
+            });
+            await JS.InvokeVoidAsync("gwsQuickNote.init", ModalElementId);
             _editorInitialized = true;
         }
     }
@@ -103,34 +73,7 @@
     [JSInvokable]
     public void OnMarkdownChanged(string value) => _body = value;
 
-    private async Task InsertAsync(string token)
-    {
-        if (_editorInitialized)
-        {
-            await JS.InvokeVoidAsync("gwsMarkdownEditor.insertAtCursor", EditorElementId, token);
-        }
-        else
-        {
-            _body += token;
-        }
-    }
-
-    private void BeginDrag(MouseEventArgs e)
-    {
-        _dragging = true;
-        _dragOriginX = e.ClientX;
-        _dragOriginY = e.ClientY;
-        _dragOriginLeft = _left;
-        _dragOriginTop = _top;
-    }
-
-    private void OnDragMove(MouseEventArgs e)
-    {
-        _left = Math.Max(0, _dragOriginLeft + (e.ClientX - _dragOriginX));
-        _top = Math.Max(0, _dragOriginTop + (e.ClientY - _dragOriginY));
-    }
-
-    private void EndDrag() => _dragging = false;
+    private Task ToggleExpandedAsync() => JS.InvokeVoidAsync("gwsQuickNote.toggleExpanded", ModalElementId).AsTask();
 
     private async Task SaveAsync()
     {
@@ -164,14 +107,13 @@
     {
         if (_editorInitialized)
         {
+            await JS.InvokeVoidAsync("gwsQuickNote.destroy", ModalElementId);
             await JS.InvokeVoidAsync("gwsMarkdownEditor.destroy", EditorElementId);
             _editorInitialized = false;
         }
         Title = string.Empty;
         _body = string.Empty;
         ErrorMessage = string.Empty;
-        _left = 120;
-        _top = 100;
         IsOpen = false;
         await IsOpenChanged.InvokeAsync(false);
     }
@@ -180,7 +122,11 @@
     {
         if (_editorInitialized)
         {
-            try { await JS.InvokeVoidAsync("gwsMarkdownEditor.destroy", EditorElementId); }
+            try
+            {
+                await JS.InvokeVoidAsync("gwsQuickNote.destroy", ModalElementId);
+                await JS.InvokeVoidAsync("gwsMarkdownEditor.destroy", EditorElementId);
+            }
             catch (JSDisconnectedException) { /* circuit already gone */ }
         }
         _editorRef?.Dispose();
@@ -188,16 +134,11 @@
 }
 
 <style>
-    .qn-drag-overlay {
-        position: fixed;
-        inset: 0;
-        z-index: 1998;
-        cursor: grabbing;
-    }
-
     .qn-modal {
         position: fixed;
         z-index: 1999;
+        left: 120px;
+        top: 100px;
         width: 380px;
         min-width: 320px;
         min-height: 220px;
@@ -205,8 +146,6 @@
         max-height: min(88vh, 680px);
         resize: both;
         overflow: auto;
-        container-type: inline-size;
-        container-name: qn;
         background: var(--gws-panel-bg, #1b1917);
         border: 1px solid var(--gws-panel-border, #4c4337);
         border-radius: 10px;
@@ -222,7 +161,27 @@
         border-bottom: 1px solid var(--gws-panel-border, #4c4337);
         cursor: grab;
         user-select: none;
+        touch-action: none;
         flex: 0 0 auto;
+    }
+
+    .qn-header-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.75rem;
+        height: 1.75rem;
+        padding: 0;
+        color: var(--gws-text-soft);
+        background: transparent;
+        border: 0;
+        border-radius: .35rem;
+    }
+
+    .qn-header-button:hover,
+    .qn-header-button:focus-visible {
+        color: var(--gws-text-strong);
+        background: var(--gws-sidebar-hover-bg);
     }
 
     .qn-body {
@@ -235,32 +194,58 @@
         margin-bottom: .5rem;
     }
 
-    .qn-editor-row {
-        display: flex;
-        gap: .5rem;
-        align-items: flex-start;
-    }
-
     .qn-textarea {
+        width: 100%;
+    }
+
+    .qn-modal .EasyMDEContainer .editor-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1px;
+        padding: .25rem;
+        opacity: 1;
+    }
+
+    .qn-modal .EasyMDEContainer .editor-toolbar button {
+        width: 28px;
+        height: 28px;
+        line-height: 28px;
+        border: 0;
+        border-radius: .3rem;
+    }
+
+    .qn-modal .EasyMDEContainer .editor-toolbar i.separator {
+        height: 20px;
+        margin: 4px 2px;
+    }
+
+    .qn-modal .EasyMDEContainer .CodeMirror {
+        min-height: 180px;
+        border-radius: 0;
+    }
+
+    .qn-modal .EasyMDEContainer .editor-statusbar {
+        padding: .25rem .1rem 0;
+        font-size: .7rem;
+    }
+
+    .qn-modal[data-expanded="true"] {
+        max-width: 96vw;
+        max-height: 92vh;
+        resize: none;
+    }
+
+    .qn-modal[data-expanded="true"] .qn-body,
+    .qn-modal[data-expanded="true"] .EasyMDEContainer {
+        display: flex;
         flex: 1 1 auto;
-        min-width: 0;
-    }
-
-    .qn-side-rail {
-        display: none;
         flex-direction: column;
-        gap: .35rem;
-        flex: 0 0 auto;
+        min-height: 0;
     }
 
-    /* Progressive reveal as the box is resized wider - satisfies "more options for text
-       editing comes up on the sides of the modal" without any JS resize detection. */
-    @@container qn (min-width: 560px) {
-        .qn-side-rail-1 { display: flex; }
-    }
-
-    @@container qn (min-width: 720px) {
-        .qn-side-rail-2 { display: flex; }
+    .qn-modal[data-expanded="true"] .EasyMDEContainer .CodeMirror {
+        flex: 1 1 auto;
+        height: auto;
     }
 
     .qn-footer {
