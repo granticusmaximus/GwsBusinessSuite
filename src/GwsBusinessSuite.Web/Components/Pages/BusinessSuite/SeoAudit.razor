@@ -1,0 +1,183 @@
+@page "/admin/seo-audit"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContributorAccess")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.SeoAudit
+@using GwsBusinessSuite.Domain.Entities
+@inject ISeoAuditService AuditService
+
+<PageTitle>SEO Audit</PageTitle>
+
+<div class="page-header">
+    <h1><i class="bi bi-search-heart me-2 text-primary"></i>SEO Audit</h1>
+    <p>A deterministic SEO checklist, plus an optional AI-era readiness read from a local Ollama model on how likely an AI answer engine would cite this page.</p>
+</div>
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+        @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+        {
+            <div class="alert alert-danger py-2 px-3 small">@ErrorMessage</div>
+        }
+        <div class="row g-2 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label small fw-semibold">Content</label>
+                <select class="form-select form-select-sm" @bind="_selectedContentKey">
+                    <option value="">Select content to audit...</option>
+                    @foreach (var item in Content)
+                    {
+                        <option value="@ContentKey(item)">@item.Title (@item.ContentType)</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small fw-semibold">Target keyword (optional)</label>
+                <input class="form-control form-control-sm" placeholder="e.g. small business crm" @bind="_keyword" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small fw-semibold">Ollama model (optional)</label>
+                <input class="form-control form-control-sm" placeholder="e.g. llama3.1" @bind="_model" />
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-sm btn-primary w-100" disabled="@(_isBusy || string.IsNullOrEmpty(_selectedContentKey))" @onclick="RunAuditAsync">
+                    <i class="bi bi-play-fill me-1"></i>Run Audit
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (Result is not null)
+{
+    <div class="row g-4">
+        <div class="col-lg-4">
+            <div class="card border-0 shadow-sm text-center">
+                <div class="card-body">
+                    <div class="display-5 fw-bold @ScoreColorClass(Result.Score)">@Result.Score</div>
+                    <div class="text-secondary small">out of 100</div>
+                    @if (Result.AiModel is not null)
+                    {
+                        <div class="badge text-bg-info mt-2">AI-blended (@Result.AiModel)</div>
+                    }
+                    else
+                    {
+                        <div class="badge text-bg-secondary mt-2">Deterministic checklist only</div>
+                    }
+                </div>
+            </div>
+
+            @if (RunHistory.Count > 1)
+            {
+                <div class="card border-0 shadow-sm mt-3">
+                    <div class="card-header bg-white border-bottom py-2 small fw-semibold">History</div>
+                    <div class="list-group list-group-flush">
+                        @foreach (var run in RunHistory)
+                        {
+                            <div class="list-group-item d-flex justify-content-between small">
+                                <span>@run.RunAt.ToLocalTime().ToString("MMM d, h:mm tt")</span>
+                                <span class="fw-semibold">@run.Score</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="col-lg-8">
+            @if (!string.IsNullOrWhiteSpace(Result.AiSummary))
+            {
+                <div class="card border-0 shadow-sm mb-3">
+                    <div class="card-header bg-white border-bottom py-2 small fw-semibold">AI-Era Readiness</div>
+                    <div class="card-body">
+                        <p class="mb-2">@Result.AiSummary</p>
+                        @if (Result.AiSuggestions.Count > 0)
+                        {
+                            <ul class="mb-0 small">
+                                @foreach (var suggestion in Result.AiSuggestions)
+                                {
+                                    <li>@suggestion</li>
+                                }
+                            </ul>
+                        }
+                    </div>
+                </div>
+            }
+
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white border-bottom py-2 small fw-semibold">Checklist</div>
+                <div class="list-group list-group-flush">
+                    @foreach (var finding in Result.Findings)
+                    {
+                        <div class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <div>
+                                    <div class="fw-semibold small">@finding.Category</div>
+                                    <div class="text-secondary small">@finding.Message</div>
+                                </div>
+                                <span class="badge @FindingBadgeClass(finding.Status) flex-shrink-0">@finding.Status</span>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<SeoAuditableContent> Content { get; set; } = [];
+    private string _selectedContentKey = string.Empty;
+    private string _keyword = string.Empty;
+    private string _model = string.Empty;
+    private bool _isBusy;
+    private string ErrorMessage { get; set; } = string.Empty;
+    private SeoAuditResult? Result { get; set; }
+    private IReadOnlyList<SeoAuditRunSummary> RunHistory { get; set; } = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        Content = (await AuditService.ListAuditableContentAsync()).ToList();
+    }
+
+    private static string ContentKey(SeoAuditableContent item) => $"{item.ContentType}:{item.Id}";
+
+    private async Task RunAuditAsync()
+    {
+        ErrorMessage = string.Empty;
+        var parts = _selectedContentKey.Split(':', 2);
+        if (parts.Length != 2 || !Guid.TryParse(parts[1], out var id)) return;
+
+        _isBusy = true;
+        try
+        {
+            var model = string.IsNullOrWhiteSpace(_model) ? null : _model.Trim();
+            var keyword = string.IsNullOrWhiteSpace(_keyword) ? null : _keyword.Trim();
+            Result = parts[0] == SeoAuditContentTypes.Article
+                ? await AuditService.AuditArticleAsync(id, model, keyword)
+                : await AuditService.AuditCmsPageAsync(id, model, keyword);
+            RunHistory = await AuditService.ListRunsAsync(parts[0], id);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private static string ScoreColorClass(int score) => score switch
+    {
+        >= 80 => "text-success",
+        >= 50 => "text-warning",
+        _ => "text-danger"
+    };
+
+    private static string FindingBadgeClass(string status) => status switch
+    {
+        SeoAuditFindingStatuses.Pass => "text-bg-success",
+        SeoAuditFindingStatuses.Warning => "text-bg-warning",
+        _ => "text-bg-danger"
+    };
+}

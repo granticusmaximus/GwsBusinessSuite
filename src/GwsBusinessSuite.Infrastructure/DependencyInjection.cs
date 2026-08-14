@@ -179,6 +179,7 @@ public static class DependencyInjection
         services.AddSingleton<GwsBusinessSuite.Application.Campaigns.IEmailCampaignEmailSender, EmailCampaignEmailSender>();
         services.AddScoped<GwsBusinessSuite.Application.Campaigns.IEmailCampaignService, EmailCampaignService>();
         services.AddHostedService<EmailCampaignBackgroundService>();
+        services.AddScoped<GwsBusinessSuite.Application.SeoAudit.ISeoAuditService, SeoAuditService>();
         services.AddOptions<SlackOAuthOptions>()
             .Bind(configuration.GetSection(SlackOAuthOptions.SectionName));
         services.AddHttpClient<GwsBusinessSuite.Application.Automation.ISlackOAuthService, SlackOAuthService>(client =>

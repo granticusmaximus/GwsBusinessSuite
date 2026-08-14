@@ -31,6 +31,10 @@
                 <span class="gws-nav-link-copy"><span>Content Studio</span><small>SentinelGPT-assisted drafts</small></span>
                 @if (_pendingDraftCount > 0) { <span class="gws-nav-count">@_pendingDraftCount</span> }
             </NavLink>
+            <NavLink class="gws-nav-link" href="admin/seo-audit" title="SEO Audit">
+                <i class="bi bi-search-heart" aria-hidden="true"></i>
+                <span class="gws-nav-link-copy"><span>SEO Audit</span><small>Classic + AI-era readiness</small></span>
+            </NavLink>
             @if (IsAdmin)
             {
                 <NavLink class="gws-nav-link" href="admin/growth" title="Growth Studio">
@@ -193,7 +197,7 @@
 </nav>
 
 @code {
-    private static readonly string[] PublishingPrefixes = ["admin/article", "admin/content-studio", "admin/growth", "admin/app-generation", "admin/media", "admin/pages", "admin/appearance"];
+    private static readonly string[] PublishingPrefixes = ["admin/article", "admin/content-studio", "admin/seo-audit", "admin/growth", "admin/app-generation", "admin/media", "admin/pages", "admin/appearance"];
     private static readonly string[] RelationshipPrefixes = ["admin/comments", "admin/crm", "admin/deal-scoring", "admin/billing", "admin/support", "admin/scheduling", "admin/email-campaigns", "admin/users"];
     private static readonly string[] IntelligencePrefixes = ["admin/news-intelligence", "admin/government-intelligence", "admin/podcasts", "admin/sentinel-gpt", "admin/sentinel", "admin/wiki"];
     private static readonly string[] OperationsPrefixes = ["admin/automation", "admin/cj-ads", "admin/affiliate", "admin/app-generation-queue", "admin/cms-knowledge", "admin/live-show", "admin/docker", "admin/security-audit", "admin/privacy-operations"];

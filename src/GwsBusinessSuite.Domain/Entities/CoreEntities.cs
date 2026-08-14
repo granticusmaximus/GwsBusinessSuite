@@ -380,6 +380,29 @@ public sealed class EmailCampaignSendLog : AuditableEntity
     public string ErrorMessage { get; set; } = string.Empty;
 }
 
+public static class SeoAuditContentTypes
+{
+    public const string Article = "Article";
+    public const string CmsPage = "CmsPage";
+}
+
+// A point-in-time SEO/AI-search-readiness audit of one Article or CmsPage - loosely linked
+// (no FK) to ContentId, same convention as every other loose Guid reference in this codebase,
+// since an audited page can be deleted without needing its history deleted in lockstep.
+// FindingsJson is the full deterministic checklist (see SeoAuditFinding); AiModel/AiSummary
+// are null/empty when the AI-era readiness pass was skipped or unavailable, so a run always
+// records at least the deterministic result even without a working Ollama connection.
+public sealed class SeoAuditRun : AuditableEntity
+{
+    public required string ContentType { get; set; }
+    public Guid ContentId { get; set; }
+    public int Score { get; set; }
+    public string FindingsJson { get; set; } = "[]";
+    public string? AiModel { get; set; }
+    public string AiSummary { get; set; } = string.Empty;
+    public string AiSuggestionsJson { get; set; } = "[]";
+}
+
 public sealed class WikiPage : AuditableEntity
 {
     public required string Title { get; set; }
