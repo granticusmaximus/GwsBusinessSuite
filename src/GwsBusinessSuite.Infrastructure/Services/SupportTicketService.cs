@@ -113,12 +113,18 @@ public sealed class SupportTicketService(
             throw new ArgumentException("A reply can't be empty.", nameof(body));
         }
 
-        var ticket = await db.SupportTickets.Include(item => item.Messages)
-            .FirstOrDefaultAsync(item => item.Id == ticketId, cancellationToken)
+        // Deliberately fetched WITHOUT Include(Messages) here - appending a new child to a
+        // collection navigation that was populated by an earlier, separate Include() query
+        // (which every call to this method would otherwise do, against the same long-lived
+        // scoped DbContext) confuses EF Core's change tracker into treating the new row as
+        // already-persisted, so it emits an UPDATE instead of an INSERT and then fails as a
+        // bogus concurrency conflict. Adding the message directly on its own DbSet, with the
+        // ticket fetched separately and untouched by Include, avoids that entirely.
+        var ticket = await db.SupportTickets.FirstOrDefaultAsync(item => item.Id == ticketId, cancellationToken)
             ?? throw new InvalidOperationException($"Ticket {ticketId} was not found.");
 
         var now = timeProvider.GetUtcNow();
-        ticket.Messages.Add(new SupportTicketMessage
+        db.SupportTicketMessages.Add(new SupportTicketMessage
         {
             TicketId = ticketId,
             AuthorType = authorType,
@@ -137,11 +143,8 @@ public sealed class SupportTicketService(
         ticket.UpdatedBy = authorName;
         await db.SaveChangesAsync(cancellationToken);
 
-        var contactName = await db.Contacts.AsNoTracking()
-            .Where(contact => contact.Id == ticket.ContactId)
-            .Select(contact => contact.FullName)
-            .FirstOrDefaultAsync(cancellationToken) ?? "Unknown contact";
-        return ToView(ticket, contactName);
+        return await GetTicketAsync(ticketId, cancellationToken)
+            ?? throw new InvalidOperationException($"Ticket {ticketId} was not found after saving.");
     }
 
     public async Task<SupportTicketView> SetStatusAsync(Guid ticketId, string status, string performedBy, CancellationToken cancellationToken = default)

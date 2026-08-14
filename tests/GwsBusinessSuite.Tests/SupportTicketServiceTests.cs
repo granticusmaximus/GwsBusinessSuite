@@ -130,7 +130,7 @@ public sealed class SupportTicketServiceTests
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
-            var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).EnableSensitiveDataLogging().LogTo(Console.WriteLine, Microsoft.Extensions.Logging.LogLevel.Information).Options);
+            var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options);
             await db.Database.EnsureCreatedAsync();
             return new Fixture(connection, db);
         }
