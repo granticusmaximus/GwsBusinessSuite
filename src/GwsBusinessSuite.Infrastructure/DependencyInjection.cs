@@ -232,6 +232,7 @@ public static class DependencyInjection
         services.AddHostedService<CmsScheduledPublishBackgroundService>();
         services.AddScoped<IWikiSyncedBlockService, WikiSyncedBlockService>();
         services.AddScoped<IWikiService, WikiService>();
+        services.AddScoped<IQuickNoteService, QuickNoteService>();
         services.AddScoped<IWikiDatabaseService, WikiDatabaseService>();
         services.AddScoped<ISentinelTemplateService, SentinelTemplateService>();
         services.AddScoped<ISentinelWorkspaceImportService, SentinelWorkspaceImportService>();

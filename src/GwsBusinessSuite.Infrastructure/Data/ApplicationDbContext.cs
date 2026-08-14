@@ -324,6 +324,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<WikiDatabaseRow>().HasIndex(x => x.NotionId);
         modelBuilder.Entity<WikiDatabaseProperty>().HasIndex(x => x.NotionId);
         modelBuilder.Entity<WikiPage>().HasIndex(x => x.TrashedAt);
+        modelBuilder.Entity<WikiPage>().HasIndex(x => x.SystemKey).IsUnique();
         modelBuilder.Entity<WikiDatabase>().HasIndex(x => x.TrashedAt);
         modelBuilder.Entity<WikiDatabaseRow>().HasIndex(x => x.TrashedAt);
         modelBuilder.Entity<CmsSite>().HasIndex(x => x.Slug).IsUnique();

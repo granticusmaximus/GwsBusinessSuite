@@ -1,4 +1,5 @@
 @page "/admin"
+@rendermode InteractiveServer
 @attribute [Authorize(Policy = "PortalAccess")]
 @using GwsBusinessSuite.Application.AdminPortal
 @using GwsBusinessSuite.Domain.Entities
@@ -19,8 +20,18 @@
     <div class="gws-dashboard-quick-actions" aria-label="Quick actions">
         <a class="btn btn-primary" href="/admin/article-editor"><i class="bi bi-pencil-square me-1" aria-hidden="true"></i>Manage posts</a>
         <a class="btn btn-outline-secondary" href="/admin/content-studio"><i class="bi bi-magic me-1" aria-hidden="true"></i>Generate draft</a>
+        <button type="button" class="btn btn-outline-secondary" @onclick="OpenQuickNote">
+            <i class="bi bi-stickies-fill me-1" aria-hidden="true"></i>Quick Note
+        </button>
     </div>
 </div>
+
+<QuickNoteModal @bind-IsOpen="_showQuickNote" OnSaved="OnQuickNoteSaved" />
+
+@if (!string.IsNullOrWhiteSpace(_quickNoteStatus))
+{
+    <div class="alert alert-success py-2 px-3 small" role="status">@_quickNoteStatus</div>
+}
 
 <section aria-labelledby="attention-heading" class="mb-5">
     <div class="gws-section-heading">
@@ -76,6 +87,12 @@
     private int _dueFollowUps;
     private int _unreadAlerts;
     private string _role = string.Empty;
+    private bool _showQuickNote;
+    private string _quickNoteStatus = string.Empty;
+
+    private void OpenQuickNote() => _showQuickNote = true;
+
+    private void OnQuickNoteSaved() => _quickNoteStatus = "Saved to Quick Notes in Sentinel.";
 
     private IReadOnlyList<AttentionItem> AttentionItems
     {

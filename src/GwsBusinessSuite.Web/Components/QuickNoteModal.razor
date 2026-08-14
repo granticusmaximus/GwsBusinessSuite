@@ -1,0 +1,274 @@
+@* A small, draggable, resizable "quick capture" note. Dragging is done with a plain
+   mousedown/mousemove/mouseup overlay (no JS) - the same technique Sentinel's own
+   collaborative cursor tracking already relies on for live pointer broadcasting over
+   the Blazor Server circuit. Resizing is native CSS `resize: both`; growing the box past
+   a couple of width thresholds reveals extra formatting buttons via CSS container
+   queries, with no ResizeObserver/JS needed to detect the size change. *@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@inject IQuickNoteService QuickNoteService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+@if (IsOpen)
+{
+    @if (_dragging)
+    {
+        <div class="qn-drag-overlay" @onmousemove="OnDragMove" @onmouseup="EndDrag" @onmouseleave="EndDrag"></div>
+    }
+
+    <div class="qn-modal" style="left:@(_left)px; top:@(_top)px;">
+        <div class="qn-header" @onmousedown="BeginDrag">
+            <i class="bi bi-stickies-fill me-2" aria-hidden="true"></i>
+            <span class="fw-semibold small">Quick Note</span>
+            <button type="button" class="btn-close btn-close-white ms-auto" aria-label="Close" @onclick="CloseAsync"></button>
+        </div>
+
+        <div class="qn-body">
+            <input class="form-control form-control-sm qn-title" placeholder="Title"
+                   @bind="Title" @bind:event="oninput" />
+
+            <div class="qn-editor-row">
+                <textarea id="@EditorElementId" class="qn-textarea">@_body</textarea>
+
+                <div class="qn-side-rail qn-side-rail-1">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" title="Checklist" @onclick='() => InsertAsync("\n- [ ] ")'>
+                        <i class="bi bi-check2-square"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" title="Quote" @onclick='() => InsertAsync("\n> ")'>
+                        <i class="bi bi-quote"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" title="Divider" @onclick='() => InsertAsync("\n\n---\n\n")'>
+                        <i class="bi bi-hr"></i>
+                    </button>
+                </div>
+
+                <div class="qn-side-rail qn-side-rail-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" title="Code block" @onclick='() => InsertAsync("\n```\n\n```\n")'>
+                        <i class="bi bi-code-slash"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" title="Table" @onclick='() => InsertAsync("\n| Column | Column |\n| --- | --- |\n| | |\n")'>
+                        <i class="bi bi-table"></i>
+                    </button>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+            {
+                <div class="alert alert-danger py-2 px-3 small mb-0 mt-2">@ErrorMessage</div>
+            }
+        </div>
+
+        <div class="qn-footer">
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CloseAsync" disabled="@_isSaving">Cancel</button>
+            <button type="button" class="btn btn-sm btn-primary" @onclick="SaveAsync" disabled="@_isSaving">
+                @(_isSaving ? "Saving..." : "Save")
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public EventCallback<bool> IsOpenChanged { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private const string EditorElementId = "quick-note-editor";
+    private string Title { get; set; } = string.Empty;
+    private string _body = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+    private bool _isSaving;
+    private bool _editorInitialized;
+    private DotNetObjectReference<QuickNoteModal>? _editorRef;
+
+    private bool _dragging;
+    private double _left = 120;
+    private double _top = 100;
+    private double _dragOriginX;
+    private double _dragOriginY;
+    private double _dragOriginLeft;
+    private double _dragOriginTop;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsOpen && !_editorInitialized)
+        {
+            _editorRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("gwsMarkdownEditor.init", EditorElementId, _editorRef);
+            _editorInitialized = true;
+        }
+    }
+
+    [JSInvokable]
+    public void OnMarkdownChanged(string value) => _body = value;
+
+    private async Task InsertAsync(string token)
+    {
+        if (_editorInitialized)
+        {
+            await JS.InvokeVoidAsync("gwsMarkdownEditor.insertAtCursor", EditorElementId, token);
+        }
+        else
+        {
+            _body += token;
+        }
+    }
+
+    private void BeginDrag(MouseEventArgs e)
+    {
+        _dragging = true;
+        _dragOriginX = e.ClientX;
+        _dragOriginY = e.ClientY;
+        _dragOriginLeft = _left;
+        _dragOriginTop = _top;
+    }
+
+    private void OnDragMove(MouseEventArgs e)
+    {
+        _left = Math.Max(0, _dragOriginLeft + (e.ClientX - _dragOriginX));
+        _top = Math.Max(0, _dragOriginTop + (e.ClientY - _dragOriginY));
+    }
+
+    private void EndDrag() => _dragging = false;
+
+    private async Task SaveAsync()
+    {
+        ErrorMessage = string.Empty;
+        if (string.IsNullOrWhiteSpace(Title) && string.IsNullOrWhiteSpace(_body))
+        {
+            ErrorMessage = "Write something first.";
+            return;
+        }
+
+        _isSaving = true;
+        try
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await QuickNoteService.AddQuickNoteAsync(
+                string.IsNullOrWhiteSpace(Title) ? "Untitled note" : Title, _body, performedBy);
+            await OnSaved.InvokeAsync();
+            await CloseAsync();
+        }
+        catch (Exception)
+        {
+            ErrorMessage = "Couldn't save that note. Try again.";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        if (_editorInitialized)
+        {
+            await JS.InvokeVoidAsync("gwsMarkdownEditor.destroy", EditorElementId);
+            _editorInitialized = false;
+        }
+        Title = string.Empty;
+        _body = string.Empty;
+        ErrorMessage = string.Empty;
+        _left = 120;
+        _top = 100;
+        IsOpen = false;
+        await IsOpenChanged.InvokeAsync(false);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_editorInitialized)
+        {
+            try { await JS.InvokeVoidAsync("gwsMarkdownEditor.destroy", EditorElementId); }
+            catch (JSDisconnectedException) { /* circuit already gone */ }
+        }
+        _editorRef?.Dispose();
+    }
+}
+
+<style>
+    .qn-drag-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 1998;
+        cursor: grabbing;
+    }
+
+    .qn-modal {
+        position: fixed;
+        z-index: 1999;
+        width: 380px;
+        min-width: 320px;
+        min-height: 220px;
+        max-width: min(92vw, 820px);
+        max-height: min(88vh, 680px);
+        resize: both;
+        overflow: auto;
+        container-type: inline-size;
+        container-name: qn;
+        background: var(--gws-panel-bg, #1b1917);
+        border: 1px solid var(--gws-panel-border, #4c4337);
+        border-radius: 10px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, .45);
+        display: flex;
+        flex-direction: column;
+    }
+
+    .qn-header {
+        display: flex;
+        align-items: center;
+        padding: .5rem .75rem;
+        border-bottom: 1px solid var(--gws-panel-border, #4c4337);
+        cursor: grab;
+        user-select: none;
+        flex: 0 0 auto;
+    }
+
+    .qn-body {
+        padding: .6rem .75rem;
+        flex: 1 1 auto;
+        overflow: auto;
+    }
+
+    .qn-title {
+        margin-bottom: .5rem;
+    }
+
+    .qn-editor-row {
+        display: flex;
+        gap: .5rem;
+        align-items: flex-start;
+    }
+
+    .qn-textarea {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .qn-side-rail {
+        display: none;
+        flex-direction: column;
+        gap: .35rem;
+        flex: 0 0 auto;
+    }
+
+    /* Progressive reveal as the box is resized wider - satisfies "more options for text
+       editing comes up on the sides of the modal" without any JS resize detection. */
+    @@container qn (min-width: 560px) {
+        .qn-side-rail-1 { display: flex; }
+    }
+
+    @@container qn (min-width: 720px) {
+        .qn-side-rail-2 { display: flex; }
+    }
+
+    .qn-footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: .5rem;
+        padding: .5rem .75rem;
+        border-top: 1px solid var(--gws-panel-border, #4c4337);
+        flex: 0 0 auto;
+    }
+</style>

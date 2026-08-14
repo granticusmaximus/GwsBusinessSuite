@@ -231,6 +231,12 @@ public sealed class WikiPage : AuditableEntity
     // the *remote* Notion page's own archived state. A page can be trashed here without ever
     // having touched Notion at all.
     public DateTimeOffset? TrashedAt { get; set; }
+    // Marks a page as owned/managed by an app feature rather than freely authored - e.g.
+    // QuickNoteService's "quick-notes" root folder, found by this stable key rather than by
+    // title (titles are user-editable and not unique). Null for every ordinary page. A second
+    // system feature would pick its own distinct key; this is not an enum because the set of
+    // system-managed pages is expected to grow one feature at a time, not be fixed up front.
+    public string? SystemKey { get; set; }
     public ICollection<WikiPageRevision> Revisions { get; set; } = new List<WikiPageRevision>();
 }
 
