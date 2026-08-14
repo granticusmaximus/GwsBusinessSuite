@@ -169,6 +169,10 @@ public static class DependencyInjection
         services.AddScoped<IStripeInvoicingClient, StripeInvoicingClient>();
         services.AddScoped<IBillingService, BillingService>();
         services.AddScoped<GwsBusinessSuite.Application.Support.ISupportTicketService, SupportTicketService>();
+        services.AddOptions<BookingEmailOptions>()
+            .Bind(configuration.GetSection(BookingEmailOptions.SectionName));
+        services.AddSingleton<GwsBusinessSuite.Application.Scheduling.IBookingEmailSender, BookingEmailSender>();
+        services.AddScoped<GwsBusinessSuite.Application.Scheduling.IBookingService, BookingService>();
         services.AddScoped<GwsBusinessSuite.Application.MissionControl.IMissionControlService, MissionControlService>();
         services.AddScoped<GwsBusinessSuite.Application.Mobile.IMobilePushRegistrationService, MobilePushRegistrationService>();
         services.AddScoped<GwsBusinessSuite.Application.Mobile.IMobileApprovalService, MobileApprovalService>();

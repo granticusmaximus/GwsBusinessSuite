@@ -32,6 +32,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<InvoiceLineItem> InvoiceLineItems => Set<InvoiceLineItem>();
     public DbSet<SupportTicket> SupportTickets => Set<SupportTicket>();
     public DbSet<SupportTicketMessage> SupportTicketMessages => Set<SupportTicketMessage>();
+    public DbSet<BookingType> BookingTypes => Set<BookingType>();
+    public DbSet<Booking> Bookings => Set<Booking>();
     public DbSet<WikiPage> WikiPages => Set<WikiPage>();
     public DbSet<WikiPageRevision> WikiPageRevisions => Set<WikiPageRevision>();
     public DbSet<SentinelPageTemplate> SentinelPageTemplates => Set<SentinelPageTemplate>();
@@ -181,6 +183,17 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .HasForeignKey(x => x.TicketId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<SupportTicketMessage>().HasIndex(x => x.TicketId);
+
+        modelBuilder.Entity<BookingType>().HasIndex(x => x.Slug).IsUnique();
+
+        modelBuilder.Entity<Booking>()
+            .HasOne<BookingType>()
+            .WithMany()
+            .HasForeignKey(x => x.BookingTypeId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<Booking>().HasIndex(x => x.BookingTypeId);
+        modelBuilder.Entity<Booking>().HasIndex(x => x.ManageTokenHash).IsUnique();
+        modelBuilder.Entity<Booking>().HasIndex(x => new { x.BookingTypeId, x.StartsAt });
 
         modelBuilder.Entity<MediaAsset>().HasIndex(x => x.CreatedAt);
         modelBuilder.Entity<WatchedTopic>().HasIndex(x => x.IsActive);

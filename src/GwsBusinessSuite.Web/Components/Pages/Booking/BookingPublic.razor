@@ -1,0 +1,162 @@
+@page "/book/{Slug}"
+@rendermode InteractiveServer
+@attribute [AllowAnonymous]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Scheduling
+@inject IBookingService BookingService
+
+<PageTitle>@(BookingType?.Title ?? "Book a time")</PageTitle>
+
+<div class="gws-booking-shell">
+    @if (_loading)
+    {
+        <p class="text-secondary">Loading...</p>
+    }
+    else if (BookingType is null)
+    {
+        <div class="alert alert-warning">This booking link isn't available.</div>
+    }
+    else if (_confirmedBooking is not null)
+    {
+        <div class="card border-0 shadow-sm">
+            <div class="card-body text-center py-5">
+                <i class="bi bi-check-circle-fill text-success" style="font-size: 2.5rem;"></i>
+                <h2 class="h5 mt-3">You're booked!</h2>
+                <p class="text-secondary">
+                    @BookingType.Title &middot; @_confirmedBooking.StartsAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")
+                </p>
+                <p class="small text-secondary">A confirmation has been emailed to @_confirmedBooking.AttendeeEmail.</p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="page-header">
+            <h1>@BookingType.Title</h1>
+            @if (!string.IsNullOrWhiteSpace(BookingType.Description))
+            {
+                <p>@BookingType.Description</p>
+            }
+            <p class="text-secondary small">@BookingType.DurationMinutes minutes</p>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+        {
+            <div class="alert alert-danger">@ErrorMessage</div>
+        }
+
+        @if (_selectedSlot is null)
+        {
+            @if (SlotsByDay.Count == 0)
+            {
+                <div class="alert alert-info">No open times in the next two weeks.</div>
+            }
+            else
+            {
+                @foreach (var day in SlotsByDay)
+                {
+                    <div class="mb-3">
+                        <div class="fw-semibold small mb-2">@day.Key.ToString("dddd, MMMM d")</div>
+                        <div class="d-flex flex-wrap gap-2">
+                            @foreach (var slot in day)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => _selectedSlot = slot">
+                                    @slot.StartsAt.ToLocalTime().ToString("h:mm tt")
+                                </button>
+                            }
+                        </div>
+                    </div>
+                }
+            }
+        }
+        else
+        {
+            <div class="card border-0 shadow-sm" style="max-width: 32rem;">
+                <div class="card-body">
+                    <p class="fw-semibold">@_selectedSlot.StartsAt.ToLocalTime().ToString("dddd, MMMM d, h:mm tt")</p>
+                    <div class="mb-2">
+                        <input class="form-control form-control-sm" placeholder="Your name" @bind="_attendeeName" />
+                    </div>
+                    <div class="mb-2">
+                        <input class="form-control form-control-sm" type="email" placeholder="Your email" @bind="_attendeeEmail" />
+                    </div>
+                    <div class="mb-3">
+                        <textarea class="form-control form-control-sm" rows="2" placeholder="Anything we should know? (optional)" @bind="_notes"></textarea>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => _selectedSlot = null">Back</button>
+                        <button class="btn btn-sm btn-primary" disabled="@_isBusy" @onclick="ConfirmAsync">Confirm booking</button>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+<style>
+    .gws-booking-shell {
+        max-width: 42rem;
+        margin: 0 auto;
+        padding: 1rem 0 2rem;
+    }
+</style>
+
+@code {
+    [Parameter] public string Slug { get; set; } = string.Empty;
+
+    private bool _loading = true;
+    private BookingTypeView? BookingType { get; set; }
+    private IReadOnlyList<BookingSlot> Slots { get; set; } = [];
+    private BookingSlot? _selectedSlot;
+    private BookingView? _confirmedBooking;
+    private string _attendeeName = string.Empty;
+    private string _attendeeEmail = string.Empty;
+    private string _notes = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+    private bool _isBusy;
+
+    private List<IGrouping<DateTime, BookingSlot>> SlotsByDay =>
+        Slots.GroupBy(slot => slot.StartsAt.ToLocalTime().Date).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        BookingType = await BookingService.GetBookingTypeBySlugAsync(Slug);
+        if (BookingType is not null)
+        {
+            Slots = await BookingService.GetAvailableSlotsAsync(BookingType.Id, DateTimeOffset.UtcNow, 14);
+        }
+        _loading = false;
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (_selectedSlot is null || BookingType is null) return;
+        ErrorMessage = string.Empty;
+        if (string.IsNullOrWhiteSpace(_attendeeName) || string.IsNullOrWhiteSpace(_attendeeEmail))
+        {
+            ErrorMessage = "Name and email are required.";
+            return;
+        }
+
+        _isBusy = true;
+        try
+        {
+            var result = await BookingService.CreateBookingAsync(
+                BookingType.Id, _selectedSlot.StartsAt, _attendeeName, _attendeeEmail, _notes);
+            if (result is null)
+            {
+                ErrorMessage = "That time was just taken. Please pick another.";
+                Slots = await BookingService.GetAvailableSlotsAsync(BookingType.Id, DateTimeOffset.UtcNow, 14);
+                _selectedSlot = null;
+            }
+            else
+            {
+                _confirmedBooking = result;
+            }
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+}

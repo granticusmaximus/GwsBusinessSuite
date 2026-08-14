@@ -256,6 +256,58 @@ public sealed class SupportTicketMessage : AuditableEntity
     public SupportTicket? Ticket { get; set; }
 }
 
+// A bookable meeting type ("30-minute intro call") - anonymous visitors book against this at
+// GET /book/{Slug}. AvailabilityJson holds a small list of recurring weekly windows
+// (BookingAvailabilityWindow, serialized) rather than its own child-entity table, matching
+// this codebase's existing convention for small structured blobs (NavMenuJson, BlocksJson)
+// that are always read/written as a whole rather than queried row-by-row.
+// Times in AvailabilityJson and every Booking.StartsAt/EndsAt are UTC - this app is
+// single-tenant/self-hosted for one team, so there's deliberately no per-visitor timezone
+// conversion; the admin defines availability in whatever "UTC" means for their own team.
+public sealed class BookingType : AuditableEntity
+{
+    public required string Title { get; set; }
+    public required string Slug { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public int DurationMinutes { get; set; } = 30;
+    // Gap enforced after each booked slot before the next one can start.
+    public int BufferMinutes { get; set; } = 0;
+    // Free-text staff username shown to the visitor and emailed on a new booking - same
+    // "display label, not a real FK" convention as SupportTicket.AssignedToUsername.
+    public string? OwnerUsername { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string AvailabilityJson { get; set; } = "[]";
+}
+
+public sealed record BookingAvailabilityWindow(DayOfWeek DayOfWeek, TimeOnly Start, TimeOnly End);
+
+public static class BookingStatuses
+{
+    public const string Confirmed = "Confirmed";
+    public const string Cancelled = "Cancelled";
+}
+
+// A confirmed (or since-cancelled) slot against a BookingType. ManageTokenHash follows the
+// same "mint a random token, store only its SHA-256 hash, hand the raw token to the visitor
+// in a link" convention as ClientPortalLoginToken/SentinelPublicShare - the emailed
+// "manage/cancel this booking" link is the only place the raw token ever exists outside this
+// hash.
+public sealed class Booking : AuditableEntity
+{
+    public Guid BookingTypeId { get; set; }
+    // Loosely linked (no FK) - set when the attendee's email matches (or is used to create)
+    // a CRM Contact, same convention as every other loose Guid reference in this codebase.
+    public Guid? ContactId { get; set; }
+    public DateTimeOffset StartsAt { get; set; }
+    public DateTimeOffset EndsAt { get; set; }
+    public required string AttendeeName { get; set; }
+    public required string AttendeeEmail { get; set; }
+    public string Notes { get; set; } = string.Empty;
+    public string Status { get; set; } = BookingStatuses.Confirmed;
+    public required string ManageTokenHash { get; set; }
+    public DateTimeOffset? CancelledAt { get; set; }
+}
+
 public sealed class WikiPage : AuditableEntity
 {
     public required string Title { get; set; }

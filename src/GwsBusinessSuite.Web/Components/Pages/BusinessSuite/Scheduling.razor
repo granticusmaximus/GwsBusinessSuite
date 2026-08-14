@@ -1,0 +1,272 @@
+@page "/admin/scheduling"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Scheduling
+@using GwsBusinessSuite.Domain.Entities
+@using GwsBusinessSuite.Application.Abstractions
+@inject IBookingService BookingService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject NavigationManager Navigation
+
+<PageTitle>Scheduling</PageTitle>
+
+<div class="page-header">
+    <h1><i class="bi bi-calendar2-check me-2 text-primary"></i>Scheduling</h1>
+    <p>Booking types visitors can reserve time against, and the bookings they've made.</p>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+                <span class="fw-semibold">@(Editor.Id is null ? "New Booking Type" : "Edit Booking Type")</span>
+                @if (Editor.Id is not null)
+                {
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="ResetEditor">
+                        <i class="bi bi-plus-lg me-1"></i>New
+                    </button>
+                }
+            </div>
+            <div class="card-body">
+                @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+                {
+                    <div class="alert alert-danger py-2 px-3 small">@ErrorMessage</div>
+                }
+                <div class="mb-2">
+                    <input class="form-control form-control-sm" placeholder="Title" @bind="Editor.Title" />
+                </div>
+                <div class="mb-2">
+                    <input class="form-control form-control-sm" placeholder="URL slug (auto if blank)" @bind="Editor.Slug" />
+                </div>
+                <div class="mb-2">
+                    <textarea class="form-control form-control-sm" rows="2" placeholder="Description" @bind="Editor.Description"></textarea>
+                </div>
+                <div class="row g-2 mb-2">
+                    <div class="col-6">
+                        <label class="form-label small text-secondary mb-1">Duration (min)</label>
+                        <input type="number" min="5" class="form-control form-control-sm" @bind="Editor.DurationMinutes" />
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small text-secondary mb-1">Buffer (min)</label>
+                        <input type="number" min="0" class="form-control form-control-sm" @bind="Editor.BufferMinutes" />
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <input class="form-control form-control-sm" placeholder="Owner username (optional)" @bind="Editor.OwnerUsername" />
+                </div>
+                <div class="form-check mb-3">
+                    <input type="checkbox" class="form-check-input" id="active-toggle" @bind="Editor.IsActive" />
+                    <label class="form-check-label small" for="active-toggle">Active (bookable)</label>
+                </div>
+
+                <div class="mb-2 d-flex align-items-center justify-content-between">
+                    <label class="form-label fw-semibold small mb-0">Weekly Availability (UTC)</label>
+                    <button class="btn btn-sm btn-outline-primary" @onclick="AddWindow"><i class="bi bi-plus-lg me-1"></i>Add</button>
+                </div>
+                @for (var i = 0; i < Editor.Availability.Count; i++)
+                {
+                    var index = i;
+                    var window = Editor.Availability[index];
+                    <div class="row g-2 mb-2 align-items-center">
+                        <div class="col-4">
+                            <select class="form-select form-select-sm" value="@((int)window.DayOfWeek)" @onchange="e => OnDayChanged(index, e)">
+                                @foreach (var day in Enum.GetValues<DayOfWeek>())
+                                {
+                                    <option value="@((int)day)">@day</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-3">
+                            <input type="time" class="form-control form-control-sm" value="@window.Start.ToString("HH:mm")" @onchange="e => OnStartChanged(index, e)" />
+                        </div>
+                        <div class="col-3">
+                            <input type="time" class="form-control form-control-sm" value="@window.End.ToString("HH:mm")" @onchange="e => OnEndChanged(index, e)" />
+                        </div>
+                        <div class="col-2">
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => Editor.Availability.RemoveAt(index)">
+                                <i class="bi bi-trash3"></i>
+                            </button>
+                        </div>
+                    </div>
+                }
+
+                <button class="btn btn-sm btn-primary w-100 mt-2" disabled="@_isBusy" @onclick="SaveAsync">
+                    <i class="bi bi-save me-1"></i>Save
+                </button>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3 fw-semibold">Booking Types</div>
+            <div class="card-body p-0">
+                @if (BookingTypes.Count == 0)
+                {
+                    <div class="p-4 text-secondary">No booking types yet.</div>
+                }
+                else
+                {
+                    <div class="list-group list-group-flush">
+                        @foreach (var type in BookingTypes)
+                        {
+                            <div class="list-group-item">
+                                <div class="d-flex justify-content-between align-items-start gap-2">
+                                    <div class="min-w-0">
+                                        <div class="fw-semibold">@type.Title @(type.IsActive ? "" : "(inactive)")</div>
+                                        <a href="@BookingUrl(type.Slug)" target="_blank" class="small text-truncate d-block">@BookingUrl(type.Slug)</a>
+                                    </div>
+                                    <div class="d-flex gap-2 flex-shrink-0">
+                                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => LoadIntoEditor(type)"><i class="bi bi-pencil"></i></button>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(type.Id)"><i class="bi bi-trash3"></i></button>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3 fw-semibold">Bookings</div>
+            <div class="card-body p-0">
+                @if (Bookings.Count == 0)
+                {
+                    <div class="p-4 text-secondary">No bookings yet.</div>
+                }
+                else
+                {
+                    <div class="list-group list-group-flush">
+                        @foreach (var booking in Bookings)
+                        {
+                            <div class="list-group-item">
+                                <div class="d-flex justify-content-between align-items-start gap-2">
+                                    <div>
+                                        <div class="fw-semibold">@booking.BookingTypeTitle &middot; @booking.AttendeeName</div>
+                                        <div class="text-secondary small">
+                                            @booking.StartsAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt") &middot; @booking.AttendeeEmail
+                                        </div>
+                                    </div>
+                                    <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                                        <span class="badge @(booking.Status == BookingStatuses.Cancelled ? "text-bg-secondary" : "text-bg-success")">@booking.Status</span>
+                                        @if (booking.Status != BookingStatuses.Cancelled)
+                                        {
+                                            <button class="btn btn-sm btn-outline-danger" @onclick="() => CancelAsync(booking.Id)">Cancel</button>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<BookingTypeView> BookingTypes { get; set; } = [];
+    private IReadOnlyList<BookingView> Bookings { get; set; } = [];
+    private BookingTypeEditorModel Editor { get; set; } = new();
+    private string ErrorMessage { get; set; } = string.Empty;
+    private bool _isBusy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        BookingTypes = (await BookingService.ListBookingTypesAsync(includeInactive: true)).ToList();
+        Bookings = await BookingService.ListBookingsAsync();
+    }
+
+    private void AddWindow() => Editor.Availability.Add(new BookingAvailabilityWindow(DayOfWeek.Monday, new TimeOnly(9, 0), new TimeOnly(17, 0)));
+
+    private void OnDayChanged(int index, ChangeEventArgs e)
+    {
+        if (e.Value is string value && int.TryParse(value, out var day))
+        {
+            var window = Editor.Availability[index];
+            Editor.Availability[index] = window with { DayOfWeek = (DayOfWeek)day };
+        }
+    }
+
+    private void OnStartChanged(int index, ChangeEventArgs e)
+    {
+        if (e.Value is string value && TimeOnly.TryParse(value, out var time))
+        {
+            Editor.Availability[index] = Editor.Availability[index] with { Start = time };
+        }
+    }
+
+    private void OnEndChanged(int index, ChangeEventArgs e)
+    {
+        if (e.Value is string value && TimeOnly.TryParse(value, out var time))
+        {
+            Editor.Availability[index] = Editor.Availability[index] with { End = time };
+        }
+    }
+
+    private void ResetEditor()
+    {
+        Editor = new BookingTypeEditorModel();
+        ErrorMessage = string.Empty;
+    }
+
+    private void LoadIntoEditor(BookingTypeView type)
+    {
+        Editor = new BookingTypeEditorModel
+        {
+            Id = type.Id,
+            Title = type.Title,
+            Slug = type.Slug,
+            Description = type.Description,
+            DurationMinutes = type.DurationMinutes,
+            BufferMinutes = type.BufferMinutes,
+            OwnerUsername = type.OwnerUsername,
+            IsActive = type.IsActive,
+            Availability = type.Availability.ToList()
+        };
+        ErrorMessage = string.Empty;
+    }
+
+    private async Task SaveAsync()
+    {
+        ErrorMessage = string.Empty;
+        _isBusy = true;
+        try
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await BookingService.SaveBookingTypeAsync(Editor, performedBy);
+            ResetEditor();
+            await RefreshAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task DeleteAsync(Guid bookingTypeId)
+    {
+        await BookingService.DeleteBookingTypeAsync(bookingTypeId);
+        await RefreshAsync();
+    }
+
+    private async Task CancelAsync(Guid bookingId)
+    {
+        var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        await BookingService.CancelBookingAsync(bookingId, performedBy);
+        await RefreshAsync();
+    }
+
+    private string BookingUrl(string slug) => $"{Navigation.BaseUri.TrimEnd('/')}/book/{slug}";
+}

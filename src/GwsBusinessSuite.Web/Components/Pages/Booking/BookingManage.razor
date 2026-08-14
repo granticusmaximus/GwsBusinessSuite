@@ -1,0 +1,85 @@
+@page "/book/manage/{Token}"
+@rendermode InteractiveServer
+@attribute [AllowAnonymous]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Scheduling
+@using GwsBusinessSuite.Domain.Entities
+@inject IBookingService BookingService
+
+<PageTitle>Manage Booking</PageTitle>
+
+<div class="gws-booking-shell">
+    @if (_loading)
+    {
+        <p class="text-secondary">Loading...</p>
+    }
+    else if (Booking is null)
+    {
+        <div class="alert alert-warning">This booking link is invalid or has expired.</div>
+    }
+    else
+    {
+        <div class="card border-0 shadow-sm" style="max-width: 32rem;">
+            <div class="card-body">
+                <h1 class="h5">@Booking.BookingTypeTitle</h1>
+                <p class="mb-1">@Booking.StartsAt.ToLocalTime().ToString("dddd, MMMM d, yyyy 'at' h:mm tt")</p>
+                <span class="badge @(Booking.Status == BookingStatuses.Cancelled ? "text-bg-secondary" : "text-bg-success")">@Booking.Status</span>
+
+                @if (!string.IsNullOrWhiteSpace(StatusMessage))
+                {
+                    <div class="alert alert-info mt-3 py-2 px-3 small">@StatusMessage</div>
+                }
+
+                @if (Booking.Status != BookingStatuses.Cancelled)
+                {
+                    <div class="mt-3">
+                        <button class="btn btn-outline-danger btn-sm" disabled="@_isBusy" @onclick="CancelAsync">
+                            Cancel this booking
+                        </button>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+<style>
+    .gws-booking-shell {
+        max-width: 42rem;
+        margin: 0 auto;
+        padding: 1rem 0 2rem;
+    }
+</style>
+
+@code {
+    [Parameter] public string Token { get; set; } = string.Empty;
+
+    private bool _loading = true;
+    private bool _isBusy;
+    private BookingView? Booking { get; set; }
+    private string StatusMessage { get; set; } = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Booking = await BookingService.GetBookingByManageTokenAsync(Token);
+        _loading = false;
+    }
+
+    private async Task CancelAsync()
+    {
+        _isBusy = true;
+        try
+        {
+            var cancelled = await BookingService.CancelBookingByManageTokenAsync(Token);
+            if (cancelled)
+            {
+                Booking = await BookingService.GetBookingByManageTokenAsync(Token);
+                StatusMessage = "Your booking has been cancelled.";
+            }
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+}
