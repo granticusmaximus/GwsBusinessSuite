@@ -421,6 +421,7 @@ using (var scope = app.Services.CreateScope())
     }
 
     await TrySeedStepAsync(nameof(EnsureGrantWatsonHomepageAsync), () => EnsureGrantWatsonHomepageAsync(dbContext, app.Configuration, app.Logger));
+    await TrySeedStepAsync(nameof(EnsurePortfolioPageAsync), () => EnsurePortfolioPageAsync(dbContext, app.Logger));
     await TrySeedStepAsync(nameof(EnsureAboutPageResumeSectionAsync), () => EnsureAboutPageResumeSectionAsync(dbContext, app.Logger));
     await TrySeedStepAsync(nameof(EnsureWikiPagesHaveBlocksAsync), () => EnsureWikiPagesHaveBlocksAsync(dbContext, app.Logger));
     await TrySeedStepAsync(nameof(EnsureSentinelLearningWorkflowAsync), () => EnsureSentinelLearningWorkflowAsync(scope.ServiceProvider, app.Logger));
@@ -3199,6 +3200,50 @@ static async Task EnsureGrantWatsonHomepageAsync(ApplicationDbContext dbContext,
     }
 
     await dbContext.SaveChangesAsync();
+}
+
+// Seeds the Portfolio page once. Unlike EnsureGrantWatsonHomepageAsync (which re-applies its
+// template on every restart until real content replaces a detected "still legacy" state), this
+// only ever creates the page if the slug doesn't exist yet - it's a genuine one-time seed, not
+// a reapply-until-customized migration, since a portfolio is exactly the kind of content meant
+// to be hand-curated afterward (reordered, reworded, added to) without a restart discarding it.
+static async Task EnsurePortfolioPageAsync(ApplicationDbContext dbContext, ILogger logger)
+{
+    var site = await dbContext.CmsSites.FirstOrDefaultAsync(s => s.Slug == GrantWatsonHomepageTemplate.SiteSlug);
+    if (site is null)
+    {
+        // The homepage seed step (run immediately before this one) creates the site; if that
+        // step didn't run or failed, there's nothing to attach a Portfolio page to yet - the
+        // next restart retries both steps.
+        return;
+    }
+
+    var existing = await dbContext.CmsPages
+        .FirstOrDefaultAsync(page => page.SiteId == site.Id && page.ParentPageId == null && page.Slug == GrantWatsonPortfolioPageTemplate.Slug);
+    if (existing is not null)
+    {
+        return;
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var page = new CmsPage
+    {
+        SiteId = site.Id,
+        Title = "Portfolio",
+        Slug = GrantWatsonPortfolioPageTemplate.Slug,
+        BlocksJson = GrantWatsonPortfolioPageTemplate.CreateBlocksJson(),
+        MetaTitle = GrantWatsonPortfolioPageTemplate.MetaTitle,
+        MetaDescription = GrantWatsonPortfolioPageTemplate.MetaDescription,
+        Status = CmsPageStatuses.Published,
+        PublishedAt = now,
+        CreatedAt = now,
+        CreatedBy = "system",
+        UpdatedAt = now,
+        UpdatedBy = "system"
+    };
+    dbContext.CmsPages.Add(page);
+    await dbContext.SaveChangesAsync();
+    logger.LogInformation("Created the Portfolio page for {SiteSlug}.", GrantWatsonHomepageTemplate.SiteSlug);
 }
 
 // One-time content migration: folds the resume/CV content into the "about" Canvas page
