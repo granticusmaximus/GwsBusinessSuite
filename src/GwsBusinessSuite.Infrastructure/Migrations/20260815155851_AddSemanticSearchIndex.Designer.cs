@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GwsBusinessSuite.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260815154629_AddSemanticSearchIndex")]
+    [Migration("20260815155851_AddSemanticSearchIndex")]
     partial class AddSemanticSearchIndex
     {
         /// <inheritdoc />
