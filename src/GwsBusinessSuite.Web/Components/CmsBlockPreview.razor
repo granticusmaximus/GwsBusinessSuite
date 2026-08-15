@@ -2,6 +2,7 @@
 @using Markdig
 @using System.Text.Json
 @inject GlobalBlockResolver GlobalBlockResolver
+@inject ICmsBuilderService CmsBuilderService
 
 @if (!string.IsNullOrWhiteSpace(ParseError))
 {
@@ -30,7 +31,7 @@ else
                 {
                     @foreach (var widget in column.Widgets)
                     {
-                        <section class="cms-block-preview-card mb-3" style="@WidgetStylePreviewAttr(widget)">
+                        <section class="cms-block-preview-card mb-3" style="@widget.Style.ToInlineStyle(_tokens)">
                             @RenderWidget(widget)
                         </section>
                     }
@@ -50,6 +51,7 @@ else
 
     private PageLayout? Layout { get; set; }
     private string ParseError { get; set; } = string.Empty;
+    private DesignTokenSet? _tokens;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -62,6 +64,8 @@ else
             if (Layout is not null && SiteId is { } siteId)
             {
                 await GlobalBlockResolver.ResolveAsync(siteId, Layout);
+                var site = await CmsBuilderService.GetSiteAsync(siteId);
+                _tokens = site is not null ? DesignTokenJson.ParseOrEmpty(site.DesignTokensJson) : null;
             }
         }
         catch (Exception ex)
@@ -227,12 +231,6 @@ else
             return [];
         }
     }
-
-    // Previews a widget's Style overrides (Phase 6) on its preview card wrapper — this
-    // preview is already a simplified "chip + fields" summary rather than a pixel-match of
-    // the live render, so applying the override here (rather than reimplementing every
-    // widget type's real markup) is enough to make style choices visible while editing.
-    private static string WidgetStylePreviewAttr(LayoutWidget widget) => widget.Style.ToInlineStyle();
 
     private static string Get(IReadOnlyDictionary<string, string> p, string key, string fallback = "") =>
         p.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v) ? v : fallback;

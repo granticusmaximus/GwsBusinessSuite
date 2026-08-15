@@ -83,6 +83,13 @@ public sealed class WidgetStyle
     public string TextColor { get; set; } = "";
     public string BackgroundColor { get; set; } = "";
 
+    // Optional named reference into the site's DesignTokenSet (see DesignTokenModels.cs), e.g.
+    // "Primary" - when set and a matching token exists, it takes precedence over the raw
+    // TextColor/BackgroundColor value above at render time, so changing the token once cascades
+    // everywhere it's referenced. Empty = use the raw value (or nothing, if that's also empty).
+    public string TextColorToken { get; set; } = "";
+    public string BackgroundColorToken { get; set; } = "";
+
     // none | sm | md | lg | xl — same scale as LayoutSection.Padding, for consistency.
     public string Padding { get; set; } = "none";
 
@@ -92,6 +99,11 @@ public sealed class WidgetStyle
     // default | sm | md | lg | xl — scales the widget's base font-size; "default" leaves
     // the widget type's own natural size untouched.
     public string FontSize { get; set; } = "default";
+
+    // Optional named reference into the site's DesignTokenSet's type scale - same precedence
+    // convention as TextColorToken: takes over from FontSize's fixed scale when set and a
+    // matching step exists.
+    public string FontSizeToken { get; set; } = "";
 
     private static readonly Dictionary<string, string> PaddingRems = new()
     {
@@ -110,11 +122,15 @@ public sealed class WidgetStyle
 
     public bool HasAnyOverride =>
         !string.IsNullOrWhiteSpace(TextColor) || !string.IsNullOrWhiteSpace(BackgroundColor)
-        || Padding != "none" || BorderRadius != "none" || FontSize != "default";
+        || !string.IsNullOrWhiteSpace(TextColorToken) || !string.IsNullOrWhiteSpace(BackgroundColorToken)
+        || Padding != "none" || BorderRadius != "none" || FontSize != "default"
+        || !string.IsNullOrWhiteSpace(FontSizeToken);
 
     // Builds the inline style="" attribute value for a wrapper element around the widget's
-    // rendered content. Returns "" (no wrapper needed) when nothing is overridden.
-    public string ToInlineStyle()
+    // rendered content. Returns "" (no wrapper needed) when nothing is overridden. `tokens` is
+    // optional so every existing call site keeps working unchanged - passing none simply means
+    // *Token fields never resolve and the raw values are used, same as before this existed.
+    public string ToInlineStyle(DesignTokenSet? tokens = null)
     {
         if (!HasAnyOverride)
         {
@@ -122,12 +138,35 @@ public sealed class WidgetStyle
         }
 
         var parts = new List<string>();
-        if (!string.IsNullOrWhiteSpace(TextColor)) parts.Add($"color:{TextColor}");
-        if (!string.IsNullOrWhiteSpace(BackgroundColor)) parts.Add($"background-color:{BackgroundColor}");
+        var textColor = ResolveColor(TextColorToken, TextColor, tokens);
+        if (!string.IsNullOrWhiteSpace(textColor)) parts.Add($"color:{textColor}");
+        var backgroundColor = ResolveColor(BackgroundColorToken, BackgroundColor, tokens);
+        if (!string.IsNullOrWhiteSpace(backgroundColor)) parts.Add($"background-color:{backgroundColor}");
         if (Padding != "none" && PaddingRems.TryGetValue(Padding, out var pad)) parts.Add($"padding:{pad}");
         if (BorderRadius != "none" && BorderRadiusPx.TryGetValue(BorderRadius, out var radius)) parts.Add($"border-radius:{radius}");
-        if (FontSize != "default" && FontSizeRems.TryGetValue(FontSize, out var size)) parts.Add($"font-size:{size}");
+        var fontSize = ResolveFontSize(tokens);
+        if (!string.IsNullOrWhiteSpace(fontSize)) parts.Add($"font-size:{fontSize}");
 
         return string.Join(';', parts);
+    }
+
+    private static string? ResolveColor(string tokenName, string rawValue, DesignTokenSet? tokens)
+    {
+        if (!string.IsNullOrWhiteSpace(tokenName) && tokens is not null)
+        {
+            var match = tokens.Colors.FirstOrDefault(color => string.Equals(color.Name, tokenName, StringComparison.OrdinalIgnoreCase));
+            if (match is not null) return match.Hex;
+        }
+        return string.IsNullOrWhiteSpace(rawValue) ? null : rawValue;
+    }
+
+    private string? ResolveFontSize(DesignTokenSet? tokens)
+    {
+        if (!string.IsNullOrWhiteSpace(FontSizeToken) && tokens is not null)
+        {
+            var step = tokens.TypeScale.FirstOrDefault(item => string.Equals(item.Name, FontSizeToken, StringComparison.OrdinalIgnoreCase));
+            if (step is not null) return step.RemValue;
+        }
+        return FontSize != "default" && FontSizeRems.TryGetValue(FontSize, out var size) ? size : null;
     }
 }

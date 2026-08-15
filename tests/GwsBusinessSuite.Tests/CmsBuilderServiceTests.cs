@@ -782,6 +782,42 @@ public sealed class CmsBuilderServiceTests
         importedLayout.Sections.Single().Columns.Single().Widgets.Single().GlobalBlockId.Should().Be(importedGlobalBlockId);
     }
 
+    [Fact]
+    public async Task SaveSiteAsync_ShouldRoundTripDesignTokensJson()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+        var tokens = new DesignTokenSet(
+            [new DesignToken("Primary", "#1c3d5a")],
+            [new TypeScaleStep("Body", "1rem")],
+            [new SpacingScaleStep("Gutter", "1.5rem")]);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel
+        {
+            Name = "Site",
+            DesignTokensJson = DesignTokenJson.Serialize(tokens)
+        });
+
+        var reloaded = await service.GetSiteAsync(site.Id);
+        var reloadedTokens = DesignTokenJson.ParseOrEmpty(reloaded!.DesignTokensJson);
+        reloadedTokens.Colors.Should().ContainSingle(color => color.Name == "Primary" && color.Hex == "#1c3d5a");
+        reloadedTokens.TypeScale.Should().ContainSingle(step => step.Name == "Body" && step.RemValue == "1rem");
+        reloadedTokens.SpacingScale.Should().ContainSingle(step => step.Name == "Gutter" && step.RemValue == "1.5rem");
+    }
+
+    [Fact]
+    public async Task SaveSiteAsync_ShouldDefaultDesignTokensJson_WhenNotProvided()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+
+        var tokens = DesignTokenJson.ParseOrEmpty(site.DesignTokensJson);
+        tokens.Colors.Should().BeEmpty();
+        tokens.TypeScale.Should().BeEmpty();
+    }
+
     private static async Task<ApplicationDbContext> CreateDbAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

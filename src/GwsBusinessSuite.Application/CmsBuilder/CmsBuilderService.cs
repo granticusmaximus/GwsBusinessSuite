@@ -205,6 +205,7 @@ public sealed class CmsBuilderService(
         site.FontPairingKey = string.IsNullOrWhiteSpace(editor.FontPairingKey) ? CmsFontPairings.Elegant : editor.FontPairingKey.Trim();
         site.LogoUrl = editor.LogoUrl?.Trim() ?? string.Empty;
         site.FaviconUrl = editor.FaviconUrl?.Trim() ?? string.Empty;
+        site.DesignTokensJson = string.IsNullOrWhiteSpace(editor.DesignTokensJson) ? "{}" : editor.DesignTokensJson.Trim();
         site.UpdatedAt = now;
         site.UpdatedBy = "cms-ui";
 

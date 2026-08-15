@@ -81,6 +81,68 @@
 
 <div class="card border-0 shadow-sm mt-3" style="max-width: 640px;">
     <div class="card-body">
+        <label class="form-label fw-semibold small">Design Tokens</label>
+        <p class="text-secondary small">Named colors and a type scale a widget's Style panel can reference instead of a raw hex/size value - change a token here and every widget referencing it updates, in Canvas Studio and on the live site.</p>
+
+        <div class="small fw-semibold text-secondary text-uppercase mb-1" style="letter-spacing:.05em;">Colors</div>
+        @if (ColorTokens.Count > 0)
+        {
+            <div class="d-flex flex-column gap-1 mb-2">
+                @foreach (var token in ColorTokens)
+                {
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="d-inline-block rounded" style="width:1.25rem;height:1.25rem;background:@token.Hex;border:1px solid rgba(0,0,0,.15);"></span>
+                        <span class="small flex-grow-1">@token.Name</span>
+                        <span class="small text-secondary font-monospace">@token.Hex</span>
+                        <button type="button" class="btn btn-sm btn-link text-danger p-0" @onclick="() => RemoveColorToken(token)">Remove</button>
+                    </div>
+                }
+            </div>
+        }
+        <div class="row g-2 align-items-end mb-3">
+            <div class="col-5">
+                <input class="form-control form-control-sm" placeholder="Name (e.g. Primary)" @bind="NewColorName" @bind:event="oninput" />
+            </div>
+            <div class="col-3">
+                <input type="color" class="form-control form-control-color form-control-sm w-100" @bind="NewColorHex" />
+            </div>
+            <div class="col-4">
+                <button type="button" class="btn btn-sm btn-outline-primary w-100" disabled="@string.IsNullOrWhiteSpace(NewColorName)" @onclick="AddColorToken">Add color</button>
+            </div>
+        </div>
+
+        <div class="small fw-semibold text-secondary text-uppercase mb-1" style="letter-spacing:.05em;">Type scale</div>
+        @if (TypeScaleTokens.Count > 0)
+        {
+            <div class="d-flex flex-column gap-1 mb-2">
+                @foreach (var step in TypeScaleTokens)
+                {
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="small flex-grow-1">@step.Name</span>
+                        <span class="small text-secondary font-monospace">@step.RemValue</span>
+                        <button type="button" class="btn btn-sm btn-link text-danger p-0" @onclick="() => RemoveTypeScaleStep(step)">Remove</button>
+                    </div>
+                }
+            </div>
+        }
+        <div class="row g-2 align-items-end">
+            <div class="col-5">
+                <input class="form-control form-control-sm" placeholder="Name (e.g. Body)" @bind="NewTypeScaleName" @bind:event="oninput" />
+            </div>
+            <div class="col-3">
+                <input class="form-control form-control-sm" placeholder="1rem" @bind="NewTypeScaleRem" @bind:event="oninput" />
+            </div>
+            <div class="col-4">
+                <button type="button" class="btn btn-sm btn-outline-primary w-100" disabled="@(string.IsNullOrWhiteSpace(NewTypeScaleName) || string.IsNullOrWhiteSpace(NewTypeScaleRem))" @onclick="AddTypeScaleStep">Add step</button>
+            </div>
+        </div>
+
+        <button class="btn btn-primary btn-sm mt-3" @onclick="SaveAsync" disabled="@IsBusy">Save changes</button>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm mt-3" style="max-width: 640px;">
+    <div class="card-body">
         <label class="form-label fw-semibold small">Portable site recipe</label>
         <p class="text-secondary small">A recipe is this site's structure - pages, categories, custom fields, global blocks, and design settings - as a portable JSON package. Importing always creates a <strong>brand-new site</strong> with fresh page/category/field ids, and every imported page starts as a Draft so nothing goes live until you review and publish it.</p>
         <label class="btn btn-sm btn-outline-primary mb-0 @(IsBusy ? "disabled" : string.Empty)">
@@ -154,6 +216,13 @@
     private string FontPairingInput { get; set; } = CmsFontPairings.Elegant;
     private string LogoUrlInput { get; set; } = string.Empty;
     private string FaviconUrlInput { get; set; } = string.Empty;
+    private List<DesignToken> ColorTokens { get; set; } = [];
+    private List<TypeScaleStep> TypeScaleTokens { get; set; } = [];
+    private List<SpacingScaleStep> SpacingScaleTokens { get; set; } = [];
+    private string NewColorName { get; set; } = string.Empty;
+    private string NewColorHex { get; set; } = "#000000";
+    private string NewTypeScaleName { get; set; } = string.Empty;
+    private string NewTypeScaleRem { get; set; } = string.Empty;
     private bool IsBusy { get; set; }
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
@@ -186,8 +255,32 @@
         FontPairingInput = site.FontPairingKey;
         LogoUrlInput = site.LogoUrl;
         FaviconUrlInput = site.FaviconUrl;
+        var tokens = DesignTokenJson.ParseOrEmpty(site.DesignTokensJson);
+        ColorTokens = tokens.Colors.ToList();
+        TypeScaleTokens = tokens.TypeScale.ToList();
+        SpacingScaleTokens = tokens.SpacingScale.ToList();
         PageProperties = (await CmsBuilderService.ListPagePropertiesAsync(site.Id)).ToList();
     }
+
+    private void AddColorToken()
+    {
+        if (string.IsNullOrWhiteSpace(NewColorName)) return;
+        ColorTokens.Add(new DesignToken(NewColorName.Trim(), NewColorHex));
+        NewColorName = string.Empty;
+        NewColorHex = "#000000";
+    }
+
+    private void RemoveColorToken(DesignToken token) => ColorTokens.Remove(token);
+
+    private void AddTypeScaleStep()
+    {
+        if (string.IsNullOrWhiteSpace(NewTypeScaleName) || string.IsNullOrWhiteSpace(NewTypeScaleRem)) return;
+        TypeScaleTokens.Add(new TypeScaleStep(NewTypeScaleName.Trim(), NewTypeScaleRem.Trim()));
+        NewTypeScaleName = string.Empty;
+        NewTypeScaleRem = string.Empty;
+    }
+
+    private void RemoveTypeScaleStep(TypeScaleStep step) => TypeScaleTokens.Remove(step);
 
     private async Task AddPropertyAsync()
     {
@@ -251,7 +344,8 @@
                 AccentColorHex = AccentColorInput,
                 FontPairingKey = FontPairingInput,
                 LogoUrl = LogoUrlInput,
-                FaviconUrl = FaviconUrlInput
+                FaviconUrl = FaviconUrlInput,
+                DesignTokensJson = DesignTokenJson.Serialize(new DesignTokenSet(ColorTokens, TypeScaleTokens, SpacingScaleTokens))
             });
 
             CurrentSite = saved;

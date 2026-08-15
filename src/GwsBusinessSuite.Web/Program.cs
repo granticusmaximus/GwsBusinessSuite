@@ -1638,7 +1638,7 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     var articles = CmsBlockHtmlRenderer.LayoutContainsPostsGrid(layout)
         ? await LoadPublicArticleSummariesAsync(dbFactory)
         : [];
-    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, pageSlug, editMode, articles, isLoggedIn: includeUnpublished);
+    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, pageSlug, editMode, articles, isLoggedIn: includeUnpublished, tokens: DesignTokenJson.ParseOrEmpty(site.DesignTokensJson));
     var pageTitle = System.Net.WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle);
     var metaDescription = System.Net.WebUtility.HtmlEncode(page.MetaDescription);
     var ogImageTag = string.IsNullOrWhiteSpace(page.OgImageUrl)
@@ -2367,7 +2367,7 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
         // The full nested path (not just the leaf slug) so a form widget's hidden "_path"
         // field matches what the live /cms/{siteSlug}/{**pageSlug} route would have passed.
         var fullPath = cmsBuilderService.BuildFullPath(page, allPages);
-        var bodySections = CmsBlockHtmlRenderer.Render(layout, site.Slug, fullPath, articles: articles);
+        var bodySections = CmsBlockHtmlRenderer.Render(layout, site.Slug, fullPath, articles: articles, tokens: DesignTokenJson.ParseOrEmpty(site.DesignTokensJson));
         var pageTitle = System.Net.WebUtility.HtmlEncode(
             string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle);
         var metaDescription = System.Net.WebUtility.HtmlEncode(page.MetaDescription);
@@ -2965,7 +2965,7 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     var articles = CmsBlockHtmlRenderer.LayoutContainsPostsGrid(layout)
         ? await LoadPublicArticleSummariesAsync(dbFactory)
         : [];
-    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, fullPath, articles: articles);
+    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, fullPath, articles: articles, tokens: DesignTokenJson.ParseOrEmpty(site.DesignTokensJson));
     if (showSubmittedBanner)
     {
         bodyHtml = PublicSiteHtmlRenderer.SubmittedBanner() + bodyHtml;

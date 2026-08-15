@@ -1001,6 +1001,12 @@ public sealed class CmsSite : AuditableEntity
     public string FontPairingKey { get; set; } = CmsFontPairings.Elegant;
     public string LogoUrl { get; set; } = string.Empty;
     public string FaviconUrl { get; set; } = string.Empty;
+
+    // A fuller token set (named colors + a type scale + a spacing scale) than AccentColorHex/
+    // FontPairingKey alone provide - see GwsBusinessSuite.Application.CmsBuilder.DesignTokenSet.
+    // Additive: a widget's WidgetStyle only resolves against this when it references a token by
+    // name, so every existing page with raw hex/size values renders identically either way.
+    public string DesignTokensJson { get; set; } = "{}";
 }
 
 public static class CmsPageStatuses

@@ -813,6 +813,18 @@ else
                                 <input type="color" class="form-control form-control-color w-100"
                                        value="@(string.IsNullOrWhiteSpace(selWidget.Style.TextColor) ? "#0f172a" : selWidget.Style.TextColor)"
                                        @oninput="(e) => SetStyleTextColor(selWidget, e.Value?.ToString() ?? string.Empty)" />
+                                @if (SiteTokens.Colors.Count > 0)
+                                {
+                                    <select class="form-select form-select-sm mt-1" value="@selWidget.Style.TextColorToken"
+                                            @onchange='(e) => SetStyleTextColorToken(selWidget, e.Value?.ToString() ?? string.Empty)'
+                                            title="A token, when set, overrides the color picker above and updates everywhere it's used if the token changes.">
+                                        <option value="">No token (use color above)</option>
+                                        @foreach (var token in SiteTokens.Colors)
+                                        {
+                                            <option value="@token.Name">@token.Name</option>
+                                        }
+                                    </select>
+                                }
                             </div>
                             <div class="col-6">
                                 <label class="form-label small fw-semibold d-flex align-items-center justify-content-between">
@@ -825,6 +837,18 @@ else
                                 <input type="color" class="form-control form-control-color w-100"
                                        value="@(string.IsNullOrWhiteSpace(selWidget.Style.BackgroundColor) ? "#ffffff" : selWidget.Style.BackgroundColor)"
                                        @oninput="(e) => SetStyleBackgroundColor(selWidget, e.Value?.ToString() ?? string.Empty)" />
+                                @if (SiteTokens.Colors.Count > 0)
+                                {
+                                    <select class="form-select form-select-sm mt-1" value="@selWidget.Style.BackgroundColorToken"
+                                            @onchange='(e) => SetStyleBackgroundColorToken(selWidget, e.Value?.ToString() ?? string.Empty)'
+                                            title="A token, when set, overrides the color picker above and updates everywhere it's used if the token changes.">
+                                        <option value="">No token (use color above)</option>
+                                        @foreach (var token in SiteTokens.Colors)
+                                        {
+                                            <option value="@token.Name">@token.Name</option>
+                                        }
+                                    </select>
+                                }
                             </div>
                             <div class="col-6">
                                 <label class="form-label small fw-semibold">Padding</label>
@@ -858,6 +882,18 @@ else
                                     <option value="lg">Large</option>
                                     <option value="xl">Extra Large</option>
                                 </select>
+                                @if (SiteTokens.TypeScale.Count > 0)
+                                {
+                                    <select class="form-select form-select-sm mt-1" value="@selWidget.Style.FontSizeToken"
+                                            @onchange='(e) => SetStyleFontSizeToken(selWidget, e.Value?.ToString() ?? string.Empty)'
+                                            title="A token, when set, overrides the size above and updates everywhere it's used if the token changes.">
+                                        <option value="">No token (use size above)</option>
+                                        @foreach (var step in SiteTokens.TypeScale)
+                                        {
+                                            <option value="@step.Name">@step.Name</option>
+                                        }
+                                    </select>
+                                }
                             </div>
                         </div>
 
@@ -2312,11 +2348,22 @@ else
     private void SetStyleFontSize(LayoutWidget widget, string value) =>
         SetWidgetStyle(widget, "font-size", style => style.FontSize = value);
 
+    private void SetStyleTextColorToken(LayoutWidget widget, string value) =>
+        SetWidgetStyle(widget, "text-color-token", style => style.TextColorToken = value);
+
+    private void SetStyleBackgroundColorToken(LayoutWidget widget, string value) =>
+        SetWidgetStyle(widget, "background-color-token", style => style.BackgroundColorToken = value);
+
+    private void SetStyleFontSizeToken(LayoutWidget widget, string value) =>
+        SetWidgetStyle(widget, "font-size-token", style => style.FontSizeToken = value);
+
+    private DesignTokenSet SiteTokens => _site is not null ? DesignTokenJson.ParseOrEmpty(_site.DesignTokensJson) : DesignTokenSet.Empty;
+
     private void SetWidgetStyle(LayoutWidget widget, string styleKey, Action<WidgetStyle> mutation)
     {
-        var before = widget.Style.ToInlineStyle();
+        var before = widget.Style.ToInlineStyle(SiteTokens);
         ApplyTrackedMutation($"{widget.Id}:style:{styleKey}", () => mutation(widget.Style), reloadPreview: false);
-        if (before == widget.Style.ToInlineStyle())
+        if (before == widget.Style.ToInlineStyle(SiteTokens))
         {
             return;
         }
@@ -2342,7 +2389,7 @@ else
                 {
                     type = "cms:style-changed",
                     widgetId,
-                    inlineStyle = style.ToInlineStyle(),
+                    inlineStyle = style.ToInlineStyle(SiteTokens),
                     hasAnyOverride = style.HasAnyOverride
                 });
         }

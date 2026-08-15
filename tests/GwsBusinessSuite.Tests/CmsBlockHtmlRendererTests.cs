@@ -239,12 +239,58 @@ public sealed class CmsBlockHtmlRendererTests
     }
 
     [Fact]
+    public void Render_ShouldResolveAColorToken_OverRawTextColor_WhenTokensAreSupplied()
+    {
+        var tokens = new DesignTokenSet([new DesignToken("Primary", "#1c3d5a")], [], []);
+
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"Hello"},"style":{"textColor":"#000000","textColorToken":"Primary"}}"""),
+            tokens: tokens);
+
+        Assert.Contains("color:#1c3d5a", html);
+        Assert.DoesNotContain("color:#000000", html);
+    }
+
+    [Fact]
+    public void Render_ShouldFallBackToRawTextColor_WhenTheReferencedTokenDoesNotExist()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"Hello"},"style":{"textColor":"#000000","textColorToken":"NoSuchToken"}}"""),
+            tokens: DesignTokenSet.Empty);
+
+        Assert.Contains("color:#000000", html);
+    }
+
+    [Fact]
     public void WidgetStyle_ToInlineStyle_ShouldReturnEmptyString_WhenAllFieldsAreDefault()
     {
         var style = new WidgetStyle();
 
         Assert.Equal(string.Empty, style.ToInlineStyle());
         Assert.False(style.HasAnyOverride);
+    }
+
+    [Fact]
+    public void WidgetStyle_ToInlineStyle_ShouldResolveBackgroundAndFontSizeTokens()
+    {
+        var tokens = new DesignTokenSet(
+            [new DesignToken("Surface", "#f7f5f1")],
+            [new TypeScaleStep("Lead", "1.25rem")],
+            []);
+        var style = new WidgetStyle { BackgroundColorToken = "Surface", FontSizeToken = "Lead" };
+
+        Assert.True(style.HasAnyOverride);
+        var inline = style.ToInlineStyle(tokens);
+        Assert.Contains("background-color:#f7f5f1", inline);
+        Assert.Contains("font-size:1.25rem", inline);
+    }
+
+    [Fact]
+    public void WidgetStyle_ToInlineStyle_ShouldBehaveIdentically_WhenNoTokensArgumentIsPassed()
+    {
+        var style = new WidgetStyle { TextColor = "#111111" };
+
+        Assert.Equal(style.ToInlineStyle(), style.ToInlineStyle(null));
     }
 
     [Fact]

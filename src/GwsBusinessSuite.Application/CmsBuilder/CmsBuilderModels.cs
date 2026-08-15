@@ -27,6 +27,8 @@ public sealed class CmsSiteEditorModel
     public string LogoUrl { get; set; } = string.Empty;
 
     public string FaviconUrl { get; set; } = string.Empty;
+
+    public string DesignTokensJson { get; set; } = "{}";
 }
 
 public sealed class CmsPageEditorModel

@@ -69,10 +69,10 @@ public static class CmsBlockHtmlRenderer
     // canvas route - that have no concept of a logged-in visitor at all). The one route that
     // does (admin.gwsapp.net's /cms/{siteSlug}/{**pageSlug} preview route) passes its own
     // already-computed IsAuthenticated check through explicitly.
-    public static string Render(string blocksJson, string siteSlug = "", string pageSlug = "", bool editMode = false, IReadOnlyList<PublicArticleSummary>? articles = null, bool isLoggedIn = false)
-        => Render(CmsBuilderJson.ParseLayout(blocksJson), siteSlug, pageSlug, editMode, articles, isLoggedIn);
+    public static string Render(string blocksJson, string siteSlug = "", string pageSlug = "", bool editMode = false, IReadOnlyList<PublicArticleSummary>? articles = null, bool isLoggedIn = false, DesignTokenSet? tokens = null)
+        => Render(CmsBuilderJson.ParseLayout(blocksJson), siteSlug, pageSlug, editMode, articles, isLoggedIn, tokens);
 
-    public static string Render(PageLayout? layout, string siteSlug = "", string pageSlug = "", bool editMode = false, IReadOnlyList<PublicArticleSummary>? articles = null, bool isLoggedIn = false)
+    public static string Render(PageLayout? layout, string siteSlug = "", string pageSlug = "", bool editMode = false, IReadOnlyList<PublicArticleSummary>? articles = null, bool isLoggedIn = false, DesignTokenSet? tokens = null)
     {
         if (layout is null || layout.Sections.Count == 0)
         {
@@ -85,7 +85,7 @@ public static class CmsBlockHtmlRenderer
         var html = new StringBuilder();
         foreach (var section in layout.Sections)
         {
-            html.Append(RenderSection(section, siteSlug, pageSlug, editMode, effectiveArticles, isLoggedIn));
+            html.Append(RenderSection(section, siteSlug, pageSlug, editMode, effectiveArticles, isLoggedIn, tokens));
         }
 
         return html.ToString();
@@ -507,7 +507,7 @@ public static class CmsBlockHtmlRenderer
         </script>
         """;
 
-    private static string RenderSection(LayoutSection section, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, bool isLoggedIn)
+    private static string RenderSection(LayoutSection section, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, bool isLoggedIn, DesignTokenSet? tokens = null)
     {
         var sectionClass = $"gws-section {BgClass(section.Background)} {PadClass(section.Padding)}".TrimEnd();
         var columnsClass = ColsClass(section.ColumnLayout);
@@ -539,7 +539,7 @@ public static class CmsBlockHtmlRenderer
                     continue;
                 }
 
-                var inner = WrapWithStyle(RenderWidget(widget, siteSlug, pageSlug, editMode, articles), widget.Style);
+                var inner = WrapWithStyle(RenderWidget(widget, siteSlug, pageSlug, editMode, articles), widget.Style, tokens);
                 var visibilityBadge = editMode ? VisibilityBadgeText(widget.Visibility) : string.Empty;
                 var hiddenHint = visibilityBadge.Length > 0
                     ? $"""<div class="gws-visibility-hint">{Html(visibilityBadge)}</div>"""
@@ -562,9 +562,9 @@ public static class CmsBlockHtmlRenderer
     // Wraps a widget's rendered HTML in a styled container when it has any per-widget
     // style override set (Phase 6) — otherwise returns the inner HTML untouched, so
     // widgets with no overrides render byte-for-byte as they did before this feature.
-    private static string WrapWithStyle(string innerHtml, WidgetStyle style)
+    private static string WrapWithStyle(string innerHtml, WidgetStyle style, DesignTokenSet? tokens = null)
     {
-        var inlineStyle = style.ToInlineStyle();
+        var inlineStyle = style.ToInlineStyle(tokens);
         return inlineStyle.Length == 0
             ? innerHtml
             : $"""<div class="gws-widget-style" style="{Html(inlineStyle)}">{innerHtml}</div>""";
