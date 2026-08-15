@@ -108,6 +108,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SocialPostTarget> SocialPostTargets => Set<SocialPostTarget>();
     public DbSet<SocialPostAlert> SocialPostAlerts => Set<SocialPostAlert>();
     public DbSet<AppUser> AppUsers => Set<AppUser>();
+    public DbSet<DeveloperApiKey> DeveloperApiKeys => Set<DeveloperApiKey>();
     public DbSet<WatchedTopic> WatchedTopics => Set<WatchedTopic>();
     public DbSet<NewsItem> NewsItems => Set<NewsItem>();
     public DbSet<PodcastShow> PodcastShows => Set<PodcastShow>();
@@ -608,6 +609,12 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
 
         modelBuilder.Entity<AppUser>().HasIndex(x => x.Username).IsUnique();
         modelBuilder.Entity<AppUser>().HasIndex(x => x.Role);
+        modelBuilder.Entity<DeveloperApiKey>().HasIndex(x => x.KeyPrefix).IsUnique();
+        modelBuilder.Entity<DeveloperApiKey>().HasIndex(x => x.RevokedAt);
+        modelBuilder.Entity<DeveloperApiKey>().Property(x => x.Name).HasMaxLength(100);
+        modelBuilder.Entity<DeveloperApiKey>().Property(x => x.KeyPrefix).HasMaxLength(32);
+        modelBuilder.Entity<DeveloperApiKey>().Property(x => x.KeyHash).HasMaxLength(64);
+        modelBuilder.Entity<DeveloperApiKey>().Property(x => x.ScopesCsv).HasMaxLength(512);
 
         modelBuilder.Entity<SecurityAuditEvent>().HasIndex(x => x.OccurredAtUnixSeconds);
         modelBuilder.Entity<SecurityAuditEvent>().HasIndex(x => new { x.Category, x.OccurredAtUnixSeconds });

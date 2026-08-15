@@ -9,6 +9,7 @@ using GwsBusinessSuite.Application.Comments;
 using GwsBusinessSuite.Application.Growth;
 using GwsBusinessSuite.Application.LiveShow;
 using GwsBusinessSuite.Application.Localization;
+using GwsBusinessSuite.Application.DeveloperApi;
 using GwsBusinessSuite.Application.Mobile;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure;
@@ -25,6 +26,7 @@ using GwsBusinessSuite.Web.Services;
 using GwsBusinessSuite.Web.Components;
 using GwsBusinessSuite.Web.Hubs;
 using GwsBusinessSuite.Web.Security;
+using GwsBusinessSuite.Web;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -161,7 +163,9 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.ExpireTimeSpan = TimeSpan.FromDays(14);
         options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
         options.Cookie.SameSite = SameSiteMode.Lax;
-    });
+    })
+    .AddScheme<AuthenticationSchemeOptions, DeveloperApiAuthenticationHandler>(
+        DeveloperApiAuthenticationDefaults.Scheme, _ => { });
 
 builder.Services.AddAuthorization(options =>
 {
@@ -190,6 +194,16 @@ builder.Services.AddAuthorization(options =>
         policy.AddAuthenticationSchemes(ClientPortalAuthenticationDefaults.Scheme);
         policy.RequireAuthenticatedUser();
     });
+
+    foreach (var scope in DeveloperApiScopes.All)
+    {
+        options.AddPolicy(DeveloperApiPolicies.ForScope(scope), policy =>
+        {
+            policy.AddAuthenticationSchemes(DeveloperApiAuthenticationDefaults.Scheme);
+            policy.RequireAuthenticatedUser();
+            policy.RequireClaim(DeveloperApiAuthenticationDefaults.ScopeClaim, scope);
+        });
+    }
 
     options.FallbackPolicy = options.GetPolicy("AdminOnly");
 });
@@ -304,6 +318,29 @@ builder.Services.AddRateLimiter(options =>
                 QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                 QueueLimit           = 0,
             }));
+
+    // Each issued key carries its own requests-per-minute allowance. Authentication runs
+    // before rate limiting, so the key id is a stable partition and callers behind the same
+    // NAT do not consume one another's budget. Invalid keys fall back to an IP partition.
+    options.AddPolicy("developer-api", context =>
+    {
+        var keyId = context.User.FindFirstValue(DeveloperApiAuthenticationDefaults.KeyIdClaim)
+            ?? $"ip:{context.Connection.RemoteIpAddress?.ToString() ?? "unknown"}";
+        var limit = int.TryParse(
+            context.User.FindFirstValue(DeveloperApiAuthenticationDefaults.RateLimitClaim),
+            out var configured)
+            ? Math.Clamp(configured, 1, 600)
+            : 30;
+        return RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: keyId,
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                Window = TimeSpan.FromMinutes(1),
+                PermitLimit = limit,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0
+            });
+    });
 
     // Only the login page wants a redirect on rejection; API-shaped endpoints should get
     // a plain 429 instead of being bounced to an HTML page.
@@ -485,13 +522,38 @@ if (!app.Environment.IsDevelopment())
     // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
+// API failures must remain machine-readable. In particular, do not re-execute a 401/403
+// through the HTML not-found endpoint used by the browser-facing application.
+app.UseWhen(
+    context => context.Request.Path.StartsWithSegments("/api/v1"),
+    branch => branch.UseStatusCodePages(async statusContext =>
+    {
+        var response = statusContext.HttpContext.Response;
+        response.ContentType = "application/problem+json";
+        await response.WriteAsJsonAsync(new Microsoft.AspNetCore.Mvc.ProblemDetails
+        {
+            Type = "about:blank",
+            Title = response.StatusCode switch
+            {
+                StatusCodes.Status401Unauthorized => "Unauthorized",
+                StatusCodes.Status403Forbidden => "Forbidden",
+                StatusCodes.Status404NotFound => "Not Found",
+                StatusCodes.Status429TooManyRequests => "Too Many Requests",
+                _ => "Request failed"
+            },
+            Status = response.StatusCode
+        });
+    }));
+
 // grantwatson.dev gets its own styled 404 (matching public-site.css) instead of the
 // admin's Bootstrap-styled not-found page — handled by one target endpoint that branches
 // internally on IsPublicHost, not two UseWhen-branched re-execute targets. The two-branch
 // version reliably broke auth on the admin side: a re-executed request replayed inside a
 // UseWhen branch somehow lost track of the target endpoint's AllowAnonymous metadata by the
 // time it reached UseAuthorization, bouncing every admin-side 404 through a login redirect.
-app.UseStatusCodePagesWithReExecute("/__not-found", createScopeForStatusCodePages: true);
+app.UseWhen(
+    context => !context.Request.Path.StartsWithSegments("/api/v1"),
+    branch => branch.UseStatusCodePagesWithReExecute("/__not-found", createScopeForStatusCodePages: true));
 // HTTP-only in Docker — remove HTTPS redirect so the container runs cleanly on port 8080
 
 // Serve Blazor static assets before auth checks.
@@ -534,6 +596,8 @@ app.MapHealthChecks("/health/ready", new()
 {
     Predicate = registration => registration.Tags.Contains("ready")
 }).AllowAnonymous();
+
+app.MapDeveloperApiEndpoints();
 
 // Notion connection webhooks are intentionally anonymous: Notion is the caller. Event
 // requests are authenticated with X-Notion-Signature (HMAC-SHA256 over the exact raw body);

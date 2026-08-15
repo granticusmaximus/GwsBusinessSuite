@@ -4,6 +4,7 @@
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Application.ContentStudio
+@using GwsBusinessSuite.Application.DeveloperApi
 @using GwsBusinessSuite.Application.Settings
 @using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Infrastructure.Data
@@ -15,6 +16,10 @@
 @inject IOptions<ContentStudioOptions> StudioOptions
 @inject IConfiguration Configuration
 @inject ILogger<Settings> Logger
+@inject IDeveloperApiKeyService DeveloperApiKeyService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>Settings</PageTitle>
 
@@ -158,6 +163,121 @@ else
             </div>
         </div>
     }
+    else if (ActiveTab == "Developer API")
+    {
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white border-bottom">
+                <h2 class="h5 mb-1">Issue an API key</h2>
+                <p class="small text-secondary mb-0">The full key is shown once. Store it in your integration's secret manager.</p>
+            </div>
+            <div class="card-body">
+                @if (!string.IsNullOrWhiteSpace(NewPlaintextApiKey))
+                {
+                    <div class="alert alert-warning" role="alert">
+                        <strong>Copy this key now. It cannot be shown again.</strong>
+                        <div class="input-group mt-2">
+                            <input id="new-developer-api-key" class="form-control font-monospace" readonly value="@NewPlaintextApiKey" />
+                            <button class="btn btn-outline-dark" type="button" @onclick="CopyApiKeyAsync"><i class="bi bi-copy me-1"></i>Copy</button>
+                        </div>
+                    </div>
+                }
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label small text-secondary">Key name</label>
+                        <input class="form-control" maxlength="100" @bind="NewApiKeyName" placeholder="e.g. Reporting integration" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small text-secondary">Requests per minute</label>
+                        <input class="form-control" type="number" min="1" max="600" @bind="NewApiRateLimit" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small text-secondary">Expires</label>
+                        <select class="form-select" @bind="NewApiExpiryDays">
+                            <option value="30">30 days</option>
+                            <option value="90">90 days</option>
+                            <option value="365">1 year</option>
+                            <option value="0">Never</option>
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small text-secondary d-block">Scopes</label>
+                        <div class="row g-2">
+                            @foreach (var scope in DeveloperApiScopes.All)
+                            {
+                                <div class="col-sm-6 col-xl-4">
+                                    <label class="form-check border rounded p-2 ps-5 w-100">
+                                        <input class="form-check-input" type="checkbox" checked="@SelectedApiScopes.Contains(scope)"
+                                               @onchange="args => ToggleApiScope(scope, args.Value as bool? == true)" />
+                                        <span class="form-check-label font-monospace small">@scope</span>
+                                    </label>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+                <div class="gws-settings-actions mt-3">
+                    <span>Grant only the scopes this integration needs.</span>
+                    <button class="btn btn-primary" @onclick="IssueApiKeyAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewApiKeyName) || SelectedApiScopes.Count == 0)">
+                        @(IsBusy ? "Issuing…" : "Issue key")
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white border-bottom"><h2 class="h5 mb-0">Issued keys</h2></div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead><tr><th>Name</th><th>Prefix</th><th>Scopes</th><th>Usage</th><th>Status</th><th></th></tr></thead>
+                    <tbody>
+                        @if (ApiKeys.Count == 0)
+                        {
+                            <tr><td colspan="6" class="text-center text-secondary py-4">No developer API keys have been issued.</td></tr>
+                        }
+                        @foreach (var key in ApiKeys)
+                        {
+                            <tr>
+                                <td><strong>@key.Name</strong><div class="small text-secondary">Created @key.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")</div></td>
+                                <td><code>@key.KeyPrefix…</code></td>
+                                <td><div class="d-flex flex-wrap gap-1">@foreach (var scope in key.Scopes) { <span class="badge text-bg-light border">@scope</span> }</div></td>
+                                <td><span>@key.RequestCount.ToString("N0") requests</span><div class="small text-secondary">@(key.LastUsedAt?.ToLocalTime().ToString("MMM d, h:mm tt") ?? "Never used") · @key.RateLimitPerMinute/min</div></td>
+                                <td>
+                                    @if (key.RevokedAt is not null) { <span class="badge text-bg-secondary">Revoked</span> }
+                                    else if (key.ExpiresAt <= DateTimeOffset.UtcNow) { <span class="badge text-bg-warning">Expired</span> }
+                                    else { <span class="badge text-bg-success">Active</span> }
+                                </td>
+                                <td class="text-end">
+                                    @if (key.RevokedAt is null)
+                                    {
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => RevokeApiKeyAsync(key)" disabled="@IsBusy">Revoke</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom"><h2 class="h5 mb-0">API reference</h2></div>
+            <div class="card-body">
+                <p>Send the key as <code>Authorization: Bearer YOUR_KEY</code>. Responses use JSON and validation failures use Problem Details.</p>
+                <div class="table-responsive mb-3">
+                    <table class="table table-sm">
+                        <thead><tr><th>Resource</th><th>Read</th><th>Write</th></tr></thead>
+                        <tbody>
+                            <tr><td>Contacts</td><td><code>GET /api/v1/contacts</code></td><td><code>POST /api/v1/contacts</code>, <code>PUT /api/v1/contacts/&#123;id&#125;</code></td></tr>
+                            <tr><td>Deals</td><td><code>GET /api/v1/deals</code></td><td><code>POST /api/v1/deals</code>, <code>PUT /api/v1/deals/&#123;id&#125;</code></td></tr>
+                            <tr><td>CMS pages</td><td><code>GET /api/v1/cms-pages</code></td><td><code>POST /api/v1/cms-pages</code>, <code>PUT /api/v1/cms-pages/&#123;id&#125;</code></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <pre class="bg-dark text-light rounded p-3 mb-0"><code>curl "@($"{Navigation.BaseUri.TrimEnd('/')}/api/v1/contacts?page=1&pageSize=50")" \
+  -H "Authorization: Bearer YOUR_KEY"</code></pre>
+            </div>
+        </div>
+    }
         </section>
     </div>
 }
@@ -169,7 +289,8 @@ else
         new("Reading", "bi-book", "Public blog display"),
         new("Writing", "bi-pencil", "Post defaults"),
         new("Media", "bi-image", "Upload limits"),
-        new("SentinelGPT", "bi-stars", "Models and generation")
+        new("SentinelGPT", "bi-stars", "Models and generation"),
+        new("Developer API", "bi-braces-asterisk", "Keys, scopes, and docs")
     ];
     private string ActiveTab { get; set; } = "General";
 
@@ -189,6 +310,12 @@ else
     private string OllamaModelOverrideInput { get; set; } = string.Empty;
     private int? OllamaTimeoutOverrideInput { get; set; }
     private string HeroImageModelOverrideInput { get; set; } = string.Empty;
+    private List<DeveloperApiKeyView> ApiKeys { get; set; } = [];
+    private HashSet<string> SelectedApiScopes { get; } = [DeveloperApiScopes.ContactsRead];
+    private string NewApiKeyName { get; set; } = string.Empty;
+    private int NewApiRateLimit { get; set; } = 60;
+    private int NewApiExpiryDays { get; set; } = 90;
+    private string NewPlaintextApiKey { get; set; } = string.Empty;
 
     private List<ArticleCategory> Categories { get; set; } = new();
 
@@ -220,6 +347,7 @@ else
         OllamaModelOverrideInput = settings.OllamaModelOverride ?? string.Empty;
         OllamaTimeoutOverrideInput = settings.OllamaTimeoutMinutesOverride;
         HeroImageModelOverrideInput = settings.HeroImageModelOverride ?? string.Empty;
+        ApiKeys = (await DeveloperApiKeyService.ListAsync()).ToList();
 
         _loaded = true;
     }
@@ -296,7 +424,44 @@ else
         });
     }
 
-    private async Task RunSaveAsync(Func<Task> save)
+    private void ToggleApiScope(string scope, bool selected)
+    {
+        if (selected) SelectedApiScopes.Add(scope);
+        else SelectedApiScopes.Remove(scope);
+    }
+
+    private async Task IssueApiKeyAsync()
+    {
+        await RunSaveAsync(async () =>
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            DateTimeOffset? expiresAt = NewApiExpiryDays == 0 ? null : DateTimeOffset.UtcNow.AddDays(NewApiExpiryDays);
+            var issued = await DeveloperApiKeyService.IssueAsync(
+                NewApiKeyName, SelectedApiScopes, NewApiRateLimit, expiresAt, performedBy);
+            NewPlaintextApiKey = issued.PlaintextKey;
+            NewApiKeyName = string.Empty;
+            ApiKeys = (await DeveloperApiKeyService.ListAsync()).ToList();
+        }, "API key issued. Copy it now; the plaintext is not stored.");
+    }
+
+    private async Task RevokeApiKeyAsync(DeveloperApiKeyView key)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Revoke API key '{key.Name}'? Calls using it will stop immediately.")) return;
+        await RunSaveAsync(async () =>
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await DeveloperApiKeyService.RevokeAsync(key.Id, performedBy);
+            ApiKeys = (await DeveloperApiKeyService.ListAsync()).ToList();
+        }, "API key revoked.");
+    }
+
+    private async Task CopyApiKeyAsync()
+    {
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", NewPlaintextApiKey);
+        StatusMessage = "API key copied to clipboard.";
+    }
+
+    private async Task RunSaveAsync(Func<Task> save, string successMessage = "Settings saved.")
     {
         IsBusy = true;
         StatusMessage = string.Empty;
@@ -304,7 +469,7 @@ else
         try
         {
             await save();
-            StatusMessage = "Settings saved.";
+            StatusMessage = successMessage;
         }
         catch (Exception ex)
         {

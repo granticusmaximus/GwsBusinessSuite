@@ -418,6 +418,7 @@ public sealed class CmsBuilderService(
         }
 
         var now = _timeProvider.GetUtcNow();
+        var effectiveActor = string.IsNullOrWhiteSpace(actor) ? "cms-ui" : actor;
         var page = editor.PageId is { } pageId
             ? await dbContext.CmsPages.FirstOrDefaultAsync(item => item.Id == pageId, cancellationToken)
             : null;
@@ -431,7 +432,7 @@ public sealed class CmsBuilderService(
             Slug = string.Empty,
             BlocksJson = "{\"sections\":[]}",
             CreatedAt = now,
-            CreatedBy = "cms-ui"
+            CreatedBy = effectiveActor
         };
 
         if (editor.ParentPageId is { } requestedParentId)
@@ -490,7 +491,7 @@ public sealed class CmsBuilderService(
         }
         page.Status = requestedStatus;
         page.UpdatedAt = now;
-        page.UpdatedBy = "cms-ui";
+        page.UpdatedBy = effectiveActor;
 
         if (isNew)
         {

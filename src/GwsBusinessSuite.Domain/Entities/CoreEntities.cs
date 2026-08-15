@@ -35,6 +35,23 @@ public sealed class AppUser : AuditableEntity
     public DateTimeOffset? MfaEnrolledAt { get; set; }
 }
 
+// Machine credential for the outbound developer API. Only a SHA-256 hash of the complete
+// issued key is persisted; KeyPrefix is a non-secret selector/display hint used to find the
+// candidate row without scanning every key. The plaintext key is returned exactly once.
+public sealed class DeveloperApiKey : AuditableEntity
+{
+    public required string Name { get; set; }
+    public required string KeyPrefix { get; set; }
+    public required string KeyHash { get; set; }
+    public required string ScopesCsv { get; set; }
+    public int RateLimitPerMinute { get; set; } = 60;
+    public DateTimeOffset? ExpiresAt { get; set; }
+    public DateTimeOffset? LastUsedAt { get; set; }
+    public long RequestCount { get; set; }
+    public DateTimeOffset? RevokedAt { get; set; }
+    public string? RevokedBy { get; set; }
+}
+
 public static class SeoArticleDraftStatuses
 {
     public const string Draft = "Draft";
