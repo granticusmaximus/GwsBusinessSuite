@@ -76,6 +76,7 @@ window.gwsProfessionalEditor = (() => {
         const walk = (node) => {
             [...node.children].forEach((child) => {
                 if (!allowedTags.has(child.tagName)) {
+                    walk(child);
                     child.replaceWith(...child.childNodes);
                     return;
                 }
