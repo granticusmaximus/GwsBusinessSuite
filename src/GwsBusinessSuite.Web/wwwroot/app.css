@@ -4687,6 +4687,12 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-composer > button.sentinel-gpt-send:disabled { background: #4a433d; color: #77716c; opacity: 1; }
 .sentinel-gpt-composer > button.sentinel-gpt-stop { background: #eeeae7; color: #211e1b; }
 .sentinel-gpt-composer > button.sentinel-gpt-stop:hover { background: #fff; color: #171513; }
+.sentinel-gpt-composer > button:disabled { cursor: default; opacity: .4; }
+.sentinel-gpt-composer > button.is-listening { color: #ef4444; animation: sentinel-gpt-mic-pulse 1.4s ease-in-out infinite; }
+@keyframes sentinel-gpt-mic-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, .35); }
+    50% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+}
 .sentinel-gpt-composer-wrap > small { display: block; margin-top: .4rem; color: #625d58; font-size: .57rem; text-align: center; }
 .sentinel-gpt-character-count { color: #d6a047; font-variant-numeric: tabular-nums; }
 

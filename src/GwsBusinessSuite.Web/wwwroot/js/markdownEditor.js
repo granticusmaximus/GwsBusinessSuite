@@ -31,7 +31,7 @@ window.gwsMarkdownEditor = (function () {
         const guide = command("guide", "https://www.markdownguide.org/basic-syntax/", "bi-question-circle", "Markdown guide");
 
         return compact
-            ? [bold, italic, heading, "|", unordered, ordered, checklist, quote, "|", link, code, preview, fullscreen]
+            ? [bold, italic, heading, "|", unordered, ordered, checklist, table, quote, "|", link, code, preview, fullscreen]
             : [bold, italic, heading, "|", quote, unordered, ordered, checklist, "|", link, image, code, table, rule, "|", preview, sideBySide, fullscreen, "|", guide];
     }
 

@@ -369,8 +369,23 @@
                     <i class="bi bi-tools"></i>
                     <span>@(_useTools ? "Tools on" : "Tools off")</span>
                 </button>
-                <button type="button" aria-label="Voice input" title="Voice input">
-                    <i class="bi bi-mic"></i>
+                @if (_ttsSupported)
+                {
+                    <button type="button" class="sentinel-gpt-context-pill @(_speakResponses ? "is-enabled" : null)"
+                            @onclick="ToggleSpeakResponses"
+                            title="@(_speakResponses ? "SentinelGPT reads new responses aloud" : "Enable voice output")">
+                        <i class="bi @(_speakResponses ? "bi-volume-up-fill" : "bi-volume-mute")"></i>
+                        <span>@(_speakResponses ? "Speak on" : "Speak off")</span>
+                    </button>
+                }
+                <button type="button"
+                        class="@(_listening ? "is-listening" : null)"
+                        aria-label="Voice input"
+                        aria-pressed="@_listening"
+                        title="Voice input"
+                        disabled="@(!_sttSupported || _generating)"
+                        @onclick="ToggleListeningAsync">
+                    <i class="bi @(_listening ? "bi-mic-fill" : "bi-mic")"></i>
                 </button>
                 @if (_generating && _activeGenerationId is not null)
                 {
@@ -445,6 +460,18 @@
     private readonly CancellationTokenSource _componentLifetime = new();
     private ElementReference _threadElement;
     private bool _scrollThreadAfterRender;
+
+    // Voice interface (Web Speech API via wwwroot/js/voiceInterface.js) - browser-native STT/TTS,
+    // no server-side speech model. Support is checked per-browser on first render since Firefox
+    // has neither API and Safari differs from Chrome; the mic button and "speak" toggle are
+    // hidden/disabled rather than shown-but-broken when unsupported.
+    private const string VoiceElementId = "sentinel-gpt-voice";
+    private DotNetObjectReference<SentinelGpt>? _voiceRef;
+    private bool _voiceInitialized;
+    private bool _sttSupported;
+    private bool _ttsSupported;
+    private bool _listening;
+    private bool _speakResponses;
     private int RemainingPromptCharacters =>
         Math.Max(0, SentinelGptDefaults.MaxInstructionLength - _instruction.Length);
 
@@ -750,6 +777,10 @@
                 {
                     _runs.Add(completed);
                     RequestThreadScroll();
+                    if (_speakResponses && _ttsSupported && !string.IsNullOrWhiteSpace(completed.Output))
+                    {
+                        await SpeakAsync(completed.Output);
+                    }
                 }
                 return;
             }
@@ -792,6 +823,26 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender && !_componentLifetime.IsCancellationRequested)
+        {
+            try
+            {
+                _sttSupported = await JS.InvokeAsync<bool>("gwsVoiceInterface.isSttSupported");
+                _ttsSupported = await JS.InvokeAsync<bool>("gwsVoiceInterface.isTtsSupported");
+                if (_sttSupported || _ttsSupported)
+                {
+                    _voiceRef = DotNetObjectReference.Create(this);
+                    await JS.InvokeVoidAsync("gwsVoiceInterface.init", VoiceElementId, _voiceRef);
+                    _voiceInitialized = true;
+                }
+                StateHasChanged();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit gone before the first render finished - nothing to wire up.
+            }
+        }
+
         if (!_scrollThreadAfterRender || _componentLifetime.IsCancellationRequested)
         {
             return;
@@ -807,6 +858,87 @@
             // The response coordinator continues even when this browser circuit is gone.
         }
     }
+
+    private async Task ToggleListeningAsync()
+    {
+        if (!_sttSupported || !_voiceInitialized)
+        {
+            return;
+        }
+
+        if (_listening)
+        {
+            await JS.InvokeVoidAsync("gwsVoiceInterface.stopListening", VoiceElementId);
+            return;
+        }
+
+        _error = string.Empty;
+        _listening = true;
+        await JS.InvokeVoidAsync("gwsVoiceInterface.startListening", VoiceElementId, System.Globalization.CultureInfo.CurrentUICulture.Name);
+    }
+
+    private void ToggleSpeakResponses() => _speakResponses = !_speakResponses;
+
+    private async Task SpeakAsync(string text)
+    {
+        if (!_ttsSupported || !_voiceInitialized)
+        {
+            return;
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync("gwsVoiceInterface.speak", VoiceElementId, text, System.Globalization.CultureInfo.CurrentUICulture.Name);
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit gone - nothing to speak to.
+        }
+    }
+
+    // Fired once Web Speech recognition finalizes an utterance. Populating the composer and
+    // sending immediately (rather than waiting for the user to press Send) matches how the
+    // existing Enter-to-send composer already behaves - a finished spoken utterance is the
+    // voice equivalent of pressing Enter, not a dictation draft to review first.
+    [JSInvokable]
+    public async Task OnVoiceTranscript(string transcript)
+    {
+        _listening = false;
+        if (string.IsNullOrWhiteSpace(transcript))
+        {
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        _instruction = transcript.Trim();
+        await InvokeAsync(StateHasChanged);
+        await SendAsync();
+    }
+
+    [JSInvokable]
+    public async Task OnVoiceError(string error)
+    {
+        _listening = false;
+        // "no-speech"/"aborted" are routine (the user paused or cancelled) - not worth surfacing
+        // as an error banner the way a real failure (e.g. "not-allowed", mic permission denied) is.
+        if (error is not ("no-speech" or "aborted"))
+        {
+            _error = error == "not-allowed"
+                ? "Microphone access was denied. Allow microphone access to use voice input."
+                : $"Voice input failed ({error}).";
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public async Task OnListeningEnded()
+    {
+        _listening = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnSpeakingEnded() => Task.CompletedTask;
 
     private async Task HandleComposerKeyDownAsync(KeyboardEventArgs args)
     {
@@ -1034,10 +1166,21 @@
         return "The model was ready and generation was the primary measured cost.";
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         _componentLifetime.Cancel();
         _componentLifetime.Dispose();
-        return ValueTask.CompletedTask;
+        if (_voiceInitialized)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("gwsVoiceInterface.destroy", VoiceElementId);
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit already gone.
+            }
+        }
+        _voiceRef?.Dispose();
     }
 }

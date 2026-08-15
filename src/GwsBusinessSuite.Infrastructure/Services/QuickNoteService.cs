@@ -19,7 +19,14 @@ public sealed class QuickNoteService(IAppDbContext db, IWikiService wikiService)
             Title = trimmedTitle,
             Icon = "📝",
             ParentWikiPageId = folder.Id,
-            BlocksJson = WikiBlockJson.Serialize(WikiBlockJson.FromLegacyMarkdown(markdownBody))
+            // FromMarkdown (not FromLegacyMarkdown) - the note needs to open editable in the
+            // interactive Sentinel wiki editor, which renders from each block's RichText spans.
+            // FromLegacyMarkdown stashes the whole body as an opaque Props["content"] string
+            // with an empty RichText array, meant only for read-only rendering, so a note saved
+            // that way appeared to have a title but no visible content. FromMarkdown also gives
+            // real list/checklist/table syntax typed into the note a native block instead of
+            // flattening it to plain text.
+            BlocksJson = WikiBlockJson.Serialize(WikiBlockJson.FromMarkdown(markdownBody))
         }, performedBy, cancellationToken: cancellationToken);
 
         await RebuildFolderIndexAsync(folder.Id, performedBy, cancellationToken);

@@ -28,7 +28,7 @@ public sealed class QuickNoteServiceTests
     }
 
     [Fact]
-    public async Task AddQuickNoteAsync_ShouldStoreTheBodyAsAMarkdownBlock()
+    public async Task AddQuickNoteAsync_ShouldStoreTheBodyAsAnEditableRichTextBlock()
     {
         await using var fixture = await Fixture.CreateAsync();
 
@@ -36,8 +36,38 @@ public sealed class QuickNoteServiceTests
 
         var blocks = WikiBlockJson.ParseBlocks(note.BlocksJson);
         blocks.Should().ContainSingle();
-        blocks[0].Type.Should().Be(WikiBlockTypes.Markdown);
-        blocks[0].Props["content"].Should().Be("Remember to follow up **soon**");
+        blocks[0].Type.Should().Be(WikiBlockTypes.Paragraph);
+        // Populated RichText (not just an opaque Props string) is what makes the note render
+        // and stay editable in the interactive wiki block editor - see wiki-block-editor.js's
+        // createContentEditable, which builds the DOM purely from block.richText.
+        blocks[0].PlainText.Should().Be("Remember to follow up soon");
+        blocks[0].RichText.Should().Contain(span => span.Text == "soon" && span.Bold);
+    }
+
+    [Fact]
+    public async Task AddQuickNoteAsync_ShouldParseChecklistsListsAndTablesIntoNativeBlocks()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+
+        const string body = """
+            - [ ] Call the vendor
+            - [x] Draft the agenda
+
+            - First point
+            - Second point
+
+            | Item | Qty |
+            | --- | --- |
+            | Widget | 3 |
+            """;
+        var note = await fixture.Service.AddQuickNoteAsync("Idea", body, "owner");
+
+        var blocks = WikiBlockJson.ParseBlocks(note.BlocksJson);
+        blocks.Where(b => b.Type == WikiBlockTypes.ToDo).Should().HaveCount(2);
+        blocks.Should().Contain(b => b.Type == WikiBlockTypes.ToDo && b.Props["checked"] == "false" && b.PlainText == "Call the vendor");
+        blocks.Should().Contain(b => b.Type == WikiBlockTypes.ToDo && b.Props["checked"] == "true" && b.PlainText == "Draft the agenda");
+        blocks.Where(b => b.Type == WikiBlockTypes.BulletedListItem).Should().HaveCount(2);
+        blocks.Should().Contain(b => b.Type == WikiBlockTypes.Table);
     }
 
     [Fact]
