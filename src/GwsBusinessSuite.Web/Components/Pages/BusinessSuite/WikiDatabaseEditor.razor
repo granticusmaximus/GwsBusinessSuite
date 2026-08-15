@@ -269,9 +269,10 @@ else
                                     <div class="row g-2">
                                         <div class="col-md-8">
                                             <label class="form-label small text-secondary mb-1">Prompt</label>
-                                            <textarea class="form-control form-control-sm" rows="2" placeholder="Summarize [Notes] in one sentence."
-                                                      value="@aiConfig.AiPromptTemplate"
-                                                      @onchange="e => SetAiPromptTemplateAsync(property, e.Value?.ToString() ?? string.Empty)" disabled="@IsBusy"></textarea>
+                                            <ProfessionalWysiwygEditor Value="@aiConfig.AiPromptTemplate"
+                                                                       ValueChanged="value => SetAiPromptTemplateAsync(property, value)"
+                                                                       Compact="true" MinHeight="90px" Placeholder="Summarize [Notes] in one sentence."
+                                                                       AriaLabel="AI field prompt" Disabled="@IsBusy" />
                                         </div>
                                         <div class="col-md-4">
                                             <label class="form-label small text-secondary mb-1">Ollama model</label>
@@ -464,7 +465,8 @@ else
                             }
                             else if (_newPropertyType == WikiDatabasePropertyTypes.AiField)
                             {
-                                <textarea class="form-control form-control-sm mb-2" rows="2" placeholder="Summarize [Notes] in one sentence." @bind="_newAiPromptTemplate"></textarea>
+                                <ProfessionalWysiwygEditor @bind-Value="_newAiPromptTemplate" Compact="true" MinHeight="90px" CssClass="mb-2"
+                                                           Placeholder="Summarize [Notes] in one sentence." AriaLabel="New AI field prompt" />
                                 <input class="form-control form-control-sm mb-2" placeholder="Ollama model, e.g. llama3.1" @bind="_newAiModel" />
                                 <div class="form-text mb-2">Use <code>[Property name]</code> references. Generated on demand from a "Generate" button on the cell, never automatically.</div>
                             }

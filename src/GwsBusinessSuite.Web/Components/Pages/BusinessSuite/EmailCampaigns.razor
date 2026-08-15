@@ -41,7 +41,7 @@
                     <input class="form-control form-control-sm" placeholder="Campaign name" @bind="Editor.Name" />
                 </div>
                 <div class="mb-3">
-                    <textarea class="form-control form-control-sm" rows="2" placeholder="Description" @bind="Editor.Description"></textarea>
+                    <ProfessionalWysiwygEditor @bind-Value="Editor.Description" Compact="true" MinHeight="100px" Placeholder="Description" AriaLabel="Campaign description" />
                 </div>
 
                 <div class="d-flex align-items-center justify-content-between mb-2">
@@ -58,7 +58,8 @@
                             <button class="btn btn-sm btn-outline-danger" @onclick="() => Editor.Steps.RemoveAt(index)"><i class="bi bi-trash3"></i></button>
                         </div>
                         <input class="form-control form-control-sm mb-1" placeholder="Subject" @bind="step.Subject" />
-                        <textarea class="form-control form-control-sm mb-1" rows="3" placeholder="Body - {{FirstName}} and {{FullName}} are supported" @bind="step.Body"></textarea>
+                        <ProfessionalWysiwygEditor @bind-Value="step.Body" Compact="true" MinHeight="120px"
+                                                   Placeholder="Body — {{FirstName}} and {{FullName}} are supported" AriaLabel="Email body" CssClass="mb-1" />
                         @if (index > 0)
                         {
                             <div class="input-group input-group-sm" style="max-width:12rem;">

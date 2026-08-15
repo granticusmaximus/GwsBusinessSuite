@@ -24,6 +24,7 @@ using GwsBusinessSuite.Application.Podcasts;
 using GwsBusinessSuite.Application.Privacy;
 using GwsBusinessSuite.Application.Resume;
 using GwsBusinessSuite.Application.SecurityAudit;
+using GwsBusinessSuite.Application.SemanticSearch;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Application.SshTerminal;
 using GwsBusinessSuite.Application.Users;
@@ -68,12 +69,27 @@ public static class DependencyInjection
             .Validate(options => options.MaxResults is >= 1 and <= 10,
                 "OllamaWeb:MaxResults must be between 1 and 10.")
             .ValidateOnStart();
+        services.AddOptions<SemanticSearchOptions>()
+            .Bind(configuration.GetSection(SemanticSearchOptions.SectionName))
+            .Validate(options => !options.Enabled || !string.IsNullOrWhiteSpace(options.Model),
+                "SemanticSearch:Model is required when semantic search is enabled.")
+            .Validate(options => options.BatchSize is >= 1 and <= 50,
+                "SemanticSearch:BatchSize must be between 1 and 50.")
+            .Validate(options => options.ReconciliationMinutes is >= 1 and <= 1440,
+                "SemanticSearch:ReconciliationMinutes must be between 1 and 1440.")
+            .Validate(options => options.SimilarityThreshold is >= -1 and <= 1,
+                "SemanticSearch:SimilarityThreshold must be between -1 and 1.")
+            .ValidateOnStart();
 
         services.TryAddSingleton<IPublicContentCacheInvalidator, NoOpPublicContentCacheInvalidator>();
         services.AddSingleton<PublicContentCacheInvalidationInterceptor>();
+        services.AddSingleton<SemanticIndexQueue>();
+        services.AddSingleton<SemanticIndexSaveChangesInterceptor>();
         services.AddDbContextFactory<ApplicationDbContext>((serviceProvider, options) => options
             .UseSqlite(connectionString)
-            .AddInterceptors(serviceProvider.GetRequiredService<PublicContentCacheInvalidationInterceptor>()));
+            .AddInterceptors(
+                serviceProvider.GetRequiredService<PublicContentCacheInvalidationInterceptor>(),
+                serviceProvider.GetRequiredService<SemanticIndexSaveChangesInterceptor>()));
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
         services.AddScoped<IAppDbContextFactory, AppDbContextFactory>();
         services.AddScoped<IAdminPortalSummaryService, AdminPortalSummaryService>();
@@ -268,6 +284,8 @@ public static class DependencyInjection
         services.AddScoped<ISentinelWorkspaceImportService, SentinelWorkspaceImportService>();
         services.AddScoped<ISentinelWorkspaceService, SentinelWorkspaceService>();
         services.AddScoped<GwsBusinessSuite.Application.SuiteSearch.ISuiteSearchService, SuiteSearchService>();
+        services.AddScoped<IHybridSearchService, HybridSemanticSearchService>();
+        services.AddHostedService<SemanticIndexBackgroundService>();
         services.AddScoped<ISentinelCollaborationService, SentinelCollaborationService>();
         services.AddScoped<ISentinelAccessService, SentinelAccessService>();
         services.AddScoped<ISentinelAiService, SentinelAiService>();

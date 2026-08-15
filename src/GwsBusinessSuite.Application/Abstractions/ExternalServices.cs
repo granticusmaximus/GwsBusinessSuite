@@ -48,6 +48,14 @@ public interface IOllamaService
     Task PullModelAsync(string model, CancellationToken ct = default);
     Task DeleteModelAsync(string model, CancellationToken ct = default);
 
+    // Ollama's current batch embedding endpoint. Kept additive with a default implementation
+    // so existing test fakes and non-Ollama integrations remain source-compatible.
+    Task<IReadOnlyList<float[]>> EmbedAsync(
+        string model,
+        IReadOnlyList<string> inputs,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException("This Ollama service implementation does not support embeddings.");
+
     // Requires a model with image-generation capability (e.g. an installed Z-Image
     // Turbo / FLUX build) - returns raw base64 PNG bytes, no data: URI prefix.
     Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default);

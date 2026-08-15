@@ -1,7 +1,6 @@
 @page "/admin/article-editor/{ArticleId:guid}"
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "ContentAccess")]
-@implements IAsyncDisposable
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.AffiliateSuggestions
 @using GwsBusinessSuite.Application.Articles
@@ -61,8 +60,9 @@
         </div>
         <div class="card-body">
             <label class="form-label fw-semibold small">Revision notes</label>
-            <textarea class="form-control mb-3" rows="3" @bind="ReviseWithAiNotes" @bind:event="oninput"
-                      placeholder="e.g. Make the introduction shorter and add a section on error handling."></textarea>
+            <ProfessionalWysiwygEditor @bind-Value="ReviseWithAiNotes" Compact="true" MinHeight="110px" CssClass="mb-3"
+                                       Placeholder="e.g. Make the introduction shorter and add a section on error handling."
+                                       AriaLabel="AI revision notes" />
             @if (!string.IsNullOrWhiteSpace(ReviseWithAiError))
             {
                 <div class="alert alert-danger py-2 small mb-3">@ReviseWithAiError</div>
@@ -162,8 +162,8 @@ else
                 </div>
                 <div class="col-12">
                     <label class="form-label fw-semibold small">Meta Description</label>
-                    <textarea class="form-control" rows="2" @bind="MetaDescription"
-                              placeholder="Short description for search engine results (150–160 chars)"></textarea>
+                    <input class="form-control" @bind="MetaDescription" maxlength="320"
+                           placeholder="Short description for search engine results (150–160 chars)" />
                     <div class="form-text">@MetaDescription.Length / 160 characters</div>
                 </div>
                 <div class="col-md-4">
@@ -221,7 +221,8 @@ else
             <div class="row g-4">
                 <div class="col-xl-6">
                     <label class="form-label fw-semibold small">Markdown</label>
-                    <textarea id="article-body-textarea">@BodyMarkdown</textarea>
+                    <ProfessionalWysiwygEditor @ref="_bodyEditor" @bind-Value="BodyMarkdown" MinHeight="460px"
+                                               AriaLabel="Article body" Placeholder="Write or paste Markdown…" />
                 </div>
                 <div class="col-xl-6">
                     <label class="form-label fw-semibold small">Preview</label>
@@ -421,10 +422,7 @@ else
     private string ReviseWithAiNotes { get; set; } = string.Empty;
     private string ReviseWithAiError { get; set; } = string.Empty;
 
-    private const string MarkdownEditorElementId = "article-body-textarea";
-    private bool _markdownEditorInitialized;
-    private string? _lastSyncedMarkdown;
-    private DotNetObjectReference<ArticleEditorDetail>? _markdownEditorRef;
+    private ProfessionalWysiwygEditor? _bodyEditor;
 
     // CJ ad placements
     private List<ArticleAffiliatePlacement> Placements { get; set; } = new();
@@ -470,35 +468,6 @@ else
         var settings = await SiteSettingsService.GetSettingsAsync();
         MaxUploadSizeMb = settings.MaxMediaUploadSizeMb;
         await LoadArticle();
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (CurrentArticle is null)
-        {
-            return;
-        }
-
-        if (!_markdownEditorInitialized)
-        {
-            _markdownEditorRef = DotNetObjectReference.Create(this);
-            await JS.InvokeVoidAsync("gwsMarkdownEditor.init", MarkdownEditorElementId, _markdownEditorRef);
-            _markdownEditorInitialized = true;
-            _lastSyncedMarkdown = BodyMarkdown;
-        }
-        else if (!string.Equals(BodyMarkdown, _lastSyncedMarkdown, StringComparison.Ordinal))
-        {
-            await JS.InvokeVoidAsync("gwsMarkdownEditor.setValue", MarkdownEditorElementId, BodyMarkdown);
-            _lastSyncedMarkdown = BodyMarkdown;
-        }
-    }
-
-    [JSInvokable]
-    public async Task OnMarkdownChanged(string value)
-    {
-        BodyMarkdown = value;
-        _lastSyncedMarkdown = value;
-        await InvokeAsync(StateHasChanged);
     }
 
     private async Task LoadArticle()
@@ -990,24 +959,7 @@ else
 
     private async Task InsertTokenAtCursor(string slotToken)
     {
-        await JS.InvokeVoidAsync("gwsMarkdownEditor.insertAtCursor", MarkdownEditorElementId, slotToken);
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_markdownEditorInitialized)
-        {
-            try
-            {
-                await JS.InvokeVoidAsync("gwsMarkdownEditor.destroy", MarkdownEditorElementId);
-            }
-            catch (JSDisconnectedException)
-            {
-                // The circuit is already gone (e.g. browser closed); nothing to clean up client-side.
-            }
-        }
-
-        _markdownEditorRef?.Dispose();
+        if (_bodyEditor is not null) await _bodyEditor.InsertTextAsync(slotToken);
     }
 
     private static string ToSlug(string title)

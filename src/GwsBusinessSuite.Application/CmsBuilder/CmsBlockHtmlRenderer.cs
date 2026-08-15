@@ -24,6 +24,7 @@ public static class CmsBlockHtmlRenderer
 {
     private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
+        .DisableHtml()
         .Build();
 
     private static readonly IReadOnlyList<PublicArticleSummary> NoArticles = [];
@@ -577,7 +578,7 @@ public static class CmsBlockHtmlRenderer
             "hero" => $"""
                 <div class="gws-hero gws-align-{Html(Align(p))}">
                   <h1 class="gws-hero-headline"{InlineEditAttrs(editMode, "headline")}>{Html(Get(p, "headline"))}</h1>
-                  {(HasValue(p, "subline") ? $"""<p class="gws-hero-subline"{InlineEditAttrs(editMode, "subline")}>{Html(Get(p, "subline"))}</p>""" : "")}
+                  {(HasValue(p, "subline") ? $"""<div class="gws-hero-subline">{Markdown.ToHtml(Get(p, "subline"), MarkdownPipeline)}</div>""" : "")}
                   <div class="gws-hero-actions">
                     {HeroCta(Get(p, "cta1Label"), Get(p, "cta1Href"), "btn-primary", editMode, "cta1Label")}
                     {HeroCta(Get(p, "cta2Label"), Get(p, "cta2Href"), "btn-ghost", editMode, "cta2Label")}
@@ -585,7 +586,7 @@ public static class CmsBlockHtmlRenderer
                 </div>
                 """,
             "heading" => $"""<{Tag(p)} class="gws-heading gws-align-{Html(Align(p))}"{InlineEditAttrs(editMode, "text")}>{Html(Get(p, "text"))}</{Tag(p)}>""",
-            "paragraph" => $"""<p class="gws-paragraph gws-align-{Html(Align(p))}"{InlineEditAttrs(editMode, "text")}>{Html(Get(p, "text"))}</p>""",
+            "paragraph" => $"""<div class="gws-paragraph gws-align-{Html(Align(p))}">{Markdown.ToHtml(Get(p, "text"), MarkdownPipeline)}</div>""",
             // Same trust boundary as blog articles: only authenticated Contributor/Author/
             // Admin roles can edit Canvas widgets, so rendering Markdown -> HTML here (rather
             // than HTML-encoding it, which would show raw asterisks/brackets) is consistent
@@ -613,14 +614,14 @@ public static class CmsBlockHtmlRenderer
                   {(HasValue(p, "imageSrc") ? $"""<img src="{Html(Get(p, "imageSrc"))}" alt="" class="gws-card-img" />""" : "")}
                   <div class="gws-card-body">
                     <h3 class="gws-card-title">{Html(Get(p, "title"))}</h3>
-                    <p class="gws-card-text">{Html(Get(p, "body"))}</p>
+                    <div class="gws-card-text">{Markdown.ToHtml(Get(p, "body"), MarkdownPipeline)}</div>
                     {(HasValue(p, "link") ? $"""<a href="{Html(Get(p, "link"))}" class="btn btn-sm btn-outline-primary">Read more</a>""" : "")}
                   </div>
                 </div>
                 """,
             "testimonial" => $"""
                 <blockquote class="gws-testimonial">
-                  <p class="gws-testimonial-quote">&ldquo;{Html(Get(p, "quote"))}&rdquo;</p>
+                  <div class="gws-testimonial-quote">{Markdown.ToHtml(Get(p, "quote"), MarkdownPipeline)}</div>
                   <footer class="gws-testimonial-author">
                     <span class="gws-testimonial-name">{Html(Get(p, "authorName"))}</span>
                     {(HasValue(p, "authorRole") ? $"""<span class="gws-testimonial-role">{Html(Get(p, "authorRole"))}</span>""" : "")}
@@ -692,7 +693,7 @@ public static class CmsBlockHtmlRenderer
                 sb.Append($"""
                     <details class="gws-accordion-item">
                       <summary class="gws-accordion-question">{Html(question)}</summary>
-                      <div class="gws-accordion-answer">{Html(answer)}</div>
+                      <div class="gws-accordion-answer">{Markdown.ToHtml(answer, MarkdownPipeline)}</div>
                     </details>
                     """);
             }

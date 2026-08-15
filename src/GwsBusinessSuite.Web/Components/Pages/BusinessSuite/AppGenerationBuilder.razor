@@ -41,8 +41,9 @@
                 </select>
 
                 <label class="form-label fw-semibold small">What should it generate?</label>
-                <textarea class="form-control form-control-sm mb-3" rows="4" @bind="NewPrompt"
-                          placeholder="e.g. A pricing page with three tiers and a comparison table"></textarea>
+                <ProfessionalWysiwygEditor @bind-Value="NewPrompt" Compact="true" MinHeight="130px" CssClass="mb-3"
+                                           Placeholder="e.g. A pricing page with three tiers and a comparison table"
+                                           AriaLabel="App generation request" />
 
                 <button class="btn btn-primary btn-sm w-100" @onclick="StartNewAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewSiteId) || string.IsNullOrWhiteSpace(NewPrompt))">
                     <i class="bi bi-chat-dots me-1"></i>Start Chat

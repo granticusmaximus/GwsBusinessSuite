@@ -1,5 +1,6 @@
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Wiki;
+using GwsBusinessSuite.Application.SemanticSearch;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using System.Text.RegularExpressions;
@@ -9,7 +10,8 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 public sealed class SentinelWorkspaceService(
     IAppDbContext dbContext,
     TimeProvider timeProvider,
-    ISentinelAccessService? accessService = null) : ISentinelWorkspaceService
+    ISentinelAccessService? accessService = null,
+    IHybridSearchService? hybridSearchService = null) : ISentinelWorkspaceService
 {
     // Every call here loads full row content (BlocksJson/PropertyValuesJson blobs, not just
     // a title) into memory, and search re-runs this on every keystroke of live search. These
@@ -120,6 +122,82 @@ public sealed class SentinelWorkspaceService(
                     terms,
                     database.CreatedBy,
                     database.CreatedAt));
+            }
+        }
+
+        if (hybridSearchService is not null)
+        {
+            var semanticHits = await hybridSearchService.SearchAsync(
+                normalized,
+                [SemanticSourceTypes.WikiPage, SemanticSourceTypes.WikiDatabaseRow],
+                Math.Max(maxResults * 2, 10),
+                cancellationToken);
+            var semanticTargets = semanticHits.Select(hit => hit.SourceType == SemanticSourceTypes.WikiDatabaseRow
+                ? new SentinelAccessTarget(hit.ParentId ?? Guid.Empty, IsDatabase: true)
+                : new SentinelAccessTarget(hit.SourceId, IsDatabase: false))
+                .Where(target => target.TargetId != Guid.Empty)
+                .Distinct()
+                .ToList();
+            var semanticAccessible = await GetAccessibleTargetsAsync(
+                semanticTargets, username, SentinelAccessLevels.View, cancellationToken);
+            var semanticPageIds = semanticAccessible.Where(target => !target.IsDatabase).Select(target => target.TargetId).ToList();
+            var semanticDatabaseIds = semanticAccessible.Where(target => target.IsDatabase).Select(target => target.TargetId).ToList();
+            var pageMetadata = await dbContext.WikiPages.AsNoTracking()
+                .Where(item => semanticPageIds.Contains(item.Id) && item.TrashedAt == null && item.NotionArchivedAt == null)
+                .Select(item => new { item.Id, item.CreatedBy, item.CreatedAt })
+                .ToDictionaryAsync(item => item.Id, cancellationToken);
+            var databaseMetadata = await dbContext.WikiDatabases.AsNoTracking()
+                .Where(item => semanticDatabaseIds.Contains(item.Id) && item.TrashedAt == null && item.NotionArchivedAt == null)
+                .Select(item => new { item.Id, item.Title, item.CreatedBy, item.CreatedAt })
+                .ToDictionaryAsync(item => item.Id, cancellationToken);
+
+            foreach (var hit in semanticHits)
+            {
+                var isDatabase = hit.SourceType == SemanticSourceTypes.WikiDatabaseRow;
+                var targetId = isDatabase ? hit.ParentId ?? Guid.Empty : hit.SourceId;
+                var target = new SentinelAccessTarget(targetId, isDatabase);
+                if (targetId == Guid.Empty || !semanticAccessible.Contains(target)) continue;
+
+                string createdBy;
+                DateTimeOffset createdAt;
+                string title;
+                if (isDatabase)
+                {
+                    if (!databaseMetadata.TryGetValue(targetId, out var metadata)) continue;
+                    (createdBy, createdAt, title) = (metadata.CreatedBy, metadata.CreatedAt, hit.Title);
+                }
+                else
+                {
+                    if (!pageMetadata.TryGetValue(targetId, out var metadata)) continue;
+                    (createdBy, createdAt, title) = (metadata.CreatedBy, metadata.CreatedAt, hit.Title);
+                }
+
+                var semanticScore = Math.Max(1, (int)Math.Round(hit.Score * 200));
+                var existingIndex = results.FindIndex(item => item.Id == targetId && item.IsDatabase == isDatabase);
+                var semanticResult = new SentinelSearchResult(
+                    targetId,
+                    isDatabase,
+                    title,
+                    hit.Preview,
+                    isDatabase ? "Semantic database row" : "Semantic page",
+                    semanticScore,
+                    terms,
+                    createdBy,
+                    createdAt,
+                    isDatabase ? hit.SourceId : null);
+                if (existingIndex >= 0)
+                {
+                    var existing = results[existingIndex];
+                    results[existingIndex] = existing with
+                    {
+                        Score = existing.Score + Math.Max(20, semanticScore / 3),
+                        MatchKind = $"{existing.MatchKind} + semantic"
+                    };
+                }
+                else
+                {
+                    results.Add(semanticResult);
+                }
             }
         }
 

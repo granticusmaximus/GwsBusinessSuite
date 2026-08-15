@@ -1,0 +1,110 @@
+@using Markdig
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div id="@_rootId" class="gws-wysiwyg @(Compact ? "gws-wysiwyg-compact" : null) @CssClass" data-disabled="@Disabled.ToString().ToLowerInvariant()">
+    <div class="gws-wysiwyg-toolbar" role="toolbar" aria-label="Rich text formatting">
+        <div class="gws-wysiwyg-group">
+            <button type="button" data-command="undo" title="Undo" aria-label="Undo"><i class="bi bi-arrow-counterclockwise"></i></button>
+            <button type="button" data-command="redo" title="Redo" aria-label="Redo"><i class="bi bi-arrow-clockwise"></i></button>
+        </div>
+        <div class="gws-wysiwyg-group">
+            <button type="button" data-command="paragraph" title="Paragraph">P</button>
+            <button type="button" data-command="h2" title="Heading 2">H2</button>
+            <button type="button" data-command="h3" title="Heading 3">H3</button>
+        </div>
+        <div class="gws-wysiwyg-group">
+            <button type="button" data-command="bold" title="Bold"><i class="bi bi-type-bold"></i></button>
+            <button type="button" data-command="italic" title="Italic"><i class="bi bi-type-italic"></i></button>
+            <button type="button" data-command="underline" title="Underline"><i class="bi bi-type-underline"></i></button>
+            <button type="button" data-command="strikeThrough" title="Strikethrough"><i class="bi bi-type-strikethrough"></i></button>
+        </div>
+        <div class="gws-wysiwyg-group">
+            <button type="button" data-command="insertUnorderedList" title="Bulleted list"><i class="bi bi-list-ul"></i></button>
+            <button type="button" data-command="insertOrderedList" title="Numbered list"><i class="bi bi-list-ol"></i></button>
+            <button type="button" data-command="blockquote" title="Quote"><i class="bi bi-quote"></i></button>
+            <button type="button" data-command="code" title="Inline code"><i class="bi bi-code"></i></button>
+        </div>
+        <div class="gws-wysiwyg-group">
+            <button type="button" data-command="link" title="Add link"><i class="bi bi-link-45deg"></i></button>
+            <button type="button" data-command="removeFormat" title="Clear formatting"><i class="bi bi-eraser"></i></button>
+        </div>
+        <span class="gws-wysiwyg-hint"><i class="bi bi-markdown"></i> Markdown converts as you type or paste</span>
+    </div>
+    <div id="@_editorId"
+         class="gws-wysiwyg-surface"
+         contenteditable="@(!Disabled).ToString().ToLowerInvariant()"
+         role="textbox"
+         aria-multiline="true"
+         aria-label="@AriaLabel"
+         data-placeholder="@Placeholder"
+         style="min-height: @MinHeight"></div>
+    <div class="gws-wysiwyg-footer">
+        <span>Rich text</span>
+        <span id="@_countId">0 words</span>
+    </div>
+</div>
+
+@code {
+    private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .DisableHtml()
+        .Build();
+    private readonly string _instanceId = Guid.NewGuid().ToString("N");
+    private DotNetObjectReference<ProfessionalWysiwygEditor>? _dotNetRef;
+    private bool _initialized;
+    private string _knownValue = string.Empty;
+    private string _rootId => $"gws-wysiwyg-{_instanceId}";
+    private string _editorId => $"gws-wysiwyg-editor-{_instanceId}";
+    private string _countId => $"gws-wysiwyg-count-{_instanceId}";
+
+    [Parameter] public string Value { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public string Placeholder { get; set; } = "Start writing…";
+    [Parameter] public string AriaLabel { get; set; } = "Rich text editor";
+    [Parameter] public string MinHeight { get; set; } = "180px";
+    [Parameter] public bool Compact { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string? CssClass { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            _knownValue = Value ?? string.Empty;
+            await JS.InvokeVoidAsync("gwsProfessionalEditor.init", _rootId, _editorId, _countId,
+                _dotNetRef, Markdown.ToHtml(_knownValue, MarkdownPipeline));
+            _initialized = true;
+            return;
+        }
+
+        var current = Value ?? string.Empty;
+        if (_initialized && !string.Equals(current, _knownValue, StringComparison.Ordinal))
+        {
+            _knownValue = current;
+            await JS.InvokeVoidAsync("gwsProfessionalEditor.setHtml", _rootId,
+                Markdown.ToHtml(current, MarkdownPipeline));
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnEditorChanged(string markdown)
+    {
+        _knownValue = markdown ?? string.Empty;
+        await ValueChanged.InvokeAsync(_knownValue);
+    }
+
+    public ValueTask FocusAsync() => JS.InvokeVoidAsync("gwsProfessionalEditor.focus", _rootId);
+    public ValueTask InsertTextAsync(string text) => JS.InvokeVoidAsync("gwsProfessionalEditor.insertText", _rootId, text);
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_initialized)
+        {
+            try { await JS.InvokeVoidAsync("gwsProfessionalEditor.destroy", _rootId); }
+            catch (JSDisconnectedException) { }
+        }
+        _dotNetRef?.Dispose();
+    }
+}

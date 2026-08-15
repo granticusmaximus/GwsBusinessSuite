@@ -90,6 +90,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<SocialPostAlert> SocialPostAlerts { get; }
     DbSet<AppUser> AppUsers { get; }
     DbSet<DeveloperApiKey> DeveloperApiKeys { get; }
+    DbSet<SemanticSearchDocument> SemanticSearchDocuments { get; }
     DbSet<WatchedTopic> WatchedTopics { get; }
     DbSet<NewsItem> NewsItems { get; }
     DbSet<PodcastShow> PodcastShows { get; }

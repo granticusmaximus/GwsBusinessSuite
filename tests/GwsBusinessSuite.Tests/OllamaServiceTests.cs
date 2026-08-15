@@ -164,6 +164,31 @@ public sealed class OllamaServiceTests
     }
 
     [Fact]
+    public async Task EmbedAsync_ShouldUseBatchEmbedEndpointAndReturnEveryVector()
+    {
+        string? path = null;
+        string? payload = null;
+        var handler = new RecordingHandler(request =>
+        {
+            path = request.RequestUri?.AbsolutePath;
+            payload = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"model":"embeddinggemma","embeddings":[[1.0,0.0],[0.5,0.5]]}""")
+            };
+        });
+        var service = CreateService(handler, new RecordingLogger<OllamaService>());
+
+        var vectors = await service.EmbedAsync("embeddinggemma", ["first", "second"]);
+
+        path.Should().Be("/api/embed");
+        payload.Should().Contain("\"model\":\"embeddinggemma\"");
+        payload.Should().Contain("\"input\":[\"first\",\"second\"]");
+        vectors.Should().HaveCount(2);
+        vectors[1].Should().Equal(0.5f, 0.5f);
+    }
+
+    [Fact]
     public async Task GenerateStreamAsync_ShouldNotCaptureBackgroundPerformance()
     {
         var scheduler = new OllamaWorkloadScheduler();

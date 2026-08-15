@@ -142,7 +142,7 @@ else
                     <textarea class="form-control form-control-sm font-monospace mb-2" rows="12" @bind="_nodeParameters"></textarea>
                     <div class="small text-secondary mb-3">Use expressions such as <code>{{ExpressionExample}}</code>.</div>
                     <label class="form-label small fw-semibold">Notes</label>
-                    <textarea class="form-control form-control-sm mb-3" rows="2" @bind="_nodeNotes"></textarea>
+                    <ProfessionalWysiwygEditor @bind-Value="_nodeNotes" Compact="true" MinHeight="90px" AriaLabel="Node notes" CssClass="mb-3" />
                     <label class="form-label small fw-semibold">Credential</label>
                     <select class="form-select form-select-sm mb-3" @bind="_nodeCredentialId">
                         <option value="">No credential</option>
@@ -268,7 +268,7 @@ else
                 }
                 else
                 {
-                    <div class="row g-3"><div class="col-md-5"><label class="form-label small fw-semibold">Description</label><textarea class="form-control form-control-sm" rows="3" @bind="_description"></textarea></div><div class="col-md-4"><label class="form-label small fw-semibold">Tags</label><input class="form-control form-control-sm" @bind="_tags" placeholder="sales, notifications" /></div><div class="col-md-3"><label class="form-label small fw-semibold">Manual input JSON</label><textarea class="form-control form-control-sm font-monospace" rows="3" @bind="_runInput"></textarea></div></div>
+                    <div class="row g-3"><div class="col-md-5"><label class="form-label small fw-semibold">Description</label><ProfessionalWysiwygEditor @bind-Value="_description" Compact="true" MinHeight="110px" AriaLabel="Workflow description" /></div><div class="col-md-4"><label class="form-label small fw-semibold">Tags</label><input class="form-control form-control-sm" @bind="_tags" placeholder="sales, notifications" /></div><div class="col-md-3"><label class="form-label small fw-semibold">Manual input JSON</label><textarea class="form-control form-control-sm font-monospace" rows="3" @bind="_runInput"></textarea></div></div>
                     <div class="form-check mt-3">
                         <input id="allowDownstreamTriggers" class="form-check-input" type="checkbox" checked="@_allowDownstreamTriggers" disabled="@_busy" @onchange="ToggleAllowDownstreamTriggers" />
                         <label for="allowDownstreamTriggers" class="form-check-label small">
@@ -331,7 +331,7 @@ else
                     <label class="form-label fw-semibold" for="templateName">Template name</label>
                     <input id="templateName" class="form-control mb-3" @bind="_templateName" />
                     <label class="form-label fw-semibold" for="templateDescription">Description</label>
-                    <textarea id="templateDescription" class="form-control" rows="3" @bind="_templateDescription"></textarea>
+                    <ProfessionalWysiwygEditor @bind-Value="_templateDescription" Compact="true" MinHeight="110px" AriaLabel="Template description" />
                 </div>
                 <div class="modal-footer"><button class="btn btn-outline-secondary" @onclick="CloseSaveTemplate">Cancel</button><button class="btn btn-primary" @onclick="SaveAsTemplate" disabled="@_busy">Save template</button></div>
             </div></div>

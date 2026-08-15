@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.Settings;
+using GwsBusinessSuite.Application.SemanticSearch;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -33,7 +34,8 @@ public sealed class SentinelAiService(
     // indirectly (AutomationNodeRegistry only ever resolves things like ISentinelAiService
     // lazily via IServiceProvider, never through its constructor), so there's no DI cycle.
     IAutomationNodeRegistry? automationNodeRegistry = null,
-    IAutomationWorkflowService? automationWorkflowService = null) : ISentinelAiService
+    IAutomationWorkflowService? automationWorkflowService = null,
+    IHybridSearchService? hybridSearchService = null) : ISentinelAiService
 {
     private static readonly HashSet<string> AllowedActions =
     [
@@ -1435,36 +1437,63 @@ public sealed class SentinelAiService(
         CancellationToken cancellationToken)
     {
         var terms = SearchTerms(instruction);
-        var cacheKey = $"sentinel-gpt:suite-context:v1:{string.Join('|', terms)}";
+        var cacheKey = $"sentinel-gpt:suite-context:v2:{string.Join('|', terms)}";
         var cached = await cache.GetOrCreateAsync(
             cacheKey,
             async entry =>
             {
                 entry.AbsoluteExpirationRelativeToNow = SuiteContextCacheDuration;
                 entry.Size = 1;
-                return await BuildSuiteContextUncachedAsync(db, terms, cancellationToken);
+                return await BuildSuiteContextUncachedAsync(db, instruction, terms, cancellationToken);
             });
-        cached ??= await BuildSuiteContextUncachedAsync(db, terms, cancellationToken);
+        cached ??= await BuildSuiteContextUncachedAsync(db, instruction, terms, cancellationToken);
         return (cached.Context, cached.Citations.ToList());
     }
 
     private async Task<CachedSuiteContext> BuildSuiteContextUncachedAsync(
         IAppDbContext db,
+        string instruction,
         string[] terms,
         CancellationToken cancellationToken)
     {
         var builder = new StringBuilder();
         var citations = new List<SentinelAiCitation>();
         var citedUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var addedItems = new HashSet<(string Type, string Title)>();
 
         builder.Append(await GetSuiteOverviewAsync(db, cancellationToken));
 
         void AddResult(string type, string title, string details, string url)
         {
+            if (!addedItems.Add((type, title))) return;
             builder.AppendLine($"{type}: {title}\n{Limit(details, 600)}");
             if (citedUrls.Add(url))
             {
                 citations.Add(new SentinelAiCitation(null, false, title, url, "gws"));
+            }
+        }
+
+        if (hybridSearchService is not null)
+        {
+            var semanticMatches = await hybridSearchService.SearchAsync(
+                instruction,
+                [SemanticSourceTypes.CrmContact, SemanticSourceTypes.CrmDeal, SemanticSourceTypes.CmsPage],
+                12,
+                cancellationToken);
+            foreach (var item in semanticMatches)
+            {
+                switch (item.SourceType)
+                {
+                    case SemanticSourceTypes.CrmContact:
+                        AddResult("CRM CONTACT", item.Title, item.Preview, $"admin/crm/{item.SourceId}");
+                        break;
+                    case SemanticSourceTypes.CrmDeal:
+                        AddResult("CRM DEAL", item.Title, item.Preview, $"admin/crm/{item.SourceId}");
+                        break;
+                    case SemanticSourceTypes.CmsPage:
+                        AddResult("CMS PAGE", item.Title, item.Preview, $"admin/pages/{item.SourceId}");
+                        break;
+                }
             }
         }
 

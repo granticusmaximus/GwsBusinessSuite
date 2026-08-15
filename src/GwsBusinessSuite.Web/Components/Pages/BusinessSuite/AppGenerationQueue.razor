@@ -99,7 +99,8 @@
                             <i class="bi bi-check-circle me-1"></i>Approve
                         </button>
                         <div class="flex-grow-1">
-                            <textarea class="form-control form-control-sm mb-2" rows="2" @bind="RejectionReason" placeholder="Reason for rejection (optional)"></textarea>
+                            <ProfessionalWysiwygEditor @bind-Value="RejectionReason" Compact="true" MinHeight="90px"
+                                                       Placeholder="Reason for rejection (optional)" AriaLabel="Rejection reason" CssClass="mb-2" />
                             <button class="btn btn-outline-danger btn-sm" @onclick="RejectAsync" disabled="@IsBusy">
                                 <i class="bi bi-x-circle me-1"></i>Reject
                             </button>

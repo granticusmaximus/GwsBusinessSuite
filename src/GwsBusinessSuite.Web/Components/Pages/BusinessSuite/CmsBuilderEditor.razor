@@ -385,9 +385,9 @@ else
                             </div>
                             <div>
                                 <label class="form-label small fw-semibold">Subline</label>
-                                <textarea class="form-control studio-inspector-textarea-sm"
-                                          value='@GetProp(selWidget, "subline")'
-                                          @oninput='(e) => SetProp(selWidget, "subline", e.Value?.ToString() ?? string.Empty)'></textarea>
+                                <ProfessionalWysiwygEditor Value='@GetProp(selWidget, "subline")'
+                                                           ValueChanged='value => SetProp(selWidget, "subline", value)'
+                                                           Compact="true" MinHeight="90px" AriaLabel="Hero subline" />
                             </div>
                             <div>
                                 <label class="form-label small fw-semibold">CTA 1 Label</label>
@@ -449,8 +449,9 @@ else
                         {
                             <div>
                                 <label class="form-label small fw-semibold">Text</label>
-                                <textarea class="form-control studio-inspector-textarea" value='@GetProp(selWidget, "text")'
-                                          @oninput='(e) => SetProp(selWidget, "text", e.Value?.ToString() ?? string.Empty)'></textarea>
+                                <ProfessionalWysiwygEditor Value='@GetProp(selWidget, "text")'
+                                                           ValueChanged='value => SetProp(selWidget, "text", value)'
+                                                           Compact="true" MinHeight="110px" AriaLabel="Paragraph text" />
                             </div>
                             <div>
                                 <label class="form-label small fw-semibold">Alignment</label>
@@ -466,9 +467,10 @@ else
                         {
                             <div>
                                 <label class="form-label small fw-semibold">Content (Markdown)</label>
-                                <textarea class="form-control studio-inspector-textarea font-monospace" rows="8" value='@GetProp(selWidget, "content")'
-                                          @oninput='(e) => SetProp(selWidget, "content", e.Value?.ToString() ?? string.Empty)'
-                                          placeholder="**Bold**, *italics*, [links](https://example.com), lists, etc."></textarea>
+                                <ProfessionalWysiwygEditor Value='@GetProp(selWidget, "content")'
+                                                           ValueChanged='value => SetProp(selWidget, "content", value)'
+                                                           MinHeight="240px" AriaLabel="Rich text content"
+                                                           Placeholder="Write rich content or paste Markdown…" />
                                 <div class="small text-secondary mt-1">Supports Markdown — the same formatting used in blog posts.</div>
                             </div>
                             <div>
@@ -595,8 +597,9 @@ else
                             </div>
                             <div>
                                 <label class="form-label small fw-semibold">Body</label>
-                                <textarea class="form-control studio-inspector-textarea" value='@GetProp(selWidget, "body")'
-                                          @oninput='(e) => SetProp(selWidget, "body", e.Value?.ToString() ?? string.Empty)'></textarea>
+                                <ProfessionalWysiwygEditor Value='@GetProp(selWidget, "body")'
+                                                           ValueChanged='value => SetProp(selWidget, "body", value)'
+                                                           Compact="true" MinHeight="110px" AriaLabel="Card body" />
                             </div>
                             <div>
                                 <label class="form-label small fw-semibold">Image URL</label>
@@ -614,8 +617,9 @@ else
                         {
                             <div>
                                 <label class="form-label small fw-semibold">Quote</label>
-                                <textarea class="form-control studio-inspector-textarea" value='@GetProp(selWidget, "quote")'
-                                          @oninput='(e) => SetProp(selWidget, "quote", e.Value?.ToString() ?? string.Empty)'></textarea>
+                                <ProfessionalWysiwygEditor Value='@GetProp(selWidget, "quote")'
+                                                           ValueChanged='value => SetProp(selWidget, "quote", value)'
+                                                           Compact="true" MinHeight="110px" AriaLabel="Testimonial quote" />
                             </div>
                             <div>
                                 <label class="form-label small fw-semibold">Author Name</label>
@@ -656,8 +660,9 @@ else
                                                     <i class="bi bi-trash"></i>
                                                 </button>
                                             </div>
-                                            <textarea class="form-control form-control-sm" rows="2" placeholder="Answer"
-                                                      @oninput="(e) => UpdateAccordionItem(selWidget, index, i => i with { Answer = e.Value?.ToString() ?? string.Empty })">@item.Answer</textarea>
+                                            <ProfessionalWysiwygEditor Value="@item.Answer"
+                                                                       ValueChanged="value => UpdateAccordionItem(selWidget, index, i => i with { Answer = value })"
+                                                                       Compact="true" MinHeight="90px" Placeholder="Answer" AriaLabel="Accordion answer" />
                                         </div>
                                     }
                                 }

@@ -109,6 +109,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SocialPostAlert> SocialPostAlerts => Set<SocialPostAlert>();
     public DbSet<AppUser> AppUsers => Set<AppUser>();
     public DbSet<DeveloperApiKey> DeveloperApiKeys => Set<DeveloperApiKey>();
+    public DbSet<SemanticSearchDocument> SemanticSearchDocuments => Set<SemanticSearchDocument>();
     public DbSet<WatchedTopic> WatchedTopics => Set<WatchedTopic>();
     public DbSet<NewsItem> NewsItems => Set<NewsItem>();
     public DbSet<PodcastShow> PodcastShows => Set<PodcastShow>();
@@ -615,6 +616,13 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<DeveloperApiKey>().Property(x => x.KeyPrefix).HasMaxLength(32);
         modelBuilder.Entity<DeveloperApiKey>().Property(x => x.KeyHash).HasMaxLength(64);
         modelBuilder.Entity<DeveloperApiKey>().Property(x => x.ScopesCsv).HasMaxLength(512);
+        modelBuilder.Entity<SemanticSearchDocument>().HasIndex(x => new { x.SourceType, x.SourceId }).IsUnique();
+        modelBuilder.Entity<SemanticSearchDocument>().HasIndex(x => new { x.EmbeddingModel, x.Dimensions });
+        modelBuilder.Entity<SemanticSearchDocument>().HasIndex(x => x.ParentId);
+        modelBuilder.Entity<SemanticSearchDocument>().Property(x => x.SourceType).HasMaxLength(40);
+        modelBuilder.Entity<SemanticSearchDocument>().Property(x => x.Title).HasMaxLength(300);
+        modelBuilder.Entity<SemanticSearchDocument>().Property(x => x.ContentHash).HasMaxLength(64);
+        modelBuilder.Entity<SemanticSearchDocument>().Property(x => x.EmbeddingModel).HasMaxLength(100);
 
         modelBuilder.Entity<SecurityAuditEvent>().HasIndex(x => x.OccurredAtUnixSeconds);
         modelBuilder.Entity<SecurityAuditEvent>().HasIndex(x => new { x.Category, x.OccurredAtUnixSeconds });

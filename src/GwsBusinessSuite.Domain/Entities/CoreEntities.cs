@@ -52,6 +52,24 @@ public sealed class DeveloperApiKey : AuditableEntity
     public string? RevokedBy { get; set; }
 }
 
+// One normalized, searchable representation of an application record. Embeddings remain in
+// the primary SQLite database as compact float32 BLOBs so backups/restores are atomic with the
+// source data. SourceType + SourceId is the durable identity; ParentId points a database-row
+// document at its access-controlled parent database.
+public sealed class SemanticSearchDocument : AuditableEntity
+{
+    public required string SourceType { get; set; }
+    public Guid SourceId { get; set; }
+    public Guid? ParentId { get; set; }
+    public required string Title { get; set; }
+    public required string Content { get; set; }
+    public required string ContentHash { get; set; }
+    public required string EmbeddingModel { get; set; }
+    public int Dimensions { get; set; }
+    public byte[] Embedding { get; set; } = [];
+    public DateTimeOffset IndexedAt { get; set; }
+}
+
 public static class SeoArticleDraftStatuses
 {
     public const string Draft = "Draft";

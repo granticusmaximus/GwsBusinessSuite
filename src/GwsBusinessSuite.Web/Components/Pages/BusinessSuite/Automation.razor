@@ -149,7 +149,7 @@ else
                 <label class="form-label fw-semibold" for="newWorkflowName">Name</label>
                 <input id="newWorkflowName" class="form-control mb-3" @bind="_newName" placeholder="Customer follow-up" />
                 <label class="form-label fw-semibold" for="newWorkflowDescription">Description</label>
-                <textarea id="newWorkflowDescription" class="form-control" rows="3" @bind="_newDescription"></textarea>
+                <ProfessionalWysiwygEditor @bind-Value="_newDescription" Compact="true" MinHeight="110px" AriaLabel="Workflow description" />
             </div>
             <div class="modal-footer"><button class="btn btn-outline-secondary" @onclick="CloseCreate">Cancel</button><button class="btn btn-primary" @onclick="CreateWorkflow" disabled="@_busy">Create and open</button></div>
         </div></div>

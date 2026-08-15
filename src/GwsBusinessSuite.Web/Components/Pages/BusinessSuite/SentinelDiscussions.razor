@@ -82,8 +82,8 @@
 
     <div class="card-body border-bottom">
         <label class="form-label small fw-semibold">Start a discussion</label>
-        <textarea class="form-control" rows="2" @bind="NewDiscussionBody"
-                  placeholder="Write a comment. Use @@username to notify someone."></textarea>
+        <ProfessionalWysiwygEditor @bind-Value="NewDiscussionBody" Compact="true" MinHeight="100px"
+                                   Placeholder="@("Write a comment. Use @username to notify someone.")" AriaLabel="New discussion" />
         <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
             <select class="form-select form-select-sm sentinel-discussion-anchor"
                     @bind="NewAnchorSelection" @bind:after="ClearSelectionAnchor">
@@ -159,7 +159,7 @@
                                 <span class="small fw-semibold">@comment.Author</span>
                                 <span class="small text-secondary">@comment.CreatedAt.ToLocalTime().ToString("g")</span>
                             </div>
-                            <div class="small mt-1 sentinel-discussion-body">@comment.Body</div>
+                            <SafeMarkdownContent Content="@comment.Body" CssClass="small mt-1 sentinel-discussion-body" />
                             <div class="d-flex flex-wrap align-items-center gap-1 mt-2">
                                 @foreach (var emoji in ReactionChoices)
                                 {
@@ -185,7 +185,8 @@
                     {
                         <div class="mt-3 p-2 rounded-3 bg-body-tertiary">
                             <div class="small text-secondary mb-1">Replying to @ReplyingToAuthor</div>
-                            <textarea class="form-control form-control-sm" rows="2" @bind="ReplyBody" placeholder="Write a reply..."></textarea>
+                            <ProfessionalWysiwygEditor @bind-Value="ReplyBody" Compact="true" MinHeight="90px"
+                                                       Placeholder="Write a reply…" AriaLabel="Discussion reply" />
                             <div class="d-flex gap-2 mt-2">
                                 <button type="button" class="btn btn-sm btn-primary" @onclick="SubmitReplyAsync"
                                         disabled="@(IsBusy || string.IsNullOrWhiteSpace(ReplyBody))">Reply</button>

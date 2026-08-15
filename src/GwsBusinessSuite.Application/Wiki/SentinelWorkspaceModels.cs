@@ -11,7 +11,8 @@ public sealed record SentinelSearchResult(
     // Phase 5.3 - lets search UI facet-filter an already-fetched result set by author/date
     // without a second round trip, rather than adding filter parameters to SearchAsync itself.
     string CreatedBy,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    Guid? SourceRowId = null);
 
 public sealed record SentinelBacklink(
     Guid SourcePageId,

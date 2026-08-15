@@ -22,6 +22,17 @@ public sealed class CmsBlockHtmlRendererTests
     }
 
     [Fact]
+    public void Render_ShouldRenderWysiwygMarkdownAndEscapeRawHtml()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"Use **strong guidance** and <script>alert(1)</script>."}}"""));
+
+        Assert.Contains("<strong>strong guidance</strong>", html);
+        Assert.DoesNotContain("<script>", html);
+        Assert.Contains("&lt;script&gt;", html);
+    }
+
+    [Fact]
     public void Render_ShouldHtmlEncodeUserSuppliedFields_ToPreventScriptInjection()
     {
         var html = CmsBlockHtmlRenderer.Render(Layout(

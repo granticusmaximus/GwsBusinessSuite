@@ -74,7 +74,8 @@
                 </label>
                 <label>
                     Note
-                    <textarea @bind="AnnotationNote" maxlength="500" rows="4" placeholder="Homepage launch, campaign started, checkout outage…"></textarea>
+                    <ProfessionalWysiwygEditor @bind-Value="AnnotationNote" Compact="true" MinHeight="110px"
+                                               Placeholder="Homepage launch, campaign started, checkout outage…" AriaLabel="Annotation note" />
                 </label>
                 <p class="annotation-help">Annotations explain the chart without changing analytics totals or visitor history.</p>
                 <button type="submit" class="annotation-save" disabled="@IsBusy">

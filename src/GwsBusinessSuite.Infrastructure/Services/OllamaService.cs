@@ -398,7 +398,60 @@ public sealed class OllamaService(
         }
     }
 
+    public async Task<IReadOnlyList<float[]>> EmbedAsync(
+        string model,
+        IReadOnlyList<string> inputs,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(model)) throw new ArgumentException("An embedding model is required.", nameof(model));
+        if (inputs.Count == 0) return [];
+        if (inputs.Any(string.IsNullOrWhiteSpace)) throw new ArgumentException("Embedding inputs cannot be empty.", nameof(inputs));
+
+        var payload = new
+        {
+            model,
+            input = inputs,
+            truncate = true,
+            keep_alive = ModelKeepAlive
+        };
+
+        try
+        {
+            var queueTimer = Stopwatch.StartNew();
+            await using var workloadLease = await workloadScheduler.AcquireAsync(ct);
+            queueTimer.Stop();
+            LogQueueWait(model, queueTimer.Elapsed);
+            var stopwatch = Stopwatch.StartNew();
+            using var response = await http.PostAsJsonAsync("/api/embed", payload, ct);
+            response.EnsureSuccessStatusCode();
+            var result = await response.Content.ReadFromJsonAsync<OllamaEmbedResponse>(cancellationToken: ct);
+            stopwatch.Stop();
+            if (result?.Embeddings is not { Length: > 0 } embeddings || embeddings.Length != inputs.Count)
+            {
+                throw new InvalidOperationException(
+                    $"Ollama returned {result?.Embeddings?.Length ?? 0} embeddings for {inputs.Count} inputs.");
+            }
+            if (embeddings.Any(item => item.Length == 0 || item.Any(value => !float.IsFinite(value))))
+            {
+                throw new InvalidOperationException("Ollama returned an empty or non-finite embedding.");
+            }
+
+            logger.LogInformation(
+                "Ollama embedded {InputCount} document(s) with '{Model}' in {RequestMs:F0} ms ({Dimensions} dimensions).",
+                inputs.Count, model, stopwatch.Elapsed.TotalMilliseconds, embeddings[0].Length);
+            return embeddings;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            logger.LogWarning(ex, "Ollama embedding request failed for model '{Model}'.", model);
+            throw;
+        }
+    }
+
     private sealed record OllamaStatusResponse(string? Status);
+
+    private sealed record OllamaEmbedResponse(
+        [property: JsonPropertyName("embeddings")] float[][]? Embeddings);
 
     private sealed record OllamaImageGenerateResponse([property: JsonPropertyName("image")] string? Image);
 

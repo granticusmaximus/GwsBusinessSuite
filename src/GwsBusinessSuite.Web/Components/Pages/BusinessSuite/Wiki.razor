@@ -2684,6 +2684,11 @@
         else if (query.TryGetValue("database", out var requestedDatabase)
             && Guid.TryParse(requestedDatabase.ToString(), out var requestedDatabaseId))
         {
+            if (query.TryGetValue("row", out var requestedRow)
+                && Guid.TryParse(requestedRow.ToString(), out var requestedRowId))
+            {
+                _pendingOpenRowId = requestedRowId;
+            }
             await OpenDatabaseAsync(requestedDatabaseId);
         }
 

@@ -1,11 +1,15 @@
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.SuiteSearch;
+using GwsBusinessSuite.Application.SemanticSearch;
 using GwsBusinessSuite.Application.Wiki;
 using Microsoft.EntityFrameworkCore;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
-public sealed class SuiteSearchService(IAppDbContext db, ISentinelWorkspaceService sentinelWorkspaceService) : ISuiteSearchService
+public sealed class SuiteSearchService(
+    IAppDbContext db,
+    ISentinelWorkspaceService sentinelWorkspaceService,
+    IHybridSearchService? hybridSearchService = null) : ISuiteSearchService
 {
     // Each module query is bounded and materialized before filtering client-side (same
     // "materialize then filter" shape as SentinelAiService.BuildSuiteContextUncachedAsync) -
@@ -27,8 +31,29 @@ public sealed class SuiteSearchService(IAppDbContext db, ISentinelWorkspaceServi
             item.Title,
             item.Preview,
             item.IsDatabase ? "Sentinel database" : "Sentinel page",
-            item.IsDatabase ? $"/admin/sentinel?database={item.Id}" : $"/admin/sentinel?page={item.Id}",
+            item.IsDatabase
+                ? $"/admin/sentinel?database={item.Id}{(item.SourceRowId is { } rowId ? $"&row={rowId}" : string.Empty)}"
+                : $"/admin/sentinel?page={item.Id}",
             item.IsDatabase ? "bi bi-grid-3x3-gap-fill" : "bi bi-file-earmark-text")));
+
+        if (hybridSearchService is not null)
+        {
+            var hybridMatches = await hybridSearchService.SearchAsync(
+                query,
+                [SemanticSourceTypes.CrmContact, SemanticSourceTypes.CrmDeal, SemanticSourceTypes.CmsPage],
+                PerCategoryLimit * 3,
+                cancellationToken);
+            results.AddRange(hybridMatches.Select(item => item.SourceType switch
+            {
+                SemanticSourceTypes.CrmContact => new SuiteSearchResult(
+                    item.Title, item.Preview, "CRM contact", "/admin/crm", "bi bi-person-lines-fill"),
+                SemanticSourceTypes.CrmDeal => new SuiteSearchResult(
+                    item.Title, item.Preview, "CRM deal", "/admin/crm", "bi bi-graph-up-arrow"),
+                SemanticSourceTypes.CmsPage => new SuiteSearchResult(
+                    item.Title, item.Preview, "CMS page", $"/admin/pages/edit/{item.SourceId}", "bi bi-file-earmark-richtext"),
+                _ => null
+            }).OfType<SuiteSearchResult>());
+        }
 
         var contacts = await db.Contacts.AsNoTracking().Where(item => item.TrashedAt == null)
             .Take(ModuleScanLimit).Select(item => new { item.FullName, item.Company }).ToListAsync(cancellationToken);
@@ -60,7 +85,10 @@ public sealed class SuiteSearchService(IAppDbContext db, ISentinelWorkspaceServi
         results.AddRange(offers.Where(item => Matches(query, item.LinkName, item.AdvertiserName)).Take(PerCategoryLimit)
             .Select(item => new SuiteSearchResult(item.LinkName, item.AdvertiserName, "Affiliate offer", "/admin/cj-ads", "bi bi-link-45deg")));
 
-        return results.Take(Math.Clamp(take, 1, 40)).ToList();
+        return results
+            .DistinctBy(item => (item.Category, item.Title, item.Url))
+            .Take(Math.Clamp(take, 1, 40))
+            .ToList();
     }
 
     private static bool Matches(string query, params string?[] values) =>

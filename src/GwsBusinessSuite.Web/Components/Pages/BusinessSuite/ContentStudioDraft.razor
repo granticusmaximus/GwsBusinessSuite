@@ -87,16 +87,16 @@ else
                         <span class="badge text-bg-warning">Unsaved edits</span>
                     }
                 </div>
-                <textarea id="@MarkdownEditorElementId">@EditableMarkdown</textarea>
+                <ProfessionalWysiwygEditor @bind-Value="EditableMarkdown" MinHeight="440px"
+                                           AriaLabel="Generated article" Placeholder="Write or paste Markdown…" />
                 <div class="mt-2">
                     <button class="btn btn-sm btn-primary d-inline-flex align-items-center gap-2"
                             @onclick="SaveMarkdownEdits" disabled="@(IsBusy || !IsMarkdownDirty)">
                         <i class="bi bi-save"></i>
-                        <span>Save Markdown Edits</span>
+                            <span>Save article edits</span>
                     </button>
                     <span class="text-secondary small ms-2">
-                        Saves immediately, no SentinelGPT regeneration. Use the editor's preview/side-by-side
-                        toolbar buttons to see the rendered article.
+                        Saves immediately without SentinelGPT regeneration. Markdown is preserved automatically.
                     </span>
                 </div>
             </div>
@@ -129,8 +129,9 @@ else
 
                 <div class="mt-3">
                     <label class="form-label small text-secondary">Or generate with SentinelGPT</label>
-                    <textarea class="form-control form-control-sm mb-2" rows="2" @bind="HeroImagePromptInput"
-                              placeholder="@($"Prompt (leave blank to use the title: \"{CurrentDraft.Title}\")")"></textarea>
+                    <ProfessionalWysiwygEditor @bind-Value="HeroImagePromptInput" Compact="true" MinHeight="90px" CssClass="mb-2"
+                                               Placeholder="@($"Prompt (leave blank to use the title: \"{CurrentDraft.Title}\")")"
+                                               AriaLabel="Hero image prompt" />
                     <button class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-2"
                             @onclick="GenerateHeroImage" disabled="@(IsBusy || !HeroImageGenerationConfigured)">
                         <i class="bi bi-stars"></i>
@@ -150,8 +151,9 @@ else
                     <div class="row g-3 mb-4">
                         <div class="col-12">
                             <label class="form-label fw-semibold small">Revision Notes</label>
-                            <textarea class="form-control" rows="3" @bind="RevisionNotes"
-                                      placeholder="Describe what should be revised or explain decision notes."></textarea>
+                            <ProfessionalWysiwygEditor @bind-Value="RevisionNotes" Compact="true" MinHeight="110px"
+                                                       Placeholder="Describe what should be revised or explain decision notes."
+                                                       AriaLabel="Revision notes" />
                         </div>
                     </div>
 
@@ -302,11 +304,6 @@ else
         CurrentDraft is not null &&
         !string.Equals(EditableMarkdown, CurrentDraft.Markdown, StringComparison.Ordinal);
 
-    private const string MarkdownEditorElementId = "draft-markdown-editor";
-    private bool _markdownEditorInitialized;
-    private string? _lastSyncedMarkdown;
-    private DotNetObjectReference<ContentStudioDraft>? _markdownEditorRef;
-
     private string BusyElapsedText => BusyStartedAt is null
         ? "Elapsed: 00:00"
         : $"Elapsed: {FormatElapsed(DateTimeOffset.UtcNow - BusyStartedAt.Value)}";
@@ -326,32 +323,6 @@ else
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         await JS.InvokeVoidAsync("gwsTooltips.init", "[data-bs-toggle='tooltip']");
-
-        if (CurrentDraft is null)
-        {
-            return;
-        }
-
-        if (!_markdownEditorInitialized)
-        {
-            _markdownEditorRef = DotNetObjectReference.Create(this);
-            await JS.InvokeVoidAsync("gwsMarkdownEditor.init", MarkdownEditorElementId, _markdownEditorRef);
-            _markdownEditorInitialized = true;
-            _lastSyncedMarkdown = EditableMarkdown;
-        }
-        else if (!string.Equals(EditableMarkdown, _lastSyncedMarkdown, StringComparison.Ordinal))
-        {
-            await JS.InvokeVoidAsync("gwsMarkdownEditor.setValue", MarkdownEditorElementId, EditableMarkdown);
-            _lastSyncedMarkdown = EditableMarkdown;
-        }
-    }
-
-    [JSInvokable]
-    public async Task OnMarkdownChanged(string value)
-    {
-        EditableMarkdown = value;
-        _lastSyncedMarkdown = value;
-        await InvokeAsync(StateHasChanged);
     }
 
     private async Task LoadDraft()
@@ -658,20 +629,7 @@ else
     public async ValueTask DisposeAsync()
     {
         EndBusy();
-
-        if (_markdownEditorInitialized)
-        {
-            try
-            {
-                await JS.InvokeVoidAsync("gwsMarkdownEditor.destroy", MarkdownEditorElementId);
-            }
-            catch (JSDisconnectedException)
-            {
-                // The circuit is already gone (e.g. browser closed); nothing to clean up client-side.
-            }
-        }
-
-        _markdownEditorRef?.Dispose();
+        await Task.CompletedTask;
     }
 
     private static string FormatElapsed(TimeSpan elapsed)

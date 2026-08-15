@@ -126,7 +126,7 @@
 
                 <div class="mb-3">
                     <label class="form-label fw-semibold small">Notes</label>
-                    <textarea class="form-control" rows="2" @bind="Editor.Notes"></textarea>
+                    <ProfessionalWysiwygEditor @bind-Value="Editor.Notes" Compact="true" MinHeight="100px" AriaLabel="Billing notes" />
                 </div>
 
                 <button class="btn btn-primary w-100" disabled="@IsBusy" @onclick="SaveDraftAsync">

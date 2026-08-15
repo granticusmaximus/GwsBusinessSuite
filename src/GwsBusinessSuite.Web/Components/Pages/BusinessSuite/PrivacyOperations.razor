@@ -75,7 +75,7 @@ else
                 <label>Owner<input class="form-control" @bind="_incidentOwner" maxlength="100" /></label>
                 <label class="check"><input type="checkbox" @bind="_personalData" /> Personal data involved</label>
                 <label class="check"><input type="checkbox" @bind="_ephi" /> ePHI involved</label>
-                <label class="wide">Summary<textarea class="form-control" @bind="_incidentSummary" rows="2" maxlength="2000"></textarea></label>
+                <label class="wide">Summary<ProfessionalWysiwygEditor @bind-Value="_incidentSummary" Compact="true" MinHeight="100px" AriaLabel="Incident summary" /></label>
                 <button class="btn btn-danger align-self-end" @onclick="CreateIncidentAsync" disabled="@_busy">Open incident</button>
             </div>
             <div class="list-group list-group-flush">

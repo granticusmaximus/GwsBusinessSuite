@@ -2,6 +2,7 @@ using System.Net;
 using GwsBusinessSuite.Application.Campaigns;
 using MailKit.Net.Smtp;
 using MailKit.Security;
+using Markdig;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MimeKit;
@@ -31,6 +32,10 @@ public sealed class EmailCampaignEmailSender(
     IOptions<EmailCampaignEmailOptions> configuredOptions,
     ILogger<EmailCampaignEmailSender> logger) : IEmailCampaignEmailSender
 {
+    private static readonly MarkdownPipeline EmailMarkdownPipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .DisableHtml()
+        .Build();
     private readonly EmailCampaignEmailOptions options = configuredOptions.Value;
 
     public async Task SendStepAsync(string toEmail, string subject, string body, string unsubscribeUrl, CancellationToken cancellationToken = default)
@@ -50,10 +55,12 @@ public sealed class EmailCampaignEmailSender(
         message.From.Add(new MailboxAddress(options.FromName.Trim(), from.Address));
         message.To.Add(to);
         message.Subject = subject;
+        var textBody = Markdown.ToPlainText(body, EmailMarkdownPipeline).Trim();
+        var htmlBody = Markdown.ToHtml(body, EmailMarkdownPipeline);
         message.Body = new BodyBuilder
         {
-            TextBody = $"{body}\n\n---\nUnsubscribe: {unsubscribeUrl}",
-            HtmlBody = $"<div>{WebUtility.HtmlEncode(body).Replace("\n", "<br/>")}</div><p style=\"margin-top:2rem;font-size:.8rem;color:#888;\"><a href=\"{WebUtility.HtmlEncode(unsubscribeUrl)}\">Unsubscribe</a></p>"
+            TextBody = $"{textBody}\n\n---\nUnsubscribe: {unsubscribeUrl}",
+            HtmlBody = $"<div>{htmlBody}</div><p style=\"margin-top:2rem;font-size:.8rem;color:#888;\"><a href=\"{WebUtility.HtmlEncode(unsubscribeUrl)}\">Unsubscribe</a></p>"
         }.ToMessageBody();
 
         if (!string.IsNullOrWhiteSpace(options.PickupDirectory))

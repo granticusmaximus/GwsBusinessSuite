@@ -1,4 +1,5 @@
 using FluentAssertions;
+using GwsBusinessSuite.Application.SemanticSearch;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
@@ -446,6 +447,29 @@ public sealed class SentinelWorkspaceServiceTests
         (await sentinel.ListSavedSearchesAsync("Grant")).Should().ContainSingle(saved => saved.Query == "onboarding");
     }
 
+    [Fact]
+    public async Task SemanticSearch_ShouldFailClosedForInaccessibleWorkspaceResults()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = await CreateDbAsync(connection);
+        var wiki = new WikiService(db);
+        var access = new SentinelAccessService(db);
+        var allowed = await wiki.SavePageAsync(new WikiPageEditorModel { Title = "Allowed recovery notes" }, "owner");
+        var denied = await wiki.SavePageAsync(new WikiPageEditorModel { Title = "Denied recovery notes" }, "owner");
+        await access.SetPermissionAsync(allowed.Id, false, "member", SentinelAccessLevels.View, "owner");
+        var hybrid = new FixedHybridSearchService([
+            Hit(allowed.Id, allowed.Title, 0.94),
+            Hit(denied.Id, denied.Title, 0.99)
+        ]);
+        var sentinel = new SentinelWorkspaceService(db, TimeProvider.System, access, hybrid);
+
+        var results = await sentinel.SearchAsync("oblique constellation", "member");
+
+        results.Should().ContainSingle(result => result.Id == allowed.Id);
+        results.Should().NotContain(result => result.Id == denied.Id);
+    }
+
     private static async Task<ApplicationDbContext> CreateDbAsync(SqliteConnection connection)
     {
         var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -460,5 +484,17 @@ public sealed class SentinelWorkspaceServiceTests
         private DateTimeOffset _utcNow = utcNow;
         public override DateTimeOffset GetUtcNow() => _utcNow;
         public void Advance(TimeSpan by) => _utcNow += by;
+    }
+
+    private static SemanticSearchHit Hit(Guid sourceId, string title, double score) =>
+        new(Guid.NewGuid(), SemanticSourceTypes.WikiPage, sourceId, null, title, "Semantic preview", score, 0, score);
+
+    private sealed class FixedHybridSearchService(IReadOnlyList<SemanticSearchHit> hits) : IHybridSearchService
+    {
+        public Task<IReadOnlyList<SemanticSearchHit>> SearchAsync(string query, IReadOnlyCollection<string>? sourceTypes = null, int take = 20, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<SemanticSearchHit>>(hits.Take(take).ToList());
+        public Task<SemanticIndexStatus> GetStatusAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(new SemanticIndexStatus(true, "test", hits.Count, DateTimeOffset.UtcNow, 0));
+        public Task RebuildAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }

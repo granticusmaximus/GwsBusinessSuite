@@ -20,7 +20,8 @@
                     <button type="button" class="@(_action == option.Action ? "active" : "")" @onclick="() => _action = option.Action">@option.Label</button>
                 }
             </div>
-            <textarea rows="4" @bind="_instruction" placeholder="@InstructionPlaceholder"></textarea>
+            <ProfessionalWysiwygEditor @bind-Value="_instruction" Compact="true" MinHeight="120px"
+                                       Placeholder="@InstructionPlaceholder" AriaLabel="SentinelGPT instruction" />
             <div class="d-flex align-items-center gap-2">
                 <button type="button" class="btn btn-sm btn-warning" @onclick="RunAsync" disabled="@(_running || string.IsNullOrWhiteSpace(_instruction))">
                     @if (_running) { <span class="spinner-border spinner-border-sm me-1"></span> }

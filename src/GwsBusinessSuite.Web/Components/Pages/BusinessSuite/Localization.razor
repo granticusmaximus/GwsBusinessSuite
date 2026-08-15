@@ -77,16 +77,25 @@
                     </div>
                     <div class="col-md-9">
                         <label class="form-label small fw-semibold">Translated title</label>
-                        <textarea class="form-control form-control-sm" rows="2" @bind="_editor.Title" disabled="@_isBusy"></textarea>
+                        <input class="form-control form-control-sm" @bind="_editor.Title" disabled="@_isBusy" />
                     </div>
                     <div class="col-12">
                         <label class="form-label small fw-semibold">Translated body</label>
-                        <textarea class="form-control form-control-sm font-monospace" rows="12" @bind="_editor.Body" disabled="@_isBusy"></textarea>
-                        <div class="form-text">Article Markdown or CMS page layout JSON, depending on the selected content.</div>
+                        @if (IsArticleSelected)
+                        {
+                            <ProfessionalWysiwygEditor @bind-Value="_editor.Body" MinHeight="360px" Disabled="@_isBusy"
+                                                       AriaLabel="Translated article body" Placeholder="Write or paste translated Markdown…" />
+                            <div class="form-text">Formatting is stored as Markdown and converted automatically while editing.</div>
+                        }
+                        else
+                        {
+                            <textarea class="form-control form-control-sm font-monospace" rows="12" @bind="_editor.Body" disabled="@_isBusy"></textarea>
+                            <div class="form-text">CMS layout JSON remains in a code-safe editor so its structure is preserved exactly.</div>
+                        }
                     </div>
                     <div class="col-12">
                         <label class="form-label small fw-semibold">Translated meta description</label>
-                        <textarea class="form-control form-control-sm" rows="2" @bind="_editor.MetaDescription" disabled="@_isBusy"></textarea>
+                        <input class="form-control form-control-sm" @bind="_editor.MetaDescription" disabled="@_isBusy" maxlength="320" />
                     </div>
                 </div>
                 <div class="d-flex gap-2 mt-3">
@@ -163,6 +172,8 @@
     private string _statusMessage = string.Empty;
 
     private bool HasSelectedContent => TryGetSelectedContent(out _, out _);
+    private bool IsArticleSelected => TryGetSelectedContent(out var type, out _)
+        && type == ContentLocalizationContentTypes.Article;
 
     protected override async Task OnInitializedAsync()
     {

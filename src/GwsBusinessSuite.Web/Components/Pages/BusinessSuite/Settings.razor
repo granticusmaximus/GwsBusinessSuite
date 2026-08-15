@@ -5,6 +5,7 @@
 @using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Application.ContentStudio
 @using GwsBusinessSuite.Application.DeveloperApi
+@using GwsBusinessSuite.Application.SemanticSearch
 @using GwsBusinessSuite.Application.Settings
 @using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Infrastructure.Data
@@ -14,6 +15,8 @@
 @inject ICmsBuilderService CmsBuilderService
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject IOptions<ContentStudioOptions> StudioOptions
+@inject IOptions<SemanticSearchOptions> SemanticOptions
+@inject IHybridSearchService HybridSearchService
 @inject IConfiguration Configuration
 @inject ILogger<Settings> Logger
 @inject IDeveloperApiKeyService DeveloperApiKeyService
@@ -157,6 +160,31 @@ else
                         installed model with image-generation capability. Local image generation is
                         <strong>experimental and currently macOS-only</strong>, so this may
                         not work against a Linux-hosted local model service. Leave blank to disable the button.
+                    </div>
+                </div>
+                <div class="border rounded-3 p-3 mb-3 bg-body-tertiary">
+                    <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+                        <div>
+                            <div class="fw-semibold"><i class="bi bi-diagram-3 me-1 text-primary"></i>Semantic knowledge index</div>
+                            <div class="small text-secondary mt-1">
+                                @if (SemanticIndexStatus is null)
+                                {
+                                    <span>Status unavailable.</span>
+                                }
+                                else
+                                {
+                                    <span>@SemanticIndexStatus.DocumentCount documents · model <code>@SemanticIndexStatus.Model</code></span>
+                                    @if (SemanticIndexStatus.LastIndexedAt is { } indexedAt)
+                                    {
+                                        <span> · updated @indexedAt.ToLocalTime().ToString("g")</span>
+                                    }
+                                }
+                            </div>
+                            <div class="form-text">Meaning-based matches augment keyword search across Sentinel, CRM, and CMS content. Install <code>@SemanticOptions.Value.Model</code> in SentinelGPT model management before rebuilding.</div>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="RebuildSemanticIndexAsync" disabled="@IsBusy">
+                            <i class="bi bi-arrow-repeat me-1"></i>Rebuild index
+                        </button>
                     </div>
                 </div>
                 <div class="gws-settings-actions"><span>Overrides deployment defaults for this site.</span><button class="btn btn-primary" @onclick="SaveAiAsync" disabled="@IsBusy">@(IsBusy ? "Saving…" : "Save changes")</button></div>
@@ -310,6 +338,7 @@ else
     private string OllamaModelOverrideInput { get; set; } = string.Empty;
     private int? OllamaTimeoutOverrideInput { get; set; }
     private string HeroImageModelOverrideInput { get; set; } = string.Empty;
+    private SemanticIndexStatus? SemanticIndexStatus { get; set; }
     private List<DeveloperApiKeyView> ApiKeys { get; set; } = [];
     private HashSet<string> SelectedApiScopes { get; } = [DeveloperApiScopes.ContactsRead];
     private string NewApiKeyName { get; set; } = string.Empty;
@@ -347,6 +376,7 @@ else
         OllamaModelOverrideInput = settings.OllamaModelOverride ?? string.Empty;
         OllamaTimeoutOverrideInput = settings.OllamaTimeoutMinutesOverride;
         HeroImageModelOverrideInput = settings.HeroImageModelOverride ?? string.Empty;
+        SemanticIndexStatus = await HybridSearchService.GetStatusAsync();
         ApiKeys = (await DeveloperApiKeyService.ListAsync()).ToList();
 
         _loaded = true;
@@ -422,6 +452,15 @@ else
                 HeroImageModelOverride = HeroImageModelOverrideInput
             });
         });
+    }
+
+    private async Task RebuildSemanticIndexAsync()
+    {
+        await RunSaveAsync(async () =>
+        {
+            await HybridSearchService.RebuildAsync();
+            SemanticIndexStatus = await HybridSearchService.GetStatusAsync();
+        }, "Semantic knowledge index rebuilt.");
     }
 
     private void ToggleApiScope(string scope, bool selected)

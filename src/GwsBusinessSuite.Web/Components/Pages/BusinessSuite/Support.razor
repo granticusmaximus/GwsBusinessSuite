@@ -39,7 +39,7 @@
                     <input class="form-control form-control-sm" placeholder="Subject" @bind="_newSubject" />
                 </div>
                 <div class="mb-2">
-                    <textarea class="form-control form-control-sm" rows="3" placeholder="First message" @bind="_newMessage"></textarea>
+                    <ProfessionalWysiwygEditor @bind-Value="_newMessage" Compact="true" MinHeight="120px" Placeholder="First message" AriaLabel="First support message" />
                 </div>
                 <button class="btn btn-sm btn-primary w-100" disabled="@_isBusy" @onclick="CreateTicketAsync">
                     <i class="bi bi-plus-lg me-1"></i>Open Ticket
@@ -126,14 +126,14 @@
                         {
                             <div class="mb-3 @(message.AuthorType == SupportTicketAuthorTypes.Staff ? "text-end" : "")">
                                 <div class="small text-secondary">@message.AuthorName &middot; @message.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</div>
-                                <div class="d-inline-block p-2 rounded @(message.AuthorType == SupportTicketAuthorTypes.Staff ? "bg-primary-subtle" : "bg-secondary-subtle")" style="max-width: 80%; text-align: left;">
-                                    @message.Body
-                                </div>
+                                <SafeMarkdownContent Content="@message.Body"
+                                                     CssClass="@(message.AuthorType == SupportTicketAuthorTypes.Staff ? "d-inline-block p-2 rounded bg-primary-subtle" : "d-inline-block p-2 rounded bg-secondary-subtle")"
+                                                     style="max-width: 80%; text-align: left;" />
                             </div>
                         }
                     </div>
                     <div class="d-flex gap-2">
-                        <textarea class="form-control" rows="2" placeholder="Reply..." @bind="_replyBody"></textarea>
+                        <div class="flex-grow-1"><ProfessionalWysiwygEditor @bind-Value="_replyBody" Compact="true" MinHeight="90px" Placeholder="Reply…" AriaLabel="Support reply" /></div>
                         <button class="btn btn-primary align-self-end" disabled="@_isBusy" @onclick="ReplyAsync">Send</button>
                     </div>
                 </div>
