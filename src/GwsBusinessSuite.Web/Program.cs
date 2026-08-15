@@ -422,6 +422,7 @@ using (var scope = app.Services.CreateScope())
 
     await TrySeedStepAsync(nameof(EnsureGrantWatsonHomepageAsync), () => EnsureGrantWatsonHomepageAsync(dbContext, app.Configuration, app.Logger));
     await TrySeedStepAsync(nameof(EnsurePortfolioPageAsync), () => EnsurePortfolioPageAsync(dbContext, app.Logger));
+    await TrySeedStepAsync(nameof(EnsurePrimaryNavMenuAsync), () => EnsurePrimaryNavMenuAsync(dbContext, app.Logger));
     await TrySeedStepAsync(nameof(EnsureAboutPageResumeSectionAsync), () => EnsureAboutPageResumeSectionAsync(dbContext, app.Logger));
     await TrySeedStepAsync(nameof(EnsureWikiPagesHaveBlocksAsync), () => EnsureWikiPagesHaveBlocksAsync(dbContext, app.Logger));
     await TrySeedStepAsync(nameof(EnsureSentinelLearningWorkflowAsync), () => EnsureSentinelLearningWorkflowAsync(scope.ServiceProvider, app.Logger));
@@ -3244,6 +3245,40 @@ static async Task EnsurePortfolioPageAsync(ApplicationDbContext dbContext, ILogg
     dbContext.CmsPages.Add(page);
     await dbContext.SaveChangesAsync();
     logger.LogInformation("Created the Portfolio page for {SiteSlug}.", GrantWatsonHomepageTemplate.SiteSlug);
+}
+
+// Seeds the primary nav menu once, and ONLY if it's still genuinely unset ("[]"/blank) - never
+// overwrites real curated content, whether that was set by hand via /admin/appearance/menus or
+// by an earlier run of this same step. PublicSiteHtmlRenderer.DefaultNavItems is the fallback
+// used while NavMenuJson is empty (About/Blog/Contact, no Home/My CV/Portfolio) - this replaces
+// that fallback with a real, explicit, permanently-editable menu the first time it's missing.
+static async Task EnsurePrimaryNavMenuAsync(ApplicationDbContext dbContext, ILogger logger)
+{
+    var site = await dbContext.CmsSites.FirstOrDefaultAsync(s => s.Slug == GrantWatsonHomepageTemplate.SiteSlug);
+    if (site is null)
+    {
+        return;
+    }
+
+    if (!string.IsNullOrWhiteSpace(site.NavMenuJson) && site.NavMenuJson != "[]")
+    {
+        return;
+    }
+
+    var navItems = new List<NavMenuItem>
+    {
+        new(Guid.NewGuid().ToString("N")[..8], "Home", "/", false),
+        new(Guid.NewGuid().ToString("N")[..8], "About", "/about", false),
+        new(Guid.NewGuid().ToString("N")[..8], "My CV", "/about#resume", false),
+        new(Guid.NewGuid().ToString("N")[..8], "Portfolio", "/" + GrantWatsonPortfolioPageTemplate.Slug, false),
+        new(Guid.NewGuid().ToString("N")[..8], "Blog", "/blog", false),
+        new(Guid.NewGuid().ToString("N")[..8], "Contact", "/contact", false)
+    };
+    site.NavMenuJson = JsonSerializer.Serialize(navItems, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+    site.UpdatedAt = DateTimeOffset.UtcNow;
+    site.UpdatedBy = "system";
+    await dbContext.SaveChangesAsync();
+    logger.LogInformation("Seeded the primary nav menu for {SiteSlug}.", GrantWatsonHomepageTemplate.SiteSlug);
 }
 
 // One-time content migration: folds the resume/CV content into the "about" Canvas page

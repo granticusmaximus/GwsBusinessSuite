@@ -170,7 +170,7 @@ public static class GrantWatsonPortfolioPageTemplate
                 ["cta1Href"] = cta1Href,
                 ["cta2Label"] = cta2Label,
                 ["cta2Href"] = cta2Href,
-                ["align"] = "left"
+                ["align"] = "center"
             }
         };
 
