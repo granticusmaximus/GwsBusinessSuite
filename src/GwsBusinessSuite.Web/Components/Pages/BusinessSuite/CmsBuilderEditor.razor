@@ -3,6 +3,7 @@
 @attribute [Authorize(Policy = "ContributorAccess")]
 @implements IAsyncDisposable
 @using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
 @using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Application.CmsKnowledge
 @using GwsBusinessSuite.Domain.Entities
@@ -364,6 +365,16 @@ else
                                 <div class="small text-secondary">Widget properties</div>
                             </div>
                         </div>
+                        @if (!_isAdmin && EffectiveWidgetEditPermission(_selectedWidgetId) != CmsEditPermissions.Open)
+                        {
+                            <div class="studio-lock-notice small">
+                                <i class="bi @(EffectiveWidgetEditPermission(_selectedWidgetId) == CmsEditPermissions.Locked ? "bi-lock-fill" : "bi-pencil-square") me-1"></i>
+                                @(EffectiveWidgetEditPermission(_selectedWidgetId) == CmsEditPermissions.Locked
+                                    ? "Locked - an admin has restricted this widget."
+                                    : "Content only - you can edit the text/image/link content, but not move, delete, or restyle this widget.")
+                            </div>
+                        }
+                        <fieldset disabled="@(!CanEditSelectedWidgetStructure)" class="studio-fieldset">
                         @if (selWidget.GlobalBlockId is { } globalWidgetId)
                         {
                             <div class="studio-global-meta">
@@ -374,8 +385,10 @@ else
                                 </button>
                             </div>
                         }
+                        </fieldset>
 
                         @* ── Per-type inspector fields ─────────────────────── *@
+                        <fieldset disabled="@(!CanEditSelectedWidgetContent)" class="studio-fieldset">
                         @if (selWidget.WidgetType == "hero")
                         {
                             <div>
@@ -796,7 +809,9 @@ else
                                 }
                             </div>
                         }
+                        </fieldset>
 
+                        <fieldset disabled="@(!CanEditSelectedWidgetStructure)" class="studio-fieldset">
                         @* Style — applies uniformly across every widget type, layered on top of the
                            Content fields above and the site's global design tokens (Phase 5). *@
                         <hr class="my-2" />
@@ -925,6 +940,21 @@ else
                             }
                         </div>
 
+                        @* Client Access — client-safe structural locking (Phase 2). Inside the
+                           same structure fieldset as everything else here, so a Contributor can
+                           only ever change permission on a widget they already fully control
+                           (Open) - one that's Locked/ContentOnly hides this control the same
+                           way it hides Move/Delete/Style, so they can't unlock themselves. *@
+                        <hr class="my-2" />
+                        <div class="small text-secondary fw-semibold text-uppercase mb-1" style="letter-spacing:.05em;">Client Access</div>
+                        <select class="form-select form-select-sm mb-2" value="@selWidget.EditPermission"
+                                @onchange='(e) => SetWidgetEditPermission(selWidget, e.Value?.ToString() ?? CmsEditPermissions.Inherit)'>
+                            <option value="@CmsEditPermissions.Inherit">Inherit from section/page</option>
+                            <option value="@CmsEditPermissions.Open">Open - fully editable</option>
+                            <option value="@CmsEditPermissions.ContentOnly">Content only - text/image/link only</option>
+                            <option value="@CmsEditPermissions.Locked">Locked - no client edits</option>
+                        </select>
+
                         @* Action row *@
                         <div class="studio-action-row mt-1">
                             <button class="btn btn-sm btn-outline-secondary" @onclick="MoveSelectedWidgetUp"
@@ -948,6 +978,7 @@ else
                                 <i class="bi bi-trash"></i>
                             </button>
                         </div>
+                        </fieldset>
                     </div>
                 }
             }
@@ -967,6 +998,16 @@ else
                                 <div class="small text-secondary">@sel.Label</div>
                             </div>
                         </div>
+                        @if (!_isAdmin && EffectiveSectionEditPermission(_selectedSectionId) != CmsEditPermissions.Open)
+                        {
+                            <div class="studio-lock-notice small">
+                                <i class="bi @(EffectiveSectionEditPermission(_selectedSectionId) == CmsEditPermissions.Locked ? "bi-lock-fill" : "bi-pencil-square") me-1"></i>
+                                @(EffectiveSectionEditPermission(_selectedSectionId) == CmsEditPermissions.Locked
+                                    ? "Locked - an admin has restricted this section."
+                                    : "Content only - edit the widgets inside individually; this section's own layout/style is restricted.")
+                            </div>
+                        }
+                        <fieldset disabled="@(!CanEditSelectedSectionStructure)" class="studio-fieldset">
                         @if (sel.GlobalBlockId is { } globalSectionId)
                         {
                             <div class="studio-global-meta">
@@ -1014,6 +1055,16 @@ else
                                 <option value="xl">XL</option>
                             </select>
                         </div>
+                        <div>
+                            <label class="form-label small fw-semibold">Client Access</label>
+                            <select class="form-select" value="@sel.EditPermission"
+                                    @onchange='(e) => SetSectionEditPermission(sel, e.Value?.ToString() ?? CmsEditPermissions.Inherit)'>
+                                <option value="@CmsEditPermissions.Inherit">Inherit from page</option>
+                                <option value="@CmsEditPermissions.Open">Open - fully editable</option>
+                                <option value="@CmsEditPermissions.ContentOnly">Content only - widgets inside stay editable individually</option>
+                                <option value="@CmsEditPermissions.Locked">Locked - no client edits</option>
+                            </select>
+                        </div>
                         <div class="studio-action-row mt-1">
                             <button class="btn btn-sm btn-outline-secondary" @onclick="() => MoveSection(_selectedSectionId, -1)"
                                     disabled="@(!CanMoveSectionUp(_selectedSectionId))">
@@ -1036,6 +1087,7 @@ else
                                 <i class="bi bi-trash me-1"></i>Delete Section
                             </button>
                         </div>
+                        </fieldset>
                     </div>
                 }
             }
@@ -1133,6 +1185,12 @@ else
     private CmsPage? _page;
     private CmsSite? _site;
     private List<CmsPage> _allPagesInSite = new();
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    // Phase 2 (client-safe structural locking) - the [Authorize(Policy = "ContributorAccess")]
+    // attribute above only lets Admin or Contributor reach this page at all, so this is the only
+    // distinction that matters: Admin always has full access regardless of EditPermission;
+    // Contributor is constrained by it.
+    private bool _isAdmin;
     private bool _isLoading = true;
     private bool _isBusy;
     private string _statusMessage = string.Empty;
@@ -1230,7 +1288,15 @@ else
     ];
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState is not null)
+        {
+            var authState = await AuthState;
+            _isAdmin = authState.User.IsInRole(AppRoles.Admin);
+        }
+        await LoadAsync();
+    }
 
     // ── Live-preview click-to-select bridge ─────────────────────────────────
     // See wwwroot/js/cms-builder-bridge.js and CmsBlockHtmlRenderer.BuildEditModeScript
@@ -1485,7 +1551,8 @@ else
                 MetaDescription = _page.MetaDescription,
                 OgImageUrl = _page.OgImageUrl,
                 CustomCss = _page.CustomCss,
-                Status = _page.Status
+                Status = _page.Status,
+                EditPermission = _page.EditPermission
             };
             _page = await CmsBuilderService.SavePageAsync(editor);
             _globalBlocks = (await GlobalBlockService.ListAsync(_page.SiteId)).ToList();
@@ -2212,6 +2279,46 @@ else
 
     private static int GetSectionWidgetCount(LayoutSection section) =>
         section.Columns.Sum(c => c.Widgets.Count);
+
+    // ── Client-safe structural locking (Phase 2) ────────────────────────────
+    // Admin always has full access; a Contributor is constrained by the resolved
+    // EditPermission (widget -> section -> page, see CmsEditPermissionResolver).
+    private string EffectiveWidgetEditPermission(string widgetId)
+    {
+        var widget = FindWidget(widgetId);
+        if (widget is null) return CmsEditPermissions.Open;
+        var (section, _) = FindWidgetLocation(widgetId);
+        return CmsEditPermissionResolver.ResolveForWidget(
+            _page?.EditPermission ?? CmsEditPermissions.Open,
+            section?.EditPermission ?? CmsEditPermissions.Inherit,
+            widget.EditPermission);
+    }
+
+    private string EffectiveSectionEditPermission(string sectionId)
+    {
+        var section = FindSection(sectionId);
+        return CmsEditPermissionResolver.ResolveForSection(
+            _page?.EditPermission ?? CmsEditPermissions.Open,
+            section?.EditPermission ?? CmsEditPermissions.Inherit);
+    }
+
+    private bool CanEditSelectedWidgetContent =>
+        _isAdmin || EffectiveWidgetEditPermission(_selectedWidgetId) != CmsEditPermissions.Locked;
+
+    private bool CanEditSelectedWidgetStructure =>
+        _isAdmin || EffectiveWidgetEditPermission(_selectedWidgetId) == CmsEditPermissions.Open;
+
+    private bool CanEditSelectedSectionContent =>
+        _isAdmin || EffectiveSectionEditPermission(_selectedSectionId) != CmsEditPermissions.Locked;
+
+    private bool CanEditSelectedSectionStructure =>
+        _isAdmin || EffectiveSectionEditPermission(_selectedSectionId) == CmsEditPermissions.Open;
+
+    private void SetWidgetEditPermission(LayoutWidget widget, string value) =>
+        ApplyTrackedMutation($"{widget.Id}:editPermission", () => widget.EditPermission = value, reloadPreview: true);
+
+    private void SetSectionEditPermission(LayoutSection section, string value) =>
+        ApplyTrackedMutation($"{section.Id}:editPermission", () => section.EditPermission = value, reloadPreview: true);
 
     // ── Prop helpers ──────────────────────────────────────────────────────
     private static string GetProp(LayoutWidget widget, string key, string defaultValue = "") =>

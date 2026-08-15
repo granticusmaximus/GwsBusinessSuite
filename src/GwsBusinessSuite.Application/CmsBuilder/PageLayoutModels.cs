@@ -24,6 +24,11 @@ public sealed class LayoutSection
     // full | half-half | one-third-two-thirds | two-thirds-one-third | thirds
     public string ColumnLayout { get; set; } = "full";
 
+    // Client-safe structural locking - see CmsEditPermissions. Defaults to Inherit, meaning
+    // "use the page's own setting" - so an existing page with no lock configuration anywhere
+    // behaves exactly as it always has (fully editable by any Contributor).
+    public string EditPermission { get; set; } = CmsEditPermissions.Inherit;
+
     public List<LayoutColumn> Columns { get; set; } = new();
 }
 
@@ -54,6 +59,51 @@ public sealed class LayoutWidget
     // widget renders at all. Evaluated by CmsBlockHtmlRenderer.ShouldRenderWidget; a widget
     // with Mode == Always (the default) always renders, so existing pages are unaffected.
     public VisibilityRule Visibility { get; set; } = new();
+
+    // Client-safe structural locking - see CmsEditPermissions. Defaults to Inherit (falls
+    // through to the parent section, then the page); has no effect on public rendering, only
+    // on what Canvas Studio lets a non-Admin Contributor do with this widget.
+    public string EditPermission { get; set; } = CmsEditPermissions.Inherit;
+}
+
+// Client-safe structural locking (Phase 2): an agency builds a site as Admin, then wants to
+// hand editing of specific parts to a client who only has the Contributor role. Locked = the
+// Contributor can't select/edit/move/delete/restyle it at all; ContentOnly = they can edit its
+// text/image/link content but not move/delete/restyle/change visibility; Open = fully editable,
+// same as today's unrestricted behavior. Admin always has full access regardless of this
+// setting - it constrains Contributor only. Resolved top-down (widget -> section -> page),
+// mirroring WidgetStyle's own "empty/default = inherit, explicit value = override" convention -
+// see CmsEditPermissionResolver.
+public static class CmsEditPermissions
+{
+    public const string Inherit = "Inherit";
+    public const string Locked = "Locked";
+    public const string ContentOnly = "ContentOnly";
+    public const string Open = "Open";
+
+    public static readonly string[] WidgetAndSectionOptions = [Inherit, Locked, ContentOnly, Open];
+    public static readonly string[] PageOptions = [Open, ContentOnly, Locked];
+}
+
+public static class CmsEditPermissionResolver
+{
+    // Widget wins if it has an explicit (non-Inherit) value, else section, else the page's own
+    // default (which is never Inherit - CmsPage.EditPermission always holds a real value).
+    public static string ResolveForWidget(string pageDefault, string sectionValue, string widgetValue)
+    {
+        if (IsExplicit(widgetValue)) return widgetValue;
+        if (IsExplicit(sectionValue)) return sectionValue;
+        return NormalizePageDefault(pageDefault);
+    }
+
+    public static string ResolveForSection(string pageDefault, string sectionValue) =>
+        IsExplicit(sectionValue) ? sectionValue : NormalizePageDefault(pageDefault);
+
+    private static bool IsExplicit(string value) =>
+        !string.IsNullOrWhiteSpace(value) && value != CmsEditPermissions.Inherit;
+
+    private static string NormalizePageDefault(string pageDefault) =>
+        string.IsNullOrWhiteSpace(pageDefault) || pageDefault == CmsEditPermissions.Inherit ? CmsEditPermissions.Open : pageDefault;
 }
 
 public sealed class VisibilityRule

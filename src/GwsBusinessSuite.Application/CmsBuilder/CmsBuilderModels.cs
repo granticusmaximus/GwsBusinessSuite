@@ -66,6 +66,8 @@ public sealed class CmsPageEditorModel
 
     public DateTimeOffset? PublishedAt { get; set; }
 
+    public string EditPermission { get; set; } = CmsEditPermissions.Open;
+
     // Part 6.1 - keyed by CmsPageProperty.Id. Full-replace, same convention as every other field
     // on this editor model (e.g. CategoryName/Tags): a save that omits this clears existing
     // values, matching the pre-existing Canvas-Studio-vs-EditPage editor split's own behavior.

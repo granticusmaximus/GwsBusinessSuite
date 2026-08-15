@@ -475,6 +475,7 @@ public sealed class CmsBuilderService(
         page.CategoryId = await ResolvePageCategoryIdAsync(siteId, editor.CategoryName, cancellationToken);
         page.Tags = editor.Tags?.Trim() ?? string.Empty;
         page.CustomCss = editor.CustomCss?.Trim() ?? string.Empty;
+        page.EditPermission = string.IsNullOrWhiteSpace(editor.EditPermission) ? CmsEditPermissions.Open : editor.EditPermission;
         var propertyValues = new JsonObject();
         foreach (var pair in editor.PropertyValues) CmsPropertyValues.SetText(propertyValues, pair.Key, pair.Value);
         page.PropertyValuesJson = CmsPropertyValues.Serialize(propertyValues);

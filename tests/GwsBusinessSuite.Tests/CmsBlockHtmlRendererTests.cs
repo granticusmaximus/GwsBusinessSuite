@@ -239,6 +239,42 @@ public sealed class CmsBlockHtmlRendererTests
     }
 
     [Fact]
+    public void Render_ShouldShowALockedBadge_InEditModeOnly_ForAnExplicitlyLockedWidget()
+    {
+        var blocksJson = Layout("""{"id":"w1","widgetType":"paragraph","props":{"text":"Hello"},"editPermission":"Locked"}""");
+
+        var editModeHtml = CmsBlockHtmlRenderer.Render(blocksJson, editMode: true);
+        var publicHtml = CmsBlockHtmlRenderer.Render(blocksJson, editMode: false);
+
+        Assert.Contains("Locked", editModeHtml);
+        Assert.DoesNotContain("Locked", publicHtml);
+    }
+
+    [Fact]
+    public void Render_ShouldCombineVisibilityAndLockBadges_IntoOneHint_NotTwoOverlappingOnes()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"Hello"},"visibility":{"mode":"LoggedInOnly"},"editPermission":"ContentOnly"}"""),
+            editMode: true);
+
+        Assert.Contains("Logged-in only | Content only", html);
+        var hintCount = System.Text.RegularExpressions.Regex.Matches(html, "gws-visibility-hint").Count;
+        Assert.Equal(1, hintCount);
+    }
+
+    [Fact]
+    public void Render_ShouldNotShowABadge_ForAnInheritedOrOpenEditPermission()
+    {
+        var inheritHtml = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"Hello"}}"""), editMode: true);
+        var openHtml = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"Hello"},"editPermission":"Open"}"""), editMode: true);
+
+        Assert.DoesNotContain("gws-visibility-hint", inheritHtml);
+        Assert.DoesNotContain("gws-visibility-hint", openHtml);
+    }
+
+    [Fact]
     public void Render_ShouldResolveAColorToken_OverRawTextColor_WhenTokensAreSupplied()
     {
         var tokens = new DesignTokenSet([new DesignToken("Primary", "#1c3d5a")], [], []);

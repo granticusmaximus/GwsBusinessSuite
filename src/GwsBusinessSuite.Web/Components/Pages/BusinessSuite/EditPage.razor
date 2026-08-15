@@ -118,6 +118,15 @@
                     <label class="form-label fw-semibold small">Tags</label>
                     <InputText class="form-control" @bind-Value="PageEditorModel.Tags" placeholder="comma-separated, e.g. landing, seo, campaign" />
                 </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold small">Client Edit Permission</label>
+                    <select class="form-select" @bind="PageEditorModel.EditPermission">
+                        <option value="@CmsEditPermissions.Open">Open - fully editable by any Contributor</option>
+                        <option value="@CmsEditPermissions.ContentOnly">Content only - Contributors can edit text/image/link content, not structure</option>
+                        <option value="@CmsEditPermissions.Locked">Locked - no Contributor edits</option>
+                    </select>
+                    <div class="form-text">The default for every section/widget on this page, unless overridden individually in Canvas Studio. Admin is never restricted.</div>
+                </div>
                 <div class="col-12">
                     <label class="form-label fw-semibold small">Page Custom CSS</label>
                     <InputTextArea class="form-control font-monospace cms-custom-css-editor" @bind-Value="PageEditorModel.CustomCss"
@@ -512,6 +521,7 @@
                     CustomCss = page.CustomCss,
                     Status = page.Status,
                     PublishedAt = page.PublishedAt,
+                    EditPermission = page.EditPermission,
                     PropertyValues = LoadPropertyValues(page.PropertyValuesJson)
                 };
 

@@ -601,6 +601,38 @@
 	flex-wrap: wrap;
 }
 
+/* Phase 2 (client-safe structural locking) - a plain <fieldset> disables every descendant
+   input/select/textarea/button at once with no per-control edits, but ships with its own
+   browser chrome (a border, min-width, block margin) that has nothing to do with this layout -
+   reset to an invisible wrapper, and only visually communicate the disabled state via opacity
+   plus a not-allowed cursor over its own controls. */
+.studio-fieldset {
+	border: 0;
+	margin: 0;
+	padding: 0;
+	min-width: 0;
+	display: contents;
+}
+
+.studio-fieldset:disabled {
+	opacity: 0.55;
+}
+
+.studio-fieldset:disabled * {
+	cursor: not-allowed;
+}
+
+.studio-lock-notice {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0.5rem 0.65rem;
+	border-radius: 8px;
+	background: rgba(217, 106, 43, 0.14);
+	color: #f2894a;
+	margin-top: -0.25rem;
+}
+
 /* ── Publish panel ───────────────────────────────────────────────────────── */
 
 .studio-publish-meta {

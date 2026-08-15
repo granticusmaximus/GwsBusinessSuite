@@ -120,6 +120,19 @@ public static class CmsBlockHtmlRenderer
         _ => string.Empty
     };
 
+    // Phase 2 (client-safe structural locking) - informational only, shown to every Studio user
+    // regardless of role (same as VisibilityBadgeText). Only for an EXPLICIT, non-inherited
+    // value set directly on this widget/section - a value inherited from the page's own default
+    // isn't shown here, since CmsBlockHtmlRenderer is a stateless renderer with no access to the
+    // CmsPage that owns this layout (see Render's own doc comment) and threading that through
+    // just for a badge isn't worth the plumbing this phase already avoided for the same reason.
+    private static string EditPermissionBadgeText(string editPermission) => editPermission switch
+    {
+        CmsEditPermissions.Locked => "Locked",
+        CmsEditPermissions.ContentOnly => "Content only",
+        _ => string.Empty
+    };
+
     // Emitted only when editMode is true (see Program.cs's /cms/{siteSlug}/{**pageSlug}
     // gating - never reaches a real visitor). Lets Canvas Studio's live-preview iframe
     // report clicks back to the parent page via postMessage instead of navigating away,
@@ -540,9 +553,15 @@ public static class CmsBlockHtmlRenderer
                 }
 
                 var inner = WrapWithStyle(RenderWidget(widget, siteSlug, pageSlug, editMode, articles), widget.Style, tokens);
-                var visibilityBadge = editMode ? VisibilityBadgeText(widget.Visibility) : string.Empty;
-                var hiddenHint = visibilityBadge.Length > 0
-                    ? $"""<div class="gws-visibility-hint">{Html(visibilityBadge)}</div>"""
+                // Both badges share one absolutely-positioned corner slot (see .gws-visibility-
+                // hint), so a widget with both a visibility rule and a lock setting gets ONE
+                // combined badge rather than two stacked/overlapping divs.
+                var widgetBadgeText = editMode
+                    ? string.Join(" | ", new[] { VisibilityBadgeText(widget.Visibility), EditPermissionBadgeText(widget.EditPermission) }
+                        .Where(badge => badge.Length > 0))
+                    : string.Empty;
+                var hiddenHint = widgetBadgeText.Length > 0
+                    ? $"""<div class="gws-visibility-hint">{Html(widgetBadgeText)}</div>"""
                     : string.Empty;
                 // Wrapped OUTSIDE WrapWithStyle so a widget's own background/padding
                 // overrides can never clip the selection outline, and closest('[data-gws-

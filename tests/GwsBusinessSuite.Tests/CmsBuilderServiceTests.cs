@@ -818,6 +818,80 @@ public sealed class CmsBuilderServiceTests
         tokens.TypeScale.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task SavePageAsync_ShouldRoundTripEditPermission()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+
+        var page = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id,
+            Title = "Page",
+            Slug = "page",
+            EditPermission = CmsEditPermissions.Locked
+        });
+
+        page.EditPermission.Should().Be(CmsEditPermissions.Locked);
+        var reloaded = await service.GetPageAsync(page.Id);
+        reloaded!.EditPermission.Should().Be(CmsEditPermissions.Locked);
+    }
+
+    [Fact]
+    public async Task SavePageAsync_ShouldDefaultEditPermissionToOpen_WhenNotProvided()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+
+        var page = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, Title = "Page", Slug = "page" });
+
+        page.EditPermission.Should().Be(CmsEditPermissions.Open);
+    }
+
+    [Fact]
+    public async Task SavePageAsync_ShouldRoundTripEditPermission_OnWidgetsAndSectionsInBlocksJson()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+
+        var layout = new PageLayout
+        {
+            Sections =
+            [
+                new LayoutSection
+                {
+                    Id = "s1",
+                    EditPermission = CmsEditPermissions.ContentOnly,
+                    Columns =
+                    [
+                        new LayoutColumn
+                        {
+                            Id = "c1",
+                            Widgets =
+                            [
+                                new LayoutWidget { Id = "w1", WidgetType = "paragraph", EditPermission = CmsEditPermissions.Locked }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+        var page = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id,
+            Title = "Page",
+            Slug = "page",
+            BlocksJson = CmsBuilderJson.Serialize(layout)
+        });
+
+        var reloadedLayout = CmsBuilderJson.ParseLayoutOrEmpty(page.BlocksJson);
+        reloadedLayout.Sections.Single().EditPermission.Should().Be(CmsEditPermissions.ContentOnly);
+        reloadedLayout.Sections.Single().Columns.Single().Widgets.Single().EditPermission.Should().Be(CmsEditPermissions.Locked);
+    }
+
     private static async Task<ApplicationDbContext> CreateDbAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

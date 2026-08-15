@@ -1042,6 +1042,12 @@ public sealed class CmsPage : AuditableEntity
     // the trigger once PublishedAt actually arrives, so automations react at the real publish
     // moment instead of the moment someone scheduled it.
     public bool ScheduledPublishTriggerPending { get; set; }
+    // Client-safe structural locking (Phase 2) - the page-level default a section/widget falls
+    // back to when its own EditPermission is "Inherit". One of "Open"/"ContentOnly"/"Locked"
+    // (see GwsBusinessSuite.Application.CmsBuilder.CmsEditPermissions - not referenced directly
+    // since Domain doesn't depend on Application, same reason CmsPageStatuses below is defined
+    // here rather than shared). Defaults to "Open" so existing pages are unaffected.
+    public string EditPermission { get; set; } = "Open";
 }
 
 // Part 6.1: one row per typed custom field defined for a CmsSite (shared across every page on
