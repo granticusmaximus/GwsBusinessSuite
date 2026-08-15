@@ -60,6 +60,73 @@ public sealed class GlobalBlockServiceTests
     }
 
     [Fact]
+    public async Task SetOverridableFieldsAsync_ShouldOnlyPersistValidCandidateFields()
+    {
+        await using var db = await CreateDbAsync();
+        var cms = new CmsBuilderService(db);
+        var globals = new GlobalBlockService(db);
+        var site = await cms.SaveSiteAsync(new CmsSiteEditorModel { Name = "Globals" });
+        var block = await globals.CreateWidgetAsync(site.Id, "Product card", new LayoutWidget { Id = "w1", WidgetType = "card" });
+
+        // "variant" isn't in GlobalBlockOverridableFields.CandidatesFor("card") - should be
+        // silently dropped rather than accepted, since the Inspector only ever offers real
+        // candidates and a stray key here would just be dead weight.
+        await globals.SetOverridableFieldsAsync(site.Id, block.Id, ["title", "variant"]);
+
+        var reloaded = (await globals.ListAsync(site.Id)).Single();
+        GlobalBlockOverridableFields.Parse(reloaded.OverridableFieldsJson).Should().BeEquivalentTo(["title"]);
+    }
+
+    [Fact]
+    public async Task SetOverridableFieldsAsync_ShouldThrow_ForASectionKindBlock()
+    {
+        await using var db = await CreateDbAsync();
+        var cms = new CmsBuilderService(db);
+        var globals = new GlobalBlockService(db);
+        var site = await cms.SaveSiteAsync(new CmsSiteEditorModel { Name = "Globals" });
+        var block = await globals.CreateSectionAsync(site.Id, "Hero strip", new LayoutSection { Id = "s1" });
+
+        var act = () => globals.SetOverridableFieldsAsync(site.Id, block.Id, ["title"]);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task SyncWidgetAsync_ShouldPreserveTheCanonicalValue_ForAnOverridableField()
+    {
+        await using var db = await CreateDbAsync();
+        var cms = new CmsBuilderService(db);
+        var globals = new GlobalBlockService(db);
+        var site = await cms.SaveSiteAsync(new CmsSiteEditorModel { Name = "Globals" });
+
+        var block = await globals.CreateWidgetAsync(site.Id, "Product card", new LayoutWidget
+        {
+            Id = "w1",
+            WidgetType = "card",
+            Props = new Dictionary<string, string> { ["title"] = "Shared title", ["body"] = "Shared body" }
+        });
+        await globals.SetOverridableFieldsAsync(site.Id, block.Id, ["title"]);
+
+        // Simulates what the resolver merge already produced in memory before this placement's
+        // save: Props["title"] holds THIS placement's own resolved value (via Overrides), not
+        // the canonical's - syncing must not let that leak back into the shared block.
+        var placement = new LayoutWidget
+        {
+            Id = "placement-1",
+            GlobalBlockId = block.Id,
+            WidgetType = "card",
+            Props = new Dictionary<string, string> { ["title"] = "This placement's own title", ["body"] = "Edited shared body" },
+            Overrides = new Dictionary<string, string> { ["title"] = "This placement's own title" }
+        };
+
+        var synced = await globals.SyncWidgetAsync(site.Id, placement);
+        var canonical = CmsBuilderJson.Parse<LayoutWidget>(synced.Json);
+
+        canonical!.Props["title"].Should().Be("Shared title", "title is overridable - no placement's save should change the shared default");
+        canonical.Props["body"].Should().Be("Edited shared body", "body was never flagged overridable, so it still syncs normally");
+    }
+
+    [Fact]
     public async Task DeleteAsync_ShouldRemoveBlock_FromListAsync()
     {
         await using var db = await CreateDbAsync();

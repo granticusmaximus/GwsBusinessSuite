@@ -66,10 +66,21 @@ public static class GlobalBlockMaterializer
         };
     }
 
-    public static void ApplyResolvedWidget(LayoutWidget placement, LayoutWidget canonical)
+    // overridableFields: Props keys this placement may hold its own diverged value for (see
+    // LayoutWidget.Overrides) instead of the canonical's - every other key stays 100% synced
+    // from the canonical, exactly as before per-instance overrides existed.
+    public static void ApplyResolvedWidget(LayoutWidget placement, LayoutWidget canonical, IReadOnlyList<string> overridableFields)
     {
         placement.WidgetType = canonical.WidgetType;
-        placement.Props = new Dictionary<string, string>(canonical.Props);
+        var mergedProps = new Dictionary<string, string>(canonical.Props);
+        foreach (var key in overridableFields)
+        {
+            if (placement.Overrides.TryGetValue(key, out var overrideValue))
+            {
+                mergedProps[key] = overrideValue;
+            }
+        }
+        placement.Props = mergedProps;
         placement.Style = CloneStyle(canonical.Style);
     }
 
@@ -88,6 +99,11 @@ public static class GlobalBlockMaterializer
         canonical.Id = StripPlacementWidgetPrefix(widget.Id, sectionPlacementId);
         if (widget.GlobalBlockId is not null)
         {
+            // No overridableFields here (a global widget nested inside a global section, being
+            // captured while saving the section itself as Global) - this synchronous helper has
+            // no DB access to look up the nested widget's own block definition. Out of scope for
+            // this first version of per-instance overrides; the nested widget still syncs/
+            // resolves normally, just without override support at this specific nesting depth.
             return CreateWidgetPlaceholder(canonical);
         }
 
@@ -121,17 +137,40 @@ public static class GlobalBlockMaterializer
     {
         TextColor = style.TextColor,
         BackgroundColor = style.BackgroundColor,
+        TextColorToken = style.TextColorToken,
+        BackgroundColorToken = style.BackgroundColorToken,
         Padding = style.Padding,
         BorderRadius = style.BorderRadius,
-        FontSize = style.FontSize
+        FontSize = style.FontSize,
+        FontSizeToken = style.FontSizeToken
     };
 
-    public static LayoutWidget CreateWidgetPlaceholder(LayoutWidget widget) => new()
+    // overridableFields: for each key the referenced GlobalBlock has flagged overridable,
+    // captures widget.Props' current value into the placeholder's Overrides so it survives the
+    // collapse-to-placeholder step (Props itself is dropped here, same as every other key,
+    // since Props gets fully re-derived from the canonical + Overrides on next resolve).
+    public static LayoutWidget CreateWidgetPlaceholder(LayoutWidget widget, IReadOnlyList<string>? overridableFields = null)
     {
-        Id = widget.Id,
-        GlobalBlockId = widget.GlobalBlockId,
-        WidgetType = widget.WidgetType
-    };
+        var placeholder = new LayoutWidget
+        {
+            Id = widget.Id,
+            GlobalBlockId = widget.GlobalBlockId,
+            WidgetType = widget.WidgetType
+        };
+
+        if (overridableFields is { Count: > 0 })
+        {
+            foreach (var key in overridableFields)
+            {
+                if (widget.Props.TryGetValue(key, out var value))
+                {
+                    placeholder.Overrides[key] = value;
+                }
+            }
+        }
+
+        return placeholder;
+    }
 
     public static LayoutSection CreateSectionPlaceholder(LayoutSection section) => new()
     {

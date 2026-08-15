@@ -93,7 +93,8 @@ public sealed class GlobalBlockResolver(IGlobalBlockService globalBlockService, 
                 var canonical = GlobalBlockMaterializer.DeserializeWidget(globalBlock.Json);
                 if (canonical is not null)
                 {
-                    GlobalBlockMaterializer.ApplyResolvedWidget(widget, canonical);
+                    var overridableFields = GlobalBlockOverridableFields.Parse(globalBlock.OverridableFieldsJson);
+                    GlobalBlockMaterializer.ApplyResolvedWidget(widget, canonical, overridableFields);
                 }
             }
             else

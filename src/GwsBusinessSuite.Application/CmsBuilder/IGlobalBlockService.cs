@@ -38,6 +38,15 @@ public interface IGlobalBlockService
         string name,
         CancellationToken cancellationToken = default);
 
+    // Phase 3 (per-instance overrides) - which of this Widget-kind block's Props keys each
+    // placement may hold its own diverged value for. See LayoutWidget.Overrides and
+    // GlobalBlockOverridableFields.CandidatesFor for the offered/candidate keys per widget type.
+    Task SetOverridableFieldsAsync(
+        Guid siteId,
+        Guid globalBlockId,
+        IReadOnlyList<string> fields,
+        CancellationToken cancellationToken = default);
+
     Task DeleteAsync(
         Guid siteId,
         Guid globalBlockId,

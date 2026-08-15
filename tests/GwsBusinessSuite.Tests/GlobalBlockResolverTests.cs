@@ -176,6 +176,147 @@ public sealed class GlobalBlockResolverTests
     }
 
     [Fact]
+    public async Task ResolveAsync_ShouldUseThePlacementsOwnOverride_ForAnOverridableField()
+    {
+        await using var db = await CreateDbAsync();
+        var cms = new CmsBuilderService(db);
+        var globals = new GlobalBlockService(db);
+        var resolver = new GlobalBlockResolver(globals);
+        var site = await cms.SaveSiteAsync(new CmsSiteEditorModel { Name = "Globals" });
+
+        var block = await globals.CreateWidgetAsync(site.Id, "Product card", new LayoutWidget
+        {
+            Id = "canonical-card",
+            WidgetType = "card",
+            Props = new Dictionary<string, string> { ["title"] = "Shared title", ["body"] = "Shared body" }
+        });
+        await globals.SetOverridableFieldsAsync(site.Id, block.Id, ["title"]);
+
+        var layout = new PageLayout
+        {
+            Sections =
+            [
+                new LayoutSection
+                {
+                    Id = "section-1",
+                    Columns =
+                    [
+                        new LayoutColumn
+                        {
+                            Id = "column-1",
+                            Widgets =
+                            [
+                                new LayoutWidget
+                                {
+                                    Id = "placement-widget",
+                                    GlobalBlockId = block.Id,
+                                    WidgetType = "card",
+                                    Overrides = new Dictionary<string, string> { ["title"] = "This placement's own title" }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        await resolver.ResolveAsync(site.Id, layout);
+
+        var resolved = layout.Sections[0].Columns[0].Widgets[0];
+        resolved.Props["title"].Should().Be("This placement's own title", "title was flagged overridable and this placement has its own value");
+        resolved.Props["body"].Should().Be("Shared body", "body was never flagged overridable, so it always stays synced to the canonical");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ShouldFallBackToTheCanonicalValue_WhenThePlacementHasNoOverrideYet()
+    {
+        await using var db = await CreateDbAsync();
+        var cms = new CmsBuilderService(db);
+        var globals = new GlobalBlockService(db);
+        var resolver = new GlobalBlockResolver(globals);
+        var site = await cms.SaveSiteAsync(new CmsSiteEditorModel { Name = "Globals" });
+
+        var block = await globals.CreateWidgetAsync(site.Id, "Product card", new LayoutWidget
+        {
+            Id = "canonical-card",
+            WidgetType = "card",
+            Props = new Dictionary<string, string> { ["title"] = "Shared title" }
+        });
+        await globals.SetOverridableFieldsAsync(site.Id, block.Id, ["title"]);
+
+        var layout = new PageLayout
+        {
+            Sections =
+            [
+                new LayoutSection
+                {
+                    Id = "section-1",
+                    Columns =
+                    [
+                        new LayoutColumn
+                        {
+                            Id = "column-1",
+                            // No Overrides set yet - a brand-new placement of this block.
+                            Widgets = [new LayoutWidget { Id = "placement-widget", GlobalBlockId = block.Id, WidgetType = "card" }]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        await resolver.ResolveAsync(site.Id, layout);
+
+        layout.Sections[0].Columns[0].Widgets[0].Props["title"].Should().Be("Shared title");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ShouldPreserveDesignTokenReferences_ThroughAGlobalWidgetRoundTrip()
+    {
+        // Regression guard: CloneStyle (used throughout GlobalBlockMaterializer) initially
+        // didn't copy WidgetStyle's Phase-1 token fields, so any color/font-size token
+        // reference on a widget silently vanished the moment it became - or resolved through -
+        // a Global Block.
+        await using var db = await CreateDbAsync();
+        var cms = new CmsBuilderService(db);
+        var globals = new GlobalBlockService(db);
+        var resolver = new GlobalBlockResolver(globals);
+        var site = await cms.SaveSiteAsync(new CmsSiteEditorModel { Name = "Globals" });
+
+        var block = await globals.CreateWidgetAsync(site.Id, "Styled paragraph", new LayoutWidget
+        {
+            Id = "canonical-paragraph",
+            WidgetType = "paragraph",
+            Props = new Dictionary<string, string> { ["text"] = "Hello" },
+            Style = new WidgetStyle { TextColorToken = "Primary", FontSizeToken = "Lead" }
+        });
+
+        var layout = new PageLayout
+        {
+            Sections =
+            [
+                new LayoutSection
+                {
+                    Id = "section-1",
+                    Columns =
+                    [
+                        new LayoutColumn
+                        {
+                            Id = "column-1",
+                            Widgets = [new LayoutWidget { Id = "placement-widget", GlobalBlockId = block.Id, WidgetType = "paragraph" }]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        await resolver.ResolveAsync(site.Id, layout);
+
+        var resolvedStyle = layout.Sections[0].Columns[0].Widgets[0].Style;
+        resolvedStyle.TextColorToken.Should().Be("Primary");
+        resolvedStyle.FontSizeToken.Should().Be("Lead");
+    }
+
+    [Fact]
     public async Task ResolveAsync_ShouldWarnWhenAReferencedGlobalBlockNoLongerExists()
     {
         // Regression guard: a deleted/missing global block used to fail silently - the page

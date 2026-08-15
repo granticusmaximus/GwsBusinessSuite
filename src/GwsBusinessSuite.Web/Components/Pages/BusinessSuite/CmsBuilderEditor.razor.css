@@ -573,6 +573,24 @@
 	text-transform: uppercase;
 }
 
+/* Phase 3 (per-instance overrides) - which of a Global Block's content fields each placement
+   may hold its own diverged value for. */
+.studio-overridable-fields {
+	display: flex;
+	flex-direction: column;
+	gap: 0.2rem;
+	margin-top: -0.25rem;
+}
+
+.studio-overridable-field-check {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	font-size: 0.78rem;
+	color: var(--gws-text-strong);
+	margin: 0;
+}
+
 .studio-inspector-textarea {
 	min-height: 120px;
 	resize: vertical;

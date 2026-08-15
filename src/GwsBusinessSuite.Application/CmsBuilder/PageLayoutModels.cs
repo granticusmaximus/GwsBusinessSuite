@@ -64,6 +64,14 @@ public sealed class LayoutWidget
     // through to the parent section, then the page); has no effect on public rendering, only
     // on what Canvas Studio lets a non-Admin Contributor do with this widget.
     public string EditPermission { get; set; } = CmsEditPermissions.Inherit;
+
+    // Phase 3 (per-instance overrides) - only meaningful when GlobalBlockId is set and the
+    // referenced GlobalBlock has marked a key as overridable (GlobalBlock.OverridableFieldsJson).
+    // Holds THIS placement's own diverged value for such a key, keyed by Props key name; a key
+    // absent here stays 100% synced to the shared canonical, same as before this existed. See
+    // GlobalBlockMaterializer.ApplyResolvedWidget (read/merge) and GlobalBlockService
+    // .SyncWidgetAsync (write/preserve-canonical).
+    public Dictionary<string, string> Overrides { get; set; } = new();
 }
 
 // Client-safe structural locking (Phase 2): an agency builds a site as Admin, then wants to

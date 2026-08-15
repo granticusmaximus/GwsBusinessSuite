@@ -106,7 +106,6 @@ public sealed class GlobalBlockService(IAppDbContext dbContext) : IGlobalBlockSe
             .FirstOrDefaultAsync(block => block.Id == globalBlockId && block.SiteId == siteId, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
-        var canonical = GlobalBlockMaterializer.ToCanonicalWidget(widget);
         var isNew = globalBlock is null;
         globalBlock ??= new GlobalBlock
         {
@@ -117,6 +116,44 @@ public sealed class GlobalBlockService(IAppDbContext dbContext) : IGlobalBlockSe
             CreatedBy = "cms-global-block"
         };
 
+        // Once a field is flagged overridable, no single placement's save can change the
+        // shared/canonical value for it anymore - each placement owns its own divergent value
+        // in its own Overrides instead (see LayoutWidget.Overrides,
+        // GlobalBlockMaterializer.ApplyResolvedWidget). Preserve whatever the canonical
+        // currently holds for those keys rather than letting this placement's in-memory Props
+        // (which, for an overridden key, holds THIS placement's own value, not the shared one)
+        // silently become the new shared default.
+        var overridableFields = GlobalBlockOverridableFields.Parse(globalBlock.OverridableFieldsJson);
+        var widgetToSync = widget;
+        if (overridableFields.Count > 0)
+        {
+            var existingCanonical = GlobalBlockMaterializer.DeserializeWidget(globalBlock.Json);
+            var syncedProps = new Dictionary<string, string>(widget.Props);
+            foreach (var key in overridableFields)
+            {
+                if (existingCanonical is not null && existingCanonical.Props.TryGetValue(key, out var canonicalValue))
+                {
+                    syncedProps[key] = canonicalValue;
+                }
+                else
+                {
+                    syncedProps.Remove(key);
+                }
+            }
+            widgetToSync = new LayoutWidget
+            {
+                Id = widget.Id,
+                GlobalBlockId = widget.GlobalBlockId,
+                WidgetType = widget.WidgetType,
+                Props = syncedProps,
+                Style = widget.Style,
+                Visibility = widget.Visibility,
+                EditPermission = widget.EditPermission,
+                Overrides = widget.Overrides
+            };
+        }
+
+        var canonical = GlobalBlockMaterializer.ToCanonicalWidget(widgetToSync);
         globalBlock.Kind = GlobalBlockKinds.Widget;
         globalBlock.WidgetType = canonical.WidgetType;
         globalBlock.Json = CmsBuilderJson.Serialize(canonical);
@@ -186,6 +223,36 @@ public sealed class GlobalBlockService(IAppDbContext dbContext) : IGlobalBlockSe
         }
 
         globalBlock.Name = ValidateName(name);
+        globalBlock.UpdatedAt = DateTimeOffset.UtcNow;
+        globalBlock.UpdatedBy = "cms-global-block";
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task SetOverridableFieldsAsync(
+        Guid siteId,
+        Guid globalBlockId,
+        IReadOnlyList<string> fields,
+        CancellationToken cancellationToken = default)
+    {
+        var globalBlock = await dbContext.GlobalBlocks
+            .FirstOrDefaultAsync(block => block.Id == globalBlockId && block.SiteId == siteId, cancellationToken);
+        if (globalBlock is null)
+        {
+            throw new InvalidOperationException("Global block not found.");
+        }
+
+        // Only Widget-kind blocks have Props to flag fields on - Section blocks have typed
+        // fields (Label/Background/etc.), not a Props dictionary, so per-instance overrides
+        // aren't offered for sections in this first version.
+        if (globalBlock.Kind != GlobalBlockKinds.Widget)
+        {
+            throw new InvalidOperationException("Only widget-kind global blocks support per-instance overridable fields.");
+        }
+
+        var candidates = GlobalBlockOverridableFields.CandidatesFor(globalBlock.WidgetType ?? string.Empty);
+        var validated = fields.Where(field => candidates.Contains(field, StringComparer.Ordinal)).ToList();
+        globalBlock.OverridableFieldsJson = GlobalBlockOverridableFields.Serialize(validated);
         globalBlock.UpdatedAt = DateTimeOffset.UtcNow;
         globalBlock.UpdatedBy = "cms-global-block";
 

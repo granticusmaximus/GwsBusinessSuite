@@ -384,6 +384,24 @@ else
                                     <i class="bi bi-scissors me-1"></i>Detach
                                 </button>
                             </div>
+                            @if (GlobalBlockOverridableFields.CandidatesFor(selWidget.WidgetType).Count > 0)
+                            {
+                                var overridableCandidates = GlobalBlockOverridableFields.CandidatesFor(selWidget.WidgetType);
+                                var currentOverridable = GlobalBlockOverridableFields.Parse(
+                                    _globalBlocks.FirstOrDefault(b => b.Id == globalWidgetId)?.OverridableFieldsJson).ToHashSet();
+                                <div class="studio-overridable-fields">
+                                    <div class="small text-secondary fw-semibold">Per-instance fields</div>
+                                    <div class="small text-secondary mb-1">Checked fields can differ on every page that uses this block; unchecked fields always stay shared.</div>
+                                    @foreach (var field in overridableCandidates)
+                                    {
+                                        <label class="studio-overridable-field-check">
+                                            <input type="checkbox" checked="@currentOverridable.Contains(field)"
+                                                   @onchange="(e) => ToggleOverridableFieldAsync(globalWidgetId, field, (bool)(e.Value ?? false))" />
+                                            <span>@field</span>
+                                        </label>
+                                    }
+                                </div>
+                            }
                         }
                         </fieldset>
 
@@ -1629,11 +1647,17 @@ else
 
     private async Task<LayoutSection> BuildStoredSectionAsync(LayoutSection section, Guid siteId)
     {
+        // Keyed by widget placement Id (not GlobalBlockId - two placements can share one
+        // block), holding each synced widget's freshly-returned overridable-fields list so the
+        // placeholder step below captures the right Overrides without a second, possibly-stale
+        // lookup against _globalBlocks.
+        var overridableFieldsByWidgetId = new Dictionary<string, IReadOnlyList<string>>();
         foreach (var widget in section.Columns.SelectMany(column => column.Widgets))
         {
             if (widget.GlobalBlockId is not null)
             {
-                await GlobalBlockService.SyncWidgetAsync(siteId, widget);
+                var syncedBlock = await GlobalBlockService.SyncWidgetAsync(siteId, widget);
+                overridableFieldsByWidgetId[widget.Id] = GlobalBlockOverridableFields.Parse(syncedBlock.OverridableFieldsJson);
             }
         }
 
@@ -1656,7 +1680,7 @@ else
                 Span = column.Span,
                 Widgets = column.Widgets.Select(widget =>
                     widget.GlobalBlockId is not null
-                        ? GlobalBlockMaterializer.CreateWidgetPlaceholder(widget)
+                        ? GlobalBlockMaterializer.CreateWidgetPlaceholder(widget, overridableFieldsByWidgetId.GetValueOrDefault(widget.Id))
                         : CmsBuilderJson.Clone(widget)).ToList()
             }).ToList()
         };
@@ -1711,6 +1735,37 @@ else
         {
             Logger.LogError(ex, "Failed to save section {SectionId} as a global block.", _selectedSectionId);
             _errorMessage = $"Failed to save as global. {ex.Message}";
+        }
+    }
+
+    // Persists immediately (a block-level setting shared by every placement, not part of the
+    // page's own autosave) - mirrors RenameAsync's shape, not ApplyTrackedMutation's, since
+    // there's no undo/redo concept for "which fields this block offers as overridable."
+    private async Task ToggleOverridableFieldAsync(Guid globalBlockId, string field, bool isChecked)
+    {
+        if (_page is null) return;
+        var block = _globalBlocks.FirstOrDefault(b => b.Id == globalBlockId);
+        if (block is null) return;
+
+        var fields = GlobalBlockOverridableFields.Parse(block.OverridableFieldsJson).ToList();
+        if (isChecked && !fields.Contains(field, StringComparer.Ordinal))
+        {
+            fields.Add(field);
+        }
+        else if (!isChecked)
+        {
+            fields.RemoveAll(existing => string.Equals(existing, field, StringComparison.Ordinal));
+        }
+
+        try
+        {
+            await GlobalBlockService.SetOverridableFieldsAsync(_page.SiteId, globalBlockId, fields);
+            _globalBlocks = (await GlobalBlockService.ListAsync(_page.SiteId)).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to update per-instance fields for global block {GlobalBlockId}.", globalBlockId);
+            _errorMessage = $"Failed to update per-instance fields. {ex.Message}";
         }
     }
 

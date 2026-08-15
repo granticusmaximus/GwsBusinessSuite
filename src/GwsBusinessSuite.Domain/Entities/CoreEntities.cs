@@ -1114,6 +1114,12 @@ public sealed class GlobalBlock : AuditableEntity
     public string Kind { get; set; } = GlobalBlockKinds.Widget;
     public string? WidgetType { get; set; }
     public string Json { get; set; } = "{}";
+    // Phase 3 (per-instance overrides) - a JSON string array of this block's own Props keys
+    // that each placement may diverge on independently instead of staying 100% synced (e.g. a
+    // shared "product box" widget where every placement shares layout/style but has its own
+    // title/link). Widget-kind blocks only; empty for Section blocks. See
+    // GwsBusinessSuite.Application.CmsBuilder.GlobalBlockOverridableFields.
+    public string OverridableFieldsJson { get; set; } = "[]";
 }
 
 public sealed class MediaAsset : AuditableEntity
