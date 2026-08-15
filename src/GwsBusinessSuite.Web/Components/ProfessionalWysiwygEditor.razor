@@ -32,7 +32,7 @@
     </div>
     <div id="@_editorId"
          class="gws-wysiwyg-surface"
-         contenteditable="@(!Disabled).ToString().ToLowerInvariant()"
+         contenteditable="@(Disabled ? "false" : "true")"
          role="textbox"
          aria-multiline="true"
          aria-label="@AriaLabel"

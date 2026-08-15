@@ -155,7 +155,8 @@ public sealed class BusinessIntelligenceServiceTests
         Title = title,
         Stage = stage,
         ValueUsd = value,
-        CreatedAt = createdAt
+        CreatedAt = createdAt,
+        CreatedAtUnixSeconds = createdAt.ToUnixTimeSeconds()
     };
 
     private static WebAnalyticsEvent PageView(string path, string visitor, DateTimeOffset occurredAt) => new()

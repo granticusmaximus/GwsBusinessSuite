@@ -615,7 +615,7 @@ public static class CmsBlockHtmlRenderer
                   <div class="gws-card-body">
                     <h3 class="gws-card-title">{Html(Get(p, "title"))}</h3>
                     <div class="gws-card-text">{Markdown.ToHtml(Get(p, "body"), MarkdownPipeline)}</div>
-                    {(HasValue(p, "link") ? $"""<a href="{Html(Get(p, "link"))}" class="btn btn-sm btn-outline-primary">Read more</a>""" : "")}
+                    {(HasValue(p, "link") ? $"""<a href="{Html(HrefOrHash(Get(p, "link")))}" class="btn btn-sm btn-outline-primary">Read more</a>""" : "")}
                   </div>
                 </div>
                 """,
@@ -806,7 +806,30 @@ public static class CmsBlockHtmlRenderer
     private static string InlineEditAttrs(bool editMode, string propKey) =>
         editMode ? $" contenteditable=\"plaintext-only\" data-gws-inline-prop=\"{propKey}\"" : "";
 
-    private static string HrefOrHash(string href) => string.IsNullOrWhiteSpace(href) ? "#" : href;
+    private static readonly string[] AllowedHrefSchemes = ["http", "https", "mailto", "tel"];
+
+    // Html() only HTML-encodes for the attribute context - it does not neutralize a dangerous
+    // URI scheme, since none of javascript:/data:/vbscript: contain characters that need
+    // encoding. A widget's href/link fields are editable by any Contributor (and, since the
+    // Developer API's cms-pages:write scope, by a fully machine-driven credential with no human
+    // ever looking at the editor), so an unvalidated scheme here would let that role run
+    // arbitrary script for every site visitor who clicks the link. Relative paths/anchors/query
+    // strings have no scheme to check and are passed through; an absolute URL's scheme must be
+    // on the allowlist. Browsers strip tab/newline/carriage-return before scheme-sniffing a URL
+    // (a known way to sneak "java\tscript:" past a naive check) - stripped here first so this
+    // check sees the same string a browser would act on.
+    private static string HrefOrHash(string href)
+    {
+        var value = (href ?? string.Empty).Replace("\t", "").Replace("\n", "").Replace("\r", "").Trim();
+        if (value.Length == 0) return "#";
+        if (value[0] is '/' or '#' or '?') return value;
+        if (Uri.TryCreate(value, UriKind.RelativeOrAbsolute, out var uri))
+        {
+            if (!uri.IsAbsoluteUri) return value;
+            if (AllowedHrefSchemes.Contains(uri.Scheme, StringComparer.OrdinalIgnoreCase)) return value;
+        }
+        return "#";
+    }
 
     private static string OpenInNewTabAttrs(IReadOnlyDictionary<string, string> p) =>
         Get(p, "openInNewTab") == "true" ? " target=\"_blank\" rel=\"noopener noreferrer\"" : string.Empty;

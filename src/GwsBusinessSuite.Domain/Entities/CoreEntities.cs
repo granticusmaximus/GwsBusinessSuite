@@ -197,6 +197,11 @@ public sealed class Deal : AuditableEntity
     // also changes for unrelated edits, e.g. fixing a typo in Notes long after closing).
     public DateTimeOffset? ClosedAt { get; set; }
     public string Notes { get; set; } = string.Empty;
+    // SQLite/EF Core can't translate a range comparison or ORDER BY against CreatedAt (a
+    // DateTimeOffset column) - mirrors WebAnalyticsEvent.OccurredAtUnixSeconds/
+    // CjCommissionRecord.CreatedAtUnixSeconds so BI dashboard queries can filter/sort/cap deals
+    // in SQL by date range instead of loading the whole table.
+    public long CreatedAtUnixSeconds { get; set; }
 }
 
 public static class InvoiceStatuses

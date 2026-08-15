@@ -309,7 +309,7 @@ public sealed class CrmService(
         var deal = editor.DealId is { } dealId
             ? await dbContext.Deals.FirstOrDefaultAsync(item => item.Id == dealId, cancellationToken)
                 ?? throw new KeyNotFoundException("Deal was not found.")
-            : new Deal { ContactId = editor.ContactId, Title = string.Empty, CreatedAt = now, CreatedBy = performedBy };
+            : new Deal { ContactId = editor.ContactId, Title = string.Empty, CreatedAt = now, CreatedAtUnixSeconds = now.ToUnixTimeSeconds(), CreatedBy = performedBy };
         var isNew = editor.DealId is null;
 
         deal.ContactId = editor.ContactId;

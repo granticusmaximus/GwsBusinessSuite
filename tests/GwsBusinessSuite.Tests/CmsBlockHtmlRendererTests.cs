@@ -462,4 +462,84 @@ public sealed class CmsBlockHtmlRendererTests
         Assert.Equal(11, preview.Length); // 10 chars + ellipsis
         Assert.EndsWith("…", preview);
     }
+
+    [Theory]
+    [InlineData("javascript:alert(1)")]
+    [InlineData("JavaScript:alert(1)")]
+    [InlineData("java\tscript:alert(1)")]
+    [InlineData("data:text/html,<script>alert(1)</script>")]
+    [InlineData("vbscript:msgbox(1)")]
+    public void Render_ShouldRejectDangerousUriSchemes_InButtonHref(string dangerousHref)
+    {
+        // Built via the typed model + the real serializer (not hand-spliced JSON text) so an
+        // exotic value like a raw tab character is escaped exactly the way a genuinely stored
+        // BlocksJson value would be, rather than producing invalid JSON in the test itself.
+        var layout = ButtonLayout(dangerousHref);
+        var html = CmsBlockHtmlRenderer.Render(CmsBuilderJson.Serialize(layout));
+
+        Assert.DoesNotContain("javascript:", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("data:", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("vbscript:", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("href=\"#\"", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRejectDangerousUriSchemes_InHeroCtaHref()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"hero","props":{"headline":"Hi","cta1Label":"Go","cta1Href":"javascript:alert(document.cookie)"}}"""));
+
+        Assert.DoesNotContain("javascript:", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("href=\"#\"", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRejectDangerousUriSchemes_InCardLink()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"card","props":{"title":"T","link":"javascript:alert(1)"}}"""));
+
+        Assert.DoesNotContain("javascript:", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("href=\"#\"", html);
+    }
+
+    [Theory]
+    [InlineData("/about")]
+    [InlineData("about")]
+    [InlineData("#section")]
+    [InlineData("?query=1")]
+    [InlineData("https://example.com/path")]
+    [InlineData("http://example.com")]
+    [InlineData("mailto:hello@example.com")]
+    [InlineData("tel:+15551234567")]
+    public void Render_ShouldPreserveLegitimateHrefValues(string safeHref)
+    {
+        var html = CmsBlockHtmlRenderer.Render(CmsBuilderJson.Serialize(ButtonLayout(safeHref)));
+
+        Assert.Contains($"href=\"{safeHref}\"", html);
+    }
+
+    private static PageLayout ButtonLayout(string href) => new()
+    {
+        Sections =
+        [
+            new LayoutSection
+            {
+                Columns =
+                [
+                    new LayoutColumn
+                    {
+                        Widgets =
+                        [
+                            new LayoutWidget
+                            {
+                                WidgetType = "button",
+                                Props = new() { ["label"] = "Click", ["href"] = href }
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    };
 }

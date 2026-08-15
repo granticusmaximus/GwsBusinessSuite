@@ -248,7 +248,7 @@ else if (View.Type == WikiDatabaseViewTypes.Feed)
                 <div class="sentinel-db-feed-icon">@(Database.Icon ?? "◈")</div>
                 <div>
                     <button type="button" @onclick="() => OnOpenRow.InvokeAsync(row.Id)">@Title(row)</button>
-                    <time>@(row.UpdatedAt ?? row.CreatedAt).ToLocalTime().ToString("g")</time>
+                    <time>@((row.UpdatedAt ?? row.CreatedAt).ToLocalTime().ToString("g"))</time>
                     @foreach (var property in Database.Properties.Where(property => property.Type != WikiDatabasePropertyTypes.Title).Take(3))
                     {
                         var text = WikiPropertyValues.GetDisplayText(property, WikiPropertyValues.ParseObject(row.PropertyValuesJson), row.CreatedAt);

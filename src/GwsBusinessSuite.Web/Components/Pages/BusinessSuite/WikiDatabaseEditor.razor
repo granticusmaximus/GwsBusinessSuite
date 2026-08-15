@@ -1123,7 +1123,7 @@ else
                                                     <span class="small text-secondary">@row.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")</span>
                                                     break;
                                                 case WikiDatabasePropertyTypes.LastEditedTime:
-                                                    <span class="small text-secondary">@(row.UpdatedAt ?? row.CreatedAt).ToLocalTime().ToString("MMM d, yyyy")</span>
+                                                    <span class="small text-secondary">@((row.UpdatedAt ?? row.CreatedAt).ToLocalTime().ToString("MMM d, yyyy"))</span>
                                                     break;
                                                 case WikiDatabasePropertyTypes.CreatedBy:
                                                     <span class="small text-secondary">@row.CreatedBy</span>

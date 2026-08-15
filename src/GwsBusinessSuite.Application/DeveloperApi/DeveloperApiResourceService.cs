@@ -92,6 +92,7 @@ public sealed class DeveloperApiResourceService(
             ClosedAt = DealStages.Open.Contains(input.Stage) ? null : now,
             Notes = input.Notes?.Trim() ?? string.Empty,
             CreatedAt = now,
+            CreatedAtUnixSeconds = now.ToUnixTimeSeconds(),
             CreatedBy = actor
         };
         await db.Deals.AddAsync(row, cancellationToken);

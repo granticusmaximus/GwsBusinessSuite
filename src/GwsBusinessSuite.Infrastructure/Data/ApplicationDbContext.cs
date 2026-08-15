@@ -161,6 +161,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<Deal>().HasIndex(x => x.ContactId);
         modelBuilder.Entity<Deal>().HasIndex(x => x.Stage);
+        modelBuilder.Entity<Deal>().HasIndex(x => x.CreatedAtUnixSeconds);
 
         modelBuilder.Entity<Invoice>()
             .HasOne<Contact>()
