@@ -200,6 +200,8 @@ public sealed class ContentLocalizationService(
 
             inputStrings.Add(page.Title);
             inputStrings.AddRange(fields.Select(field => field.Widget.Props[field.FieldKey]));
+            var metaDescriptionIndex = inputStrings.Count;
+            inputStrings.Add(page.MetaDescription ?? string.Empty);
             var translated = await TranslateAsync(ai, normalizedLanguageCode, normalizedModel, inputStrings, cancellationToken);
             for (var index = 0; index < fields.Count; index++)
             {
@@ -207,7 +209,7 @@ public sealed class ContentLocalizationService(
             }
 
             translatedBody = CmsBuilderJson.Serialize(layout);
-            translatedMetaDescription = page.MetaDescription;
+            translatedMetaDescription = NormalizeOptional(translated[metaDescriptionIndex]);
             return await UpsertAiDraftAsync(
                 contentType, contentId, normalizedLanguageCode, translated[0], translatedBody,
                 translatedMetaDescription, normalizedModel, performedBy, cancellationToken);

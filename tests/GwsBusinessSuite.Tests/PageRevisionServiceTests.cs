@@ -215,6 +215,36 @@ public sealed class PageRevisionServiceTests
     }
 
     [Fact]
+    public async Task GetPageStructuralDiffAsync_ShouldReportAParseFailure_RatherThanFabricatingAFullRewriteDiff()
+    {
+        await using var db = await CreateDbAsync();
+        var cms = new CmsBuilderService(db);
+        var revisions = new PageRevisionService(db);
+        var page = await CreatePageAsync(cms,
+            """{"sections":[{"id":"s1","columns":[{"id":"c1","widgets":[{"id":"w1","widgetType":"heading","props":{"text":"Hello"}}]}]}]}""");
+        var fromRevision = await revisions.CreateRevisionAsync(page);
+
+        // A bare JSON array instead of the expected {"sections":[...]} wrapper - fails to
+        // deserialize into PageLayout. Previously this was indistinguishable from a genuinely
+        // empty revision and showed every section on the other side as a wholesale add/remove.
+        var toPage = await cms.SavePageAsync(new CmsPageEditorModel
+        {
+            PageId = page.Id,
+            SiteId = page.SiteId,
+            Title = page.Title,
+            BlocksJson = "[1,2,3]"
+        });
+        var toRevision = await revisions.CreateRevisionAsync(toPage);
+
+        var diff = await revisions.GetPageStructuralDiffAsync(fromRevision.Id, toRevision.Id);
+
+        diff.Should().NotBeNull();
+        diff.Should().NotContain("[section]");
+        diff.Should().NotContain("[heading]");
+        diff.Should().Contain("could not be parsed");
+    }
+
+    [Fact]
     public async Task GetPageStructuralDiffAsync_ShouldReturnNull_WhenARevisionNoLongerExists()
     {
         await using var db = await CreateDbAsync();

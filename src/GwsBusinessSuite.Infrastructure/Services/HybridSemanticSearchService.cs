@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Data;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.CmsBuilder;
@@ -83,7 +84,7 @@ public sealed class HybridSemanticSearchService(
                     }
                 }
             }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException or NotSupportedException)
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException or NotSupportedException or JsonException)
             {
                 cache.Set(EmbeddingFailureCacheKey, true, TimeSpan.FromMinutes(1));
                 logger.LogWarning(ex, "Semantic query embedding failed; returning keyword-ranked results.");
@@ -150,7 +151,7 @@ public sealed class HybridSemanticSearchService(
                     batch.Select(item => item.EmbeddingInput).ToList(),
                     cancellationToken);
             }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException or NotSupportedException)
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException or NotSupportedException or JsonException)
             {
                 cache.Set(EmbeddingFailureCacheKey, true, TimeSpan.FromMinutes(1));
                 throw new InvalidOperationException(

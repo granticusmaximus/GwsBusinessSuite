@@ -74,9 +74,18 @@ public sealed class SeoAuditService(
             ?? throw new InvalidOperationException($"Page {pageId} was not found.");
 
         var analysis = AnalyzeLayout(page.BlocksJson);
-        var findings = BuildDeterministicFindings(
-            string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle, page.MetaDescription, page.Slug,
-            analysis.PlainText, analysis.WordCount, analysis.HeadingLevels, analysis.ImageHasAlt, analysis.HasLink, primaryKeyword);
+        // A parse failure (malformed BlocksJson) is not the same as genuinely empty content -
+        // treating it as empty would silently score real content as if it had zero words, no
+        // headings, no images, etc. Surface the parse failure itself instead of a fabricated
+        // low score.
+        var findings = analysis.ParsedSuccessfully
+            ? BuildDeterministicFindings(
+                string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle, page.MetaDescription, page.Slug,
+                analysis.PlainText, analysis.WordCount, analysis.HeadingLevels, analysis.ImageHasAlt, analysis.HasLink, primaryKeyword)
+            : [new SeoAuditFinding(
+                "Content", SeoAuditFindingStatuses.Fail,
+                "This page's content could not be parsed (malformed BlocksJson) - the audit could not run against its actual content.",
+                0, 100)];
 
         return await FinishAuditAsync(
             SeoAuditContentTypes.CmsPage, page.Id, page.Title, findings, analysis.PlainText, model, cancellationToken);
@@ -273,7 +282,8 @@ public sealed class SeoAuditService(
             : new SeoAuditFinding("Slug", SeoAuditFindingStatuses.Warning, $"\"{trimmed}\" - prefer short, lowercase, hyphen-separated slugs.", 5, 10);
     }
 
-    private readonly record struct ContentAnalysis(string PlainText, int WordCount, List<int> HeadingLevels, List<bool> ImageHasAlt, bool HasLink);
+    private readonly record struct ContentAnalysis(
+        string PlainText, int WordCount, List<int> HeadingLevels, List<bool> ImageHasAlt, bool HasLink, bool ParsedSuccessfully = true);
 
     private static ContentAnalysis AnalyzeMarkdown(string markdown)
     {
@@ -300,7 +310,7 @@ public sealed class SeoAuditService(
 
     private static ContentAnalysis AnalyzeLayout(string blocksJson)
     {
-        var layout = CmsBuilderJson.ParseLayoutOrEmpty(blocksJson);
+        var parsedSuccessfully = CmsBuilderJson.TryParseLayout(blocksJson, out var layout);
         var widgets = layout.Sections.SelectMany(section => section.Columns).SelectMany(column => column.Widgets).ToList();
 
         var headingLevels = widgets
@@ -332,7 +342,7 @@ public sealed class SeoAuditService(
             if (!string.IsNullOrWhiteSpace(text)) textBuilder.Append(text).Append(' ');
         }
         var plainText = textBuilder.ToString();
-        return new ContentAnalysis(plainText, CountWords(plainText), headingLevels, imageHasAlt, hasLink);
+        return new ContentAnalysis(plainText, CountWords(plainText), headingLevels, imageHasAlt, hasLink, parsedSuccessfully);
     }
 
     private static int CountWords(string text) =>

@@ -5,6 +5,7 @@
 @inject IQuickNoteService QuickNoteService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
+@inject ILogger<QuickNoteModal> Logger
 @implements IAsyncDisposable
 
 @if (IsOpen)
@@ -93,8 +94,9 @@
             await OnSaved.InvokeAsync();
             await CloseAsync();
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Logger.LogWarning(ex, "Quick Note save failed.");
             ErrorMessage = "Couldn't save that note. Try again.";
         }
         finally

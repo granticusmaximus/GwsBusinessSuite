@@ -81,6 +81,24 @@ public sealed class SeoAuditServiceTests
     }
 
     [Fact]
+    public async Task AuditCmsPageAsync_ShouldReportAParseFailure_RatherThanScoringMalformedBlocksJsonAsEmptyContent()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var site = await fixture.AddCmsSiteAsync();
+        // A bare JSON array instead of the expected {"sections":[...]} wrapper object - valid
+        // JSON, but the wrong shape, so it fails to deserialize into PageLayout. Previously this
+        // was indistinguishable from a genuinely empty page and scored as if it had zero words,
+        // no headings, etc.
+        var page = await fixture.AddCmsPageAsync(site.Id, "Landing Page", "landing-page", "[1,2,3]");
+
+        var result = await fixture.Service.AuditCmsPageAsync(page.Id, model: null, primaryKeyword: null);
+
+        result.Findings.Should().ContainSingle(finding => finding.Category == "Content" && finding.Status == SeoAuditFindingStatuses.Fail);
+        result.Findings.Should().NotContain(finding =>
+            finding.Category == "Word count" || finding.Category == "Heading structure" || finding.Category == "Image alt text");
+    }
+
+    [Fact]
     public async Task AuditArticleAsync_ShouldBlendInAValidAiAssessment()
     {
         await using var fixture = await Fixture.CreateAsync();

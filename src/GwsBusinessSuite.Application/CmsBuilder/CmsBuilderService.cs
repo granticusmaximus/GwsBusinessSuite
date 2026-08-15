@@ -846,7 +846,15 @@ public sealed class CmsBuilderService(
     // dropped rather than left dangling.
     private static string RemapGlobalBlockReferences(string blocksJson, IReadOnlyDictionary<Guid, Guid> globalBlockIds)
     {
-        var layout = CmsBuilderJson.ParseLayoutOrEmpty(blocksJson);
+        // ParseLayoutOrEmpty can't tell "genuinely empty" apart from "malformed" - both return
+        // an empty PageLayout. Re-serializing that for a malformed (non-empty) source would
+        // silently import the page with zero content. Leave the page's BlocksJson untouched
+        // instead - its global-block references may point at stale ids, but that's far less
+        // destructive than discarding the page's actual content on import.
+        if (!CmsBuilderJson.TryParseLayout(blocksJson, out var layout))
+        {
+            return blocksJson;
+        }
         foreach (var section in layout.Sections)
         {
             section.GlobalBlockId = section.GlobalBlockId is { } id && globalBlockIds.TryGetValue(id, out var newId) ? newId : null;

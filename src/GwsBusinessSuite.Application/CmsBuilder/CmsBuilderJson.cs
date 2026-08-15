@@ -14,6 +14,27 @@ public static class CmsBuilderJson
     public static PageLayout ParseLayoutOrEmpty(string blocksJson) =>
         ParseLayout(blocksJson) ?? new PageLayout();
 
+    // ParseLayoutOrEmpty deliberately can't distinguish "genuinely empty BlocksJson" from
+    // "non-empty but malformed/wrong-shaped BlocksJson" - both return an empty PageLayout, which
+    // is right for most read paths (never crash rendering a page) but has repeatedly caused
+    // callers to silently treat a parse FAILURE as proof the source content was actually empty
+    // (site import overwriting a page with blank content, an SEO audit scoring real content as
+    // if it had none, a revision diff fabricating a full add/remove). Callers that need to tell
+    // the two apart - anywhere a parse failure should be surfaced rather than silently
+    // swallowed - should use this instead.
+    public static bool TryParseLayout(string blocksJson, out PageLayout layout)
+    {
+        if (string.IsNullOrWhiteSpace(blocksJson))
+        {
+            layout = new PageLayout();
+            return true;
+        }
+
+        var parsed = ParseLayout(blocksJson);
+        layout = parsed ?? new PageLayout();
+        return parsed is not null;
+    }
+
     public static T? Parse<T>(string json)
     {
         if (string.IsNullOrWhiteSpace(json))

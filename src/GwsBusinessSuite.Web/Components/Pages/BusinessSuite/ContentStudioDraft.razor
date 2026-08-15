@@ -672,8 +672,13 @@ else
                     await InvokeAsync(StateHasChanged);
                 }
             }
-            catch (Exception)
+            catch (OperationCanceledException)
             {
+                // Expected - StopBusyTicker() cancels this loop deliberately.
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Content Studio busy ticker stopped unexpectedly.");
             }
         });
     }

@@ -105,9 +105,18 @@ public sealed class PageRevisionService(IAppDbContext dbContext) : IPageRevision
             return null;
         }
 
-        return BuildStructuralDiff(
-            CmsBuilderJson.ParseLayoutOrEmpty(from.BlocksJson),
-            CmsBuilderJson.ParseLayoutOrEmpty(to.BlocksJson));
+        // ParseLayoutOrEmpty can't tell "genuinely empty" apart from "malformed" - diffing a
+        // malformed side against an empty PageLayout would show every section on the other side
+        // as a wholesale add/remove, looking like a full rewrite when the real story is "this
+        // revision's BlocksJson couldn't be parsed."
+        var fromParsed = CmsBuilderJson.TryParseLayout(from.BlocksJson, out var fromLayout);
+        var toParsed = CmsBuilderJson.TryParseLayout(to.BlocksJson, out var toLayout);
+        if (!fromParsed || !toParsed)
+        {
+            return "Unable to compute a structural diff - one of these revisions' content could not be parsed.";
+        }
+
+        return BuildStructuralDiff(fromLayout, toLayout);
     }
 
     // Mirrors WikiDatabaseService.BuildStructuralDiff's dictionary-by-id diff approach, applied

@@ -36,6 +36,15 @@ public sealed class BusinessIntelligenceService(IAppDbContext db, TimeProvider t
             .OrderBy(item => item.SortOrder)
             .ToListAsync(cancellationToken);
 
+        // Deals can't be filtered by CreatedAt in SQL (SQLite can't translate DateTimeOffset
+        // comparisons - see QueryDeals), so every Deals-shaped widget needs the whole table in
+        // memory. Loaded once here and shared across every widget on this dashboard instead of
+        // once per widget - a dashboard with several Deals widgets used to re-scan the full
+        // table that many times on a single page load.
+        var dealsCache = widgets.Any(item => item.QueryShape == BiQueryShapes.Deals)
+            ? await LoadDealProjectionsAsync(cancellationToken)
+            : null;
+
         var results = new List<BiDashboardWidget>(widgets.Count);
         foreach (var widget in widgets)
         {
@@ -49,7 +58,7 @@ public sealed class BusinessIntelligenceService(IAppDbContext db, TimeProvider t
                 Visualization = widget.Visualization,
                 RangeDays = widget.RangeDays
             };
-            var chart = await PreviewAsync(editor, cancellationToken);
+            var chart = await PreviewCoreAsync(editor, dealsCache, cancellationToken);
             results.Add(new BiDashboardWidget(widget.Id, widget.Title, widget.QueryShape, widget.Metric,
                 widget.Dimension, widget.Visualization, widget.RangeDays, widget.SortOrder, chart));
         }
@@ -57,7 +66,11 @@ public sealed class BusinessIntelligenceService(IAppDbContext db, TimeProvider t
         return results;
     }
 
-    public async Task<BiChartResult> PreviewAsync(BiWidgetEditor editor, CancellationToken cancellationToken = default)
+    public Task<BiChartResult> PreviewAsync(BiWidgetEditor editor, CancellationToken cancellationToken = default) =>
+        PreviewCoreAsync(editor, preloadedDeals: null, cancellationToken);
+
+    private async Task<BiChartResult> PreviewCoreAsync(
+        BiWidgetEditor editor, IReadOnlyList<DealProjection>? preloadedDeals, CancellationToken cancellationToken)
     {
         var definition = Validate(editor);
         var now = timeProvider.GetUtcNow();
@@ -65,7 +78,7 @@ public sealed class BusinessIntelligenceService(IAppDbContext db, TimeProvider t
 
         var points = editor.QueryShape switch
         {
-            BiQueryShapes.Deals => await QueryDealsAsync(editor, from, cancellationToken),
+            BiQueryShapes.Deals => QueryDeals(preloadedDeals ?? await LoadDealProjectionsAsync(cancellationToken), editor, from),
             BiQueryShapes.ArticlePerformance => await QueryArticlesAsync(editor, from, cancellationToken),
             BiQueryShapes.AffiliateRevenue => await QueryAffiliateAsync(editor, from, cancellationToken),
             _ => throw new InvalidOperationException("That report source is not supported.")
@@ -143,18 +156,20 @@ public sealed class BusinessIntelligenceService(IAppDbContext db, TimeProvider t
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    private async Task<IReadOnlyList<BiDataPoint>> QueryDealsAsync(
-        BiWidgetEditor editor,
-        DateTimeOffset from,
-        CancellationToken cancellationToken)
+    // SQLite cannot translate DateTimeOffset range comparisons or ORDER BY, so the cutoff is
+    // always applied in memory - materialized once (capped at MaxSourceRows as a safety bound
+    // for a pathologically large table) and shared across every Deals-shaped widget in a
+    // dashboard load rather than re-queried per widget (see GetDashboardAsync).
+    private async Task<List<DealProjection>> LoadDealProjectionsAsync(CancellationToken cancellationToken) =>
+        await db.Deals.AsNoTracking()
+            .Select(item => new DealProjection(item.Stage, item.ValueUsd, item.CreatedAt))
+            .Take(MaxSourceRows)
+            .ToListAsync(cancellationToken);
+
+    private static IReadOnlyList<BiDataPoint> QueryDeals(
+        IReadOnlyList<DealProjection> allDeals, BiWidgetEditor editor, DateTimeOffset from)
     {
-        // SQLite cannot translate DateTimeOffset range comparisons. Deals are an operational,
-        // bounded table, so materialize the compact projection and apply the cutoff in memory.
-        var deals = (await db.Deals.AsNoTracking()
-                .Select(item => new { item.Stage, item.ValueUsd, item.CreatedAt })
-                .ToListAsync(cancellationToken))
-            .Where(item => item.CreatedAt >= from)
-            .ToList();
+        var deals = allDeals.Where(item => item.CreatedAt >= from).ToList();
 
         if (editor.Dimension == BiDimensions.Stage)
         {
@@ -172,6 +187,8 @@ public sealed class BusinessIntelligenceService(IAppDbContext db, TimeProvider t
                 group.Sum(item => editor.Metric == BiMetrics.Count ? 1m : item.ValueUsd)))
             .ToList();
     }
+
+    private sealed record DealProjection(string Stage, decimal ValueUsd, DateTimeOffset CreatedAt);
 
     private async Task<IReadOnlyList<BiDataPoint>> QueryArticlesAsync(
         BiWidgetEditor editor,

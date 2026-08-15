@@ -7,6 +7,7 @@
 @inject IJSRuntime JS
 @inject ILiveShowService LiveShowService
 @inject ILiveShowIceServerProvider IceServerProvider
+@inject ILogger<LiveShowWatch> Logger
 @implements IAsyncDisposable
 
 <PageTitle>Live Show</PageTitle>
@@ -62,8 +63,9 @@
                 _joined = sessionId is not null;
                 StatusMessage = _joined ? string.Empty : "The show just ended.";
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Logger.LogWarning(ex, "Live show viewer connection failed for token {Token}.", Token);
                 StatusMessage = "Could not connect to the broadcast.";
             }
         }

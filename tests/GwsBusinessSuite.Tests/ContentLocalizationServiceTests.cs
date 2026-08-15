@@ -91,8 +91,8 @@ public sealed class ContentLocalizationServiceTests
                 }
             ]
         };
-        var page = await fixture.AddCmsPageAsync("Source page", layout);
-        fixture.Ollama!.Response = """["Página","Encabezado","Párrafo"]""";
+        var page = await fixture.AddCmsPageAsync("Source page", layout, "Source description");
+        fixture.Ollama!.Response = """["Página","Encabezado","Párrafo","Descripción traducida"]""";
 
         var result = await fixture.Service.GenerateTranslationAsync(
             ContentLocalizationContentTypes.CmsPage, page.Id, "es", "llama3.1", "author");
@@ -100,6 +100,7 @@ public sealed class ContentLocalizationServiceTests
         var widgets = translated.Sections.Single().Columns.Single().Widgets;
 
         result.Title.Should().Be("Página");
+        result.MetaDescription.Should().Be("Descripción traducida");
         widgets.Should().HaveCount(2);
         widgets[0].Id.Should().Be("heading-1");
         widgets[0].WidgetType.Should().Be("heading");
@@ -214,7 +215,7 @@ public sealed class ContentLocalizationServiceTests
             return article;
         }
 
-        public async Task<CmsPage> AddCmsPageAsync(string title, PageLayout layout)
+        public async Task<CmsPage> AddCmsPageAsync(string title, PageLayout layout, string? metaDescription = null)
         {
             var site = new CmsSite { Name = "Site", Slug = $"site-{Guid.NewGuid():N}" };
             Db.CmsSites.Add(site);
@@ -223,7 +224,8 @@ public sealed class ContentLocalizationServiceTests
                 SiteId = site.Id,
                 Title = title,
                 Slug = $"page-{Guid.NewGuid():N}",
-                BlocksJson = CmsBuilderJson.Serialize(layout)
+                BlocksJson = CmsBuilderJson.Serialize(layout),
+                MetaDescription = metaDescription ?? string.Empty
             };
             Db.CmsPages.Add(page);
             await Db.SaveChangesAsync();
