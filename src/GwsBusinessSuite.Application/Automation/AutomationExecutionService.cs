@@ -70,6 +70,7 @@ public sealed class AutomationExecutionService(
                 AutomationExecutionModes.DatabaseTrigger => "database.rowChangedTrigger",
                 AutomationExecutionModes.CrmDealStageChanged => "crm.dealStageChangedTrigger",
                 AutomationExecutionModes.CmsPagePublished => "cms.pagePublishedTrigger",
+                AutomationExecutionModes.SentinelChatPromptSubmitted => "sentinel.chatPromptSubmittedTrigger",
                 _ => "core.manualTrigger"
             };
             var startNodes = snapshot.Nodes.Where(node => node.TypeKey == triggerType && !node.IsDisabled).ToList();

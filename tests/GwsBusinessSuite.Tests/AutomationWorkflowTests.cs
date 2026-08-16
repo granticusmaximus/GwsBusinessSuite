@@ -903,6 +903,86 @@ public sealed class AutomationWorkflowTests
         lesson.Output.Should().Contain("Sentinel synthesis");
     }
 
+    [Fact]
+    public async Task AiAllInstalledModelsAdvisor_ShouldDiscoverModelsDynamically_AndFeedSentinelSynthesizeEndToEnd()
+    {
+        await using var db = await CreateDbAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(db.Database.GetDbConnection())
+            .Options;
+        // FakeOllamaService.ListModelsAsync returns ["qwen2.5-coder", "deepseek-r1", "sentinelgpt"] -
+        // excludeModel defaults to "sentinelgpt", so this should discover exactly the same two
+        // specialist models the old hardcoded workflow used, without either being named here.
+        var ollama = new FakeOllamaService();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), ollama, new FakeAppDbContextFactory(options));
+        var input = System.Text.Json.JsonSerializer.SerializeToElement(new { prompt = "Review this Blazor workflow architecture." });
+
+        var advised = await registry.ExecuteAsync(
+            Node("ai.allInstalledModelsAdvisor", "{\"role\":\"Review .NET code.\",\"promptPath\":\"prompt\"}"),
+            input,
+            null);
+
+        ollama.RequestedModels.Should().BeEquivalentTo(["qwen2.5-coder", "deepseek-r1"]);
+        var advisedJson = System.Text.Json.Nodes.JsonNode.Parse(advised.Outputs["main"].Single().GetRawText())!.AsObject();
+        advisedJson["advisor1Advice"].Should().NotBeNull();
+        advisedJson["advisor2Advice"].Should().NotBeNull();
+        advisedJson["advisorModelsUsed"]!.AsArray().Select(n => n!.GetValue<string>())
+            .Should().BeEquivalentTo(["qwen2.5-coder", "deepseek-r1"]);
+
+        var synthesis = await registry.ExecuteAsync(
+            Node("ai.sentinelSynthesize", "{\"model\":\"sentinelgpt\",\"promptPath\":\"prompt\",\"answerField\":\"sentinelAnswer\"}"),
+            advised.Outputs["main"].Single(),
+            null);
+
+        ollama.RequestedModels.Should().Contain("sentinelgpt");
+        var synthesisJson = System.Text.Json.Nodes.JsonNode.Parse(synthesis.Outputs["main"].Single().GetRawText())!.AsObject();
+        synthesisJson["sentinelAnswer"]!.GetValue<string>().Should().Contain("Sentinel synthesis");
+    }
+
+    [Fact]
+    public async Task AiAllInstalledModelsAdvisor_ShouldRespectMaxModelsCap()
+    {
+        await using var db = await CreateDbAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(db.Database.GetDbConnection())
+            .Options;
+        var ollama = new FakeOllamaService();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), ollama, new FakeAppDbContextFactory(options));
+        var input = System.Text.Json.JsonSerializer.SerializeToElement(new { prompt = "Review this." });
+
+        var advised = await registry.ExecuteAsync(
+            Node("ai.allInstalledModelsAdvisor", "{\"role\":\"Review.\",\"promptPath\":\"prompt\",\"maxModels\":1}"),
+            input,
+            null);
+
+        ollama.RequestedModels.Should().HaveCount(1);
+        var advisedJson = System.Text.Json.Nodes.JsonNode.Parse(advised.Outputs["main"].Single().GetRawText())!.AsObject();
+        advisedJson["advisorModelsUsed"]!.AsArray().Should().HaveCount(1);
+        advisedJson["advisor2Advice"].Should().BeNull();
+    }
+
+    [Fact]
+    public async Task AiAllInstalledModelsAdvisor_ShouldExcludeSentinelGptLatestTag_WhenExcludeModelHasNoTag()
+    {
+        await using var db = await CreateDbAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(db.Database.GetDbConnection())
+            .Options;
+        var ollama = new TaggedFakeOllamaService();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), ollama, new FakeAppDbContextFactory(options));
+        var input = System.Text.Json.JsonSerializer.SerializeToElement(new { prompt = "Review this." });
+
+        var advised = await registry.ExecuteAsync(
+            Node("ai.allInstalledModelsAdvisor", "{\"role\":\"Review.\",\"promptPath\":\"prompt\"}"),
+            input,
+            null);
+
+        ollama.RequestedModels.Should().NotContain("sentinelgpt:latest");
+        var advisedJson = System.Text.Json.Nodes.JsonNode.Parse(advised.Outputs["main"].Single().GetRawText())!.AsObject();
+        advisedJson["advisorModelsUsed"]!.AsArray().Select(n => n!.GetValue<string>())
+            .Should().BeEquivalentTo(["qwen2.5-coder"]);
+    }
+
     // --- Part 2: cron scheduling ---
 
     [Fact]
@@ -1421,6 +1501,83 @@ public sealed class AutomationWorkflowTests
 
         (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == watcher.Id)).Should().Be(1);
         (await db.CmsPages.AsNoTracking().SingleAsync(p => p.Id == scheduled.Id)).ScheduledPublishTriggerPending.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SentinelChatPromptSubmittedTrigger_ShouldFireOnlyActiveWorkflowsWithThatEnabledTriggerNode()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+
+        var subscriber = await workflowService.CreateAsync("Teacher panel");
+        await workflowService.SaveNodeAsync(subscriber.Id, new AutomationNodeEditor
+        {
+            Id = subscriber.Nodes.Single().Id, Name = "Prompt submitted", TypeKey = "sentinel.chatPromptSubmittedTrigger",
+            PositionX = 100, PositionY = 100, ParametersJson = "{}"
+        });
+        await workflowService.PublishAsync(subscriber.Id, "v1");
+        await workflowService.SetActiveAsync(subscriber.Id, true);
+
+        // Inactive - must not fire even though the graph shape matches.
+        var inactive = await workflowService.CreateAsync("Inactive teacher panel");
+        await workflowService.SaveNodeAsync(inactive.Id, new AutomationNodeEditor
+        {
+            Id = inactive.Nodes.Single().Id, Name = "Prompt submitted", TypeKey = "sentinel.chatPromptSubmittedTrigger",
+            PositionX = 100, PositionY = 100, ParametersJson = "{}"
+        });
+        await workflowService.PublishAsync(inactive.Id, "v1");
+
+        // Active, but no chat-prompt trigger node at all - unrelated workflow, must not fire.
+        var unrelated = await workflowService.CreateAsync("Unrelated");
+        await workflowService.PublishAsync(unrelated.Id, "v1");
+        await workflowService.SetActiveAsync(unrelated.Id, true);
+
+        var triggered = await triggerService.TriggerSentinelChatPromptSubmittedAsync("What is our refund policy?", Guid.NewGuid());
+
+        triggered.Should().Be(1);
+        (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == subscriber.Id)).Should().Be(1);
+        (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == inactive.Id)).Should().Be(0);
+        (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == unrelated.Id)).Should().Be(0);
+        var execution = await db.AutomationExecutions.AsNoTracking().SingleAsync(e => e.WorkflowId == subscriber.Id);
+        execution.Mode.Should().Be(AutomationExecutionModes.SentinelChatPromptSubmitted);
+        execution.InputJson.Should().Contain("What is our refund policy?");
+    }
+
+    [Fact]
+    public async Task SentinelChatPromptSubmittedTrigger_ShouldBeANoOp_ForABlankPrompt()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+
+        (await triggerService.TriggerSentinelChatPromptSubmittedAsync("   ", null)).Should().Be(0);
+        (await triggerService.TriggerSentinelChatPromptSubmittedAsync(string.Empty, null)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PublishAsync_ShouldSyncTriggerSentinelChatPromptSubmittedFlag_FromTheEnabledTriggerNode()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+
+        var workflow = await workflowService.CreateAsync("Teacher panel");
+        await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Id = workflow.Nodes.Single().Id, Name = "Prompt submitted", TypeKey = "sentinel.chatPromptSubmittedTrigger",
+            PositionX = 100, PositionY = 100, ParametersJson = "{}"
+        });
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        (await db.AutomationWorkflows.AsNoTracking().SingleAsync(w => w.Id == workflow.Id))
+            .TriggerSentinelChatPromptSubmitted.Should().BeTrue();
     }
 
     // --- Part 4.4: execution time-travel replay ---
@@ -2332,6 +2489,34 @@ public sealed class AutomationWorkflowTests
 
         public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyCollection<string>>(["qwen2.5-coder", "deepseek-r1", "sentinelgpt"]);
+        public Task PullModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+        public Task DeleteModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default) =>
+            Task.FromResult(string.Empty);
+    }
+
+    // Regression guard for the bare-name-vs-":latest"-tag exclusion match specifically -
+    // installed models often come back from Ollama's /api/tags with an explicit ":latest" tag
+    // even when the workflow's excludeModel parameter is left as the bare "sentinelgpt".
+    private sealed class TaggedFakeOllamaService : IOllamaService
+    {
+        public List<string> RequestedModels { get; } = [];
+
+        public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
+        {
+            RequestedModels.Add(model);
+            return Task.FromResult("Advice");
+        }
+
+        public async IAsyncEnumerable<string> GenerateStreamAsync(
+            string model, string systemPrompt, string userPrompt,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            yield return await GenerateAsync(model, systemPrompt, userPrompt, ct);
+        }
+
+        public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyCollection<string>>(["qwen2.5-coder", "sentinelgpt:latest"]);
         public Task PullModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
         public Task DeleteModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
         public Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default) =>

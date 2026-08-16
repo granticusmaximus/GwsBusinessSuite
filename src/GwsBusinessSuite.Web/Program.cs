@@ -3347,67 +3347,65 @@ static async Task EnsureAboutPageResumeSectionAsync(ApplicationDbContext dbConte
 // Markdown column has content gets that content wrapped into a single legacy "markdown"
 // block (rendered through the existing Markdig pipeline unchanged) so nothing is lost -
 // idempotent, since a page that already has blocks is left alone on every subsequent run.
+// Model-advisor role prompt shared between a brand-new seed and an in-place upgrade of an
+// already-seeded workflow, so the two paths can't drift apart.
+const string SentinelLearningAdvisorRole =
+    "Review the request as a senior Microsoft .NET, C#, Blazor, security, testing, and software architecture specialist. Correct invalid APIs or assumptions.";
+
+static string SentinelLearningAdvisorParametersJson() => JsonSerializer.Serialize(new
+{
+    role = SentinelLearningAdvisorRole,
+    promptPath = "prompt",
+    excludeModel = "sentinelgpt",
+    maxModels = 3
+});
+
 static async Task EnsureSentinelLearningWorkflowAsync(IServiceProvider services, ILogger logger)
 {
     const string workflowName = "SentinelGPT Teacher Panel";
     var workflows = services.GetRequiredService<IAutomationWorkflowService>();
-    if ((await workflows.ListAsync()).Any(item => item.Name.Equals(workflowName, StringComparison.OrdinalIgnoreCase)))
+    var existing = (await workflows.ListAsync()).FirstOrDefault(item => item.Name.Equals(workflowName, StringComparison.OrdinalIgnoreCase));
+    if (existing is not null)
     {
+        // The workflow was already seeded by an earlier version of this app that hardcoded two
+        // specific models (Qwen/DeepSeek) behind a manual-only trigger. Bring it up to today's
+        // shape - dynamic model discovery plus an automatic chat-prompt trigger - in place,
+        // rather than leaving every already-deployed instance stuck on the old graph forever.
+        await UpgradeSentinelLearningWorkflowToDynamicAdvisorAsync(workflows, existing.Id, logger);
         return;
     }
 
     var workflow = await workflows.CreateAsync(
         workflowName,
-        "Qwen reviews engineering concerns, DeepSeek challenges reasoning, SentinelGPT synthesizes their advice, and only a human-approved result becomes reusable SentinelGPT memory.");
+        "Every installed Ollama model (besides SentinelGPT itself) reviews the request, SentinelGPT synthesizes their advice, and only a human-approved result becomes reusable SentinelGPT memory. Fires automatically in the background whenever a chat prompt is submitted, or on demand via Run workflow.");
     await workflows.UpdateMetadataAsync(
         workflow.Id,
         workflowName,
         workflow.Description,
         "sentinelgpt,ai,teacher-panel,supervised-learning");
-    var trigger = workflow.Nodes.Single(node => node.TypeKey == "core.manualTrigger");
-    var qwen = await workflows.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+    var manualTrigger = workflow.Nodes.Single(node => node.TypeKey == "core.manualTrigger");
+    var chatTrigger = await workflows.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
     {
-        Name = "Qwen engineering review",
-        TypeKey = "ai.modelAdvisor",
-        PositionX = 380,
-        PositionY = 80,
-        TimeoutMs = 300_000,
-        ParametersJson = JsonSerializer.Serialize(new
-        {
-            model = "qwen2.5-coder",
-            role = "Review the request as a senior Microsoft .NET, C#, Blazor, security, testing, and software architecture specialist. Correct invalid APIs or assumptions.",
-            promptPath = "prompt",
-            outputField = "qwenAdvice"
-        })
-    });
-    var deepSeek = await workflows.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
-    {
-        Name = "DeepSeek reasoning review",
-        TypeKey = "ai.modelAdvisor",
-        PositionX = 380,
+        Name = "SentinelGPT prompt submitted",
+        TypeKey = "sentinel.chatPromptSubmittedTrigger",
+        PositionX = 80,
         PositionY = 280,
-        TimeoutMs = 300_000,
-        ParametersJson = JsonSerializer.Serialize(new
-        {
-            model = "deepseek-r1",
-            role = "Audit the request's reasoning. Challenge its premises, identify missing evidence and counterexamples, and recommend the most defensible course.",
-            promptPath = "prompt",
-            outputField = "deepseekAdvice"
-        })
-    });
-    var merge = await workflows.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
-    {
-        Name = "Merge specialist reviews",
-        TypeKey = "core.merge",
-        PositionX = 650,
-        PositionY = 180,
         ParametersJson = "{}"
+    });
+    var advisor = await workflows.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+    {
+        Name = "All installed models review",
+        TypeKey = "ai.allInstalledModelsAdvisor",
+        PositionX = 380,
+        PositionY = 180,
+        TimeoutMs = 900_000,
+        ParametersJson = SentinelLearningAdvisorParametersJson()
     });
     var synthesize = await workflows.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
     {
         Name = "SentinelGPT final synthesis",
         TypeKey = "ai.sentinelSynthesize",
-        PositionX = 900,
+        PositionX = 650,
         PositionY = 180,
         TimeoutMs = 300_000,
         ParametersJson = "{\"model\":\"sentinelgpt\",\"promptPath\":\"prompt\",\"answerField\":\"sentinelAnswer\"}"
@@ -3416,7 +3414,7 @@ static async Task EnsureSentinelLearningWorkflowAsync(IServiceProvider services,
     {
         Name = "Approve as learning memory",
         TypeKey = "core.approval",
-        PositionX = 1160,
+        PositionX = 900,
         PositionY = 180,
         ParametersJson = "{\"message\":\"Review the SentinelGPT synthesis in the execution output. Save it as reusable learning memory?\",\"timeoutHours\":0}"
     });
@@ -3424,7 +3422,7 @@ static async Task EnsureSentinelLearningWorkflowAsync(IServiceProvider services,
     {
         Name = "Save approved lesson",
         TypeKey = "ai.saveApprovedLesson",
-        PositionX = 1410,
+        PositionX = 1160,
         PositionY = 100,
         ParametersJson = "{\"promptPath\":\"prompt\",\"answerPath\":\"sentinelAnswer\"}"
     });
@@ -3432,22 +3430,89 @@ static async Task EnsureSentinelLearningWorkflowAsync(IServiceProvider services,
     {
         Name = "Discard rejected lesson",
         TypeKey = "core.noOp",
-        PositionX = 1410,
+        PositionX = 1160,
         PositionY = 280,
         ParametersJson = "{}"
     });
 
-    await workflows.AddConnectionAsync(workflow.Id, trigger.Id, "main", qwen.Id);
-    await workflows.AddConnectionAsync(workflow.Id, trigger.Id, "main", deepSeek.Id);
-    await workflows.AddConnectionAsync(workflow.Id, qwen.Id, "main", merge.Id, "qwen");
-    await workflows.AddConnectionAsync(workflow.Id, deepSeek.Id, "main", merge.Id, "deepseek");
-    await workflows.AddConnectionAsync(workflow.Id, merge.Id, "main", synthesize.Id);
+    await workflows.AddConnectionAsync(workflow.Id, manualTrigger.Id, "main", advisor.Id);
+    await workflows.AddConnectionAsync(workflow.Id, chatTrigger.Id, "main", advisor.Id);
+    await workflows.AddConnectionAsync(workflow.Id, advisor.Id, "main", synthesize.Id);
     await workflows.AddConnectionAsync(workflow.Id, synthesize.Id, "main", approval.Id);
     await workflows.AddConnectionAsync(workflow.Id, approval.Id, "approved", save.Id);
     await workflows.AddConnectionAsync(workflow.Id, approval.Id, "rejected", reject.Id);
-    await workflows.PublishAsync(workflow.Id, "Initial supervised teacher-panel workflow");
+    await workflows.PublishAsync(workflow.Id, "Initial supervised teacher-panel workflow with dynamic model discovery and an automatic chat-prompt trigger");
     await workflows.SetActiveAsync(workflow.Id, true);
     logger.LogInformation("Seeded the {WorkflowName} automation workflow.", workflowName);
+}
+
+// Upgrades an already-seeded "SentinelGPT Teacher Panel" workflow (from a version of this app
+// that hardcoded two specific advisor models behind a manual-only trigger) to the current
+// dynamic-discovery shape, in place, preserving the workflow's id/history/approved-lesson
+// linkage. Idempotent - a workflow that already has the new trigger node is left untouched.
+static async Task UpgradeSentinelLearningWorkflowToDynamicAdvisorAsync(
+    IAutomationWorkflowService workflows, Guid workflowId, ILogger logger)
+{
+    var workflow = await workflows.GetAsync(workflowId);
+    if (workflow is null || workflow.Nodes.Any(node => node.TypeKey == "sentinel.chatPromptSubmittedTrigger"))
+    {
+        return;
+    }
+
+    var synthesizeNode = workflow.Nodes.FirstOrDefault(node => node.TypeKey == "ai.sentinelSynthesize");
+    if (synthesizeNode is null)
+    {
+        // Graph no longer matches what this upgrade expects (hand-edited, or an unrecognized
+        // shape) - leave it alone rather than guess and risk corrupting a user's own edits.
+        logger.LogWarning(
+            "Skipped upgrading the {WorkflowName} automation workflow to dynamic model discovery - its graph doesn't match the expected shape.",
+            workflow.Name);
+        return;
+    }
+
+    var chatTrigger = await workflows.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+    {
+        Name = "SentinelGPT prompt submitted",
+        TypeKey = "sentinel.chatPromptSubmittedTrigger",
+        PositionX = 80,
+        PositionY = 280,
+        ParametersJson = "{}"
+    });
+    var advisor = await workflows.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+    {
+        Name = "All installed models review",
+        TypeKey = "ai.allInstalledModelsAdvisor",
+        PositionX = 380,
+        PositionY = 180,
+        TimeoutMs = 900_000,
+        ParametersJson = SentinelLearningAdvisorParametersJson()
+    });
+
+    var manualTrigger = workflow.Nodes.FirstOrDefault(node => node.TypeKey == "core.manualTrigger");
+    if (manualTrigger is not null)
+    {
+        await workflows.AddConnectionAsync(workflow.Id, manualTrigger.Id, "main", advisor.Id);
+    }
+    await workflows.AddConnectionAsync(workflow.Id, chatTrigger.Id, "main", advisor.Id);
+    await workflows.AddConnectionAsync(workflow.Id, advisor.Id, "main", synthesizeNode.Id);
+
+    // DeleteNodeAsync also removes every connection referencing the node being deleted, so the
+    // old trigger->qwen/deepseek->merge wiring is cleaned up as a side effect of these calls -
+    // no separate connection cleanup needed.
+    foreach (var oldAdvisor in workflow.Nodes.Where(node => node.TypeKey == "ai.modelAdvisor"))
+    {
+        await workflows.DeleteNodeAsync(workflow.Id, oldAdvisor.Id);
+    }
+    var mergeNode = workflow.Nodes.FirstOrDefault(node => node.TypeKey == "core.merge");
+    if (mergeNode is not null)
+    {
+        await workflows.DeleteNodeAsync(workflow.Id, mergeNode.Id);
+    }
+
+    await workflows.PublishAsync(workflow.Id, "Upgraded to dynamic all-installed-models discovery and an automatic chat-prompt trigger");
+    logger.LogInformation(
+        "Upgraded the {WorkflowName} automation workflow to dynamic model discovery with an automatic chat-prompt trigger.",
+        workflow.Name);
 }
 
 static async Task EnsureWikiPagesHaveBlocksAsync(ApplicationDbContext dbContext, ILogger logger)

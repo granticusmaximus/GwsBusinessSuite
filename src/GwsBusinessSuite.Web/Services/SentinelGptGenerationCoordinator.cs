@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Text;
+using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.Wiki;
+using GwsBusinessSuite.Infrastructure.Services;
 
 namespace GwsBusinessSuite.Web.Services;
 
@@ -46,6 +48,7 @@ public sealed record SentinelGptGenerationSnapshot(
 public sealed class SentinelGptGenerationCoordinator(
     IServiceScopeFactory scopeFactory,
     IHostApplicationLifetime applicationLifetime,
+    OllamaWorkloadScheduler ollamaWorkloads,
     TimeProvider timeProvider,
     ILogger<SentinelGptGenerationCoordinator> logger)
 {
@@ -161,7 +164,43 @@ public sealed class SentinelGptGenerationCoordinator(
             _ = Task.Run(
                 () => RunAsync(state, applicationLifetime.ApplicationStopping),
                 CancellationToken.None);
+
+            // Only a real chat prompt (StartAsync, action is null) fires the Teacher Panel
+            // trigger - not the one-shot Ask/Summarize/Rewrite action panel (StartActionAsync),
+            // which isn't "putting a prompt into SentinelGPT" in the sense that workflow cares
+            // about. A completely separate detached task from the generation itself, so a slow
+            // or failing trigger can never delay the chat response the user is waiting on.
+            if (action is null)
+            {
+                _ = Task.Run(
+                    () => FireChatPromptTriggerAsync(state.Instruction, conversationId, applicationLifetime.ApplicationStopping),
+                    CancellationToken.None);
+            }
+
             return state;
+        }
+    }
+
+    private async Task FireChatPromptTriggerAsync(string prompt, Guid? conversationId, CancellationToken stoppingToken)
+    {
+        try
+        {
+            // Every Ollama call any subscriber workflow makes (via ai.modelAdvisor,
+            // ai.allInstalledModelsAdvisor, ai.sentinelSynthesize, ...) flows through this same
+            // AsyncLocal-scoped priority for the rest of this call tree, so it always yields the
+            // single OllamaWorkloadScheduler lease to the user's own interactive chat request.
+            using var workloadPriority = ollamaWorkloads.UseBackgroundPriority();
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var triggerService = scope.ServiceProvider.GetRequiredService<IAutomationTriggerService>();
+            await triggerService.TriggerSentinelChatPromptSubmittedAsync(prompt, conversationId, stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Server shutting down - nothing left to report this to.
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "SentinelGPT chat-prompt automation trigger failed.");
         }
     }
 

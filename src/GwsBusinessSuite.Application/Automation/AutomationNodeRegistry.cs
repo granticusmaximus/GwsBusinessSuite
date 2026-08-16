@@ -30,6 +30,7 @@ public sealed partial class AutomationNodeRegistry(
         new("database.rowChangedTrigger", 1, "Database Row Changed", "Starts an active workflow when a row's properties change in a Sentinel database. Paste the database's id (visible in its Sentinel URL) into wikiDatabaseId. Optionally add a conditions array (each {propertyId, operator: equals|notEquals|contains, value}, ANDed together) so the workflow only starts when the row's new values match - leave conditions empty/absent to fire on any change, as before.", "Triggers", "bi-table", true, ["main"], "{\"wikiDatabaseId\":\"\",\"conditions\":[]}"),
         new("crm.dealStageChangedTrigger", 1, "CRM Deal Stage Changed", "Starts an active workflow when a CRM deal's pipeline stage changes. Leave toStage empty to fire on any stage change, or set it (e.g. \"Won\") to fire only when a deal reaches that stage.", "Triggers", "bi-graph-up-arrow", true, ["main"], "{\"toStage\":\"\"}"),
         new("cms.pagePublishedTrigger", 1, "CMS Page Published", "Starts an active workflow when a CMS page transitions from draft to published.", "Triggers", "bi-file-earmark-richtext", true, ["main"], "{}"),
+        new("sentinel.chatPromptSubmittedTrigger", 1, "SentinelGPT Prompt Submitted", "Starts an active workflow immediately after a user sends a chat message to SentinelGPT. Runs in the background at lower priority than the chat itself, so it never delays or blocks that response.", "Triggers", "bi-chat-dots-fill", true, ["main"], "{}"),
         new("database.setRowProperty", 1, "Set Database Row Property", "Sets one property on a Sentinel database row. Paste the database, row, and property ids and an optional {{ $json.path }} expression for the value. Never re-triggers a Database Row Changed workflow, so it cannot cause an automation loop - chaining a second workflow off this write is not supported.", "Actions", "bi-pencil-square", false, ["main"], "{\"wikiDatabaseId\":\"\",\"rowId\":\"{{ $json.rowId }}\",\"propertyId\":\"\",\"value\":\"\"}", IsIdempotent: false),
         new("database.addRow", 1, "Add Database Row", "Creates a new row in a Sentinel database. propertyValues maps property ids to values (string values support {{ $json.path }} expressions); parentRowId is optional and nests the new row as a sub-item. Like Set Database Row Property, this never re-triggers a Database Row Changed workflow.", "Actions", "bi-plus-square", false, ["main"], "{\"wikiDatabaseId\":\"\",\"parentRowId\":\"\",\"propertyValues\":{}}", IsIdempotent: false),
         new("automation.subWorkflow", 1, "Execute Workflow", "Runs another published workflow to completion and returns its output. The child must not pause on a Wait or Approval node. workflowId is the id shown in the target workflow's URL.", "Flow", "bi-diagram-3", false, ["main"], "{\"workflowId\":\"\"}", IsIdempotent: false),
@@ -63,6 +64,16 @@ public sealed partial class AutomationNodeRegistry(
             false,
             ["main"],
             "{\"model\":\"qwen2.5-coder\",\"role\":\"Review the request as a senior .NET and C# engineer. Identify correctness, security, testing, and architecture concerns.\",\"promptPath\":\"prompt\",\"outputField\":\"qwenAdvice\"}"),
+        new(
+            "ai.allInstalledModelsAdvisor",
+            1,
+            "All Installed Models Adviser",
+            "Discovers every Ollama model installed on this server (excluding excludeModel, default \"sentinelgpt\") and asks each one, in turn, for bounded specialist advice - unlike Model Adviser, no model name is hardcoded, so newly pulled models are picked up automatically. Capped at maxModels (default 3) to bound how long a single run takes.",
+            "AI",
+            "bi-cpu-fill",
+            false,
+            ["main"],
+            "{\"role\":\"Review the request as an independent specialist. Identify correctness, security, testing, and architecture concerns.\",\"promptPath\":\"prompt\",\"excludeModel\":\"sentinelgpt\",\"maxModels\":3}"),
         new(
             "ai.sentinelSynthesize",
             1,
@@ -171,6 +182,7 @@ public sealed partial class AutomationNodeRegistry(
             "database.rowChangedTrigger" => SingleOutput("main", input),
             "crm.dealStageChangedTrigger" => SingleOutput("main", input),
             "cms.pagePublishedTrigger" => SingleOutput("main", input),
+            "sentinel.chatPromptSubmittedTrigger" => SingleOutput("main", input),
             "database.setRowProperty" => await ExecuteSetRowPropertyAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
             "database.addRow" => await ExecuteAddRowAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
             "automation.subWorkflow" => await ExecuteSubWorkflowAsync(node, input, subWorkflowChain, cancellationToken),
@@ -194,6 +206,7 @@ public sealed partial class AutomationNodeRegistry(
             "core.stopError" => throw new InvalidOperationException(ResolveText(ParseObject(node.ParametersJson, node.Name)["message"]?.GetValue<string>() ?? "Workflow stopped.", input, nodeOutputsByName)),
             "core.wait" or "core.approval" => throw new InvalidOperationException($"{node.Name} must be paused and resumed by the execution engine, not called directly."),
             "ai.modelAdvisor" => await ExecuteModelAdvisorAsync(node, input, cancellationToken),
+            "ai.allInstalledModelsAdvisor" => await ExecuteAllInstalledModelsAdvisorAsync(node, input, cancellationToken),
             "ai.sentinelSynthesize" => await ExecuteSentinelSynthesisAsync(node, input, cancellationToken),
             "ai.saveApprovedLesson" => await ExecuteSaveApprovedLessonAsync(node, input, cancellationToken),
             "slack.sendMessage" => await ExecuteSlackSendMessageAsync(node, input, credentialJson, nodeOutputsByName, cancellationToken),
@@ -237,6 +250,82 @@ public sealed partial class AutomationNodeRegistry(
         output[$"{outputField}Model"] = model;
         return SingleOutput("main", JsonSerializer.SerializeToElement(output));
     }
+
+    // Same output shape as N copies of ai.modelAdvisor (advisor1Advice/advisor1Model,
+    // advisor2Advice/advisor2Model, ...) so it plugs straight into ai.sentinelSynthesize's
+    // existing FindPropertiesEndingWith(source, "Advice") without that method needing to know
+    // this node exists. Runs models sequentially rather than in parallel - OllamaWorkloadScheduler
+    // only ever lets one Ollama call run at a time app-wide, so parallel calls here would just
+    // queue behind each other anyway for no benefit, with more complexity.
+    private async Task<AutomationNodeRunResult> ExecuteAllInstalledModelsAdvisorAsync(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        CancellationToken cancellationToken)
+    {
+        var ai = ollama ?? throw new InvalidOperationException("Ollama is not available to the automation engine.");
+        var parameters = ParseObject(node.ParametersJson, node.Name);
+        var source = RequireObject(input, node.Name);
+        var role = parameters["role"]?.GetValue<string>()?.Trim();
+        if (string.IsNullOrWhiteSpace(role))
+            throw new InvalidOperationException($"{node.Name} requires a specialist role.");
+        var promptPath = parameters["promptPath"]?.GetValue<string>()?.Trim() ?? "prompt";
+        var excludeModel = parameters["excludeModel"]?.GetValue<string>()?.Trim();
+        excludeModel = string.IsNullOrWhiteSpace(excludeModel) ? "sentinelgpt" : excludeModel;
+        var maxModels = Math.Clamp(parameters["maxModels"]?.GetValue<int>() ?? 3, 1, 10);
+        var prompt = FindString(source, promptPath)
+            ?? throw new InvalidOperationException($"{node.Name} could not find a non-empty prompt at '{promptPath}'.");
+
+        var installedModels = await ai.ListModelsAsync(cancellationToken);
+        var candidateModels = installedModels
+            .Where(model => !string.IsNullOrWhiteSpace(model) && !IsSameModel(model, excludeModel))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(maxModels)
+            .ToList();
+
+        var output = source.DeepClone().AsObject();
+        if (candidateModels.Count == 0)
+        {
+            output["advisorModelsUsed"] = new JsonArray();
+            return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+        }
+
+        var systemPrompt =
+            $"{role} Return independent advisory analysis, not a final user-facing answer. " +
+            "Challenge unsupported assumptions. Separate verified facts from inference. " +
+            "Never claim that an action ran. Keep the response under 700 words and do not request or reveal secrets.";
+        var workflowContext = LimitText(source.ToJsonString(), 12_000);
+        var requestText = LimitText(prompt, 12_000);
+        var usedModels = new JsonArray();
+        for (var i = 0; i < candidateModels.Count; i++)
+        {
+            var model = RequireSafeModelName(candidateModels[i], node.Name);
+            var advice = (await ai.GenerateAsync(
+                model,
+                systemPrompt,
+                $"REQUEST:\n{requestText}\n\nWORKFLOW CONTEXT:\n{workflowContext}",
+                cancellationToken)).Trim();
+            // One model returning nothing (or erroring - GenerateAsync itself would throw and
+            // abort the whole node, which is fine) shouldn't be treated differently from it just
+            // having less to say; skip it rather than failing the entire fan-out over one model.
+            if (advice.Length == 0) continue;
+
+            var ordinal = i + 1;
+            output[$"advisor{ordinal}Advice"] = LimitText(advice, 8_000);
+            output[$"advisor{ordinal}Model"] = model;
+            usedModels.Add(model);
+        }
+
+        if (usedModels.Count == 0)
+            throw new InvalidOperationException($"{node.Name} found no installed model (besides {excludeModel}) that returned advice.");
+
+        output["advisorModelsUsed"] = usedModels;
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    // Ollama treats a bare model name and its ":latest" tag as the same model, so
+    // "sentinelgpt" must exclude "sentinelgpt:latest" too - compare only the part before ':'.
+    private static bool IsSameModel(string model, string other) =>
+        string.Equals(model.Split(':')[0].Trim(), other.Split(':')[0].Trim(), StringComparison.OrdinalIgnoreCase);
 
     private async Task<AutomationNodeRunResult> ExecuteSentinelSynthesisAsync(
         AutomationNodeSnapshot node,

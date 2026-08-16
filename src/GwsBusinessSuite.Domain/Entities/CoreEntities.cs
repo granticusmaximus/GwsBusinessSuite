@@ -2020,6 +2020,7 @@ public static class AutomationExecutionModes
     public const string SubWorkflow = "SubWorkflow";
     public const string CrmDealStageChanged = "CrmDealStageChanged";
     public const string CmsPagePublished = "CmsPagePublished";
+    public const string SentinelChatPromptSubmitted = "SentinelChatPromptSubmitted";
     // A sandboxed dry run of a past execution's recorded input against the current published
     // graph - see AutomationExecutionService.ReplayAsync. Never performs real side effects.
     public const string Replay = "Replay";
@@ -2062,6 +2063,10 @@ public sealed class AutomationWorkflow : AuditableEntity
     // deserializing every active workflow's published snapshot.
     public bool TriggerCrmDealStageChanged { get; set; }
     public bool TriggerCmsPagePublished { get; set; }
+    // Same cached-subscriber-lookup pattern, synced from an enabled
+    // "sentinel.chatPromptSubmittedTrigger" node - fires whenever a user sends a SentinelGPT
+    // chat message (see SentinelGptGenerationCoordinator).
+    public bool TriggerSentinelChatPromptSubmitted { get; set; }
     public ICollection<AutomationNode> Nodes { get; set; } = new List<AutomationNode>();
     public ICollection<AutomationConnection> Connections { get; set; } = new List<AutomationConnection>();
     public ICollection<AutomationWorkflowVersion> Versions { get; set; } = new List<AutomationWorkflowVersion>();

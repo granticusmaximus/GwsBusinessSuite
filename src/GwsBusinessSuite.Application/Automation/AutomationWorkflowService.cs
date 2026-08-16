@@ -436,6 +436,7 @@ public sealed class AutomationWorkflowService(
                 : null;
         workflow.TriggerCrmDealStageChanged = workflow.Nodes.Any(node => node.TypeKey == "crm.dealStageChangedTrigger" && !node.IsDisabled);
         workflow.TriggerCmsPagePublished = workflow.Nodes.Any(node => node.TypeKey == "cms.pagePublishedTrigger" && !node.IsDisabled);
+        workflow.TriggerSentinelChatPromptSubmitted = workflow.Nodes.Any(node => node.TypeKey == "sentinel.chatPromptSubmittedTrigger" && !node.IsDisabled);
         if (workflow.Status == AutomationWorkflowStatuses.Draft) workflow.Status = AutomationWorkflowStatuses.Inactive;
         Touch(workflow);
         await db.SaveChangesAsync(cancellationToken);

@@ -1787,6 +1787,12 @@ public sealed class SentinelAiService(
             .Take(500)
             .Select(run => new { run.Instruction, run.Output, run.ReviewedAt, run.CreatedAt })
             .ToListAsync(cancellationToken);
+        // Score > 0 is required unconditionally now (the Teacher Panel workflow can auto-fire
+        // on every chat prompt - see SentinelGptGenerationCoordinator - so this table grows
+        // continuously; injecting the N most-recent lessons regardless of topical relevance,
+        // as this used to do when terms.Length == 0, would mean every single prompt pays the
+        // prefill cost of unrelated context. A short/keyword-free instruction now simply gets
+        // no memory context, same as any other instruction with no matching lesson.
         var lessons = candidates
             .Select(item => new
             {
@@ -1795,10 +1801,10 @@ public sealed class SentinelAiService(
                     item.Instruction.Contains(term, StringComparison.OrdinalIgnoreCase)
                     || item.Output.Contains(term, StringComparison.OrdinalIgnoreCase))
             })
-            .Where(item => item.Score > 0 || terms.Length == 0)
+            .Where(item => item.Score > 0)
             .OrderByDescending(item => item.Score)
             .ThenByDescending(item => item.Item.ReviewedAt ?? item.Item.CreatedAt)
-            .Take(4)
+            .Take(3)
             .ToList();
         if (lessons.Count == 0) return string.Empty;
 
@@ -1806,8 +1812,8 @@ public sealed class SentinelAiService(
             "HUMAN-APPROVED SENTINELGPT MEMORY — reuse as guidance, but re-verify current facts:\n");
         foreach (var lesson in lessons)
         {
-            memory.AppendLine($"PRIOR REQUEST: {LimitRaw(lesson.Item.Instruction, 1_500)}");
-            memory.AppendLine($"APPROVED ANSWER: {LimitRaw(lesson.Item.Output, 3_000)}");
+            memory.AppendLine($"PRIOR REQUEST: {LimitRaw(lesson.Item.Instruction, 1_000)}");
+            memory.AppendLine($"APPROVED ANSWER: {LimitRaw(lesson.Item.Output, 2_000)}");
         }
         return memory.ToString();
     }

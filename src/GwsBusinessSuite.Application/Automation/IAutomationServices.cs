@@ -223,4 +223,14 @@ public interface IAutomationTriggerService
     // Fires every active workflow with an enabled "cms.pagePublishedTrigger" node. Callers fire
     // this only on a draft-to-published transition, not on every page save.
     Task<int> TriggerCmsPagePublishedAsync(Guid siteId, string inputJson, CancellationToken cancellationToken = default);
+
+    // Fires every active workflow with an enabled "sentinel.chatPromptSubmittedTrigger" node,
+    // immediately after a user sends a chat message to SentinelGPT (see
+    // SentinelGptGenerationCoordinator). The caller is expected to invoke this fire-and-forget,
+    // wrapped in OllamaWorkloadScheduler.UseBackgroundPriority(), so a slow or misconfigured
+    // subscriber workflow here can never delay or block the chat response the user is waiting
+    // on - same non-blocking contract as every other trigger method on this interface, just
+    // enforced by priority instead of by not awaiting (the chat response path never calls this
+    // at all, so there is nothing to await there in the first place).
+    Task<int> TriggerSentinelChatPromptSubmittedAsync(string prompt, Guid? conversationId, CancellationToken cancellationToken = default);
 }

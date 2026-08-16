@@ -18,7 +18,21 @@ public sealed class CurrentUserAccessor(
             return httpUsername;
         }
 
-        var authState = await authenticationStateProvider.GetAuthenticationStateAsync();
+        // ServerAuthenticationStateProvider.GetAuthenticationStateAsync throws
+        // InvalidOperationException when there's no active Razor Components circuit to read -
+        // true for any startup-time or background-service caller (e.g. Program.cs's seed
+        // steps, which run before any user ever connects). No HttpContext AND no circuit both
+        // mean "no known caller," same as the existing "unknown" fallback below already covers.
+        AuthenticationState authState;
+        try
+        {
+            authState = await authenticationStateProvider.GetAuthenticationStateAsync();
+        }
+        catch (InvalidOperationException)
+        {
+            return "unknown";
+        }
+
         var circuitUsername = authState.User.Identity?.IsAuthenticated == true
             ? authState.User.Identity?.Name
             : null;

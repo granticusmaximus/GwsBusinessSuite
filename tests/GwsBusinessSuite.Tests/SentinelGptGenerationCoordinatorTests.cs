@@ -1,6 +1,8 @@
 using System.Runtime.CompilerServices;
 using FluentAssertions;
+using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.Wiki;
+using GwsBusinessSuite.Infrastructure.Services;
 using GwsBusinessSuite.Web.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -164,15 +166,56 @@ public sealed class SentinelGptGenerationCoordinatorTests
         sentinel.Release.TrySetResult();
     }
 
+    [Fact]
+    public async Task StartAsync_ShouldFireTheChatPromptAutomationTrigger_WithoutWaitingForIt()
+    {
+        var sentinel = new ControllableSentinelAiService();
+        var trigger = new RecordingAutomationTriggerService();
+        var coordinator = CreateCoordinator(sentinel, trigger);
+        var conversationId = Guid.NewGuid();
+
+        await coordinator.StartAsync(
+            conversationId, null, "  What is our refund policy?  ", "grant", includeInternet: false, useDeepAnalysis: false);
+
+        var (prompt, firedConversationId) = await trigger.Fired.Task.WaitAsync(TestTimeout);
+        prompt.Should().Be("What is our refund policy?");
+        firedConversationId.Should().Be(conversationId);
+
+        sentinel.Release.TrySetResult();
+    }
+
+    [Fact]
+    public async Task StartActionAsync_ShouldNotFireTheChatPromptAutomationTrigger()
+    {
+        // The one-shot Ask/Summarize/Rewrite action panel isn't "putting a prompt into
+        // SentinelGPT" in the sense the Teacher Panel workflow cares about - only a real chat
+        // conversation (StartAsync) does.
+        var sentinel = new ControllableSentinelAiService();
+        var trigger = new RecordingAutomationTriggerService();
+        var coordinator = CreateCoordinator(sentinel, trigger);
+
+        var started = await coordinator.StartActionAsync(Guid.NewGuid(), SentinelAiActions.Summarize, "Summarize this page.", "grant");
+        await sentinel.Started.Task.WaitAsync(TestTimeout);
+        sentinel.Release.TrySetResult();
+        await WaitForTerminalAsync(coordinator, started.Id, "grant");
+
+        trigger.Fired.Task.IsCompleted.Should().BeFalse();
+    }
+
     private static SentinelGptGenerationCoordinator CreateCoordinator(
-        ControllableSentinelAiService sentinel)
+        ControllableSentinelAiService sentinel, IAutomationTriggerService? triggerService = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton<ISentinelAiService>(sentinel);
+        if (triggerService is not null)
+        {
+            services.AddSingleton<IAutomationTriggerService>(triggerService);
+        }
         var provider = services.BuildServiceProvider();
         return new SentinelGptGenerationCoordinator(
             provider.GetRequiredService<IServiceScopeFactory>(),
             new TestHostApplicationLifetime(),
+            new OllamaWorkloadScheduler(),
             TimeProvider.System,
             NullLogger<SentinelGptGenerationCoordinator>.Instance);
     }
@@ -385,6 +428,37 @@ public sealed class SentinelGptGenerationCoordinatorTests
             bool approved,
             string performedBy,
             CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class RecordingAutomationTriggerService : IAutomationTriggerService
+    {
+        public TaskCompletionSource<(string Prompt, Guid? ConversationId)> Fired { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<int> TriggerSentinelChatPromptSubmittedAsync(
+            string prompt, Guid? conversationId, CancellationToken cancellationToken = default)
+        {
+            Fired.TrySetResult((prompt, conversationId));
+            return Task.FromResult(1);
+        }
+
+        public Task<AutomationExecutionView?> TriggerWebhookAsync(
+            string path, string inputJson, string? providedSecret, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<int> RunDueSchedulesAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<int> ResumeDueWaitsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<AutomationExecutionView?> ResumeViaWebhookAsync(
+            string token, string bodyJson, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<int> TriggerDatabaseRowChangedAsync(
+            Guid wikiDatabaseId, string inputJson, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<int> TriggerCrmDealStageChangedAsync(
+            string stage, string inputJson, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<int> TriggerCmsPagePublishedAsync(
+            Guid siteId, string inputJson, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }
 
