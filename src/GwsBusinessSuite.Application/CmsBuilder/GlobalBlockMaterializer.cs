@@ -21,6 +21,10 @@ public static class GlobalBlockMaterializer
         });
         placement.Id = Guid.NewGuid().ToString("N");
         placement.GlobalBlockId = globalBlock.Id;
+        // A fresh placement starts unpositioned - if it lands on a Freeform section, the
+        // inserting caller (CmsBuilderEditor.MaterializeFreeformPositionIfNeeded) assigns it
+        // a default box, same as any other newly-inserted widget.
+        placement.Freeform = null;
         return placement;
     }
 
@@ -36,14 +40,23 @@ public static class GlobalBlockMaterializer
             Background = canonical.Background,
             Padding = canonical.Padding,
             ColumnLayout = canonical.ColumnLayout,
+            LayoutMode = canonical.LayoutMode,
+            FreeformHeightPx = canonical.FreeformHeightPx,
             Columns = ClonePlacementColumns(canonical.Columns, placementId)
         };
     }
 
+    // A standalone global WIDGET's canonical definition never carries any one placement's
+    // Freeform position - unlike Props/Style, "where this widget sits on this particular
+    // page" isn't shareable content (see LayoutWidget.Freeform's own doc comment). CloneWidget
+    // copies Freeform through by default (needed so section-child widgets, below, DO sync
+    // their position as part of the shared section design), so this explicitly strips it back
+    // out for the widget-level case only.
     public static LayoutWidget ToCanonicalWidget(LayoutWidget widget)
     {
         var canonical = CloneWidget(widget);
         canonical.GlobalBlockId = null;
+        canonical.Freeform = null;
         return canonical;
     }
 
@@ -57,6 +70,8 @@ public static class GlobalBlockMaterializer
             Background = section.Background,
             Padding = section.Padding,
             ColumnLayout = section.ColumnLayout,
+            LayoutMode = section.LayoutMode,
+            FreeformHeightPx = section.FreeformHeightPx,
             Columns = section.Columns.Select(column => new LayoutColumn
             {
                 Id = column.Id,
@@ -90,6 +105,8 @@ public static class GlobalBlockMaterializer
         placement.Background = canonical.Background;
         placement.Padding = canonical.Padding;
         placement.ColumnLayout = canonical.ColumnLayout;
+        placement.LayoutMode = canonical.LayoutMode;
+        placement.FreeformHeightPx = canonical.FreeformHeightPx;
         placement.Columns = ClonePlacementColumns(canonical.Columns, placement.Id);
     }
 
@@ -124,14 +141,24 @@ public static class GlobalBlockMaterializer
             }).ToList()
         }).ToList();
 
+    // Freeform is carried through by default - correct for section-child widgets, where
+    // position is part of the shared section design (see ApplyResolvedSection/ToCanonicalSection
+    // above). The standalone widget-level callers (ToCanonicalWidget, CreateWidgetPlacement)
+    // explicitly null it back out afterward, since a lone global widget's position is
+    // placement-local, not shareable.
     private static LayoutWidget CloneWidget(LayoutWidget widget) => new()
     {
         Id = widget.Id,
         GlobalBlockId = widget.GlobalBlockId,
         WidgetType = widget.WidgetType,
         Props = new Dictionary<string, string>(widget.Props),
-        Style = CloneStyle(widget.Style)
+        Style = CloneStyle(widget.Style),
+        Freeform = CloneFreeform(widget.Freeform)
     };
+
+    private static FreeformPosition? CloneFreeform(FreeformPosition? position) => position is null
+        ? null
+        : new FreeformPosition { X = position.X, Y = position.Y, Width = position.Width, Height = position.Height, Z = position.Z };
 
     private static WidgetStyle CloneStyle(WidgetStyle style) => new()
     {
@@ -155,7 +182,11 @@ public static class GlobalBlockMaterializer
         {
             Id = widget.Id,
             GlobalBlockId = widget.GlobalBlockId,
-            WidgetType = widget.WidgetType
+            WidgetType = widget.WidgetType,
+            // Placement-local, like Overrides just below - always carried through the
+            // collapse-to-placeholder step regardless of overridableFields, since Freeform
+            // position was never a sync candidate at all.
+            Freeform = CloneFreeform(widget.Freeform)
         };
 
         if (overridableFields is { Count: > 0 })

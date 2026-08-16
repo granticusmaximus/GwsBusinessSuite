@@ -176,6 +176,16 @@ public static class CmsBlockHtmlRenderer
             pointer-events: none; white-space: nowrap;
           }
           .gws-editable:hover .gws-visibility-hint { opacity: 1; }
+          .gws-section-freeform-canvas { position: relative; }
+          .gws-freeform-item { outline: 1px dashed rgba(148, 163, 184, 0.4); outline-offset: -1px; cursor: move; }
+          .gws-freeform-item:hover { outline-color: rgba(37, 99, 235, 0.45); }
+          .gws-freeform-resize {
+            position: absolute; right: -5px; bottom: -5px; z-index: 41;
+            width: 14px; height: 14px; border-radius: 3px;
+            background: #2563eb; border: 2px solid #fff;
+            cursor: nwse-resize; opacity: 0; transition: opacity 0.1s ease;
+          }
+          .gws-editable:hover .gws-freeform-resize, .gws-editor-selected .gws-freeform-resize { opacity: 1; }
         </style>
         <script>
         (function () {
@@ -355,6 +365,82 @@ public static class CmsBlockHtmlRenderer
             }
           });
 
+          // Freeform Canvas Layout (Phase 4) - a completely separate move/resize gesture from
+          // the reorder-drag system above, scoped to widgets inside a Freeform-mode section
+          // (.gws-freeform-item never renders the reorder drag-handle, so the mousedown
+          // listener above always bails for these via its own `if (!handle) return`, and this
+          // one bails for ordinary flow items via `if (!item) return` - the two never fire for
+          // the same element). Percentages are computed against the canvas's own bounding rect
+          // so they stay meaningful regardless of viewport size.
+          var freeformDrag = null;
+
+          function clampPct(value, min, max) { return Math.max(min, Math.min(max, value)); }
+
+          document.addEventListener('mousedown', function (e) {
+            var item = e.target.closest('.gws-freeform-item');
+            if (!item) return;
+            var canvasEl = item.closest('[data-gws-freeform]');
+            if (!canvasEl) return;
+            if (!e.target.closest('[data-gws-freeform-resize-for]') && e.target.closest('[data-gws-inline-prop]')) return;
+
+            e.preventDefault();
+            document.body.style.userSelect = 'none';
+            var canvasRect = canvasEl.getBoundingClientRect();
+            var itemRect = item.getBoundingClientRect();
+            freeformDrag = {
+              widgetId: item.getAttribute('data-gws-widget-id'),
+              sectionId: getSectionId(item),
+              mode: e.target.closest('[data-gws-freeform-resize-for]') ? 'resize' : 'move',
+              item: item,
+              canvasRect: canvasRect,
+              startClientX: e.clientX,
+              startClientY: e.clientY,
+              startLeftPct: ((itemRect.left - canvasRect.left) / canvasRect.width) * 100,
+              startTopPct: ((itemRect.top - canvasRect.top) / canvasRect.height) * 100,
+              startWidthPct: (itemRect.width / canvasRect.width) * 100,
+              startHeightPct: (itemRect.height / canvasRect.height) * 100,
+              moved: false
+            };
+          });
+
+          document.addEventListener('mousemove', function (e) {
+            if (!freeformDrag) return;
+            var d = freeformDrag;
+            var dxPct = ((e.clientX - d.startClientX) / d.canvasRect.width) * 100;
+            var dyPct = ((e.clientY - d.startClientY) / d.canvasRect.height) * 100;
+            if (Math.abs(dxPct) > 0.2 || Math.abs(dyPct) > 0.2) d.moved = true;
+
+            if (d.mode === 'move') {
+              d.resultLeft = clampPct(d.startLeftPct + dxPct, 0, 100 - d.startWidthPct);
+              d.resultTop = clampPct(d.startTopPct + dyPct, 0, 100 - d.startHeightPct);
+              d.item.style.left = d.resultLeft + '%';
+              d.item.style.top = d.resultTop + '%';
+            } else {
+              d.resultWidth = clampPct(d.startWidthPct + dxPct, 5, 100 - d.startLeftPct);
+              d.resultHeight = clampPct(d.startHeightPct + dyPct, 5, 100 - d.startTopPct);
+              d.item.style.width = d.resultWidth + '%';
+              d.item.style.height = d.resultHeight + '%';
+            }
+          });
+
+          document.addEventListener('mouseup', function () {
+            if (!freeformDrag) return;
+            var d = freeformDrag;
+            freeformDrag = null;
+            document.body.style.userSelect = '';
+            if (!d.moved) return;
+
+            send({
+              type: 'cms:freeform-update',
+              sectionId: d.sectionId,
+              widgetId: d.widgetId,
+              x: d.resultLeft !== undefined ? d.resultLeft : d.startLeftPct,
+              y: d.resultTop !== undefined ? d.resultTop : d.startTopPct,
+              width: d.resultWidth !== undefined ? d.resultWidth : d.startWidthPct,
+              height: d.resultHeight !== undefined ? d.resultHeight : d.startHeightPct
+            });
+          });
+
           document.addEventListener('dragover', function (e) {
             if (!hasExternalDragType(e.dataTransfer)) return;
             var target = resolveDropTarget(e.clientX, e.clientY, null);
@@ -523,9 +609,14 @@ public static class CmsBlockHtmlRenderer
     private static string RenderSection(LayoutSection section, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, bool isLoggedIn, DesignTokenSet? tokens = null)
     {
         var sectionClass = $"gws-section {BgClass(section.Background)} {PadClass(section.Padding)}".TrimEnd();
-        var columnsClass = ColsClass(section.ColumnLayout);
         var sectionAttrs = editMode ? $" data-gws-section-id=\"{Html(section.Id)}\"" : "";
 
+        if (section.LayoutMode == CmsSectionLayoutModes.Freeform)
+        {
+            return RenderFreeformSection(section, sectionClass, sectionAttrs, siteSlug, pageSlug, editMode, articles, isLoggedIn, tokens);
+        }
+
+        var columnsClass = ColsClass(section.ColumnLayout);
         var sb = new StringBuilder();
         sb.Append($"""<section class="{Html(sectionClass)}"{sectionAttrs}><div class="{Html(columnsClass)}">""");
 
@@ -572,6 +663,56 @@ public static class CmsBlockHtmlRenderer
                     : inner);
             }
             sb.Append("</div>");
+        }
+
+        sb.Append("</div></section>\n");
+        return sb.ToString();
+    }
+
+    // Phase 4 (Freeform Canvas Layout) - an alternative to the column-grid RenderSection path
+    // above, for a section whose LayoutMode is Freeform. Every widget lives in Columns[0]
+    // (ColumnLayout/multiple columns are a Flow-only concept) and is absolutely positioned
+    // inside a fixed-height canvas via its own LayoutWidget.Freeform box instead of flowing
+    // through a grid. See cms-public.css/public-site.css's .gws-section-freeform-canvas /
+    // .gws-freeform-item rules for the actual positioning + the small-viewport stack fallback.
+    private static string RenderFreeformSection(LayoutSection section, string sectionClass, string sectionAttrs, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, bool isLoggedIn, DesignTokenSet? tokens)
+    {
+        var widgets = section.Columns.Count > 0 ? section.Columns[0].Widgets : [];
+        var canvasAttrs = editMode
+            ? $" data-gws-column-id=\"{Html(section.Columns.FirstOrDefault()?.Id ?? "")}\" data-gws-freeform=\"1\""
+            : "";
+
+        var sb = new StringBuilder();
+        sb.Append($"""<section class="{Html(sectionClass)}"{sectionAttrs}><div class="gws-section-freeform-canvas" style="height:{section.FreeformHeightPx}px"{canvasAttrs}>""");
+
+        if (editMode && widgets.Count == 0)
+        {
+            sb.Append("""<div class="gws-column-empty">Drop widgets here</div>""");
+        }
+
+        for (var i = 0; i < widgets.Count; i++)
+        {
+            var widget = widgets[i];
+            if (!editMode && !ShouldRenderWidget(widget.Visibility, pageSlug, isLoggedIn))
+            {
+                continue;
+            }
+
+            var position = widget.Freeform ?? FreeformPosition.DefaultFor(i);
+            var inner = WrapWithStyle(RenderWidget(widget, siteSlug, pageSlug, editMode, articles), widget.Style, tokens);
+            var widgetBadgeText = editMode
+                ? string.Join(" | ", new[] { VisibilityBadgeText(widget.Visibility), EditPermissionBadgeText(widget.EditPermission) }
+                    .Where(badge => badge.Length > 0))
+                : string.Empty;
+            var hiddenHint = widgetBadgeText.Length > 0
+                ? $"""<div class="gws-visibility-hint">{Html(widgetBadgeText)}</div>"""
+                : string.Empty;
+            var positionStyle = Html(position.ToInlineStyle());
+            var resizeHandle = editMode ? $"""<div class="gws-freeform-resize" data-gws-freeform-resize-for="{Html(widget.Id)}"></div>""" : string.Empty;
+
+            sb.Append(editMode
+                ? $"""<div class="gws-editable gws-freeform-item" data-gws-widget-id="{Html(widget.Id)}" data-gws-widget-type="{Html(widget.WidgetType)}" style="{positionStyle}">{hiddenHint}{resizeHandle}{inner}</div>"""
+                : $"""<div class="gws-freeform-item" style="{positionStyle}">{inner}</div>""");
         }
 
         sb.Append("</div></section>\n");

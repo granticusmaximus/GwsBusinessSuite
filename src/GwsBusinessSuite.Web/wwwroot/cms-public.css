@@ -48,6 +48,21 @@ body {
 
 .gws-column { display: flex; flex-direction: column; gap: 1.25rem; }
 
+/* Phase 4 - Freeform Canvas Layout: an opt-in per-section alternative to the grid above.
+   Each .gws-freeform-item is absolutely positioned (left/top/width/height/z-index set inline
+   per-widget by CmsBlockHtmlRenderer) inside a fixed-height canvas. On small viewports there's
+   no good general answer for arbitrary overlapping positioned boxes, so this falls back to a
+   simple full-width stack in DOM order - not configurable per-section in this first version. */
+.gws-section-freeform-canvas { position: relative; width: 100%; max-width: 960px; margin: 0 auto; padding: 0 1.5rem; box-sizing: border-box; }
+.gws-freeform-item { position: absolute; }
+@media (max-width: 760px) {
+  .gws-section-freeform-canvas { height: auto !important; }
+  .gws-freeform-item {
+    position: static !important; left: auto !important; top: auto !important;
+    width: 100% !important; height: auto !important; margin-bottom: 1.25rem;
+  }
+}
+
 .gws-align-left   { text-align: left; }
 .gws-align-center { text-align: center; }
 .gws-align-right  { text-align: right; }

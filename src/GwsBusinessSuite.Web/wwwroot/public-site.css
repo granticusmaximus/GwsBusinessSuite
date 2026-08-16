@@ -897,6 +897,18 @@ a { color: inherit; }
 
 .gws-column { display: flex; flex-direction: column; gap: 1.25rem; }
 
+/* Phase 4 - Freeform Canvas Layout (kept in sync with cms-public.css - see its own comment
+   for the full rationale). */
+.gws-section-freeform-canvas { position: relative; width: 100%; max-width: 1100px; margin: 0 auto; padding: 0 1.5rem; box-sizing: border-box; }
+.gws-freeform-item { position: absolute; }
+@media (max-width: 760px) {
+  .gws-section-freeform-canvas { height: auto !important; }
+  .gws-freeform-item {
+    position: static !important; left: auto !important; top: auto !important;
+    width: 100% !important; height: auto !important; margin-bottom: 1.25rem;
+  }
+}
+
 .gws-align-left   { text-align: left; }
 .gws-align-center { text-align: center; }
 .gws-align-right  { text-align: right; }

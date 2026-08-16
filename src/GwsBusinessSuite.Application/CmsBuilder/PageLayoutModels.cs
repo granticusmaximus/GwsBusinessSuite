@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace GwsBusinessSuite.Application.CmsBuilder;
 
 // The schema stored in CmsPage.BlocksJson — a page is a list of sections, each split
@@ -29,7 +31,67 @@ public sealed class LayoutSection
     // behaves exactly as it always has (fully editable by any Contributor).
     public string EditPermission { get; set; } = CmsEditPermissions.Inherit;
 
+    // Phase 4 (Freeform Canvas Layout) - see CmsSectionLayoutModes. Flow (the default) keeps
+    // today's ColumnLayout/Columns-driven behavior completely unchanged. Freeform ignores
+    // ColumnLayout's multi-column split - every widget lives in Columns[0] and is positioned
+    // by its own LayoutWidget.Freeform box instead.
+    public string LayoutMode { get; set; } = CmsSectionLayoutModes.Flow;
+
+    // Only meaningful when LayoutMode == Freeform. A fixed pixel height for the positioning
+    // canvas - percentage-based child positions (LayoutWidget.Freeform) need a concrete box
+    // to be percentages OF, and absolutely-positioned children don't contribute to a parent's
+    // natural height the way flow children do.
+    public int FreeformHeightPx { get; set; } = 480;
+
     public List<LayoutColumn> Columns { get; set; } = new();
+}
+
+// Phase 4 (Freeform Canvas Layout) - an opt-in per-section alternative to the normal
+// column-flow layout, for pages that need to place widgets anywhere on a canvas (overlapping
+// hero graphics, custom collages) rather than stacked in columns - a common WordPress-builder
+// gap this app's CMS didn't have until now. See LayoutSection.LayoutMode/FreeformHeightPx and
+// LayoutWidget.Freeform.
+public static class CmsSectionLayoutModes
+{
+    public const string Flow = "Flow";
+    public const string Freeform = "Freeform";
+}
+
+// A widget's position/size within its parent Freeform-mode section, as percentages of the
+// section's FreeformHeightPx-tall canvas (X/Y/Width/Height all 0-100) so it stays proportional
+// if the canvas is later resized. Z is a plain stacking-order tiebreak for overlapping widgets
+// (higher paints on top) - not a percentage, no clamping needed beyond "is a number".
+// Only meaningful when the parent LayoutSection.LayoutMode == Freeform; ignored otherwise.
+public sealed class FreeformPosition
+{
+    public double X { get; set; }
+    public double Y { get; set; }
+    public double Width { get; set; } = 30;
+    public double Height { get; set; } = 20;
+    public int Z { get; set; }
+
+    // A simple deterministic scatter so several widgets switched into Freeform (or dropped
+    // onto a Freeform canvas) at once don't all start stacked exactly on top of each other.
+    public static FreeformPosition DefaultFor(int index) => new()
+    {
+        X = 5 + index * 12 % 55,
+        Y = 5 + index * 18 % 45,
+        Width = 35,
+        Height = 22
+    };
+
+    // Keeps the box fully inside the 0-100 canvas and above a sane minimum size, after a
+    // hand-typed Inspector value or a drag/resize gesture.
+    public void Clamp()
+    {
+        Width = Math.Clamp(Width, 5, 100);
+        Height = Math.Clamp(Height, 5, 100);
+        X = Math.Clamp(X, 0, 100 - Width);
+        Y = Math.Clamp(Y, 0, 100 - Height);
+    }
+
+    public string ToInlineStyle() => string.Create(CultureInfo.InvariantCulture,
+        $"left:{X}%;top:{Y}%;width:{Width}%;height:{Height}%;z-index:{Z};");
 }
 
 public sealed class LayoutColumn
@@ -72,6 +134,13 @@ public sealed class LayoutWidget
     // GlobalBlockMaterializer.ApplyResolvedWidget (read/merge) and GlobalBlockService
     // .SyncWidgetAsync (write/preserve-canonical).
     public Dictionary<string, string> Overrides { get; set; } = new();
+
+    // Phase 4 (Freeform Canvas Layout) - this widget's own position/size within its parent
+    // section, only meaningful when that section's LayoutMode == Freeform. Null means "not
+    // positioned yet" (a widget still living in a Flow section, or one about to be
+    // materialized with a default box the moment its section switches to Freeform or it's
+    // first dropped onto one) - see CmsBuilderEditor.razor's MaterializeFreeformPositionIfNeeded.
+    public FreeformPosition? Freeform { get; set; }
 }
 
 // Client-safe structural locking (Phase 2): an agency builds a site as Admin, then wants to

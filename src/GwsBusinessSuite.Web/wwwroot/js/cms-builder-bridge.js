@@ -218,6 +218,12 @@ window.gwsCmsBuilderBridge = (function () {
             case 'cms:ready':
                 _dotNetRef.invokeMethodAsync('OnIframeReady');
                 break;
+            case 'cms:freeform-update':
+                if (data.widgetId && _dotNetRef) {
+                    _dotNetRef.invokeMethodAsync('OnFreeformUpdateAsync',
+                        data.sectionId || '', data.widgetId, data.x, data.y, data.width, data.height);
+                }
+                break;
         }
     }
 

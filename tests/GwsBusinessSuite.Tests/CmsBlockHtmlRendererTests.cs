@@ -601,6 +601,117 @@ public sealed class CmsBlockHtmlRendererTests
         Assert.Contains($"href=\"{safeHref}\"", html);
     }
 
+    [Fact]
+    public void Render_ShouldAbsolutelyPositionWidgets_InAFreeformSection()
+    {
+        var layout = new PageLayout
+        {
+            Sections =
+            [
+                new LayoutSection
+                {
+                    LayoutMode = CmsSectionLayoutModes.Freeform,
+                    FreeformHeightPx = 600,
+                    Columns =
+                    [
+                        new LayoutColumn
+                        {
+                            Widgets =
+                            [
+                                new LayoutWidget
+                                {
+                                    WidgetType = "heading",
+                                    Props = new() { ["text"] = "Freeform heading" },
+                                    Freeform = new FreeformPosition { X = 10, Y = 15, Width = 40, Height = 25, Z = 2 }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var html = CmsBlockHtmlRenderer.Render(CmsBuilderJson.Serialize(layout));
+
+        Assert.Contains("gws-section-freeform-canvas", html);
+        Assert.Contains("height:600px", html);
+        Assert.Contains("gws-freeform-item", html);
+        Assert.Contains("left:10%;top:15%;width:40%;height:25%;z-index:2;", html);
+        Assert.Contains("Freeform heading", html);
+        Assert.DoesNotContain("gws-columns", html);
+    }
+
+    [Fact]
+    public void Render_ShouldFallBackToADefaultScatteredPosition_ForAFreeformWidgetWithNoExplicitBox()
+    {
+        var layout = new PageLayout
+        {
+            Sections =
+            [
+                new LayoutSection
+                {
+                    LayoutMode = CmsSectionLayoutModes.Freeform,
+                    Columns = [new LayoutColumn { Widgets = [new LayoutWidget { WidgetType = "heading", Props = new() { ["text"] = "No box yet" } }] }]
+                }
+            ]
+        };
+
+        var html = CmsBlockHtmlRenderer.Render(CmsBuilderJson.Serialize(layout));
+
+        Assert.Contains("gws-freeform-item", html);
+        Assert.Contains("No box yet", html);
+    }
+
+    [Fact]
+    public void Render_ShouldStillUseColumnGrid_ForAFlowSection_WithDefaultLayoutMode()
+    {
+        var layout = new PageLayout
+        {
+            Sections = [new LayoutSection { Columns = [new LayoutColumn { Widgets = [new LayoutWidget { WidgetType = "heading", Props = new() { ["text"] = "Flow heading" } }] }] }]
+        };
+
+        var html = CmsBlockHtmlRenderer.Render(CmsBuilderJson.Serialize(layout));
+
+        Assert.Contains("gws-columns", html);
+        Assert.DoesNotContain("gws-section-freeform-canvas", html);
+        Assert.DoesNotContain("gws-freeform-item", html);
+    }
+
+    [Fact]
+    public void Render_ShouldOmitAVisibilityHiddenWidget_InAFreeformSection_OutsideEditMode()
+    {
+        var layout = new PageLayout
+        {
+            Sections =
+            [
+                new LayoutSection
+                {
+                    LayoutMode = CmsSectionLayoutModes.Freeform,
+                    Columns =
+                    [
+                        new LayoutColumn
+                        {
+                            Widgets =
+                            [
+                                new LayoutWidget
+                                {
+                                    WidgetType = "heading",
+                                    Props = new() { ["text"] = "Members only" },
+                                    Visibility = new VisibilityRule { Mode = VisibilityModes.LoggedInOnly },
+                                    Freeform = new FreeformPosition()
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var html = CmsBlockHtmlRenderer.Render(CmsBuilderJson.Serialize(layout), editMode: false, isLoggedIn: false);
+
+        Assert.DoesNotContain("Members only", html);
+    }
+
     private static PageLayout ButtonLayout(string href) => new()
     {
         Sections =

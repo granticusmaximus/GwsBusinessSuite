@@ -344,6 +344,116 @@ public sealed class GlobalBlockResolverTests
         logger.Warnings.Should().ContainSingle(w => w.Contains(missingBlockId.ToString()));
     }
 
+    [Fact]
+    public async Task ResolveAsync_ShouldPreserveThePlacementsOwnFreeformPosition_ForAStandaloneGlobalWidget()
+    {
+        // A lone global widget's on-page position is placement-local (see LayoutWidget.Freeform's
+        // doc comment) - unlike Props/Style, resolving must never overwrite it from the canonical.
+        await using var db = await CreateDbAsync();
+        var cms = new CmsBuilderService(db);
+        var globals = new GlobalBlockService(db);
+        var resolver = new GlobalBlockResolver(globals);
+        var site = await cms.SaveSiteAsync(new CmsSiteEditorModel { Name = "Globals" });
+
+        var globalWidget = await globals.CreateWidgetAsync(site.Id, "Badge", new LayoutWidget
+        {
+            Id = "global-widget",
+            WidgetType = "paragraph",
+            Props = new Dictionary<string, string> { ["text"] = "Synced copy" }
+        });
+
+        var layout = new PageLayout
+        {
+            Sections =
+            [
+                new LayoutSection
+                {
+                    Id = "section-1",
+                    LayoutMode = CmsSectionLayoutModes.Freeform,
+                    Columns =
+                    [
+                        new LayoutColumn
+                        {
+                            Id = "column-1",
+                            Widgets =
+                            [
+                                new LayoutWidget
+                                {
+                                    Id = "placement-widget",
+                                    GlobalBlockId = globalWidget.Id,
+                                    WidgetType = "paragraph",
+                                    Freeform = new FreeformPosition { X = 22, Y = 33, Width = 40, Height = 20 }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        await resolver.ResolveAsync(site.Id, layout);
+
+        var resolved = layout.Sections[0].Columns[0].Widgets[0];
+        resolved.Freeform.Should().NotBeNull();
+        resolved.Freeform!.X.Should().Be(22);
+        resolved.Freeform.Y.Should().Be(33);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ShouldSyncChildWidgetFreeformPositions_ForAGlobalFreeformSection()
+    {
+        // Unlike a standalone global widget, a global SECTION's internal layout (including
+        // each child widget's Freeform box) IS part of the shared canonical design - every
+        // placement of the same global section should look the same, position included.
+        await using var db = await CreateDbAsync();
+        var cms = new CmsBuilderService(db);
+        var globals = new GlobalBlockService(db);
+        var resolver = new GlobalBlockResolver(globals);
+        var site = await cms.SaveSiteAsync(new CmsSiteEditorModel { Name = "Globals" });
+
+        var globalSection = await globals.CreateSectionAsync(site.Id, "Freeform hero", new LayoutSection
+        {
+            Id = "canonical-section",
+            LayoutMode = CmsSectionLayoutModes.Freeform,
+            FreeformHeightPx = 700,
+            Columns =
+            [
+                new LayoutColumn
+                {
+                    Id = "canonical-column",
+                    Widgets =
+                    [
+                        new LayoutWidget
+                        {
+                            Id = "canonical-heading",
+                            WidgetType = "heading",
+                            Props = new Dictionary<string, string> { ["text"] = "Hero" },
+                            Freeform = new FreeformPosition { X = 5, Y = 5, Width = 50, Height = 30 }
+                        }
+                    ]
+                }
+            ]
+        });
+
+        var layout = new PageLayout
+        {
+            Sections =
+            [
+                new LayoutSection { Id = "placement-section", GlobalBlockId = globalSection.Id }
+            ]
+        };
+
+        await resolver.ResolveAsync(site.Id, layout);
+
+        var placementSection = layout.Sections[0];
+        placementSection.LayoutMode.Should().Be(CmsSectionLayoutModes.Freeform);
+        placementSection.FreeformHeightPx.Should().Be(700);
+        var childWidget = placementSection.Columns[0].Widgets[0];
+        childWidget.Freeform.Should().NotBeNull();
+        childWidget.Freeform!.X.Should().Be(5);
+        childWidget.Freeform.Width.Should().Be(50);
+    }
+
     private static async Task<ApplicationDbContext> CreateDbAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
