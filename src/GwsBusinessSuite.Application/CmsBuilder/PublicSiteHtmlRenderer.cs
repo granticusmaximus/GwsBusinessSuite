@@ -302,14 +302,40 @@ public static class PublicSiteHtmlRenderer
         </main>
         """;
 
-    // ── Form submitted banner ────────────────────────────────────────────────
-    // Shown inline above a Canvas page's normal content when it's reached via
-    // ?submitted=1 (the contact-form submit handler's redirect target) — replaces a
-    // separate /{page}/thanks route, which can't coexist with the nested-page catch-all
-    // route (a fixed segment can't follow a catch-all route parameter).
+    // ── Form submitted modal ─────────────────────────────────────────────────
+    // Shown as a dismissible popup over a Canvas page's normal content when it's reached via
+    // ?submitted=1 (the contact-form submit handler's redirect target) — replaces a separate
+    // /{page}/thanks route, which can't coexist with the nested-page catch-all route (a fixed
+    // segment can't follow a catch-all route parameter). ID-based (not sibling-based) so it
+    // stays correct regardless of exactly where in bodyHtml the caller prepends this markup.
 
-    public static string SubmittedBanner() => """
-        <div class="gws-submitted-banner">Thanks — your message was sent. I'll get back to you soon.</div>
+    public static string SubmittedModal() => """
+        <div class="gws-submitted-modal-backdrop" id="gws-submitted-modal">
+          <div class="gws-submitted-modal" role="dialog" aria-modal="true" aria-labelledby="gws-submitted-modal-text">
+            <p id="gws-submitted-modal-text">Thanks for your submission! Grant Watson will reach out as soon as possible.</p>
+            <button type="button" class="gws-submitted-modal-close" id="gws-submitted-modal-close">Close</button>
+          </div>
+        </div>
+        <script>
+        (function () {
+          var modal = document.getElementById('gws-submitted-modal');
+          var closeBtn = document.getElementById('gws-submitted-modal-close');
+          if (!modal || !closeBtn) return;
+
+          function close() {
+            modal.style.display = 'none';
+            if (window.history && window.history.replaceState) {
+              var url = new URL(window.location.href);
+              url.searchParams.delete('submitted');
+              window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+            }
+          }
+
+          closeBtn.addEventListener('click', close);
+          modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
+          document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+        })();
+        </script>
         """;
 
     public static string CommentPendingBanner() => """

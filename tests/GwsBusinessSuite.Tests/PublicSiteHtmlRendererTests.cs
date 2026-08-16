@@ -278,11 +278,13 @@ public sealed class PublicSiteHtmlRendererTests
     }
 
     [Fact]
-    public void SubmittedBanner_ShouldRenderThanksMessage()
+    public void SubmittedModal_ShouldRenderTheConfirmationMessage_AsADismissibleModal()
     {
-        var html = PublicSiteHtmlRenderer.SubmittedBanner();
+        var html = PublicSiteHtmlRenderer.SubmittedModal();
 
-        Assert.Contains("Thanks", html);
+        Assert.Contains("Thanks for your submission! Grant Watson will reach out as soon as possible.", html);
+        Assert.Contains("gws-submitted-modal-backdrop", html);
+        Assert.Contains("id=\"gws-submitted-modal-close\"", html);
     }
 
     [Fact]

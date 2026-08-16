@@ -234,6 +234,8 @@ public static class DependencyInjection
         services.AddOptions<GrowthReportEmailOptions>()
             .Bind(configuration.GetSection(GrowthReportEmailOptions.SectionName));
         services.AddSingleton<IGrowthReportEmailSender, GrowthReportEmailSender>();
+        services.AddOptions<FormNotificationOptions>()
+            .Bind(configuration.GetSection(FormNotificationOptions.SectionName));
         services.AddOptions<ClientPortalEmailOptions>()
             .Bind(configuration.GetSection(ClientPortalEmailOptions.SectionName));
         services.AddSingleton<GwsBusinessSuite.Application.ClientPortal.IClientPortalEmailSender, ClientPortalEmailSender>();

@@ -1,0 +1,128 @@
+@page "/admin/form-submissions/{SubmissionId:guid}"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContributorAccess")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.CmsBuilder
+@using GwsBusinessSuite.Domain.Entities
+@using System.Text.Json
+@inject IFormSubmissionService FormSubmissionService
+@inject ICmsBuilderService CmsBuilderService
+@inject NavigationManager Navigation
+@inject ILogger<FormSubmissionDetail> Logger
+
+<PageTitle>Form Submission</PageTitle>
+
+<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-envelope-open me-2 text-primary"></i>Form Submission</h1>
+        @if (SourcePage is not null)
+        {
+            <p class="mb-0">
+                From <a href="/admin/pages/edit/@SourcePage.Id">@SourcePage.Title</a>
+                @if (Submission is not null)
+                {
+                    <text> &middot; @Submission.CreatedAt.ToLocalTime().ToString("f")</text>
+                }
+            </p>
+        }
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+}
+else if (IsLoading)
+{
+    <p class="text-secondary">Loading…</p>
+}
+else if (Submission is null)
+{
+    <div class="alert alert-warning" role="alert">This submission no longer exists — it may have already been deleted.</div>
+}
+else
+{
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            <dl class="row mb-0">
+                @foreach (var field in Fields)
+                {
+                    <dt class="col-3 text-secondary">@field.Key</dt>
+                    <dd class="col-9">@field.Value</dd>
+                }
+            </dl>
+        </div>
+        <div class="card-footer bg-white border-top d-flex gap-2">
+            <button class="btn btn-sm btn-outline-danger" @onclick="DeleteAsync">
+                <i class="bi bi-trash me-1"></i>Delete
+            </button>
+            @if (SourcePage is not null)
+            {
+                <a class="btn btn-sm btn-outline-secondary" href="/admin/pages/edit/@SourcePage.Id">
+                    <i class="bi bi-arrow-left me-1"></i>Back to page
+                </a>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid SubmissionId { get; set; }
+
+    private FormSubmission? Submission { get; set; }
+    private CmsPage? SourcePage { get; set; }
+    private Dictionary<string, string> Fields { get; set; } = new();
+    private bool IsLoading { get; set; } = true;
+    private string ErrorMessage { get; set; } = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            Submission = await FormSubmissionService.GetAsync(SubmissionId);
+            if (Submission is null)
+            {
+                return;
+            }
+
+            Fields = ParseSubmissionFields(Submission.FieldsJson);
+            SourcePage = await CmsBuilderService.GetPageAsync(Submission.PageId);
+
+            // Viewing this page IS the read action - no separate "mark read" click needed,
+            // since arriving here (from the notification email's link, or a manual visit) is
+            // itself the same signal EditPage.razor's own "Mark read" button represents.
+            if (!Submission.IsRead)
+            {
+                await FormSubmissionService.MarkReadAsync(SubmissionId);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load form submission {SubmissionId}.", SubmissionId);
+            ErrorMessage = "Unable to load this submission.";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        await FormSubmissionService.DeleteAsync(SubmissionId);
+        Navigation.NavigateTo(SourcePage is not null ? $"/admin/pages/edit/{SourcePage.Id}" : "/admin/pages");
+    }
+
+    private static Dictionary<string, string> ParseSubmissionFields(string fieldsJson)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(
+                string.IsNullOrWhiteSpace(fieldsJson) ? "{}" : fieldsJson) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+}

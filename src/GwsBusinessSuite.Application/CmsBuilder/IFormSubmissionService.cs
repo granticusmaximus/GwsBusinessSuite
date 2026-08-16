@@ -13,6 +13,10 @@ public interface IFormSubmissionService
 
     Task<IReadOnlyList<FormSubmission>> ListAsync(Guid pageId, CancellationToken cancellationToken = default);
 
+    // For the admin detail page a notification email links to - a single submission by id,
+    // regardless of which page it belongs to (unlike ListAsync, which is scoped per page).
+    Task<FormSubmission?> GetAsync(Guid submissionId, CancellationToken cancellationToken = default);
+
     Task MarkReadAsync(Guid submissionId, CancellationToken cancellationToken = default);
 
     Task DeleteAsync(Guid submissionId, CancellationToken cancellationToken = default);

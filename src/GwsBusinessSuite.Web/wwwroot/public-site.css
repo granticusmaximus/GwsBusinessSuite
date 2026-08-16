@@ -1042,6 +1042,30 @@ a { color: inherit; }
   font-weight: 500;
 }
 
+.gws-submitted-modal-backdrop {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex; align-items: center; justify-content: center;
+  padding: 1.5rem;
+}
+.gws-submitted-modal {
+  max-width: 420px;
+  width: 100%;
+  background: var(--bg-surface);
+  color: var(--text-1);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  padding: 1.75rem;
+  text-align: center;
+}
+.gws-submitted-modal p { margin: 0 0 1.25rem; font-size: 1.02rem; line-height: 1.5; }
+.gws-submitted-modal-close {
+  background: var(--accent); color: #1c1917;
+  border: none; border-radius: var(--radius-sm);
+  padding: 0.6rem 1.5rem; font-weight: 600; cursor: pointer;
+}
+
 /* ─── Resume page ─────────────────────────────────────────
    Colors are hardcoded (not var(--accent)/var(--text-*)) rather than themed off the
    site's global tokens, and deliberately match ResumePdfService's constants exactly -

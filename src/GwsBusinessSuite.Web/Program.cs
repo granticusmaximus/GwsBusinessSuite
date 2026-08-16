@@ -423,6 +423,9 @@ using (var scope = app.Services.CreateScope())
     await TrySeedStepAsync(nameof(EnsureGrantWatsonHomepageAsync), () => EnsureGrantWatsonHomepageAsync(dbContext, app.Configuration, app.Logger));
     await TrySeedStepAsync(nameof(EnsurePortfolioPageAsync), () => EnsurePortfolioPageAsync(dbContext, app.Logger));
     await TrySeedStepAsync(nameof(EnsurePrimaryNavMenuAsync), () => EnsurePrimaryNavMenuAsync(dbContext, app.Logger));
+    await TrySeedStepAsync(nameof(EnsureGrantWatsonContactFormFieldsAsync), () => EnsureGrantWatsonContactFormFieldsAsync(dbContext, app.Logger));
+    await TrySeedStepAsync(nameof(EnsureGrantWatsonFormNotificationEmailAsync), () => EnsureGrantWatsonFormNotificationEmailAsync(dbContext, app.Logger));
+    await TrySeedStepAsync(nameof(EnsurePublishedPagesHavePublishedAtAsync), () => EnsurePublishedPagesHavePublishedAtAsync(dbContext, app.Logger));
     await TrySeedStepAsync(nameof(EnsureAboutPageResumeSectionAsync), () => EnsureAboutPageResumeSectionAsync(dbContext, app.Logger));
     await TrySeedStepAsync(nameof(EnsureWikiPagesHaveBlocksAsync), () => EnsureWikiPagesHaveBlocksAsync(dbContext, app.Logger));
     await TrySeedStepAsync(nameof(EnsureSentinelLearningWorkflowAsync), () => EnsureSentinelLearningWorkflowAsync(scope.ServiceProvider, app.Logger));
@@ -1732,10 +1735,15 @@ app.MapPost("/cms/{siteSlug}/submit", async (
 
     // The form widget's fields are admin-defined per page, so collect whatever was
     // actually posted (minus the honeypot and the routing field) rather than assuming
-    // fixed field names.
+    // fixed field names. Stored keyed by the field's configured display Label (resolved from
+    // the page's live BlocksJson) rather than the raw posted key/HTML "name" attribute, so a
+    // submission reads as "Full Name: Ada" instead of "fullName: Ada" wherever it's later
+    // shown (admin detail page, notification email). Falls back to the raw key for a field
+    // the resolver can't find (e.g. the widget was edited/removed after this submission).
+    var fieldLabelsByKey = ResolveFormFieldLabels(page.BlocksJson);
     var fields = form
         .Where(kvp => kvp.Key != "company" && kvp.Key != "_path")
-        .ToDictionary(kvp => kvp.Key, kvp => kvp.Value.ToString());
+        .ToDictionary(kvp => fieldLabelsByKey.GetValueOrDefault(kvp.Key, kvp.Key), kvp => kvp.Value.ToString());
 
     try
     {
@@ -1748,6 +1756,50 @@ app.MapPost("/cms/{siteSlug}/submit", async (
 
     return Results.Redirect(thanksUrl);
 }).AllowAnonymous().RequireRateLimiting("public-write");
+
+// Maps each "form" widget field's posted key (its HTML input "name") to its configured
+// display Label, across every form widget on the page - a small, single-purpose duplicate of
+// CmsBlockHtmlRenderer's private ParseFormFields rather than exposing that method publicly for
+// this one caller. Malformed/missing fieldsJson on any widget is simply skipped (falls through
+// to the caller's own key fallback), matching this app's established "parse failure -> empty,
+// never throw" convention for admin-authored JSON blobs.
+static Dictionary<string, string> ResolveFormFieldLabels(string blocksJson)
+{
+    var labelsByKey = new Dictionary<string, string>();
+    var layout = CmsBuilderJson.ParseLayout(blocksJson);
+    if (layout is null) return labelsByKey;
+
+    foreach (var widget in layout.Sections.SelectMany(s => s.Columns).SelectMany(c => c.Widgets))
+    {
+        if (widget.WidgetType != "form" || !widget.Props.TryGetValue("fieldsJson", out var fieldsJson))
+        {
+            continue;
+        }
+
+        try
+        {
+            var array = System.Text.Json.Nodes.JsonNode.Parse(
+                string.IsNullOrWhiteSpace(fieldsJson) ? "[]" : fieldsJson) as System.Text.Json.Nodes.JsonArray;
+            if (array is null) continue;
+
+            foreach (var item in array.OfType<System.Text.Json.Nodes.JsonObject>())
+            {
+                var key = item["key"]?.GetValue<string>();
+                var label = item["label"]?.GetValue<string>();
+                if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(label))
+                {
+                    labelsByKey[key] = label;
+                }
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // Malformed fieldsJson on this widget - callers fall back to the raw posted key.
+        }
+    }
+
+    return labelsByKey;
+}
 
 // ── grantwatson.dev — the real public site ──────────────────────────────────────────
 // Same app/process as admin.gwsapp.net, gated to only activate for the public host (see
@@ -2970,7 +3022,7 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, fullPath, articles: articles, tokens: DesignTokenJson.ParseOrEmpty(site.DesignTokensJson));
     if (showSubmittedBanner)
     {
-        bodyHtml = PublicSiteHtmlRenderer.SubmittedBanner() + bodyHtml;
+        bodyHtml = PublicSiteHtmlRenderer.SubmittedModal() + bodyHtml;
     }
 
     var customCss = string.Join('\n', new[] { site.CustomCss, page.CustomCss }.Where(css => !string.IsNullOrWhiteSpace(css)));
@@ -3279,6 +3331,96 @@ static async Task EnsurePrimaryNavMenuAsync(ApplicationDbContext dbContext, ILog
     site.UpdatedBy = "system";
     await dbContext.SaveChangesAsync();
     logger.LogInformation("Seeded the primary nav menu for {SiteSlug}.", GrantWatsonHomepageTemplate.SiteSlug);
+}
+
+// One-time content migration: the "contact" page's original form widget only had
+// name/email/message. Replaces it with the fuller intake form (idempotent - checks for the
+// "hasBusiness" field as the marker that this has already run) so a submission actually
+// carries what's needed to follow up: who they are, whether there's a business behind the
+// inquiry, contact details, how they'd like to be reached, and what they want to discuss.
+static async Task EnsureGrantWatsonContactFormFieldsAsync(ApplicationDbContext dbContext, ILogger logger)
+{
+    var site = await dbContext.CmsSites.FirstOrDefaultAsync(s => s.Slug == GrantWatsonHomepageTemplate.SiteSlug);
+    if (site is null) return;
+
+    var page = await dbContext.CmsPages
+        .FirstOrDefaultAsync(p => p.SiteId == site.Id && p.ParentPageId == null && p.Slug == "contact");
+    if (page is null) return;
+
+    var layout = CmsBuilderJson.ParseLayout(page.BlocksJson);
+    if (layout is null) return;
+
+    var formWidget = layout.Sections.SelectMany(s => s.Columns).SelectMany(c => c.Widgets)
+        .FirstOrDefault(w => w.WidgetType == "form");
+    if (formWidget is null || formWidget.Props.GetValueOrDefault("fieldsJson", "").Contains("hasBusiness"))
+    {
+        return;
+    }
+
+    var fields = new[]
+    {
+        new { key = "fullName", label = "Full Name", type = "text", required = true, optionsJson = "" },
+        new { key = "hasBusiness", label = "Do you have a business?", type = "select", required = true, optionsJson = JsonSerializer.Serialize(new[] { "Yes", "No" }) },
+        new { key = "businessName", label = "Business Name (if applicable)", type = "text", required = false, optionsJson = "" },
+        new { key = "phone", label = "Phone Number", type = "tel", required = true, optionsJson = "" },
+        new { key = "email", label = "Email Address", type = "email", required = true, optionsJson = "" },
+        new { key = "followUpMethod", label = "Preferred Follow-Up Method", type = "select", required = true, optionsJson = JsonSerializer.Serialize(new[] { "Email", "Text", "Phone Call" }) },
+        new { key = "preferredTimes", label = "Best Time(s) to Discuss", type = "text", required = false, optionsJson = "" },
+        new { key = "projectDetails", label = "Tell me about your project, idea, or question", type = "textarea", required = true, optionsJson = "" }
+    };
+    formWidget.Props["fieldsJson"] = JsonSerializer.Serialize(fields);
+    formWidget.Props["submitLabel"] = "Send Message";
+
+    page.BlocksJson = CmsBuilderJson.Serialize(layout);
+    page.UpdatedAt = DateTimeOffset.UtcNow;
+    page.UpdatedBy = "system";
+    await dbContext.SaveChangesAsync();
+    logger.LogInformation("Updated the contact form fields for {SiteSlug}.", GrantWatsonHomepageTemplate.SiteSlug);
+}
+
+// General data-hygiene fix, not grantwatson.dev-specific: PublicationWindows.IsVisible (see
+// CoreEntities.cs) requires BOTH Status == Published AND a non-null PublishedAt in the past -
+// a page whose Status is Published but PublishedAt is null (however that happened - a row
+// inserted outside the normal SavePageAsync "publish" flow, e.g. a manual DB edit or an early
+// import) is invisible to every real visitor and to GetPageByFullPathAsync's own
+// includeUnpublished:false callers, yet looks completely normal ("Published") in the page
+// list. Found this while verifying the contact-form work: grantwatson.dev/contact had exactly
+// this problem and was returning 404 to real visitors, unrelated to anything about its form
+// widget. Backfills PublishedAt from CreatedAt (the closest available approximation of when it
+// actually went live) so the page becomes reachable; never touches a page that already has a
+// PublishedAt or isn't marked Published.
+static async Task EnsurePublishedPagesHavePublishedAtAsync(ApplicationDbContext dbContext, ILogger logger)
+{
+    var affected = await dbContext.CmsPages
+        .Where(page => page.Status == CmsPageStatuses.Published && page.PublishedAt == null)
+        .ToListAsync();
+    if (affected.Count == 0) return;
+
+    foreach (var page in affected)
+    {
+        page.PublishedAt = page.CreatedAt;
+    }
+    await dbContext.SaveChangesAsync();
+    logger.LogWarning(
+        "Backfilled PublishedAt for {Count} page(s) that were marked Published but unreachable by visitors: {Slugs}.",
+        affected.Count, string.Join(", ", affected.Select(p => p.Slug)));
+}
+
+// One-time backfill, only if genuinely unset - never overwrites a value set by hand through
+// /admin/appearance/customize (once that field exists there) or by an earlier run of this step.
+static async Task EnsureGrantWatsonFormNotificationEmailAsync(ApplicationDbContext dbContext, ILogger logger)
+{
+    var site = await dbContext.CmsSites.FirstOrDefaultAsync(s => s.Slug == GrantWatsonHomepageTemplate.SiteSlug);
+    if (site is null || !string.IsNullOrWhiteSpace(site.FormNotificationEmail))
+    {
+        return;
+    }
+
+    site.FormNotificationEmail = "grant@gwsapp.net";
+    site.UpdatedAt = DateTimeOffset.UtcNow;
+    site.UpdatedBy = "system";
+    await dbContext.SaveChangesAsync();
+    logger.LogInformation("Set the form submission notification email for {SiteSlug}.", GrantWatsonHomepageTemplate.SiteSlug);
 }
 
 // One-time content migration: folds the resume/CV content into the "about" Canvas page

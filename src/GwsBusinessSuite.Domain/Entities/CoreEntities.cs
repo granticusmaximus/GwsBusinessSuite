@@ -1007,6 +1007,12 @@ public sealed class CmsSite : AuditableEntity
     // Additive: a widget's WidgetStyle only resolves against this when it references a token by
     // name, so every existing page with raw hex/size values renders identically either way.
     public string DesignTokensJson { get; set; } = "{}";
+
+    // When set, every "form" widget submission anywhere on this site sends a notification email
+    // here (see FormSubmissionService.SubmitAsync) with a link into the admin submission detail
+    // page. Empty = no notification (the pre-existing, silent-save-only behavior), so this is
+    // opt-in per site rather than forced on.
+    public string FormNotificationEmail { get; set; } = string.Empty;
 }
 
 public static class CmsPageStatuses
@@ -1141,10 +1147,12 @@ public sealed class FormSubmission : AuditableEntity
 {
     public Guid PageId { get; set; }
 
-    // JSON object of { fieldKey: submittedValue }, since the "form" widget lets an admin
-    // define arbitrary fields per page — there's no fixed set of columns that covers
-    // every form. Keyed by the field's key (the HTML input's "name") rather than its
-    // label, since the submit endpoint only has the raw posted field names to work with.
+    // JSON object of { fieldLabel: submittedValue }, since the "form" widget lets an admin
+    // define arbitrary fields per page — there's no fixed set of columns that covers every
+    // form. Keyed by the field's configured display Label (resolved from the page's live
+    // widget config at submit time - see Program.cs's ResolveFormFieldLabels), falling back
+    // to the raw posted field key for any field the resolver can't find (e.g. the page's
+    // form widget was edited/removed after this submission arrived).
     public string FieldsJson { get; set; } = "{}";
 
     public bool IsRead { get; set; }
