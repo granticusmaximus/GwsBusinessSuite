@@ -1513,6 +1513,14 @@
     private List<SentinelBacklink> Backlinks { get; set; } = new();
     private WikiPageConflictSnapshot? PageConflict { get; set; }
     private CancellationTokenSource? _autosaveCts;
+
+    // Autosave and the explicit "Save changes" button both ultimately call
+    // WikiService.SavePageAsync against the same long-lived per-circuit DbContext. Without this,
+    // a click landing while an autosave write is already mid-flight lets the two calls race on
+    // the same tracked entity - whichever's (possibly stale) snapshot commits last silently wins,
+    // which is what wiped page content out from under an explicit save. This serializes the two
+    // paths so they can never overlap.
+    private readonly SemaphoreSlim _saveLock = new(1, 1);
     private bool _hasUnsavedAutosaveChanges;
     private string _autosaveStatus = string.Empty;
     private SentinelNavigationState Navigation { get; set; } = new([], []);
@@ -2489,6 +2497,15 @@
             // from OnBlocksChanged (at most ~250ms stale) rather than failing the flush.
         }
 
+        try
+        {
+            await _saveLock.WaitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
         var wasNew = !Editor.WikiPageId.HasValue;
         try
         {
@@ -2525,6 +2542,10 @@
             Logger.LogError(ex, "Autosave failed for Sentinel page {WikiPageId}.", Editor.WikiPageId);
             _autosaveStatus = "Autosave failed - use Save changes to retry";
             await InvokeAsync(StateHasChanged);
+        }
+        finally
+        {
+            _saveLock.Release();
         }
     }
 
@@ -3442,6 +3463,10 @@
         ErrorMessage = string.Empty;
         StatusMessage = string.Empty;
 
+        // Waits for any autosave write already mid-flight against the same DbContext/tracked
+        // entity to finish first, so this explicit save can never race it and lose.
+        await _saveLock.WaitAsync();
+
         try
         {
             // Only existing pages have a SentinelResourcePermission row to check - a brand new
@@ -3505,6 +3530,7 @@
         }
         finally
         {
+            _saveLock.Release();
             IsBusy = false;
         }
     }
@@ -4247,5 +4273,6 @@
 
         _wikiLinksRef?.Dispose();
         _disposeCts.Dispose();
+        _saveLock.Dispose();
     }
 }
