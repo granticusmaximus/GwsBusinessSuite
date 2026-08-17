@@ -1,10 +1,14 @@
 using FluentAssertions;
+using GwsBusinessSuite.Application.ClientPortal;
+using GwsBusinessSuite.Application.Growth;
 using GwsBusinessSuite.Application.Support;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -98,6 +102,81 @@ public sealed class SupportTicketServiceTests
     }
 
     [Fact]
+    public async Task CreateTicketAsync_ShouldEmailTheAdmin_WhenTheContactRaisesItThemselves()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+
+        await fixture.Service.CreateTicketAsync(
+            contact.Id, "Can't log in", "I keep getting an error", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+
+        fixture.AdminSender.Messages.Should().ContainSingle();
+        var email = fixture.AdminSender.Messages.Single();
+        email.RecipientEmail.Should().Be("grant@gwsapp.net");
+        email.Subject.Should().Contain("Can't log in");
+        email.PlainTextBody.Should().Contain("Jamie Rivera");
+    }
+
+    [Fact]
+    public async Task CreateTicketAsync_ShouldNotEmailTheAdmin_WhenStaffOpenItOnTheContactsBehalf()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+
+        await fixture.Service.CreateTicketAsync(
+            contact.Id, "Logged for them", "Called in about billing", SupportTicketAuthorTypes.Staff, "staff");
+
+        fixture.AdminSender.Messages.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AddReplyAsync_ShouldEmailTheContact_WhenStaffReplies_AndTheContactHasAnEmail()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera", email: "jamie@example.com");
+        var ticket = await fixture.Service.CreateTicketAsync(
+            contact.Id, "Question", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+        fixture.AdminSender.Messages.Clear();
+
+        await fixture.Service.AddReplyAsync(ticket.Id, SupportTicketAuthorTypes.Staff, "staff", "Here's the fix");
+
+        fixture.ContactSender.Messages.Should().ContainSingle();
+        var email = fixture.ContactSender.Messages.Single();
+        email.ToEmail.Should().Be("jamie@example.com");
+        email.TicketSubject.Should().Be("Question");
+        fixture.AdminSender.Messages.Should().BeEmpty("staff replying shouldn't notify the admin about their own reply");
+    }
+
+    [Fact]
+    public async Task AddReplyAsync_ShouldSkipTheContactEmail_WhenTheContactHasNoEmailOnFile()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+        var ticket = await fixture.Service.CreateTicketAsync(
+            contact.Id, "Question", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+
+        var afterReply = await fixture.Service.AddReplyAsync(ticket.Id, SupportTicketAuthorTypes.Staff, "staff", "Here's the fix");
+
+        fixture.ContactSender.Messages.Should().BeEmpty();
+        afterReply.Messages.Should().HaveCount(2, "the reply itself must still be saved even though no email could be sent");
+    }
+
+    [Fact]
+    public async Task AddReplyAsync_ShouldEmailTheAdmin_WhenTheContactReplies()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+        var ticket = await fixture.Service.CreateTicketAsync(
+            contact.Id, "Question", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+        fixture.AdminSender.Messages.Clear();
+
+        await fixture.Service.AddReplyAsync(ticket.Id, SupportTicketAuthorTypes.Contact, "Jamie Rivera", "Still broken");
+
+        fixture.AdminSender.Messages.Should().ContainSingle();
+        fixture.AdminSender.Messages.Single().PlainTextBody.Should().Contain("Still broken");
+    }
+
+    [Fact]
     public async Task AssignAsync_ShouldClearAssignment_WhenGivenAnEmptyValue()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -120,11 +199,21 @@ public sealed class SupportTicketServiceTests
         {
             _connection = connection;
             Db = db;
-            Service = new SupportTicketService(db, new FixedTimeProvider(DateTimeOffset.UtcNow));
+            AdminSender = new CapturingAdminSender();
+            ContactSender = new CapturingContactSender();
+            Service = new SupportTicketService(
+                db,
+                new FixedTimeProvider(DateTimeOffset.UtcNow),
+                AdminSender,
+                ContactSender,
+                Options.Create(new SupportNotificationOptions { NotifyEmail = "grant@gwsapp.net", AdminBaseUrl = "https://admin.example.test" }),
+                NullLogger<SupportTicketService>.Instance);
         }
 
         public ApplicationDbContext Db { get; }
         public SupportTicketService Service { get; }
+        public CapturingAdminSender AdminSender { get; }
+        public CapturingContactSender ContactSender { get; }
 
         public static async Task<Fixture> CreateAsync()
         {
@@ -135,9 +224,9 @@ public sealed class SupportTicketServiceTests
             return new Fixture(connection, db);
         }
 
-        public async Task<Contact> AddContactAsync(string fullName)
+        public async Task<Contact> AddContactAsync(string fullName, string? email = null)
         {
-            var contact = new Contact { FullName = fullName };
+            var contact = new Contact { FullName = fullName, Email = email };
             Db.Contacts.Add(contact);
             await Db.SaveChangesAsync();
             return contact;
@@ -153,5 +242,32 @@ public sealed class SupportTicketServiceTests
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
+    }
+
+    private sealed class CapturingAdminSender : IGrowthReportEmailSender
+    {
+        public GrowthReportDeliveryConfiguration Configuration { get; set; } = new(true, "ready");
+        public List<GrowthReportEmail> Messages { get; } = [];
+
+        public Task SendAsync(GrowthReportEmail email, CancellationToken cancellationToken = default)
+        {
+            Messages.Add(email);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class CapturingContactSender : IClientPortalEmailSender
+    {
+        public List<(string ToEmail, string ContactName, string TicketSubject, string PortalUrl)> Messages { get; } = [];
+
+        public Task SendLoginLinkAsync(string toEmail, string contactName, string loginUrl, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task SendTicketReplyNotificationAsync(
+            string toEmail, string contactName, string ticketSubject, string portalUrl, CancellationToken cancellationToken = default)
+        {
+            Messages.Add((toEmail, contactName, ticketSubject, portalUrl));
+            return Task.CompletedTask;
+        }
     }
 }

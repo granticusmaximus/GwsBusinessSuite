@@ -81,6 +81,53 @@ public sealed class ClientPortalEmailSender(
         await client.DisconnectAsync(true, cancellationToken);
     }
 
+    public async Task SendTicketReplyNotificationAsync(
+        string toEmail, string contactName, string ticketSubject, string portalUrl, CancellationToken cancellationToken = default)
+    {
+        if (!MailboxAddress.TryParse(options.FromAddress, out var from))
+        {
+            logger.LogError("Ticket reply notification not sent to {Email}: ClientPortalEmail:FromAddress is not configured.", toEmail);
+            return;
+        }
+        if (!MailboxAddress.TryParse(toEmail, out var to))
+        {
+            logger.LogWarning("Ticket reply notification not sent: '{Email}' is not a valid address.", toEmail);
+            return;
+        }
+
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress(options.FromName.Trim(), from.Address));
+        message.To.Add(to);
+        message.Subject = $"New reply on your support ticket: {ticketSubject}";
+        message.Body = new BodyBuilder
+        {
+            TextBody = $"Hi {contactName},\n\nThere's a new reply on your support ticket \"{ticketSubject}\".\n\nView it here: {portalUrl}",
+            HtmlBody = $"<p>Hi {WebUtility.HtmlEncode(contactName)},</p><p>There's a new reply on your support ticket <strong>{WebUtility.HtmlEncode(ticketSubject)}</strong>.</p><p><a href=\"{WebUtility.HtmlEncode(portalUrl)}\">View it in the client portal</a></p>"
+        }.ToMessageBody();
+
+        if (!string.IsNullOrWhiteSpace(options.PickupDirectory))
+        {
+            Directory.CreateDirectory(options.PickupDirectory);
+            var path = Path.Combine(options.PickupDirectory, $"ticket-reply-{Guid.NewGuid():N}.eml");
+            await message.WriteToAsync(path, cancellationToken);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(options.Host))
+        {
+            logger.LogError("Ticket reply notification not sent to {Email}: ClientPortalEmail:Host is not configured.", toEmail);
+            return;
+        }
+
+        TryGetSecurity(options.Security, out var security);
+        using var client = new SmtpClient();
+        await client.ConnectAsync(options.Host.Trim(), options.Port, security, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(options.Username))
+            await client.AuthenticateAsync(options.Username, options.Password, cancellationToken);
+        await client.SendAsync(message, cancellationToken);
+        await client.DisconnectAsync(true, cancellationToken);
+    }
+
     private static bool TryGetSecurity(string value, out SecureSocketOptions security)
     {
         security = value.Trim().ToLowerInvariant() switch

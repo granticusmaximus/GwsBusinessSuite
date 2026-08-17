@@ -186,6 +186,8 @@ public static class DependencyInjection
         services.AddScoped<ICrmService, CrmService>();
         services.AddScoped<IStripeInvoicingClient, StripeInvoicingClient>();
         services.AddScoped<IBillingService, BillingService>();
+        services.AddOptions<GwsBusinessSuite.Application.Support.SupportNotificationOptions>()
+            .Bind(configuration.GetSection(GwsBusinessSuite.Application.Support.SupportNotificationOptions.SectionName));
         services.AddScoped<GwsBusinessSuite.Application.Support.ISupportTicketService, SupportTicketService>();
         services.AddOptions<BookingEmailOptions>()
             .Bind(configuration.GetSection(BookingEmailOptions.SectionName));

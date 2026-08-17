@@ -24,4 +24,10 @@ public interface IClientPortalAuthService
 public interface IClientPortalEmailSender
 {
     Task SendLoginLinkAsync(string toEmail, string contactName, string loginUrl, CancellationToken cancellationToken = default);
+
+    // Fired when staff reply to a support ticket - toEmail is the ticket's Contact.Email, which
+    // may be absent (a Contact can exist without one); callers should skip this call entirely
+    // rather than invoke it with an empty address.
+    Task SendTicketReplyNotificationAsync(
+        string toEmail, string contactName, string ticketSubject, string portalUrl, CancellationToken cancellationToken = default);
 }

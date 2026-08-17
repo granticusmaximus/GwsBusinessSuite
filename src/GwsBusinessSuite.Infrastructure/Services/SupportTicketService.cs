@@ -1,14 +1,22 @@
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.ClientPortal;
+using GwsBusinessSuite.Application.Growth;
 using GwsBusinessSuite.Application.SecurityAudit;
 using GwsBusinessSuite.Application.Support;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
 public sealed class SupportTicketService(
     IAppDbContext db,
     TimeProvider timeProvider,
+    IGrowthReportEmailSender adminEmailSender,
+    IClientPortalEmailSender clientPortalEmailSender,
+    IOptions<SupportNotificationOptions> notificationOptions,
+    ILogger<SupportTicketService> logger,
     // Optional, resolved by DI in production - see AutomationWorkflowService's own comment on
     // this same pattern for why it's nullable (existing tests new this class up directly).
     ISecurityAuditService? securityAudit = null) : ISupportTicketService
@@ -101,6 +109,21 @@ public sealed class SupportTicketService(
             .Where(contact => contact.Id == contactId)
             .Select(contact => contact.FullName)
             .FirstOrDefaultAsync(cancellationToken) ?? "Unknown contact";
+
+        // Only when the CONTACT raised it themselves through the portal - staff opening a
+        // ticket on a contact's behalf shouldn't email themselves about their own action.
+        if (authorType == SupportTicketAuthorTypes.Contact)
+        {
+            try
+            {
+                await NotifyAdminOfNewTicketAsync(ticket, contactName, trimmedMessage, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to send a new-ticket notification email for ticket {TicketId}.", ticket.Id);
+            }
+        }
+
         return ToView(ticket, contactName);
     }
 
@@ -143,8 +166,72 @@ public sealed class SupportTicketService(
         ticket.UpdatedBy = authorName;
         await db.SaveChangesAsync(cancellationToken);
 
+        // A notification failure must never take down the reply itself - the message is
+        // already safely saved by this point regardless of what happens next.
+        try
+        {
+            if (authorType == SupportTicketAuthorTypes.Staff)
+            {
+                await NotifyContactOfReplyAsync(ticket, cancellationToken);
+            }
+            else
+            {
+                await NotifyAdminOfReplyAsync(ticket, authorName, trimmedBody, cancellationToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to send a reply notification email for ticket {TicketId}.", ticketId);
+        }
+
         return await GetTicketAsync(ticketId, cancellationToken)
             ?? throw new InvalidOperationException($"Ticket {ticketId} was not found after saving.");
+    }
+
+    private async Task NotifyAdminOfNewTicketAsync(
+        SupportTicket ticket, string contactName, string initialMessage, CancellationToken cancellationToken)
+    {
+        if (!adminEmailSender.Configuration.IsConfigured) return;
+
+        var portalUrl = $"{notificationOptions.Value.AdminBaseUrl.TrimEnd('/')}/admin/support";
+        var subject = $"New support ticket: {ticket.Subject}";
+        var plainText = $"{contactName} opened a new support ticket.\n\nSubject: {ticket.Subject}\n\n{initialMessage}\n\nView it here: {portalUrl}";
+        var html = $"<p><strong>{System.Net.WebUtility.HtmlEncode(contactName)}</strong> opened a new support ticket.</p>" +
+            $"<p><strong>Subject:</strong> {System.Net.WebUtility.HtmlEncode(ticket.Subject)}</p>" +
+            $"<p>{System.Net.WebUtility.HtmlEncode(initialMessage)}</p>" +
+            $"""<p><a href="{portalUrl}">View it in the admin inbox</a></p>""";
+        await adminEmailSender.SendAsync(
+            new GrowthReportEmail(notificationOptions.Value.NotifyEmail, subject, plainText, html), cancellationToken);
+    }
+
+    private async Task NotifyAdminOfReplyAsync(
+        SupportTicket ticket, string authorName, string body, CancellationToken cancellationToken)
+    {
+        if (!adminEmailSender.Configuration.IsConfigured) return;
+
+        var portalUrl = $"{notificationOptions.Value.AdminBaseUrl.TrimEnd('/')}/admin/support";
+        var subject = $"New reply on ticket: {ticket.Subject}";
+        var plainText = $"{authorName} replied to \"{ticket.Subject}\".\n\n{body}\n\nView it here: {portalUrl}";
+        var html = $"<p><strong>{System.Net.WebUtility.HtmlEncode(authorName)}</strong> replied to <strong>{System.Net.WebUtility.HtmlEncode(ticket.Subject)}</strong>.</p>" +
+            $"<p>{System.Net.WebUtility.HtmlEncode(body)}</p>" +
+            $"""<p><a href="{portalUrl}">View it in the admin inbox</a></p>""";
+        await adminEmailSender.SendAsync(
+            new GrowthReportEmail(notificationOptions.Value.NotifyEmail, subject, plainText, html), cancellationToken);
+    }
+
+    // The contact may not have an email on file (Contact.Email is nullable) - skip gracefully,
+    // same "opt-in, never crash" posture as every other notification path in this method.
+    private async Task NotifyContactOfReplyAsync(SupportTicket ticket, CancellationToken cancellationToken)
+    {
+        var contact = await db.Contacts.AsNoTracking()
+            .Where(c => c.Id == ticket.ContactId)
+            .Select(c => new { c.Email, c.FullName })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(contact?.Email)) return;
+
+        var portalUrl = $"{notificationOptions.Value.AdminBaseUrl.TrimEnd('/')}/client-portal/support";
+        await clientPortalEmailSender.SendTicketReplyNotificationAsync(
+            contact.Email, contact.FullName, ticket.Subject, portalUrl, cancellationToken);
     }
 
     public async Task<SupportTicketView> SetStatusAsync(Guid ticketId, string status, string performedBy, CancellationToken cancellationToken = default)

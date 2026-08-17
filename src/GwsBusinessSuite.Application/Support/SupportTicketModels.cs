@@ -1,5 +1,17 @@
 namespace GwsBusinessSuite.Application.Support;
 
+// AdminBaseUrl is reused for both the admin inbox link (staff notification) and the client
+// portal link (contact notification) - they're served from the same host in this app. Same
+// hardcoded-default-with-config-override convention as FormNotificationOptions/
+// GrowthReportEmailOptions.DashboardUrl.
+public sealed class SupportNotificationOptions
+{
+    public const string SectionName = "SupportNotification";
+
+    public string NotifyEmail { get; set; } = "grant@gwsapp.net";
+    public string AdminBaseUrl { get; set; } = "https://admin.gwsapp.net";
+}
+
 public sealed record SupportTicketMessageView(
     Guid Id, string AuthorType, string AuthorName, string Body, DateTimeOffset CreatedAt);
 

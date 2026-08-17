@@ -80,9 +80,9 @@
                             {
                                 <div class="mb-3 @(message.AuthorType == SupportTicketAuthorTypes.Contact ? "text-end" : "")">
                                     <div class="small text-secondary">@message.AuthorName &middot; @message.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</div>
-                                    <div class="d-inline-block p-2 rounded @(message.AuthorType == SupportTicketAuthorTypes.Contact ? "bg-primary-subtle" : "bg-secondary-subtle")" style="max-width: 80%; text-align: left;">
-                                        @message.Body
-                                    </div>
+                                    <SafeMarkdownContent Content="@message.Body"
+                                                         CssClass="@(message.AuthorType == SupportTicketAuthorTypes.Contact ? "d-inline-block p-2 rounded bg-primary-subtle" : "d-inline-block p-2 rounded bg-secondary-subtle")"
+                                                         style="max-width: 80%; text-align: left;" />
                                 </div>
                             }
                         </div>

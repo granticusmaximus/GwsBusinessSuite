@@ -140,6 +140,10 @@ public sealed class ClientPortalAuthServiceTests
             Messages.Add((toEmail, contactName, loginUrl));
             return Task.CompletedTask;
         }
+
+        public Task SendTicketReplyNotificationAsync(
+            string toEmail, string contactName, string ticketSubject, string portalUrl, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
