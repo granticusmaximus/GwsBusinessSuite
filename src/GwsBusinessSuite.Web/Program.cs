@@ -127,7 +127,31 @@ builder.Services.AddCors(options =>
         .WithHeaders("Content-Type"));
 });
 
-builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+const string ClientPortalCookieName = "GwsBusinessSuite.ClientPortal";
+
+builder.Services.AddAuthentication(options =>
+    {
+        // The Blazor Server interactive circuit's own connection endpoint (/_blazor) can't
+        // carry a per-page [Authorize(AuthenticationSchemes=...)] policy - it's one shared
+        // endpoint, not tied to any single route - so it always authenticates via whatever the
+        // DEFAULT scheme resolves to. A plain default of the admin cookie scheme meant a
+        // client-portal contact's circuit always saw an anonymous HttpContext.User (they only
+        // ever hold the ClientPortal cookie), even though their page's own initial HTTP GET
+        // correctly authenticated via ClientPortalAccess's scheme - so every @onclick on a
+        // client-portal page ran with an empty contact id. Forwarding the default scheme based
+        // on which cookie is actually present fixes this for the circuit (and for any other
+        // endpoint relying on ambient default-scheme auth) without weakening admin pages, which
+        // keep resolving to the admin cookie scheme exactly as before.
+        options.DefaultScheme = "Dynamic";
+        options.DefaultChallengeScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    })
+    .AddPolicyScheme("Dynamic", "Dynamic", options =>
+    {
+        options.ForwardDefaultSelector = context =>
+            context.Request.Cookies.ContainsKey(ClientPortalCookieName)
+                ? ClientPortalAuthenticationDefaults.Scheme
+                : CookieAuthenticationDefaults.AuthenticationScheme;
+    })
     .AddCookie(options =>
     {
         options.LoginPath = "/admin/login";
@@ -156,7 +180,7 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
     // second factor a real password login would otherwise need.
     .AddCookie(ClientPortalAuthenticationDefaults.Scheme, options =>
     {
-        options.Cookie.Name = "GwsBusinessSuite.ClientPortal";
+        options.Cookie.Name = ClientPortalCookieName;
         options.LoginPath = "/client-portal/login";
         options.AccessDeniedPath = "/client-portal/login";
         options.SlidingExpiration = true;
@@ -2928,8 +2952,19 @@ app.MapDelete("/admin/api/articles/{id:guid}", async (
 }).RequireAuthorization().RequireRateLimiting("admin-mutation");
 
 app.MapStaticAssets().AllowAnonymous();
+// The global FallbackPolicy (AdminOnly, above) applies to any endpoint with no [Authorize]
+// metadata of its own. AddInteractiveServerRenderMode()'s shared circuit/hub connection
+// endpoint carries no per-page metadata - it isn't tied to any one route - so without this,
+// the fallback silently required the admin role just to open a SignalR circuit at all. Every
+// non-admin authenticated user (e.g. a client-portal contact) got a fully server-rendered page
+// on the initial GET (that request DOES carry its own page's [Authorize(Policy=...)] metadata)
+// but the circuit behind it never connected, so every @onclick on that page was a silent no-op.
+// Per-page authorization is unaffected: each component's own [Authorize(Policy = "...")] is
+// still enforced both on the initial GET and continuously by Routes.razor's AuthorizeRouteView
+// for the life of the circuit.
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
+    .AddInteractiveServerRenderMode()
+    .AllowAnonymous();
 
 // "/" on the public host renders the Canvas "home" page; anywhere else (admin.gwsapp.net,
 // localhost, direct IP) redirects to /admin as before. One endpoint, not two — see the note
