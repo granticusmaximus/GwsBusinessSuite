@@ -233,6 +233,8 @@ builder.Services.AddAuthorization(options =>
 });
 builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler,
     AuditingAuthorizationMiddlewareResultHandler>();
+builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler,
+    BlazorCircuitAuthorizationBypassHandler>();
 
 builder.Services.AddHealthChecks()
     .AddCheck<GwsBusinessSuite.Web.HealthChecks.DatabaseHealthCheck>(
@@ -2952,19 +2954,11 @@ app.MapDelete("/admin/api/articles/{id:guid}", async (
 }).RequireAuthorization().RequireRateLimiting("admin-mutation");
 
 app.MapStaticAssets().AllowAnonymous();
-// The global FallbackPolicy (AdminOnly, above) applies to any endpoint with no [Authorize]
-// metadata of its own. AddInteractiveServerRenderMode()'s shared circuit/hub connection
-// endpoint carries no per-page metadata - it isn't tied to any one route - so without this,
-// the fallback silently required the admin role just to open a SignalR circuit at all. Every
-// non-admin authenticated user (e.g. a client-portal contact) got a fully server-rendered page
-// on the initial GET (that request DOES carry its own page's [Authorize(Policy=...)] metadata)
-// but the circuit behind it never connected, so every @onclick on that page was a silent no-op.
-// Per-page authorization is unaffected: each component's own [Authorize(Policy = "...")] is
-// still enforced both on the initial GET and continuously by Routes.razor's AuthorizeRouteView
-// for the life of the circuit.
+// See BlazorCircuitAuthorizationBypassHandler for why the shared /_blazor circuit endpoint needs
+// special handling instead of a blanket .AllowAnonymous() here - that approach broke the normal
+// early login redirect for every page.
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode()
-    .AllowAnonymous();
+    .AddInteractiveServerRenderMode();
 
 // "/" on the public host renders the Canvas "home" page; anywhere else (admin.gwsapp.net,
 // localhost, direct IP) redirects to /admin as before. One endpoint, not two — see the note
