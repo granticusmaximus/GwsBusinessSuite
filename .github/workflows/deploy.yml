@@ -9,6 +9,12 @@ jobs:
   test:
     name: Build & Test
     runs-on: ubuntu-latest
+    # Defense in depth alongside the `timeout` wrapped around the Playwright install command in
+    # verify-release.sh itself: GitHub Actions jobs default to a 6-hour timeout if unset, which
+    # is exactly how a single silently-hung step (observed: 30+ min with zero output, from a
+    # stalled apt-get mirror) went unnoticed for hours and blocked every subsequent deploy commit
+    # from shipping until someone happened to check and manually cancel it.
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v7

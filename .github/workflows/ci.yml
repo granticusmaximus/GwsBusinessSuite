@@ -9,6 +9,10 @@ jobs:
   dotnet:
     name: .NET Build & Test
     runs-on: ubuntu-latest
+    # See deploy.yml's identical timeout for why: a silently-hung Playwright dependency install
+    # (stalled apt-get mirror, zero output) can otherwise run for hours against GitHub's default
+    # 6-hour job timeout before anyone notices.
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v7

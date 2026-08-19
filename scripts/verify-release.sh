@@ -148,8 +148,14 @@ run_check "Release build" \
   dotnet build GwsBusinessSuite.slnx -c Release --no-restore --disable-build-servers -m:1
 
 if [[ "$install_playwright_deps" == true ]]; then
+  # This step normally finishes in well under a minute, but its underlying `apt-get install`
+  # (from --with-deps) has been observed to hang completely silently for 30+ minutes in CI with
+  # no error and no further output - almost certainly a stalled package mirror or an unanswered
+  # interactive prompt, not anything this app's own code can control. Bounding it turns a
+  # multi-hour silent hang (blocking every subsequent deploy until someone notices and manually
+  # cancels the run) into a fast, clear, retryable failure instead.
   run_check "Playwright browser install" \
-    pwsh tests/GwsBusinessSuite.Tests/bin/Release/net10.0/playwright.ps1 \
+    timeout 480 pwsh tests/GwsBusinessSuite.Tests/bin/Release/net10.0/playwright.ps1 \
       install --with-deps chromium
 fi
 
