@@ -86,6 +86,12 @@ export function initialize(container, dotNetRef, initialBlocksJson, historyKey =
         // since undoing past that boundary would fight the server's own source of truth.
         undoStack: [],
         redoStack: [],
+        // Cross-block text selection - see "---- Cross-block selection ----" below. Native
+        // Selection/Range can't span separate contentEditable elements (each block is its own),
+        // so a drag/shift-click/shift-arrow that crosses a block boundary switches from the
+        // browser's native in-block selection to this synthetic whole-block highlight instead.
+        blockDragSelect: null,
+        blockSelection: null,
         lastSnapshot: undefined,
         baseSnapshot: undefined,
         historyKey: normalizeHistoryKey(historyKey),
@@ -131,6 +137,11 @@ export function initialize(container, dotNetRef, initialBlocksJson, historyKey =
         reportCursor(state);
     });
     container.addEventListener('keyup', state.selectionHandler);
+    container.addEventListener('mousedown', event => onBlockMouseDown(state, event));
+    document.addEventListener('mousemove', state.blockSelectMoveHandler = event => onBlockMouseMove(state, event));
+    document.addEventListener('mouseup', state.blockSelectUpHandler = () => { state.blockDragSelect = null; });
+    container.addEventListener('copy', event => onBlockSelectionCopy(state, event));
+    container.addEventListener('cut', event => onBlockSelectionCut(state, event));
     document.addEventListener('mousedown', state.outsideClickHandler = event => closeFloatingMenus(state, event));
     window.addEventListener('resize', state.resizeHandler = () => repositionSuggestionMenu(state));
     window.addEventListener('offline', state.offlineHandler = () => setOfflineState(state, true));
@@ -201,6 +212,10 @@ function renderBlocks(container, state, blocksJson) {
         blocks = [emptyBlock('paragraph')];
     }
 
+    // The old .wiki-block elements are about to be discarded - any reference to them in an
+    // in-progress or finalized cross-block selection would be dangling after this.
+    state.blockDragSelect = null;
+    state.blockSelection = null;
     container.innerHTML = '';
     for (const block of blocks) {
         container.appendChild(createBlockElement(block, state));
@@ -405,6 +420,8 @@ export function dispose(container) {
         container.removeEventListener('keyup', state.selectionHandler);
     }
     if (state.outsideClickHandler) document.removeEventListener('mousedown', state.outsideClickHandler);
+    if (state.blockSelectMoveHandler) document.removeEventListener('mousemove', state.blockSelectMoveHandler);
+    if (state.blockSelectUpHandler) document.removeEventListener('mouseup', state.blockSelectUpHandler);
     if (state.resizeHandler) window.removeEventListener('resize', state.resizeHandler);
     if (state.offlineHandler) window.removeEventListener('offline', state.offlineHandler);
     if (state.onlineHandler) window.removeEventListener('online', state.onlineHandler);
@@ -2105,6 +2122,32 @@ function placeholderFor(type) {
 function onContentKeyDown(state, content, event) {
     const blockEl = content.closest('.wiki-block');
 
+    if (state.blockSelection) {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            clearBlockSelection(state);
+            return;
+        }
+        if (event.key === 'Backspace' || event.key === 'Delete') {
+            event.preventDefault();
+            deleteBlockSelection(state);
+            return;
+        }
+        if (event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+            event.preventDefault();
+            extendBlockSelectionByArrow(state, event.key === 'ArrowUp' ? -1 : 1);
+            return;
+        }
+        const isCopyOrCut = (event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'c' || event.key.toLowerCase() === 'x');
+        if (!isCopyOrCut && !event.ctrlKey && !event.metaKey && !event.altKey) {
+            // Any other unmodified key (typing, a plain arrow, Enter, Tab...) isn't a selection
+            // action - drop back to a normal caret in whichever block still has DOM focus (the
+            // one the drag/shift-click started from) rather than silently editing only that one
+            // block while the rest of the highlighted range stays selected and stale-looking.
+            clearBlockSelection(state);
+        }
+    }
+
     if (handleSuggestionMenuKey(state, event)) {
         return;
     }
@@ -2171,6 +2214,28 @@ function onContentKeyDown(state, content, event) {
         if (next) {
             event.preventDefault();
             focusBlockAtStart(next);
+        }
+        return;
+    }
+    // Native Shift+ArrowUp/Down already extends the selection across wrapped lines within this
+    // one contentEditable just fine - it's only once the caret is at this block's own start/end
+    // edge that the browser has nowhere further to extend into (each block is a separate
+    // contentEditable), which is exactly where cross-block selection needs to take over.
+    if (event.key === 'ArrowUp' && event.shiftKey && isCaretAtStart(content)) {
+        const previous = blockEl.previousElementSibling;
+        if (previous) {
+            event.preventDefault();
+            window.getSelection()?.removeAllRanges();
+            applyBlockRangeSelection(state, blockEl, previous);
+        }
+        return;
+    }
+    if (event.key === 'ArrowDown' && event.shiftKey && isCaretAtEnd(content)) {
+        const next = blockEl.nextElementSibling;
+        if (next) {
+            event.preventDefault();
+            window.getSelection()?.removeAllRanges();
+            applyBlockRangeSelection(state, blockEl, next);
         }
         return;
     }
@@ -2858,6 +2923,152 @@ function onHandlePointerDown(state, event) {
     branch.forEach(element => element.classList.add('is-dragging'));
     handle.setPointerCapture(event.pointerId);
     event.preventDefault();
+}
+
+// ---- Cross-block selection --------------------------------------------------
+// Each block is its own separate contentEditable (see createContentEditable), so the browser's
+// native Selection/Range can never span a drag across a block boundary. This layer detects that
+// crossing and takes over with a synthetic whole-block highlight instead - the same approach
+// Notion itself uses. Selecting mid-drag stays native (and cheap) right up until the pointer
+// leaves the block it started in.
+
+function topLevelBlockFor(container, node) {
+    const el = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+    const block = el?.closest?.('.wiki-block');
+    return block && block.parentElement === container ? block : null;
+}
+
+function topLevelBlockAtY(container, clientY) {
+    const blocks = [...container.querySelectorAll(':scope > .wiki-block')];
+    if (blocks.length === 0) return null;
+    for (const el of blocks) {
+        const rect = el.getBoundingClientRect();
+        if (clientY >= rect.top && clientY <= rect.bottom) return el;
+    }
+    const firstRect = blocks[0].getBoundingClientRect();
+    return clientY < firstRect.top ? blocks[0] : blocks[blocks.length - 1];
+}
+
+function currentFocusedTopBlock(state) {
+    const active = document.activeElement?.closest?.('.wiki-block-content');
+    return active ? topLevelBlockFor(state.container, active) : null;
+}
+
+function onBlockMouseDown(state, event) {
+    if (event.button !== 0) return;
+    if (event.target.closest('.wiki-block-handle')) return; // owned by the drag-reorder pointer handlers
+
+    const topBlock = topLevelBlockFor(state.container, event.target);
+    if (!topBlock) {
+        clearBlockSelection(state);
+        return;
+    }
+
+    if (event.shiftKey) {
+        const anchor = state.blockSelection?.anchorEl || currentFocusedTopBlock(state) || topBlock;
+        event.preventDefault(); // native cross-contentEditable selection tends to render as a messy partial highlight
+        applyBlockRangeSelection(state, anchor, topBlock);
+        return;
+    }
+
+    clearBlockSelection(state);
+    state.blockDragSelect = { anchorBlockEl: topBlock, active: false };
+}
+
+function onBlockMouseMove(state, event) {
+    if (!state.blockDragSelect) return;
+    const currentBlock = topLevelBlockAtY(state.container, event.clientY);
+    if (!currentBlock) return;
+    if (currentBlock === state.blockDragSelect.anchorBlockEl && !state.blockDragSelect.active) return;
+
+    state.blockDragSelect.active = true;
+    window.getSelection()?.removeAllRanges();
+    applyBlockRangeSelection(state, state.blockDragSelect.anchorBlockEl, currentBlock);
+}
+
+function applyBlockRangeSelection(state, anchorEl, focusEl) {
+    const blocks = [...state.container.querySelectorAll(':scope > .wiki-block')];
+    const anchorIndex = blocks.indexOf(anchorEl);
+    const focusIndex = blocks.indexOf(focusEl);
+    if (anchorIndex === -1 || focusIndex === -1) return;
+    const [lo, hi] = anchorIndex <= focusIndex ? [anchorIndex, focusIndex] : [focusIndex, anchorIndex];
+    setBlockSelection(state, blocks.slice(lo, hi + 1), anchorEl, focusEl);
+}
+
+function extendBlockSelectionByArrow(state, direction) {
+    const blocks = [...state.container.querySelectorAll(':scope > .wiki-block')];
+    const anchorEl = state.blockSelection?.anchorEl;
+    const focusEl = state.blockSelection?.focusEl;
+    if (!anchorEl || !focusEl) return;
+    const focusIndex = blocks.indexOf(focusEl);
+    if (focusIndex === -1) return;
+    const nextIndex = Math.min(blocks.length - 1, Math.max(0, focusIndex + direction));
+    applyBlockRangeSelection(state, anchorEl, blocks[nextIndex]);
+    blocks[nextIndex].scrollIntoView({ block: 'nearest' });
+}
+
+function setBlockSelection(state, blockEls, anchorEl, focusEl) {
+    clearBlockSelectionClasses(state);
+    if (!blockEls || blockEls.length === 0) {
+        state.blockSelection = null;
+        return;
+    }
+    for (const el of blockEls) el.classList.add('wiki-block-selected');
+    state.blockSelection = {
+        blockEls,
+        anchorEl: anchorEl || blockEls[0],
+        focusEl: focusEl || blockEls[blockEls.length - 1]
+    };
+}
+
+function clearBlockSelectionClasses(state) {
+    state.container.querySelectorAll(':scope > .wiki-block.wiki-block-selected')
+        .forEach(el => el.classList.remove('wiki-block-selected'));
+}
+
+function clearBlockSelection(state) {
+    clearBlockSelectionClasses(state);
+    state.blockSelection = null;
+}
+
+function blockPlainText(blockEl) {
+    return blockEl.querySelector('.wiki-block-content')?.textContent || '';
+}
+
+function onBlockSelectionCopy(state, event) {
+    if (!state.blockSelection || !event.clipboardData) return;
+    event.preventDefault();
+    event.clipboardData.setData('text/plain', state.blockSelection.blockEls.map(blockPlainText).join('\n'));
+}
+
+function onBlockSelectionCut(state, event) {
+    if (!state.blockSelection || !event.clipboardData) return;
+    event.preventDefault();
+    event.clipboardData.setData('text/plain', state.blockSelection.blockEls.map(blockPlainText).join('\n'));
+    deleteBlockSelection(state);
+}
+
+// Mirrors deleteBlockAction's own invariant: the editor always shows at least one block.
+function deleteBlockSelection(state) {
+    const blockEls = state.blockSelection?.blockEls;
+    if (!blockEls || blockEls.length === 0) return;
+
+    const allBlocks = [...state.container.querySelectorAll(':scope > .wiki-block')];
+    const isFullDocument = blockEls.length === allBlocks.length;
+    const focusFallback = isFullDocument ? null : (blockEls[blockEls.length - 1].nextElementSibling || blockEls[0].previousElementSibling);
+
+    let focusTarget = focusFallback;
+    if (isFullDocument) {
+        focusTarget = createBlockElement(emptyBlock('paragraph'), state);
+        blockEls[0].before(focusTarget);
+    }
+
+    blockEls.forEach(el => el.remove());
+    state.blockSelection = null;
+
+    refreshBlockPresentation(state.container);
+    if (focusTarget) focusBlock(focusTarget);
+    notifyChanged(state);
 }
 
 function wikiLinkAnchorFromEvent(event) {
