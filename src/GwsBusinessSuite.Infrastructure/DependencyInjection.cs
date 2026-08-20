@@ -163,7 +163,6 @@ public static class DependencyInjection
         });
         services.AddScoped<IDockerDeploymentService, DockerDeploymentService>();
         services.AddScoped<ICjAdsService, CjAdsService>();
-        services.AddScoped<GwsBusinessSuite.Application.Discord.IDiscordService, DiscordService>();
         services.AddScoped<ISiteSettingsService, SiteSettingsService>();
         services.AddScoped<IAffiliateOfferScoringService, AffiliateOfferScoringService>();
         services.AddScoped<ICmsBuilderService, CmsBuilderService>();

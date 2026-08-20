@@ -7,7 +7,6 @@
 
   <ItemGroup>
     <PackageReference Include="CodeHollow.FeedReader" Version="1.2.6" />
-    <PackageReference Include="Discord.Net.Rest" Version="3.20.1" />
     <PackageReference Include="Docker.DotNet" Version="3.125.15" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="10.0.10" />
     <!-- IPasswordHasher<T>/PasswordHasher<T> only - not the full ASP.NET Core Identity

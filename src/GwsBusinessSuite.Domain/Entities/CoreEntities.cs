@@ -1255,14 +1255,6 @@ public sealed class CjConnectorSettings : AuditableEntity
     public bool AutomaticArticleRotationEnabled { get; set; } = true;
 }
 
-public sealed class DiscordConnectorSettings : AuditableEntity
-{
-    // Singleton row — always upserted using WellKnownId.
-    public static readonly Guid WellKnownId = new("d15c0000-0000-0000-0000-000000000001");
-
-    public string BotToken { get; set; } = string.Empty;
-}
-
 public sealed class NotionConnectorSettings : AuditableEntity
 {
     // Singleton row — always upserted using WellKnownId.

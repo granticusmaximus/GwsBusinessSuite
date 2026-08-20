@@ -83,7 +83,6 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SeoArticleWorkflowEvent> SeoArticleWorkflowEvents => Set<SeoArticleWorkflowEvent>();
     public DbSet<SeoArticleDraftRevision> SeoArticleDraftRevisions => Set<SeoArticleDraftRevision>();
     public DbSet<CjConnectorSettings> CjConnectorSettings => Set<CjConnectorSettings>();
-    public DbSet<DiscordConnectorSettings> DiscordConnectorSettings => Set<DiscordConnectorSettings>();
     public DbSet<NotionConnectorSettings> NotionConnectorSettings => Set<NotionConnectorSettings>();
     public DbSet<NotionWebhookEvent> NotionWebhookEvents => Set<NotionWebhookEvent>();
     public DbSet<NotionSyncConflict> NotionSyncConflicts => Set<NotionSyncConflict>();
