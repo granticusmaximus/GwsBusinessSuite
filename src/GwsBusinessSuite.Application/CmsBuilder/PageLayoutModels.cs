@@ -141,6 +141,58 @@ public sealed class LayoutWidget
     // materialized with a default box the moment its section switches to Freeform or it's
     // first dropped onto one) - see CmsBuilderEditor.razor's MaterializeFreeformPositionIfNeeded.
     public FreeformPosition? Freeform { get; set; }
+
+    // Phase 5 (Native No-Code Interactions & Animation Engine) - an optional single
+    // trigger+action pair that animates this widget with zero CSS/JS authoring. Null (the
+    // default) means no interaction - existing widgets are visually unaffected. See
+    // WidgetInteractionTriggers/WidgetInteractionActions and CmsBlockHtmlRenderer
+    // .WrapWithInteraction, which turns this into a data-gws-interaction attribute that the
+    // shared runtime script (CmsBlockHtmlRenderer.BuildInteractionRuntimeScript) reads at
+    // render time - no new EF column, same "lives inside the BlocksJson blob" convention as
+    // Freeform/Overrides above.
+    public WidgetInteraction? Interaction { get; set; }
+}
+
+public sealed class WidgetInteraction
+{
+    public string Trigger { get; set; } = WidgetInteractionTriggers.ScrollIntoView;
+    public string Action { get; set; } = WidgetInteractionActions.FadeIn;
+    public int DurationMs { get; set; } = 600;
+    public int DelayMs { get; set; }
+
+    // Only meaningful for ScrollIntoView - true (default) plays once the first time the
+    // widget enters the viewport; false replays every time it re-enters (and reverses when it
+    // leaves), for a repeating scroll-driven reveal.
+    public bool Once { get; set; } = true;
+}
+
+public static class WidgetInteractionTriggers
+{
+    // Camel-case string values, not PascalCase - these round-trip directly into the inline
+    // JSON payload the runtime script reads (CmsBlockHtmlRenderer.WrapWithInteraction), so the
+    // C# constant and the JS-side string comparison are always the same literal with no
+    // casing translation step to keep in sync.
+    public const string PageLoad = "pageLoad";
+    public const string ScrollIntoView = "scrollIntoView";
+    public const string Click = "click";
+    public const string Hover = "hover";
+
+    public static readonly IReadOnlyList<string> All = [PageLoad, ScrollIntoView, Click, Hover];
+}
+
+public static class WidgetInteractionActions
+{
+    public const string FadeIn = "fadeIn";
+    public const string SlideInUp = "slideInUp";
+    public const string SlideInDown = "slideInDown";
+    public const string SlideInLeft = "slideInLeft";
+    public const string SlideInRight = "slideInRight";
+    public const string ScaleIn = "scaleIn";
+    public const string Bounce = "bounce";
+    public const string Pulse = "pulse";
+
+    public static readonly IReadOnlyList<string> All =
+        [FadeIn, SlideInUp, SlideInDown, SlideInLeft, SlideInRight, ScaleIn, Bounce, Pulse];
 }
 
 // Client-safe structural locking (Phase 2): an agency builds a site as Admin, then wants to

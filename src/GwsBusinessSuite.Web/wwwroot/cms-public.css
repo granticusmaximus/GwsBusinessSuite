@@ -155,3 +155,55 @@ body {
   opacity: 0;
   pointer-events: none;
 }
+
+/* Phase 5 (Native No-Code Interactions & Animation Engine). --gws-duration/--gws-delay are
+   set inline per element by CmsBlockHtmlRenderer.BuildInteractionRuntimeScript from the
+   widget's own configured values; everything else here is keyed off the
+   data-gws-trigger/data-gws-action attributes that same script also sets. */
+.gws-interaction {
+  --gws-duration: 600ms;
+  --gws-delay: 0ms;
+}
+.gws-interaction[data-gws-trigger="pageLoad"],
+.gws-interaction[data-gws-trigger="scrollIntoView"] {
+  opacity: 0;
+  transition: opacity var(--gws-duration) ease var(--gws-delay),
+    transform var(--gws-duration) ease var(--gws-delay);
+}
+.gws-interaction[data-gws-action="slideInUp"] { transform: translateY(28px); }
+.gws-interaction[data-gws-action="slideInDown"] { transform: translateY(-28px); }
+.gws-interaction[data-gws-action="slideInLeft"] { transform: translateX(28px); }
+.gws-interaction[data-gws-action="slideInRight"] { transform: translateX(-28px); }
+.gws-interaction[data-gws-action="scaleIn"] { transform: scale(0.85); }
+
+.gws-interaction.gws-interaction-revealed {
+  opacity: 1;
+  transform: none;
+}
+
+@keyframes gwsInteractionBounceIn {
+  0% { transform: scale(0.9); opacity: 0; }
+  60% { transform: scale(1.03); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes gwsInteractionPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+.gws-interaction[data-gws-action="bounce"].gws-interaction-revealed,
+.gws-interaction[data-gws-action="bounce"].gws-interaction-played {
+  animation: gwsInteractionBounceIn var(--gws-duration) var(--gws-delay) both;
+}
+.gws-interaction[data-gws-action="pulse"].gws-interaction-revealed,
+.gws-interaction[data-gws-action="pulse"].gws-interaction-played {
+  animation: gwsInteractionPulse var(--gws-duration) var(--gws-delay) ease-in-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gws-interaction {
+    transition: none !important;
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}

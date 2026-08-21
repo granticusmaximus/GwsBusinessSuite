@@ -239,6 +239,70 @@ public sealed class CmsBlockHtmlRendererTests
     }
 
     [Fact]
+    public void Render_ShouldNotWrapWidget_WhenNoInteractionIsSet()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"Hello"}}"""));
+
+        Assert.DoesNotContain("gws-interaction", html);
+    }
+
+    [Fact]
+    public void Render_ShouldWrapWidgetWithInteractionData_WhenAnInteractionIsSet()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"Hello"},"interaction":{"trigger":"scrollIntoView","action":"slideInUp","durationMs":450,"delayMs":100,"once":false}}"""));
+
+        Assert.Contains("gws-interaction", html);
+        Assert.Contains("data-gws-interaction=", html);
+        Assert.Contains("scrollIntoView", html);
+        Assert.Contains("slideInUp", html);
+        Assert.Contains("450", html);
+        Assert.Contains("false", html);
+    }
+
+    [Fact]
+    public void Render_ShouldNotWrapWidgetWithInteractionData_InEditMode()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"Hello"},"interaction":{"trigger":"pageLoad","action":"fadeIn"}}"""),
+            editMode: true);
+
+        Assert.DoesNotContain("gws-interaction", html);
+    }
+
+    [Fact]
+    public void Render_ShouldIgnoreAnInteraction_WithAnUnrecognizedTriggerOrAction()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"Hello"},"interaction":{"trigger":"onKeyPress","action":"fadeIn"}}"""));
+
+        Assert.DoesNotContain("gws-interaction", html);
+    }
+
+    [Fact]
+    public void Render_ShouldClampInteractionDurationAndDelay_ToATenSecondCeiling()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"Hello"},"interaction":{"trigger":"pageLoad","action":"fadeIn","durationMs":999999,"delayMs":-50}}"""));
+
+        Assert.Contains("&quot;durationMs&quot;:10000", html);
+        Assert.Contains("&quot;delayMs&quot;:0", html);
+    }
+
+    [Fact]
+    public void InteractionRuntimeScript_ShouldHandleAllFourTriggerKinds()
+    {
+        var script = CmsBlockHtmlRenderer.BuildInteractionRuntimeScript();
+
+        Assert.Contains("data-gws-interaction", script);
+        Assert.Contains("pageLoad", script);
+        Assert.Contains("scrollIntoView", script);
+        Assert.Contains("IntersectionObserver", script);
+        Assert.Contains("prefers-reduced-motion", script);
+    }
+
+    [Fact]
     public void Render_ShouldShowALockedBadge_InEditModeOnly_ForAnExplicitlyLockedWidget()
     {
         var blocksJson = Layout("""{"id":"w1","widgetType":"paragraph","props":{"text":"Hello"},"editPermission":"Locked"}""");

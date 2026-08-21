@@ -643,7 +643,13 @@ public static class CmsBlockHtmlRenderer
                     continue;
                 }
 
+                // Interaction wrapping is skipped in edit mode - its CSS starts a pageLoad/
+                // scrollIntoView widget at opacity:0 until the public-only runtime script
+                // (BuildInteractionRuntimeScript, never injected into the Canvas Studio
+                // preview iframe) reveals it, which would otherwise make the widget disappear
+                // in the editor with nothing to ever bring it back.
                 var inner = WrapWithStyle(RenderWidget(widget, siteSlug, pageSlug, editMode, articles), widget.Style, tokens);
+                if (!editMode) inner = WrapWithInteraction(inner, widget.Interaction);
                 // Both badges share one absolutely-positioned corner slot (see .gws-visibility-
                 // hint), so a widget with both a visibility rule and a lock setting gets ONE
                 // combined badge rather than two stacked/overlapping divs.
@@ -700,6 +706,7 @@ public static class CmsBlockHtmlRenderer
 
             var position = widget.Freeform ?? FreeformPosition.DefaultFor(i);
             var inner = WrapWithStyle(RenderWidget(widget, siteSlug, pageSlug, editMode, articles), widget.Style, tokens);
+            if (!editMode) inner = WrapWithInteraction(inner, widget.Interaction);
             var widgetBadgeText = editMode
                 ? string.Join(" | ", new[] { VisibilityBadgeText(widget.Visibility), EditPermissionBadgeText(widget.EditPermission) }
                     .Where(badge => badge.Length > 0))
@@ -729,6 +736,77 @@ public static class CmsBlockHtmlRenderer
             ? innerHtml
             : $"""<div class="gws-widget-style" style="{Html(inlineStyle)}">{innerHtml}</div>""";
     }
+
+    // Phase 5 (Native No-Code Interactions & Animation Engine) — wraps a widget's rendered
+    // HTML in a data-gws-interaction container the shared runtime script
+    // (BuildInteractionRuntimeScript) reads at load time. Null Interaction (the default)
+    // returns the inner HTML untouched, same "opt-in wrapper" contract as WrapWithStyle above.
+    // Trigger/Action are re-validated against the known-good sets here rather than trusted
+    // as-is — BlocksJson is just a text column, so a hand-crafted save request could otherwise
+    // smuggle an arbitrary string into this attribute; an unrecognized value is treated as "no
+    // interaction" rather than rendered.
+    private static string WrapWithInteraction(string innerHtml, WidgetInteraction? interaction)
+    {
+        if (interaction is null
+            || !WidgetInteractionTriggers.All.Contains(interaction.Trigger)
+            || !WidgetInteractionActions.All.Contains(interaction.Action))
+        {
+            return innerHtml;
+        }
+
+        var durationMs = Math.Clamp(interaction.DurationMs, 0, 10_000);
+        var delayMs = Math.Clamp(interaction.DelayMs, 0, 10_000);
+        var payload = $$"""{"trigger":"{{interaction.Trigger}}","action":"{{interaction.Action}}","durationMs":{{durationMs}},"delayMs":{{delayMs}},"once":{{(interaction.Once ? "true" : "false")}}}""";
+        return $"""<div class="gws-interaction" data-gws-interaction="{Html(payload)}">{innerHtml}</div>""";
+    }
+
+    // Inline <script>, matching BuildEditModeScript's pattern - injected once per public page
+    // response (see Program.cs's public page route and the static-export route) rather than
+    // served as a wwwroot/js file, so the static-export zip stays fully self-contained with no
+    // extra file to bundle. A no-op when the page has no data-gws-interaction elements at all.
+    public static string BuildInteractionRuntimeScript() => """
+        <script>
+        (function () {
+          var elements = document.querySelectorAll('[data-gws-interaction]');
+          if (!elements.length) return;
+          var prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+          elements.forEach(function (el) {
+            var config;
+            try { config = JSON.parse(el.getAttribute('data-gws-interaction')); } catch (e) { return; }
+            el.style.setProperty('--gws-duration', (config.durationMs || 0) + 'ms');
+            el.style.setProperty('--gws-delay', (config.delayMs || 0) + 'ms');
+            el.setAttribute('data-gws-trigger', config.trigger);
+            el.setAttribute('data-gws-action', config.action);
+            if (prefersReducedMotion) { el.classList.add('gws-interaction-revealed'); return; }
+
+            if (config.trigger === 'pageLoad') {
+              requestAnimationFrame(function () { el.classList.add('gws-interaction-revealed'); });
+            } else if (config.trigger === 'scrollIntoView') {
+              if (!('IntersectionObserver' in window)) { el.classList.add('gws-interaction-revealed'); return; }
+              var observer = new IntersectionObserver(function (entries) {
+                entries.forEach(function (entry) {
+                  if (entry.isIntersecting) {
+                    el.classList.add('gws-interaction-revealed');
+                    if (config.once !== false) observer.unobserve(el);
+                  } else if (config.once === false) {
+                    el.classList.remove('gws-interaction-revealed');
+                  }
+                });
+              }, { threshold: 0.15 });
+              observer.observe(el);
+            } else if (config.trigger === 'click' || config.trigger === 'hover') {
+              var eventName = config.trigger === 'click' ? 'click' : 'mouseenter';
+              el.addEventListener(eventName, function () {
+                el.classList.remove('gws-interaction-played');
+                void el.offsetWidth;
+                el.classList.add('gws-interaction-played');
+              });
+            }
+          });
+        })();
+        </script>
+        """;
 
     private static string RenderWidget(LayoutWidget widget, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles)
     {

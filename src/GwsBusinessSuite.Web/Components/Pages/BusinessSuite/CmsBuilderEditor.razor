@@ -1002,6 +1002,72 @@ else
                             }
                         </div>
 
+                        @* Interactions — no-code scroll/click/hover animation (Phase 5). One
+                           optional interaction per widget; unchecking "Enable" clears it back
+                           to null so an untouched widget renders byte-for-byte as before this
+                           feature existed. Never applied inside Studio's own preview (see
+                           CmsBlockHtmlRenderer's editMode guard) so a scroll-reveal widget
+                           doesn't just sit invisible while you're editing it. *@
+                        <hr class="my-2" />
+                        <div class="small text-secondary fw-semibold text-uppercase mb-1" style="letter-spacing:.05em;">Interaction</div>
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" role="switch" id="interaction-enabled"
+                                   checked="@(selWidget.Interaction is not null)"
+                                   @onchange='(e) => SetWidgetInteractionEnabled(selWidget, (bool)(e.Value ?? false))' />
+                            <label class="form-check-label small" for="interaction-enabled">Animate this widget</label>
+                        </div>
+                        @if (selWidget.Interaction is { } interaction)
+                        {
+                            <div class="row g-2 mb-2">
+                                <div class="col-6">
+                                    <label class="form-label small mb-1">Trigger</label>
+                                    <select class="form-select form-select-sm" value="@interaction.Trigger"
+                                            @onchange='(e) => SetWidgetInteractionTrigger(selWidget, e.Value?.ToString() ?? WidgetInteractionTriggers.ScrollIntoView)'>
+                                        <option value="@WidgetInteractionTriggers.PageLoad">Page load</option>
+                                        <option value="@WidgetInteractionTriggers.ScrollIntoView">Scroll into view</option>
+                                        <option value="@WidgetInteractionTriggers.Click">Click</option>
+                                        <option value="@WidgetInteractionTriggers.Hover">Hover</option>
+                                    </select>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small mb-1">Animation</label>
+                                    <select class="form-select form-select-sm" value="@interaction.Action"
+                                            @onchange='(e) => SetWidgetInteractionAction(selWidget, e.Value?.ToString() ?? WidgetInteractionActions.FadeIn)'>
+                                        <option value="@WidgetInteractionActions.FadeIn">Fade in</option>
+                                        <option value="@WidgetInteractionActions.SlideInUp">Slide in (up)</option>
+                                        <option value="@WidgetInteractionActions.SlideInDown">Slide in (down)</option>
+                                        <option value="@WidgetInteractionActions.SlideInLeft">Slide in (left)</option>
+                                        <option value="@WidgetInteractionActions.SlideInRight">Slide in (right)</option>
+                                        <option value="@WidgetInteractionActions.ScaleIn">Scale in</option>
+                                        <option value="@WidgetInteractionActions.Bounce">Bounce</option>
+                                        <option value="@WidgetInteractionActions.Pulse">Pulse</option>
+                                    </select>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small mb-1">Duration (ms)</label>
+                                    <input type="number" min="0" max="10000" step="50" class="form-control form-control-sm"
+                                           value="@interaction.DurationMs"
+                                           @onchange='(e) => SetWidgetInteractionDuration(selWidget, e.Value?.ToString() ?? "600")' />
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small mb-1">Delay (ms)</label>
+                                    <input type="number" min="0" max="10000" step="50" class="form-control form-control-sm"
+                                           value="@interaction.DelayMs"
+                                           @onchange='(e) => SetWidgetInteractionDelay(selWidget, e.Value?.ToString() ?? "0")' />
+                                </div>
+                                @if (interaction.Trigger == WidgetInteractionTriggers.ScrollIntoView)
+                                {
+                                    <div class="col-12 form-check">
+                                        <input class="form-check-input" type="checkbox" id="interaction-once"
+                                               checked="@interaction.Once"
+                                               @onchange='(e) => SetWidgetInteractionOnce(selWidget, (bool)(e.Value ?? true))' />
+                                        <label class="form-check-label small" for="interaction-once">Play only once</label>
+                                        <div class="form-text small">Unchecked replays every time it re-enters view.</div>
+                                    </div>
+                                }
+                            </div>
+                        }
+
                         @* Client Access — client-safe structural locking (Phase 2). Inside the
                            same structure fieldset as everything else here, so a Contributor can
                            only ever change permission on a widget they already fully control
@@ -2700,6 +2766,36 @@ else
 
     private void SetVisibilityUrlPattern(LayoutWidget widget, string value) =>
         ApplyTrackedMutation($"{widget.Id}:visibility:urlPattern", () => widget.Visibility.UrlPattern = value, reloadPreview: true);
+
+    // ── Interaction helpers (Phase 5) ───────────────────────────────────────
+    // Same "no live visual effect in edit mode" contract as Visibility above (see
+    // CmsBlockHtmlRenderer's editMode guard on WrapWithInteraction) - reloadPreview: true only
+    // to drive autosave/dirty-tracking, not to push anything into the iframe.
+    private void SetWidgetInteractionEnabled(LayoutWidget widget, bool enabled) =>
+        ApplyTrackedMutation($"{widget.Id}:interaction:enabled",
+            () => widget.Interaction = enabled ? new WidgetInteraction() : null, reloadPreview: true);
+
+    private void SetWidgetInteractionTrigger(LayoutWidget widget, string value) =>
+        ApplyTrackedMutation($"{widget.Id}:interaction:trigger",
+            () => { if (widget.Interaction is { } i) i.Trigger = value; }, reloadPreview: true);
+
+    private void SetWidgetInteractionAction(LayoutWidget widget, string value) =>
+        ApplyTrackedMutation($"{widget.Id}:interaction:action",
+            () => { if (widget.Interaction is { } i) i.Action = value; }, reloadPreview: true);
+
+    private void SetWidgetInteractionDuration(LayoutWidget widget, string value) =>
+        ApplyTrackedMutation($"{widget.Id}:interaction:duration",
+            () => { if (widget.Interaction is { } i) i.DurationMs = int.TryParse(value, out var ms) ? Math.Clamp(ms, 0, 10_000) : i.DurationMs; },
+            reloadPreview: true);
+
+    private void SetWidgetInteractionDelay(LayoutWidget widget, string value) =>
+        ApplyTrackedMutation($"{widget.Id}:interaction:delay",
+            () => { if (widget.Interaction is { } i) i.DelayMs = int.TryParse(value, out var ms) ? Math.Clamp(ms, 0, 10_000) : i.DelayMs; },
+            reloadPreview: true);
+
+    private void SetWidgetInteractionOnce(LayoutWidget widget, bool once) =>
+        ApplyTrackedMutation($"{widget.Id}:interaction:once",
+            () => { if (widget.Interaction is { } i) i.Once = once; }, reloadPreview: true);
 
     private async Task PushStyleToCanvasAsync(string widgetId, WidgetStyle style)
     {

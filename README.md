@@ -107,6 +107,7 @@ Always review the generated migration file(s) under
 
 ## Key Documents
 
+- `docs/USER_GUIDES.md` — onboarding knowledge base: how to use every section of the app
 - `docs/ARCHITECTURE.md`
 - `docs/ROADMAP.md`
 - `docs/SENTINEL_REBUILD.md`

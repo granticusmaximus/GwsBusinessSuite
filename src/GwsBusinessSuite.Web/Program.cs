@@ -1701,6 +1701,7 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
         <body>
           {bodyHtml}
           {editModeTag}
+          {CmsBlockHtmlRenderer.BuildInteractionRuntimeScript()}
         </body>
         </html>
         """;
@@ -2473,6 +2474,7 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
             </head>
             <body>
               {bodySections}
+              {CmsBlockHtmlRenderer.BuildInteractionRuntimeScript()}
             </body>
             </html>
             """;
