@@ -32,6 +32,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<InvoiceLineItem> InvoiceLineItems => Set<InvoiceLineItem>();
     public DbSet<SupportTicket> SupportTickets => Set<SupportTicket>();
     public DbSet<SupportTicketMessage> SupportTicketMessages => Set<SupportTicketMessage>();
+    public DbSet<SupportTicketAttachment> SupportTicketAttachments => Set<SupportTicketAttachment>();
+    public DbSet<SupportTicketCannedResponse> SupportTicketCannedResponses => Set<SupportTicketCannedResponse>();
     public DbSet<BookingType> BookingTypes => Set<BookingType>();
     public DbSet<Booking> Bookings => Set<Booking>();
     public DbSet<EmailCampaign> EmailCampaigns => Set<EmailCampaign>();
@@ -193,6 +195,13 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .HasForeignKey(x => x.TicketId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<SupportTicketMessage>().HasIndex(x => x.TicketId);
+
+        modelBuilder.Entity<SupportTicketAttachment>()
+            .HasOne(x => x.Message)
+            .WithMany(x => x.Attachments)
+            .HasForeignKey(x => x.MessageId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<SupportTicketAttachment>().HasIndex(x => x.MessageId);
 
         modelBuilder.Entity<BookingType>().HasIndex(x => x.Slug).IsUnique();
 

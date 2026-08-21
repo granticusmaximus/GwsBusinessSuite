@@ -6,6 +6,7 @@
 @using GwsBusinessSuite.Application.Support
 @using GwsBusinessSuite.Domain.Entities
 @inject ISupportTicketService TicketService
+@inject ISupportTicketCannedResponseService CannedResponseService
 @inject ICrmService CrmService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @using GwsBusinessSuite.Application.Abstractions
@@ -15,6 +16,12 @@
 <div class="page-header">
     <h1><i class="bi bi-life-preserver me-2 text-primary"></i>Support</h1>
     <p>Tickets raised by contacts through the client portal, plus anything opened on their behalf.</p>
+    @if (AverageSatisfactionRating is { } average)
+    {
+        <p class="small text-secondary">
+            <i class="bi bi-star-fill text-warning me-1"></i>@average.ToString("0.0") avg satisfaction (@RatedTicketCount rating@(RatedTicketCount == 1 ? "" : "s"))
+        </p>
+    }
 </div>
 
 <div class="row g-4">
@@ -40,6 +47,13 @@
                 </div>
                 <div class="mb-2">
                     <ProfessionalWysiwygEditor @bind-Value="_newMessage" Compact="true" MinHeight="120px" Placeholder="First message" AriaLabel="First support message" />
+                </div>
+                <div class="mb-2">
+                    <InputFile OnChange="args => OnFilesSelectedAsync(args, _newAttachments)" multiple class="form-control form-control-sm" />
+                    @if (_newAttachments.Count > 0)
+                    {
+                        <div class="small text-secondary mt-1">@string.Join(", ", _newAttachments.Select(a => a.FileName))</div>
+                    }
                 </div>
                 <button class="btn btn-sm btn-primary w-100" disabled="@_isBusy" @onclick="CreateTicketAsync">
                     <i class="bi bi-plus-lg me-1"></i>Open Ticket
@@ -78,6 +92,16 @@
                                     <span class="badge @PriorityBadgeClass(ticket.Priority)">@ticket.Priority</span>
                                 </div>
                                 <span class="badge @StatusBadgeClass(ticket.Status) mt-1">@ticket.Status</span>
+                                @if (IsSlaBreached(ticket))
+                                {
+                                    <span class="badge text-bg-danger mt-1 ms-1">SLA overdue</span>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(ticket.TagsCsv))
+                                {
+                                    <div class="small text-truncate @(SelectedTicketId == ticket.Id ? "" : "text-secondary")">
+                                        <i class="bi bi-tags me-1"></i>@ticket.TagsCsv
+                                    </div>
+                                }
                             </button>
                         }
                     </div>
@@ -101,6 +125,21 @@
                         <div>
                             <div class="fw-semibold">@SelectedTicket.Subject</div>
                             <div class="text-secondary small">@SelectedTicket.ContactName</div>
+                            @if (SelectedTicket.Status is SupportTicketStatuses.Open or SupportTicketStatuses.Pending)
+                            {
+                                @if (SelectedTicket.FirstResponseDueAt is { } firstResponseDue && SelectedTicket.Messages.All(m => m.AuthorType != SupportTicketAuthorTypes.Staff))
+                                {
+                                    <div class="small @(firstResponseDue < DateTimeOffset.UtcNow ? "text-danger" : "text-secondary")">
+                                        First response due @firstResponseDue.ToLocalTime().ToString("MMM d, h:mm tt")
+                                    </div>
+                                }
+                                @if (SelectedTicket.ResolutionDueAt is { } resolutionDue)
+                                {
+                                    <div class="small @(resolutionDue < DateTimeOffset.UtcNow ? "text-danger" : "text-secondary")">
+                                        Resolution due @resolutionDue.ToLocalTime().ToString("MMM d, h:mm tt")
+                                    </div>
+                                }
+                            }
                         </div>
                         <div class="d-flex gap-2 flex-wrap">
                             <select class="form-select form-select-sm w-auto" value="@SelectedTicket.Status" @onchange="OnStatusChangedAsync">
@@ -119,6 +158,10 @@
                                    value="@SelectedTicket.AssignedToUsername" @onchange="OnAssignChangedAsync" />
                         </div>
                     </div>
+                    <div class="mt-2">
+                        <input class="form-control form-control-sm" placeholder="Tags (comma-separated)"
+                               value="@SelectedTicket.TagsCsv" @onchange="OnTagsChangedAsync" />
+                    </div>
                 </div>
                 <div class="card-body">
                     <div class="qn-thread mb-3">
@@ -129,16 +172,87 @@
                                 <SafeMarkdownContent Content="@message.Body"
                                                      CssClass="@(message.AuthorType == SupportTicketAuthorTypes.Staff ? "d-inline-block p-2 rounded bg-primary-subtle" : "d-inline-block p-2 rounded bg-secondary-subtle")"
                                                      style="max-width: 80%; text-align: left;" />
+                                @if (message.Attachments.Count > 0)
+                                {
+                                    <div class="mt-1">
+                                        @foreach (var attachment in message.Attachments)
+                                        {
+                                            <a class="d-inline-flex align-items-center gap-1 small me-2" href="/support/attachments/@attachment.Id" target="_blank">
+                                                <i class="bi bi-paperclip"></i>@attachment.FileName
+                                            </a>
+                                        }
+                                    </div>
+                                }
                             </div>
                         }
                     </div>
+                    @if (CannedResponses.Count > 0)
+                    {
+                        <div class="mb-2">
+                            <select class="form-select form-select-sm w-auto" @bind="_selectedCannedResponseId" @bind:after="InsertCannedResponse">
+                                <option value="@Guid.Empty">Insert canned response...</option>
+                                @foreach (var response in CannedResponses)
+                                {
+                                    <option value="@response.Id">@response.Title</option>
+                                }
+                            </select>
+                        </div>
+                    }
                     <div class="d-flex gap-2">
-                        <div class="flex-grow-1"><ProfessionalWysiwygEditor @bind-Value="_replyBody" Compact="true" MinHeight="90px" Placeholder="Reply…" AriaLabel="Support reply" /></div>
+                        <div class="flex-grow-1">
+                            <ProfessionalWysiwygEditor @bind-Value="_replyBody" Compact="true" MinHeight="90px" Placeholder="Reply…" AriaLabel="Support reply" />
+                            <InputFile OnChange="args => OnFilesSelectedAsync(args, _replyAttachments)" multiple class="form-control form-control-sm mt-1" />
+                            @if (_replyAttachments.Count > 0)
+                            {
+                                <div class="small text-secondary mt-1">@string.Join(", ", _replyAttachments.Select(a => a.FileName))</div>
+                            }
+                        </div>
                         <button class="btn btn-primary align-self-end" disabled="@_isBusy" @onclick="ReplyAsync">Send</button>
                     </div>
                 </div>
             </div>
         }
+
+        <div class="card border-0 shadow-sm mt-4">
+            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+                <span class="fw-semibold">Canned Responses</span>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="StartNewCannedResponse">
+                    <i class="bi bi-plus-lg me-1"></i>New
+                </button>
+            </div>
+            <div class="card-body">
+                @if (_editingCannedResponseId.HasValue)
+                {
+                    <div class="mb-2">
+                        <input class="form-control form-control-sm mb-2" placeholder="Title" @bind="_cannedResponseTitle" />
+                        <textarea class="form-control form-control-sm" rows="3" placeholder="Body" @bind="_cannedResponseBody"></textarea>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-primary" disabled="@_isBusy" @onclick="SaveCannedResponseAsync">Save</button>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="CancelCannedResponseEdit">Cancel</button>
+                    </div>
+                }
+                @if (CannedResponses.Count == 0 && !_editingCannedResponseId.HasValue)
+                {
+                    <div class="text-secondary small">No canned responses yet.</div>
+                }
+                else
+                {
+                    <div class="list-group list-group-flush mt-2">
+                        @foreach (var response in CannedResponses)
+                        {
+                            <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                                <span class="text-truncate">@response.Title</span>
+                                <div class="d-flex gap-1">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => EditCannedResponse(response)">Edit</button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteCannedResponseAsync(response.Id)">Delete</button>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
     </div>
 </div>
 
@@ -151,15 +265,128 @@
     private string ErrorMessage { get; set; } = string.Empty;
     private bool _isBusy;
 
+    // Reflects whatever the current status filter shows, same "stats for what you're looking
+    // at" scope as the ticket list itself - not a separate all-time query.
+    private int RatedTicketCount => Tickets.Count(ticket => ticket.SatisfactionRating.HasValue);
+    private double? AverageSatisfactionRating => RatedTicketCount == 0
+        ? null
+        : Tickets.Where(ticket => ticket.SatisfactionRating.HasValue).Average(ticket => ticket.SatisfactionRating!.Value);
+
     private Guid _newContactId;
     private string _newSubject = string.Empty;
     private string _newMessage = string.Empty;
     private string _replyBody = string.Empty;
+    private const long MaxAttachmentBytes = 10 * 1024 * 1024;
+    private const int MaxAttachmentsPerMessage = 5;
+    private readonly List<SupportTicketAttachmentUpload> _newAttachments = [];
+    private readonly List<SupportTicketAttachmentUpload> _replyAttachments = [];
+
+    private async Task OnFilesSelectedAsync(InputFileChangeEventArgs args, List<SupportTicketAttachmentUpload> target)
+    {
+        ErrorMessage = string.Empty;
+        target.Clear();
+        foreach (var file in args.GetMultipleFiles(MaxAttachmentsPerMessage))
+        {
+            if (file.Size > MaxAttachmentBytes)
+            {
+                ErrorMessage = $"'{file.Name}' exceeds the {MaxAttachmentBytes / 1024 / 1024} MB attachment limit.";
+                target.Clear();
+                return;
+            }
+
+            using var stream = new MemoryStream();
+            await file.OpenReadStream(MaxAttachmentBytes).CopyToAsync(stream);
+            target.Add(new SupportTicketAttachmentUpload(file.Name, stream.ToArray()));
+        }
+    }
+
+    private IReadOnlyList<SupportTicketCannedResponseView> CannedResponses { get; set; } = [];
+    private Guid _selectedCannedResponseId;
+    private Guid? _editingCannedResponseId;
+    private string _cannedResponseTitle = string.Empty;
+    private string _cannedResponseBody = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
         Contacts = (await CrmService.ListContactsAsync()).ToList();
         await RefreshTicketsAsync();
+        await RefreshCannedResponsesAsync();
+    }
+
+    private async Task RefreshCannedResponsesAsync()
+    {
+        CannedResponses = await CannedResponseService.ListAsync();
+    }
+
+    private void InsertCannedResponse()
+    {
+        var response = CannedResponses.FirstOrDefault(item => item.Id == _selectedCannedResponseId);
+        if (response is null) return;
+
+        _replyBody = string.IsNullOrWhiteSpace(_replyBody) ? response.Body : $"{_replyBody}\n\n{response.Body}";
+        _selectedCannedResponseId = Guid.Empty;
+    }
+
+    private void StartNewCannedResponse()
+    {
+        _editingCannedResponseId = Guid.Empty;
+        _cannedResponseTitle = string.Empty;
+        _cannedResponseBody = string.Empty;
+    }
+
+    private void EditCannedResponse(SupportTicketCannedResponseView response)
+    {
+        _editingCannedResponseId = response.Id;
+        _cannedResponseTitle = response.Title;
+        _cannedResponseBody = response.Body;
+    }
+
+    private void CancelCannedResponseEdit()
+    {
+        _editingCannedResponseId = null;
+    }
+
+    private async Task SaveCannedResponseAsync()
+    {
+        ErrorMessage = string.Empty;
+        _isBusy = true;
+        try
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            if (_editingCannedResponseId is { } id && id != Guid.Empty)
+            {
+                await CannedResponseService.UpdateAsync(id, _cannedResponseTitle, _cannedResponseBody, performedBy);
+            }
+            else
+            {
+                await CannedResponseService.CreateAsync(_cannedResponseTitle, _cannedResponseBody, performedBy);
+            }
+            _editingCannedResponseId = null;
+            await RefreshCannedResponsesAsync();
+        }
+        catch (ArgumentException ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task DeleteCannedResponseAsync(Guid id)
+    {
+        await CannedResponseService.DeleteAsync(id);
+        await RefreshCannedResponsesAsync();
+    }
+
+    private async Task OnTagsChangedAsync(ChangeEventArgs e)
+    {
+        if (SelectedTicketId is not { } ticketId) return;
+        var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        await TicketService.SetTagsAsync(ticketId, e.Value as string ?? string.Empty, performedBy);
+        await RefreshTicketsAsync();
+        await SelectTicketAsync(ticketId);
     }
 
     private async Task RefreshTicketsAsync()
@@ -192,10 +419,11 @@
         {
             var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
             var created = await TicketService.CreateTicketAsync(
-                _newContactId, _newSubject, _newMessage, SupportTicketAuthorTypes.Staff, performedBy);
+                _newContactId, _newSubject, _newMessage, SupportTicketAuthorTypes.Staff, performedBy, _newAttachments);
             _newContactId = Guid.Empty;
             _newSubject = string.Empty;
             _newMessage = string.Empty;
+            _newAttachments.Clear();
             await RefreshTicketsAsync();
             await SelectTicketAsync(created.Id);
         }
@@ -217,8 +445,9 @@
         try
         {
             var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
-            await TicketService.AddReplyAsync(ticketId, SupportTicketAuthorTypes.Staff, performedBy, _replyBody);
+            await TicketService.AddReplyAsync(ticketId, SupportTicketAuthorTypes.Staff, performedBy, _replyBody, _replyAttachments);
             _replyBody = string.Empty;
+            _replyAttachments.Clear();
             await RefreshTicketsAsync();
             await SelectTicketAsync(ticketId);
         }
@@ -271,4 +500,16 @@
         SupportTicketPriorities.Low => "text-bg-secondary",
         _ => "text-bg-info"
     };
+
+    // Only Open/Pending tickets can be "overdue" - a Resolved/Closed ticket's due dates are
+    // frozen history, not an active breach to flag in the queue.
+    private static bool IsSlaBreached(SupportTicketView ticket)
+    {
+        if (ticket.Status is not (SupportTicketStatuses.Open or SupportTicketStatuses.Pending)) return false;
+        var now = DateTimeOffset.UtcNow;
+        var firstResponseBreached = ticket.FirstResponseDueAt is { } dueAt && dueAt < now
+            && ticket.Messages.All(m => m.AuthorType != SupportTicketAuthorTypes.Staff);
+        var resolutionBreached = ticket.ResolutionDueAt is { } resolutionDue && resolutionDue < now;
+        return firstResponseBreached || resolutionBreached;
+    }
 }

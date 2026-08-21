@@ -1,4 +1,5 @@
 using FluentAssertions;
+using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.ClientPortal;
 using GwsBusinessSuite.Application.Growth;
 using GwsBusinessSuite.Application.Support;
@@ -177,6 +178,173 @@ public sealed class SupportTicketServiceTests
     }
 
     [Fact]
+    public async Task CreateTicketAsync_ShouldPersistAttachments_AndServeThemBackByContentAndOwner()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+        var upload = new SupportTicketAttachmentUpload("screenshot.png", [0x89, 0x50, 0x4E, 0x47]);
+
+        var ticket = await fixture.Service.CreateTicketAsync(
+            contact.Id, "Broken layout", "See attached", SupportTicketAuthorTypes.Contact, "Jamie Rivera",
+            [upload]);
+
+        var attachment = ticket.Messages.Single().Attachments.Should().ContainSingle().Subject;
+        attachment.FileName.Should().Be("screenshot.png");
+        attachment.ContentType.Should().Be("image/png");
+        attachment.SizeBytes.Should().Be(4);
+
+        var content = await fixture.Service.GetAttachmentContentAsync(attachment.Id);
+        content.Should().NotBeNull();
+        content!.Value.FileName.Should().Be("screenshot.png");
+        content.Value.Content.Should().Equal(upload.Content);
+
+        var ownerContactId = await fixture.Service.GetAttachmentOwnerContactIdAsync(attachment.Id);
+        ownerContactId.Should().Be(contact.Id);
+    }
+
+    [Fact]
+    public async Task AddReplyAsync_ShouldPersistAttachmentsOnTheNewMessageOnly()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+        var ticket = await fixture.Service.CreateTicketAsync(
+            contact.Id, "Question", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+
+        var replied = await fixture.Service.AddReplyAsync(
+            ticket.Id, SupportTicketAuthorTypes.Staff, "staff", "Here's a log file",
+            [new SupportTicketAttachmentUpload("trace.log", "boom"u8.ToArray())]);
+
+        replied.Messages.Single(m => m.Body == "Body").Attachments.Should().BeEmpty("the original message had no attachments");
+        replied.Messages.Single(m => m.Body == "Here's a log file").Attachments
+            .Should().ContainSingle(a => a.FileName == "trace.log" && a.ContentType == "text/plain");
+    }
+
+    [Fact]
+    public async Task AddReplyAsync_ShouldRejectAnOversizedAttachment()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+        var ticket = await fixture.Service.CreateTicketAsync(
+            contact.Id, "Question", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+        var tooBig = new SupportTicketAttachmentUpload("huge.bin", new byte[11 * 1024 * 1024]);
+
+        var act = () => fixture.Service.AddReplyAsync(
+            ticket.Id, SupportTicketAuthorTypes.Staff, "staff", "Body", [tooBig]);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task GetAttachmentOwnerContactIdAsync_ShouldReturnNull_ForAnUnknownAttachment()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+
+        var ownerContactId = await fixture.Service.GetAttachmentOwnerContactIdAsync(Guid.NewGuid());
+
+        ownerContactId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateTicketAsync_ShouldComputeSlaTargetsFromDefaultPriority()
+    {
+        var now = DateTimeOffset.Parse("2026-08-21T12:00:00Z");
+        await using var fixture = await Fixture.CreateAsync(now);
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+
+        var ticket = await fixture.Service.CreateTicketAsync(
+            contact.Id, "Question", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+
+        ticket.Priority.Should().Be(SupportTicketPriorities.Normal);
+        ticket.FirstResponseDueAt.Should().Be(now.AddHours(8));
+        ticket.ResolutionDueAt.Should().Be(now.AddHours(72));
+    }
+
+    [Fact]
+    public async Task CreateTicketAsync_ShouldFireTheAutomationTrigger()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+
+        var ticket = await fixture.Service.CreateTicketAsync(
+            contact.Id, "Can't log in", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+
+        fixture.AutomationTriggers.CreatedCalls.Should().ContainSingle(call => call.TicketId == ticket.Id && call.Subject == "Can't log in");
+    }
+
+    [Fact]
+    public async Task AddReplyAsync_ShouldFireTheAutomationTrigger()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+        var ticket = await fixture.Service.CreateTicketAsync(
+            contact.Id, "Question", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+        fixture.AutomationTriggers.CreatedCalls.Clear();
+
+        await fixture.Service.AddReplyAsync(ticket.Id, SupportTicketAuthorTypes.Staff, "staff", "Here's the fix");
+
+        fixture.AutomationTriggers.RepliedCalls.Should().ContainSingle(call => call.TicketId == ticket.Id && call.Body == "Here's the fix");
+    }
+
+    [Fact]
+    public async Task SubmitSatisfactionRatingAsync_ShouldRecordTheRating_OnlyOnceForAResolvedTicket()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+        var ticket = await fixture.Service.CreateTicketAsync(
+            contact.Id, "Question", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+        await fixture.Service.SetStatusAsync(ticket.Id, SupportTicketStatuses.Resolved, "staff");
+
+        var rated = await fixture.Service.SubmitSatisfactionRatingAsync(ticket.Id, 5, "Great support!");
+        rated.SatisfactionRating.Should().Be(5);
+        rated.SatisfactionComment.Should().Be("Great support!");
+
+        var act = () => fixture.Service.SubmitSatisfactionRatingAsync(ticket.Id, 3, null);
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task SubmitSatisfactionRatingAsync_ShouldReject_AnUnresolvedTicket()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+        var ticket = await fixture.Service.CreateTicketAsync(
+            contact.Id, "Question", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+
+        var act = () => fixture.Service.SubmitSatisfactionRatingAsync(ticket.Id, 5, null);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(6)]
+    public async Task SubmitSatisfactionRatingAsync_ShouldReject_AnOutOfRangeRating(int rating)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+        var ticket = await fixture.Service.CreateTicketAsync(
+            contact.Id, "Question", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+        await fixture.Service.SetStatusAsync(ticket.Id, SupportTicketStatuses.Resolved, "staff");
+
+        var act = () => fixture.Service.SubmitSatisfactionRatingAsync(ticket.Id, rating, null);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task SetTagsAsync_ShouldNormalizeAndTrimTheCsvList()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+        var ticket = await fixture.Service.CreateTicketAsync(
+            contact.Id, "Question", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+
+        var tagged = await fixture.Service.SetTagsAsync(ticket.Id, " billing ,  urgent,billing", "staff");
+
+        tagged.TagsCsv.Should().Be("billing, urgent, billing");
+    }
+
+    [Fact]
     public async Task AssignAsync_ShouldClearAssignment_WhenGivenAnEmptyValue()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -195,33 +363,36 @@ public sealed class SupportTicketServiceTests
     {
         private readonly SqliteConnection _connection;
 
-        private Fixture(SqliteConnection connection, ApplicationDbContext db)
+        private Fixture(SqliteConnection connection, ApplicationDbContext db, DateTimeOffset now)
         {
             _connection = connection;
             Db = db;
             AdminSender = new CapturingAdminSender();
             ContactSender = new CapturingContactSender();
+            AutomationTriggers = new RecordingAutomationTriggerService();
             Service = new SupportTicketService(
                 db,
-                new FixedTimeProvider(DateTimeOffset.UtcNow),
+                new FixedTimeProvider(now),
                 AdminSender,
                 ContactSender,
                 Options.Create(new SupportNotificationOptions { NotifyEmail = "grant@gwsapp.net", AdminBaseUrl = "https://admin.example.test" }),
-                NullLogger<SupportTicketService>.Instance);
+                NullLogger<SupportTicketService>.Instance,
+                automationTriggerService: AutomationTriggers);
         }
 
         public ApplicationDbContext Db { get; }
         public SupportTicketService Service { get; }
         public CapturingAdminSender AdminSender { get; }
         public CapturingContactSender ContactSender { get; }
+        public RecordingAutomationTriggerService AutomationTriggers { get; }
 
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(DateTimeOffset? now = null)
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
             var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options);
             await db.Database.EnsureCreatedAsync();
-            return new Fixture(connection, db);
+            return new Fixture(connection, db, now ?? DateTimeOffset.UtcNow);
         }
 
         public async Task<Contact> AddContactAsync(string fullName, string? email = null)
@@ -269,5 +440,46 @@ public sealed class SupportTicketServiceTests
             Messages.Add((toEmail, contactName, ticketSubject, portalUrl));
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class RecordingAutomationTriggerService : IAutomationTriggerService
+    {
+        public List<(Guid TicketId, string Subject, string ContactName, string Priority)> CreatedCalls { get; } = [];
+        public List<(Guid TicketId, string AuthorType, string AuthorName, string Body)> RepliedCalls { get; } = [];
+
+        public Task<int> TriggerSupportTicketCreatedAsync(
+            Guid ticketId, string subject, string contactName, string priority, CancellationToken cancellationToken = default)
+        {
+            CreatedCalls.Add((ticketId, subject, contactName, priority));
+            return Task.FromResult(1);
+        }
+
+        public Task<int> TriggerSupportTicketRepliedAsync(
+            Guid ticketId, string authorType, string authorName, string body, CancellationToken cancellationToken = default)
+        {
+            RepliedCalls.Add((ticketId, authorType, authorName, body));
+            return Task.FromResult(1);
+        }
+
+        public Task<AutomationExecutionView?> TriggerWebhookAsync(
+            string path, string inputJson, string? providedSecret, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<int> RunDueSchedulesAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<int> ResumeDueWaitsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<AutomationExecutionView?> ResumeViaWebhookAsync(
+            string token, string bodyJson, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<int> TriggerDatabaseRowChangedAsync(
+            Guid wikiDatabaseId, string inputJson, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<int> TriggerCrmDealStageChangedAsync(
+            string stage, string inputJson, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<int> TriggerCmsPagePublishedAsync(
+            Guid siteId, string inputJson, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<int> TriggerSentinelChatPromptSubmittedAsync(
+            string prompt, Guid? conversationId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 }

@@ -233,4 +233,16 @@ public interface IAutomationTriggerService
     // enforced by priority instead of by not awaiting (the chat response path never calls this
     // at all, so there is nothing to await there in the first place).
     Task<int> TriggerSentinelChatPromptSubmittedAsync(string prompt, Guid? conversationId, CancellationToken cancellationToken = default);
+
+    // Fires every active workflow with an enabled "support.ticketCreatedTrigger" node,
+    // immediately after a new support ticket is opened (either side). Same non-blocking
+    // contract as every other trigger method here - callers wrap this in a try/catch so a
+    // misconfigured subscriber workflow can never prevent the ticket itself from saving.
+    Task<int> TriggerSupportTicketCreatedAsync(
+        Guid ticketId, string subject, string contactName, string priority, CancellationToken cancellationToken = default);
+
+    // Same shape, for an enabled "support.ticketRepliedTrigger" node, fired after any reply
+    // (Contact or Staff) is added to an existing ticket.
+    Task<int> TriggerSupportTicketRepliedAsync(
+        Guid ticketId, string authorType, string authorName, string body, CancellationToken cancellationToken = default);
 }

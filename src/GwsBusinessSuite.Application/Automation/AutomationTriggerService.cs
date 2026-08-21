@@ -244,6 +244,80 @@ public sealed class AutomationTriggerService(
         return triggered;
     }
 
+    public async Task<int> TriggerSupportTicketCreatedAsync(
+        Guid ticketId, string subject, string contactName, string priority, CancellationToken cancellationToken = default)
+    {
+        var subscribers = await db.AutomationWorkflows.AsNoTracking().Where(item =>
+            item.Status == AutomationWorkflowStatuses.Active && item.TriggerSupportTicketCreated)
+            .Select(item => item.Id).ToListAsync(cancellationToken);
+        if (subscribers.Count == 0) return 0;
+
+        var inputJson = JsonSerializer.Serialize(new
+        {
+            ticketId = ticketId.ToString(),
+            subject,
+            contactName,
+            priority,
+            createdAt = timeProvider.GetUtcNow().ToString("O")
+        });
+
+        var triggered = 0;
+        foreach (var workflowId in subscribers)
+        {
+            try
+            {
+                var snapshot = await workflowService.GetPublishedSnapshotAsync(workflowId, cancellationToken);
+                var triggerNode = snapshot?.Nodes.FirstOrDefault(node => node.TypeKey == "support.ticketCreatedTrigger" && !node.IsDisabled);
+                if (triggerNode is null) continue;
+
+                await executionService.ExecuteAsync(workflowId, inputJson, AutomationExecutionModes.SupportTicketCreated, cancellationToken: cancellationToken);
+                triggered++;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Support ticket-created trigger failed for automation workflow {WorkflowId}.", workflowId);
+            }
+        }
+        return triggered;
+    }
+
+    public async Task<int> TriggerSupportTicketRepliedAsync(
+        Guid ticketId, string authorType, string authorName, string body, CancellationToken cancellationToken = default)
+    {
+        var subscribers = await db.AutomationWorkflows.AsNoTracking().Where(item =>
+            item.Status == AutomationWorkflowStatuses.Active && item.TriggerSupportTicketReplied)
+            .Select(item => item.Id).ToListAsync(cancellationToken);
+        if (subscribers.Count == 0) return 0;
+
+        var inputJson = JsonSerializer.Serialize(new
+        {
+            ticketId = ticketId.ToString(),
+            authorType,
+            authorName,
+            body,
+            repliedAt = timeProvider.GetUtcNow().ToString("O")
+        });
+
+        var triggered = 0;
+        foreach (var workflowId in subscribers)
+        {
+            try
+            {
+                var snapshot = await workflowService.GetPublishedSnapshotAsync(workflowId, cancellationToken);
+                var triggerNode = snapshot?.Nodes.FirstOrDefault(node => node.TypeKey == "support.ticketRepliedTrigger" && !node.IsDisabled);
+                if (triggerNode is null) continue;
+
+                await executionService.ExecuteAsync(workflowId, inputJson, AutomationExecutionModes.SupportTicketReplied, cancellationToken: cancellationToken);
+                triggered++;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Support ticket-replied trigger failed for automation workflow {WorkflowId}.", workflowId);
+            }
+        }
+        return triggered;
+    }
+
     private static string? ReadStringParameter(string parametersJson, string propertyName)
     {
         using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(parametersJson) ? "{}" : parametersJson);

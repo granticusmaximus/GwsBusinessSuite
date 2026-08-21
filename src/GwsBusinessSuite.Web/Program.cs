@@ -17,6 +17,7 @@ using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.Resume;
 using GwsBusinessSuite.Application.Privacy;
 using GwsBusinessSuite.Application.SecurityAudit;
+using GwsBusinessSuite.Application.Support;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Application.SuiteSearch;
 using GwsBusinessSuite.Application.Users;
@@ -2589,6 +2590,51 @@ app.MapGet("/media/{id:guid}/thumb", async (Guid id, IMediaLibraryService mediaL
 {
     var content = await mediaLibraryService.GetThumbnailContentAsync(id);
     return content is null ? Results.NotFound() : Results.Bytes(content.Value.Content, content.Value.ContentType);
+}).AllowAnonymous().RequireRateLimiting("public-read");
+
+// Unlike /media/{id}, a ticket attachment is private (either side of the ticket's own
+// contact) and unlike MediaAsset content is never validated as an image, so it's always
+// served as a forced download (fileDownloadName below sets Content-Disposition: attachment)
+// rather than inline - a malicious HTML/SVG upload can never render in a browser this way,
+// regardless of its actual ContentType. AllowAnonymous because the caller may be authenticated
+// under either the admin cookie scheme or the separate ClientPortalAccess scheme - the
+// FallbackPolicy (AdminOnly) would reject a contact outright before this handler ever got to
+// check ownership, so both cases are resolved manually below instead.
+app.MapGet("/support/attachments/{id:guid}", async (
+    Guid id, HttpContext httpContext, ISupportTicketService ticketService) =>
+{
+    var isAdmin = httpContext.User.IsInRole(AppRoles.Admin);
+    Guid? requestingContactId = null;
+    if (!isAdmin)
+    {
+        var portalAuth = await httpContext.AuthenticateAsync(ClientPortalAuthenticationDefaults.Scheme);
+        var claim = portalAuth.Succeeded
+            ? portalAuth.Principal?.FindFirst(ClientPortalAuthenticationDefaults.ContactIdClaim)?.Value
+            : null;
+        if (claim is not null && Guid.TryParse(claim, out var parsedContactId))
+        {
+            requestingContactId = parsedContactId;
+        }
+    }
+    if (!isAdmin && requestingContactId is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var ownerContactId = await ticketService.GetAttachmentOwnerContactIdAsync(id);
+    if (ownerContactId is null)
+    {
+        return Results.NotFound();
+    }
+    if (!isAdmin && ownerContactId != requestingContactId)
+    {
+        return Results.Forbid();
+    }
+
+    var content = await ticketService.GetAttachmentContentAsync(id);
+    return content is null
+        ? Results.NotFound()
+        : Results.File(content.Value.Content, content.Value.ContentType, content.Value.FileName);
 }).AllowAnonymous().RequireRateLimiting("public-read");
 
 // Raw request body is one MediaRecorder chunk (see liveShow.js's upload queue), appended to

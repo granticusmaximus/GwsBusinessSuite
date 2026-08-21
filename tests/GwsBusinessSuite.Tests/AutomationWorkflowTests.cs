@@ -1580,6 +1580,88 @@ public sealed class AutomationWorkflowTests
             .TriggerSentinelChatPromptSubmitted.Should().BeTrue();
     }
 
+    [Fact]
+    public async Task SupportTicketCreatedTrigger_ShouldFireOnlyActiveWorkflowsWithThatEnabledTriggerNode()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+
+        var subscriber = await workflowService.CreateAsync("New ticket watcher");
+        await workflowService.SaveNodeAsync(subscriber.Id, new AutomationNodeEditor
+        {
+            Id = subscriber.Nodes.Single().Id, Name = "Ticket created", TypeKey = "support.ticketCreatedTrigger",
+            PositionX = 100, PositionY = 100, ParametersJson = "{}"
+        });
+        await workflowService.PublishAsync(subscriber.Id, "v1");
+        await workflowService.SetActiveAsync(subscriber.Id, true);
+
+        var unrelated = await workflowService.CreateAsync("Unrelated");
+        await workflowService.PublishAsync(unrelated.Id, "v1");
+        await workflowService.SetActiveAsync(unrelated.Id, true);
+
+        var ticketId = Guid.NewGuid();
+        var triggered = await triggerService.TriggerSupportTicketCreatedAsync(ticketId, "Login is broken", "Jamie Rivera", "Normal");
+
+        triggered.Should().Be(1);
+        (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == subscriber.Id)).Should().Be(1);
+        (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == unrelated.Id)).Should().Be(0);
+        var execution = await db.AutomationExecutions.AsNoTracking().SingleAsync(e => e.WorkflowId == subscriber.Id);
+        execution.Mode.Should().Be(AutomationExecutionModes.SupportTicketCreated);
+        execution.InputJson.Should().Contain("Login is broken");
+    }
+
+    [Fact]
+    public async Task SupportTicketRepliedTrigger_ShouldFireOnlyActiveWorkflowsWithThatEnabledTriggerNode()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+
+        var subscriber = await workflowService.CreateAsync("Reply watcher");
+        await workflowService.SaveNodeAsync(subscriber.Id, new AutomationNodeEditor
+        {
+            Id = subscriber.Nodes.Single().Id, Name = "Ticket replied", TypeKey = "support.ticketRepliedTrigger",
+            PositionX = 100, PositionY = 100, ParametersJson = "{}"
+        });
+        await workflowService.PublishAsync(subscriber.Id, "v1");
+        await workflowService.SetActiveAsync(subscriber.Id, true);
+
+        var ticketId = Guid.NewGuid();
+        var triggered = await triggerService.TriggerSupportTicketRepliedAsync(ticketId, "Staff", "staff", "Try resetting your password");
+
+        triggered.Should().Be(1);
+        var execution = await db.AutomationExecutions.AsNoTracking().SingleAsync(e => e.WorkflowId == subscriber.Id);
+        execution.Mode.Should().Be(AutomationExecutionModes.SupportTicketReplied);
+        execution.InputJson.Should().Contain("Try resetting your password");
+    }
+
+    [Fact]
+    public async Task PublishAsync_ShouldSyncSupportTicketTriggerFlags_FromTheEnabledTriggerNodes()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+
+        var workflow = await workflowService.CreateAsync("Ticket watcher");
+        await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Id = workflow.Nodes.Single().Id, Name = "Ticket created", TypeKey = "support.ticketCreatedTrigger",
+            PositionX = 100, PositionY = 100, ParametersJson = "{}"
+        });
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var published = await db.AutomationWorkflows.AsNoTracking().SingleAsync(w => w.Id == workflow.Id);
+        published.TriggerSupportTicketCreated.Should().BeTrue();
+        published.TriggerSupportTicketReplied.Should().BeFalse();
+    }
+
     // --- Part 4.4: execution time-travel replay ---
 
     [Fact]

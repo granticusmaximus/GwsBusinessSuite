@@ -286,6 +286,24 @@ public sealed class SupportTicket : AuditableEntity
     public string? AssignedToUsername { get; set; }
     public DateTimeOffset? LastRepliedAt { get; set; }
     public DateTimeOffset? ResolvedAt { get; set; }
+    // Comma-separated, same raw-string-field convention as AutomationWorkflow.TagsCsv /
+    // AutomationWorkflowTemplate.TagsCsv - split with StringSplitOptions.RemoveEmptyEntries |
+    // TrimEntries at read time, never normalized into a child table.
+    public string TagsCsv { get; set; } = string.Empty;
+    // Computed once from Priority at creation time (see SupportTicketService.SlaTargets) - not
+    // recomputed if Priority later changes, since a target that moves after the clock starts
+    // isn't a meaningful SLA. Null LastRepliedAt-relative "first response" is considered met the
+    // moment any Staff message exists; both are purely informational today (surfaced in the
+    // admin inbox), not enforced or automation-triggering - a breach trigger is a later
+    // iteration per the plan this shipped from.
+    public DateTimeOffset? FirstResponseDueAt { get; set; }
+    public DateTimeOffset? ResolutionDueAt { get; set; }
+    // Set once by the contact via the client portal, shown once per ticket after it transitions
+    // to Resolved (see SupportTicketService.SubmitSatisfactionRatingAsync's validation - not
+    // status-gated at the DB level itself, since a later Closed ticket should still keep its
+    // rating). 1-5, null means not yet rated.
+    public int? SatisfactionRating { get; set; }
+    public string? SatisfactionComment { get; set; }
     public ICollection<SupportTicketMessage> Messages { get; set; } = new List<SupportTicketMessage>();
 }
 
@@ -302,6 +320,31 @@ public sealed class SupportTicketMessage : AuditableEntity
     public required string AuthorName { get; set; }
     public required string Body { get; set; }
     public SupportTicket? Ticket { get; set; }
+    public ICollection<SupportTicketAttachment> Attachments { get; set; } = new List<SupportTicketAttachment>();
+}
+
+// Stored the same base64-in-DB way as MediaAsset.DataUri, but deliberately has no image-only
+// validation - a ticket attachment can be any file type. Unlike /media/{id}, which serves
+// public CMS assets inline, attachment content is always served with a forced download
+// Content-Disposition (see the /support/attachments/{id} endpoint) regardless of ContentType,
+// so a malicious HTML/SVG upload from an untrusted contact can never render inline in a
+// browser as stored XSS.
+public sealed class SupportTicketAttachment : AuditableEntity
+{
+    public Guid MessageId { get; set; }
+    public required string FileName { get; set; }
+    public required string ContentType { get; set; }
+    public required string DataUri { get; set; }
+    public long SizeBytes { get; set; }
+    public SupportTicketMessage? Message { get; set; }
+}
+
+// A saved reply staff can insert into the composer verbatim - standalone, not tied to any one
+// ticket (a macro library, not a per-ticket note).
+public sealed class SupportTicketCannedResponse : AuditableEntity
+{
+    public required string Title { get; set; }
+    public required string Body { get; set; }
 }
 
 // A bookable meeting type ("30-minute intro call") - anonymous visitors book against this at
@@ -2029,6 +2072,8 @@ public static class AutomationExecutionModes
     public const string CrmDealStageChanged = "CrmDealStageChanged";
     public const string CmsPagePublished = "CmsPagePublished";
     public const string SentinelChatPromptSubmitted = "SentinelChatPromptSubmitted";
+    public const string SupportTicketCreated = "SupportTicketCreated";
+    public const string SupportTicketReplied = "SupportTicketReplied";
     // A sandboxed dry run of a past execution's recorded input against the current published
     // graph - see AutomationExecutionService.ReplayAsync. Never performs real side effects.
     public const string Replay = "Replay";
@@ -2075,6 +2120,10 @@ public sealed class AutomationWorkflow : AuditableEntity
     // "sentinel.chatPromptSubmittedTrigger" node - fires whenever a user sends a SentinelGPT
     // chat message (see SentinelGptGenerationCoordinator).
     public bool TriggerSentinelChatPromptSubmitted { get; set; }
+    // Same cached-subscriber-lookup pattern, synced from an enabled
+    // "support.ticketCreatedTrigger" / "support.ticketRepliedTrigger" node.
+    public bool TriggerSupportTicketCreated { get; set; }
+    public bool TriggerSupportTicketReplied { get; set; }
     public ICollection<AutomationNode> Nodes { get; set; } = new List<AutomationNode>();
     public ICollection<AutomationConnection> Connections { get; set; } = new List<AutomationConnection>();
     public ICollection<AutomationWorkflowVersion> Versions { get; set; } = new List<AutomationWorkflowVersion>();

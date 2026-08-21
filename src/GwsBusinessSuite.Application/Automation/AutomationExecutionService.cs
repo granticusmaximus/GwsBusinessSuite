@@ -71,6 +71,8 @@ public sealed class AutomationExecutionService(
                 AutomationExecutionModes.CrmDealStageChanged => "crm.dealStageChangedTrigger",
                 AutomationExecutionModes.CmsPagePublished => "cms.pagePublishedTrigger",
                 AutomationExecutionModes.SentinelChatPromptSubmitted => "sentinel.chatPromptSubmittedTrigger",
+                AutomationExecutionModes.SupportTicketCreated => "support.ticketCreatedTrigger",
+                AutomationExecutionModes.SupportTicketReplied => "support.ticketRepliedTrigger",
                 _ => "core.manualTrigger"
             };
             var startNodes = snapshot.Nodes.Where(node => node.TypeKey == triggerType && !node.IsDisabled).ToList();

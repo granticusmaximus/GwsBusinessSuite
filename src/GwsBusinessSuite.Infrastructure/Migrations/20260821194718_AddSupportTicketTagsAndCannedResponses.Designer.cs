@@ -3,6 +3,7 @@ using System;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GwsBusinessSuite.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260821194718_AddSupportTicketTagsAndCannedResponses")]
+    partial class AddSupportTicketTagsAndCannedResponses
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
@@ -1357,12 +1360,6 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("TriggerSentinelChatPromptSubmitted")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<bool>("TriggerSupportTicketCreated")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<bool>("TriggerSupportTicketReplied")
                         .HasColumnType("INTEGER");
 
                     b.Property<Guid?>("TriggerWikiDatabaseId")
@@ -5660,9 +5657,6 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset?>("FirstResponseDueAt")
-                        .HasColumnType("TEXT");
-
                     b.Property<DateTimeOffset?>("LastRepliedAt")
                         .HasColumnType("TEXT");
 
@@ -5670,17 +5664,8 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset?>("ResolutionDueAt")
-                        .HasColumnType("TEXT");
-
                     b.Property<DateTimeOffset?>("ResolvedAt")
                         .HasColumnType("TEXT");
-
-                    b.Property<string>("SatisfactionComment")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("SatisfactionRating")
-                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Status")
                         .IsRequired()

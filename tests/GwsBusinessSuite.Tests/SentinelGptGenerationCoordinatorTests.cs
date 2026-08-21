@@ -460,6 +460,12 @@ public sealed class SentinelGptGenerationCoordinatorTests
         public Task<int> TriggerCmsPagePublishedAsync(
             Guid siteId, string inputJson, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+        public Task<int> TriggerSupportTicketCreatedAsync(
+            Guid ticketId, string subject, string contactName, string priority, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<int> TriggerSupportTicketRepliedAsync(
+            Guid ticketId, string authorType, string authorName, string body, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class TestHostApplicationLifetime : IHostApplicationLifetime

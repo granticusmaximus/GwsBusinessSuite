@@ -30,6 +30,13 @@
                     <div class="mb-2">
                         <textarea class="form-control form-control-sm" rows="3" placeholder="How can we help?" @bind="_newMessage"></textarea>
                     </div>
+                    <div class="mb-2">
+                        <InputFile OnChange="args => OnFilesSelectedAsync(args, _newAttachments)" multiple class="form-control form-control-sm" />
+                        @if (_newAttachments.Count > 0)
+                        {
+                            <div class="small text-secondary mt-1">@string.Join(", ", _newAttachments.Select(a => a.FileName))</div>
+                        }
+                    </div>
                     <button class="btn btn-sm btn-primary w-100" disabled="@_isBusy" @onclick="CreateTicketAsync">
                         <i class="bi bi-plus-lg me-1"></i>Send
                     </button>
@@ -83,11 +90,62 @@
                                     <SafeMarkdownContent Content="@message.Body"
                                                          CssClass="@(message.AuthorType == SupportTicketAuthorTypes.Contact ? "d-inline-block p-2 rounded bg-primary-subtle" : "d-inline-block p-2 rounded bg-secondary-subtle")"
                                                          style="max-width: 80%; text-align: left;" />
+                                    @if (message.Attachments.Count > 0)
+                                    {
+                                        <div class="mt-1">
+                                            @foreach (var attachment in message.Attachments)
+                                            {
+                                                <a class="d-inline-flex align-items-center gap-1 small me-2" href="/support/attachments/@attachment.Id" target="_blank">
+                                                    <i class="bi bi-paperclip"></i>@attachment.FileName
+                                                </a>
+                                            }
+                                        </div>
+                                    }
                                 </div>
                             }
                         </div>
+                        @if (SelectedTicket.Status == SupportTicketStatuses.Resolved)
+                        {
+                            @if (SelectedTicket.SatisfactionRating is { } rating)
+                            {
+                                <div class="alert alert-light border small mb-3">
+                                    Thanks for your feedback! You rated this @rating / 5.
+                                    @if (!string.IsNullOrWhiteSpace(SelectedTicket.SatisfactionComment))
+                                    {
+                                        <div class="mt-1 fst-italic">"@SelectedTicket.SatisfactionComment"</div>
+                                    }
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="alert alert-light border mb-3">
+                                    <div class="fw-semibold mb-2">How did we do?</div>
+                                    <div class="d-flex gap-2 mb-2">
+                                        @for (var star = 1; star <= 5; star++)
+                                        {
+                                            var value = star;
+                                            <button type="button" class="btn btn-sm @(_ratingValue >= value ? "btn-warning" : "btn-outline-secondary")"
+                                                    @onclick="() => _ratingValue = value">
+                                                <i class="bi bi-star-fill"></i>
+                                            </button>
+                                        }
+                                    </div>
+                                    <textarea class="form-control form-control-sm mb-2" rows="2" placeholder="Optional comment" @bind="_ratingComment"></textarea>
+                                    <button class="btn btn-sm btn-primary" disabled="@(_isBusy || _ratingValue == 0)" @onclick="SubmitSatisfactionRatingAsync">
+                                        Submit rating
+                                    </button>
+                                </div>
+                            }
+                        }
                         <div class="d-flex gap-2">
-                            <textarea class="form-control" rows="2" placeholder="Reply..." @bind="_replyBody"></textarea>
+                            <div class="flex-grow-1">
+                                <textarea class="form-control" rows="2" placeholder="Reply..." @bind="_replyBody"></textarea>
+                                <InputFile OnChange="args => OnFilesSelectedAsync(args, _replyAttachments)" multiple class="form-control form-control-sm mt-1" />
+                                @if (_replyAttachments.Count > 0)
+                                {
+                                    <div class="small text-secondary mt-1">@string.Join(", ", _replyAttachments.Select(a => a.FileName))</div>
+                                }
+                            </div>
                             <button class="btn btn-primary align-self-end" disabled="@_isBusy" @onclick="ReplyAsync">Send</button>
                         </div>
                     </div>
@@ -112,6 +170,31 @@
     private string _newSubject = string.Empty;
     private string _newMessage = string.Empty;
     private string _replyBody = string.Empty;
+    private const long MaxAttachmentBytes = 10 * 1024 * 1024;
+    private const int MaxAttachmentsPerMessage = 5;
+    private readonly List<SupportTicketAttachmentUpload> _newAttachments = [];
+    private readonly List<SupportTicketAttachmentUpload> _replyAttachments = [];
+    private int _ratingValue;
+    private string _ratingComment = string.Empty;
+
+    private async Task OnFilesSelectedAsync(InputFileChangeEventArgs args, List<SupportTicketAttachmentUpload> target)
+    {
+        ErrorMessage = string.Empty;
+        target.Clear();
+        foreach (var file in args.GetMultipleFiles(MaxAttachmentsPerMessage))
+        {
+            if (file.Size > MaxAttachmentBytes)
+            {
+                ErrorMessage = $"'{file.Name}' exceeds the {MaxAttachmentBytes / 1024 / 1024} MB attachment limit.";
+                target.Clear();
+                return;
+            }
+
+            using var stream = new MemoryStream();
+            await file.OpenReadStream(MaxAttachmentBytes).CopyToAsync(stream);
+            target.Add(new SupportTicketAttachmentUpload(file.Name, stream.ToArray()));
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -141,6 +224,8 @@
         SelectedTicketId = ticketId;
         SelectedTicket = await TicketService.GetTicketAsync(ticketId);
         _replyBody = string.Empty;
+        _ratingValue = 0;
+        _ratingComment = string.Empty;
     }
 
     private async Task CreateTicketAsync()
@@ -150,11 +235,34 @@
         try
         {
             var created = await TicketService.CreateTicketAsync(
-                _contactId, _newSubject, _newMessage, SupportTicketAuthorTypes.Contact, _contactName);
+                _contactId, _newSubject, _newMessage, SupportTicketAuthorTypes.Contact, _contactName, _newAttachments);
             _newSubject = string.Empty;
             _newMessage = string.Empty;
+            _newAttachments.Clear();
             await RefreshTicketsAsync();
             await SelectTicketAsync(created.Id);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task SubmitSatisfactionRatingAsync()
+    {
+        if (SelectedTicketId is not { } ticketId || _ratingValue == 0) return;
+
+        ErrorMessage = string.Empty;
+        _isBusy = true;
+        try
+        {
+            await TicketService.SubmitSatisfactionRatingAsync(ticketId, _ratingValue, _ratingComment);
+            await RefreshTicketsAsync();
+            await SelectTicketAsync(ticketId);
         }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
         {
@@ -173,8 +281,9 @@
         _isBusy = true;
         try
         {
-            await TicketService.AddReplyAsync(ticketId, SupportTicketAuthorTypes.Contact, _contactName, _replyBody);
+            await TicketService.AddReplyAsync(ticketId, SupportTicketAuthorTypes.Contact, _contactName, _replyBody, _replyAttachments);
             _replyBody = string.Empty;
+            _replyAttachments.Clear();
             await RefreshTicketsAsync();
             await SelectTicketAsync(ticketId);
         }
