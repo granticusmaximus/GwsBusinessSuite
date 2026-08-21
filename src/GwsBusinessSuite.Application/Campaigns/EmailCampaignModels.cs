@@ -56,6 +56,10 @@ public interface IEmailCampaignService
     // cancels every active enrollment for that contact across every campaign.
     Task<bool> UnsubscribeByTokenAsync(string token, CancellationToken cancellationToken = default);
 
+    // Clears global suppression after an admin confirms renewed consent. Existing cancelled
+    // enrollments remain historical and can be followed by a deliberate new enrollment.
+    Task<bool> ResubscribeContactAsync(Guid contactId, string performedBy, CancellationToken cancellationToken = default);
+
     // Sends every enrollment whose NextSendAt is due, advances or completes it, and logs the
     // result - called by the background sweep. Returns how many sends were attempted.
     Task<int> ProcessDueSendsAsync(CancellationToken cancellationToken = default);

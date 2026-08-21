@@ -128,6 +128,26 @@ public sealed class EmailCampaignServiceTests
     }
 
     [Fact]
+    public async Task ResubscribeContactAsync_ShouldClearSuppression_AndKeepCancelledEnrollmentHistory()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var campaign = await fixture.CreateCampaignAsync("Welcome", activate: true, steps: [("Hello", "Body", 0)]);
+        var contact = await fixture.AddContactAsync("Jamie Rivera", "jamie@example.test");
+        await fixture.Service.EnrollContactAsync(campaign.Id, contact.Id);
+        contact.UnsubscribedFromCampaignsAt = Now;
+        var enrollment = await fixture.Db.EmailCampaignEnrollments.SingleAsync();
+        enrollment.Status = EmailCampaignEnrollmentStatuses.Cancelled;
+        await fixture.Db.SaveChangesAsync();
+
+        (await fixture.Service.ResubscribeContactAsync(contact.Id, "admin@example.test")).Should().BeTrue();
+
+        var reloaded = await fixture.Db.Contacts.SingleAsync();
+        reloaded.UnsubscribedFromCampaignsAt.Should().BeNull();
+        reloaded.UpdatedBy.Should().Be("admin@example.test");
+        (await fixture.Db.EmailCampaignEnrollments.SingleAsync()).Status.Should().Be(EmailCampaignEnrollmentStatuses.Cancelled);
+    }
+
+    [Fact]
     public async Task ProcessDueSendsAsync_ShouldSkipAPausedCampaign()
     {
         await using var fixture = await Fixture.CreateAsync();

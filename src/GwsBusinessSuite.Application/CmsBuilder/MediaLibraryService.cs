@@ -72,6 +72,57 @@ public sealed class MediaLibraryService(IAppDbContext dbContext, ISiteSettingsSe
         string altText,
         CancellationToken cancellationToken = default)
     {
+        var (normalizedFileName, detectedContentType) = await ValidateUploadAsync(fileName, content, cancellationToken);
+
+        var asset = new MediaAsset
+        {
+            FileName = normalizedFileName,
+            ContentType = detectedContentType,
+            DataUri = $"data:{detectedContentType};base64,{Convert.ToBase64String(content)}",
+            ThumbnailDataUri = TryGenerateThumbnail(content),
+            AltText = altText?.Trim() ?? string.Empty,
+            SizeBytes = content.Length,
+            CreatedBy = "cms-media-library"
+        };
+
+        await dbContext.MediaAssets.AddAsync(asset, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return ToSummary(asset);
+    }
+
+    public async Task<MediaAssetSummary?> ReplaceAsync(
+        Guid mediaAssetId,
+        string fileName,
+        byte[] content,
+        string altText,
+        CancellationToken cancellationToken = default)
+    {
+        var (normalizedFileName, detectedContentType) = await ValidateUploadAsync(fileName, content, cancellationToken);
+        var asset = await dbContext.MediaAssets
+            .FirstOrDefaultAsync(item => item.Id == mediaAssetId, cancellationToken);
+        if (asset is null)
+        {
+            return null;
+        }
+
+        asset.FileName = normalizedFileName;
+        asset.ContentType = detectedContentType;
+        asset.DataUri = $"data:{detectedContentType};base64,{Convert.ToBase64String(content)}";
+        asset.ThumbnailDataUri = TryGenerateThumbnail(content);
+        asset.AltText = altText?.Trim() ?? string.Empty;
+        asset.SizeBytes = content.Length;
+        asset.UpdatedBy = "cms-media-library";
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ToSummary(asset);
+    }
+
+    private async Task<(string FileName, string ContentType)> ValidateUploadAsync(
+        string fileName,
+        byte[] content,
+        CancellationToken cancellationToken)
+    {
         if (string.IsNullOrWhiteSpace(fileName))
         {
             throw new ArgumentException("File name is required.", nameof(fileName));
@@ -100,21 +151,7 @@ public sealed class MediaLibraryService(IAppDbContext dbContext, ISiteSettingsSe
                 nameof(content));
         }
 
-        var asset = new MediaAsset
-        {
-            FileName = fileName.Trim(),
-            ContentType = detectedContentType,
-            DataUri = $"data:{detectedContentType};base64,{Convert.ToBase64String(content)}",
-            ThumbnailDataUri = TryGenerateThumbnail(content),
-            AltText = altText?.Trim() ?? string.Empty,
-            SizeBytes = content.Length,
-            CreatedBy = "cms-media-library"
-        };
-
-        await dbContext.MediaAssets.AddAsync(asset, cancellationToken);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        return ToSummary(asset);
+        return (fileName.Trim(), detectedContentType);
     }
 
     // Best-effort: a thumbnail failure (corrupt/unsupported-by-SkiaSharp bytes, e.g. an

@@ -226,6 +226,23 @@ public sealed class EmailCampaignService(
         return true;
     }
 
+    public async Task<bool> ResubscribeContactAsync(Guid contactId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var contact = await db.Contacts.FirstOrDefaultAsync(
+            item => item.Id == contactId && item.TrashedAt == null,
+            cancellationToken);
+        if (contact is null || contact.UnsubscribedFromCampaignsAt is null)
+        {
+            return false;
+        }
+
+        contact.UnsubscribedFromCampaignsAt = null;
+        contact.UpdatedAt = timeProvider.GetUtcNow();
+        contact.UpdatedBy = performedBy;
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
     public async Task<int> ProcessDueSendsAsync(CancellationToken cancellationToken = default)
     {
         var now = timeProvider.GetUtcNow();

@@ -73,6 +73,7 @@ public sealed class AutomationExecutionService(
                 AutomationExecutionModes.SentinelChatPromptSubmitted => "sentinel.chatPromptSubmittedTrigger",
                 AutomationExecutionModes.SupportTicketCreated => "support.ticketCreatedTrigger",
                 AutomationExecutionModes.SupportTicketReplied => "support.ticketRepliedTrigger",
+                AutomationExecutionModes.SupportTicketSlaBreached => "support.ticketSlaBreachedTrigger",
                 _ => "core.manualTrigger"
             };
             var startNodes = snapshot.Nodes.Where(node => node.TypeKey == triggerType && !node.IsDisabled).ToList();

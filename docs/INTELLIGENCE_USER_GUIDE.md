@@ -53,14 +53,17 @@ The left sidebar always has two built-in views plus one row per topic:
 - **Breaking News** — the same pool, filtered to items whose title or description contains a
   breaking-news signal word (`breaking`, `urgent`, `alert`, `developing`, `live updates`, `just
   in`). This is a simple keyword heuristic, not a real editorial "breaking" flag from any source.
-- **Your topics** — each with a colored dot, a strikethrough if disabled, and a badge showing how
-  many articles are currently in that topic's feed.
+- **Your topics** — each with a colored dot, a strikethrough when inactive, and a badge showing
+  how many articles are currently in that topic's feed.
 
 Click the **+** button above the topic list to add one, or the pencil icon on an existing topic
 to edit it. A topic has:
 
 - **Name** and **Keywords** (comma-separated — these are what actually get searched).
 - **Badge color**, used for the sidebar dot and the source-avatar circle on its cards.
+- **Active (refreshes on schedule)**, shown while editing an existing topic. Turn it off to keep
+  the topic and its current feed visible while excluding it from scheduled and Refresh All runs;
+  turn it back on whenever you want refreshes to resume. New topics always start active.
 - **Topic type**:
   - **General** — searches Google News RSS + dev.to. Best for regions, people, or current
     events.
@@ -95,9 +98,9 @@ hourly background refresh:
   once), then prunes any article older than 24 hours.
 - **Refresh All News** — refreshes only the shared Top News pool behind All News/Breaking News.
 - **Refresh now** (per topic, from the sidebar) — refreshes just that one topic. This only works
-  while the topic is active; there's currently no way to deactivate a topic from the UI (see
-  [Known limitations](#known-limitations)), so in practice every topic you create stays
-  refreshable and part of Refresh All until you delete it outright.
+  while the topic is active. Use the pencil icon and the **Active (refreshes on schedule)** switch
+  to pause or resume a topic without deleting it; inactive topics remain visible with
+  strikethrough styling but are excluded from Refresh All.
 
 While a refresh runs, a "Refresh pipeline" panel shows the current phase, a completed/total
 progress bar, which feeds are actively being fetched, and a per-stage timing table (feed fetch,
@@ -251,10 +254,6 @@ who isn't a full admin can still browse and manage the shared podcast library.
 - **No real "unread" tracking in Media Watch.** The badge next to each topic is just a count of
   how many articles currently sit in that topic's 24-hour window — opening a feed never marks
   anything as read, and there's no per-user read state.
-- **No way to deactivate a Media Watch topic from the UI.** The underlying data supports a
-  disabled state (and the sidebar even renders it with strikethrough styling), but the topic edit
-  form never exposes a toggle for it — the only way to stop a topic from refreshing is to delete
-  it outright.
 - **"Breaking News" is a keyword heuristic**, not a real breaking-news signal from any source —
   it just scans titles and descriptions for words like "breaking" or "urgent."
 - **Hot takes and episode/article sets are fully replaced on every refresh**, not incrementally

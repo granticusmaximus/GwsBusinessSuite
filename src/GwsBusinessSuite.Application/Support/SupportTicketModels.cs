@@ -44,9 +44,8 @@ public sealed record SupportTicketView(
     int? SatisfactionRating,
     string? SatisfactionComment);
 
-// Purely informational targets (surfaced in the admin inbox), not enforced anywhere and not a
-// trigger source yet - a breach-driven automation trigger is a later iteration per the plan
-// this shipped from. Chosen as reasonable, unconfigurable-for-now defaults; revisit as a real
+// Surfaced in the admin inbox and consumed by the one-shot SLA automation sweep. These remain
+// reasonable, unconfigurable-for-now defaults; revisit as a real
 // per-workspace setting if/when SLA enforcement becomes a real ask.
 public static class SupportTicketSlaTargets
 {
@@ -105,6 +104,10 @@ public interface ISupportTicketService
     // For the access check above: which contact (if any) owns the ticket an attachment
     // belongs to.
     Task<Guid?> GetAttachmentOwnerContactIdAsync(Guid attachmentId, CancellationToken cancellationToken = default);
+
+    // Detects newly overdue first-response/resolution targets, marks each breach once, and
+    // dispatches the corresponding automation trigger. Returns breach events detected.
+    Task<int> ProcessSlaBreachesAsync(CancellationToken cancellationToken = default);
 }
 
 // A standalone macro library staff insert into the reply composer verbatim - admin-only CRUD,

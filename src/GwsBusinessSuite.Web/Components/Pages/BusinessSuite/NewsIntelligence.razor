@@ -68,6 +68,13 @@
                         <label class="form-label small mb-0">Badge color</label>
                         <input type="color" class="form-control form-control-color form-control-sm" @bind="_formColor" />
                     </div>
+                    @if (_editingTopicId.HasValue)
+                    {
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" role="switch" id="topic-active" @bind="_formIsActive" />
+                            <label class="form-check-label small" for="topic-active">Active (refreshes on schedule)</label>
+                        </div>
+                    }
                     <div class="d-flex gap-2">
                         <button class="btn btn-primary btn-sm" @onclick="SaveTopicAsync">
                             @(_editingTopicId.HasValue ? "Save" : "Add")
@@ -276,6 +283,7 @@
     private string _formKeywords = string.Empty;
     private string _formColor = "#6366f1";
     private string _formTopicType = WatchedTopicTypes.Technical;
+    private bool _formIsActive = true;
     private string _formError = string.Empty;
 
     private const string ThemeStorageKey = "civic-watch-theme";
@@ -520,6 +528,7 @@
         _formName = _formKeywords = _formError = string.Empty;
         _formColor = "#6366f1";
         _formTopicType = WatchedTopicTypes.Technical;
+        _formIsActive = true;
         _showTopicForm = true;
     }
 
@@ -530,6 +539,7 @@
         _formKeywords = topic.Keywords;
         _formColor = topic.ColorHex;
         _formTopicType = topic.TopicType;
+        _formIsActive = topic.IsActive;
         _formError = string.Empty;
         _showTopicForm = true;
     }
@@ -544,8 +554,7 @@
         {
             if (_editingTopicId.HasValue)
             {
-                var existing = _topics.First(t => t.Id == _editingTopicId.Value);
-                await NewsService.UpdateTopicAsync(_editingTopicId.Value, _formName, _formKeywords, _formColor, existing.IsActive, _formTopicType);
+                await NewsService.UpdateTopicAsync(_editingTopicId.Value, _formName, _formKeywords, _formColor, _formIsActive, _formTopicType);
             }
             else
             {

@@ -189,6 +189,7 @@ public static class DependencyInjection
         services.AddOptions<GwsBusinessSuite.Application.Support.SupportNotificationOptions>()
             .Bind(configuration.GetSection(GwsBusinessSuite.Application.Support.SupportNotificationOptions.SectionName));
         services.AddScoped<GwsBusinessSuite.Application.Support.ISupportTicketService, SupportTicketService>();
+        services.AddHostedService<SupportTicketSlaBackgroundService>();
         services.AddScoped<GwsBusinessSuite.Application.Support.ISupportTicketCannedResponseService, SupportTicketCannedResponseService>();
         services.AddOptions<BookingEmailOptions>()
             .Bind(configuration.GetSection(BookingEmailOptions.SectionName));

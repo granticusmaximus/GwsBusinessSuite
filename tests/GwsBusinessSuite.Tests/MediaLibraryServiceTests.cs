@@ -133,6 +133,39 @@ public sealed class MediaLibraryServiceTests
     }
 
     [Fact]
+    public async Task ReplaceAsync_ShouldUpdateContentInPlace_AndPreserveAssetId()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new MediaLibraryService(db, new GwsBusinessSuite.Application.Settings.SiteSettingsService(db));
+        var uploaded = await service.UploadAsync("logo.png", PngBytes, "Old logo");
+        var replacement = CreateRealPng(width: 32, height: 32);
+
+        var replaced = await service.ReplaceAsync(uploaded.Id, " logo.png ", replacement, " New logo ");
+
+        replaced.Should().NotBeNull();
+        replaced!.Id.Should().Be(uploaded.Id);
+        replaced.FileName.Should().Be("logo.png");
+        replaced.AltText.Should().Be("New logo");
+        replaced.SizeBytes.Should().Be(replacement.Length);
+        (await service.ListAsync()).Should().ContainSingle();
+        var fetched = await service.GetContentAsync(uploaded.Id);
+        fetched.Should().NotBeNull();
+        fetched!.Value.Content.Should().BeEquivalentTo(replacement);
+    }
+
+    [Fact]
+    public async Task ReplaceAsync_ShouldReturnNull_ForUnknownId_WithoutCreatingAnAsset()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new MediaLibraryService(db, new GwsBusinessSuite.Application.Settings.SiteSettingsService(db));
+
+        var replaced = await service.ReplaceAsync(Guid.NewGuid(), "logo.png", PngBytes, string.Empty);
+
+        replaced.Should().BeNull();
+        (await service.ListAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task GetContentAsync_ShouldReturnNull_ForUnknownId()
     {
         await using var db = await CreateDbAsync();

@@ -6,7 +6,7 @@
 @using GwsBusinessSuite.Domain.Entities
 @inject ICmsBuilderService CmsBuilderService
 @inject NavigationManager Navigation
-@inject IConfiguration Configuration
+@inject GwsBusinessSuite.Web.Services.CurrentCmsSiteAccessor CurrentCmsSiteAccessor
 @inject IJSRuntime JS
 @inject ILogger<Pages> Logger
 
@@ -17,6 +17,7 @@
         <h1><i class="bi bi-layout-three-columns me-2 text-primary"></i>Pages</h1>
         <p>Create, edit, and preview pages on @(CurrentSite?.Name ?? "the live site").</p>
     </div>
+    <CmsSiteSwitcher SiteChanged="OnSiteChangedAsync" />
 </div>
 
 @if (!string.IsNullOrWhiteSpace(CmsErrorMessage))
@@ -169,7 +170,7 @@
 
         try
         {
-            await LoadDefaultSiteAsync();
+            await LoadCurrentSiteAsync();
         }
         catch (Exception ex)
         {
@@ -182,28 +183,33 @@
         }
     }
 
-    // Mirrors CmsBuilder's original single-site assumption: Canvas manages exactly one
-    // site, the one behind the live React frontend, identified by Canvas:SiteSlug.
-    private async Task LoadDefaultSiteAsync()
+    private async Task LoadCurrentSiteAsync()
     {
-        var slug = Configuration["Canvas:SiteSlug"] ?? "grantwatson-dev";
-        var name = Configuration["Canvas:SiteName"] ?? slug;
-
-        var site = await CmsBuilderService.GetSiteBySlugAsync(slug);
-        if (site is null)
-        {
-            site = await CmsBuilderService.SaveSiteAsync(new CmsSiteEditorModel
-            {
-                Name = name,
-                Slug = slug,
-                Theme = "Default"
-            });
-        }
+        var site = await CurrentCmsSiteAccessor.GetCurrentSiteAsync();
 
         CurrentSite = site;
         SelectedSiteId = site.Id;
         CmsPages = (await CmsBuilderService.ListPagesAsync(site.Id)).ToList();
         TrashedPages = (await CmsBuilderService.ListTrashedPagesAsync(site.Id)).ToList();
+    }
+
+    private async Task OnSiteChangedAsync(CmsSite site)
+    {
+        IsCmsBusy = true;
+        try
+        {
+            CurrentSite = site;
+            SelectedSiteId = site.Id;
+            ShowTrash = false;
+            SelectedPageIdsForBulk.Clear();
+            CmsPages = (await CmsBuilderService.ListPagesAsync(site.Id)).ToList();
+            TrashedPages = (await CmsBuilderService.ListTrashedPagesAsync(site.Id)).ToList();
+            CmsStatusMessage = $"Now managing {site.Name}.";
+        }
+        finally
+        {
+            IsCmsBusy = false;
+        }
     }
 
     private List<CmsPage> OrderedPagesByHierarchy()

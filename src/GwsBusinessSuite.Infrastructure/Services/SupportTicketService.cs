@@ -444,6 +444,53 @@ public sealed class SupportTicketService(
             .ToList();
     }
 
+    public async Task<int> ProcessSlaBreachesAsync(CancellationToken cancellationToken = default)
+    {
+        var now = timeProvider.GetUtcNow();
+        var candidates = await db.SupportTickets
+            .Include(ticket => ticket.Messages)
+            .Where(ticket => ticket.Status == SupportTicketStatuses.Open || ticket.Status == SupportTicketStatuses.Pending)
+            .ToListAsync(cancellationToken);
+        var contactIds = candidates.Select(ticket => ticket.ContactId).Distinct().ToList();
+        var contactNames = await db.Contacts.AsNoTracking()
+            .Where(contact => contactIds.Contains(contact.Id))
+            .ToDictionaryAsync(contact => contact.Id, contact => contact.FullName, cancellationToken);
+
+        var breaches = new List<(SupportTicket Ticket, string Type, DateTimeOffset DueAt)>();
+        foreach (var ticket in candidates)
+        {
+            var hasStaffResponse = ticket.Messages.Any(message => message.AuthorType == SupportTicketAuthorTypes.Staff);
+            if (!hasStaffResponse && ticket.FirstResponseBreachNotifiedAt is null
+                && ticket.FirstResponseDueAt is { } firstDue && firstDue < now)
+            {
+                ticket.FirstResponseBreachNotifiedAt = now;
+                breaches.Add((ticket, "FirstResponse", firstDue));
+            }
+
+            if (ticket.ResolutionBreachNotifiedAt is null
+                && ticket.ResolutionDueAt is { } resolutionDue && resolutionDue < now)
+            {
+                ticket.ResolutionBreachNotifiedAt = now;
+                breaches.Add((ticket, "Resolution", resolutionDue));
+            }
+        }
+
+        if (breaches.Count == 0) return 0;
+        await db.SaveChangesAsync(cancellationToken);
+        if (automationTriggerService is not null)
+        {
+            foreach (var breach in breaches)
+            {
+                await automationTriggerService.TriggerSupportTicketSlaBreachedAsync(
+                    breach.Ticket.Id, breach.Ticket.Subject,
+                    contactNames.GetValueOrDefault(breach.Ticket.ContactId, "Unknown contact"),
+                    breach.Ticket.Priority, breach.Type, breach.DueAt, cancellationToken);
+            }
+        }
+
+        return breaches.Count;
+    }
+
     private static SupportTicketView ToView(SupportTicket ticket, string contactName) => new(
         ticket.Id,
         ticket.ContactId,

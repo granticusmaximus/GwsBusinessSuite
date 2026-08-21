@@ -30,7 +30,7 @@
         <p class="mb-0">Add sections and widgets, edit their content, and save — changes go live immediately, no rebuild or deploy.</p>
         @if (_site is not null && _page is not null)
         {
-            <p class="small text-secondary mb-0 mt-1">Live at: <span class="font-monospace">/@CurrentFullPath</span></p>
+            <p class="small text-secondary mb-0 mt-1">Website: @_site.Name · Live at: <span class="font-monospace">/@CurrentFullPath</span></p>
         }
     </div>
     <div class="studio-header-actions">
@@ -1334,6 +1334,17 @@ else
     private CmsPage? _page;
     private CmsSite? _site;
     private List<CmsPage> _allPagesInSite = new();
+
+    // Canvas Studio never edits Category/Tags/CanonicalUrl/custom field values (those belong to
+    // the separate /admin/pages/edit page-settings screen) - but CmsPageEditorModel's fields are
+    // full-replace ("omit = clear"), so every autosave here needs to carry these three forward
+    // unchanged or it silently wipes them. Captured once at load time, before anything here has
+    // a chance to touch them, and reused as-is on every subsequent SaveAsync call in this
+    // session - real bug found and fixed, see feedback_canvas_studio_autosave_wipes_page_fields.
+    private string _preservedCategoryName = string.Empty;
+    private string _preservedTags = string.Empty;
+    private string _preservedCanonicalUrl = string.Empty;
+    private Dictionary<Guid, string> _preservedPropertyValues = new();
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
     // Phase 2 (client-safe structural locking) - the [Authorize(Policy = "ContributorAccess")]
     // attribute above only lets Admin or Contributor reach this page at all, so this is the only
@@ -1671,6 +1682,26 @@ else
             _globalBlocks = (await GlobalBlockService.ListAsync(_page.SiteId)).ToList();
             _layout = CmsBuilderJson.ParseLayoutOrEmpty(_page.BlocksJson);
             await GlobalBlockResolver.ResolveAsync(_page.SiteId, _layout);
+
+            _preservedTags = _page.Tags;
+            _preservedCanonicalUrl = _page.CanonicalUrl;
+            if (_page.CategoryId is { } categoryId)
+            {
+                var categories = await CmsBuilderService.ListPageCategoriesAsync(_page.SiteId);
+                _preservedCategoryName = categories.FirstOrDefault(category => category.Id == categoryId)?.Name ?? string.Empty;
+            }
+            var propertyValues = CmsPropertyValues.ParseObject(_page.PropertyValuesJson);
+            _preservedPropertyValues = new Dictionary<Guid, string>();
+            foreach (var pair in propertyValues)
+            {
+                if (Guid.TryParse(pair.Key, out var propertyId)
+                    && pair.Value is System.Text.Json.Nodes.JsonValue value
+                    && value.TryGetValue<string>(out var text))
+                {
+                    _preservedPropertyValues[propertyId] = text;
+                }
+            }
+
             _statusMessage = $"Loaded '{_page.Title}'.";
         }
         catch (Exception ex)
@@ -1726,7 +1757,13 @@ else
                 OgImageUrl = _page.OgImageUrl,
                 CustomCss = _page.CustomCss,
                 Status = _page.Status,
-                EditPermission = _page.EditPermission
+                EditPermission = _page.EditPermission,
+                // CmsPageEditorModel is full-replace - carry these forward unchanged since
+                // Canvas Studio never edits them itself (see _preserved* fields' own comment).
+                CategoryName = _preservedCategoryName,
+                Tags = _preservedTags,
+                CanonicalUrl = _preservedCanonicalUrl,
+                PropertyValues = _preservedPropertyValues
             };
             _page = await CmsBuilderService.SavePageAsync(editor);
             _globalBlocks = (await GlobalBlockService.ListAsync(_page.SiteId)).ToList();

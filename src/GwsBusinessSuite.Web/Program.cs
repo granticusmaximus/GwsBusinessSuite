@@ -98,6 +98,7 @@ builder.Services.AddSingleton<ILiveShowIceServerProvider, LiveShowIceServerProvi
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserAccessor, CurrentUserAccessor>();
+builder.Services.AddScoped<GwsBusinessSuite.Web.Services.CurrentCmsSiteAccessor>();
 builder.Services.AddSignalR();
 
 // Content Studio article generation can take several minutes against Ollama

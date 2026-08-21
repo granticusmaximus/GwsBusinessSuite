@@ -13,6 +13,7 @@
 @using Microsoft.Extensions.Options
 @inject ISiteSettingsService SiteSettingsService
 @inject ICmsBuilderService CmsBuilderService
+@inject GwsBusinessSuite.Web.Services.CurrentCmsSiteAccessor CurrentCmsSiteAccessor
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject IOptions<ContentStudioOptions> StudioOptions
 @inject IOptions<SemanticSearchOptions> SemanticOptions
@@ -26,9 +27,12 @@
 
 <PageTitle>Settings</PageTitle>
 
-<div class="page-header">
-    <h1><i class="bi bi-gear-fill me-2 text-primary"></i>Settings</h1>
-    <p>Site-wide configuration for reading, writing, media, and SentinelGPT generation defaults.</p>
+<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-gear-fill me-2 text-primary"></i>Settings</h1>
+        <p>Website identity plus shared platform defaults for reading, writing, media, and SentinelGPT.</p>
+    </div>
+    <CmsSiteSwitcher SiteChanged="OnSiteChangedAsync" />
 </div>
 
 @if (!string.IsNullOrWhiteSpace(StatusMessage))
@@ -357,13 +361,9 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        var slug = Configuration["Canvas:SiteSlug"] ?? "grantwatson-dev";
-        CurrentSite = await CmsBuilderService.GetSiteBySlugAsync(slug);
-        if (CurrentSite is not null)
-        {
-            SiteNameInput = CurrentSite.Name;
-            SiteSlugInput = CurrentSite.Slug;
-        }
+        CurrentSite = await CurrentCmsSiteAccessor.GetCurrentSiteAsync();
+        SiteNameInput = CurrentSite.Name;
+        SiteSlugInput = CurrentSite.Slug;
 
         await using var db = await DbFactory.CreateDbContextAsync();
         Categories = await db.ArticleCategories.OrderBy(c => c.Name).ToListAsync();
@@ -380,6 +380,16 @@ else
         ApiKeys = (await DeveloperApiKeyService.ListAsync()).ToList();
 
         _loaded = true;
+    }
+
+    private Task OnSiteChangedAsync(CmsSite site)
+    {
+        CurrentSite = site;
+        SiteNameInput = site.Name;
+        SiteSlugInput = site.Slug;
+        StatusMessage = $"Now editing website identity for {site.Name}. Other settings on this page are shared platform defaults.";
+        ErrorMessage = string.Empty;
+        return Task.CompletedTask;
     }
 
     private async Task<SiteSettingsView> GetCurrentSettingsAsync() => await SiteSettingsService.GetSettingsAsync();

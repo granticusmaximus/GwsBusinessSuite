@@ -12,7 +12,7 @@
 <div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
     <div>
         <h1><i class="bi bi-images me-2 text-primary"></i>Media Library</h1>
-        <p>Upload and manage every image available to Posts, Content Studio, and page builder blocks.</p>
+        <p>Upload and manage the shared image library available to every website, Posts, Content Studio, and page builder blocks.</p>
     </div>
 </div>
 
@@ -152,10 +152,39 @@ else
             using var ms = new MemoryStream();
             await stream.CopyToAsync(ms);
 
-            await MediaLibraryService.UploadAsync(e.File.Name, ms.ToArray(), UploadAltTextInput);
+            var existing = MediaAssets.FirstOrDefault(asset =>
+                string.Equals(asset.FileName, e.File.Name.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                var confirmed = await JS.InvokeAsync<bool>(
+                    "confirm",
+                    $"A file named '{e.File.Name}' already exists. Replace it everywhere it is currently used?");
+                if (!confirmed)
+                {
+                    StatusMessage = "Upload cancelled; the existing image was not changed.";
+                    return;
+                }
+
+                var replaced = await MediaLibraryService.ReplaceAsync(
+                    existing.Id,
+                    e.File.Name,
+                    ms.ToArray(),
+                    UploadAltTextInput);
+                if (replaced is null)
+                {
+                    throw new InvalidOperationException("The existing media asset could not be found. Refresh the page and try again.");
+                }
+
+                StatusMessage = "Existing image replaced; its URL and page references were preserved.";
+            }
+            else
+            {
+                await MediaLibraryService.UploadAsync(e.File.Name, ms.ToArray(), UploadAltTextInput);
+                StatusMessage = "Image uploaded.";
+            }
+
             UploadAltTextInput = string.Empty;
             await LoadAssetsAsync();
-            StatusMessage = "Image uploaded.";
         }
         catch (Exception ex)
         {

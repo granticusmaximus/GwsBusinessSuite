@@ -11,6 +11,7 @@
 @inject IPageRevisionService PageRevisionService
 @inject NavigationManager Navigation
 @inject IConfiguration Configuration
+@inject GwsBusinessSuite.Web.Services.CurrentCmsSiteAccessor CurrentCmsSiteAccessor
 @inject IJSRuntime JS
 @inject ILogger<EditPage> Logger
 
@@ -477,12 +478,33 @@
         {
             CmsBlueprints = (await CmsBuilderService.ListWorkflowBlueprintsAsync()).ToList();
 
-            var slug = Configuration["Canvas:SiteSlug"] ?? "grantwatson-dev";
-            var name = Configuration["Canvas:SiteName"] ?? slug;
-            var site = await CmsBuilderService.GetSiteBySlugAsync(slug);
+            CmsPage? existingPage = null;
+            CmsSite? site;
+            if (PageId.HasValue)
+            {
+                existingPage = await CmsBuilderService.GetPageAsync(PageId.Value);
+                if (existingPage is null)
+                {
+                    CmsErrorMessage = "The requested page no longer exists.";
+                    Navigation.NavigateTo("/admin/pages");
+                    return;
+                }
+
+                site = await CmsBuilderService.GetSiteAsync(existingPage.SiteId);
+                if (site is not null)
+                {
+                    await CurrentCmsSiteAccessor.SelectAsync(site.Id);
+                }
+            }
+            else
+            {
+                site = await CurrentCmsSiteAccessor.GetCurrentSiteAsync();
+            }
+
             if (site is null)
             {
-                site = await CmsBuilderService.SaveSiteAsync(new CmsSiteEditorModel { Name = name, Slug = slug, Theme = "Default" });
+                CmsErrorMessage = "The page's website no longer exists.";
+                return;
             }
 
             CurrentSite = site;
@@ -494,13 +516,7 @@
 
             if (PageId.HasValue)
             {
-                var page = await CmsBuilderService.GetPageAsync(PageId.Value);
-                if (page is null)
-                {
-                    CmsErrorMessage = "The requested page no longer exists.";
-                    Navigation.NavigateTo("/admin/pages/edit");
-                    return;
-                }
+                var page = existingPage!;
 
                 PageEditorModel = new CmsPageEditorModel
                 {

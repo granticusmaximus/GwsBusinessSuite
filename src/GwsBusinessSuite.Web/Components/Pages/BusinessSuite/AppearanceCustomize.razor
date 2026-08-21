@@ -8,15 +8,18 @@
 @using GwsBusinessSuite.Application.Abstractions
 @using System.Text.Json
 @inject ICmsBuilderService CmsBuilderService
-@inject IConfiguration Configuration
+@inject GwsBusinessSuite.Web.Services.CurrentCmsSiteAccessor CurrentCmsSiteAccessor
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject ILogger<AppearanceCustomize> Logger
 
 <PageTitle>Customize</PageTitle>
 
-<div class="page-header">
-    <h1><i class="bi bi-palette me-2 text-primary"></i>Customize</h1>
-    <p>Global design tokens for @(CurrentSite?.Name ?? "the live site") — applies site-wide, across every page and the blog.</p>
+<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-palette me-2 text-primary"></i>Customize</h1>
+        <p>Global design tokens for @(CurrentSite?.Name ?? "the live site") — applies site-wide, across every page and the blog.</p>
+    </div>
+    <CmsSiteSwitcher SiteChanged="LoadSiteAsync" />
 </div>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
@@ -240,15 +243,12 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var slug = Configuration["Canvas:SiteSlug"] ?? "grantwatson-dev";
-        var name = Configuration["Canvas:SiteName"] ?? slug;
+        var site = await CurrentCmsSiteAccessor.GetCurrentSiteAsync();
+        await LoadSiteAsync(site);
+    }
 
-        var site = await CmsBuilderService.GetSiteBySlugAsync(slug);
-        if (site is null)
-        {
-            site = await CmsBuilderService.SaveSiteAsync(new CmsSiteEditorModel { Name = name, Slug = slug, Theme = "Default" });
-        }
-
+    private async Task LoadSiteAsync(CmsSite site)
+    {
         CurrentSite = site;
         CustomCssInput = site.CustomCss;
         AccentColorInput = site.AccentColorHex;
@@ -260,6 +260,8 @@
         TypeScaleTokens = tokens.TypeScale.ToList();
         SpacingScaleTokens = tokens.SpacingScale.ToList();
         PageProperties = (await CmsBuilderService.ListPagePropertiesAsync(site.Id)).ToList();
+        StatusMessage = $"Now customizing {site.Name}.";
+        ErrorMessage = string.Empty;
     }
 
     private void AddColorToken()

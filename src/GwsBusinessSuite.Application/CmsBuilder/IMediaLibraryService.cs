@@ -14,6 +14,17 @@ public interface IMediaLibraryService
         string altText,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Replaces an uploaded image in place so existing /media/{id} references remain valid.
+    /// Content validation and upload-size limits are identical to a new upload.
+    /// </summary>
+    Task<MediaAssetSummary?> ReplaceAsync(
+        Guid mediaAssetId,
+        string fileName,
+        byte[] content,
+        string altText,
+        CancellationToken cancellationToken = default);
+
     Task<(string ContentType, byte[] Content)?> GetContentAsync(Guid mediaAssetId, CancellationToken cancellationToken = default);
 
     // Falls back to the full-size content (via the same DataUri) when the asset has no

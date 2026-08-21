@@ -318,6 +318,39 @@ public sealed class AutomationTriggerService(
         return triggered;
     }
 
+    public async Task<int> TriggerSupportTicketSlaBreachedAsync(
+        Guid ticketId, string subject, string contactName, string priority, string breachType,
+        DateTimeOffset dueAt, CancellationToken cancellationToken = default)
+    {
+        var subscribers = await db.AutomationWorkflows.AsNoTracking().Where(item =>
+            item.Status == AutomationWorkflowStatuses.Active && item.TriggerSupportTicketSlaBreached)
+            .Select(item => item.Id).ToListAsync(cancellationToken);
+        if (subscribers.Count == 0) return 0;
+
+        var inputJson = JsonSerializer.Serialize(new
+        {
+            ticketId = ticketId.ToString(), subject, contactName, priority, breachType,
+            dueAt = dueAt.ToString("O"), breachedAt = timeProvider.GetUtcNow().ToString("O")
+        });
+
+        var triggered = 0;
+        foreach (var workflowId in subscribers)
+        {
+            try
+            {
+                var snapshot = await workflowService.GetPublishedSnapshotAsync(workflowId, cancellationToken);
+                if (snapshot?.Nodes.Any(node => node.TypeKey == "support.ticketSlaBreachedTrigger" && !node.IsDisabled) != true) continue;
+                await executionService.ExecuteAsync(workflowId, inputJson, AutomationExecutionModes.SupportTicketSlaBreached, cancellationToken: cancellationToken);
+                triggered++;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Support ticket SLA-breach trigger failed for automation workflow {WorkflowId}.", workflowId);
+            }
+        }
+        return triggered;
+    }
+
     private static string? ReadStringParameter(string parametersJson, string propertyName)
     {
         using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(parametersJson) ? "{}" : parametersJson);

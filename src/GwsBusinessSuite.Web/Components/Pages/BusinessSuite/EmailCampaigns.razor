@@ -9,6 +9,7 @@
 @inject IEmailCampaignService CampaignService
 @inject ICrmService CrmService
 @inject ICurrentUserAccessor CurrentUserAccessor
+@inject IJSRuntime JS
 
 <PageTitle>Email Campaigns</PageTitle>
 
@@ -132,11 +133,18 @@
                             <option value="@Guid.Empty">Enroll a contact...</option>
                             @foreach (var contact in Contacts)
                             {
-                                <option value="@contact.Id">@contact.FullName</option>
+                                <option value="@contact.Id">@contact.FullName@(contact.UnsubscribedFromCampaignsAt is not null ? " — unsubscribed" : "")</option>
                             }
                         </select>
                         <button class="btn btn-sm btn-primary text-nowrap" disabled="@_isBusy" @onclick="EnrollAsync">Enroll</button>
                     </div>
+                    @if (SelectedEnrollmentContact is { UnsubscribedFromCampaignsAt: not null } unsubscribedContact)
+                    {
+                        <div class="alert alert-warning py-2 px-3 small d-flex flex-wrap align-items-center justify-content-between gap-2">
+                            <span>@unsubscribedContact.FullName is globally unsubscribed from all campaigns.</span>
+                            <button class="btn btn-sm btn-outline-dark" disabled="@_isBusy" @onclick="() => ResubscribeAsync(unsubscribedContact)">Resubscribe</button>
+                        </div>
+                    }
 
                     @if (Enrollments.Count == 0)
                     {
@@ -178,6 +186,7 @@
     private string StatusMessage { get; set; } = string.Empty;
     private bool _isBusy;
     private Guid _enrollContactId;
+    private Contact? SelectedEnrollmentContact => Contacts.FirstOrDefault(contact => contact.Id == _enrollContactId);
 
     protected override async Task OnInitializedAsync()
     {
@@ -246,6 +255,9 @@
     private async Task DeleteAsync()
     {
         if (SelectedCampaignId is not { } id) return;
+        var confirmed = await JS.InvokeAsync<bool>("confirm", "Permanently delete this campaign? This cannot be undone.");
+        if (!confirmed) return;
+
         await CampaignService.DeleteCampaignAsync(id);
         SelectedCampaignId = null;
         SelectedCampaign = null;
@@ -263,6 +275,29 @@
             StatusMessage = enrolled ? "Contact enrolled." : "That contact is already enrolled, unsubscribed, or the campaign isn't active.";
             await SelectCampaignAsync(id);
             await RefreshCampaignsAsync();
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task ResubscribeAsync(Contact contact)
+    {
+        var confirmed = await JS.InvokeAsync<bool>(
+            "confirm",
+            $"Confirm that {contact.FullName} has asked to receive campaign email again. This restores eligibility for every campaign.");
+        if (!confirmed) return;
+
+        _isBusy = true;
+        try
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var resubscribed = await CampaignService.ResubscribeContactAsync(contact.Id, performedBy);
+            Contacts = (await CrmService.ListContactsAsync()).ToList();
+            StatusMessage = resubscribed
+                ? $"{contact.FullName} can receive campaigns again. Existing cancelled enrollments were kept as history."
+                : "The contact was already subscribed or could not be found.";
         }
         finally
         {

@@ -286,6 +286,26 @@ public sealed class SupportTicketServiceTests
     }
 
     [Fact]
+    public async Task ProcessSlaBreachesAsync_ShouldFireEachBreachOnlyOnce()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+        var created = await fixture.Service.CreateTicketAsync(
+            contact.Id, "Question", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+        var ticket = await fixture.Db.SupportTickets.SingleAsync(item => item.Id == created.Id);
+        ticket.FirstResponseDueAt = DateTimeOffset.UtcNow.AddMinutes(-2);
+        ticket.ResolutionDueAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        await fixture.Db.SaveChangesAsync();
+
+        (await fixture.Service.ProcessSlaBreachesAsync()).Should().Be(2);
+        (await fixture.Service.ProcessSlaBreachesAsync()).Should().Be(0);
+
+        fixture.AutomationTriggers.SlaCalls.Should().HaveCount(2);
+        fixture.AutomationTriggers.SlaCalls.Select(call => call.BreachType)
+            .Should().BeEquivalentTo("FirstResponse", "Resolution");
+    }
+
+    [Fact]
     public async Task SubmitSatisfactionRatingAsync_ShouldRecordTheRating_OnlyOnceForAResolvedTicket()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -446,6 +466,7 @@ public sealed class SupportTicketServiceTests
     {
         public List<(Guid TicketId, string Subject, string ContactName, string Priority)> CreatedCalls { get; } = [];
         public List<(Guid TicketId, string AuthorType, string AuthorName, string Body)> RepliedCalls { get; } = [];
+        public List<(Guid TicketId, string BreachType)> SlaCalls { get; } = [];
 
         public Task<int> TriggerSupportTicketCreatedAsync(
             Guid ticketId, string subject, string contactName, string priority, CancellationToken cancellationToken = default)
@@ -458,6 +479,14 @@ public sealed class SupportTicketServiceTests
             Guid ticketId, string authorType, string authorName, string body, CancellationToken cancellationToken = default)
         {
             RepliedCalls.Add((ticketId, authorType, authorName, body));
+            return Task.FromResult(1);
+        }
+
+        public Task<int> TriggerSupportTicketSlaBreachedAsync(
+            Guid ticketId, string subject, string contactName, string priority, string breachType,
+            DateTimeOffset dueAt, CancellationToken cancellationToken = default)
+        {
+            SlaCalls.Add((ticketId, breachType));
             return Task.FromResult(1);
         }
 

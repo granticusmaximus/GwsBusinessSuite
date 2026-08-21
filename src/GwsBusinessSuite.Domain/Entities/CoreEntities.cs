@@ -293,11 +293,14 @@ public sealed class SupportTicket : AuditableEntity
     // Computed once from Priority at creation time (see SupportTicketService.SlaTargets) - not
     // recomputed if Priority later changes, since a target that moves after the clock starts
     // isn't a meaningful SLA. Null LastRepliedAt-relative "first response" is considered met the
-    // moment any Staff message exists; both are purely informational today (surfaced in the
-    // admin inbox), not enforced or automation-triggering - a breach trigger is a later
-    // iteration per the plan this shipped from.
+    // moment any Staff message exists. Both are surfaced in the admin inbox and monitored by
+    // the one-shot SLA automation sweep; they do not themselves enforce assignment or status.
     public DateTimeOffset? FirstResponseDueAt { get; set; }
     public DateTimeOffset? ResolutionDueAt { get; set; }
+    // One-shot sweep markers. Persisted before dispatch so a restart or later sweep cannot
+    // repeatedly fire the same breach automation.
+    public DateTimeOffset? FirstResponseBreachNotifiedAt { get; set; }
+    public DateTimeOffset? ResolutionBreachNotifiedAt { get; set; }
     // Set once by the contact via the client portal, shown once per ticket after it transitions
     // to Resolved (see SupportTicketService.SubmitSatisfactionRatingAsync's validation - not
     // status-gated at the DB level itself, since a later Closed ticket should still keep its
@@ -2074,6 +2077,7 @@ public static class AutomationExecutionModes
     public const string SentinelChatPromptSubmitted = "SentinelChatPromptSubmitted";
     public const string SupportTicketCreated = "SupportTicketCreated";
     public const string SupportTicketReplied = "SupportTicketReplied";
+    public const string SupportTicketSlaBreached = "SupportTicketSlaBreached";
     // A sandboxed dry run of a past execution's recorded input against the current published
     // graph - see AutomationExecutionService.ReplayAsync. Never performs real side effects.
     public const string Replay = "Replay";
@@ -2124,6 +2128,7 @@ public sealed class AutomationWorkflow : AuditableEntity
     // "support.ticketCreatedTrigger" / "support.ticketRepliedTrigger" node.
     public bool TriggerSupportTicketCreated { get; set; }
     public bool TriggerSupportTicketReplied { get; set; }
+    public bool TriggerSupportTicketSlaBreached { get; set; }
     public ICollection<AutomationNode> Nodes { get; set; } = new List<AutomationNode>();
     public ICollection<AutomationConnection> Connections { get; set; } = new List<AutomationConnection>();
     public ICollection<AutomationWorkflowVersion> Versions { get; set; } = new List<AutomationWorkflowVersion>();

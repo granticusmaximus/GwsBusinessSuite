@@ -190,10 +190,11 @@ across the tickets the current status filter shows (no filter = every ticket).
 
 - **No dedicated tag filter** — tags are visible and searchable by eye, but there's no
   filter-by-tag control in the ticket list yet.
-- **SLA targets are informational only** — nothing enforces them and a breach doesn't fire an
-  automation trigger on its own (though you can build that yourself today by combining a
-  Schedule Trigger workflow with an HTTP/database check against `FirstResponseDueAt`/
-  `ResolutionDueAt`).
+- **SLA targets trigger automation but don't enforce workflow policy.** A five-minute background
+  sweep fires **Support Ticket SLA Breached** once for a missed first-response target and once for
+  a missed resolution target, with ticket/contact/priority/breach-type/due-time input. What happens
+  next depends on the active workflow you build; the system doesn't automatically reassign,
+  escalate, or close a ticket on its own.
 - **No multi-channel intake** — tickets only ever originate from the admin inbox or the Client
   Portal. There's no email-to-ticket parsing (turning an inbound email into a new ticket
   automatically).

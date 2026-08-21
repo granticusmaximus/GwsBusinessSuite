@@ -1,0 +1,53 @@
+@using GwsBusinessSuite.Application.CmsBuilder
+@using GwsBusinessSuite.Domain.Entities
+@using GwsBusinessSuite.Web.Services
+@inject ICmsBuilderService CmsBuilderService
+@inject CurrentCmsSiteAccessor CurrentCmsSiteAccessor
+
+<div class="d-flex align-items-center gap-2" style="min-width: 16rem;">
+    <label class="small text-secondary text-nowrap" for="cms-site-switcher">Website</label>
+    <select id="cms-site-switcher" class="form-select form-select-sm" value="@_selectedSiteId" @onchange="ChangeSiteAsync" disabled="@_isBusy">
+        @foreach (var site in _sites)
+        {
+            <option value="@site.Id">@site.Name (@site.Slug)</option>
+        }
+    </select>
+</div>
+
+@code {
+    [Parameter] public EventCallback<CmsSite> SiteChanged { get; set; }
+
+    private IReadOnlyList<CmsSite> _sites = [];
+    private Guid _selectedSiteId;
+    private bool _isBusy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var current = await CurrentCmsSiteAccessor.GetCurrentSiteAsync();
+        _sites = await CmsBuilderService.ListSitesAsync();
+        _selectedSiteId = current.Id;
+    }
+
+    private async Task ChangeSiteAsync(ChangeEventArgs args)
+    {
+        if (!Guid.TryParse(args.Value?.ToString(), out var siteId) || siteId == _selectedSiteId)
+        {
+            return;
+        }
+
+        _isBusy = true;
+        try
+        {
+            var selected = await CurrentCmsSiteAccessor.SelectAsync(siteId);
+            if (selected is not null)
+            {
+                _selectedSiteId = selected.Id;
+                await SiteChanged.InvokeAsync(selected);
+            }
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+}

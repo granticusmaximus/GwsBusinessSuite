@@ -439,6 +439,7 @@ public sealed class AutomationWorkflowService(
         workflow.TriggerSentinelChatPromptSubmitted = workflow.Nodes.Any(node => node.TypeKey == "sentinel.chatPromptSubmittedTrigger" && !node.IsDisabled);
         workflow.TriggerSupportTicketCreated = workflow.Nodes.Any(node => node.TypeKey == "support.ticketCreatedTrigger" && !node.IsDisabled);
         workflow.TriggerSupportTicketReplied = workflow.Nodes.Any(node => node.TypeKey == "support.ticketRepliedTrigger" && !node.IsDisabled);
+        workflow.TriggerSupportTicketSlaBreached = workflow.Nodes.Any(node => node.TypeKey == "support.ticketSlaBreachedTrigger" && !node.IsDisabled);
         if (workflow.Status == AutomationWorkflowStatuses.Draft) workflow.Status = AutomationWorkflowStatuses.Inactive;
         Touch(workflow);
         await db.SaveChangesAsync(cancellationToken);

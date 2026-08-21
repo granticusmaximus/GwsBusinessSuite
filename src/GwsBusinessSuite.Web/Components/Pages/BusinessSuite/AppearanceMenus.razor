@@ -6,14 +6,17 @@
 @using GwsBusinessSuite.Domain.Entities
 @using System.Text.Json
 @inject ICmsBuilderService CmsBuilderService
-@inject IConfiguration Configuration
+@inject GwsBusinessSuite.Web.Services.CurrentCmsSiteAccessor CurrentCmsSiteAccessor
 @inject ILogger<AppearanceMenus> Logger
 
 <PageTitle>Menus</PageTitle>
 
-<div class="page-header">
-    <h1><i class="bi bi-list me-2 text-primary"></i>Menus</h1>
-    <p>Edit the header (primary) and footer navigation for @(CurrentSite?.Name ?? "the live site").</p>
+<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-list me-2 text-primary"></i>Menus</h1>
+        <p>Edit the header (primary) and footer navigation for @(CurrentSite?.Name ?? "the live site").</p>
+    </div>
+    <CmsSiteSwitcher SiteChanged="LoadSiteAsync" />
 </div>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
@@ -103,15 +106,20 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var slug = Configuration["Canvas:SiteSlug"] ?? "grantwatson-dev";
-        var name = Configuration["Canvas:SiteName"] ?? slug;
+        var site = await CurrentCmsSiteAccessor.GetCurrentSiteAsync();
+        LoadSite(site);
+    }
 
-        var site = await CmsBuilderService.GetSiteBySlugAsync(slug);
-        if (site is null)
-        {
-            site = await CmsBuilderService.SaveSiteAsync(new CmsSiteEditorModel { Name = name, Slug = slug, Theme = "Default" });
-        }
+    private Task LoadSiteAsync(CmsSite site)
+    {
+        LoadSite(site);
+        StatusMessage = $"Now editing menus for {site.Name}.";
+        ErrorMessage = string.Empty;
+        return Task.CompletedTask;
+    }
 
+    private void LoadSite(CmsSite site)
+    {
         CurrentSite = site;
         NavMenuItems = ParseNavMenuJson(site.NavMenuJson);
         FooterNavMenuItems = ParseNavMenuJson(site.FooterNavMenuJson);

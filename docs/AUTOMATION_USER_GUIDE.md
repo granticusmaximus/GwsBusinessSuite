@@ -113,10 +113,13 @@ draft).
 | **Database Row Changed** | A row's properties change in a specific Sentinel database. Paste the database's id (visible in its Sentinel URL). Optionally add `conditions` (each `{propertyId, operator: equals\|notEquals\|contains, value}`, ANDed together) so it only fires when the new values match — leave empty to fire on any change. |
 | **CRM Deal Stage Changed** | A CRM deal's pipeline stage changes. Leave `toStage` empty to fire on any stage change, or set it (e.g. `"Won"`) to fire only when a deal reaches that stage. |
 | **CMS Page Published** | A CMS page transitions from Draft to Published. Fires at the moment a page actually becomes visible — a page scheduled for a future publish date fires this trigger when that time arrives, not when it was scheduled (see [Known limitations](#known-limitations) for what "scheduled" means here). |
+| **Support Ticket Created** | A contact or staff member opens a support ticket. Input includes ticket id, subject, contact name, priority, and creation time. |
+| **Support Ticket Replied** | A contact or staff member adds a reply. Input includes ticket id, author type/name, body, and reply time. |
+| **Support Ticket SLA Breached** | The five-minute support sweep first detects a missed first-response or resolution target. Each breach type fires once per ticket; input includes ticket/contact/priority, `breachType`, due time, and detection time. |
 
 A published workflow can have at most one enabled Webhook Trigger and one enabled Schedule
-Trigger, but any number of Database Row Changed / CRM / CMS triggers, and any mix of trigger types
-in the same workflow (whichever one actually fires starts that run).
+Trigger, but any number of Database Row Changed / CRM / CMS / Support triggers, and any mix of
+trigger types in the same workflow (whichever one actually fires starts that run).
 
 ## Action nodes
 

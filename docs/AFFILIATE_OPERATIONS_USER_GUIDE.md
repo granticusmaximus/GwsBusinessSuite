@@ -99,7 +99,7 @@ badge if CJ supplied one.
 
 Click an advertiser's row to expand it and load its individual offers on demand (only fetched the
 first time you expand a given advertiser in a session). Each offer row shows its name, category,
-promotion end date (or "-" if it never expires), and a **Choose Ad** button — this opens the
+promotion end date (or "-" if it never expires), and a **Preview Ad** button — this opens the
 offer's raw CJ tracking URL directly in a new tab so you can preview or copy it. It does **not**
 by itself insert anything into an article; that's a separate step (see
 [Two ways an offer actually lands in an article](#two-ways-an-offer-actually-lands-in-an-article)).
@@ -227,13 +227,13 @@ manually.
 
 **Affiliate Analytics** (`/admin/affiliate-analytics`) reports on what already happened: reader
 clicks (tracked directly by this app) and imported CJ commission data (best-effort, see below).
-Every number on this page — including the "Total Commission (all-time)" tile — is actually scoped
-to activity from the **last 90 days**, capped at the 5,000 most recent rows for clicks and for
-commission records independently; despite the "all-time" label on that tile, older activity drops
-out of every figure on this page once it ages past that window.
+Every number on this page is scoped to activity from the **last 90 days**, capped at the 5,000
+most recent rows for clicks and for commission records independently — the two headline tiles say
+so directly ("last 90 days"), and older activity drops out of every figure on this page once it
+ages past that window.
 
-- **Total Clicks** / **Total Commission (all-time)** — headline tiles for the windowed data
-  described above.
+- **Total Clicks** / **Total Commission** (both labeled "last 90 days") — headline tiles for the
+  windowed data described above.
 - **Clicks by Advertiser** — click counts and last-click timestamp, grouped by advertiser,
   highest first.
 - **Clicks by Article** — click counts per article, with a link to the live article if it still
@@ -288,18 +288,18 @@ failure in one step (e.g. commission sync) doesn't block the others.
 - **Commission field mapping is unverified.** CJ's commissions GraphQL schema hasn't been
   independently confirmed in this environment; a mismatch fails silently (zero rows imported, no
   error surfaced beyond the sync message) rather than throwing.
-- **The "Total Commission (all-time)" label is misleading.** Every figure on the Analytics
-  dashboard — clicks and commissions alike — is actually windowed to the last 90 days (and capped
-  at 5,000 rows per table), not true all-time totals.
+- **The dashboard is always windowed, never true all-time.** Every figure — clicks and
+  commissions alike — is scoped to the last 90 days (and capped at 5,000 rows per table); there's
+  no way to see totals beyond that window.
 - **No dedicated tag/category filter on Analytics.** You can see clicks/revenue by advertiser or
   article, but there's no way to filter the dashboard itself by date range, advertiser, or
   article from the UI.
 - **Click dedupe isn't fraud protection.** The 30-minute per-placement window only smooths out
   ordinary double-counting (refresh, back-button); it doesn't detect or block deliberate click
   fraud, and doesn't key on IP or any other reader signal by design.
-- **"Choose Ad" on the CJ Ads page doesn't insert anything.** It only opens the raw CJ tracking
-  URL in a new tab for preview/copy — creating an actual article placement always happens either
-  in the Article Editor's Placements panel or by applying a Suggestion.
+- **"Preview Ad" on the CJ Ads page doesn't insert anything.** Its label now states its actual
+  purpose: opening the raw CJ tracking URL in a new tab for preview/copy. Creating an article
+  placement still happens in the Article Editor's Placements panel or by applying a Suggestion.
 - **Manual placements require a manual "Insert at Cursor" step.** Saving a placement in the
   Article Editor does not automatically drop its token into the article body; only applying a
   Suggestion does that automatically.

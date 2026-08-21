@@ -8,6 +8,7 @@
 @inject IBookingService BookingService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>Scheduling</PageTitle>
 
@@ -257,12 +258,19 @@
 
     private async Task DeleteAsync(Guid bookingTypeId)
     {
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            "Permanently delete this booking type? Every booking ever made against it will be deleted too. This cannot be undone.");
+        if (!confirmed) return;
+
         await BookingService.DeleteBookingTypeAsync(bookingTypeId);
         await RefreshAsync();
     }
 
     private async Task CancelAsync(Guid bookingId)
     {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", "Cancel this booking?");
+        if (!confirmed) return;
+
         var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
         await BookingService.CancelBookingAsync(bookingId, performedBy);
         await RefreshAsync();

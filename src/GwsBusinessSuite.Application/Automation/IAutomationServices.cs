@@ -245,4 +245,8 @@ public interface IAutomationTriggerService
     // (Contact or Staff) is added to an existing ticket.
     Task<int> TriggerSupportTicketRepliedAsync(
         Guid ticketId, string authorType, string authorName, string body, CancellationToken cancellationToken = default);
+
+    Task<int> TriggerSupportTicketSlaBreachedAsync(
+        Guid ticketId, string subject, string contactName, string priority, string breachType,
+        DateTimeOffset dueAt, CancellationToken cancellationToken = default);
 }

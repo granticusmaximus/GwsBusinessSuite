@@ -7,6 +7,7 @@
 @using GwsBusinessSuite.Domain.Entities
 @inject IBillingService BillingService
 @inject ICrmService CrmService
+@inject IJSRuntime JS
 
 <PageTitle>Billing</PageTitle>
 
@@ -343,6 +344,9 @@
 
     private async Task DeleteDraftAsync(Guid invoiceId)
     {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", "Permanently delete this draft invoice? This cannot be undone.");
+        if (!confirmed) return;
+
         IsBusy = true;
         try
         {

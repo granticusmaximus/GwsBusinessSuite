@@ -164,8 +164,8 @@ every **Send** button is disabled; you can still draft invoices freely in the me
   typed, since it's now anchored to the actual send moment rather than the day you drafted it.
 - **Void**: a `Sent` invoice (not yet paid) can be **Void**ed, which also voids it on the Stripe
   side if it made it there.
-- **Delete**: only a `Draft` can be deleted outright — void a sent invoice instead; there's no
-  confirmation prompt before deleting a draft, unlike trashing a contact or deleting a comment.
+- **Delete**: only a `Draft` can be deleted outright — void a sent invoice instead. This asks for
+  confirmation first, same as trashing a contact or deleting a comment.
 - **Paid**: nothing you do in this UI marks an invoice Paid — that status is set automatically
   when Stripe's `invoice.paid` webhook arrives, safely idempotent against Stripe's own webhook
   retries.
@@ -200,10 +200,11 @@ against any of them on the right.
   confirmed booking emails the attendee a confirmation with a private manage/cancel link
   (`/book/manage/{token}`) they can use to cancel it themselves later, no login required.
 - **Edit or delete a booking type**: the pencil/trash icons in the Booking Types list. Deleting a
-  booking type has no confirmation prompt and permanently deletes every booking ever made against
-  it along with it — there's no way to delete just the type while keeping its booking history.
-- **Bookings list**: every booking across every type, newest-first, with a **Cancel** button (also
-  with no confirmation prompt) that emails the attendee a cancellation notice. A booking's contact
+  booking type asks for confirmation first (it warns that every booking ever made against it will
+  be permanently deleted too) — there's no way to delete just the type while keeping its booking
+  history.
+- **Bookings list**: every booking across every type, newest-first, with a **Cancel** button
+  (confirmation required) that emails the attendee a cancellation notice. A booking's contact
   is found by matching the attendee's email against an existing Contact, or a brand-new Contact is
   created automatically if there's no match — so the booking page is itself a lead-capture form.
 
@@ -235,10 +236,11 @@ on the right.
   old the email is). Clicking it sets a global "unsubscribed from campaigns" flag on the contact
   (suppressing them from *every* campaign, not just the one the email came from) and cancels every
   campaign they're currently actively enrolled in. There's no in-app UI for a contact to manage
-  this themselves beyond that one link, and no admin-side "resubscribe" button — you'd have to
-  clear the flag directly if a contact asked to opt back in.
-- **Delete a campaign**: the **Delete** button, with no confirmation prompt, permanently removes
-  the campaign, its steps, every enrollment, and every send-log entry for it.
+  this themselves beyond that one link. If they explicitly ask to opt back in, select their
+  "unsubscribed" entry in the enrollment picker, click **Resubscribe**, and confirm consent. This
+  restores global eligibility while preserving cancelled enrollments as history.
+- **Delete a campaign**: the **Delete** button (confirmation required) permanently removes the
+  campaign, its steps, every enrollment, and every send-log entry for it.
 
 ## Moderating a comment
 
@@ -317,9 +319,9 @@ These are real gaps observed directly in the current code, not a general disclai
   editor has no currency selector.
 - **A `Paid` or `Void` invoice has no actions at all in the UI** — not even a link back to its
   Stripe hosted page. Only `Draft` (edit/send/delete) and `Sent` (view/void) rows show any buttons.
-- **Deleting a booking type cascades silently.** It permanently deletes every booking ever made
-  against that type, with no confirmation prompt and no way to keep the booking history while
-  removing just the type.
+- **Deleting a booking type has no way to keep the booking history while removing just the
+  type.** It permanently deletes every booking ever made against that type (confirmation is
+  required first, but there's no "keep the history, remove only the type" option).
 - **The public booking page always looks 14 days ahead**, and isn't configurable per booking type
   from this UI (the service itself supports up to 60 days).
 - **Scheduling times are UTC-only with no per-visitor timezone conversion** — by design, for a
@@ -328,12 +330,9 @@ These are real gaps observed directly in the current code, not a general disclai
 - **No campaign send-time control beyond the day-delay chain.** There's no "send only during
   business hours" or "skip weekends" option, and the background sweep only runs every 5 minutes,
   so there's no true "send immediately" button.
-- **Campaign unsubscribe is global, not per-campaign**, and there's no admin-side "resubscribe"
-  control — a contact who unsubscribes is suppressed from every campaign, and getting them back in
-  requires clearing the flag directly rather than through this UI.
-- **Several delete/void actions across Billing, Scheduling, and Email Campaigns have no
-  confirmation prompt** (unlike Contacts and Comments, which do) — Delete Draft, Delete Booking
-  Type, Cancel Booking, and Delete Campaign all act immediately on click.
+- **Campaign unsubscribe and resubscribe are global, not per-campaign.** An unsubscribe suppresses
+  the contact from every campaign; the admin Resubscribe action restores eligibility for every
+  campaign after consent, rather than for one campaign at a time.
 - **Comment moderation has no spam-pattern filtering beyond the honeypot field** — every non-bot
   submission lands in `Pending` for a human to review; there's no keyword blocklist or third-party
   spam-scoring integration.

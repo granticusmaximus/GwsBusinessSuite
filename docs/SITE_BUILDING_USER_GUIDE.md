@@ -402,13 +402,16 @@ support, so every link sits at the same level in both the header and footer.
 
 `/admin/media` is the shared image library behind Posts, Content Studio, and every Canvas Studio
 Image widget (and the Image widget's own picker button opens this same library inline, without
-leaving Studio).
+leaving Studio). It is intentionally shared across websites rather than filtered by the current
+website, so an uploaded brand asset can be reused without storing duplicate copies.
 
 - **Upload**: pick a file (PNG, JPEG, GIF, or WEBP — the actual file bytes are sniffed and
   validated regardless of what content-type the browser claims, and SVG is deliberately rejected
   since it's XML capable of carrying a `<script>` tag). One file at a time. An "Alt text" field
   above the picker applies to whatever you upload next. Default size cap is 8 MB per file
-  (configurable in Settings).
+  (configurable in Settings). If that filename already exists (case-insensitive), the page asks
+  whether to replace it. Confirming updates the existing asset in place, preserving its URL and
+  every page reference; cancelling leaves the existing image unchanged and creates no duplicate.
 - **Browse and search**: a responsive grid with a filename search box.
 - **Details modal**: click any image to see its type, size, upload date, and full URL (with a
   one-click Copy button), and to edit its alt text.
@@ -441,11 +444,12 @@ leaving Studio).
 
 ## Known limitations
 
-- **Single-site admin UI.** The backend data model supports multiple `CmsSite` records (and
-  **Import recipe** deliberately creates a brand-new one), but every screen in this cluster
-  (Pages, Canvas Studio, Appearance, Media) is hardcoded to whatever site matches the
-  `Canvas:SiteSlug` configuration value — there's no site switcher anywhere in the admin UI. An
-  imported recipe's new site has no in-app screen to review or manage it from today.
+- **Website selection is session-scoped.** Pages, new-page creation, Appearance, Menus, and the
+  website identity fields in Settings all share the **Website** selector. Imported recipe sites
+  appear in the selector on the next CMS screen load. The configured `Canvas:SiteSlug` is only the initial selection for a
+  new login/session; a full reload starts from that configured site again. Canvas Studio and an
+  existing page editor stay bound to the page's own website, while Media remains intentionally
+  shared across every website.
 - **No draft/live separation for content.** Unlike Workflow Automation's draft-vs-published
   version model, Canvas Studio autosaves straight to the live record. The only content-level
   safety net is Revision History (snapshot-before-save, with restore) — there is no "preview
@@ -461,9 +465,9 @@ leaving Studio).
   positioning offers within one section.
 - **Menus are single-level.** No dropdown/nested sub-menus in either the Primary or Footer list.
 - **Media Library**: single-file upload only (no batch upload), no folders/albums/tags beyond
-  filename search, no image cropping/editing, and re-uploading a file under a filename that
-  already exists creates a second, separate asset rather than replacing or flagging the original.
-  Deleting an image never checks whether any page still references it.
+  filename search, and no image cropping/editing. Duplicate filenames now prompt for in-place
+  replacement, but legacy duplicates aren't consolidated automatically. Deleting an image never
+  checks whether any page still references it.
 - **HTML widget content is unsanitized** — it renders exactly what's typed, by design (it's meant
   for trusted authors embedding raw markup/embeds), so it isn't a safe target for untrusted input.
 - **Client Access is a role/permission-level control, not a per-user ACL.** It distinguishes Admin
