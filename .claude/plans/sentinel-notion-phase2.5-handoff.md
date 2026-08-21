@@ -1,4 +1,61 @@
-# Handoff: Sentinel → Notion parity, Phase 2.5 in progress
+# Handoff: Sentinel → Notion parity — STALE, see 2026-08-21 status update below
+
+## 2026-08-21 status update
+This doc was last edited 2026-08-08 mid-Phase-2.5 and was never updated as work continued
+through 2026-08-16+. A full audit against current source (2026-08-21) found essentially
+everything below — all of Phase 2.5 items 1-6, and nearly everything in Phases 3-5 — already
+implemented, in a later session that didn't touch this file. Verified done (file:line citations
+from the audit): sub-items (`WikiDatabaseService.cs:1251` `ValidateParentRowAsync`, UI at
+`WikiDatabaseEditor.razor:1020-1197`), linked database views (`WikiDatabaseService.cs:2211`
+`GetLinkedDatabaseAsync`, UI `Wiki.razor:2208-2301`), row templates picker
+(`WikiDatabaseEditor.razor:35-128,2154-2183`), CSV import UI (`WikiDatabaseEditor.razor:139-152`),
+timeline dependency rendering (`SentinelDatabaseAdvancedView.razor:36-82`), Tab block editor UI
+(`wiki-block-editor.js:903-1103`), automation recurring/conditional triggers + new actions
+(`AutomationNodeRegistry.cs:29-37`), Button property firing a workflow
+(`WikiDatabaseEditor.razor:1143`), real SentinelGPT tool-calling loop via `ollama.ChatAsync`
+(`SentinelAiService.cs:231-300`), DatabaseAutofill row-write (`WikiDatabaseEditor.razor:1926-1945`),
+synced-block propagation (`WikiService.cs:66,119-151,253`), Markdown/CSV export, chart line/donut
+types, a real Map view, command palette (Ctrl+K), starter templates, comment filtering, and the
+embed block split into Video/Audio/File/Pdf. Nested toggle content (flagged "partial" by the
+audit) is also actually complete — it uses this codebase's established flat-list-plus-IndentLevel
+pattern (same as lists/columns) rather than an explicit `Children` field, both in the read-only
+renderer (`WikiBlockHtmlRenderer.RenderToggle`, tested at `WikiBlockHtmlRendererTests.cs:154`) and
+the editor (`wiki-block-editor.js:1164` `refreshToggleVisibility`).
+
+**Closed this session**: KaTeX + highlight.js were still loaded from jsdelivr CDN
+(`App.razor`), contradicting the explicit "no CDN" Phase 4 item. Vendored both (JS, CSS, and all
+60 KaTeX font files) into `wwwroot/lib/katex/` and `wwwroot/lib/highlightjs/`, following the same
+pattern already used for bootstrap/signalr/xterm. `App.razor` now references the local paths.
+Verified via a local `dotnet run` that all three (css, js, one font file) serve 200. Note:
+bootstrap-icons, easymde, leaflet, and hls.js are still CDN-loaded — the roadmap only ever called
+out KaTeX/highlight.js by name, so those were left alone; revisit only if the user extends the
+"no CDN" requirement.
+
+**Two genuine gaps found, one closed this session, one deferred by explicit user choice
+(2026-08-21):**
+1. **Timeline drag-resize** — user chose "skip for now". Still only drag-to-move exists
+   (`wikiTimelineDrag.js`); the file's own header comment explains why (rows carry a single
+   `Date` property, not a start+end range, so the bar's width is a fixed minimum-visibility
+   affordance, not real duration). If revisited later, needs a schema decision first: a second
+   "End date" property mapping on the Timeline view config vs. a duration field vs. something
+   else — ask before picking one, since it changes how every existing Timeline view is
+   configured.
+2. **Search scope — closed this session.** `SentinelWorkspaceService.SearchAsync` now also
+   indexes `SentinelDiscussionComments` and `SentinelAiRuns` (both resolve to their parent
+   `WikiPage` for navigation/access checks, same pattern the semantic branch already used for
+   database-row hits → parent database; runs with a null `WikiPageId` are excluded since there's
+   no page to check access against). New `MatchKind` values `"Comment"` / `"AI run"`; `Wiki.razor`
+   got a `SearchResultIconClass` helper (bi-chat-left-text / bi-robot) so these render distinctly
+   in both the sidebar search list and the Ctrl/Cmd+K command palette. New test:
+   `SentinelWorkspaceServiceTests.SearchAsync_ShouldFindCommentsAndAiRunsAndRespectPageAccess`.
+   Deliberately kept to the keyword-search path only — the semantic/embedding branch
+   (`IHybridSearchService`) still covers only `WikiPage`/`WikiDatabaseRow` source types; extending
+   semantic search to comments/AI-runs would need a new embedding-backfill pipeline and wasn't
+   part of what was approved here.
+
+---
+
+# Original handoff (2026-08-08, mostly superseded — kept for history)
 
 ## Context
 Repo: `/Users/grantwatson/Desktop/Development/CSharp/GwsBusinessSuite` (Blazor Server, auto-deploys

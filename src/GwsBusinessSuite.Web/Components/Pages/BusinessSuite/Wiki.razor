@@ -83,7 +83,7 @@
                         var isSelected = index == _paletteSelectedIndex;
                         <button type="button" class="sentinel-command-palette-item @(isSelected ? "is-selected" : string.Empty)"
                                 @onclick="() => OpenPaletteResultAsync(result)" @onmouseenter="() => _paletteSelectedIndex = index">
-                            <i class="bi @(result.IsDatabase ? "bi-grid-3x3-gap-fill" : "bi-file-earmark-text")"></i>
+                            <i class="bi @SearchResultIconClass(result)"></i>
                             <span>
                                 <strong>@HighlightMatches(result.Title, result.MatchedTerms)</strong>
                                 <small>@HighlightMatches(result.Preview, result.MatchedTerms)</small>
@@ -349,7 +349,7 @@
                                     <button type="button" class="list-group-item list-group-item-action text-start"
                                             @onclick="() => OpenSearchResultAsync(result)" disabled="@IsBusy">
                                         <div class="d-flex align-items-center gap-2">
-                                            <i class="bi @(result.IsDatabase ? "bi-grid-3x3-gap-fill" : "bi-file-earmark-text") text-secondary"></i>
+                                            <i class="bi @SearchResultIconClass(result) text-secondary"></i>
                                             <span class="fw-semibold text-truncate">@HighlightMatches(result.Title, result.MatchedTerms)</span>
                                             <span class="badge text-bg-light border ms-auto">@result.MatchKind</span>
                                         </div>
@@ -4160,6 +4160,16 @@
             ErrorMessage = $"Unable to update favorite. {ex.Message}";
         }
     }
+
+    // Comment/AI-run hits resolve Id/IsDatabase to their parent WikiPage for navigation and
+    // access checks (same pattern as a "Semantic database row" hit resolving to its parent
+    // database), so MatchKind is the only signal available here to pick a distinct icon.
+    private static string SearchResultIconClass(SentinelSearchResult result) => result.MatchKind switch
+    {
+        "Comment" => "bi-chat-left-text",
+        "AI run" => "bi-robot",
+        _ => result.IsDatabase ? "bi-grid-3x3-gap-fill" : "bi-file-earmark-text"
+    };
 
     private static MarkupString HighlightMatches(string text, IReadOnlyList<string> terms)
     {

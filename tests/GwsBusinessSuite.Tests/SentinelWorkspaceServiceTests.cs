@@ -61,6 +61,72 @@ public sealed class SentinelWorkspaceServiceTests
     }
 
     [Fact]
+    public async Task SearchAsync_ShouldFindCommentsAndAiRunsAndRespectPageAccess()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = await CreateDbAsync(connection);
+        var wiki = new WikiService(db);
+        var access = new SentinelAccessService(db);
+        var sentinel = new SentinelWorkspaceService(db, TimeProvider.System, access);
+
+        var allowedPage = await wiki.SavePageAsync(new WikiPageEditorModel { Title = "Allowed page" }, "u");
+        var deniedPage = await wiki.SavePageAsync(new WikiPageEditorModel { Title = "Denied page" }, "u");
+        await access.SetPermissionAsync(allowedPage.Id, false, "member", SentinelAccessLevels.View, "owner");
+
+        var allowedDiscussion = new SentinelDiscussion { WikiPageId = allowedPage.Id, CreatedBy = "u" };
+        var deniedDiscussion = new SentinelDiscussion { WikiPageId = deniedPage.Id, CreatedBy = "u" };
+        db.SentinelDiscussions.AddRange(allowedDiscussion, deniedDiscussion);
+        db.SentinelDiscussionComments.AddRange(
+            new SentinelDiscussionComment
+            {
+                SentinelDiscussionId = allowedDiscussion.Id,
+                Body = "Remember to check the flux capacitor wiring.",
+                CreatedBy = "u"
+            },
+            new SentinelDiscussionComment
+            {
+                SentinelDiscussionId = deniedDiscussion.Id,
+                Body = "Flux capacitor secrets nobody else should see.",
+                CreatedBy = "u"
+            });
+        db.SentinelAiRuns.AddRange(
+            new SentinelAiRun
+            {
+                WikiPageId = allowedPage.Id,
+                Action = "summarize",
+                Instruction = "Summarize the flux capacitor rollout plan",
+                Output = "The rollout is on track.",
+                CreatedBy = "u"
+            },
+            new SentinelAiRun
+            {
+                WikiPageId = deniedPage.Id,
+                Action = "summarize",
+                Instruction = "Summarize the flux capacitor security review",
+                Output = "Restricted findings.",
+                CreatedBy = "u"
+            },
+            new SentinelAiRun
+            {
+                WikiPageId = null,
+                Action = "summarize",
+                Instruction = "Summarize flux capacitor status with no page",
+                Output = "n/a",
+                CreatedBy = "u"
+            });
+        await db.SaveChangesAsync();
+
+        var results = await sentinel.SearchAsync("flux capacitor", "member");
+
+        results.Should().ContainSingle(result =>
+            result.Id == allowedPage.Id && !result.IsDatabase && result.MatchKind == "Comment");
+        results.Should().ContainSingle(result =>
+            result.Id == allowedPage.Id && !result.IsDatabase && result.MatchKind == "AI run");
+        results.Should().NotContain(result => result.Id == deniedPage.Id);
+    }
+
+    [Fact]
     public async Task GetBacklinksAsync_ShouldFindStructuredAndLegacyLinks()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

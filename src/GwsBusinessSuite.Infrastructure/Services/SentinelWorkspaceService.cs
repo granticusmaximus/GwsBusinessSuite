@@ -125,6 +125,99 @@ public sealed class SentinelWorkspaceService(
             }
         }
 
+        // Discussion comments and SentinelGPT run history have no standalone identity in the
+        // workspace tree, so both resolve Id/IsDatabase to their parent WikiPage for navigation
+        // and access checks - the same pattern the semantic branch below uses to fold a
+        // database-row hit back onto its parent database.
+        var commentQuery = dbContext.SentinelDiscussionComments.AsNoTracking();
+        foreach (var term in terms)
+        {
+            var loweredTerm = term.ToLower();
+            commentQuery = commentQuery.Where(comment => comment.Body.ToLower().Contains(loweredTerm));
+        }
+        var comments = await commentQuery.Take(MaxSearchCandidatesPerType).ToListAsync(cancellationToken);
+        if (comments.Count > 0)
+        {
+            var discussionIds = comments.Select(comment => comment.SentinelDiscussionId).Distinct().ToList();
+            var discussionPageIds = await dbContext.SentinelDiscussions.AsNoTracking()
+                .Where(discussion => discussionIds.Contains(discussion.Id))
+                .Select(discussion => new { discussion.Id, discussion.WikiPageId })
+                .ToDictionaryAsync(discussion => discussion.Id, discussion => discussion.WikiPageId, cancellationToken);
+            var commentPageIds = discussionPageIds.Values.Distinct().ToList();
+            var commentAccessible = await GetAccessibleTargetsAsync(
+                commentPageIds.Select(pageId => new SentinelAccessTarget(pageId, IsDatabase: false)),
+                username, SentinelAccessLevels.View, cancellationToken);
+            var commentPageTitles = await dbContext.WikiPages.AsNoTracking()
+                .Where(page => commentPageIds.Contains(page.Id))
+                .Select(page => new { page.Id, page.Title })
+                .ToDictionaryAsync(page => page.Id, page => page.Title, cancellationToken);
+
+            foreach (var comment in comments)
+            {
+                if (!discussionPageIds.TryGetValue(comment.SentinelDiscussionId, out var pageId)) continue;
+                if (!commentAccessible.Contains(new SentinelAccessTarget(pageId, IsDatabase: false))) continue;
+                if (!commentPageTitles.TryGetValue(pageId, out var pageTitle)) continue;
+
+                var score = Score(pageTitle, comment.Body, normalized, terms);
+                if (score <= 0) continue;
+
+                results.Add(new SentinelSearchResult(
+                    pageId,
+                    false,
+                    pageTitle,
+                    BuildPreview(comment.Body, terms, "Comment match"),
+                    "Comment",
+                    score,
+                    terms,
+                    comment.CreatedBy,
+                    comment.CreatedAt));
+            }
+        }
+
+        // Runs with no WikiPageId have no page to check access against, so they're excluded
+        // rather than treated as workspace-global.
+        var aiRunQuery = dbContext.SentinelAiRuns.AsNoTracking().Where(run => run.WikiPageId != null);
+        foreach (var term in terms)
+        {
+            var loweredTerm = term.ToLower();
+            aiRunQuery = aiRunQuery.Where(run =>
+                run.Instruction.ToLower().Contains(loweredTerm) || run.Output.ToLower().Contains(loweredTerm));
+        }
+        var aiRuns = await aiRunQuery.Take(MaxSearchCandidatesPerType).ToListAsync(cancellationToken);
+        if (aiRuns.Count > 0)
+        {
+            var aiRunPageIds = aiRuns.Select(run => run.WikiPageId!.Value).Distinct().ToList();
+            var aiRunAccessible = await GetAccessibleTargetsAsync(
+                aiRunPageIds.Select(pageId => new SentinelAccessTarget(pageId, IsDatabase: false)),
+                username, SentinelAccessLevels.View, cancellationToken);
+            var aiRunPageTitles = await dbContext.WikiPages.AsNoTracking()
+                .Where(page => aiRunPageIds.Contains(page.Id))
+                .Select(page => new { page.Id, page.Title })
+                .ToDictionaryAsync(page => page.Id, page => page.Title, cancellationToken);
+
+            foreach (var run in aiRuns)
+            {
+                var pageId = run.WikiPageId!.Value;
+                if (!aiRunAccessible.Contains(new SentinelAccessTarget(pageId, IsDatabase: false))) continue;
+                if (!aiRunPageTitles.TryGetValue(pageId, out var pageTitle)) continue;
+
+                var content = $"{run.Instruction}\n{run.Output}";
+                var score = Score(pageTitle, content, normalized, terms);
+                if (score <= 0) continue;
+
+                results.Add(new SentinelSearchResult(
+                    pageId,
+                    false,
+                    pageTitle,
+                    BuildPreview(content, terms, "AI run match"),
+                    "AI run",
+                    score,
+                    terms,
+                    run.CreatedBy,
+                    run.CreatedAt));
+            }
+        }
+
         if (hybridSearchService is not null)
         {
             var semanticHits = await hybridSearchService.SearchAsync(
