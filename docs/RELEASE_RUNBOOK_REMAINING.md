@@ -13,14 +13,17 @@ These all run **on the droplet** (`/opt/gwssuite`, per `docs/SENTINEL_OPERATIONS
 a local checkout — `docker compose exec` targets whatever stack is running on the machine it's
 invoked from.
 
-- **Backup restore rehearsal**: SSH to the droplet, then
-  ```bash
-  cd /opt/gwssuite && ./scripts/rehearse-restore.sh
-  ```
-  Follow with the manual browser portion `docs/SENTINEL_OPERATIONS.md` describes (confirm
-  `/health/ready`, sign in with MFA, open Sentinel, test one connector without saving). Escrow
-  the `Backups__EncryptionKey` value in a password manager if you haven't already — the backup
-  archive deliberately excludes it.
+- **Backup restore rehearsal — automated production portion passed 2026-08-21.** Deployment run
+  [32528155116](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32528155116)
+  created a fresh encrypted production archive on the droplet and verified it as valid before
+  deploying commit `50da93e`. Verification covered the manifest, isolated database migration and
+  integrity check, matching Data Protection key ring, active-admin MFA requirement, Sentinel
+  readability, audit chain, Live Show recording content, and protected connector credentials.
+  The deployed app then returned ready internally and passed the external liveness, readiness,
+  login-surface, and public-homepage checks. **Still required:** run the manual isolated-container
+  browser portion from `docs/SENTINEL_OPERATIONS.md` (sign in with MFA, open Sentinel, test one
+  connector without saving), confirm the backup volume is copied off-host, and record that the
+  backup encryption key is escrowed separately. The archive deliberately excludes that key.
 - **Deployment rollback rehearsal**: trigger a deploy of a deliberately broken commit (or use
   `.github/workflows/deploy.yml`'s existing rollback path) and confirm the workflow rebuilds the
   previous commit while the data volume stays forward-migrated, per the "Deployment rollback"
