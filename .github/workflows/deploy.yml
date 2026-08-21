@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      rehearse_rollback:
+        description: "Deploy, simulate a failed readiness result, and verify automatic code rollback"
+        required: true
+        default: false
+        type: boolean
 
 jobs:
   test:
@@ -68,6 +75,7 @@ jobs:
             set -e
 
             APP_DIR=/opt/gwssuite
+            REHEARSE_ROLLBACK="${{ github.event_name == 'workflow_dispatch' && inputs.rehearse_rollback && 'true' || 'false' }}"
 
             # First-time clone if directory doesn't exist
             if [ ! -d "$APP_DIR/.git" ]; then
@@ -123,6 +131,14 @@ jobs:
             echo "Waiting for the app to report ready..."
             for i in $(seq 1 24); do
               status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/health/ready || echo "000")
+              # A manually dispatched rollback rehearsal never damages the release itself. Wait
+              # until the newly built application is genuinely ready, then substitute a synthetic
+              # failure so this exact production rollback branch is exercised. The rollback poll
+              # below always uses the real endpoint and must reach HTTP 200 to count as success.
+              if [ "$REHEARSE_ROLLBACK" = "true" ] && [ "$status" = "200" ]; then
+                echo "Rollback rehearsal: new release is healthy; injecting a synthetic readiness failure."
+                status="599"
+              fi
               if [ "$status" = "200" ]; then
                 echo "Health check passed (HTTP $status)."
                 break
@@ -146,6 +162,9 @@ jobs:
                 if [ "$rollback_status" != "200" ]; then
                   echo "Automatic code rollback also failed. Data was preserved; manual roll-forward is required."
                   docker compose logs --tail=100 gwssuite
+                fi
+                if [ "$REHEARSE_ROLLBACK" = "true" ] && [ "$rollback_status" = "200" ]; then
+                  echo "Rollback rehearsal passed: previous application code is ready and the data volume was preserved."
                 fi
                 exit 1
               fi

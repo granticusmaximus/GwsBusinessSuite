@@ -24,10 +24,12 @@ invoked from.
   browser portion from `docs/SENTINEL_OPERATIONS.md` (sign in with MFA, open Sentinel, test one
   connector without saving), confirm the backup volume is copied off-host, and record that the
   backup encryption key is escrowed separately. The archive deliberately excludes that key.
-- **Deployment rollback rehearsal**: trigger a deploy of a deliberately broken commit (or use
-  `.github/workflows/deploy.yml`'s existing rollback path) and confirm the workflow rebuilds the
-  previous commit while the data volume stays forward-migrated, per the "Deployment rollback"
-  section of `docs/SENTINEL_OPERATIONS.md`.
+- **Deployment rollback rehearsal**: manually dispatch **Deploy to DigitalOcean** with
+  `rehearse_rollback=true`. The workflow first requires the new application to become genuinely
+  ready, then injects a synthetic readiness failure, rebuilds the previously deployed commit, and
+  requires its real `/health/ready` response to return 200. The rehearsal run is expected to end
+  red after proving rollback, so immediately dispatch it again with `rehearse_rollback=false` to
+  restore the current `main` commit. Confirm both run logs before marking this complete.
 - **Migration-copy rehearsal**: copy the *production* `gws-suite.db` (from a fresh backup, not
   the live file) into an isolated environment and apply the latest migration to that copy
   specifically, not just a synthetic empty/upgraded test database.
