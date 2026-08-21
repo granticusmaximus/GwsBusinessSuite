@@ -41,8 +41,8 @@ jobs:
     name: Build & Deploy
     needs: test
     runs-on: ubuntu-latest
-    # Two pushes to main close together (this repo can auto-commit/push in quick succession)
-    # otherwise start two "docker compose up -d --build" runs against the same droplet at once.
+    # Two deployments close together can otherwise start two "docker compose up -d --build"
+    # runs against the same droplet at once.
     # Both build independently, but the container recreate step names/renames the same
     # container, so whichever finishes second hits a Docker "container name already in use"
     # conflict from the one still finishing - a real observed failure, not hypothetical. Queue
@@ -113,6 +113,24 @@ jobs:
             git checkout main
             git reset --hard origin/main
 
+            ROLLBACK_COMMIT="$PREVIOUS_COMMIT"
+            if [ "$REHEARSE_ROLLBACK" = "true" ]; then
+              # A normal push deployment may already have installed the workflow-dispatch SHA
+              # before the rehearsal acquires the production concurrency lock. In that case,
+              # PREVIOUS_COMMIT equals the release under test and rebuilding it proves only the
+              # branch mechanics, not a real version reversal. Select the most recent earlier
+              # commit that changed deployable runtime files so the rehearsal genuinely rolls
+              # application code backward. Documentation/test-only commits are intentionally
+              # skipped.
+              ROLLBACK_COMMIT=$(git rev-list --first-parent -n 1 "${PREVIOUS_COMMIT}^" -- \
+                src docker-compose.yml docker-compose.turn.yml Dockerfile)
+              if [ -z "$ROLLBACK_COMMIT" ]; then
+                echo "Rollback rehearsal could not find an earlier runtime-changing commit."
+                exit 1
+              fi
+              echo "Rollback rehearsal will restore prior runtime commit $ROLLBACK_COMMIT."
+            fi
+
             # Rebuild and restart with zero-downtime swap
             docker compose pull --quiet || true
             if grep -qE '^TURN_SHARED_SECRET=.{32,}$' .env 2>/dev/null && grep -qE '^TURN_URL_UDP=turn:' .env 2>/dev/null; then
@@ -131,10 +149,10 @@ jobs:
             echo "Waiting for the app to report ready..."
             for i in $(seq 1 24); do
               status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/health/ready || echo "000")
-              # A manually dispatched rollback rehearsal never damages the release itself. Wait
-              # until the newly built application is genuinely ready, then substitute a synthetic
-              # failure so this exact production rollback branch is exercised. The rollback poll
-              # below always uses the real endpoint and must reach HTTP 200 to count as success.
+              # Wait until the newly built application is genuinely ready, then substitute a
+              # synthetic failure so this exact production rollback branch is exercised. The
+              # rollback itself selects an earlier runtime-changing commit, and its poll below
+              # always uses the real endpoint and must reach HTTP 200 to count as success.
               if [ "$REHEARSE_ROLLBACK" = "true" ] && [ "$status" = "200" ]; then
                 echo "Rollback rehearsal: new release is healthy; injecting a synthetic readiness failure."
                 status="599"
@@ -146,8 +164,8 @@ jobs:
               if [ "$i" = "24" ]; then
                 echo "Health check failed after deploy (last status: HTTP $status)."
                 docker compose logs --tail=100 gwssuite
-                echo "Rolling application code back to $PREVIOUS_COMMIT without reverting the forward-migrated data volume."
-                git reset --hard "$PREVIOUS_COMMIT"
+                echo "Rolling application code back to $ROLLBACK_COMMIT without reverting the forward-migrated data volume."
+                git reset --hard "$ROLLBACK_COMMIT"
                 if grep -qE '^TURN_SHARED_SECRET=.{32,}$' .env 2>/dev/null && grep -qE '^TURN_URL_UDP=turn:' .env 2>/dev/null; then
                   docker compose -f docker-compose.yml -f docker-compose.turn.yml up -d --build --remove-orphans
                 else
@@ -164,7 +182,7 @@ jobs:
                   docker compose logs --tail=100 gwssuite
                 fi
                 if [ "$REHEARSE_ROLLBACK" = "true" ] && [ "$rollback_status" = "200" ]; then
-                  echo "Rollback rehearsal passed: previous application code is ready and the data volume was preserved."
+                  echo "Rollback rehearsal passed: runtime commit $ROLLBACK_COMMIT is ready and the data volume was preserved."
                 fi
                 exit 1
               fi
