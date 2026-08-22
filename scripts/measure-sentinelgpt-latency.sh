@@ -42,15 +42,18 @@ warmup_payload="$(jq -nc \
   --arg model "$model" \
   '{model:$model, prompt:"", stream:false, keep_alive:"30m", options:{num_predict:1}}')"
 
+now_ms() {
+  date +%s%3N
+}
+
+warmup_started_ms="$(now_ms)"
 curl --fail-with-body --silent --show-error \
   --max-time 300 \
   --header "Content-Type: application/json" \
   --data "$warmup_payload" \
   "$ollama_base_url/api/generate" >/dev/null
-
-now_ms() {
-  date +%s%3N
-}
+warmup_ms=$(( $(now_ms) - warmup_started_ms ))
+echo "Warm-up: ${warmup_ms} ms." >&2
 
 sample_first_token_ms=0
 sample_total_ms=0
