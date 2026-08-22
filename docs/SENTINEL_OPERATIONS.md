@@ -73,6 +73,21 @@ without saving a mutation. Only then may a backup replace production data.
 Never restore the database without its matching Data Protection key ring. Doing so preserves
 content but makes encrypted Notion credentials unreadable.
 
+## Production database-copy migration rehearsal
+
+After publishing the migration-rehearsal command, manually dispatch **Deploy to DigitalOcean**
+with `rehearse_migration_copy=true` and `rehearse_rollback=false`. The workflow creates and fully
+verifies a fresh encrypted production backup, decrypts it only into the running container's
+temporary directory, and operates only on that restored copy. It migrates the copy down to the
+second-newest migration, reapplies the latest migration, requires no pending migrations, and
+then repeats the normal SQLite integrity, security-audit, MFA, Sentinel, and protected-secret
+checks. The JSON evidence includes `MigrationRehearsalFrom`, `MigrationRehearsalTo`, and
+`IsValid`; the temporary database and plaintext archive are removed even if the rehearsal fails.
+
+Never point this command at the live database. Its deliberate one-migration downgrade can discard
+values introduced by the latest migration, which is safe only because the copy is isolated and
+ephemeral. The normal deployment and external verification continue after a successful rehearsal.
+
 ## Deployment rollback
 
 The deployment workflow records the previously deployed Git commit and creates plus verifies

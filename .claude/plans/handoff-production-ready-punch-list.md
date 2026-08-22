@@ -1,5 +1,55 @@
 # Handoff: "Make it production ready" — punch-list work in progress
 
+## 2026-08-22 update: Codex completed essentially the entire punch list below
+
+Working in tandem, Codex (per the user: "Codex is working as well... to get double the work
+done") landed all 4 quick fixes and all 3 bigger items listed below, confirmed via git log
+(`50da93e feat: Implement SLA breach processing for support tickets`, plus the working tree
+showing `ReplaceAsync`/`CmsSiteSwitcher.razor`/`ResubscribeAsync`/"Preview Ad" already in place)
+and direct source inspection — not just claimed, actually verified against current code:
+- Media Watch active/inactive toggle — done (`NewsIntelligence.razor` `_formIsActive`).
+- Media Library filename dedup — done (`MediaLibraryService.ReplaceAsync`, confirm-to-replace
+  dialog in `Media.razor`).
+- CJ Ads button relabeled "Preview Ad" (was "Choose Ad", falsely implied it inserted a
+  placement) — done.
+- Campaign resubscribe — done (`ResubscribeAsync`/`IEmailCampaignService.ResubscribeContactAsync`).
+- Multi-site CMS admin UI — done. `CurrentCmsSiteAccessor` (session-scoped, not persisted across
+  a full reload) + `CmsSiteSwitcher.razor` wired into Pages/AppearanceCustomize/AppearanceMenus/
+  Settings. `Media.razor` deliberately NOT touched — `MediaAsset` has no `SiteId` at all, the
+  library is genuinely global by design, not a gap.
+- SLA-breach automation trigger — done. `support.ticketSlaBreachedTrigger` node,
+  `SupportTicketSlaBackgroundService` (5-minute `PeriodicTimer` sweep), fires-once semantics via
+  `SupportTicket.FirstResponseBreachNotifiedAt`/`ResolutionBreachNotifiedAt` — exactly the design
+  this doc recommended below.
+
+I (the other agent working in parallel) found and fixed two doc-currency gaps Codex's own
+otherwise-thorough guide updates had missed: `docs/SUPPORT_USER_GUIDE.md` had a stale line
+directly contradicting its own newer "SLA Breached" content 60 lines later (fixed), and its
+"Automation triggers" section still only listed 2 of the 3 real triggers (added the third).
+`docs/SITE_BUILDING_USER_GUIDE.md`'s "Core concepts" section still said "In practice there is
+exactly one [site]," flatly contradicting its own already-updated "Known limitations" section
+(fixed) — and the Site Recipe import section's caveat language was updated to reflect that an
+imported site is now actually manageable via the switcher, not just present-but-unmanageable.
+
+Full build (0 warnings/errors) + full test suite (1470 passing) confirmed green with both
+agents' work combined in the working tree at the same time — no collision found.
+
+**Remaining, not part of what the user approved in this round** (still just documented
+possibilities, not sanctioned work — see the original per-item scope notes below, all of which
+are now DONE except these residual bits worth a quick look if picking this up again):
+- Media guide's "legacy duplicates aren't consolidated automatically" — accurate and honestly
+  documented, not a bug, just noting the dedup fix is upload-time-only, not a backfill.
+- Whether the CJ Ads "Preview Ad" rename fully closes that finding, or whether the user actually
+  wants it wired to create a real placement instead of just being honestly labeled — the original
+  note flagged this as an either/or needing confirmation; Codex went with the relabel (the
+  lower-risk option), which matches this doc's own phrasing ("relabeling... or actually wiring it
+  up — confirm which"). Worth a one-line confirmation with the user if it ever comes up again,
+  but not blocking.
+
+---
+
+## Original handoff (kept below for full context/rationale on each item)
+
 ## Context
 
 Repo: `/Users/grantwatson/Desktop/Development/CSharp/GwsBusinessSuite` (Blazor Server). CLAUDE.md

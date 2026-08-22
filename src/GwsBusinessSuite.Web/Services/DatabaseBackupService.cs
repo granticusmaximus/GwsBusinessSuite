@@ -8,6 +8,8 @@ using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Options;
 using Renci.SshNet;
 
@@ -180,7 +182,27 @@ public sealed class DatabaseBackupService(
         return VerifyBackupAsync(path, cancellationToken);
     }
 
-    public async Task<BackupVerificationResult> VerifyBackupAsync(string archivePath, CancellationToken cancellationToken = default)
+    public Task<BackupVerificationResult> VerifyBackupAsync(
+        string archivePath,
+        CancellationToken cancellationToken = default) =>
+        VerifyBackupCoreAsync(archivePath, rehearseLatestMigration: false, cancellationToken);
+
+    public Task<BackupVerificationResult> RehearseLatestMigrationOnLatestBackupAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var path = GetLatestBackupPath() ?? throw new InvalidOperationException("No encrypted GWS backup is available.");
+        return RehearseLatestMigrationAsync(path, cancellationToken);
+    }
+
+    public Task<BackupVerificationResult> RehearseLatestMigrationAsync(
+        string archivePath,
+        CancellationToken cancellationToken = default) =>
+        VerifyBackupCoreAsync(archivePath, rehearseLatestMigration: true, cancellationToken);
+
+    private async Task<BackupVerificationResult> VerifyBackupCoreAsync(
+        string archivePath,
+        bool rehearseLatestMigration,
+        CancellationToken cancellationToken)
     {
         var restoreDirectory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"gws-restore-{Guid.NewGuid():N}");
         Directory.CreateDirectory(restoreDirectory);
@@ -205,6 +227,35 @@ public sealed class DatabaseBackupService(
             await using var restoredDb = new ApplicationDbContext(dbOptions);
             await MigrationHistoryCompatibility.NormalizeAsync(restoredDb, cancellationToken);
             await restoredDb.Database.MigrateAsync(cancellationToken);
+
+            string? migrationRehearsalFrom = null;
+            string? migrationRehearsalTo = null;
+            if (rehearseLatestMigration)
+            {
+                var migrations = restoredDb.Database.GetMigrations().ToArray();
+                if (migrations.Length < 2)
+                    throw new InvalidOperationException("At least two migrations are required for a migration-copy rehearsal.");
+
+                migrationRehearsalFrom = migrations[^2];
+                migrationRehearsalTo = migrations[^1];
+                var migrator = restoredDb.GetService<IMigrator>();
+
+                // This database lives only in the decrypted temporary restore directory. Moving
+                // it down one migration and reapplying the latest migration proves that the
+                // newest Up path works against production-shaped data without touching the live
+                // database or retaining any plaintext copy after this method returns.
+                await migrator.MigrateAsync(migrationRehearsalFrom, cancellationToken);
+                var afterDowngrade = (await restoredDb.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+                if (afterDowngrade.Contains(migrationRehearsalTo))
+                    throw new InvalidDataException($"Migration-copy rehearsal did not remove {migrationRehearsalTo} from the isolated copy.");
+
+                await migrator.MigrateAsync(migrationRehearsalTo, cancellationToken);
+                var afterReapply = (await restoredDb.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+                if (!afterReapply.Contains(migrationRehearsalTo)
+                    || (await restoredDb.Database.GetPendingMigrationsAsync(cancellationToken)).Any())
+                    throw new InvalidDataException($"Migration-copy rehearsal did not reapply {migrationRehearsalTo} cleanly.");
+            }
+
             await using var integrity = restoredDb.Database.GetDbConnection().CreateCommand();
             await restoredDb.Database.OpenConnectionAsync(cancellationToken);
             integrity.CommandText = "PRAGMA integrity_check;";
@@ -224,7 +275,8 @@ public sealed class DatabaseBackupService(
             var pages = await restoredDb.WikiPages.CountAsync(cancellationToken);
             return new(archivePath, manifest.CreatedAtUtc, manifest.Files.Count,
                 manifest.Files.Count(x => x.Path.StartsWith("live-show-recordings/", StringComparison.Ordinal)),
-                activeAdmins, pages, auditIntegrity.EventsChecked, protectedSecretsChecked, true);
+                activeAdmins, pages, auditIntegrity.EventsChecked, protectedSecretsChecked, true,
+                migrationRehearsalFrom, migrationRehearsalTo);
         }
         finally
         {
@@ -358,7 +410,8 @@ public sealed class DatabaseBackupService(
 
 public sealed record BackupVerificationResult(string ArchivePath, DateTimeOffset CreatedAtUtc,
     int FileCount, int RecordingFileCount, int ActiveAdministratorCount, int SentinelPageCount, int AuditEventCount,
-    int ProtectedSecretsChecked, bool IsValid);
+    int ProtectedSecretsChecked, bool IsValid, string? MigrationRehearsalFrom = null,
+    string? MigrationRehearsalTo = null);
 
 public sealed class DatabaseBackupBackgroundService(
     IServiceScopeFactory scopeFactory,

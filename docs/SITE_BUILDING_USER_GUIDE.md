@@ -39,10 +39,14 @@ for why, and how that may change later.
 ## Core concepts
 
 A **site** is a single record (name, slug, theme, brand settings) that everything in this
-cluster hangs off of. In practice there is exactly one: the admin screens read/write whatever
-site matches the `Canvas:SiteSlug` configuration value (defaulting to `grantwatson-dev`),
-auto-creating it on first use if it doesn't exist yet. See [Known limitations](#known-limitations)
-for what that means for imported recipes.
+cluster hangs off of. There can be more than one — a **Website** selector on Pages, Appearance
+(Customize and Menus), and Settings lets you switch which site those screens operate on for the
+rest of your session; whichever one you last selected stays current until you switch again or
+start a fresh session, at which point it falls back to the `Canvas:SiteSlug` configuration value
+(defaulting to `grantwatson-dev`, auto-created on first use if it doesn't exist yet). Canvas
+Studio and the page-settings editor always stay bound to whatever site the page you're actively
+editing already belongs to, regardless of the selector's current value. See
+[Known limitations](#known-limitations) for the session-scoping details.
 
 A **page** belongs to a site and holds: a title, a URL slug, an optional parent page (for nested
 paths like `/services/consulting`), SEO fields, a publish status, and its actual visual
@@ -361,8 +365,10 @@ available alongside it.
 **Import recipe** always creates a **brand-new site** with fresh page/category/field/global-block
 ids — it never merges into or overwrites the current site — and every imported page starts as a
 Draft regardless of its status in the original, so nothing goes live until you've reviewed and
-explicitly published it. See [Known limitations](#known-limitations) for an important caveat on
-what you can actually do with that new site afterward.
+explicitly published it. The new site shows up in the **Website** selector (see
+[Core concepts](#core-concepts)) the next time you load a CMS screen, ready to switch into and
+manage like any other site — see [Known limitations](#known-limitations) for the one caveat on
+how long that selection sticks around.
 
 ## Appearance: Customize
 

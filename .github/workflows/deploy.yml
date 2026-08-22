@@ -11,6 +11,11 @@ on:
         required: true
         default: false
         type: boolean
+      rehearse_migration_copy:
+        description: "Round-trip the latest migration on an isolated copy of a fresh production backup"
+        required: true
+        default: false
+        type: boolean
 
 jobs:
   test:
@@ -76,6 +81,12 @@ jobs:
 
             APP_DIR=/opt/gwssuite
             REHEARSE_ROLLBACK="${{ github.event_name == 'workflow_dispatch' && inputs.rehearse_rollback && 'true' || 'false' }}"
+            REHEARSE_MIGRATION_COPY="${{ github.event_name == 'workflow_dispatch' && inputs.rehearse_migration_copy && 'true' || 'false' }}"
+
+            if [ "$REHEARSE_ROLLBACK" = "true" ] && [ "$REHEARSE_MIGRATION_COPY" = "true" ]; then
+              echo "Rollback and migration-copy rehearsals must be dispatched separately."
+              exit 1
+            fi
 
             # First-time clone if directory doesn't exist
             if [ ! -d "$APP_DIR/.git" ]; then
@@ -107,6 +118,11 @@ jobs:
               # aborting the deploy could itself abort the deploy - the one path where the check
               # is most needed (no fresh backup was just verified).
               docker compose exec -T gwssuite sh -lc 'ls /app/backups/gws-backup-*.gwsbackup >/dev/null 2>&1'
+            fi
+
+            if [ "$REHEARSE_MIGRATION_COPY" = "true" ]; then
+              echo "Rehearsing the latest migration on an isolated copy of the fresh production backup."
+              docker compose exec -T gwssuite dotnet GwsBusinessSuite.Web.dll --backup-migration-rehearse
             fi
 
             git fetch origin main

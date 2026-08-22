@@ -130,8 +130,10 @@ A ticket also picks up a red **SLA overdue** badge in the list the moment either
 (first response only counts as "met" once at least one Staff message exists in the thread;
 resolution only counts as met once the ticket is actually marked Resolved).
 
-These targets are informational today — nothing enforces them, and a breach doesn't (yet) fire an
-automation on its own. See [Known limitations](#known-limitations).
+Missing either target fires a **Support Ticket SLA Breached** automation trigger (see
+[Automation triggers](#automation-triggers) below) — the targets themselves are still not
+enforced by this app on their own; what happens after a breach fires is entirely up to the
+workflow you build. See [Known limitations](#known-limitations).
 
 ## Email notifications
 
@@ -150,17 +152,25 @@ itself — the message is always saved regardless of whether the notification we
 
 ## Automation triggers
 
-Two Workflow Automation trigger nodes let a workflow react to ticket activity — see
+Three Workflow Automation trigger nodes let a workflow react to ticket activity — see
 [`AUTOMATION_USER_GUIDE.md`](AUTOMATION_USER_GUIDE.md) for how to build a workflow in general:
 
 - **Support Ticket Created** fires on every new ticket, from either side.
 - **Support Ticket Replied** fires on every reply added to an existing ticket, from either side.
+- **Support Ticket SLA Breached** fires once a missed [SLA target](#sla-targets) is detected by a
+  background sweep that runs every 5 minutes — once for a missed first-response target (only if
+  no Staff message exists yet) and once for a missed resolution target, each with the ticket id,
+  contact, priority, which target was missed, and its due time as starting data. "Once" is
+  literal: each of the two targets fires this trigger at most one time per ticket (tracked
+  internally so the sweep never re-fires on the same breach every 5 minutes), even if the ticket
+  stays overdue for days.
 
-Both hand the triggered workflow the ticket id plus the relevant subject/author/body fields as
-its starting data, so you can, for example, notify a Slack-style webhook, tag the CRM contact, or
-escalate an urgent ticket somewhere outside the inbox. A misbehaving or misconfigured subscriber
-workflow can never block or delay the ticket action itself — it always fires after the ticket is
-already safely saved, and any failure is only logged, not surfaced to the person replying.
+The two ticket-activity triggers hand the workflow the ticket id plus the relevant subject/
+author/body fields as starting data, so you can, for example, notify a Slack-style webhook, tag
+the CRM contact, or escalate an urgent ticket somewhere outside the inbox. A misbehaving or
+misconfigured subscriber workflow can never block or delay the ticket action (or the SLA sweep)
+itself — every trigger here fires only after its underlying event is already safely saved, and
+any workflow failure is only logged, never surfaced to the person replying.
 
 ## The client's side: Client Portal support
 

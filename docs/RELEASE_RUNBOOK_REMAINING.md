@@ -34,9 +34,14 @@ invoked from.
   [32539176876](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32539176876)
   restored `4092afc` and passed internal readiness plus external liveness, readiness, login-surface,
   and public-homepage verification. No manual data restore was needed.
-- **Migration-copy rehearsal**: copy the *production* `gws-suite.db` (from a fresh backup, not
-  the live file) into an isolated environment and apply the latest migration to that copy
-  specifically, not just a synthetic empty/upgraded test database.
+- **Migration-copy rehearsal — automation ready; production run required**: after publishing the
+  `--backup-migration-rehearse` command, manually dispatch **Deploy to DigitalOcean** with
+  `rehearse_migration_copy=true` and `rehearse_rollback=false`. The workflow creates and verifies
+  a fresh production backup, migrates only its temporary restored database down one migration,
+  reapplies the latest migration, requires zero pending migrations plus all normal restore
+  integrity/security checks, removes the plaintext copy, and then completes the normal deploy and
+  external checks. Record the run link and the emitted `MigrationRehearsalFrom`,
+  `MigrationRehearsalTo`, and `IsValid: true` values before marking this complete.
 - **SentinelGPT production latency objectives** (added 2026-08-12, `RELEASE_READINESS.md`'s
   SentinelGPT section): establish first-token and total-response-time objectives from actual
   droplet measurements against the deployed Ollama instance, then confirm they're met. No local

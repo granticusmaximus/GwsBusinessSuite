@@ -37,6 +37,27 @@ public sealed class DatabaseBackupServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RehearseLatestMigration_ShouldRoundTripLatestMigrationOnIsolatedCopyWithoutChangingSource()
+    {
+        var fixture = await CreateFixtureAsync();
+        var archivePath = await fixture.Service.CreateBackupAsync();
+        var sourceBefore = SHA256.HashData(await File.ReadAllBytesAsync(fixture.DatabasePath));
+
+        string[] migrations;
+        var dbOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite($"Data Source={fixture.DatabasePath}").Options;
+        await using (var db = new ApplicationDbContext(dbOptions))
+            migrations = db.Database.GetMigrations().ToArray();
+
+        var verification = await fixture.Service.RehearseLatestMigrationAsync(archivePath);
+
+        verification.IsValid.Should().BeTrue();
+        verification.MigrationRehearsalFrom.Should().Be(migrations[^2]);
+        verification.MigrationRehearsalTo.Should().Be(migrations[^1]);
+        SHA256.HashData(await File.ReadAllBytesAsync(fixture.DatabasePath)).Should().Equal(sourceBefore);
+    }
+
+    [Fact]
     public async Task GetReadinessProblemAsync_ShouldDetectATruncatedBackup_EvenThoughItsHeaderIsStillValid()
     {
         // Regression guard for a real finding: the health check previously only verified the

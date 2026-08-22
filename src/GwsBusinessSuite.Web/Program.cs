@@ -413,6 +413,17 @@ if (args is ["--backup-verify"] or ["--backup-verify", _])
     return;
 }
 
+if (args is ["--backup-migration-rehearse"] or ["--backup-migration-rehearse", _])
+{
+    using var backupScope = app.Services.CreateScope();
+    var backups = backupScope.ServiceProvider.GetRequiredService<DatabaseBackupService>();
+    var verification = args.Length == 2
+        ? await backups.RehearseLatestMigrationAsync(args[1])
+        : await backups.RehearseLatestMigrationOnLatestBackupAsync();
+    Console.WriteLine(JsonSerializer.Serialize(verification));
+    return;
+}
+
 var normalizedPathBase = NormalizePathBase(configuredPathBase);
 
 // grantwatson.dev is served by this same app/process (see the RequireHost-gated public
