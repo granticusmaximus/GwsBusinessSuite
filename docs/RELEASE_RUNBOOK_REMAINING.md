@@ -44,14 +44,27 @@ invoked from.
   integrity/security checks still passed. The temporary plaintext data was removed, commit
   `43cf1c5` returned ready internally, and external liveness, readiness, login-surface, and
   public-homepage checks all passed.
-- **SentinelGPT production latency objectives — automation ready; production run required**:
-  after publishing the probe, manually dispatch **Deploy to DigitalOcean** with
-  `measure_sentinel_latency=true` and the other rehearsal inputs `false`. The versioned objectives
-  require each of three warmed, streaming samples capped at 64 output tokens to produce its first
-  token within 30 seconds and finish within 120 seconds. Record the run link, averages, maximums, and
-  `ObjectivesMet: true` before marking this complete. Run it during a quiet production window:
-  the direct Ollama measurement bypasses the app scheduler but still includes any Ollama request
-  already executing or queued. The probe emits no prompt or response text.
+- **SentinelGPT production latency objectives — first production run did NOT meet the
+  objective; needs a clean re-run.** Run
+  [32601134782](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32601134782)
+  (commit `cba2e20`) measured `ObjectivesMet: false`: first-token times of 30751 ms, 95895 ms,
+  and 10585 ms against the 30000 ms objective (average 45743 ms, maximum 95895 ms); total times
+  of 35695 ms, 100274 ms, and 17479 ms against the 120000 ms objective (average 51149 ms,
+  maximum 100274 ms - the total objective was actually met on average, only first-token latency
+  failed). **Likely confound, not necessarily a real steady-state problem**: this run dispatched
+  `measure_sentinel_latency=true` on the same deploy that shipped `EnsureUserGuidesInSentinelAsync`
+  (commit `43cf1c5`, merged in via `cba2e20`) - a new startup seed step that parses and writes 10
+  Sentinel pages during app boot. The health check passed and the latency probe started within
+  the same second as the freshly-recreated app container coming up; residual SQLite/CPU activity
+  from that seed step finishing was very plausibly still settling during the first two samples,
+  which is consistent with the huge 10.6s-to-95.9s spread across only three back-to-back calls
+  against an Ollama instance that was never itself restarted. **Before concluding this is a real
+  latency problem**, re-run `measure_sentinel_latency=true` well after a deploy (not
+  immediately following one) so the app has been running long enough for any startup-seed
+  activity to be fully settled, and compare. If a clean re-run still misses the objective, treat
+  it as a genuine finding worth investigating (Ollama model residency, droplet resource limits,
+  concurrent request contention), not a fluke. Record the new run link, averages, maximums, and
+  `ObjectivesMet` value here either way. The probe emits no prompt or response text.
 
 ## 2. Deployed acceptance journeys (needs a real browser session against the live app)
 

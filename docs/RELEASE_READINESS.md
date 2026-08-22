@@ -233,9 +233,13 @@ history - flagging here since it's the same integrity question this whole sectio
 - [ ] Production latency objectives are established at 30 seconds to first token and 120 seconds
   total for each of three warmed production samples capped at 64 output tokens; a published
   droplet run must still demonstrate `ObjectivesMet: true`.
-  <!-- STRUCTURALLY EXTERNAL - needs real droplet-measured production latency, same class of gap
-  as the backup-restore/rollback/migration-copy rehearsals docs/RELEASE_RUNBOOK_REMAINING.md
-  already itemizes. Not yet itemized there itself, though - added below. -->
+  <!-- First production run (2026-08-22, run 32601134782, commit cba2e20) measured
+  ObjectivesMet: false - first-token times 30751/95895/10585 ms against the 30000 ms objective
+  (total times 35695/100274/17479 ms against 120000 ms DID pass on average). Likely confounded
+  by running the probe immediately after a fresh app-container restart that itself included a
+  new heavier startup seed step (EnsureUserGuidesInSentinelAsync, same deploy) rather than a
+  genuine steady-state measurement - see docs/RELEASE_RUNBOOK_REMAINING.md's fuller note for the
+  reasoning and the required clean re-run before this box can be honestly checked either way. -->
 
 ### Growth Studio
 
