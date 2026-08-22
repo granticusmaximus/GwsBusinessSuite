@@ -24,18 +24,16 @@ invoked from.
   browser portion from `docs/SENTINEL_OPERATIONS.md` (sign in with MFA, open Sentinel, test one
   connector without saving), confirm the backup volume is copied off-host, and record that the
   backup encryption key is escrowed separately. The archive deliberately excludes that key.
-- **Deployment rollback rehearsal**: manually dispatch **Deploy to DigitalOcean** with
-  `rehearse_rollback=true`. The workflow first requires the new application to become genuinely
-  ready, then injects a synthetic readiness failure, rebuilds the most recent earlier commit that
-  changed deployable runtime files, and requires its real `/health/ready` response to return 200.
-  The rehearsal run is expected to end red after proving rollback, so immediately dispatch it
-  again with `rehearse_rollback=false` to restore the current `main` commit. Confirm both run logs
-  before marking this complete. Run
-  [32530790924](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32530790924)
-  on 2026-08-21 proved the synthetic-failure and recovery mechanics, backup validity, and post-run
-  public health, but did **not** count as the rehearsal because its rollback target resolved to the
-  same `a27c9c5` revision. The workflow now rejects that false-positive shape by selecting an
-  earlier runtime-changing commit; a new run after this correction is published is still required.
+- **Deployment rollback rehearsal — passed 2026-08-21/22.** Rehearsal run
+  [32538261980](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32538261980)
+  created and verified a fresh encrypted production backup (`IsValid: true`), proved current
+  commit `4092afc` ready, injected the synthetic readiness failure, rolled application code back
+  to distinct runtime commit `50da93e` without reverting the data volume, and required that older
+  runtime's real `/health/ready` response to return 200. The run's red conclusion is expected after
+  the verified rollback. Immediate roll-forward run
+  [32539176876](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32539176876)
+  restored `4092afc` and passed internal readiness plus external liveness, readiness, login-surface,
+  and public-homepage verification. No manual data restore was needed.
 - **Migration-copy rehearsal**: copy the *production* `gws-suite.db` (from a fresh backup, not
   the live file) into an isolated environment and apply the latest migration to that copy
   specifically, not just a synthetic empty/upgraded test database.

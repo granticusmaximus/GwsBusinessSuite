@@ -84,7 +84,7 @@ manual entries with generated evidence where practical.
 | Empty and upgraded database migration rehearsal | P0 | Startup/migration compatibility tests apply the complete chain and latest migration to isolated SQLite databases | Local pass; deployed database-copy rehearsal required |
 | Production liveness/readiness | P0 | `https://admin.gwsapp.net/health/live` and `/health/ready` returned 200 on 2026-08-11 | Pass |
 | Backup plus Data Protection key restore | P0 | Encrypted authenticated archive, manifest, database/key/recording restore, migration, integrity, MFA, Sentinel, audit-chain, restored-secret, and tamper tests; deployment run [32528155116](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32528155116) created and verified a fresh production archive on the droplet on 2026-08-21 | Automated production create/verify pass; manual isolated-container browser verification, off-host backup confirmation, and external key escrow evidence still required |
-| Deployment rollback | P0 | CI workflow now takes/verifies a pre-deploy backup and rolls code back without reverting the data volume | Implemented; production-topology rehearsal required |
+| Deployment rollback | P0 | Rehearsal run [32538261980](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32538261980) verified a fresh encrypted backup, healthy `4092afc`, rollback to distinct runtime commit `50da93e`, preserved data volume, and real rollback readiness; run [32539176876](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32539176876) restored `4092afc` and passed internal plus external checks on 2026-08-22 | Production-topology pass |
 | Real Notion sync and guarded write-back | P1 | Requires controlled workspace acceptance run | Not run |
 | Real social publish success/failure | P1 | Requires controlled platform destinations | Not run |
 | Live TURN relay from restricted network | P1 | Requires deployed network acceptance run | Not run |
@@ -113,7 +113,7 @@ manual entries with generated evidence where practical.
   key ring.
 - [ ] A restored isolated instance passes integrity, readiness, sign-in, Sentinel read, and
   encrypted connector-read checks.
-- [ ] Deployment rollback is rehearsed without losing post-migration data.
+- [x] Deployment rollback is rehearsed without losing post-migration data.
 
 ### Runtime and operations
 
