@@ -44,34 +44,42 @@ invoked from.
   integrity/security checks still passed. The temporary plaintext data was removed, commit
   `43cf1c5` returned ready internally, and external liveness, readiness, login-surface, and
   public-homepage checks all passed.
-- **SentinelGPT production latency objectives — two production runs, both missed the
-  objective; this is a real finding, not a fluke, and points at a probe design gap rather than
-  a production performance problem to fix in the app itself.**
+- **SentinelGPT production latency objectives — three production runs, all missed the
+  first-token objective. Root cause not yet confirmed; leading hypothesis is real contention on
+  the shared production Ollama instance from this app's OTHER background AI features, not a
+  probe bug or a cold-model-load cost. Needs droplet-side investigation before further action.**
   - Run 1 [32601134782](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32601134782)
     (commit `cba2e20`): first-token 30751 / 95895 / 10585 ms (avg 45743, max 95895) against the
     30000 ms objective. Total 35695 / 100274 / 17479 ms (avg 51149, max 100274) against 120000 ms
-    - total DID pass on average.
+    - total passed on average.
   - Run 2 [32602132549](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32602132549)
-    (commit `4a247f4`, dispatched specifically to rule out the run-1 confound of a heavier
-    startup seed step landing in the same deploy): first-token 31302 / 50760 / 18148 ms
-    (avg 33403, max 50760) against 30000 ms. Total 37282 / 54861 / 25434 ms (avg 39192, max
-    54861) against 120000 ms - total passed comfortably.
-  - **Root cause hypothesis, now with two consistent data points**: both runs show the same
-    shape - sample 1 always lands right around 30-31s, sample 3 is always the fastest. This
-    workflow's only way to run the probe is via a fresh `workflow_dispatch` on the same
-    **Deploy to DigitalOcean** job, which always redeploys (recreates the app container) as
-    part of running - there is no path to fire the probe against an already-running, genuinely
-    long-uptime instance. Ollama unloads a model from memory after a period of idle time by
-    default; the probe fires its 3 samples back-to-back immediately after the health check
-    passes with no explicit warm-up/priming call first, so sample 1 is very plausibly paying a
-    real model-load cost, not measuring the "warmed" scenario the objective is meant to
-    describe. This is a gap in the probe's own design (`scripts/measure-sentinelgpt-latency.sh`
-    needs an explicit priming request before its measured samples), not necessarily evidence
-    that a genuinely warm production SentinelGPT is too slow for real users.
-  - **Before dispatching a third run**, either fix the probe to prime the model first (one
-    throwaway generate call, discarded, before the 3 measured samples), or accept "worst case
-    right after a deploy" as its own real, separately-tracked scenario alongside a true warm
-    measurement. Record whichever path is chosen and its result here.
+    (commit `4a247f4`): first-token 31302 / 50760 / 18148 ms (avg 33403, max 50760) against
+    30000 ms. Total 37282 / 54861 / 25434 ms (avg 39192, max 54861) against 120000 ms - total
+    passed comfortably. At this point the working hypothesis was "the probe never explicitly
+    warms the model before measuring" - **that hypothesis was wrong**, corrected by run 3 below.
+  - Run 3 [32603505954](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32603505954)
+    (commit `63b7c99`, after adding explicit timing around the warm-up call that was already in
+    `scripts/measure-sentinelgpt-latency.sh` - it turned out one already existed, just
+    unlogged): **warm-up completed in 96 ms**, proving the model was already resident in memory
+    before any of the 3 measured samples ran. Those 3 samples still measured first-token
+    30194 / 83673 / 21482 ms (avg 45116, max 83673) against 30000 ms - only sample 3 passed.
+    Total 35027 / 89349 / 27592 ms (avg 50656, max 89349) against 120000 ms - total passed.
+  - **Current best explanation**: with cold-model-load ruled out (96 ms warm-up) and run-to-run
+    variance this large (21s-96s across three separate deploys, no consistent shape), the most
+    likely cause is queueing behind other real requests on the same shared Ollama instance -
+    this app runs several other Ollama-dependent background features (SentinelGPT Teacher
+    Panel, which fires on every chat prompt; Media Watch/Civic Watch AI summarization; Affiliate
+    Suggestions matching; SEO Audit's AI blend; semantic search embeddings; others) that all
+    compete for the same single model/instance this probe also measures against. This matches
+    the caveat already written into this runbook item before any run was attempted ("still
+    includes any Ollama request already executing or queued") - that caveat was likely the
+    actual answer, not a minor footnote. **Not confirmed** - this needs actual visibility into
+    the droplet's Ollama request activity during a measurement window (queue depth, concurrent
+    request count, `docker compose logs ollama` around the sample timestamps) that isn't
+    available from a GitHub Actions runner; someone with droplet SSH access needs to correlate a
+    future run's sample timestamps against Ollama's own logs before concluding anything further.
+    Do not dispatch a fourth run purely to try again - the last three all show the same kind of
+    variance, so a fourth data point without new instrumentation won't add information.
 
 ## 2. Deployed acceptance journeys (needs a real browser session against the live app)
 

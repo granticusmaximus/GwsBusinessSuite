@@ -233,16 +233,17 @@ history - flagging here since it's the same integrity question this whole sectio
 - [ ] Production latency objectives are established at 30 seconds to first token and 120 seconds
   total for each of three warmed production samples capped at 64 output tokens; a published
   droplet run must still demonstrate `ObjectivesMet: true`.
-  <!-- Two production runs (2026-08-22: run 32601134782/cba2e20, run 32602132549/4a247f4) both
-  measured ObjectivesMet: false on first-token latency specifically (total time passed both
-  times). Same shape both runs: sample 1 ~30-31s, sample 3 fastest - consistent with the probe
-  always firing immediately after a fresh app-container restart, with no explicit model
-  warm-up/priming call before its 3 measured samples, likely paying a real Ollama model-load
-  cost on sample 1 rather than measuring genuinely warm steady-state performance. This reads as
-  a gap in the probe's own design, not confirmed evidence of a real production performance
-  problem - see docs/RELEASE_RUNBOOK_REMAINING.md's fuller note for the fix needed (an explicit
-  priming call in scripts/measure-sentinelgpt-latency.sh) before this box can be honestly
-  checked either way. -->
+  <!-- Three production runs (2026-08-22: 32601134782/cba2e20, 32602132549/4a247f4,
+  32603505954/63b7c99) all measured ObjectivesMet: false on first-token latency (total time
+  passed all three). Run 3 added timing around the probe's existing warm-up call and found it
+  completes in 96 ms - ruling out cold-model-load as the cause - yet the 3 measured samples
+  still ranged 21-96s across the three runs with no consistent shape. Leading hypothesis is
+  queueing contention on the shared production Ollama instance from this app's other
+  background AI features (SentinelGPT Teacher Panel, Media/Civic Watch summarization, Affiliate
+  Suggestions, SEO Audit, semantic search embeddings), not a probe defect - see
+  docs/RELEASE_RUNBOOK_REMAINING.md's fuller note. NOT CONFIRMED - needs droplet-side Ollama log
+  correlation, which isn't available from a GitHub Actions runner. Do not check this box, and do
+  not dispatch further measurement runs without new instrumentation first. -->
 
 ### Growth Studio
 
