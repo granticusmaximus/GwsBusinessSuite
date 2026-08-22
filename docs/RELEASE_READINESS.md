@@ -233,13 +233,16 @@ history - flagging here since it's the same integrity question this whole sectio
 - [ ] Production latency objectives are established at 30 seconds to first token and 120 seconds
   total for each of three warmed production samples capped at 64 output tokens; a published
   droplet run must still demonstrate `ObjectivesMet: true`.
-  <!-- First production run (2026-08-22, run 32601134782, commit cba2e20) measured
-  ObjectivesMet: false - first-token times 30751/95895/10585 ms against the 30000 ms objective
-  (total times 35695/100274/17479 ms against 120000 ms DID pass on average). Likely confounded
-  by running the probe immediately after a fresh app-container restart that itself included a
-  new heavier startup seed step (EnsureUserGuidesInSentinelAsync, same deploy) rather than a
-  genuine steady-state measurement - see docs/RELEASE_RUNBOOK_REMAINING.md's fuller note for the
-  reasoning and the required clean re-run before this box can be honestly checked either way. -->
+  <!-- Two production runs (2026-08-22: run 32601134782/cba2e20, run 32602132549/4a247f4) both
+  measured ObjectivesMet: false on first-token latency specifically (total time passed both
+  times). Same shape both runs: sample 1 ~30-31s, sample 3 fastest - consistent with the probe
+  always firing immediately after a fresh app-container restart, with no explicit model
+  warm-up/priming call before its 3 measured samples, likely paying a real Ollama model-load
+  cost on sample 1 rather than measuring genuinely warm steady-state performance. This reads as
+  a gap in the probe's own design, not confirmed evidence of a real production performance
+  problem - see docs/RELEASE_RUNBOOK_REMAINING.md's fuller note for the fix needed (an explicit
+  priming call in scripts/measure-sentinelgpt-latency.sh) before this box can be honestly
+  checked either way. -->
 
 ### Growth Studio
 

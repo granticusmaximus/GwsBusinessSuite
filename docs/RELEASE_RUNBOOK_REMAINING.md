@@ -44,27 +44,34 @@ invoked from.
   integrity/security checks still passed. The temporary plaintext data was removed, commit
   `43cf1c5` returned ready internally, and external liveness, readiness, login-surface, and
   public-homepage checks all passed.
-- **SentinelGPT production latency objectives — first production run did NOT meet the
-  objective; needs a clean re-run.** Run
-  [32601134782](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32601134782)
-  (commit `cba2e20`) measured `ObjectivesMet: false`: first-token times of 30751 ms, 95895 ms,
-  and 10585 ms against the 30000 ms objective (average 45743 ms, maximum 95895 ms); total times
-  of 35695 ms, 100274 ms, and 17479 ms against the 120000 ms objective (average 51149 ms,
-  maximum 100274 ms - the total objective was actually met on average, only first-token latency
-  failed). **Likely confound, not necessarily a real steady-state problem**: this run dispatched
-  `measure_sentinel_latency=true` on the same deploy that shipped `EnsureUserGuidesInSentinelAsync`
-  (commit `43cf1c5`, merged in via `cba2e20`) - a new startup seed step that parses and writes 10
-  Sentinel pages during app boot. The health check passed and the latency probe started within
-  the same second as the freshly-recreated app container coming up; residual SQLite/CPU activity
-  from that seed step finishing was very plausibly still settling during the first two samples,
-  which is consistent with the huge 10.6s-to-95.9s spread across only three back-to-back calls
-  against an Ollama instance that was never itself restarted. **Before concluding this is a real
-  latency problem**, re-run `measure_sentinel_latency=true` well after a deploy (not
-  immediately following one) so the app has been running long enough for any startup-seed
-  activity to be fully settled, and compare. If a clean re-run still misses the objective, treat
-  it as a genuine finding worth investigating (Ollama model residency, droplet resource limits,
-  concurrent request contention), not a fluke. Record the new run link, averages, maximums, and
-  `ObjectivesMet` value here either way. The probe emits no prompt or response text.
+- **SentinelGPT production latency objectives — two production runs, both missed the
+  objective; this is a real finding, not a fluke, and points at a probe design gap rather than
+  a production performance problem to fix in the app itself.**
+  - Run 1 [32601134782](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32601134782)
+    (commit `cba2e20`): first-token 30751 / 95895 / 10585 ms (avg 45743, max 95895) against the
+    30000 ms objective. Total 35695 / 100274 / 17479 ms (avg 51149, max 100274) against 120000 ms
+    - total DID pass on average.
+  - Run 2 [32602132549](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32602132549)
+    (commit `4a247f4`, dispatched specifically to rule out the run-1 confound of a heavier
+    startup seed step landing in the same deploy): first-token 31302 / 50760 / 18148 ms
+    (avg 33403, max 50760) against 30000 ms. Total 37282 / 54861 / 25434 ms (avg 39192, max
+    54861) against 120000 ms - total passed comfortably.
+  - **Root cause hypothesis, now with two consistent data points**: both runs show the same
+    shape - sample 1 always lands right around 30-31s, sample 3 is always the fastest. This
+    workflow's only way to run the probe is via a fresh `workflow_dispatch` on the same
+    **Deploy to DigitalOcean** job, which always redeploys (recreates the app container) as
+    part of running - there is no path to fire the probe against an already-running, genuinely
+    long-uptime instance. Ollama unloads a model from memory after a period of idle time by
+    default; the probe fires its 3 samples back-to-back immediately after the health check
+    passes with no explicit warm-up/priming call first, so sample 1 is very plausibly paying a
+    real model-load cost, not measuring the "warmed" scenario the objective is meant to
+    describe. This is a gap in the probe's own design (`scripts/measure-sentinelgpt-latency.sh`
+    needs an explicit priming request before its measured samples), not necessarily evidence
+    that a genuinely warm production SentinelGPT is too slow for real users.
+  - **Before dispatching a third run**, either fix the probe to prime the model first (one
+    throwaway generate call, discarded, before the 3 measured samples), or accept "worst case
+    right after a deploy" as its own real, separately-tracked scenario alongside a true warm
+    measurement. Record whichever path is chosen and its result here.
 
 ## 2. Deployed acceptance journeys (needs a real browser session against the live app)
 
