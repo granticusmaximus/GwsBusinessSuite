@@ -34,19 +34,24 @@ invoked from.
   [32539176876](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32539176876)
   restored `4092afc` and passed internal readiness plus external liveness, readiness, login-surface,
   and public-homepage verification. No manual data restore was needed.
-- **Migration-copy rehearsal — automation ready; production run required**: after publishing the
-  `--backup-migration-rehearse` command, manually dispatch **Deploy to DigitalOcean** with
-  `rehearse_migration_copy=true` and `rehearse_rollback=false`. The workflow creates and verifies
-  a fresh production backup, migrates only its temporary restored database down one migration,
-  reapplies the latest migration, requires zero pending migrations plus all normal restore
-  integrity/security checks, removes the plaintext copy, and then completes the normal deploy and
-  external checks. Record the run link and the emitted `MigrationRehearsalFrom`,
-  `MigrationRehearsalTo`, and `IsValid: true` values before marking this complete.
-- **SentinelGPT production latency objectives** (added 2026-08-12, `RELEASE_READINESS.md`'s
-  SentinelGPT section): establish first-token and total-response-time objectives from actual
-  droplet measurements against the deployed Ollama instance, then confirm they're met. No local
-  test can substitute — this needs the real droplet's hardware and model-loading behavior, not a
-  synthetic benchmark.
+- **Migration-copy rehearsal — passed 2026-08-22.** Production run
+  [32599188395](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32599188395)
+  created and verified fresh encrypted backup `gws-backup-20260822T212801366Z.gwsbackup`, then
+  operated only on its temporary restored database. The emitted result was `IsValid: true`,
+  `MigrationRehearsalFrom: 20260821195831_AddSupportTicketSatisfactionRating`, and
+  `MigrationRehearsalTo: 20260821211756_AddSupportTicketSlaBreachAutomation`, proving the latest
+  migration could be removed and reapplied with no pending migrations while all normal restore
+  integrity/security checks still passed. The temporary plaintext data was removed, commit
+  `43cf1c5` returned ready internally, and external liveness, readiness, login-surface, and
+  public-homepage checks all passed.
+- **SentinelGPT production latency objectives — automation ready; production run required**:
+  after publishing the probe, manually dispatch **Deploy to DigitalOcean** with
+  `measure_sentinel_latency=true` and the other rehearsal inputs `false`. The versioned objectives
+  require each of three warmed, streaming samples capped at 64 output tokens to produce its first
+  token within 30 seconds and finish within 120 seconds. Record the run link, averages, maximums, and
+  `ObjectivesMet: true` before marking this complete. Run it during a quiet production window:
+  the direct Ollama measurement bypasses the app scheduler but still includes any Ollama request
+  already executing or queued. The probe emits no prompt or response text.
 
 ## 2. Deployed acceptance journeys (needs a real browser session against the live app)
 

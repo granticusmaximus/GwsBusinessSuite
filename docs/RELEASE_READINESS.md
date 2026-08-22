@@ -81,7 +81,7 @@ manual entries with generated evidence where practical.
 | Mandatory portal MFA | P0 | TOTP/recovery/replay tests plus local browser enrollment and returning-login journeys | Local pass; deployed acceptance required |
 | Security audit ledger | P0 | Hash-chain, secret-metadata rejection, encrypted-network, account-event tests and local admin browser journey | Local pass; deployed acceptance required |
 | Privacy and incident operations | P0 | Identity-gated subject export, one-month rights clock, retention preview, incident register, and 72-hour breach clock tests | Local pass; legal policy approval and deployed acceptance required |
-| Empty and upgraded database migration rehearsal | P0 | Startup/migration compatibility tests apply the complete chain; the production-backup rehearsal command round-trips the latest migration on an isolated restored copy and reports the exact migration IDs | Local pass; published production database-copy run required |
+| Empty and upgraded database migration rehearsal | P0 | Startup/migration compatibility tests apply the complete chain; production run [32599188395](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32599188395) created and verified fresh encrypted backup `gws-backup-20260822T212801366Z.gwsbackup` (`IsValid: true`), then round-tripped only its isolated restored database from `20260821195831_AddSupportTicketSatisfactionRating` to `20260821211756_AddSupportTicketSlaBreachAutomation`; internal readiness and all external checks passed on 2026-08-22 | Production-topology pass |
 | Production liveness/readiness | P0 | `https://admin.gwsapp.net/health/live` and `/health/ready` returned 200 on 2026-08-11 | Pass |
 | Backup plus Data Protection key restore | P0 | Encrypted authenticated archive, manifest, database/key/recording restore, migration, integrity, MFA, Sentinel, audit-chain, restored-secret, and tamper tests; deployment run [32528155116](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32528155116) created and verified a fresh production archive on the droplet on 2026-08-21 | Automated production create/verify pass; manual isolated-container browser verification, off-host backup confirmation, and external key escrow evidence still required |
 | Deployment rollback | P0 | Rehearsal run [32538261980](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32538261980) verified a fresh encrypted backup, healthy `4092afc`, rollback to distinct runtime commit `50da93e`, preserved data volume, and real rollback readiness; run [32539176876](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32539176876) restored `4092afc` and passed internal plus external checks on 2026-08-22 | Production-topology pass |
@@ -230,7 +230,9 @@ history - flagging here since it's the same integrity question this whole sectio
   and get_page (read-only) predate this and needed none of the five. Box stays unchecked: this is
   one action, not "every enabled action" as a category, and none of it has Browser-class evidence
   (a Playwright journey through the Confirm/Decline UI) yet. -->
-- [ ] Production latency objectives are established from actual droplet measurements and met.
+- [ ] Production latency objectives are established at 30 seconds to first token and 120 seconds
+  total for each of three warmed production samples capped at 64 output tokens; a published
+  droplet run must still demonstrate `ObjectivesMet: true`.
   <!-- STRUCTURALLY EXTERNAL - needs real droplet-measured production latency, same class of gap
   as the backup-restore/rollback/migration-copy rehearsals docs/RELEASE_RUNBOOK_REMAINING.md
   already itemizes. Not yet itemized there itself, though - added below. -->

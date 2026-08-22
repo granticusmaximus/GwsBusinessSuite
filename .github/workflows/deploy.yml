@@ -16,6 +16,11 @@ on:
         required: true
         default: false
         type: boolean
+      measure_sentinel_latency:
+        description: "Measure warmed SentinelGPT first-token and total latency against production Ollama"
+        required: true
+        default: false
+        type: boolean
 
 jobs:
   test:
@@ -50,9 +55,12 @@ jobs:
     # runs against the same droplet at once.
     # Both build independently, but the container recreate step names/renames the same
     # container, so whichever finishes second hits a Docker "container name already in use"
-    # conflict from the one still finishing - a real observed failure, not hypothetical. Queue
+    # conflict from the one still finishing - a real observed failure, not hypothetical. Serialize
     # deploys instead of racing them; don't cancel one mid-build/mid-swap, since a cancelled
-    # Actions job doesn't reliably stop the remote SSH script it already started.
+    # Actions job doesn't reliably stop the remote SSH script it already started. GitHub retains
+    # at most one pending job in a concurrency group, so a newer pending deploy replaces an older
+    # pending deploy. Dispatch evidence-only rehearsals only after any desired pending push deploy
+    # has started.
     concurrency:
       group: deploy-production
       cancel-in-progress: false
@@ -82,9 +90,14 @@ jobs:
             APP_DIR=/opt/gwssuite
             REHEARSE_ROLLBACK="${{ github.event_name == 'workflow_dispatch' && inputs.rehearse_rollback && 'true' || 'false' }}"
             REHEARSE_MIGRATION_COPY="${{ github.event_name == 'workflow_dispatch' && inputs.rehearse_migration_copy && 'true' || 'false' }}"
+            MEASURE_SENTINEL_LATENCY="${{ github.event_name == 'workflow_dispatch' && inputs.measure_sentinel_latency && 'true' || 'false' }}"
 
-            if [ "$REHEARSE_ROLLBACK" = "true" ] && [ "$REHEARSE_MIGRATION_COPY" = "true" ]; then
-              echo "Rollback and migration-copy rehearsals must be dispatched separately."
+            rehearsal_count=0
+            [ "$REHEARSE_ROLLBACK" = "true" ] && rehearsal_count=$((rehearsal_count + 1))
+            [ "$REHEARSE_MIGRATION_COPY" = "true" ] && rehearsal_count=$((rehearsal_count + 1))
+            [ "$MEASURE_SENTINEL_LATENCY" = "true" ] && rehearsal_count=$((rehearsal_count + 1))
+            if [ "$rehearsal_count" -gt 1 ]; then
+              echo "Rollback, migration-copy, and SentinelGPT latency rehearsals must be dispatched separately."
               exit 1
             fi
 
@@ -204,6 +217,11 @@ jobs:
               fi
               sleep 5
             done
+
+            if [ "$MEASURE_SENTINEL_LATENCY" = "true" ]; then
+              echo "Measuring warmed SentinelGPT latency against the production Ollama service."
+              docker compose exec -T gwssuite /usr/local/bin/measure-sentinelgpt-latency
+            fi
 
             # Clean up dangling images to save disk space
             docker image prune -f

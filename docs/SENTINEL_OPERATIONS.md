@@ -100,6 +100,26 @@ required; it never restores an older database automatically.
 A database restore is a separate, explicitly approved disaster-recovery action. Do not use it
 as an ordinary application rollback because it can discard valid post-backup writes.
 
+## SentinelGPT production latency objective
+
+Manually dispatch **Deploy to DigitalOcean** with `measure_sentinel_latency=true` and both other
+rehearsal inputs set to `false`. After the new application is ready, the workflow warms the
+production `sentinelgpt` model and runs three streaming samples, each capped at 64 output tokens,
+over the private Docker network. No prompt or response content is printed or retained; the output
+contains timing and objective fields only.
+
+The versioned production objectives are:
+
+- every warmed sample produces its first token within **30,000 ms**;
+- every warmed sample completes within **120,000 ms**.
+
+The command reports averages, conservative maximums, and `ObjectivesMet`. A false value fails the
+workflow. Run the probe during a quiet production window. These numbers measure the deployed model
+and hardware path directly: they bypass the Blazor UI and its workload scheduler, but still include
+any request already executing or queued inside Ollama. They do not measure retrieval/context
+assembly. Use the SentinelGPT panel's per-request performance display when diagnosing those
+additional layers.
+
 ## Notion connection webhook
 
 Open Sentinel's Notion connection panel, copy the HTTPS webhook URL into the connection's

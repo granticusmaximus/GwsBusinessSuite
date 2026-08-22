@@ -15,6 +15,8 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    jq \
     libfontconfig1 \
     fonts-liberation \
     libssl3 \
@@ -38,6 +40,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=dotnet-build /app/publish .
+COPY scripts/measure-sentinelgpt-latency.sh /usr/local/bin/measure-sentinelgpt-latency
+RUN chmod 0755 /usr/local/bin/measure-sentinelgpt-latency
 
 # Fixed path so the build-time install below and the running container agree on where
 # the Chromium binary lives, regardless of $HOME/which user the container runs as.
