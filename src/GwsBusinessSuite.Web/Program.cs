@@ -468,6 +468,7 @@ using (var scope = app.Services.CreateScope())
     await TrySeedStepAsync(nameof(EnsureAboutPageResumeSectionAsync), () => EnsureAboutPageResumeSectionAsync(dbContext, app.Logger));
     await TrySeedStepAsync(nameof(EnsureWikiPagesHaveBlocksAsync), () => EnsureWikiPagesHaveBlocksAsync(dbContext, app.Logger));
     await TrySeedStepAsync(nameof(EnsureSentinelLearningWorkflowAsync), () => EnsureSentinelLearningWorkflowAsync(scope.ServiceProvider, app.Logger));
+    await TrySeedStepAsync(nameof(EnsureUserGuidesInSentinelAsync), () => EnsureUserGuidesInSentinelAsync(scope.ServiceProvider, app.Environment, app.Logger));
 
     await TrySeedStepAsync("SeedAdminAccount", async () =>
     {
@@ -3676,6 +3677,165 @@ static async Task EnsureSentinelLearningWorkflowAsync(IServiceProvider services,
     await workflows.SetActiveAsync(workflow.Id, true);
     logger.LogInformation("Seeded the {WorkflowName} automation workflow.", workflowName);
 }
+
+// Mirrors every docs/*_USER_GUIDE.md onboarding guide into a real, browsable Sentinel page
+// under a "User Guides" folder - re-applied on every boot (same "re-apply, don't seed once"
+// convention as EnsureGrantWatsonHomepageAsync) so the in-app copy never drifts from its
+// git-tracked source. A guide edited directly inside Sentinel would just be overwritten on
+// the next deploy - the repository Markdown is the only real source of truth, same posture as
+// AutomationHelp.razor's own doc comment on why it reads from disk instead of duplicating.
+static async Task EnsureUserGuidesInSentinelAsync(IServiceProvider services, IHostEnvironment environment, ILogger logger)
+{
+    var wikiService = services.GetRequiredService<IWikiService>();
+    var dbFactory = services.GetRequiredService<IDbContextFactory<ApplicationDbContext>>();
+    await using var dbContext = await dbFactory.CreateDbContextAsync();
+
+    // Mirrors AutomationHelp.razor's own path resolution - ContentRootPath is
+    // src/GwsBusinessSuite.Web, docs/ sits two levels up at the repo root.
+    var docsDirectory = Path.GetFullPath(Path.Combine(environment.ContentRootPath, "..", "..", "docs"));
+    if (!Directory.Exists(docsDirectory))
+    {
+        logger.LogWarning("Skipping Sentinel user-guide sync: {DocsDirectory} was not found in this deployment.", docsDirectory);
+        return;
+    }
+
+    var guides = new (string FileName, string Title, string Icon)[]
+    {
+        ("CONTENT_CREATION_USER_GUIDE.md", "Content Creation", "📝"),
+        ("SITE_BUILDING_USER_GUIDE.md", "Site Building", "🏗️"),
+        ("CRM_USER_GUIDE.md", "CRM & Relationships", "🤝"),
+        ("SUPPORT_USER_GUIDE.md", "Support", "🛟"),
+        ("SENTINEL_USER_GUIDE.md", "Sentinel & SentinelGPT", "📚"),
+        ("INTELLIGENCE_USER_GUIDE.md", "Intelligence & BI", "🛰️"),
+        ("AUTOMATION_USER_GUIDE.md", "Workflow Automation", "🔀"),
+        ("AFFILIATE_OPERATIONS_USER_GUIDE.md", "Affiliate Operations", "🔗"),
+        ("PLATFORM_OPERATIONS_USER_GUIDE.md", "Platform Operations", "🛠️"),
+        ("CLIENT_PORTAL_USER_GUIDE.md", "Client Portal & Public Site", "🌐"),
+    };
+
+    const string folderSystemKey = "user-guides-folder";
+    var folderEntity = await dbContext.WikiPages.FirstOrDefaultAsync(page => page.SystemKey == folderSystemKey);
+    if (folderEntity is null)
+    {
+        var createdFolder = await wikiService.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "User Guides",
+            Icon = "📖",
+            BlocksJson = "[]"
+        }, "system", createRevisionCheckpoint: false);
+        folderEntity = await dbContext.WikiPages.FirstAsync(page => page.Id == createdFolder.Id);
+        folderEntity.SystemKey = folderSystemKey;
+        await dbContext.SaveChangesAsync();
+    }
+    else if (folderEntity.TrashedAt is not null)
+    {
+        await wikiService.RestorePageAsync(folderEntity.Id, "system");
+        folderEntity.TrashedAt = null;
+    }
+
+    // First pass: ensure every guide has a real page id before rewriting any cross-guide
+    // links, so a link from one guide to another always resolves even on the very first boot.
+    var pageIdsByFileName = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+    foreach (var guide in guides)
+    {
+        var systemKey = $"user-guide:{guide.FileName}";
+        var existing = await dbContext.WikiPages.FirstOrDefaultAsync(page => page.SystemKey == systemKey);
+        if (existing is null)
+        {
+            var created = await wikiService.SavePageAsync(new WikiPageEditorModel
+            {
+                Title = guide.Title,
+                Icon = guide.Icon,
+                ParentWikiPageId = folderEntity.Id,
+                BlocksJson = "[]"
+            }, "system", createRevisionCheckpoint: false);
+            var entity = await dbContext.WikiPages.FirstAsync(page => page.Id == created.Id);
+            entity.SystemKey = systemKey;
+            await dbContext.SaveChangesAsync();
+            pageIdsByFileName[guide.FileName] = entity.Id;
+        }
+        else
+        {
+            if (existing.TrashedAt is not null)
+            {
+                await wikiService.RestorePageAsync(existing.Id, "system");
+            }
+            pageIdsByFileName[guide.FileName] = existing.Id;
+        }
+    }
+
+    // Second pass: read each guide's current Markdown, rewrite its relative cross-guide links
+    // into real Sentinel wikilinks now that every target id is known, parse, and save.
+    foreach (var guide in guides)
+    {
+        var filePath = Path.Combine(docsDirectory, guide.FileName);
+        if (!File.Exists(filePath))
+        {
+            logger.LogWarning("Skipping Sentinel sync for {FileName}: file not found.", guide.FileName);
+            continue;
+        }
+
+        var markdown = RewriteGuideCrossLinks(await File.ReadAllTextAsync(filePath), pageIdsByFileName);
+        var blocks = NotionMarkdownBlockParser.Parse(markdown, guide.Title);
+
+        var systemKey = $"user-guide:{guide.FileName}";
+        var pageEntity = await dbContext.WikiPages.FirstAsync(page => page.SystemKey == systemKey);
+        await wikiService.SavePageAsync(new WikiPageEditorModel
+        {
+            WikiPageId = pageEntity.Id,
+            ExpectedContentVersion = pageEntity.ContentVersion,
+            Title = guide.Title,
+            Icon = guide.Icon,
+            ParentWikiPageId = folderEntity.Id,
+            BlocksJson = WikiBlockJson.Serialize(blocks)
+        }, "system", createRevisionCheckpoint: false);
+    }
+
+    // Rebuild the folder's own index body as a clickable wikilink list of every guide -
+    // same pattern as QuickNoteService.RebuildFolderIndexAsync.
+    var indexBlocks = new List<WikiBlock>
+    {
+        new(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0,
+            [new WikiRichTextSpan(
+                "The complete onboarding knowledge base for GWS Business Suite - kept in sync "
+                + "automatically from the docs/ folder in the repository on every deploy. Edits "
+                + "made directly on these pages will be overwritten on the next deploy - edit "
+                + "the source Markdown in the repository instead.")],
+            new Dictionary<string, string>())
+    };
+    indexBlocks.AddRange(guides.Select(guide => new WikiBlock(
+        Guid.NewGuid(), WikiBlockTypes.BulletedListItem, 0,
+        [new WikiRichTextSpan(guide.Title, Link: $"wikilink:{pageIdsByFileName[guide.FileName]}")],
+        new Dictionary<string, string>())));
+
+    var freshFolderEntity = await dbContext.WikiPages.FirstAsync(page => page.Id == folderEntity.Id);
+    await wikiService.SavePageAsync(new WikiPageEditorModel
+    {
+        WikiPageId = freshFolderEntity.Id,
+        ExpectedContentVersion = freshFolderEntity.ContentVersion,
+        Title = freshFolderEntity.Title,
+        Icon = freshFolderEntity.Icon,
+        BlocksJson = WikiBlockJson.Serialize(indexBlocks)
+    }, "system", createRevisionCheckpoint: false);
+
+    logger.LogInformation("Synced {Count} user guide(s) into Sentinel under the User Guides folder.", guides.Length);
+}
+
+// Rewrites a relative link to another guide file (e.g. "[Support](SUPPORT_USER_GUIDE.md)")
+// into a real Sentinel wikilink once that guide's page id is known, so cross-guide navigation
+// works natively inside Sentinel instead of pointing at a dead relative .md path. A trailing
+// "#anchor" fragment (used for same-page Contents-table links) is dropped along with it - this
+// only rewrites links to a DIFFERENT file, an in-page "#core-concepts"-style anchor with no
+// filename is left untouched. A link to a filename not in the map (an external URL, an image,
+// or a doc outside this guide set) is left untouched too.
+static string RewriteGuideCrossLinks(string markdown, IReadOnlyDictionary<string, Guid> pageIdsByFileName) =>
+    System.Text.RegularExpressions.Regex.Replace(markdown, @"\]\(([A-Za-z0-9_]+\.md)(#[a-z0-9-]+)?\)", match =>
+    {
+        var fileName = match.Groups[1].Value;
+        return pageIdsByFileName.TryGetValue(fileName, out var pageId)
+            ? $"](wikilink:{pageId})"
+            : match.Value;
+    });
 
 // Upgrades an already-seeded "SentinelGPT Teacher Panel" workflow (from a version of this app
 // that hardcoded two specific advisor models behind a manual-only trigger) to the current
