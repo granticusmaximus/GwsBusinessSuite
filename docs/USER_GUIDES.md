@@ -9,6 +9,14 @@ This is distinct from the rest of `docs/` (`ARCHITECTURE.md`, `WORKFLOW_AUTOMATI
 `GROWTH_STUDIO.md`, etc.), which document engineering design and delivery history for
 contributors, not day-to-day usage for operators.
 
+**Also live inside Sentinel itself**: every guide below is mirrored into a "User Guides" folder
+in Sentinel (`/admin/sentinel`), so you can browse them from inside the app you're already
+working in, with working links between guides, instead of only reading them as files in this
+repository. That in-app copy is regenerated automatically on every deploy from the exact
+Markdown source here (`Program.cs`'s `EnsureUserGuidesInSentinelAsync` startup step) — editing a
+guide page directly inside Sentinel will be overwritten the next time the app restarts, so treat
+these files as the only real source of truth and edit them here, not there.
+
 **A note on screenshots**: `AUTOMATION_USER_GUIDE.md` includes real screenshots captured from a
 live, logged-in instance. Mandatory MFA on every login (no dev bypass) blocks scripted/automated
 login without a live TOTP secret, so the guides below are text-only for now. They can be
@@ -24,9 +32,9 @@ too, not that the update should be skipped.
 
 ### Home
 
-- **Dashboard** (`/admin`) — your work at a glance. *(not yet written)*
-- **Mission Control** (`/admin/mission-control`) — cross-cutting automation/CRM/affiliate/health
-  overview. *(not yet written)*
+- **Dashboard** (`/admin`) and **Mission Control** (`/admin/mission-control`) — both covered in
+  [Platform Operations](PLATFORM_OPERATIONS_USER_GUIDE.md), alongside the other operational
+  pages they pull data from.
 
 ### Publishing
 
