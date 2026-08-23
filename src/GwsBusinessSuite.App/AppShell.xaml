@@ -6,12 +6,17 @@
     xmlns:local="clr-namespace:GwsBusinessSuite.App"
     Title="GWS Business Suite"
     Shell.NavBarIsVisible="False"
-    Shell.TabBarIsVisible="False"
     FlyoutBehavior="Disabled">
 
-    <ShellContent
-        Title="GWS Business Suite"
-        ContentTemplate="{DataTemplate local:MainPage}"
-        Route="MainPage" />
+    <TabBar>
+        <ShellContent
+            Title="Workspace"
+            ContentTemplate="{DataTemplate local:MainPage}"
+            Route="MainPage" />
+        <ShellContent
+            Title="SentinelGPT"
+            ContentTemplate="{DataTemplate local:SentinelGptPage}"
+            Route="SentinelGptPage" />
+    </TabBar>
 
 </Shell>
