@@ -27,6 +27,9 @@ public static class WikiBlockTypes
     public const string Audio = "audio";
     public const string File = "file";
     public const string Pdf = "pdf";
+    // A visual shortcut to another Sentinel page. The target remains the source of truth;
+    // this block stores its id plus title/icon snapshots so the link can render immediately.
+    public const string PageLink = "page_link";
     // A reference to an existing Sentinel database. The database remains the single source
     // of truth; the block stores only its id and a display-title snapshot so pages can link
     // to the same database without copying schema or rows.
@@ -50,7 +53,7 @@ public static class WikiBlockTypes
     [
         Paragraph, Heading1, Heading2, Heading3, BulletedListItem, NumberedListItem,
         ToDo, Toggle, Quote, Callout, Code, Divider, Image, Embed, Video, Audio, File, Pdf,
-        LinkedDatabase, InlineDatabase,
+        PageLink, LinkedDatabase, InlineDatabase,
         Table, Equation, Breadcrumb, TableOfContents, Button, SyncedBlock, Columns, Tab, Markdown
     ];
 
@@ -100,6 +103,23 @@ public static class WikiBlockJson
     }
 
     public static string Serialize(IReadOnlyList<WikiBlock> blocks) => JsonSerializer.Serialize(blocks, Options);
+
+    public static WikiBlock CreatePageLink(Guid pageId, string title, string? icon = null)
+    {
+        var normalizedTitle = string.IsNullOrWhiteSpace(title) ? "Untitled" : title.Trim();
+        var normalizedIcon = string.IsNullOrWhiteSpace(icon) ? "📄" : icon.Trim();
+        return new WikiBlock(
+            Guid.NewGuid(),
+            WikiBlockTypes.PageLink,
+            0,
+            [new WikiRichTextSpan(normalizedTitle, Link: $"wikilink:{pageId}")],
+            new Dictionary<string, string>
+            {
+                ["pageId"] = pageId.ToString(),
+                ["pageTitle"] = normalizedTitle,
+                ["pageIcon"] = normalizedIcon
+            });
+    }
 
     public static WikiBlock CreateEmpty(string type) => new(
         Guid.NewGuid(), type, 0, [], new Dictionary<string, string>());

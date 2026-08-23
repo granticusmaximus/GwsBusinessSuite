@@ -91,6 +91,8 @@ see [Version history, trash, and duplication](#version-history-trash-and-duplica
 as Markdown, and a star to toggle **Favorite**. In the sidebar tree itself you can drag a page onto
 another to reparent it, use the up/down arrows or drag handle to reorder siblings, and multi-select
 with the row checkboxes to bulk-move or bulk-trash several pages (and their sub-pages) at once.
+Drag a page from that same tree into the open document canvas to insert a visual linked-page card
+without moving the original page. The card opens the existing page; it does not copy its content.
 
 ## The block editor and block types
 
@@ -110,7 +112,7 @@ empty or partial line to open the block menu, grouped as follows:
 | Toggle list | Collapsible content behind an arrow. |
 | Quote | Large text with a vertical accent line. |
 | Divider | A thin horizontal rule. |
-| Link to page | Opens a search menu to insert a shortcut link to another existing page. |
+| Link to page | Lists every page you can access and inserts the selected page as a visual shortcut card. |
 | Callout | Text in a highlighted banner with a custom icon. |
 
 **Media**
@@ -138,6 +140,11 @@ Selecting a block reveals a drag handle with **Duplicate, Indent, Outdent, Move 
 and **Delete**. Selecting text opens an inline formatting toolbar (**Bold, Italic, Strikethrough,
 Inline code**, plus text/background color). Typing `[[` opens page-link autocomplete; typing `@`
 opens a person-mention picker. `Tab` / `Shift+Tab` indent and outdent the current block.
+
+The system-managed User Guides landing page (including if you rename it to “GWS Documentations
+and Tutorials”) is rebuilt on startup with one visual linked-page card for every repository-backed
+guide. Those cards and the pages beneath them stay synchronized with `docs/`; edit the source
+guide rather than the mirrored Sentinel copy.
 
 ## Creating a database and its property types
 

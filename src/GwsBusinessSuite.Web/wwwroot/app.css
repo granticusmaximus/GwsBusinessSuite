@@ -1430,6 +1430,33 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     color: #adb5bd;
     pointer-events: none;
 }
+.wiki-page-link-card {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: .65rem;
+    width: 100%;
+    min-height: 3rem;
+    margin: .25rem 0;
+    padding: .65rem .8rem;
+    border: 1px solid var(--gws-panel-border, #dbe2ea);
+    border-radius: .55rem;
+    background: var(--gws-panel-bg-2, #f8fafc);
+    color: var(--gws-text-strong, #1f2937);
+}
+.wiki-page-link-card a,
+.wiki-page-link-title {
+    min-width: 0;
+    overflow: hidden;
+    color: inherit;
+    font-weight: 650;
+    text-decoration: none;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.wiki-page-link-card a:hover { color: var(--bs-primary, #0d6efd); text-decoration: underline; }
+.wiki-page-link-icon { font-size: 1.25rem; line-height: 1; }
+.wiki-page-link-arrow { color: var(--gws-text-soft, #64748b); font-size: 1.25rem; }
 .wiki-block[data-block-type="heading_1"] .wiki-block-content { font-size: 1.6rem; font-weight: 700; }
 .wiki-block[data-block-type="heading_2"] .wiki-block-content { font-size: 1.3rem; font-weight: 700; }
 .wiki-block[data-block-type="heading_3"] .wiki-block-content { font-size: 1.1rem; font-weight: 700; }
@@ -3050,6 +3077,24 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .wiki-block-content:empty::before { color: #57534e; }
 .sentinel-workspace .wiki-block-content a { color: #fbbf24; text-decoration-color: rgba(251, 191, 36, .45); text-underline-offset: 2px; }
 .sentinel-workspace .wiki-block-content a[href^="wikilink:"] { cursor: pointer; }
+.sentinel-workspace .wiki-page-link-card {
+    border-color: var(--sentinel-border);
+    background: rgba(255, 255, 255, .025);
+    color: #e7e5e4;
+    transition: border-color .12s ease, background .12s ease, transform .12s ease;
+}
+.sentinel-workspace .wiki-page-link-card:hover {
+    border-color: rgba(245, 158, 11, .42);
+    background: rgba(245, 158, 11, .055);
+    transform: translateY(-1px);
+}
+.sentinel-workspace .wiki-page-link-card a { color: #f5f5f4; }
+.sentinel-workspace .wiki-block-editor.wiki-page-drop-active {
+    border-radius: .65rem;
+    outline: 2px dashed rgba(245, 158, 11, .68);
+    outline-offset: .35rem;
+    background: rgba(245, 158, 11, .035);
+}
 
 .wiki-offline-banner {
     position: sticky;

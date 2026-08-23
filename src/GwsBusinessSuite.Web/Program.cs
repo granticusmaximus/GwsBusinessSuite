@@ -104,12 +104,21 @@ builder.Services.AddSignalR();
 // OSINT Watch (Intelligence tab) - reverse-proxies the internal-only osiris sidecar
 // container (docker-compose.yml) so it's reachable through this app's own AdminOnly-gated
 // admin session instead of needing its own public hostname/Cloudflared route. See the
-// OsintProxyAsync routes below for why /_next and /api specifically, not a single prefix.
+// proxy routes below for why /_next, /api, and /data need their own catch-alls.
 builder.Services.AddHttpClient("osiris", client =>
 {
     client.BaseAddress = new Uri("http://osiris:3000/");
     client.Timeout = TimeSpan.FromSeconds(30);
-});
+})
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        // Redirects must return to the browser so OsintProxyService can keep them inside the
+        // authenticated proxy surface. A pooled cookie jar would also leak one upstream session
+        // between different GWS administrators, so the sidecar is deliberately cookie-free.
+        AllowAutoRedirect = false,
+        UseCookies = false
+    });
+builder.Services.AddSingleton<OsintProxyService>();
 
 // Content Studio article generation can take several minutes against Ollama
 // (first-time model load especially). Extend the circuit's disconnect grace
@@ -547,25 +556,60 @@ app.Use(async (context, next) =>
     context.Response.OnStarting(() =>
     {
         var headers = context.Response.Headers;
+        var isOsintDocument = context.Request.Path.StartsWithSegments(OsintProxyService.ShellPrefix);
+        var isOsintHostPage = string.Equals(
+            context.Request.Path.Value,
+            "/admin/osint",
+            StringComparison.OrdinalIgnoreCase);
         headers["X-Content-Type-Options"] = "nosniff";
-        headers["X-Frame-Options"] = "SAMEORIGIN";
-        headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
-        headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=(), payment=()";
-        headers["Content-Security-Policy"] = string.Join(' ', [
-            "default-src 'self';",
-            "script-src 'self' https://cdn.jsdelivr.net;",
-            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com;",
-            "img-src 'self' data: https:;",
-            "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net;",
-            "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net;",
-            "media-src 'self' blob: https:;",
-            "worker-src 'self' blob:;",
-            "frame-src 'self';",
-            "frame-ancestors 'self';",
-            "object-src 'none';",
-            "base-uri 'self';",
-            "form-action 'self';"
-        ]);
+        if (isOsintDocument)
+        {
+            // OSIRIS is a pinned, separately built Next.js application. Its production runtime
+            // uses inline RSC bootstrapping, Web Workers, remote map/media data, and same-origin
+            // API calls. Keep this relaxation confined to the proxied iframe document; the rest
+            // of GWS retains the stricter application-wide policy below.
+            headers.Remove("X-Frame-Options");
+            headers["Referrer-Policy"] = "no-referrer";
+            headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(self), payment=()";
+            headers["Content-Security-Policy"] = string.Join(' ', [
+                "default-src 'self' data: blob: https:;",
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:;",
+                "style-src 'self' 'unsafe-inline' https:;",
+                "img-src 'self' data: blob: https:;",
+                "font-src 'self' data: https:;",
+                "connect-src 'self' data: blob: https: wss: ws:;",
+                "media-src 'self' data: blob: https:;",
+                "worker-src 'self' blob:;",
+                "frame-src 'self' https:;",
+                "frame-ancestors 'self';",
+                "object-src 'none';",
+                "base-uri 'self';",
+                "form-action 'self';"
+            ]);
+        }
+        else
+        {
+            headers["X-Frame-Options"] = "SAMEORIGIN";
+            headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+            headers["Permissions-Policy"] = isOsintHostPage
+                ? "camera=(self), microphone=(self), geolocation=(self), payment=()"
+                : "camera=(self), microphone=(self), geolocation=(), payment=()";
+            headers["Content-Security-Policy"] = string.Join(' ', [
+                "default-src 'self';",
+                "script-src 'self' https://cdn.jsdelivr.net;",
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com;",
+                "img-src 'self' data: https:;",
+                "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net;",
+                "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net;",
+                "media-src 'self' blob: https:;",
+                "worker-src 'self' blob:;",
+                "frame-src 'self';",
+                "frame-ancestors 'self';",
+                "object-src 'none';",
+                "base-uri 'self';",
+                "form-action 'self';"
+            ]);
+        }
         return Task.CompletedTask;
     });
     await next(context);
@@ -653,6 +697,7 @@ app.MapHealthChecks("/health/ready", new()
 }).AllowAnonymous();
 
 app.MapDeveloperApiEndpoints();
+app.MapOsintProxyEndpoints();
 
 // Notion connection webhooks are intentionally anonymous: Notion is the caller. Event
 // requests are authenticated with X-Notion-Signature (HMAC-SHA256 over the exact raw body);
@@ -3801,8 +3846,9 @@ static async Task EnsureUserGuidesInSentinelAsync(IServiceProvider services, IHo
         }, "system", createRevisionCheckpoint: false);
     }
 
-    // Rebuild the folder's own index body as a clickable wikilink list of every guide -
-    // same pattern as QuickNoteService.RebuildFolderIndexAsync.
+    // Rebuild the folder's own index body as a visual linked-page index of every guide.
+    // The folder can be renamed in the UI (its SystemKey remains stable), so this also keeps
+    // a user-named "GWS Documentations and Tutorials" landing page complete on every boot.
     var indexBlocks = new List<WikiBlock>
     {
         new(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0,
@@ -3813,10 +3859,10 @@ static async Task EnsureUserGuidesInSentinelAsync(IServiceProvider services, IHo
                 + "the source Markdown in the repository instead.")],
             new Dictionary<string, string>())
     };
-    indexBlocks.AddRange(guides.Select(guide => new WikiBlock(
-        Guid.NewGuid(), WikiBlockTypes.BulletedListItem, 0,
-        [new WikiRichTextSpan(guide.Title, Link: $"wikilink:{pageIdsByFileName[guide.FileName]}")],
-        new Dictionary<string, string>())));
+    indexBlocks.AddRange(guides.Select(guide => WikiBlockJson.CreatePageLink(
+        pageIdsByFileName[guide.FileName],
+        guide.Title,
+        guide.Icon)));
 
     var freshFolderEntity = await dbContext.WikiPages.FirstAsync(page => page.Id == folderEntity.Id);
     await wikiService.SavePageAsync(new WikiPageEditorModel

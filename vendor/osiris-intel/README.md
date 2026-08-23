@@ -13,8 +13,8 @@ of the same "OSIRIS" name from the same author) that has nothing to do with
 this service and is not part of any documented build path. `intel/server.js`
 itself was read in full before vendoring and is a small (~780-line),
 single-dependency (Express only) sanctions/entity-resolution service with no
-overlap with that unrelated code — see `reference_osint_watch_page` in this
-project's memory for the fuller audit this vendoring decision came out of.
+overlap with that unrelated code. See [`docs/OSINT_WATCH_SECURITY.md`](../../docs/OSINT_WATCH_SECURITY.md)
+for the integration's recorded provenance, controls, and residual risk.
 
 **What it does:** correlates OSINT entities (aircraft, vessel, company,
 person, IP, country) against OpenSanctions' public OFAC SDN list and

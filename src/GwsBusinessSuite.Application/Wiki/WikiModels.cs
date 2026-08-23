@@ -57,4 +57,4 @@ public sealed class WikiRevisionView
 // Returned to wiki-block-editor.js's [[ ]] autocomplete - carries the page id alongside the
 // title so the JS side can insert a wikilink:{id} href directly, with no second round-trip
 // to resolve an id from the chosen title.
-public sealed record WikiLinkSuggestion(Guid Id, string Title);
+public sealed record WikiLinkSuggestion(Guid Id, string Title, string? Icon = null);

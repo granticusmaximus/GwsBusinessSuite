@@ -395,6 +395,9 @@
                             <div class="wiki-tree-row @(nodeDepth == 0 ? "is-top-level" : string.Empty) @(hasChildren ? "has-children" : string.Empty) @((node.IsDatabase ? SelectedDatabaseId == node.Id : SelectedPageId == node.Id) ? "active" : "") @(node.IsArchived ? "wiki-tree-archived" : "") @(_dragOverNodeId == node.Id ? "wiki-tree-drag-over" : "") @(_selectedTreeNodeIds.Contains(node.Id) ? "wiki-tree-multi-selected" : "")"
                                  style="padding-left:@(0.4 + nodeDepth * 1.15)rem;"
                                  draggable="true"
+                                 data-sentinel-page-id="@(node.IsDatabase ? null : node.Id.ToString())"
+                                 data-sentinel-page-title="@(node.IsDatabase ? null : node.Title)"
+                                 data-sentinel-page-icon="@(node.IsDatabase ? null : string.IsNullOrWhiteSpace(node.Icon) ? "📄" : node.Icon)"
                                  @ondragstart="() => StartDragNode(node)"
                                  @ondragend="EndDragNode"
                                  @ondragenter="() => _dragOverNodeId = node.Id"
@@ -2205,6 +2208,13 @@
         Task.FromResult(WikiMarkdownHelper.SearchLinkSuggestions(query, WikiPages));
 
     [JSInvokable]
+    public Task<IReadOnlyList<WikiLinkSuggestion>> ListAllWikiLinkSuggestions() =>
+        Task.FromResult(WikiMarkdownHelper.SearchLinkSuggestions(
+            string.Empty,
+            WikiPages,
+            maxResults: int.MaxValue));
+
+    [JSInvokable]
     public async Task<IReadOnlyList<LinkedDatabaseSuggestion>> SearchLinkedDatabaseSuggestions(string query)
     {
         var normalized = query.Trim();
@@ -2812,7 +2822,7 @@
         if (SelectedDatabaseId is null && !_blockEditorInitialized)
         {
             _blockEditorRef ??= DotNetObjectReference.Create(this);
-            _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=8");
+            _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=9");
             await _blockEditorModule.InvokeVoidAsync(
                 "initialize",
                 _blockEditorContainer,

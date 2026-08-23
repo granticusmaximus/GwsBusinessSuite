@@ -6,6 +6,7 @@
 @inject IWikiDatabaseService WikiDatabaseService
 @inject INotionSyncService NotionSyncService
 @inject IWikiService WikiService
+@inject ISentinelAccessService SentinelAccessService
 @inject ISentinelWorkspaceService SentinelWorkspaceService
 @inject IMediaLibraryService MediaLibraryService
 @inject ICurrentUserAccessor CurrentUserAccessor
@@ -305,7 +306,7 @@
         if (!_initialized)
         {
             _dotNetRef = DotNetObjectReference.Create(this);
-            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=8");
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=9");
             await _module.InvokeVoidAsync("initialize", _editorContainer, _dotNetRef, _blocksJson);
             _initialized = true;
         }
@@ -398,7 +399,30 @@
 
     [JSInvokable]
     public async Task<IReadOnlyList<WikiLinkSuggestion>> SearchWikiLinkSuggestions(string query) =>
-        WikiMarkdownHelper.SearchLinkSuggestions(query, await WikiService.ListPagesAsync());
+        WikiMarkdownHelper.SearchLinkSuggestions(query, await ListAccessibleWikiPagesAsync());
+
+    [JSInvokable]
+    public async Task<IReadOnlyList<WikiLinkSuggestion>> ListAllWikiLinkSuggestions() =>
+        WikiMarkdownHelper.SearchLinkSuggestions(
+            string.Empty,
+            await ListAccessibleWikiPagesAsync(),
+            maxResults: int.MaxValue);
+
+    private async Task<IReadOnlyList<WikiPage>> ListAccessibleWikiPagesAsync()
+    {
+        var pages = await WikiService.ListPagesAsync();
+        var targets = pages
+            .Select(page => new SentinelAccessTarget(page.Id, IsDatabase: false))
+            .ToList();
+        var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        var accessibleTargets = await SentinelAccessService.GetAccessibleTargetsAsync(
+            targets,
+            username,
+            SentinelAccessLevels.View);
+        return pages
+            .Where(page => accessibleTargets.Contains(new SentinelAccessTarget(page.Id, IsDatabase: false)))
+            .ToList();
+    }
 
     [JSInvokable]
     public Task NavigateToWikiPageId(string pageId) =>

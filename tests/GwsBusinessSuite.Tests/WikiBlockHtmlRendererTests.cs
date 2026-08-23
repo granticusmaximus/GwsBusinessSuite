@@ -7,6 +7,26 @@ namespace GwsBusinessSuite.Tests;
 public sealed class WikiBlockHtmlRendererTests
 {
     [Fact]
+    public void RenderBlock_ShouldRenderAVisualPageLinkWithoutTrustingDisplaySnapshots()
+    {
+        var pageId = Guid.NewGuid();
+        var block = WikiBlockJson.CreatePageLink(pageId, "Deploy <script>", "📘") with
+        {
+            IndentLevel = 1
+        };
+
+        var html = WikiBlockHtmlRenderer.RenderBlock(block);
+
+        WikiBlockTypes.All.Should().Contain(WikiBlockTypes.PageLink);
+        block.RichText.Should().ContainSingle(span => span.Link == $"wikilink:{pageId}");
+        html.Should().Contain("class=\"wiki-page-link-card\"");
+        html.Should().Contain($"href=\"wikilink:{pageId}\"");
+        html.Should().Contain("Deploy &lt;script&gt;").And.NotContain("Deploy <script>");
+        html.Should().Contain("&#128216;");
+        html.Should().Contain("margin-left:1.5rem");
+    }
+
+    [Fact]
     public void RenderBlock_ShouldRenderLinkedDatabaseReferenceWithoutCopyingDatabaseContent()
     {
         var databaseId = Guid.NewGuid();

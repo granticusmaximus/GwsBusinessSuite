@@ -14,6 +14,7 @@ const DRAFT_STORAGE_PREFIX = 'sentinel:block-draft:v1:';
 const MAX_PERSISTED_HISTORY_CHARS = 1_500_000;
 const MAX_PERSISTED_DRAFT_CHARS = 1_500_000;
 const MAX_DRAFT_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+const SENTINEL_PAGE_DRAG_TYPE = 'application/x-gws-sentinel-page';
 let suggestionMenuSequence = 0;
 let tabEditorSequence = 0;
 
@@ -61,7 +62,7 @@ const BLOCK_TYPES = [
 // the menu at open time from GetSuggestedBlockTemplates).
 const CREATE_MENU_TYPES = new Set(['__create_page', '__create_database']);
 const MEDIA_TYPES = new Set(['image', 'embed', 'video', 'audio', 'pdf', 'file']);
-const TEXTLESS_TYPES = new Set(['divider', 'linked_database', 'inline_database', 'breadcrumb', 'table_of_contents', ...MEDIA_TYPES]);
+const TEXTLESS_TYPES = new Set(['divider', 'page_link', 'linked_database', 'inline_database', 'breadcrumb', 'table_of_contents', ...MEDIA_TYPES]);
 const RICH_TEXT_COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
 
 export function initialize(container, dotNetRef, initialBlocksJson, historyKey = null) {
@@ -142,6 +143,12 @@ export function initialize(container, dotNetRef, initialBlocksJson, historyKey =
     document.addEventListener('mouseup', state.blockSelectUpHandler = () => { state.blockDragSelect = null; });
     container.addEventListener('copy', event => onBlockSelectionCopy(state, event));
     container.addEventListener('cut', event => onBlockSelectionCut(state, event));
+    document.addEventListener('dragstart', state.externalPageDragStartHandler = event => beginExternalPageDrag(event));
+    container.addEventListener('dragenter', state.externalPageDragEnterHandler = event => onExternalPageDragOver(state, event));
+    container.addEventListener('dragover', state.externalPageDragOverHandler = event => onExternalPageDragOver(state, event));
+    container.addEventListener('dragleave', state.externalPageDragLeaveHandler = event => onExternalPageDragLeave(state, event));
+    container.addEventListener('drop', state.externalPageDropHandler = event => onExternalPageDrop(state, event));
+    document.addEventListener('dragend', state.externalPageDragEndHandler = () => container.classList.remove('wiki-page-drop-active'));
     document.addEventListener('mousedown', state.outsideClickHandler = event => closeFloatingMenus(state, event));
     window.addEventListener('resize', state.resizeHandler = () => repositionSuggestionMenu(state));
     window.addEventListener('offline', state.offlineHandler = () => setOfflineState(state, true));
@@ -422,6 +429,12 @@ export function dispose(container) {
     if (state.outsideClickHandler) document.removeEventListener('mousedown', state.outsideClickHandler);
     if (state.blockSelectMoveHandler) document.removeEventListener('mousemove', state.blockSelectMoveHandler);
     if (state.blockSelectUpHandler) document.removeEventListener('mouseup', state.blockSelectUpHandler);
+    if (state.externalPageDragStartHandler) document.removeEventListener('dragstart', state.externalPageDragStartHandler);
+    if (state.externalPageDragEnterHandler) container.removeEventListener('dragenter', state.externalPageDragEnterHandler);
+    if (state.externalPageDragOverHandler) container.removeEventListener('dragover', state.externalPageDragOverHandler);
+    if (state.externalPageDragLeaveHandler) container.removeEventListener('dragleave', state.externalPageDragLeaveHandler);
+    if (state.externalPageDropHandler) container.removeEventListener('drop', state.externalPageDropHandler);
+    if (state.externalPageDragEndHandler) document.removeEventListener('dragend', state.externalPageDragEndHandler);
     if (state.resizeHandler) window.removeEventListener('resize', state.resizeHandler);
     if (state.offlineHandler) window.removeEventListener('offline', state.offlineHandler);
     if (state.onlineHandler) window.removeEventListener('online', state.onlineHandler);
@@ -448,6 +461,11 @@ function createBlockElement(block, state) {
     if (block.type === 'to_do' && block.props && block.props.checked === 'true') el.dataset.checked = 'true';
     if (block.type === 'numbered_list_item') el.dataset.number = (block.props && block.props.number) || '';
     if (block.type === 'toggle') el.dataset.open = block.props && block.props.open === 'true' ? 'true' : 'false';
+    if (block.type === 'page_link') {
+        el.dataset.pageId = (block.props && block.props.pageId) || '';
+        el.dataset.pageTitle = (block.props && block.props.pageTitle) || block.richText?.[0]?.text || 'Untitled';
+        el.dataset.pageIcon = (block.props && block.props.pageIcon) || '📄';
+    }
     if (MEDIA_TYPES.has(block.type)) {
         el.dataset.url = (block.props && block.props.url) || '';
         el.dataset.fileName = (block.props && block.props.fileName) || '';
@@ -598,6 +616,11 @@ function createBlockBody(block, state) {
 
     if (MEDIA_TYPES.has(block.type)) {
         body.appendChild(createMediaBody(block, state));
+        return body;
+    }
+
+    if (block.type === 'page_link') {
+        body.appendChild(createPageLinkBody(block));
         return body;
     }
 
@@ -1371,6 +1394,35 @@ function inlineViewIcon(type) {
         case 'list': return 'bi-list-ul';
         default: return 'bi-table';
     }
+}
+
+function createPageLinkBody(block) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'wiki-block-content wiki-page-link-card';
+
+    const pageId = String((block.props && block.props.pageId) || '').trim();
+    const title = String((block.props && block.props.pageTitle)
+        || block.richText?.[0]?.text
+        || 'Untitled').trim() || 'Untitled';
+    const pageIcon = String((block.props && block.props.pageIcon) || '📄').trim() || '📄';
+
+    const icon = document.createElement('span');
+    icon.className = 'wiki-page-link-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = pageIcon;
+
+    const titleElement = document.createElement(isUuid(pageId) ? 'a' : 'span');
+    if (titleElement instanceof HTMLAnchorElement) titleElement.href = `wikilink:${pageId}`;
+    titleElement.className = 'wiki-page-link-title';
+    titleElement.textContent = title;
+
+    const arrow = document.createElement('span');
+    arrow.className = 'wiki-page-link-arrow';
+    arrow.setAttribute('aria-hidden', 'true');
+    arrow.textContent = '›';
+
+    wrapper.append(icon, titleElement, arrow);
+    return wrapper;
 }
 
 function createLinkedDatabaseBody(block, state) {
@@ -2437,24 +2489,52 @@ function insertAtCaret(state, content, node) {
 }
 
 function openLinkToPagePicker(state, content) {
-    state.dotNetRef.invokeMethodAsync('SearchWikiLinkSuggestions', '').then(suggestions => {
+    state.dotNetRef.invokeMethodAsync('ListAllWikiLinkSuggestions').then(suggestions => {
         if (!suggestions || suggestions.length === 0) return;
         openSuggestionMenu(state, {
             kind: 'slash',
             anchor: content,
             ariaLabel: 'Link to a Sentinel page',
             items: suggestions,
-            icon: () => '📄',
+            icon: suggestion => suggestion.icon || '📄',
             label: suggestion => suggestion.title,
             description: () => 'Sentinel page',
-            commit: suggestion => {
-                const anchor = document.createElement('a');
-                anchor.href = `wikilink:${suggestion.id}`;
-                anchor.textContent = suggestion.title;
-                insertAtCaret(state, content, anchor);
-            }
+            commit: suggestion => replaceWithPageLinkBlock(state, content.closest('.wiki-block'), suggestion)
         });
     }).catch(() => { /* circuit may be gone */ });
+}
+
+function pageLinkBlock(page) {
+    const pageId = String(page?.id || '').trim();
+    const pageTitle = String(page?.title || '').trim() || 'Untitled';
+    const pageIcon = String(page?.icon || '📄').trim() || '📄';
+    return {
+        id: crypto.randomUUID(),
+        type: 'page_link',
+        indentLevel: 0,
+        richText: [{ text: pageTitle, link: `wikilink:${pageId}` }],
+        props: { pageId, pageTitle, pageIcon }
+    };
+}
+
+function replaceWithPageLinkBlock(state, blockEl, page) {
+    if (!blockEl || !isUuid(page?.id)) return;
+    const block = pageLinkBlock(page);
+    block.indentLevel = blockIndent(blockEl);
+    const created = createBlockElement(block, state);
+    blockEl.replaceWith(created);
+
+    let next = created.nextElementSibling;
+    if (!next) {
+        const trailingBlock = emptyBlock('paragraph');
+        trailingBlock.indentLevel = block.indentLevel;
+        next = createBlockElement(trailingBlock, state);
+        created.after(next);
+    }
+
+    refreshBlockPresentation(state.container);
+    focusBlock(next);
+    notifyChanged(state);
 }
 
 function openMentionPersonPicker(state, content) {
@@ -2773,6 +2853,7 @@ function openSuggestionMenu(state, configuration) {
         option.addEventListener('mouseenter', () => setActiveSuggestion(state, index));
         option.addEventListener('mousedown', event => {
             event.preventDefault();
+            event.stopPropagation();
             commitSuggestion(state, index);
         });
         menu.appendChild(option);
@@ -2895,6 +2976,99 @@ function positionMenu(menu, anchorEl) {
     menu.style.left = `${window.scrollX + left}px`;
     menu.style.top = `${window.scrollY + rect.bottom}px`;
     menu.style.zIndex = '2000';
+}
+
+// ---- Drag a workspace page into the document ----------------------------
+
+function isUuid(value) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+        .test(String(value || '').trim());
+}
+
+function beginExternalPageDrag(event) {
+    const row = event.target instanceof Element
+        ? event.target.closest('.wiki-tree-row[data-sentinel-page-id]')
+        : null;
+    if (!row || !event.dataTransfer) return;
+
+    const page = {
+        id: row.dataset.sentinelPageId,
+        title: row.dataset.sentinelPageTitle || 'Untitled',
+        icon: row.dataset.sentinelPageIcon || '📄'
+    };
+    if (!isUuid(page.id)) return;
+
+    event.dataTransfer.setData(SENTINEL_PAGE_DRAG_TYPE, JSON.stringify(page));
+    event.dataTransfer.setData('text/plain', page.title);
+    event.dataTransfer.effectAllowed = 'copyMove';
+}
+
+function hasExternalPageDrag(event) {
+    return Boolean(event.dataTransfer)
+        && [...event.dataTransfer.types].some(type => type.toLowerCase() === SENTINEL_PAGE_DRAG_TYPE);
+}
+
+function onExternalPageDragOver(state, event) {
+    if (!hasExternalPageDrag(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'copy';
+    state.container.classList.add('wiki-page-drop-active');
+}
+
+function onExternalPageDragLeave(state, event) {
+    if (event.relatedTarget instanceof Node && state.container.contains(event.relatedTarget)) return;
+    state.container.classList.remove('wiki-page-drop-active');
+}
+
+function onExternalPageDrop(state, event) {
+    if (!hasExternalPageDrag(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    state.container.classList.remove('wiki-page-drop-active');
+
+    let page;
+    try { page = JSON.parse(event.dataTransfer.getData(SENTINEL_PAGE_DRAG_TYPE)); }
+    catch { return; }
+    if (!isUuid(page?.id)) return;
+
+    page = {
+        id: String(page.id).trim(),
+        title: String(page.title || '').trim().slice(0, 500) || 'Untitled',
+        icon: String(page.icon || '📄').trim().slice(0, 16) || '📄'
+    };
+    insertDroppedPageLink(state, event.clientY, page);
+}
+
+function insertDroppedPageLink(state, clientY, page) {
+    const block = pageLinkBlock(page);
+    const created = createBlockElement(block, state);
+    const target = topLevelBlockAtY(state.container, clientY);
+
+    if (!target) {
+        state.container.appendChild(created);
+    } else if (target.dataset.blockType === 'paragraph'
+        && (target.querySelector('.wiki-block-content')?.textContent || '').trim().length === 0) {
+        block.indentLevel = blockIndent(target);
+        created.dataset.indent = String(block.indentLevel);
+        applyIndentStyle(created);
+        target.replaceWith(created);
+    } else {
+        block.indentLevel = blockIndent(target);
+        created.dataset.indent = String(block.indentLevel);
+        applyIndentStyle(created);
+        const rect = target.getBoundingClientRect();
+        if (clientY > rect.top + (rect.height / 2)) {
+            const branch = getBlockBranch(target);
+            branch[branch.length - 1].after(created);
+        } else {
+            target.before(created);
+        }
+    }
+
+    refreshBlockPresentation(state.container);
+    created.scrollIntoView({ block: 'nearest' });
+    notifyChanged(state);
 }
 
 // ---- Drag-to-reorder (Pointer Events, matching automation-editor.js) -----
@@ -3416,6 +3590,11 @@ function serializeBlock(blockEl) {
         if (blockEl.dataset.notionBlockId) props.notionBlockId = blockEl.dataset.notionBlockId;
         if (blockEl.dataset.mediaKind) props.mediaKind = blockEl.dataset.mediaKind;
     }
+    if (type === 'page_link') {
+        props.pageId = blockEl.dataset.pageId || '';
+        props.pageTitle = blockEl.dataset.pageTitle || 'Untitled';
+        props.pageIcon = blockEl.dataset.pageIcon || '📄';
+    }
     if (type === 'linked_database' || type === 'inline_database') {
         props.databaseId = blockEl.dataset.databaseId || '';
         props.databaseTitle = blockEl.dataset.databaseTitle || '';
@@ -3425,7 +3604,9 @@ function serializeBlock(blockEl) {
     }
 
     const contentEl = blockEl.querySelector('.wiki-block-content');
-    const richText = type === 'table'
+    const richText = type === 'page_link'
+        ? [{ text: props.pageTitle, link: `wikilink:${props.pageId}` }]
+        : type === 'table'
         ? [{ text: serializeTable(blockEl) }]
         : type === 'columns'
             ? [{

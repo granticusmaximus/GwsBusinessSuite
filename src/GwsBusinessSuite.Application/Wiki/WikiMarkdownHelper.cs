@@ -46,7 +46,7 @@ public static class WikiMarkdownHelper
             : pages.Where(p => p.Title.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
 
         return candidates
-            .Select(p => new WikiLinkSuggestion(p.Id, p.Title))
+            .Select(p => new WikiLinkSuggestion(p.Id, p.Title, p.Icon))
             .Take(maxResults)
             .ToList();
     }

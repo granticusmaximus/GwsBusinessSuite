@@ -134,6 +134,13 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
                             if (method === 'CreateSyncedBlockSource') {
                                 return Promise.resolve('33333333-3333-3333-3333-333333333333');
                             }
+                            if (method === 'ListAllWikiLinkSuggestions') {
+                                return Promise.resolve(Array.from({ length: 12 }, (_, index) => ({
+                                    id: '22222222-2222-4222-8222-222222222222',
+                                    title: `Page ${index + 1}`,
+                                    icon: '📘'
+                                })));
+                            }
                             return Promise.resolve([]);
                         }
                     },
@@ -179,13 +186,20 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
         var templateCallJson = await page.EvaluateAsync<string>("() => JSON.stringify(window.calls[window.calls.length - 1])");
         templateCallJson.Should().Be("[\"InsertBlockTemplateById\",\"11111111-1111-1111-1111-111111111111\"]");
 
-        // "Link to page" opens a second search menu in place (reusing SearchWikiLinkSuggestions)
-        // rather than converting the block's type - picking a result inserts a wikilink anchor.
+        // "Link to page" asks for the complete page list (not the eight-result typeahead cap)
+        // and turns the selected result into a durable visual page-link block.
         await page.Locator(".wiki-block-add").Last.ClickAsync(new LocatorClickOptions { Force = true });
         await page.Locator(".wiki-editor-menu-item:has(.wiki-editor-menu-label:text-is(\"Link to page\"))")
             .ClickAsync(new LocatorClickOptions { Force = true });
         var linkCallJson = await page.EvaluateAsync<string>("() => JSON.stringify(window.calls[window.calls.length - 1])");
-        linkCallJson.Should().Be("[\"SearchWikiLinkSuggestions\",\"\"]");
+        linkCallJson.Should().Be("[\"ListAllWikiLinkSuggestions\"]");
+        var pageLinkMenu = page.GetByRole(AriaRole.Listbox, new() { Name = "Link to a Sentinel page" });
+        await Expect(pageLinkMenu.GetByRole(AriaRole.Option)).ToHaveCountAsync(12);
+        await pageLinkMenu.GetByRole(AriaRole.Option).Last.ClickAsync();
+        var pageLinkBlocks = WikiBlockJson.ParseBlocks(await page.EvaluateAsync<string>(
+            "() => window.sentinelBlockEditor.getBlocksJson(document.querySelector('#editor'))"));
+        pageLinkBlocks.Should().ContainSingle(block => block.Type == WikiBlockTypes.PageLink)
+            .Which.Props.Should().Contain(new KeyValuePair<string, string>("pageTitle", "Page 12"));
 
         // "Mention a person" opens a second search menu the same way, reusing SearchMentionSuggestions.
         await page.Locator(".wiki-block-add").Last.ClickAsync(new LocatorClickOptions { Force = true });
@@ -226,6 +240,62 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
             await Expect(page.Locator(".wiki-block[data-block-type]").Last).ToHaveAttributeAsync("data-block-type", expectedType);
             await Expect(page.Locator(".wiki-block").Last.Locator("input")).ToHaveAttributeAsync("placeholder", expectedPlaceholder);
         }
+    }
+
+    [Fact]
+    public async Task WorkspacePageDrag_ShouldInsertAVisibleLinkedPageBlock()
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "text/html",
+            Body = """
+                <div class="wiki-tree-row"
+                     draggable="true"
+                     data-sentinel-page-id="44444444-4444-4444-8444-444444444444"
+                     data-sentinel-page-title="Deployment Tutorial"
+                     data-sentinel-page-icon="&#x1F4D8;">Deployment Tutorial</div>
+                <main class="sentinel-workspace">
+                    <div id="editor" class="wiki-block-editor"></div>
+                </main>
+                """
+        }));
+        await page.GotoAsync("http://localhost/editor");
+
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+        await page.EvaluateAsync(
+            """
+            () => window.sentinelBlockEditor.initialize(
+                document.querySelector('#editor'),
+                { invokeMethodAsync: () => Promise.resolve([]) },
+                '[]')
+            """);
+
+        await page.Locator(".wiki-tree-row").DragToAsync(page.Locator(".wiki-block-content"));
+
+        var linkedBlock = page.Locator(".wiki-block[data-block-type='page_link']");
+        await Expect(linkedBlock).ToHaveCountAsync(1);
+        await Expect(linkedBlock.Locator(".wiki-page-link-title")).ToHaveTextAsync("Deployment Tutorial");
+        await Expect(linkedBlock.Locator("a")).ToHaveAttributeAsync(
+            "href",
+            "wikilink:44444444-4444-4444-8444-444444444444");
+
+        var blocks = WikiBlockJson.ParseBlocks(await page.EvaluateAsync<string>(
+            "() => window.sentinelBlockEditor.getBlocksJson(document.querySelector('#editor'))"));
+        var pageLink = blocks.Should().ContainSingle().Which;
+        pageLink.Type.Should().Be(WikiBlockTypes.PageLink);
+        pageLink.Props["pageTitle"].Should().Be("Deployment Tutorial");
+        pageLink.Props["pageIcon"].Should().Be("📘");
+        pageLink.RichText.Should().ContainSingle(span =>
+            span.Link == "wikilink:44444444-4444-4444-8444-444444444444");
     }
 
     [Fact]

@@ -2,10 +2,10 @@
 
 This is the complete guide to GWS Business Suite's Intelligence cluster: **Media Watch**
 (`/admin/news-intelligence`), **Civic Watch** (`/admin/government-intelligence`), the **Podcast
-Directory** (`/admin/podcasts`), and **Business Intelligence** (`/admin/business-intelligence`).
-These four pages don't share a database schema, but they share a shape: each one pulls in outside
-signal (news, government sources, podcast catalogs) or your own suite data, and turns it into
-something you can scan in a few seconds.
+Directory** (`/admin/podcasts`), **Business Intelligence** (`/admin/business-intelligence`), and
+**OSINT Watch** (`/admin/osint`). These five pages don't share a database schema, but they share a
+shape: each one pulls in outside signal (news, government sources, podcast catalogs, public OSINT)
+or your own suite data, and turns it into something you can scan in a few seconds.
 
 This guide is text-only (no screenshots) — see the note at the end of [`docs/USER_GUIDES.md`](USER_GUIDES.md)
 for why, and how that may change later.
@@ -22,8 +22,9 @@ for why, and how that may change later.
 8. [Podcast Directory: discovering and saving shows](#podcast-directory-discovering-and-saving-shows)
 9. [Podcast Directory: episodes, playback, and progress](#podcast-directory-episodes-playback-and-progress)
 10. [Business Intelligence: building and pinning a chart](#business-intelligence-building-and-pinning-a-chart)
-11. [Who can see what](#who-can-see-what)
-12. [Known limitations](#known-limitations)
+11. [OSINT Watch: map and public-source tools](#osint-watch-map-and-public-source-tools)
+12. [Who can see what](#who-can-see-what)
+13. [Known limitations](#known-limitations)
 
 ---
 
@@ -36,11 +37,13 @@ Each page has its own vocabulary, but two ideas repeat everywhere in this cluste
   topics, not one per staff member. The two exceptions are Business Intelligence dashboards
   (each admin's pinned charts belong only to them) and podcast listen progress (whether *you*
   finished an episode is tracked per staff account, even though the saved show itself is shared).
-- **Background refresh vs. on-demand refresh.** Every page in this cluster has a scheduled
-  background job that keeps its data from going stale even if nobody opens the page, plus a
-  manual "Refresh" button for when you want the latest right now. Both paths share the same
-  lock, so a manual refresh you trigger while the background job happens to be running waits
-  briefly and then tells you to try again rather than running twice at once.
+  OSINT Watch reads live public sources and can keep browser-local map preferences, but it does
+  not save OSINT results into GWS or expose them to another staff account.
+- **Background refresh vs. on-demand refresh.** The four native suite pages either refresh their
+  source data on a schedule, recompute it when the page loads, or offer a manual refresh action.
+  Where a scheduled and manual refresh share a source, they also share a lock so two runs cannot
+  overwrite each other. OSINT Watch is different: the embedded dashboard polls its public sources
+  while it is open rather than using a GWS background job.
 
 ## Media Watch: watched topics and the sidebar
 
@@ -242,12 +245,30 @@ different date ranges, GWS still only queries the deals table once per page load
 range any of those widgets needs) and applies each widget's own narrower range afterward, rather
 than re-scanning the table once per widget.
 
+## OSINT Watch: map and public-source tools
+
+OSINT Watch (`/admin/osint`) embeds the OSIRIS public-source intelligence dashboard inside the
+admin portal. It combines live or recently reported aircraft, vessels, satellites, traffic
+cameras, seismic and weather events, conflict data, cyber indicators, infrastructure, and other
+open-source layers on one map. Availability and update timing vary by source.
+
+Use the map's layer and tool controls to narrow the signals you want to inspect, select a marker
+for its available source details, and use **OSIRIS reference** at the top of the page for the
+upstream dashboard's feature and data-source reference. Some layers refresh while the dashboard
+is open; an individual upstream source can fail without taking down every other layer.
+
+Treat every match as an investigative lead, not a confirmed fact. Verify consequential findings
+against an authoritative source before acting on them. Active RECON scanning is intentionally
+unavailable in this deployment, and the dashboard must not be used to enter client data, API keys,
+passwords, or other private material. For the reviewed build and integration boundary, see
+[`OSINT_WATCH_SECURITY.md`](OSINT_WATCH_SECURITY.md).
+
 ## Who can see what
 
-All four pages require you to be signed in as an admin. Three of them (Media Watch, Civic Watch,
-Business Intelligence) are restricted to the **AdminOnly** policy specifically; the Podcast
-Directory uses the slightly broader **ContributorAccess** policy, so a Contributor-level teammate
-who isn't a full admin can still browse and manage the shared podcast library.
+All five pages require a staff sign-in. Four of them (Media Watch, Civic Watch, Business
+Intelligence, and OSINT Watch) are restricted to the **AdminOnly** policy specifically; the
+Podcast Directory uses the slightly broader **ContributorAccess** policy, so a Contributor-level
+teammate who isn't a full admin can still browse and manage the shared podcast library.
 
 ## Known limitations
 
@@ -276,3 +297,7 @@ who isn't a full admin can still browse and manage the shared podcast library.
 - **Business Intelligence chart rendering is hand-built**, not backed by a charting library — bar
   and line visualizations are simple SVG/CSS constructs, which is why data is capped to a small
   number of points (e.g. top 12 advertisers/articles) rather than rendering dense datasets.
+- **OSINT Watch depends on third-party public feeds and two internal containers.** A feed may be
+  stale, incomplete, misidentified, rate-limited, or temporarily unavailable, and the embedded
+  dashboard requires both the `osiris` and `osiris-intel` services to be healthy. Active RECON
+  scanning is not configured in GWS.

@@ -118,6 +118,7 @@ public static class WikiBlockHtmlRenderer
             WikiBlockTypes.Audio => RenderMediaTag(block, "audio"),
             WikiBlockTypes.Pdf => RenderPdf(block),
             WikiBlockTypes.File => RenderFile(block),
+            WikiBlockTypes.PageLink => RenderPageLink(block, indentStyle),
             WikiBlockTypes.LinkedDatabase => RenderLinkedDatabase(block, indentStyle),
             WikiBlockTypes.InlineDatabase => RenderLinkedDatabase(block, indentStyle, isInline: true),
             WikiBlockTypes.Table => RenderTable(block, indentStyle),
@@ -136,6 +137,32 @@ public static class WikiBlockHtmlRenderer
                 MarkdownPipeline),
             _ => $"<p{indentStyle}>{content}</p>"
         };
+    }
+
+    private static string RenderPageLink(WikiBlock block, string indentStyle)
+    {
+        var pageId = block.Props.GetValueOrDefault("pageId");
+        if (!Guid.TryParse(pageId, out var parsedPageId))
+        {
+            return string.Empty;
+        }
+
+        var title = block.Props.GetValueOrDefault("pageTitle");
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            title = block.PlainText.Length == 0 ? "Untitled" : block.PlainText;
+        }
+
+        var icon = block.Props.GetValueOrDefault("pageIcon");
+        if (string.IsNullOrWhiteSpace(icon))
+        {
+            icon = "📄";
+        }
+
+        return $"<div class=\"wiki-page-link-card\"{indentStyle}>"
+            + $"<span class=\"wiki-page-link-icon\" aria-hidden=\"true\">{WebUtility.HtmlEncode(icon)}</span>"
+            + $"<a href=\"wikilink:{parsedPageId}\">{WebUtility.HtmlEncode(title)}</a>"
+            + "<span class=\"wiki-page-link-arrow\" aria-hidden=\"true\">›</span></div>";
     }
 
     public static string RenderPage(IReadOnlyList<WikiBlock> blocks, IReadOnlyList<WikiPage>? pagesForWikiLinks = null)

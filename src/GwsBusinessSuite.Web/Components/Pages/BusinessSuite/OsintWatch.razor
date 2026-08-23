@@ -1,0 +1,32 @@
+@page "/admin/osint"
+@attribute [Authorize(Policy = "AdminOnly")]
+
+<PageTitle>OSINT Watch</PageTitle>
+
+<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+        <h1>OSINT Watch</h1>
+        <p>Live aircraft, maritime, cyber, geographic, and public-source intelligence in one map.</p>
+    </div>
+    <a class="btn btn-outline-secondary" href="/admin/osint-root/docs" target="_blank" rel="noopener">
+        <i class="bi bi-book me-1" aria-hidden="true"></i>OSIRIS reference
+    </a>
+</div>
+
+<div class="alert alert-info d-flex gap-2 align-items-start" role="note">
+    <i class="bi bi-info-circle-fill mt-1" aria-hidden="true"></i>
+    <div>
+        OSINT Watch correlates public third-party sources. Treat matches as leads to verify, not as
+        confirmed facts. Active RECON scanning is intentionally unavailable in this deployment.
+    </div>
+</div>
+
+<section class="osint-watch-frame-shell" aria-label="Embedded OSINT Watch workspace">
+    <iframe
+        class="osint-watch-frame"
+        src="/admin/osint-root/"
+        title="OSINT Watch intelligence workspace"
+        referrerpolicy="no-referrer"
+        allow="geolocation 'self'; fullscreen 'self'"
+        allowfullscreen></iframe>
+</section>
