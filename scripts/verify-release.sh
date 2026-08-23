@@ -144,6 +144,8 @@ fi
 run_check "Restore" dotnet restore GwsBusinessSuite.slnx
 run_check "Dependency vulnerability audit" \
   dotnet list GwsBusinessSuite.slnx package --vulnerable --include-transitive --no-restore
+run_check "OSINT sidecar dependency install" \
+  npm ci --prefix vendor/osiris-intel --omit=dev --ignore-scripts --no-audit --no-fund
 run_check "Release build" \
   dotnet build GwsBusinessSuite.slnx -c Release --no-restore --disable-build-servers -m:1
 

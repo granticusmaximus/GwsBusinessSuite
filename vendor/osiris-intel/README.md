@@ -24,9 +24,11 @@ are restricted to an explicit domain allowlist (`query.wikidata.org`,
 inputs are sanitized before being interpolated into SPARQL queries, and
 requests are rate-limited per client IP. No API keys or secrets required.
 
-**Provenance:** unmodified copy of `intel/server.js`, `intel/package.json`,
-and `intel/Dockerfile` as of the commit reviewed when this was vendored
-(2026-08). MIT licensed - `LICENSE` here is the upstream repository's license
-file, carried forward per its terms. If upstream ships a real fix or feature
-in this file later, re-vendor deliberately (re-fetch, re-read in full, then
-replace) rather than assuming a diff is safe to apply blindly.
+**Provenance:** `intel/server.js` and `intel/package.json` are unmodified copies
+from the commit reviewed when this was vendored (2026-08). The local Dockerfile
+requires the committed `package-lock.json`, which pins the reviewed package's
+complete dependency graph and lets `npm ci` fail before deployment if the
+manifest and lockfile drift apart. MIT licensed - `LICENSE` here is the upstream
+repository's license file, carried forward per its terms. If upstream ships a
+real fix or feature later, re-vendor deliberately (re-fetch, re-read in full,
+then replace) rather than assuming a diff is safe to apply blindly.
