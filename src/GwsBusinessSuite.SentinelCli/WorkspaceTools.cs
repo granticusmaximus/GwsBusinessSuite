@@ -35,6 +35,18 @@ public sealed class ConsoleUserApproval(bool autoApprove) : IUserApproval
     }
 }
 
+// /fleet's WorkspaceTools instance is always readOnly, which already keeps every mutating tool
+// out of Definitions and out of ExecuteAsync's dispatch (see the "when !EffectiveReadOnly" guards
+// below) - approval should therefore be structurally unreachable for a fleet run. Using this
+// instead of ConsoleUserApproval turns that from an assumption into an assertion: if a future
+// change to those guards ever lets a mutation through in read-only mode, this throws loudly
+// instead of silently prompting N concurrent agents against the same stdin.
+public sealed class UnreachableApproval : IUserApproval
+{
+    public Task<bool> ConfirmAsync(string action, string details, CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("Approval was requested on a read-only WorkspaceTools instance.");
+}
+
 public sealed class WorkspaceTools
 {
     private const int MaxFileBytes = 1_000_000;
@@ -71,16 +83,27 @@ public sealed class WorkspaceTools
     private readonly string _rootPrefix;
     private readonly IUserApproval _approval;
     private readonly bool _readOnly;
+    private readonly bool _quiet;
+    private bool _planMode;
 
-    public WorkspaceTools(string workspaceRoot, IUserApproval approval, bool readOnly)
+    public WorkspaceTools(string workspaceRoot, IUserApproval approval, bool readOnly, bool quiet = false)
     {
         _root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workspaceRoot));
         _rootPrefix = _root + Path.DirectorySeparatorChar;
         _approval = approval;
         _readOnly = readOnly;
+        _quiet = quiet;
     }
 
     public string Root => _root;
+
+    // --read-only is permanent for the process; /plan is a session-local toggle layered on top so
+    // switching back to /act restores whatever --read-only already required.
+    public bool EffectiveReadOnly => _readOnly || _planMode;
+
+    public bool PlanModeActive => _planMode;
+
+    public void SetPlanMode(bool active) => _planMode = active;
 
     public IReadOnlyList<OllamaToolDefinition> Definitions
     {
@@ -95,7 +118,7 @@ public sealed class WorkspaceTools
                 new("search_text", "Search plain text across non-secret workspace files and return file, line, and matching text.",
                     """{"type":"object","properties":{"query":{"type":"string"},"path":{"type":"string","description":"Relative directory; default ."},"glob":{"type":"string","description":"Simple file glob such as *.cs; default *"},"max_results":{"type":"integer","minimum":1,"maximum":200}},"required":["query"]}""")
             };
-            if (!_readOnly)
+            if (!EffectiveReadOnly)
             {
                 definitions.Add(new("replace_in_file", "Replace exact text in an existing workspace file after human confirmation. Prefer this for focused edits.",
                     """{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"},"replace_all":{"type":"boolean"}},"required":["path","old_text","new_text"]}"""));
@@ -110,7 +133,7 @@ public sealed class WorkspaceTools
 
     public async Task<string> ExecuteAsync(OllamaToolCall call, CancellationToken cancellationToken)
     {
-        Console.WriteLine($"  • {call.Name}");
+        if (!_quiet) Console.WriteLine($"  • {call.Name}");
         try
         {
             var result = call.Name switch
@@ -118,9 +141,9 @@ public sealed class WorkspaceTools
                 "list_files" => ListFiles(call.Arguments),
                 "read_file" => ReadFile(call.Arguments),
                 "search_text" => SearchText(call.Arguments),
-                "replace_in_file" when !_readOnly => await ReplaceInFileAsync(call.Arguments, cancellationToken),
-                "write_file" when !_readOnly => await WriteFileAsync(call.Arguments, cancellationToken),
-                "run_command" when !_readOnly => await RunCommandAsync(call.Arguments, cancellationToken),
+                "replace_in_file" when !EffectiveReadOnly => await ReplaceInFileAsync(call.Arguments, cancellationToken),
+                "write_file" when !EffectiveReadOnly => await WriteFileAsync(call.Arguments, cancellationToken),
+                "run_command" when !EffectiveReadOnly => await RunCommandAsync(call.Arguments, cancellationToken),
                 _ => JsonSerializer.Serialize(new { error = $"Unknown or disabled tool: {call.Name}" })
             };
             return Limit(result);
@@ -440,7 +463,9 @@ public sealed class WorkspaceTools
             throw new ArgumentException("Binary files cannot be read or edited.");
     }
 
-    private static async Task WriteAtomicallyAsync(string path, string content, CancellationToken cancellationToken)
+    // Also used by SessionStore for the same reason: a temp-file-then-atomic-move avoids a torn
+    // partial file if the process is killed mid-write.
+    internal static async Task WriteAtomicallyAsync(string path, string content, CancellationToken cancellationToken)
     {
         var temporaryPath = Path.Combine(Path.GetDirectoryName(path)!, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
         try

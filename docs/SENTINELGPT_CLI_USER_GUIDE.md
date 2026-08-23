@@ -16,10 +16,12 @@ repository content to the other.
 3. [Running in one repository](#running-in-one-repository)
 4. [Running across a directory of repositories](#running-across-a-directory-of-repositories)
 5. [Interactive and one-shot use](#interactive-and-one-shot-use)
-6. [Analysis, edits, and validation](#analysis-edits-and-validation)
-7. [Safety boundaries](#safety-boundaries)
-8. [Diagnostics and updates](#diagnostics-and-updates)
-9. [Known limitations](#known-limitations)
+6. [Planning mode, agents, and skills](#planning-mode-agents-and-skills)
+7. [Resuming sessions and running a fleet](#resuming-sessions-and-running-a-fleet)
+8. [Analysis, edits, and validation](#analysis-edits-and-validation)
+9. [Safety boundaries](#safety-boundaries)
+10. [Diagnostics and updates](#diagnostics-and-updates)
+11. [Known limitations](#known-limitations)
 
 ## Prerequisites and installation
 
@@ -116,7 +118,8 @@ current session's tool results and model context.
   list) to download. Downloads still go through the same confirmation prompt as everything else.
 - `/clear` starts a fresh conversation while keeping the same directory and model.
 - `/quit` or `/exit` ends the session.
-- `Control-C` cancels the active local model request.
+- `Control-C` cancels the active local model request — you're returned to the prompt, the session
+  keeps going.
 
 Put a prompt after the command for a single request suitable for shell history or scripts:
 
@@ -126,6 +129,54 @@ sentinelgpt --read-only "Explain the architecture and identify the three highest
 
 The default model is `qwen2.5-coder`. Use another installed local model for one session with
 `--model`, for example `sentinelgpt --model sentinelgpt`.
+
+## Planning mode, agents, and skills
+
+- `/plan` switches to read-only planning: mutation and command tools are hidden from the model
+  entirely, and it's instructed to produce a numbered plan instead of attempting edits. `/act`
+  switches back. If you started with `--read-only`, `/act` says so rather than pretending edits
+  are now possible.
+- `/agent` lists the built-in personas and shows which one is active; `/agent <name>` switches for
+  the rest of the session (`coder` — the default, `reviewer`, `test-writer`, `docs-writer`). A
+  persona only shapes tone and priorities in the system prompt — unlike `/plan`, it doesn't
+  actually remove any tools. Combine `/agent reviewer` with `/plan` (or `--read-only`) for a
+  persona *and* an enforced guarantee that nothing gets edited.
+- `/skills` lists the skills discovered under `~/.config/sentinelgpt/skills/` — any `.md` file you
+  put there becomes a skill named after its filename. `/skills <name> <prompt>` applies that
+  file's instructions to a single request (not a standing change like `/agent`/`/plan`). There's
+  no built-in skill; add your own, for example a `commit-messages.md` describing how you like
+  commit messages phrased.
+
+## Resuming sessions and running a fleet
+
+Every turn is saved automatically to `~/.local/share/gws/sentinelgpt/sessions/`, one JSON file per
+session, scoped to the workspace directory (`-C`/`--repo`) it was started in. `/resume` lists
+saved sessions for the *current* workspace (most recent first, with a preview of the last
+question asked) and continues the one you pick — later turns extend that same file rather than
+starting a new one. `/clear` always starts a fresh file, so clearing never overwrites a session you
+might still want to resume later. There's no locking: running two terminals against the same saved
+session at once means the last one to save wins, silently — fine for how this tool is normally
+used, just worth knowing.
+
+`/fleet <model,model,...> <prompt>` runs the same request across several installed models at once
+and prints each one's answer, labeled, for comparison:
+
+```
+sentinelgpt> /fleet llama3.2,deepseek-r1,qwen2.5-coder Explain what this function does and flag any bug
+
+=== llama3.2 ===
+...
+=== deepseek-r1 ===
+...
+=== qwen2.5-coder ===
+...
+```
+
+Fleet always runs read-only, regardless of `/plan`/`/act` or `--read-only` — there's no way for a
+fleet run to propose an edit, by design, since several models confirming edits against the same
+files at once isn't something a single terminal can sensibly present. The model list must be
+explicit (no "all installed models" default); on constrained hardware, Ollama's own model-loading
+limits may serialize the requests rather than truly overlap them, which isn't a bug in this tool.
 
 ## Analysis, edits, and validation
 
@@ -187,3 +238,9 @@ run `sentinelgpt models sync`. If the command itself is not found, confirm `~/.l
   remote repository operations, and deployments.
 - A one-shot command with redirected standard input cannot display an interactive confirmation;
   edits are declined unless the user explicitly supplied `--yes`.
+- Saved sessions have no locking between concurrent terminals against the same workspace, and are
+  never pruned automatically (only the *displayed* `/resume` list is capped, at the 20 most
+  recent) — delete old files under `~/.local/share/gws/sentinelgpt/sessions/` yourself if that
+  ever matters to you.
+- `/skills` files are plain instructions with no format beyond "this whole file is the prompt
+  addition" — there's no frontmatter, metadata, or validation.

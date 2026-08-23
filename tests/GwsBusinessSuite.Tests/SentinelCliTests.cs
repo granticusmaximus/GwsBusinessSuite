@@ -224,6 +224,99 @@ public sealed class SentinelCliTests : IDisposable
     }
 
     [Fact]
+    public void EffectiveReadOnly_ComposesPermanentReadOnlyAndPlanMode()
+    {
+        var permanentlyReadOnly = new WorkspaceTools(_root, new FakeApproval(true), readOnly: true);
+        var normally = new WorkspaceTools(_root, new FakeApproval(true), readOnly: false);
+
+        permanentlyReadOnly.SetPlanMode(true);
+        permanentlyReadOnly.SetPlanMode(false);
+        Assert.True(permanentlyReadOnly.EffectiveReadOnly, "--read-only must survive /act.");
+
+        Assert.False(normally.EffectiveReadOnly);
+        normally.SetPlanMode(true);
+        Assert.True(normally.EffectiveReadOnly);
+        normally.SetPlanMode(false);
+        Assert.False(normally.EffectiveReadOnly);
+    }
+
+    [Fact]
+    public async Task UnreachableApproval_IsNeverInvokedWhenEffectiveReadOnlyIsTrue()
+    {
+        var tools = new WorkspaceTools(_root, new UnreachableApproval(), readOnly: true);
+
+        var result = await tools.ExecuteAsync(
+            Call("replace_in_file", new { path = "sample.txt", old_text = "a", new_text = "b" }), default);
+
+        Assert.Contains("Unknown or disabled tool", result);
+    }
+
+    [Fact]
+    public void AgentPersonas_FindIsCaseInsensitiveAndRejectsUnknownNames()
+    {
+        Assert.Equal(AgentPersonas.Reviewer, AgentPersonas.Find("REVIEWER"));
+        Assert.Null(AgentPersonas.Find("does-not-exist"));
+        Assert.Contains(AgentPersonas.Default, AgentPersonas.All);
+    }
+
+    [Fact]
+    public async Task SessionStore_RoundTripsAConversationIncludingToolCalls()
+    {
+        var store = new SessionStore(Path.Combine(_root, "sessions"));
+        var toolCallMessage = new OllamaChatMessage("assistant", "")
+        {
+            ToolCalls = [new OllamaApiToolCall { Function = new OllamaApiFunctionCall { Name = "read_file", Arguments = JsonDocument.Parse("""{"path":"a.cs"}""").RootElement } }]
+        };
+        var messages = new List<OllamaChatMessage>
+        {
+            new("system", "You are SentinelGPT Code."),
+            new("user", "Read a.cs"),
+            toolCallMessage,
+            new("tool", "{}") { ToolName = "read_file" }
+        };
+
+        var path = await store.SaveAsync(null, _root, "qwen2.5-coder", messages, default);
+        var loaded = await store.LoadAsync(path, default);
+
+        Assert.NotNull(loaded);
+        Assert.Equal("qwen2.5-coder", loaded.Model);
+        Assert.Equal(4, loaded.Messages.Count);
+        Assert.Equal("read_file", loaded.Messages[2].ToolCalls?[0].Function.Name);
+        Assert.Equal("a.cs", loaded.Messages[2].ToolCalls?[0].Function.Arguments.GetProperty("path").GetString());
+        Assert.Single(store.ListForWorkspace(_root));
+    }
+
+    [Fact]
+    public async Task SessionStore_SaveWithNoExistingPathAlwaysMintsANewFile()
+    {
+        // The invariant /clear's currentSessionPath=null reset relies on: passing null for
+        // existingPath must never reuse a prior file, even for the same workspace back-to-back.
+        var store = new SessionStore(Path.Combine(_root, "sessions"));
+        var messages = new[] { new OllamaChatMessage("system", "s"), new OllamaChatMessage("user", "u") };
+
+        var first = await store.SaveAsync(null, _root, "qwen2.5-coder", messages, default);
+        var second = await store.SaveAsync(null, _root, "qwen2.5-coder", messages, default);
+
+        Assert.NotEqual(first, second);
+        Assert.Equal(2, store.ListForWorkspace(_root).Count);
+    }
+
+    [Fact]
+    public void SkillLibrary_ListsLoadsAndRejectsPathEscapingNames()
+    {
+        var skillsDir = Path.Combine(_root, "skills");
+        Directory.CreateDirectory(skillsDir);
+        File.WriteAllText(Path.Combine(skillsDir, "commit-messages.md"), "Write conventional commit messages.");
+        var library = new SkillLibrary(skillsDir);
+
+        Assert.Equal(["commit-messages"], library.List());
+        Assert.Equal("Write conventional commit messages.", library.Load("commit-messages"));
+        Assert.Null(library.Load("does-not-exist"));
+        Assert.Null(library.Load("../outside"));
+        Assert.Null(library.Load("nested/escape"));
+    }
+
+    [Fact]
     public void ContentToolFallback_RecognizesOnlyRegisteredStrictJsonActions()
     {
         var definitions = new[]
