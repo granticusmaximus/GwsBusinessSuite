@@ -34,6 +34,16 @@
                 <Label Text="Opening GWS Business Suite"
                        TextColor="#A8A29E"
                        FontSize="13" />
+                <Button Text="Cancel"
+                        Margin="0,8,0,0"
+                        Padding="16,8"
+                        BackgroundColor="Transparent"
+                        TextColor="#A8A29E"
+                        BorderColor="#44403C"
+                        BorderWidth="1"
+                        CornerRadius="8"
+                        FontSize="12"
+                        Clicked="OnCancelLoadingClicked" />
             </VerticalStackLayout>
         </Grid>
 

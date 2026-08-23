@@ -6,6 +6,15 @@
 	<string>GWS Business Suite uses the camera when you start a Live Show preview.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>GWS Business Suite uses the microphone when you start a Live Show preview.</string>
+	<!-- App Transport Security blocks plain HTTP by default. SentinelGPT's local-model tab talks
+	     to Ollama on 127.0.0.1 with no TLS (a loopback-only server has no certificate to offer).
+	     NSAllowsLocalNetworking permits loopback/local-network HTTP specifically, without the
+	     broader NSAllowsArbitraryLoads, which would also weaken ATS for the hosted-site WebView. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
     <!-- The Mac App Store requires you specify if the app uses encryption. -->
     <!-- Please consult https://developer.apple.com/documentation/bundleresources/information_property_list/itsappusesnonexemptencryption -->
     <!-- <key>ITSAppUsesNonExemptEncryption</key> -->

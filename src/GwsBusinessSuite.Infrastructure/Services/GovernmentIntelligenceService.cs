@@ -27,7 +27,16 @@ public sealed class GovernmentIntelligenceService(
 {
     private string OllamaModel => studioOptions.Value.Model;
     private static readonly TimeSpan AiOverviewCacheDuration = TimeSpan.FromDays(7);
-    private static readonly TimeSpan AiOverviewCallTimeout = TimeSpan.FromSeconds(25);
+    // Was 25s - measured production Ollama latency under real contention (single-slot
+    // OLLAMA_NUM_PARALLEL=1, competing with interactive chat/Content Studio/other background
+    // jobs) routinely exceeds that, so every single call here was being canceled before it
+    // could finish - confirmed via durable logs showing a 100% failure rate at this timeout
+    // across every 15-minute refresh cycle. 2 minutes matches this codebase's established
+    // convention for a bounded advisory Ollama sub-call (see SentinelAiService's Qwen/DeepSeek
+    // consultation timeouts) and gives real calls a realistic chance to actually complete.
+    // RunRefreshAsync's RefreshLock already makes an overrunning cycle safe: the next
+    // PeriodicTimer tick just skips gracefully rather than piling up concurrent runs.
+    private static readonly TimeSpan AiOverviewCallTimeout = TimeSpan.FromMinutes(2);
     private const string SnapshotCacheKey = "government-intelligence:snapshot";
     private const string CountyHomeUrl = "https://www.houstoncountyga.gov/";
     private const string CountyAnnouncementsUrl = "https://www.houstoncountyga.gov/residents/announcements.cms";

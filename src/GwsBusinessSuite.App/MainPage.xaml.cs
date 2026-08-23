@@ -2,8 +2,11 @@ namespace GwsBusinessSuite.App;
 
 public partial class MainPage : ContentPage
 {
+    private static readonly TimeSpan NavigationTimeout = TimeSpan.FromSeconds(20);
+
     private bool _connectivitySubscribed;
     private bool _wasOffline;
+    private CancellationTokenSource? _navigationTimeoutCts;
 
     public MainPage()
     {
@@ -64,7 +67,11 @@ public partial class MainPage : ContentPage
     private void OnWorkspaceNavigating(object? sender, WebNavigatingEventArgs args)
     {
         LoadingOverlay.IsVisible = true;
-        if (!Uri.TryCreate(args.Url, UriKind.Absolute, out var uri) || AppEndpoints.IsTrusted(uri)) return;
+        if (!Uri.TryCreate(args.Url, UriKind.Absolute, out var uri) || AppEndpoints.IsTrusted(uri))
+        {
+            StartNavigationTimeout();
+            return;
+        }
 
         args.Cancel = true;
         LoadingOverlay.IsVisible = false;
@@ -73,6 +80,7 @@ public partial class MainPage : ContentPage
 
     private void OnWorkspaceNavigated(object? sender, WebNavigatedEventArgs args)
     {
+        StopNavigationTimeout();
         LoadingOverlay.IsVisible = false;
         if (args.Result == WebNavigationResult.Success)
         {
@@ -83,8 +91,52 @@ public partial class MainPage : ContentPage
         ShowUnavailable("The workspace could not be loaded. Check the server address and connection.");
     }
 
+    // A page that never fires Navigated (e.g. an admin page whose embedded iframe hangs waiting
+    // on a slow or unreachable backend) used to leave LoadingOverlay showing forever - it has no
+    // controls of its own, and InputTransparent="False" blocks every tap on the WebView beneath
+    // it, so there was no way back into the app short of force-quitting. Both this timeout and
+    // the overlay's own Cancel button exist so that can never happen again.
+    private void StartNavigationTimeout()
+    {
+        StopNavigationTimeout();
+        var cts = new CancellationTokenSource();
+        _navigationTimeoutCts = cts;
+        _ = Task.Delay(NavigationTimeout, cts.Token).ContinueWith(
+            task =>
+            {
+                if (task.IsCanceled) return;
+                MainThread.BeginInvokeOnMainThread(() =>
+                    ShowUnavailable("This page is taking too long to load. Check the connection and try again."));
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnRanToCompletion,
+            TaskScheduler.Default);
+    }
+
+    private void StopNavigationTimeout()
+    {
+        _navigationTimeoutCts?.Cancel();
+        _navigationTimeoutCts?.Dispose();
+        _navigationTimeoutCts = null;
+    }
+
+    private void OnCancelLoadingClicked(object? sender, EventArgs e)
+    {
+        StopNavigationTimeout();
+        if (WorkspaceView.CanGoBack)
+        {
+            LoadingOverlay.IsVisible = false;
+            WorkspaceView.GoBack();
+        }
+        else
+        {
+            ReloadWorkspace();
+        }
+    }
+
     private void ShowUnavailable(string message)
     {
+        StopNavigationTimeout();
         LoadingOverlay.IsVisible = false;
         StatusMessage.Text = message;
         StatusOverlay.IsVisible = true;
