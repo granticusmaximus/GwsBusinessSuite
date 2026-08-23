@@ -202,6 +202,17 @@ container from its own inspected config against whatever image is now cached loc
 how a pulled-but-not-yet-applied image update actually gets applied) and **Remove** (permanent;
 the container must already be stopped, so removal is never a surprise side effect of one click).
 
+**Durable application logs.** The **Recent Logs** panel above (and `docker compose logs`, if you're
+on the droplet directly) only show what the *current* `gwssuite` container has logged since it last
+started — every deploy replaces the container, which discards everything logged before that
+restart. For anything that needs to survive a deploy, the app also mirrors its own logs to a
+rolling file at `/app/data/logs/gwssuite-YYYYMMDD.log` inside the container — `/app/data` is the
+persisted `gwssuite-data` volume, so this history survives container recreation (up to 14 retained
+files; a day gets split into multiple files if it exceeds 50 MB, which counts against that 14 —
+still effectively weeks of history for this app's traffic). Read it via the SSH Terminal or the
+Exec Console above (e.g. `tail -n 200 /app/data/logs/gwssuite-$(date +%Y%m%d).log`, or `grep` for
+a specific subsystem across all retained days).
+
 **Health monitoring** runs automatically in the background: every 30 seconds a sweep checks every
 container's state, and raises an alert the moment a container *transitions into* an error state
 (not on every poll while it stays broken). The alert message is picked from the most specific

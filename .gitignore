@@ -27,6 +27,7 @@ artifacts/
 dp-keys/
 *.sqlite3
 *.mmdb
+src/GwsBusinessSuite.Web/logs/
 
 # Local environment and secret files
 .env

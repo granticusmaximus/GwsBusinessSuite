@@ -58,6 +58,14 @@ if (args is ["--install-playwright-browsers"])
 var builder = WebApplication.CreateBuilder(args);
 var configuredPathBase = builder.Configuration["Hosting:PathBase"];
 
+// Console logging alone doesn't survive a redeploy: every push recreates the gwssuite
+// container, and Docker's default json-file driver discards the old container's log
+// history with it. Mirroring to a rolling file under the already-persisted gwssuite-data
+// volume means logs from before the most recent deploy stay readable. Factored into its
+// own file (rather than `using Serilog;` here) because Serilog.ILogger collides with the
+// Microsoft.Extensions.Logging.ILogger used throughout this file's endpoint handlers.
+SerilogBootstrapper.Configure(builder);
+
 // Add services to the container.
 builder.Services.AddInfrastructure(builder.Configuration);
 
