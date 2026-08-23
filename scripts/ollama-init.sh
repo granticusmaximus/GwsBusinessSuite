@@ -14,17 +14,17 @@ until ollama list > /dev/null 2>&1; do
 done
 echo "[ollama-init] Server is ready."
 
-echo "[ollama-init] Pulling llama3.2 (2 GB)..."
-ollama pull llama3.2
+echo "[ollama-init] Synchronizing the canonical GWS model set..."
+while IFS= read -r model || [ -n "$model" ]; do
+  case "$model" in
+    ""|\#*) continue ;;
+  esac
+  echo "[ollama-init] Pulling $model..."
+  ollama pull "$model"
+done < /ollama-profiles/required-models.txt
 
 echo "[ollama-init] Creating the SentinelGPT profile..."
 ollama create sentinelgpt -f /ollama-profiles/SentinelGPT.Modelfile
-
-echo "[ollama-init] Pulling qwen2.5-coder (4.7 GB)..."
-ollama pull qwen2.5-coder
-
-echo "[ollama-init] Pulling embeddinggemma (required by SemanticSearch:Model)..."
-ollama pull embeddinggemma
 
 echo "[ollama-init] All models ready. GWS Suite is good to go."
 

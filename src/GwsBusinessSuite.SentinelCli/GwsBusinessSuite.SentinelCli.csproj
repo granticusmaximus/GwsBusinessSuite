@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>sentinelgpt</AssemblyName>
+    <RootNamespace>GwsBusinessSuite.SentinelCli</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\ollama\required-models.txt"
+                      LogicalName="GwsBusinessSuite.SentinelCli.required-models.txt" />
+    <EmbeddedResource Include="..\..\ollama\SentinelGPT.Modelfile"
+                      LogicalName="GwsBusinessSuite.SentinelCli.SentinelGPT.Modelfile" />
+  </ItemGroup>
+</Project>
