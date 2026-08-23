@@ -67,4 +67,15 @@
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
 	</ItemGroup>
 
+	<!-- This repo lives under ~/Desktop, which iCloud Drive's "Desktop & Documents Folders" sync
+	     actively tracks (confirmed via `brctl status`) - it attaches com.apple.fileprovider/
+	     com.apple.FinderInfo extended attributes to the freshly-assembled .app bundle directory
+	     during build, which codesign then refuses to sign ("resource fork, Finder information,
+	     or similar detritus not allowed"). Stripping them immediately before signing, rather than
+	     moving the repo or disabling iCloud sync, keeps this fix scoped to the build itself. -->
+	<Target Name="StripICloudExtendedAttributesFromAppBundle" BeforeTargets="_CodesignAppBundle"
+	        Condition="'$([MSBuild]::IsOSPlatform(`OSX`))' == 'true' And Exists('$(AppBundleDir)')">
+		<Exec Command="xattr -cr '$(AppBundleDir)'" />
+	</Target>
+
 </Project>

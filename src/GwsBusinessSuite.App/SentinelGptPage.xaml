@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="GwsBusinessSuite.App.SentinelGptPage"
+             BackgroundColor="#141210"
+             Shell.NavBarIsVisible="False">
+
+    <Grid RowDefinitions="Auto,*,Auto">
+
+        <Grid Grid.Row="0" Padding="16,12" ColumnDefinitions="*,200" BackgroundColor="#1C1917">
+            <VerticalStackLayout Grid.Column="0" Spacing="2" VerticalOptions="Center">
+                <Label Text="SentinelGPT (local)" TextColor="#FAFAF9" FontAttributes="Bold" FontSize="16" />
+                <Label x:Name="StatusLabel" Text="Connecting to local Ollama..." TextColor="#A8A29E" FontSize="12" />
+            </VerticalStackLayout>
+            <Picker x:Name="ModelPicker" Grid.Column="1" TextColor="#FAFAF9" VerticalOptions="Center"
+                    SelectedIndexChanged="OnModelChanged" />
+        </Grid>
+
+        <ScrollView x:Name="TranscriptScroll" Grid.Row="1" Padding="16">
+            <VerticalStackLayout x:Name="Transcript" Spacing="12">
+                <Label Text="Ask anything. This talks directly to Ollama on this Mac -- nothing here is sent to the GWS server."
+                       TextColor="#78716C" FontSize="12" />
+            </VerticalStackLayout>
+        </ScrollView>
+
+        <Grid Grid.Row="2" Padding="12" ColumnDefinitions="*,Auto" BackgroundColor="#1C1917">
+            <Editor x:Name="PromptEditor" Grid.Column="0"
+                    Placeholder="Ask SentinelGPT..." PlaceholderColor="#78716C"
+                    TextColor="#FAFAF9" BackgroundColor="#231F1D"
+                    AutoSize="TextChanges" MaxLength="8000" HeightRequest="42" />
+            <Button x:Name="SendButton" Grid.Column="1" Text="Send" Margin="8,0,0,0"
+                    BackgroundColor="#F59E0B" TextColor="#1C1917" FontAttributes="Bold"
+                    CornerRadius="8" Padding="18,0" Clicked="OnSendClicked" />
+        </Grid>
+
+    </Grid>
+
+</ContentPage>
