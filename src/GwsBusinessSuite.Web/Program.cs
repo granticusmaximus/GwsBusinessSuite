@@ -101,6 +101,16 @@ builder.Services.AddScoped<ICurrentUserAccessor, CurrentUserAccessor>();
 builder.Services.AddScoped<GwsBusinessSuite.Web.Services.CurrentCmsSiteAccessor>();
 builder.Services.AddSignalR();
 
+// OSINT Watch (Intelligence tab) - reverse-proxies the internal-only osiris sidecar
+// container (docker-compose.yml) so it's reachable through this app's own AdminOnly-gated
+// admin session instead of needing its own public hostname/Cloudflared route. See the
+// OsintProxyAsync routes below for why /_next and /api specifically, not a single prefix.
+builder.Services.AddHttpClient("osiris", client =>
+{
+    client.BaseAddress = new Uri("http://osiris:3000/");
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
+
 // Content Studio article generation can take several minutes against Ollama
 // (first-time model load especially). Extend the circuit's disconnect grace
 // period well past that so a brief network blip over the Cloudflare Tunnel

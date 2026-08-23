@@ -23,6 +23,9 @@ ollama create sentinelgpt -f /ollama-profiles/SentinelGPT.Modelfile
 echo "[ollama-init] Pulling qwen2.5-coder (4.7 GB)..."
 ollama pull qwen2.5-coder
 
+echo "[ollama-init] Pulling embeddinggemma (required by SemanticSearch:Model)..."
+ollama pull embeddinggemma
+
 echo "[ollama-init] All models ready. GWS Suite is good to go."
 
 wait "$SERVE_PID"

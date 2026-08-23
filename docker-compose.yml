@@ -73,6 +73,35 @@ services:
       retries: 20
       start_period: 60s
 
+  # OSINT Watch (Intelligence tab) - github.com/simplifaisoul/osiris, MIT licensed. Their
+  # own published image, built by their own CI from the exact Dockerfile in that repo (a
+  # standard multi-stage Next.js build - reviewed before adding this). No ports: mapping -
+  # like ollama above, only reachable over the internal Docker network. gwssuite reverse-
+  # proxies /admin/osint/* to it, gated by the same AdminOnly auth as everything else, so
+  # it's never directly internet-reachable. RECON toolkit intentionally left disabled
+  # (SCANNER_URL/SCANNER_KEY unset - the RECON UI just returns 503) - it needs a separate
+  # scanner backend that runs active reconnaissance tools; see reference_osint_watch_page
+  # memory for why that piece specifically was scoped out.
+  osiris:
+    image: ghcr.io/simplifaisoul/osiris:latest
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - INTEL_URL=http://osiris-intel:4000
+    depends_on:
+      - osiris-intel
+
+  # OSINT Watch's sanctions/entity-resolution sidecar - vendored source (not built against
+  # the upstream repo directly), see vendor/osiris-intel/README.md for why and for the
+  # provenance/audit trail. No ports: mapping - internal only, called by osiris itself.
+  osiris-intel:
+    build:
+      context: ./vendor/osiris-intel
+      dockerfile: Dockerfile
+    restart: unless-stopped
+
 volumes:
   gwssuite-data:
   gwssuite-backups:
