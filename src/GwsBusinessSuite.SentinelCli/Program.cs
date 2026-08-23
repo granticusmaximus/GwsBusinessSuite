@@ -59,6 +59,21 @@ public static class Program
                     Console.WriteLine("Conversation cleared.");
                     continue;
                 }
+                if (prompt.Trim() == "/help")
+                {
+                    PrintSessionHelp();
+                    continue;
+                }
+                if (prompt.Trim() == "/models")
+                {
+                    await modelManager.ListAsync(cancellation.Token);
+                    continue;
+                }
+                if (prompt.Trim() == "/availablemodels")
+                {
+                    await BrowseAvailableModelsAsync(ollama, modelManager, cancellation.Token);
+                    continue;
+                }
                 Console.WriteLine(await agent.RunTurnAsync(prompt, cancellation.Token));
             }
             return 0;
@@ -86,7 +101,44 @@ public static class Program
         Console.WriteLine("SentinelGPT Code · local Ollama");
         Console.WriteLine($"Model: {options.Model}");
         Console.WriteLine(tools.DescribeWorkspace());
-        Console.WriteLine("Commands: /clear, /quit");
+        Console.WriteLine("Type /help to see session commands.");
+    }
+
+    private static void PrintSessionHelp() => Console.WriteLine(
+        """
+
+        Session commands:
+          /help              Show this list
+          /models            List Ollama models installed locally
+          /availablemodels   Browse and download additional free Ollama models
+          /clear             Start a fresh conversation (keeps the directory and model)
+          /quit, /exit       End the session
+          Control-C          Cancel the active local model request
+        """);
+
+    private static async Task BrowseAvailableModelsAsync(
+        OllamaClient ollama, OllamaModelManager modelManager, CancellationToken cancellationToken)
+    {
+        var installed = await ollama.ListModelsAsync(cancellationToken);
+        var suggestions = ModelCatalog.SuggestedFreeModels;
+        Console.WriteLine(
+            "\nSuggested free Ollama models (a starting point, not the full catalog -- see " +
+            "https://ollama.com/library for everything available):\n");
+        for (var i = 0; i < suggestions.Count; i++)
+        {
+            var (name, description) = suggestions[i];
+            var installedMark = OllamaModelManager.HasModel(installed, name) ? "  [installed]" : "";
+            Console.WriteLine($"  {i + 1,2}. {name,-18}{description}{installedMark}");
+        }
+
+        Console.Write("\nEnter a number, or any Ollama model name, to download (blank to cancel): ");
+        var selection = Console.ReadLine()?.Trim();
+        if (string.IsNullOrEmpty(selection)) return;
+
+        var model = int.TryParse(selection, out var index) && index >= 1 && index <= suggestions.Count
+            ? suggestions[index - 1].Name
+            : selection;
+        await modelManager.PullAsync(model, cancellationToken);
     }
 
     private static void PrintHelp() => Console.WriteLine(
@@ -111,6 +163,9 @@ public static class Program
           cd ~/Development && sentinelgpt "Find which repo contains the billing API and analyze it"
           sentinelgpt -C ~/Development/MyRepo "Add tests for the failing parser"
           sentinelgpt --read-only "Review this repository for correctness risks"
+
+        Once inside an interactive session, type /help for session-only commands (/models,
+        /availablemodels, /clear, /quit).
 
         SentinelGPT never reads known secret files, cannot escape the selected workspace, and
         cannot commit, push, deploy, or run destructive git commands.

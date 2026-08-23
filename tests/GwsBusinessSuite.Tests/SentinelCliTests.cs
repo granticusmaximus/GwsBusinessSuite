@@ -192,6 +192,38 @@ public sealed class SentinelCliTests : IDisposable
     }
 
     [Fact]
+    public void SuggestedFreeModels_AreWellFormedAndUnique()
+    {
+        var suggestions = ModelCatalog.SuggestedFreeModels;
+
+        Assert.NotEmpty(suggestions);
+        Assert.All(suggestions, item =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(item.Name));
+            Assert.False(string.IsNullOrWhiteSpace(item.Description));
+        });
+        Assert.Equal(
+            suggestions.Select(item => item.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+            suggestions.Count);
+        Assert.All(ModelCatalog.RequiredModels, required =>
+            Assert.Contains(suggestions, item => string.Equals(item.Name, required, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [Fact]
+    public async Task PullAsync_DoesNotShellOutWhenDeclined()
+    {
+        var approval = new FakeApproval(false);
+        var manager = new OllamaModelManager(new OllamaClient(new Uri("http://127.0.0.1:11434/")), approval);
+
+        var pulled = await manager.PullAsync("mistral", default);
+
+        Assert.False(pulled);
+        Assert.Single(approval.Requests);
+        Assert.Equal("Ollama model download", approval.Requests[0].Action);
+        Assert.Contains("mistral", approval.Requests[0].Details);
+    }
+
+    [Fact]
     public void ContentToolFallback_RecognizesOnlyRegisteredStrictJsonActions()
     {
         var definitions = new[]

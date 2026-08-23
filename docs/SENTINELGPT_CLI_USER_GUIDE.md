@@ -108,6 +108,12 @@ the specific repository so unrelated repositories never enter the tool surface.
 Run `sentinelgpt` without a prompt for a continuing conversation. Follow-up questions retain the
 current session's tool results and model context.
 
+- `/help` lists every session command.
+- `/models` lists the Ollama models already installed locally (same data as
+  `sentinelgpt models list`, without leaving the session).
+- `/availablemodels` shows a curated starting list of free Ollama models — marking which are
+  already installed — and prompts for a number (or any model name, including ones not on the
+  list) to download. Downloads still go through the same confirmation prompt as everything else.
 - `/clear` starts a fresh conversation while keeping the same directory and model.
 - `/quit` or `/exit` ends the session.
 - `Control-C` cancels the active local model request.

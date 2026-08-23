@@ -85,6 +85,28 @@ public sealed class OllamaModelManager(OllamaClient client, IUserApproval approv
         return 0;
     }
 
+    public async Task<bool> PullAsync(string model, CancellationToken cancellationToken)
+    {
+        var details = $"Download and install the Ollama model '{model}'.\n" +
+                      "This can consume several gigabytes of network traffic and disk space.";
+        if (!await approval.ConfirmAsync("Ollama model download", details, cancellationToken))
+        {
+            Console.WriteLine("Download cancelled.");
+            return false;
+        }
+
+        await EnsureOllamaCommandAsync(cancellationToken);
+        Console.WriteLine($"\nPulling {model}...");
+        var exitCode = await RunVisibleAsync("ollama", ["pull", model], cancellationToken);
+        if (exitCode != 0)
+        {
+            Console.Error.WriteLine($"ollama pull {model} failed with exit code {exitCode}.");
+            return false;
+        }
+        Console.WriteLine($"{model} is installed.");
+        return true;
+    }
+
     public static bool HasModel(IEnumerable<string> installedModels, string requiredModel)
     {
         var required = NormalizeModel(requiredModel);
