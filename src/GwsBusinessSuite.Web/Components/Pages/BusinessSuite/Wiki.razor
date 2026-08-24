@@ -232,11 +232,6 @@
                     Searches titles and the contents of pages, attachments, databases, and rows.
                 </div>
             </div>
-            <a class="sentinel-gpt-entry" href="admin/sentinel-gpt">
-                <span class="sentinel-gpt-entry-icon"><i class="bi bi-chat-dots-fill"></i></span>
-                <span><strong>SentinelGPT</strong><small>Chat with your workspace</small></span>
-                <i class="bi bi-chevron-right"></i>
-            </a>
             @if (string.IsNullOrWhiteSpace(SearchQuery)
                 && (Navigation.Favorites.Count > 0 || Navigation.Recents.Count > 0 || Mentions.Count > 0 || SavedSearches.Count > 0))
             {
@@ -670,7 +665,7 @@
                         <i class="bi bi-command"></i>
                         <span><code>/</code> commands · <code>[[</code> page links · <code>@@</code> mentions · Tab to indent</span>
                     </div>
-                    <SentinelAiPanel WikiPageId="SelectedPageId" OnInsert="InsertAiOutputAsync" />
+                    <SentinelAiPanel @key="SelectedPageId" WikiPageId="SelectedPageId" OnInsert="InsertAiOutputAsync" />
                     <div class="wiki-block-editor" @ref="_blockEditorContainer"></div>
 
                     <div class="sentinel-editor-actions">

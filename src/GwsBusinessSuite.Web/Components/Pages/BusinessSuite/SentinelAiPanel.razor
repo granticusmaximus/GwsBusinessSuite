@@ -118,8 +118,9 @@
         _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
 
         // Resume an in-flight generation this panel started before a page refresh or a
-        // reconnected circuit - the coordinator kept it running the whole time.
-        var active = GenerationCoordinator.GetActive(_username);
+        // reconnected circuit - the coordinator kept it running the whole time. Scoped to
+        // WikiPageId so a generation started on a different page can never be adopted here.
+        var active = GenerationCoordinator.GetActive(_username, WikiPageId);
         if (active is { ConversationId: null })
         {
             _open = true;
@@ -129,6 +130,19 @@
             _instruction = active.Instruction;
             _liveOutput = active.Output;
             _ = InvokeAsync(() => MonitorGenerationAsync(active.Id));
+            return;
+        }
+
+        // Nothing running for this page right now - but a generation may have finished while
+        // this panel wasn't open to see it (navigation, refresh, lost circuit). Surface the
+        // most recent still-unreviewed run directly instead of leaving it buried in "Recent
+        // runs".
+        var recent = await SentinelAiService.ListRunsAsync(WikiPageId, maxResults: 1);
+        if (recent.Count > 0 && recent[0].Status == SentinelAiRunStatuses.Completed)
+        {
+            _current = recent[0];
+            _action = recent[0].Action;
+            _open = true;
         }
     }
 

@@ -16,6 +16,7 @@
 @inject GwsBusinessSuite.Web.Services.CurrentCmsSiteAccessor CurrentCmsSiteAccessor
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject IOptions<ContentStudioOptions> StudioOptions
+@inject IOllamaService LocalModelService
 @inject IOptions<SemanticSearchOptions> SemanticOptions
 @inject IHybridSearchService HybridSearchService
 @inject IConfiguration Configuration
@@ -149,6 +150,19 @@ else
                     <label class="form-label small text-secondary">Model override</label>
                     <input class="form-control" @bind="OllamaModelOverrideInput" placeholder="@StudioOptions.Value.Model" />
                     <div class="form-text">Leave blank to use the server default (<code>@StudioOptions.Value.Model</code>).</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small text-secondary">Install a model</label>
+                    <div class="d-flex gap-2">
+                        <input class="form-control" @bind="PullModelNameInput" placeholder="e.g. llama3.2" />
+                        <button type="button" class="btn btn-outline-primary text-nowrap" @onclick="PullModelAsync"
+                                disabled="@(_pullingModel || string.IsNullOrWhiteSpace(PullModelNameInput))">
+                            @if (_pullingModel) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            else { <i class="bi bi-download me-1"></i> }
+                            Install
+                        </button>
+                    </div>
+                    <div class="form-text">Pulls a model onto the SentinelGPT local-model endpoint.</div>
                 </div>
                 <div class="mb-3">
                     <label class="form-label small text-secondary">Generation timeout override (minutes)</label>
@@ -341,6 +355,8 @@ else
     private int MaxUploadSizeMbInput { get; set; } = 8;
     private string OllamaModelOverrideInput { get; set; } = string.Empty;
     private int? OllamaTimeoutOverrideInput { get; set; }
+    private string PullModelNameInput { get; set; } = string.Empty;
+    private bool _pullingModel;
     private string HeroImageModelOverrideInput { get; set; } = string.Empty;
     private SemanticIndexStatus? SemanticIndexStatus { get; set; }
     private List<DeveloperApiKeyView> ApiKeys { get; set; } = [];
@@ -462,6 +478,28 @@ else
                 HeroImageModelOverride = HeroImageModelOverrideInput
             });
         });
+    }
+
+    private async Task PullModelAsync()
+    {
+        var model = PullModelNameInput.Trim();
+        if (model.Length == 0 || _pullingModel) return;
+        _pullingModel = true;
+        StateHasChanged();
+        try
+        {
+            await LocalModelService.PullModelAsync(model);
+            PullModelNameInput = string.Empty;
+            StatusMessage = $"Installed model '{model}'.";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Could not install model '{model}': {ex.Message}";
+        }
+        finally
+        {
+            _pullingModel = false;
+        }
     }
 
     private async Task RebuildSemanticIndexAsync()

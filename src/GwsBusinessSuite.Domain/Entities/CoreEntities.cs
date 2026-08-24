@@ -759,7 +759,7 @@ public static class SentinelAiRunStatuses
     // A tool-calling-loop write proposal (see SentinelAiService.ProposeSetDatabaseRowPropertyAsync)
     // awaiting human confirmation - distinct from Approved/Rejected, which are the unrelated
     // "teach SentinelGPT from this answer" learning-memory review states on a completed chat
-    // turn (SentinelGpt.razor's thumbs up/down). Resolved via
+    // turn (SentinelAiPanel.razor's Approve/Reject buttons). Resolved via
     // ISentinelAiService.ResolvePendingToolActionAsync into either Completed (executed) or
     // Cancelled (declined) - never Approved/Rejected, to avoid colliding with that separate flow.
     public const string Pending = "pending";

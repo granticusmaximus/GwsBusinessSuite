@@ -21,8 +21,9 @@ public static class SentinelGptDefaults
     public const string Model = "sentinelgpt";
 
     // Deep Analysis's two advisory models (SentinelAiService.TryConsultTeacherAsync). Named
-    // here (not inline string literals) so SentinelGpt.razor's Fast/Deep toggle can warm them
-    // lazily - see ToggleDeepAnalysis - without duplicating the model names and risking drift.
+    // here (not inline string literals) so any future caller of the useDeepAnalysis parameter
+    // on StreamAgentConversationAsync can warm them lazily without duplicating the model names
+    // and risking drift.
     public const string CodeReviewAdviserModel = "qwen2.5-coder";
     public const string ReasoningAdviserModel = "deepseek-r1";
 

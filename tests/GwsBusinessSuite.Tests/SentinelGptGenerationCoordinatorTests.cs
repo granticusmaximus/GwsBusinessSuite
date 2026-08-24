@@ -26,7 +26,7 @@ public sealed class SentinelGptGenerationCoordinatorTests
             maxOutputTokens: SentinelGptResponseBudgets.Concise);
         await sentinel.Started.Task.WaitAsync(TestTimeout);
 
-        coordinator.GetActive("grant").Should().Match<SentinelGptGenerationSnapshot>(snapshot =>
+        coordinator.GetActive("grant", null).Should().Match<SentinelGptGenerationSnapshot>(snapshot =>
             snapshot.Id == started.Id
             && snapshot.ConversationId == conversationId
             && snapshot.UseDeepAnalysis
@@ -43,7 +43,7 @@ public sealed class SentinelGptGenerationCoordinatorTests
         completed.Status.Should().Be(SentinelGptGenerationStatuses.Completed);
         completed.Output.Should().Be("Recovered response.");
         completed.CompletedRun!.ConversationId.Should().Be(conversationId);
-        coordinator.GetActive("grant").Should().BeNull();
+        coordinator.GetActive("grant", null).Should().BeNull();
     }
 
     [Fact]
@@ -59,7 +59,7 @@ public sealed class SentinelGptGenerationCoordinatorTests
         await sentinel.Started.Task.WaitAsync(TestTimeout);
 
         sentinel.ToolCallingWasInvoked.Should().BeTrue();
-        coordinator.GetActive("grant").Should().Match<SentinelGptGenerationSnapshot>(snapshot =>
+        coordinator.GetActive("grant", null).Should().Match<SentinelGptGenerationSnapshot>(snapshot =>
             snapshot.Id == started.Id && snapshot.UseTools && snapshot.Activity == "🔧 search_wiki");
 
         sentinel.Release.TrySetResult();
@@ -96,8 +96,30 @@ public sealed class SentinelGptGenerationCoordinatorTests
             Guid.NewGuid(), null, "Private request", "grant", includeInternet: false, useDeepAnalysis: false);
 
         coordinator.Get(started.Id, "another-user").Should().BeNull();
-        coordinator.GetActive("another-user").Should().BeNull();
+        coordinator.GetActive("another-user", null).Should().BeNull();
         sentinel.Release.TrySetResult();
+    }
+
+    [Fact]
+    public async Task GetActive_ShouldNotReturnAJobStartedForADifferentWikiPage()
+    {
+        // Regression guard: GetActive used to filter only by username, so two SentinelAiPanel
+        // instances open on different wiki pages (same user) could "adopt" each other's active
+        // generation - approving one page's panel could insert the other page's answer.
+        var sentinel = new ControllableSentinelAiService();
+        var coordinator = CreateCoordinator(sentinel);
+        var pageA = Guid.NewGuid();
+        var pageB = Guid.NewGuid();
+
+        var started = await coordinator.StartActionAsync(pageA, SentinelAiActions.Summarize, "Summarize this page.", "grant");
+        await sentinel.Started.Task.WaitAsync(TestTimeout);
+
+        coordinator.GetActive("grant", pageB).Should().BeNull();
+        coordinator.GetActive("grant", pageA).Should().Match<SentinelGptGenerationSnapshot>(
+            snapshot => snapshot.Id == started.Id);
+
+        sentinel.Release.TrySetResult();
+        await WaitForTerminalAsync(coordinator, started.Id, "grant");
     }
 
     [Fact]
@@ -110,7 +132,7 @@ public sealed class SentinelGptGenerationCoordinatorTests
         await sentinel.Started.Task.WaitAsync(TestTimeout);
 
         coordinator.Cancel(started.Id, "another-user").Should().BeFalse();
-        coordinator.GetActive("grant").Should().NotBeNull();
+        coordinator.GetActive("grant", null).Should().NotBeNull();
 
         coordinator.Cancel(started.Id, "grant").Should().BeTrue();
         await sentinel.CancellationObserved.Task.WaitAsync(TestTimeout);
@@ -118,7 +140,7 @@ public sealed class SentinelGptGenerationCoordinatorTests
 
         cancelled.Status.Should().Be(SentinelGptGenerationStatuses.Cancelled);
         cancelled.Error.Should().BeNull();
-        coordinator.GetActive("grant").Should().BeNull();
+        coordinator.GetActive("grant", null).Should().BeNull();
         coordinator.Cancel(started.Id, "grant").Should().BeFalse();
     }
 
@@ -200,6 +222,37 @@ public sealed class SentinelGptGenerationCoordinatorTests
         await WaitForTerminalAsync(coordinator, started.Id, "grant");
 
         trigger.Fired.Task.IsCompleted.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task StartActionAsync_WithAskAction_ShouldRouteToTheAgentConversationAndFireTheTrigger()
+    {
+        // The panel's "Ask" action is the one exception to "one-shot actions don't get chat
+        // treatment" - it should get the same suite-context grounding and Teacher Panel/approved-
+        // memory hooks as a real chat prompt, unlike Summarize/Rewrite/Translate/Research/
+        // Meeting-notes.
+        var sentinel = new ControllableSentinelAiService();
+        var trigger = new RecordingAutomationTriggerService();
+        var coordinator = CreateCoordinator(sentinel, trigger);
+        var wikiPageId = Guid.NewGuid();
+
+        var started = await coordinator.StartActionAsync(wikiPageId, SentinelAiActions.Ask, "What does this page cover?", "grant");
+        await sentinel.Started.Task.WaitAsync(TestTimeout);
+
+        sentinel.LastUseDeepAnalysis.Should().BeFalse();
+        sentinel.LastAction.Should().BeNull("the Ask action should route through StreamAgentConversationAsync, not StreamAsync");
+        var (prompt, firedConversationId) = await trigger.Fired.Task.WaitAsync(TestTimeout);
+        prompt.Should().Be("What does this page cover?");
+        // Action-based jobs (StartActionAsync) are always enqueued with conversationId: null -
+        // that's what the fresh Guid.NewGuid() inside RunAsync's Ask branch scopes instead, for
+        // the single StreamAgentConversationAsync call only, matching how Summarize/Rewrite/etc.
+        // already scope their own one-shot StreamAsync calls.
+        firedConversationId.Should().BeNull();
+
+        sentinel.Release.TrySetResult();
+        var completed = await WaitForTerminalAsync(coordinator, started.Id, "grant");
+        completed.Status.Should().Be(SentinelGptGenerationStatuses.Completed);
+        completed.CompletedRun!.WikiPageId.Should().Be(wikiPageId);
     }
 
     private static SentinelGptGenerationCoordinator CreateCoordinator(

@@ -165,12 +165,13 @@ public sealed class SentinelGptGenerationCoordinator(
                 () => RunAsync(state, applicationLifetime.ApplicationStopping),
                 CancellationToken.None);
 
-            // Only a real chat prompt (StartAsync, action is null) fires the Teacher Panel
-            // trigger - not the one-shot Ask/Summarize/Rewrite action panel (StartActionAsync),
-            // which isn't "putting a prompt into SentinelGPT" in the sense that workflow cares
-            // about. A completely separate detached task from the generation itself, so a slow
-            // or failing trigger can never delay the chat response the user is waiting on.
-            if (action is null)
+            // A real chat prompt (StartAsync, action is null) or the panel's own "Ask" action
+            // both count as "putting a prompt into SentinelGPT" for this workflow's purposes -
+            // Summarize/Rewrite/Translate/Research/Meeting-notes are one-shot transforms of
+            // pasted/selected text, not that. A completely separate detached task from the
+            // generation itself, so a slow or failing trigger can never delay the response the
+            // user is waiting on.
+            if (action is null || action == SentinelAiActions.Ask)
             {
                 _ = Task.Run(
                     () => FireChatPromptTriggerAsync(state.Instruction, conversationId, applicationLifetime.ApplicationStopping),
@@ -213,12 +214,13 @@ public sealed class SentinelGptGenerationCoordinator(
                 : null;
     }
 
-    public SentinelGptGenerationSnapshot? GetActive(string requestedBy)
+    public SentinelGptGenerationSnapshot? GetActive(string requestedBy, Guid? wikiPageId)
     {
         PruneCompleted();
         return _jobs.Values
             .Where(item =>
                 string.Equals(item.RequestedBy, requestedBy, StringComparison.OrdinalIgnoreCase)
+                && item.WikiPageId == wikiPageId
                 && !item.IsTerminal)
             .OrderByDescending(item => item.StartedAt)
             .Select(item => item.Snapshot())
@@ -247,12 +249,22 @@ public sealed class SentinelGptGenerationCoordinator(
             await using var scope = scopeFactory.CreateAsyncScope();
             var sentinelGpt = scope.ServiceProvider.GetRequiredService<ISentinelAiService>();
             var stream = state.ConversationId is not { } conversationId
-                ? sentinelGpt.StreamAsync(
-                    state.WikiPageId,
-                    state.Action!,
-                    state.Instruction,
-                    state.RequestedBy,
-                    generationToken.Token)
+                ? state.Action == SentinelAiActions.Ask
+                    ? sentinelGpt.StreamAgentConversationAsync(
+                        Guid.NewGuid(),
+                        state.WikiPageId,
+                        state.Instruction,
+                        state.RequestedBy,
+                        includeInternet: false,
+                        useDeepAnalysis: false,
+                        state.MaxOutputTokens,
+                        generationToken.Token)
+                    : sentinelGpt.StreamAsync(
+                        state.WikiPageId,
+                        state.Action!,
+                        state.Instruction,
+                        state.RequestedBy,
+                        generationToken.Token)
                 : state.UseTools
                     ? sentinelGpt.StreamToolCallingConversationAsync(
                         conversationId,
