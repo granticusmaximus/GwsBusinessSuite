@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using GwsBusinessSuite.OllamaKit;
 
 namespace GwsBusinessSuite.SentinelCli;
 

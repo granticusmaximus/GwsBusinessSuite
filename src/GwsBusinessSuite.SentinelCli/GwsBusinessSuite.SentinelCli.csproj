@@ -15,4 +15,8 @@
     <EmbeddedResource Include="..\..\ollama\SentinelGPT.Modelfile"
                       LogicalName="GwsBusinessSuite.SentinelCli.SentinelGPT.Modelfile" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GwsBusinessSuite.OllamaKit\GwsBusinessSuite.OllamaKit.csproj" />
+  </ItemGroup>
 </Project>

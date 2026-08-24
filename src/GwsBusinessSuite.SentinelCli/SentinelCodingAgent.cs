@@ -1,3 +1,5 @@
+using GwsBusinessSuite.OllamaKit;
+
 namespace GwsBusinessSuite.SentinelCli;
 
 public sealed class SentinelCodingAgent
@@ -129,7 +131,7 @@ public sealed class SentinelCodingAgent
             if (!root.TryGetProperty("arguments", out var arguments)
                 || arguments.ValueKind != System.Text.Json.JsonValueKind.Object)
                 return false;
-            call = new OllamaToolCall(name, arguments.Clone());
+            call = new OllamaToolCall(name, arguments.GetRawText());
             return true;
         }
         catch (System.Text.Json.JsonException)

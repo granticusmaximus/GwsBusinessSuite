@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO.Enumeration;
 using System.Text;
 using System.Text.Json;
+using GwsBusinessSuite.OllamaKit;
 
 namespace GwsBusinessSuite.SentinelCli;
 
@@ -136,14 +137,16 @@ public sealed class WorkspaceTools
         if (!_quiet) Console.WriteLine($"  • {call.Name}");
         try
         {
+            using var argumentsDocument = JsonDocument.Parse(call.ArgumentsJson);
+            var arguments = argumentsDocument.RootElement;
             var result = call.Name switch
             {
-                "list_files" => ListFiles(call.Arguments),
-                "read_file" => ReadFile(call.Arguments),
-                "search_text" => SearchText(call.Arguments),
-                "replace_in_file" when !EffectiveReadOnly => await ReplaceInFileAsync(call.Arguments, cancellationToken),
-                "write_file" when !EffectiveReadOnly => await WriteFileAsync(call.Arguments, cancellationToken),
-                "run_command" when !EffectiveReadOnly => await RunCommandAsync(call.Arguments, cancellationToken),
+                "list_files" => ListFiles(arguments),
+                "read_file" => ReadFile(arguments),
+                "search_text" => SearchText(arguments),
+                "replace_in_file" when !EffectiveReadOnly => await ReplaceInFileAsync(arguments, cancellationToken),
+                "write_file" when !EffectiveReadOnly => await WriteFileAsync(arguments, cancellationToken),
+                "run_command" when !EffectiveReadOnly => await RunCommandAsync(arguments, cancellationToken),
                 _ => JsonSerializer.Serialize(new { error = $"Unknown or disabled tool: {call.Name}" })
             };
             return Limit(result);

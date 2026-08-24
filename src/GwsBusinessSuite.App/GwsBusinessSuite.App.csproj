@@ -67,6 +67,10 @@
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
 	</ItemGroup>
 
+	<ItemGroup>
+		<ProjectReference Include="..\GwsBusinessSuite.OllamaKit\GwsBusinessSuite.OllamaKit.csproj" />
+	</ItemGroup>
+
 	<!-- This repo lives under ~/Desktop, which iCloud Drive's "Desktop & Documents Folders" sync
 	     actively tracks (confirmed via `brctl status`) - it attaches com.apple.fileprovider/
 	     com.apple.FinderInfo extended attributes to the freshly-assembled .app bundle directory

@@ -1,3 +1,5 @@
+using GwsBusinessSuite.OllamaKit;
+
 namespace GwsBusinessSuite.SentinelCli;
 
 public static class Program

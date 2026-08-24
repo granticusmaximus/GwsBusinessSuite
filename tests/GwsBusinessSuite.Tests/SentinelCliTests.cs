@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using GwsBusinessSuite.OllamaKit;
 using GwsBusinessSuite.SentinelCli;
 
 namespace GwsBusinessSuite.Tests;
@@ -177,7 +178,8 @@ public sealed class SentinelCliTests : IDisposable
 
         Assert.Single(result.ToolCalls);
         Assert.Equal("read_file", result.ToolCalls[0].Name);
-        Assert.Equal("Program.cs", result.ToolCalls[0].Arguments.GetProperty("path").GetString());
+        using var resultArguments = JsonDocument.Parse(result.ToolCalls[0].ArgumentsJson);
+        Assert.Equal("Program.cs", resultArguments.RootElement.GetProperty("path").GetString());
         Assert.Contains("\"tools\"", requestBody);
         Assert.Contains("\"stream\":false", requestBody);
     }
@@ -332,7 +334,8 @@ public sealed class SentinelCliTests : IDisposable
             definitions);
 
         Assert.Single(calls);
-        Assert.Equal("Program.cs", calls[0].Arguments.GetProperty("path").GetString());
+        using var callArguments = JsonDocument.Parse(calls[0].ArgumentsJson);
+        Assert.Equal("Program.cs", callArguments.RootElement.GetProperty("path").GetString());
         Assert.Empty(unknown);
     }
 
@@ -362,11 +365,8 @@ public sealed class SentinelCliTests : IDisposable
             Directory.Delete(_root, recursive: true);
     }
 
-    private static OllamaToolCall Call(string name, object arguments)
-    {
-        using var document = JsonDocument.Parse(JsonSerializer.Serialize(arguments));
-        return new OllamaToolCall(name, document.RootElement.Clone());
-    }
+    private static OllamaToolCall Call(string name, object arguments) =>
+        new(name, JsonSerializer.Serialize(arguments));
 
     private sealed class FakeApproval(bool approved) : IUserApproval
     {

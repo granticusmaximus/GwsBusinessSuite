@@ -3,4 +3,7 @@
     <Project Path="src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj" />
     <Project Path="src/GwsBusinessSuite.SentinelMenuBar/GwsBusinessSuite.SentinelMenuBar.csproj" />
   </Folder>
+  <Folder Name="/shared/">
+    <Project Path="src/GwsBusinessSuite.OllamaKit/GwsBusinessSuite.OllamaKit.csproj" />
+  </Folder>
 </Solution>
