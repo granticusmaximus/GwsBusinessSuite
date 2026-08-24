@@ -1,38 +1,107 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:local="clr-namespace:GwsBusinessSuite.App"
              x:Class="GwsBusinessSuite.App.SentinelGptPage"
              BackgroundColor="#141210"
              Shell.NavBarIsVisible="False">
 
-    <Grid RowDefinitions="Auto,*,Auto">
+    <Grid ColumnDefinitions="220,*">
 
-        <Grid Grid.Row="0" Padding="16,12" ColumnDefinitions="*,200" BackgroundColor="#1C1917">
-            <VerticalStackLayout Grid.Column="0" Spacing="2" VerticalOptions="Center">
-                <Label Text="SentinelGPT (local)" TextColor="#FAFAF9" FontAttributes="Bold" FontSize="16" />
-                <Label x:Name="StatusLabel" Text="Connecting to local Ollama..." TextColor="#A8A29E" FontSize="12" />
-            </VerticalStackLayout>
-            <Picker x:Name="ModelPicker" Grid.Column="1" TextColor="#FAFAF9" VerticalOptions="Center"
-                    SelectedIndexChanged="OnModelChanged" />
+        <Grid Grid.Column="0" RowDefinitions="Auto,*" BackgroundColor="#1C1917">
+            <Button Grid.Row="0" Text="+ New chat" Margin="10" BackgroundColor="#F59E0B" TextColor="#1C1917"
+                    FontAttributes="Bold" CornerRadius="8" Clicked="OnNewChatClicked" />
+            <CollectionView Grid.Row="1" x:Name="HistoryList" SelectionMode="Single"
+                             SelectionChanged="OnHistorySelectionChanged" Margin="4,0">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="local:ConversationSummary">
+                        <Grid Padding="8,10" ColumnDefinitions="*,Auto">
+                            <VerticalStackLayout Grid.Column="0" Spacing="2">
+                                <Label Text="{Binding Title}" TextColor="#E7E5E4" FontSize="13" LineBreakMode="TailTruncation" />
+                                <Label Text="{Binding Subtitle}" TextColor="#78716C" FontSize="11" LineBreakMode="TailTruncation" />
+                            </VerticalStackLayout>
+                            <Button Grid.Column="1" Text="&#x2715;" FontSize="11" Padding="6,2" BackgroundColor="Transparent"
+                                    TextColor="#78716C" Clicked="OnDeleteConversationClicked" BindingContext="{Binding}" />
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
         </Grid>
 
-        <ScrollView x:Name="TranscriptScroll" Grid.Row="1" Padding="16">
-            <VerticalStackLayout x:Name="Transcript" Spacing="12">
-                <Label Text="Ask anything. This talks directly to Ollama on this Mac -- nothing here is sent to the GWS server."
-                       TextColor="#78716C" FontSize="12" />
-            </VerticalStackLayout>
-        </ScrollView>
+        <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*,Auto">
 
-        <Grid Grid.Row="2" Padding="12" ColumnDefinitions="*,Auto" BackgroundColor="#1C1917">
-            <Editor x:Name="PromptEditor" Grid.Column="0"
-                    Placeholder="Ask SentinelGPT..." PlaceholderColor="#78716C"
-                    TextColor="#FAFAF9" BackgroundColor="#231F1D"
-                    AutoSize="TextChanges" MaxLength="8000" HeightRequest="42" />
-            <Button x:Name="SendButton" Grid.Column="1" Text="Send" Margin="8,0,0,0"
-                    BackgroundColor="#F59E0B" TextColor="#1C1917" FontAttributes="Bold"
-                    CornerRadius="8" Padding="18,0" Clicked="OnSendClicked" />
+            <Grid Grid.Row="0" Padding="16,12" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="10" BackgroundColor="#1C1917">
+                <VerticalStackLayout Grid.Column="0" Spacing="2" VerticalOptions="Center">
+                    <Label Text="SentinelGPT (local)" TextColor="#FAFAF9" FontAttributes="Bold" FontSize="16" />
+                    <Label x:Name="StatusLabel" Text="Connecting to local Ollama..." TextColor="#A8A29E" FontSize="12" />
+                </VerticalStackLayout>
+                <HorizontalStackLayout Grid.Column="1" Spacing="6" VerticalOptions="Center">
+                    <Label Text="Deep analysis" TextColor="#A8A29E" FontSize="12" VerticalOptions="Center" />
+                    <Switch x:Name="DeepAnalysisSwitch" Toggled="OnDeepAnalysisToggled" />
+                </HorizontalStackLayout>
+                <Picker x:Name="ModelPicker" Grid.Column="2" TextColor="#FAFAF9" VerticalOptions="Center" WidthRequest="150"
+                        SelectedIndexChanged="OnModelChanged" />
+                <Button Grid.Column="3" Text="&#x2699;" FontSize="16" Padding="8,4" BackgroundColor="Transparent"
+                        TextColor="#A8A29E" Clicked="OnToggleSettingsClicked" />
+            </Grid>
+
+            <Grid x:Name="SettingsRow" Grid.Row="1" Padding="16,10" ColumnDefinitions="*,Auto" ColumnSpacing="8"
+                  BackgroundColor="#231F1D" IsVisible="False">
+                <VerticalStackLayout Grid.Column="0" Spacing="4">
+                    <Label Text="Sentinel grounding key (optional)" TextColor="#D6D3D1" FontSize="12" FontAttributes="Bold" />
+                    <Entry x:Name="ApiKeyEntry" Placeholder="Paste a sentinel:read developer API key from Settings"
+                           PlaceholderColor="#78716C" TextColor="#FAFAF9" IsPassword="True" />
+                    <Label Text="Lets SentinelGPT search your wiki for grounded answers. Inference always stays local either way."
+                           TextColor="#78716C" FontSize="11" />
+                </VerticalStackLayout>
+                <Button Grid.Column="1" Text="Save" VerticalOptions="Start" BackgroundColor="#F59E0B" TextColor="#1C1917"
+                        FontAttributes="Bold" CornerRadius="6" Clicked="OnSaveApiKeyClicked" />
+            </Grid>
+
+            <CollectionView x:Name="Transcript" Grid.Row="2" Margin="16">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="local:ChatMessageViewModel">
+                        <Grid Padding="0,6">
+
+                            <Border IsVisible="{Binding IsUser}" Padding="12,8" HorizontalOptions="End" MaximumWidthRequest="480"
+                                    BackgroundColor="#2B2215" Stroke="#66501F" StrokeShape="RoundRectangle 10">
+                                <Label Text="{Binding Text}" TextColor="#FAFAF9" FontSize="14" />
+                            </Border>
+
+                            <VerticalStackLayout IsVisible="{Binding IsAssistant}" Spacing="4">
+                                <Border Padding="12,8" HorizontalOptions="Start" MaximumWidthRequest="560"
+                                        BackgroundColor="{Binding BubbleColor}"
+                                        Stroke="#292524" StrokeShape="RoundRectangle 10">
+                                    <Label Text="{Binding Text}" TextColor="#FAFAF9" FontSize="14" />
+                                </Border>
+                                <HorizontalStackLayout IsVisible="{Binding IsComplete}" Spacing="10" Margin="4,0,0,0">
+                                    <Button Text="&#x1F50A;" FontSize="12" Padding="4" BackgroundColor="Transparent"
+                                            TextColor="#78716C" Clicked="OnSpeakClicked" BindingContext="{Binding}" />
+                                    <Button Text="{Binding ApproveButtonText}"
+                                            FontSize="12" Padding="4" BackgroundColor="Transparent" TextColor="#78716C"
+                                            Clicked="OnApproveClicked" BindingContext="{Binding}" />
+                                    <Button Text="Retry" FontSize="12" Padding="4" BackgroundColor="Transparent"
+                                            TextColor="#78716C" IsVisible="{Binding HasRetryPrompt}"
+                                            Clicked="OnRetryClicked" BindingContext="{Binding}" />
+                                </HorizontalStackLayout>
+                            </VerticalStackLayout>
+
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+            <Grid Grid.Row="3" Padding="12" ColumnDefinitions="*,Auto" BackgroundColor="#1C1917">
+                <Editor x:Name="PromptEditor" Grid.Column="0"
+                        Placeholder="Ask SentinelGPT..." PlaceholderColor="#78716C"
+                        TextColor="#FAFAF9" BackgroundColor="#231F1D"
+                        AutoSize="TextChanges" MaxLength="8000" HeightRequest="42" />
+                <Button x:Name="SendButton" Grid.Column="1" Text="Send" Margin="8,0,0,0"
+                        BackgroundColor="#F59E0B" TextColor="#1C1917" FontAttributes="Bold"
+                        CornerRadius="8" Padding="18,0" Clicked="OnSendClicked" />
+            </Grid>
+
         </Grid>
-
     </Grid>
 
 </ContentPage>

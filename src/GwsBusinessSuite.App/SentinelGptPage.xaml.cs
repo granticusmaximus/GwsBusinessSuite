@@ -1,22 +1,66 @@
-using Microsoft.Maui.Controls.Shapes;
+using System.Collections.ObjectModel;
+using GwsBusinessSuite.OllamaKit;
 
 namespace GwsBusinessSuite.App;
+
+public sealed record ConversationSummary(string Title, string Subtitle, string Path);
 
 public partial class SentinelGptPage : ContentPage
 {
     private const string PreferredModel = "sentinelgpt";
-    private readonly OllamaClient _ollama = new();
-    private readonly List<ChatMessage> _messages = [];
-    private List<string> _models = [];
-    private bool _sending;
 
-    public SentinelGptPage() => InitializeComponent();
+    private readonly OllamaClient _ollama;
+    private readonly NativeToolExecutor _toolExecutor;
+    private readonly ConversationSessionStore _sessions;
+    private readonly ApprovedMemoryStore _approvedMemory;
+    private readonly SecureApiKeyStore _apiKeyStore;
+    private readonly SentinelVoiceService _voice;
+    private readonly DeepAnalysisAdvisor _deepAnalysis;
+
+    private readonly ObservableCollection<ChatMessageViewModel> _messages = [];
+    private readonly ObservableCollection<ConversationSummary> _history = [];
+
+    private List<string> _models = [];
+    private OllamaToolCallingAgent? _agent;
+    private CancellationTokenSource? _turnCts;
+    private string? _currentSessionPath;
+    private bool _sending;
+    private bool _useDeepAnalysis;
+
+    public SentinelGptPage(
+        OllamaClient ollama,
+        NativeToolExecutor toolExecutor,
+        ConversationSessionStore sessions,
+        ApprovedMemoryStore approvedMemory,
+        SecureApiKeyStore apiKeyStore,
+        SentinelVoiceService voice,
+        DeepAnalysisAdvisor deepAnalysis)
+    {
+        _ollama = ollama;
+        _toolExecutor = toolExecutor;
+        _sessions = sessions;
+        _approvedMemory = approvedMemory;
+        _apiKeyStore = apiKeyStore;
+        _voice = voice;
+        _deepAnalysis = deepAnalysis;
+
+        InitializeComponent();
+        Transcript.ItemsSource = _messages;
+        HistoryList.ItemsSource = _history;
+    }
 
     protected override async void OnAppearing()
     {
         base.OnAppearing();
-        if (_models.Count > 0) return;
-        await LoadModelsAsync();
+        if (_models.Count == 0)
+            await LoadModelsAsync();
+        RefreshHistory();
+    }
+
+    protected override void OnDisappearing()
+    {
+        base.OnDisappearing();
+        _turnCts?.Cancel();
     }
 
     private async Task LoadModelsAsync()
@@ -42,10 +86,57 @@ public partial class SentinelGptPage : ContentPage
         }
     }
 
+    private OllamaToolCallingAgent CreateAgent(string model) =>
+        new(_ollama, _toolExecutor, model, BuildSystemPrompt(), maxRounds: 6);
+
+    private static string BuildSystemPrompt() =>
+        "You are SentinelGPT, Grant Watson's private AI assistant running entirely locally via " +
+        "Ollama on this Mac - nothing in this conversation is sent to any hosted server. Answer " +
+        "directly and concisely. If wiki-search tools are available and the question depends on " +
+        "workspace-specific facts, use them rather than guessing.";
+
+    private void OnNewChatClicked(object? sender, EventArgs e)
+    {
+        if (_sending) return;
+        _messages.Clear();
+        _currentSessionPath = null;
+        if (ModelPicker.SelectedItem is string model)
+            _agent = CreateAgent(model);
+        HistoryList.SelectedItem = null;
+    }
+
     private void OnModelChanged(object? sender, EventArgs e)
     {
+        if (ModelPicker.SelectedItem is not string model) return;
         _messages.Clear();
-        Transcript.Children.Clear();
+        _currentSessionPath = null;
+        _agent = CreateAgent(model);
+    }
+
+    private void OnDeepAnalysisToggled(object? sender, ToggledEventArgs e) => _useDeepAnalysis = e.Value;
+
+    private void OnToggleSettingsClicked(object? sender, EventArgs e)
+    {
+        SettingsRow.IsVisible = !SettingsRow.IsVisible;
+        if (SettingsRow.IsVisible)
+            _ = LoadApiKeyIntoFieldAsync();
+    }
+
+    private async Task LoadApiKeyIntoFieldAsync() => ApiKeyEntry.Text = await _apiKeyStore.GetAsync();
+
+    private async void OnSaveApiKeyClicked(object? sender, EventArgs e)
+    {
+        var key = ApiKeyEntry.Text?.Trim();
+        if (string.IsNullOrEmpty(key))
+        {
+            _apiKeyStore.Remove();
+            StatusLabel.Text = "Grounding key removed - SentinelGPT will answer from local knowledge only.";
+        }
+        else
+        {
+            await _apiKeyStore.SetAsync(key);
+            StatusLabel.Text = "Grounding key saved.";
+        }
     }
 
     private async void OnSendClicked(object? sender, EventArgs e)
@@ -59,22 +150,87 @@ public partial class SentinelGptPage : ContentPage
             return;
         }
 
+        _agent ??= CreateAgent(model);
+        PromptEditor.Text = string.Empty;
+        await RunTurnAsync(prompt);
+    }
+
+    private async void OnRetryClicked(object? sender, EventArgs e)
+    {
+        if (_sending) return;
+        if ((sender as Button)?.BindingContext is not ChatMessageViewModel { RetryPrompt: { } prompt })
+            return;
+        await RunTurnAsync(prompt);
+    }
+
+    private async Task RunTurnAsync(string prompt)
+    {
+        if (_agent is null) return;
+
         _sending = true;
         SendButton.IsEnabled = false;
-        PromptEditor.Text = string.Empty;
-        AppendMessage("You", prompt, isUser: true);
-        _messages.Add(new ChatMessage("user", prompt));
+        _turnCts?.Dispose();
+        _turnCts = new CancellationTokenSource();
 
-        var answerLabel = AppendMessage("SentinelGPT", "Thinking...", isUser: false);
+        foreach (var previous in _messages)
+            previous.RetryPrompt = null;
+
+        _messages.Add(new ChatMessageViewModel(isUser: true) { Text = prompt, IsComplete = true });
+        var answer = new ChatMessageViewModel(isUser: false);
+        _messages.Add(answer);
+
+        var effectivePrompt = prompt;
         try
         {
-            var answer = await _ollama.ChatAsync(model, _messages, CancellationToken.None);
-            answerLabel.Text = string.IsNullOrWhiteSpace(answer) ? "(no response)" : answer;
-            _messages.Add(new ChatMessage("assistant", answer));
+            if (_useDeepAnalysis)
+            {
+                answer.Text = "Consulting specialist advisers...";
+                var advisory = await _deepAnalysis.BuildAdvisoryContextAsync(prompt, _turnCts.Token);
+                if (!string.IsNullOrWhiteSpace(advisory))
+                    effectivePrompt = $"{prompt}\n\n{advisory}";
+                answer.Text = string.Empty;
+            }
+
+            var approvedContext = await _approvedMemory.BuildContextAsync(prompt, _turnCts.Token);
+            if (!string.IsNullOrWhiteSpace(approvedContext))
+                effectivePrompt = $"{effectivePrompt}\n\n{approvedContext}";
+
+            // showingActivity is only ever read/written here, synchronously on the loop's own
+            // thread - each MainThread-marshaled closure below only carries an already-computed
+            // string, never reads or writes the flag itself, so there's no race between the
+            // enumerator advancing and a previous UI update still being queued.
+            var showingActivity = false;
+            await foreach (var turnEvent in _agent.RunTurnStreamingAsync(effectivePrompt, _turnCts.Token))
+            {
+                if (turnEvent.ToolActivity is { } activity)
+                {
+                    showingActivity = true;
+                    var activityText = $"\U0001F527 {activity}...";
+                    MainThread.BeginInvokeOnMainThread(() => answer.Text = activityText);
+                }
+                else if (turnEvent.ContentDelta is { Length: > 0 } delta)
+                {
+                    var replacePrevious = showingActivity;
+                    showingActivity = false;
+                    MainThread.BeginInvokeOnMainThread(() =>
+                        answer.Text = replacePrevious ? delta : answer.Text + delta);
+                }
+            }
+
+            answer.IsComplete = true;
+            _currentSessionPath = await _sessions.SaveAsync(_currentSessionPath, PickerModel(), _agent.Messages, CancellationToken.None);
+            RefreshHistory();
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        catch (OperationCanceledException)
         {
-            answerLabel.Text = $"Request failed: {ex.Message}";
+            // Page navigated away mid-turn - nothing left to show a result to.
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException)
+        {
+            answer.Text = $"Request failed: {ex.Message}";
+            answer.IsError = true;
+            answer.IsComplete = true;
+            answer.RetryPrompt = prompt;
         }
         finally
         {
@@ -83,28 +239,71 @@ public partial class SentinelGptPage : ContentPage
         }
     }
 
-    private Label AppendMessage(string sender, string text, bool isUser)
+    private string PickerModel() => ModelPicker.SelectedItem as string ?? PreferredModel;
+
+    private async void OnApproveClicked(object? sender, EventArgs e)
     {
-        var contentLabel = new Label { Text = text, TextColor = Color.FromArgb("#FAFAF9"), FontSize = 14 };
-        var bubble = new Border
+        if ((sender as Button)?.BindingContext is not ChatMessageViewModel answer || answer.IsApproved) return;
+        var index = _messages.IndexOf(answer);
+        var question = index > 0 ? _messages[index - 1] : null;
+        if (question is null || !question.IsUser) return;
+
+        await _approvedMemory.AppendAsync(question.Text, answer.Text, CancellationToken.None);
+        answer.IsApproved = true;
+    }
+
+    private async void OnSpeakClicked(object? sender, EventArgs e)
+    {
+        if ((sender as Button)?.BindingContext is ChatMessageViewModel { Text.Length: > 0 } message)
+            await _voice.SpeakAsync(message.Text);
+    }
+
+    private void RefreshHistory()
+    {
+        _history.Clear();
+        foreach (var (path, conversation) in _sessions.List())
         {
-            Padding = new Thickness(12, 8),
-            BackgroundColor = Color.FromArgb(isUser ? "#2B2215" : "#1C1917"),
-            Stroke = Color.FromArgb(isUser ? "#66501F" : "#292524"),
-            StrokeShape = new RoundRectangle { CornerRadius = 10 },
-            Content = new VerticalStackLayout
+            var firstUserMessage = conversation.Messages.FirstOrDefault(m => m.Role == "user")?.Content ?? "New conversation";
+            var title = firstUserMessage.Length > 48 ? firstUserMessage[..48] + "..." : firstUserMessage;
+            _history.Add(new ConversationSummary(title, conversation.UpdatedAt.ToLocalTime().ToString("MMM d, t"), path));
+        }
+    }
+
+    private async void OnHistorySelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_sending || e.CurrentSelection.FirstOrDefault() is not ConversationSummary selected) return;
+
+        var loaded = await _sessions.LoadAsync(selected.Path, CancellationToken.None);
+        if (loaded is null) return;
+
+        _currentSessionPath = selected.Path;
+        _agent = CreateAgent(loaded.Model);
+        _agent.LoadConversation(loaded.Messages);
+
+        var modelIndex = _models.FindIndex(m => m == loaded.Model);
+        if (modelIndex >= 0) ModelPicker.SelectedIndex = modelIndex;
+
+        _messages.Clear();
+        foreach (var message in loaded.Messages.Where(m => m.Role is "user" or "assistant" && m.Content.Length > 0))
+        {
+            _messages.Add(new ChatMessageViewModel(isUser: message.Role == "user")
             {
-                Spacing = 4,
-                Children =
-                {
-                    new Label { Text = sender, TextColor = Color.FromArgb("#A8A29E"), FontSize = 11, FontAttributes = FontAttributes.Bold },
-                    contentLabel
-                }
-            }
-        };
-        Transcript.Children.Add(bubble);
-        _ = TranscriptScroll.ScrollToAsync(bubble, ScrollToPosition.End, animated: true);
-        return contentLabel;
+                Text = message.Content,
+                IsComplete = true
+            });
+        }
+    }
+
+    private void OnDeleteConversationClicked(object? sender, EventArgs e)
+    {
+        if ((sender as Button)?.BindingContext is not ConversationSummary summary) return;
+        _sessions.Delete(summary.Path);
+        if (_currentSessionPath == summary.Path)
+        {
+            _messages.Clear();
+            _currentSessionPath = null;
+        }
+        RefreshHistory();
     }
 
     private static string NormalizeModel(string model) =>
