@@ -77,6 +77,17 @@ Apple builds must use the Xcode version required by the installed iOS/Mac Cataly
 Windows packaging must run on a Windows build agent; signed iOS/macOS packages require an Apple
 developer identity and provisioning profile.
 
+The Windows CI job selects only its Windows target through the app-specific
+`GwsClientTargetFramework` MSBuild property. Do not replace that with a command-line
+`TargetFrameworks` override: reserved global properties propagate to the app's plain `net10.0`
+project references and can leave their NuGet assets without a `net10.0` target. The equivalent
+Windows restore/build sequence is:
+
+```powershell
+dotnet restore src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -p:GwsClientTargetFramework=net10.0-windows10.0.19041.0 -r win-x64
+dotnet build src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-windows10.0.19041.0 -c Release --no-restore -r win-x64 -p:GwsClientTargetFramework=net10.0-windows10.0.19041.0 -p:WindowsAppSDKSelfContained=true
+```
+
 ## Sentinel menu-bar companion (macOS)
 
 `src/GwsBusinessSuite.SentinelMenuBar` is a small, separate `net10.0-macos` app (not part of the
