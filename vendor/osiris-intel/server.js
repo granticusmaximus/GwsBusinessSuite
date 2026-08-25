@@ -15,8 +15,15 @@
  *   - Rate-limited per client IP
  *
  * Vendored from https://github.com/simplifaisoul/osiris (intel/server.js,
- * MIT licensed) unmodified, reviewed in full before vendoring - see
- * reference_osint_watch_page memory for the audit that preceded this.
+ * MIT licensed), reviewed in full before vendoring - see README.md for the audit trail
+ * (account red flags in an unrelated dir, RECON scanner backend deliberately excluded,
+ * this file itself cleared).
+ *
+ * One local patch on top of that reviewed snapshot, 2026-08-25: resolveIP's four external
+ * lookups (ip-api.com + three RIPEstat calls) ran strictly sequentially - up to ~32s worst
+ * case on a cache miss for calls that don't depend on each other. Parallelized via
+ * Promise.allSettled; no URL, allowlist, sanitization, or trust-boundary logic changed.
+ * See docs/OSINT_WATCH_SECURITY.md for why this diverges from upstream.
  */
 
 const express = require('express');
@@ -479,7 +486,26 @@ async function resolveIP(id) {
   const cached = wdCacheGet(`ip:${id}`);
   if (cached) return { ...cached };
 
-  // Step 1: ip-api.com — geolocation, ISP, ASN, proxy/hosting detection
+  // These four lookups are independent - none depends on another's result - so they run
+  // concurrently instead of one after another. Sequentially this was up to ~32s worst-case
+  // (4 x 8s timeout) on a cache miss; concurrently it's bounded by the single slowest call.
+  // Each step keeps its own try/catch exactly as before, so one source failing never affects
+  // the others. Array pushes across steps are safe without locking: JS is single-threaded, so
+  // two steps' synchronous push() calls can never interleave with each other.
+  await Promise.allSettled([
+    resolveIpApiGeolocation(id, rootId, nodes, links),
+    resolveRipeWhois(id, rootId, nodes, links),
+    resolveRipeAbuseContact(id, rootId, nodes, links),
+    resolveRipeNetworkInfo(id, rootId, nodes, links),
+  ]);
+
+  const result = dedup(nodes, links);
+  wdCacheSet(`ip:${id}`, result);
+  return result;
+}
+
+// Step 1: ip-api.com — geolocation, ISP, ASN, proxy/hosting detection
+async function resolveIpApiGeolocation(id, rootId, nodes, links) {
   try {
     const ipApiUrl = `http://ip-api.com/json/${encodeURIComponent(id)}?fields=status,message,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,mobile,proxy,hosting`;
     const parsed = new URL(ipApiUrl);
@@ -536,8 +562,10 @@ async function resolveIP(id) {
       }
     }
   } catch (e) { console.warn('[INTEL] ip-api.com error:', e.message); }
+}
 
-  // Step 2: RIPEstat WHOIS
+// Step 2: RIPEstat WHOIS
+async function resolveRipeWhois(id, rootId, nodes, links) {
   try {
     const whoisUrl = `https://stat.ripe.net/data/whois/data.json?resource=${encodeURIComponent(id)}`;
     const parsed = new URL(whoisUrl);
@@ -557,8 +585,10 @@ async function resolveIP(id) {
       }
     }
   } catch (e) { console.warn('[INTEL] RIPEstat WHOIS error:', e.message); }
+}
 
-  // Step 3: RIPEstat Abuse Contact
+// Step 3: RIPEstat Abuse Contact
+async function resolveRipeAbuseContact(id, rootId, nodes, links) {
   try {
     const abuseUrl = `https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=${encodeURIComponent(id)}`;
     const parsed = new URL(abuseUrl);
@@ -576,8 +606,10 @@ async function resolveIP(id) {
       }
     }
   } catch (e) { console.warn('[INTEL] RIPEstat abuse-contact error:', e.message); }
+}
 
-  // Step 4: RIPEstat Network Info
+// Step 4: RIPEstat Network Info
+async function resolveRipeNetworkInfo(id, rootId, nodes, links) {
   try {
     const netUrl = `https://stat.ripe.net/data/network-info/data.json?resource=${encodeURIComponent(id)}`;
     const parsed = new URL(netUrl);
@@ -599,10 +631,6 @@ async function resolveIP(id) {
       }
     }
   } catch (e) { console.warn('[INTEL] RIPEstat network-info error:', e.message); }
-
-  const result = dedup(nodes, links);
-  wdCacheSet(`ip:${id}`, result);
-  return result;
 }
 
 async function resolveCountry(id) {
