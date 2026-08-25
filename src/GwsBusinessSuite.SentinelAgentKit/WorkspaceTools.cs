@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using GwsBusinessSuite.OllamaKit;
 
-namespace GwsBusinessSuite.SentinelCli;
+namespace GwsBusinessSuite.SentinelAgentKit;
 
 public interface IUserApproval
 {
@@ -48,7 +48,7 @@ public sealed class UnreachableApproval : IUserApproval
         throw new InvalidOperationException("Approval was requested on a read-only WorkspaceTools instance.");
 }
 
-public sealed class WorkspaceTools
+public sealed class WorkspaceTools : IOllamaToolExecutor
 {
     private const int MaxFileBytes = 1_000_000;
     private const int MaxReadLines = 500;

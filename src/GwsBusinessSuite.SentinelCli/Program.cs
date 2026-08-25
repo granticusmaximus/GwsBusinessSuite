@@ -1,4 +1,5 @@
 using GwsBusinessSuite.OllamaKit;
+using GwsBusinessSuite.SentinelAgentKit;
 
 namespace GwsBusinessSuite.SentinelCli;
 

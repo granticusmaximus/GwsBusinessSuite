@@ -3,7 +3,7 @@ using System.Text;
 using System.Text.Json;
 using GwsBusinessSuite.OllamaKit;
 
-namespace GwsBusinessSuite.SentinelCli;
+namespace GwsBusinessSuite.SentinelAgentKit;
 
 public sealed record PersistedSession(
     string WorkspaceRoot, string Model, DateTimeOffset UpdatedAt, IReadOnlyList<OllamaChatMessage> Messages);
