@@ -8,12 +8,16 @@ public static class DeveloperApiScopes
     public const string DealsWrite = "deals:write";
     public const string CmsPagesRead = "cms-pages:read";
     public const string CmsPagesWrite = "cms-pages:write";
+    // Deliberately has no "sentinel:write" counterpart - see NativeToolExecutor (App project)
+    // for why the native Mac SentinelGPT tab's tool set is permanently read-only.
+    public const string SentinelRead = "sentinel:read";
 
     public static readonly string[] All =
     [
         ContactsRead, ContactsWrite,
         DealsRead, DealsWrite,
-        CmsPagesRead, CmsPagesWrite
+        CmsPagesRead, CmsPagesWrite,
+        SentinelRead
     ];
 }
 
@@ -35,7 +39,8 @@ public sealed record AuthenticatedDeveloperApiKey(
     Guid Id,
     string Name,
     IReadOnlyList<string> Scopes,
-    int RateLimitPerMinute);
+    int RateLimitPerMinute,
+    string CreatedBy);
 
 public interface IDeveloperApiKeyService
 {

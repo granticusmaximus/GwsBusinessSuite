@@ -705,6 +705,7 @@ app.MapHealthChecks("/health/ready", new()
 }).AllowAnonymous();
 
 app.MapDeveloperApiEndpoints();
+app.MapDeveloperApiSentinelEndpoints();
 app.MapOsintProxyEndpoints();
 
 // Notion connection webhooks are intentionally anonymous: Notion is the caller. Event

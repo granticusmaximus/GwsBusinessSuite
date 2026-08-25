@@ -115,7 +115,8 @@ public sealed class DeveloperApiKeyService(IAppDbContext db, TimeProvider timePr
             row.Id,
             row.Name,
             ParseScopes(row.ScopesCsv),
-            row.RateLimitPerMinute);
+            row.RateLimitPerMinute,
+            row.CreatedBy);
     }
 
     private static DeveloperApiKeyView Map(DeveloperApiKey row) => new(

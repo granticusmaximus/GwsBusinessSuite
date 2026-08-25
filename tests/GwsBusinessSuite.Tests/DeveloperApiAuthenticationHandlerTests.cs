@@ -15,7 +15,7 @@ public sealed class DeveloperApiAuthenticationHandlerTests
         var keyId = Guid.NewGuid();
         var fake = new FakeKeyService
         {
-            Result = new(keyId, "Reporting", [DeveloperApiScopes.ContactsRead], 75)
+            Result = new(keyId, "Reporting", [DeveloperApiScopes.ContactsRead], 75, "grant")
         };
         await using var provider = BuildProvider(fake);
         var context = Context(provider, "Bearer gws_live_selector_secret");
@@ -27,6 +27,7 @@ public sealed class DeveloperApiAuthenticationHandlerTests
         result.Principal.FindAll(DeveloperApiAuthenticationDefaults.ScopeClaim)
             .Select(claim => claim.Value).Should().ContainSingle(DeveloperApiScopes.ContactsRead);
         result.Principal.FindFirst(DeveloperApiAuthenticationDefaults.RateLimitClaim)!.Value.Should().Be("75");
+        result.Principal.FindFirst(DeveloperApiAuthenticationDefaults.OwnerUsernameClaim)!.Value.Should().Be("grant");
     }
 
     [Fact]

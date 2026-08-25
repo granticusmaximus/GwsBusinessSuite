@@ -13,6 +13,10 @@ public static class DeveloperApiAuthenticationDefaults
     public const string ScopeClaim = "gws:api_scope";
     public const string KeyIdClaim = "gws:api_key_id";
     public const string RateLimitClaim = "gws:api_rate_limit";
+    // The admin username that issued this key - lets a scope like sentinel:read enforce
+    // per-page ACLs (ISentinelAccessService.CanAccessAsync) as that specific human, rather than
+    // under a fixed service identity that would over- or under-grant relative to them.
+    public const string OwnerUsernameClaim = "gws:api_key_owner";
 }
 
 public static class DeveloperApiPolicies
@@ -66,7 +70,8 @@ public sealed class DeveloperApiAuthenticationHandler(
             new(ClaimTypes.NameIdentifier, key.Id.ToString()),
             new(ClaimTypes.Name, key.Name),
             new(DeveloperApiAuthenticationDefaults.KeyIdClaim, key.Id.ToString()),
-            new(DeveloperApiAuthenticationDefaults.RateLimitClaim, key.RateLimitPerMinute.ToString())
+            new(DeveloperApiAuthenticationDefaults.RateLimitClaim, key.RateLimitPerMinute.ToString()),
+            new(DeveloperApiAuthenticationDefaults.OwnerUsernameClaim, key.CreatedBy)
         };
         claims.AddRange(key.Scopes.Select(scope => new Claim(DeveloperApiAuthenticationDefaults.ScopeClaim, scope)));
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, Scheme.Name));

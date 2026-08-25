@@ -233,6 +233,7 @@ public static class DependencyInjection
         services.AddScoped<IBusinessIntelligenceService, BusinessIntelligenceService>();
         services.AddScoped<IDeveloperApiKeyService, DeveloperApiKeyService>();
         services.AddScoped<IDeveloperApiResourceService, DeveloperApiResourceService>();
+        services.AddScoped<IDeveloperApiSentinelReadService, DeveloperApiSentinelReadService>();
         services.AddSingleton<IAnalyticsGeoLocationResolver, AnalyticsGeoLocationResolver>();
         services.AddScoped<IGrowthAnalyticsService, GrowthAnalyticsService>();
         services.AddOptions<GrowthReportEmailOptions>()

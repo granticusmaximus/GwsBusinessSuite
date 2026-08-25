@@ -11,13 +11,22 @@ namespace GwsBusinessSuite.App;
 // future mutating tool couldn't be authorized by a key generated for this feature.
 public sealed class NativeToolExecutor(SentinelGroundingClient grounding) : IOllamaToolExecutor
 {
-    // Empty until the backend's sentinel:read endpoints actually ship - offering these tools to
-    // the model before then would just mean every attempt silently fails (SentinelGroundingClient
-    // has no endpoint to call yet). ExecuteAsync's dispatch below is already correct and ready;
-    // replacing this empty array with the real tool list (search_wiki, get_page - see
-    // ExecuteAsync's switch for their exact shape) is the last step of wiring up backend
-    // grounding, not a signature or dispatch-logic change.
-    public IReadOnlyList<OllamaToolDefinition> Definitions { get; } = [];
+    // Text matches SentinelAiService.BuildToolCallingTools()'s search_wiki/get_page definitions
+    // verbatim, so the model gets the same descriptions whether it's talking to the hosted loop
+    // or this native one. If no grounding key is configured, SentinelGroundingClient's calls
+    // return empty/null rather than erroring, so offering these tools is safe even then - the
+    // model just learns search comes back empty and answers from its own knowledge instead.
+    public IReadOnlyList<OllamaToolDefinition> Definitions { get; } =
+    [
+        new OllamaToolDefinition(
+            "search_wiki",
+            "Search Sentinel wiki pages and databases by keyword. Returns up to 5 ranked matches, each with id, title, and a short preview.",
+            """{"type":"object","properties":{"query":{"type":"string","description":"Search keywords"}},"required":["query"]}"""),
+        new OllamaToolDefinition(
+            "get_page",
+            "Fetch the full plain-text content of one Sentinel wiki page by its id (a GUID, usually taken from a prior search_wiki result).",
+            """{"type":"object","properties":{"pageId":{"type":"string","description":"The page's GUID id"}},"required":["pageId"]}""")
+    ];
 
     public async Task<string> ExecuteAsync(OllamaToolCall call, CancellationToken cancellationToken)
     {
