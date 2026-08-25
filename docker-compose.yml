@@ -37,6 +37,16 @@ services:
       # Read-only: lets the Docker Health admin page inspect (never control) sibling
       # containers on this droplet. Every container here belongs to this app's own stack.
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      # CI/deploy.yml already poll /health/live externally after a deploy; this tells
+      # Compose itself (docker compose ps, restart policies, any future depends_on
+      # referencing this service) the same thing. curl is already installed in the final
+      # image stage (Dockerfile). Short timings - this app boots in seconds, not minutes.
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     depends_on:
       ollama:
         condition: service_healthy

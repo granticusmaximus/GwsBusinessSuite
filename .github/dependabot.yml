@@ -1,0 +1,36 @@
+version: 2
+updates:
+  # Main .NET solution. Grouped into one weekly PR rather than one-per-package to keep
+  # this from becoming noise - review and merge like any other PR, nothing here auto-merges.
+  - package-ecosystem: "nuget"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      dotnet-dependencies:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 10
+
+  # vendor/osiris-intel is a deliberately vendored, security-audited snapshot (see its own
+  # README.md), not built live against upstream. These PRs are a useful signal for when a
+  # re-audit is worth doing - review carefully before merging, don't rubber-stamp.
+  - package-ecosystem: "npm"
+    directory: "/vendor/osiris-intel"
+    schedule:
+      interval: "weekly"
+    groups:
+      osiris-intel-dependencies:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions-dependencies:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
