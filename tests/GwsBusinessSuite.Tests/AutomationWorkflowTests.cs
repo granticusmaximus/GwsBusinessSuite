@@ -627,7 +627,15 @@ public sealed class AutomationWorkflowTests
     public async Task NodeTimeout_ShouldFailEachAttemptAndStopTheExecution()
     {
         await using var db = await CreateDbAsync();
-        var httpClient = new FakeHttpClient { Delay = TimeSpan.FromMilliseconds(300) };
+        // TimeoutMs below is clamped to AutomationExecutionService's 100ms floor
+        // (ExecuteWithTimeoutAsync: Math.Clamp(node.TimeoutMs, 100, 600_000)) - it can't be
+        // pushed any lower to widen the margin, so the margin comes from the fake delay instead.
+        // This was previously 300ms, a 200ms buffer that flaked under CI runner scheduling
+        // jitter (observed: the node completed as "Succeeded" instead of timing out). The fake
+        // client's Task.Delay observes the cancellation token (see FakeHttpClient.SendAsync
+        // below), so the timeout still cancels it immediately - this doesn't slow the test down,
+        // it only makes the pass/fail margin robust to jitter that previously ate into 200ms.
+        var httpClient = new FakeHttpClient { Delay = TimeSpan.FromSeconds(5) };
         var registry = new AutomationNodeRegistry(httpClient);
         var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
         var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
