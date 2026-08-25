@@ -100,9 +100,9 @@ each of which requires an exact Xcode version (26.0 or 26.6). This also already 
 existing MAUI Mac Catalyst target, so it's a toolchain/environment gap, not specific to this
 project - confirm both build once a matching Xcode is installed.
 
-## SentinelGPT Code CLI (macOS)
+## SentinelCLI (macOS)
 
-`src/GwsBusinessSuite.SentinelCli` is the local terminal companion for software work. It is a
+`src/SentinelCLI` is the local terminal companion for software work. It is a
 self-contained .NET console application rather than a WebView: it talks only to the loopback
 Ollama API and receives bounded tools for listing, reading, searching, editing, and validating
 files beneath a user-selected workspace root. The default coding model is `qwen2.5-coder`; the
@@ -112,11 +112,11 @@ are embedded in the CLI for local model synchronization.
 Install it for the current macOS user with:
 
 ```bash
-./scripts/install-sentinelgpt-cli.sh --sync-models
+./scripts/install-sentinelcli.sh --sync-models
 ```
 
-The executable is linked at `~/.local/bin/sentinelgpt`. See
-[`SENTINELGPT_CLI_USER_GUIDE.md`](SENTINELGPT_CLI_USER_GUIDE.md) for repository selection,
+The executable is linked at `~/.local/bin/sentinelcli`. See
+[`SENTINELCLI_USER_GUIDE.md`](SENTINELCLI_USER_GUIDE.md) for repository selection,
 confirmation behavior, safety boundaries, and troubleshooting.
 
 ## Migration beyond the online shell

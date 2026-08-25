@@ -1,11 +1,11 @@
 using System.Reflection;
 
-namespace GwsBusinessSuite.SentinelCli;
+namespace GwsBusinessSuite.SentinelCLI;
 
 public static class ModelCatalog
 {
-    private const string ModelResource = "GwsBusinessSuite.SentinelCli.required-models.txt";
-    private const string ProfileResource = "GwsBusinessSuite.SentinelCli.SentinelGPT.Modelfile";
+    private const string ModelResource = "GwsBusinessSuite.SentinelCLI.required-models.txt";
+    private const string ProfileResource = "GwsBusinessSuite.SentinelCLI.SentinelGPT.Modelfile";
 
     public static IReadOnlyList<string> RequiredModels { get; } = ReadResource(ModelResource)
         .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

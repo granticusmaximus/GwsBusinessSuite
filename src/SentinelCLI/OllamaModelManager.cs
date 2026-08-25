@@ -2,7 +2,7 @@ using System.Diagnostics;
 using GwsBusinessSuite.OllamaKit;
 using GwsBusinessSuite.SentinelAgentKit;
 
-namespace GwsBusinessSuite.SentinelCli;
+namespace GwsBusinessSuite.SentinelCLI;
 
 public sealed class OllamaModelManager(OllamaClient client, IUserApproval approval)
 {
@@ -15,7 +15,7 @@ public sealed class OllamaModelManager(OllamaClient client, IUserApproval approv
 
     public async Task<int> DoctorAsync(CancellationToken cancellationToken)
     {
-        Console.WriteLine($"SentinelGPT CLI: {typeof(OllamaModelManager).Assembly.GetName().Version}");
+        Console.WriteLine($"SentinelCLI: {typeof(OllamaModelManager).Assembly.GetName().Version}");
         Console.WriteLine($"Operating system: {Environment.OSVersion}");
         Console.WriteLine($"Architecture: {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}");
         try
@@ -31,14 +31,14 @@ public sealed class OllamaModelManager(OllamaClient client, IUserApproval approv
                 return 0;
             }
             Console.WriteLine("Missing models: " + string.Join(", ", missing));
-            Console.WriteLine("Run: sentinelgpt models sync");
+            Console.WriteLine("Run: sentinelcli models sync");
             return 1;
         }
         catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException)
         {
             Console.Error.WriteLine("Ollama API: unavailable");
             Console.Error.WriteLine(ex.Message);
-            Console.Error.WriteLine("Start the Ollama macOS app, then run 'sentinelgpt doctor' again.");
+            Console.Error.WriteLine("Start the Ollama macOS app, then run 'sentinelcli doctor' again.");
             return 1;
         }
     }

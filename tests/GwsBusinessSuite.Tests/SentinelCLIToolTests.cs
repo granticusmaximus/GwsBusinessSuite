@@ -3,15 +3,15 @@ using System.Text;
 using System.Text.Json;
 using GwsBusinessSuite.OllamaKit;
 using GwsBusinessSuite.SentinelAgentKit;
-using GwsBusinessSuite.SentinelCli;
+using GwsBusinessSuite.SentinelCLI;
 
 namespace GwsBusinessSuite.Tests;
 
-public sealed class SentinelCliTests : IDisposable
+public sealed class SentinelCLIToolTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), $"gws-sentinel-cli-{Guid.NewGuid():N}");
 
-    public SentinelCliTests() => Directory.CreateDirectory(_root);
+    public SentinelCLIToolTests() => Directory.CreateDirectory(_root);
 
     [Fact]
     public void Parse_UsesCurrentDirectoryAndCodingModelByDefault()

@@ -17,17 +17,17 @@ low temperature and a 16K context window, and instructs the model to:
 - prefer official Microsoft developer documentation for .NET ecosystem questions;
 - never claim an application action succeeded without a confirmed server-side result.
 
-For local Ollama outside Docker, the SentinelGPT Code CLI synchronizes the exact same canonical
+For local Ollama outside Docker, SentinelCLI synchronizes the exact same canonical
 model manifest used by the container and rebuilds this profile:
 
 ```zsh
-./scripts/install-sentinelgpt-cli.sh --sync-models
-sentinelgpt doctor
+./scripts/install-sentinelcli.sh --sync-models
+sentinelcli doctor
 ```
 
 The shared `ollama/required-models.txt` currently contains `llama3.2`, `qwen2.5-coder`,
 `deepseek-r1`, and `embeddinggemma`; `sentinelgpt` is then created from the version-controlled
-Modelfile. See [`SENTINELGPT_CLI_USER_GUIDE.md`](SENTINELGPT_CLI_USER_GUIDE.md) for terminal coding
+Modelfile. See [`SENTINELCLI_USER_GUIDE.md`](SENTINELCLI_USER_GUIDE.md) for terminal coding
 workflows and safety boundaries.
 
 The application uses `sentinelgpt` by default when no model override has been selected.

@@ -18,7 +18,7 @@ public sealed record OllamaAgentEvent(string? ContentDelta, string? ToolActivity
 // makes via the injected executor, feed results back, and repeat until the model gives a final
 // answer with no further tool calls or _maxRounds is exhausted. Deliberately has no persona
 // system, no plan-mode, and no knowledge of what a "tool" does - callers needing that (see
-// SentinelCli's SentinelCodingAgent) build it on top rather than this class growing it.
+// SentinelCLI's SentinelCodingAgent) build it on top rather than this class growing it.
 public sealed class OllamaToolCallingAgent
 {
     private readonly OllamaClient _ollama;

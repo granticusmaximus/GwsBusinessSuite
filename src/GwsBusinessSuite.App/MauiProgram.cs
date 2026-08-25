@@ -22,7 +22,7 @@ public static class MauiProgram
 		// SentinelGPT (local): inference always stays on this Mac's own Ollama over loopback.
 		// ConversationSessionStore/ApprovedMemoryStore write inside the sandboxed app container
 		// (FileSystem.Current.AppDataDirectory), not an arbitrary path the way the unsandboxed
-		// console sentinelgpt CLI can.
+		// SentinelCLI console tool can.
 		builder.Services.AddSingleton(_ => new OllamaClient(new Uri("http://127.0.0.1:11434/")));
 		builder.Services.AddSingleton(_ =>
 			new ConversationSessionStore(Path.Combine(FileSystem.Current.AppDataDirectory, "sentinelgpt-sessions")));

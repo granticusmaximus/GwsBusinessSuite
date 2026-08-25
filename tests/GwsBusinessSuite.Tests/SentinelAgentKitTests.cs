@@ -171,7 +171,7 @@ public sealed class SentinelAgentKitTests : IDisposable
         };
         var messages = new List<OllamaChatMessage>
         {
-            new("system", "You are SentinelGPT Code."),
+            new("system", "You are SentinelCLI."),
             new("user", "Read a.cs"),
             toolCallMessage,
             new("tool", "{}") { ToolName = "read_file" }

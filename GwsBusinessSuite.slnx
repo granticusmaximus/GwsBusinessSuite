@@ -5,7 +5,7 @@
     <Project Path="src/GwsBusinessSuite.Infrastructure/GwsBusinessSuite.Infrastructure.csproj" />
     <Project Path="src/GwsBusinessSuite.OllamaKit/GwsBusinessSuite.OllamaKit.csproj" />
     <Project Path="src/GwsBusinessSuite.SentinelAgentKit/GwsBusinessSuite.SentinelAgentKit.csproj" />
-    <Project Path="src/GwsBusinessSuite.SentinelCli/GwsBusinessSuite.SentinelCli.csproj" />
+    <Project Path="src/SentinelCLI/SentinelCLI.csproj" />
     <Project Path="src/GwsBusinessSuite.Web/GwsBusinessSuite.Web.csproj" />
   </Folder>
   <Folder Name="/tests/">

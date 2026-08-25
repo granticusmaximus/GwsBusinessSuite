@@ -56,7 +56,7 @@ too, not that the update should be skipped.
 
 - [Sentinel & SentinelGPT](SENTINEL_USER_GUIDE.md) — the internal Notion-style workspace and its
   embedded AI assistant.
-- [SentinelGPT Code CLI](SENTINELGPT_CLI_USER_GUIDE.md) — the macOS terminal coding agent for
+- [SentinelCLI](SENTINELCLI_USER_GUIDE.md) — the macOS terminal coding agent for
   analyzing and making reviewable changes in one local repository or a directory of repositories.
 - [Intelligence & BI](INTELLIGENCE_USER_GUIDE.md) — Media Watch, Civic Watch, Podcast Directory,
   Business Intelligence dashboards, and the OSINT Watch public-source map.

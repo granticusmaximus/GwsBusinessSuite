@@ -1,7 +1,7 @@
 using GwsBusinessSuite.OllamaKit;
 using GwsBusinessSuite.SentinelAgentKit;
 
-namespace GwsBusinessSuite.SentinelCli;
+namespace GwsBusinessSuite.SentinelCLI;
 
 public static class Program
 {
@@ -39,7 +39,7 @@ public static class Program
             var installed = await ollama.ListModelsAsync(cancellation.Token);
             if (!OllamaModelManager.HasModel(installed, options.Model))
                 throw new InvalidOperationException(
-                    $"Model '{options.Model}' is not installed. Run 'sentinelgpt models sync' or choose --model <installed-model>.");
+                    $"Model '{options.Model}' is not installed. Run 'sentinelcli models sync' or choose --model <installed-model>.");
 
             var tools = new WorkspaceTools(options.WorkspaceRoot, approval, options.ReadOnly);
             var agent = new SentinelCodingAgent(ollama, tools, options.Model, options.MaxRounds);
@@ -88,7 +88,7 @@ public static class Program
 
             while (!cancellation.IsCancellationRequested)
             {
-                Console.Write("\nsentinelgpt> ");
+                Console.Write("\nsentinelcli> ");
                 var rawPrompt = Console.ReadLine();
                 if (rawPrompt is null || rawPrompt.Trim() is "/exit" or "/quit") break;
                 if (string.IsNullOrWhiteSpace(rawPrompt)) continue;
@@ -167,7 +167,7 @@ public static class Program
         catch (CliUsageException ex)
         {
             Console.Error.WriteLine(ex.Message);
-            Console.Error.WriteLine("Run 'sentinelgpt help' for usage.");
+            Console.Error.WriteLine("Run 'sentinelcli help' for usage.");
             return 2;
         }
         catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException)
@@ -179,12 +179,12 @@ public static class Program
 
     // Environment.SpecialFolder.LocalApplicationData resolves to ~/Library/Application Support
     // on macOS, not ~/.local/share - built explicitly instead, to land alongside the installed
-    // binary itself (install-sentinelgpt-cli.sh's own $HOME/.local/share/gws/sentinelgpt default).
+    // binary itself (install-sentinelcli.sh's own $HOME/.local/share/gws/sentinelcli default).
     private static string SessionsDirectory() => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "gws", "sentinelgpt", "sessions");
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "gws", "sentinelcli", "sessions");
 
     private static string SkillsDirectory() => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "sentinelgpt", "skills");
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "sentinelcli", "skills");
 
     // Matches "/command" (no argument) or "/command <rest of the line>" - used by the three
     // commands that carry an argument. The plain single-string-equality commands elsewhere in
@@ -344,7 +344,7 @@ public static class Program
 
     private static void PrintBanner(CliOptions options, WorkspaceTools tools)
     {
-        Console.WriteLine("SentinelGPT Code · local Ollama");
+        Console.WriteLine("SentinelCLI · local Ollama");
         Console.WriteLine($"Model: {options.Model}");
         Console.WriteLine(tools.DescribeWorkspace());
         Console.WriteLine("Type /help to see session commands.");
@@ -369,9 +369,9 @@ public static class Program
           Control-C                    Cancel the active local model request
 
         Every turn is saved automatically so /resume can pick it back up later - one JSON file
-        per session under ~/.local/share/gws/sentinelgpt/sessions, no locking between concurrent
+        per session under ~/.local/share/gws/sentinelcli/sessions, no locking between concurrent
         terminals against the same workspace (last write wins). Skills are markdown files you add
-        yourself under ~/.config/sentinelgpt/skills/. Fleet runs may feel serialized rather than
+        yourself under ~/.config/sentinelcli/skills/. Fleet runs may feel serialized rather than
         truly parallel on constrained hardware - that's Ollama's own model-loading limits, not
         this tool.
         """);
@@ -403,13 +403,13 @@ public static class Program
 
     private static void PrintHelp() => Console.WriteLine(
         """
-        SentinelGPT Code - a repository-scoped local coding agent powered by Ollama.
+        SentinelCLI - a repository-scoped local coding agent powered by Ollama.
 
         Usage:
-          sentinelgpt [chat] [options] [prompt]
-          sentinelgpt models list
-          sentinelgpt models sync [--yes]
-          sentinelgpt doctor
+          sentinelcli [chat] [options] [prompt]
+          sentinelcli models list
+          sentinelcli models sync [--yes]
+          sentinelcli doctor
 
         Agent options:
           -C, --repo <path>       Workspace or repository root (default: current directory)
@@ -420,15 +420,15 @@ public static class Program
           --max-rounds <1-30>      Tool-call round limit (default: 12)
 
         Examples:
-          cd ~/Development && sentinelgpt "Find which repo contains the billing API and analyze it"
-          sentinelgpt -C ~/Development/MyRepo "Add tests for the failing parser"
-          sentinelgpt --read-only "Review this repository for correctness risks"
+          cd ~/Development && sentinelcli "Find which repo contains the billing API and analyze it"
+          sentinelcli -C ~/Development/MyRepo "Add tests for the failing parser"
+          sentinelcli --read-only "Review this repository for correctness risks"
 
         Once inside an interactive session, type /help for session-only commands - including
         /plan (plan before editing), /agent and /skills (shape behavior), /resume (continue a
         previous session), and /fleet (compare several models on the same prompt at once).
 
-        SentinelGPT never reads known secret files, cannot escape the selected workspace, and
+        SentinelCLI never reads known secret files, cannot escape the selected workspace, and
         cannot commit, push, deploy, or run destructive git commands.
         """);
 }

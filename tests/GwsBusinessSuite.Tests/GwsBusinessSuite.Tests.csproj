@@ -35,7 +35,7 @@
     <ProjectReference
       Include="..\..\src\GwsBusinessSuite.Infrastructure\GwsBusinessSuite.Infrastructure.csproj" />
     <ProjectReference
-      Include="..\..\src\GwsBusinessSuite.SentinelCli\GwsBusinessSuite.SentinelCli.csproj" />
+      Include="..\..\src\SentinelCLI\SentinelCLI.csproj" />
     <ProjectReference
       Include="..\..\src\GwsBusinessSuite.SentinelAgentKit\GwsBusinessSuite.SentinelAgentKit.csproj" />
     <ProjectReference

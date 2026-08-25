@@ -1,4 +1,4 @@
-# Canonical Ollama base-model set for GWS Business Suite and the SentinelGPT CLI.
+# Canonical Ollama base-model set for GWS Business Suite and SentinelCLI.
 # Keep one model name per line. sentinelgpt itself is created from SentinelGPT.Modelfile.
 llama3.2
 qwen2.5-coder

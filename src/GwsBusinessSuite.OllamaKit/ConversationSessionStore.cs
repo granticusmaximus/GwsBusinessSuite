@@ -11,7 +11,7 @@ public sealed record PersistedConversation(
 // listing needs no file reads for ordering. Ordinary chats have no "workspace" concept - a
 // native chat tab just has "all my local conversations" - but Developer Mode conversations are
 // scoped to whichever folder was open (WorkspaceRoot set, filename prefixed with its slug, same
-// scheme SentinelCli's own SessionStore uses for -C/--repo scoping) so List() and
+// scheme SentinelCLI's own SessionStore uses for -C/--repo scoping) so List() and
 // ListForWorkspace() never mix the two. No locking, no retention/pruning - a single local user
 // doesn't need either; the displayed list is simply capped.
 public sealed class ConversationSessionStore(string sessionsDirectory)

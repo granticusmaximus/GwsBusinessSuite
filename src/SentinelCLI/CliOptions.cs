@@ -1,4 +1,4 @@
-namespace GwsBusinessSuite.SentinelCli;
+namespace GwsBusinessSuite.SentinelCLI;
 
 public enum CliMode
 {
@@ -30,7 +30,9 @@ public sealed record CliOptions(
 
         var mode = CliMode.Agent;
         var workspace = currentDirectory;
-        var model = Environment.GetEnvironmentVariable("SENTINELGPT_MODEL") ?? DefaultModel;
+        var model = Environment.GetEnvironmentVariable("SENTINELCLI_MODEL")
+                    ?? Environment.GetEnvironmentVariable("SENTINELGPT_MODEL")
+                    ?? DefaultModel;
         var ollama = Environment.GetEnvironmentVariable("OLLAMA_HOST") ?? "http://127.0.0.1:11434";
         var readOnly = false;
         var autoApprove = false;
@@ -111,7 +113,7 @@ public sealed record CliOptions(
 
         var baseUri = NormalizeOllamaUri(ollama);
         if (!baseUri.IsLoopback)
-            throw new CliUsageException("The SentinelGPT CLI only connects to a loopback Ollama server.");
+            throw new CliUsageException("SentinelCLI only connects to a loopback Ollama server.");
 
         return new CliOptions(
             mode,

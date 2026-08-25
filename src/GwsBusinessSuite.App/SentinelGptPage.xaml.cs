@@ -82,7 +82,7 @@ public partial class SentinelGptPage : ContentPage
             _models = (await _ollama.ListModelsAsync(CancellationToken.None)).ToList();
             if (_models.Count == 0)
             {
-                StatusLabel.Text = "No local models installed. Run 'sentinelgpt models sync' in Terminal.";
+                StatusLabel.Text = "No local models installed. Run 'sentinelcli models sync' in Terminal.";
                 return;
             }
 
@@ -108,7 +108,7 @@ public partial class SentinelGptPage : ContentPage
         "directly and concisely. If wiki-search tools are available and the question depends on " +
         "workspace-specific facts, use them rather than guessing.";
 
-    // Operating-rules prose mirrors SentinelCli's SentinelCodingAgent.BuildSystemPrompt, minus the
+    // Operating-rules prose mirrors SentinelCLI's SentinelCodingAgent.BuildSystemPrompt, minus the
     // plan-mode/persona paragraphs (out of scope for v1). Whether run_command is mentioned as
     // available depends on the actual tool set WorkspaceTools is offering, not a hardcoded
     // assumption, so this can never contradict DescribeWorkspace()'s own mode line below it.
@@ -249,7 +249,7 @@ public partial class SentinelGptPage : ContentPage
         if (string.IsNullOrWhiteSpace(prompt)) return;
         if (ModelPicker.SelectedItem is not string model)
         {
-            StatusLabel.Text = "No local model selected. Run 'sentinelgpt models sync' in Terminal, then reopen this tab.";
+            StatusLabel.Text = "No local model selected. Run 'sentinelcli models sync' in Terminal, then reopen this tab.";
             return;
         }
         if (_developerModeActive && _devTools is null)

@@ -1,4 +1,4 @@
-namespace GwsBusinessSuite.SentinelCli;
+namespace GwsBusinessSuite.SentinelCLI;
 
 // User-authored, file-based instruction snippets - deliberately simpler than /agent's personas:
 // no built-in set, no frontmatter, just "one markdown file is one skill, injected as extra

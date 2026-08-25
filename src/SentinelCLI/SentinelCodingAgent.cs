@@ -1,7 +1,7 @@
 using GwsBusinessSuite.OllamaKit;
 using GwsBusinessSuite.SentinelAgentKit;
 
-namespace GwsBusinessSuite.SentinelCli;
+namespace GwsBusinessSuite.SentinelCLI;
 
 public sealed class SentinelCodingAgent
 {
@@ -78,7 +78,7 @@ public sealed class SentinelCodingAgent
         }
 
         throw new InvalidOperationException(
-            $"SentinelGPT did not finish within {_maxRounds} tool-call rounds. " +
+            $"SentinelCLI did not finish within {_maxRounds} tool-call rounds. " +
             "Continue with a narrower request or increase --max-rounds.");
     }
 
@@ -144,7 +144,7 @@ public sealed class SentinelCodingAgent
     private static string BuildSystemPrompt(WorkspaceTools tools, AgentPersona persona)
     {
         var prompt = """
-            You are SentinelGPT Code, Grant Watson's local software-engineering agent. Work only inside the workspace root
+            You are SentinelCLI, Grant Watson's local software-engineering agent. Work only inside the workspace root
             supplied below. You can analyze repositories, read and search source, propose precise edits, and run bounded
             build/test/inspection commands through the provided tools.
 

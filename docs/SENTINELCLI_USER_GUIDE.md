@@ -1,6 +1,6 @@
-# SentinelGPT Code CLI — User Guide
+# SentinelCLI — User Guide
 
-SentinelGPT Code is the local terminal coding agent shipped with the GWS macOS client source.
+SentinelCLI is the local terminal coding agent shipped with the GWS macOS client source.
 It connects only to the Ollama server on your own Mac and can inspect one repository, a parent
 directory containing several repositories, or any other directory you explicitly select. It can
 analyze code, propose file edits, create files, and run bounded build/test commands.
@@ -26,24 +26,27 @@ repository content to the other.
 ## Prerequisites and installation
 
 Install and start the official [Ollama macOS application](https://docs.ollama.com/macos) first.
-Ollama serves its local API on `http://127.0.0.1:11434`; SentinelGPT Code refuses non-loopback
+Ollama serves its local API on `http://127.0.0.1:11434`; SentinelCLI refuses non-loopback
 Ollama URLs so a typo cannot send source to another host.
 
 From the GWS Business Suite repository, install a self-contained CLI for the current Mac user:
 
 ```zsh
-./scripts/install-sentinelgpt-cli.sh
+./scripts/install-sentinelcli.sh
 ```
 
 The installer publishes the executable for the Mac's current architecture under
-`~/.local/share/gws/sentinelgpt` and links `sentinelgpt` into `~/.local/bin`. If that directory is
+`~/.local/share/gws/sentinelcli` and links `sentinelcli` into `~/.local/bin`. If that directory is
 not already in `PATH`, add this to `~/.zprofile`, then open a new Terminal window:
 
 ```zsh
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-No `sudo` access is required. Run `sentinelgpt help` to confirm the command is available.
+No `sudo` access is required. Run `sentinelcli help` to confirm the command is available. On the
+first renamed installation, the installer copies any existing sessions from
+`~/.local/share/gws/sentinelgpt/sessions` and skills from `~/.config/sentinelgpt/skills` into the
+new SentinelCLI locations. It leaves the original files intact.
 
 ## Synchronizing the GWS Ollama models
 
@@ -61,17 +64,17 @@ Ollama container and this CLI. That prevents the Mac and server bootstrap lists 
 Install or refresh all of them with:
 
 ```zsh
-sentinelgpt models sync
+sentinelcli models sync
 ```
 
 The CLI shows the exact model set and asks before starting because first-time downloads consume
 several gigabytes. To combine CLI installation and model synchronization:
 
 ```zsh
-./scripts/install-sentinelgpt-cli.sh --sync-models
+./scripts/install-sentinelcli.sh --sync-models
 ```
 
-Run `sentinelgpt doctor` afterward. **Canonical GWS models: synchronized** means every required
+Run `sentinelcli doctor` afterward. **Canonical GWS models: synchronized** means every required
 base model and the derived `sentinelgpt` profile are available under the exact names GWS uses.
 
 ## Running in one repository
@@ -80,13 +83,13 @@ Change into a repository and start an interactive session:
 
 ```zsh
 cd ~/Development/MyRepo
-sentinelgpt
+sentinelcli
 ```
 
 Or select a repository without changing directories:
 
 ```zsh
-sentinelgpt -C ~/Development/MyRepo "Find and fix the parser regression, then run its tests"
+sentinelcli -C ~/Development/MyRepo "Find and fix the parser regression, then run its tests"
 ```
 
 `-C` and `--repo` are equivalent. The selected directory becomes a hard filesystem boundary;
@@ -98,21 +101,21 @@ Select their parent directory when a request may cross more than one repository:
 
 ```zsh
 cd ~/Development
-sentinelgpt "Find which repo owns the customer import endpoint and analyze its validation"
+sentinelcli "Find which repo owns the customer import endpoint and analyze its validation"
 ```
 
-SentinelGPT reports the repositories it detects immediately after startup. It still receives no
+SentinelCLI reports the repositories it detects immediately after startup. It still receives no
 access outside `~/Development` in this example. For a narrowly scoped change, prefer `-C` with
 the specific repository so unrelated repositories never enter the tool surface.
 
 ## Interactive and one-shot use
 
-Run `sentinelgpt` without a prompt for a continuing conversation. Follow-up questions retain the
+Run `sentinelcli` without a prompt for a continuing conversation. Follow-up questions retain the
 current session's tool results and model context.
 
 - `/help` lists every session command.
 - `/models` lists the Ollama models already installed locally (same data as
-  `sentinelgpt models list`, without leaving the session).
+  `sentinelcli models list`, without leaving the session).
 - `/availablemodels` shows a curated starting list of free Ollama models — marking which are
   already installed — and prompts for a number (or any model name, including ones not on the
   list) to download. Downloads still go through the same confirmation prompt as everything else.
@@ -124,11 +127,11 @@ current session's tool results and model context.
 Put a prompt after the command for a single request suitable for shell history or scripts:
 
 ```zsh
-sentinelgpt --read-only "Explain the architecture and identify the three highest correctness risks"
+sentinelcli --read-only "Explain the architecture and identify the three highest correctness risks"
 ```
 
 The default model is `qwen2.5-coder`. Use another installed local model for one session with
-`--model`, for example `sentinelgpt --model sentinelgpt`.
+`--model`, for example `sentinelcli --model sentinelgpt`.
 
 ## Planning mode, agents, and skills
 
@@ -141,7 +144,7 @@ The default model is `qwen2.5-coder`. Use another installed local model for one 
   persona only shapes tone and priorities in the system prompt — unlike `/plan`, it doesn't
   actually remove any tools. Combine `/agent reviewer` with `/plan` (or `--read-only`) for a
   persona *and* an enforced guarantee that nothing gets edited.
-- `/skills` lists the skills discovered under `~/.config/sentinelgpt/skills/` — any `.md` file you
+- `/skills` lists the skills discovered under `~/.config/sentinelcli/skills/` — any `.md` file you
   put there becomes a skill named after its filename. `/skills <name> <prompt>` applies that
   file's instructions to a single request (not a standing change like `/agent`/`/plan`). There's
   no built-in skill; add your own, for example a `commit-messages.md` describing how you like
@@ -149,7 +152,7 @@ The default model is `qwen2.5-coder`. Use another installed local model for one 
 
 ## Resuming sessions and running a fleet
 
-Every turn is saved automatically to `~/.local/share/gws/sentinelgpt/sessions/`, one JSON file per
+Every turn is saved automatically to `~/.local/share/gws/sentinelcli/sessions/`, one JSON file per
 session, scoped to the workspace directory (`-C`/`--repo`) it was started in. `/resume` lists
 saved sessions for the *current* workspace (most recent first, with a preview of the last
 question asked) and continues the one you pick — later turns extend that same file rather than
@@ -162,7 +165,7 @@ used, just worth knowing.
 and prints each one's answer, labeled, for comparison:
 
 ```
-sentinelgpt> /fleet llama3.2,deepseek-r1,qwen2.5-coder Explain what this function does and flag any bug
+sentinelcli> /fleet llama3.2,deepseek-r1,qwen2.5-coder Explain what this function does and flag any bug
 
 === llama3.2 ===
 ...
@@ -214,17 +217,17 @@ operation. Grant remains the only publisher of GWS code.
 Useful commands:
 
 ```zsh
-sentinelgpt doctor
-sentinelgpt models list
-sentinelgpt models sync
-sentinelgpt help
+sentinelcli doctor
+sentinelcli models list
+sentinelcli models sync
+sentinelcli help
 ```
 
-Run `./scripts/install-sentinelgpt-cli.sh` again after updating the GWS repository. The installer
+Run `./scripts/install-sentinelcli.sh` again after updating the GWS repository. The installer
 re-publishes the current source and refreshes the user-level link without changing repositories.
 
 If `doctor` says Ollama is unavailable, start the Ollama macOS app. If it reports missing models,
-run `sentinelgpt models sync`. If the command itself is not found, confirm `~/.local/bin` is in
+run `sentinelcli models sync`. If the command itself is not found, confirm `~/.local/bin` is in
 `PATH`.
 
 ## Known limitations
@@ -240,7 +243,7 @@ run `sentinelgpt models sync`. If the command itself is not found, confirm `~/.l
   edits are declined unless the user explicitly supplied `--yes`.
 - Saved sessions have no locking between concurrent terminals against the same workspace, and are
   never pruned automatically (only the *displayed* `/resume` list is capped, at the 20 most
-  recent) — delete old files under `~/.local/share/gws/sentinelgpt/sessions/` yourself if that
+  recent) — delete old files under `~/.local/share/gws/sentinelcli/sessions/` yourself if that
   ever matters to you.
 - `/skills` files are plain instructions with no format beyond "this whole file is the prompt
   addition" — there's no frontmatter, metadata, or validation.
