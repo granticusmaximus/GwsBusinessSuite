@@ -85,15 +85,21 @@ public sealed class WorkspaceTools : IOllamaToolExecutor
     private readonly IUserApproval _approval;
     private readonly bool _readOnly;
     private readonly bool _quiet;
+    private readonly bool _allowRunCommand;
     private bool _planMode;
 
-    public WorkspaceTools(string workspaceRoot, IUserApproval approval, bool readOnly, bool quiet = false)
+    // allowRunCommand exists for hosts that cannot exec external processes at all - e.g. the Mac
+    // Catalyst app, which runs inside an App Sandbox with no entitlement for arbitrary process
+    // execution (confirmed empirically: git/dotnet both throw EPERM even with a fully-resolved
+    // PATH). SentinelCLI itself is unsandboxed and always leaves this at its default of true.
+    public WorkspaceTools(string workspaceRoot, IUserApproval approval, bool readOnly, bool quiet = false, bool allowRunCommand = true)
     {
         _root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workspaceRoot));
         _rootPrefix = _root + Path.DirectorySeparatorChar;
         _approval = approval;
         _readOnly = readOnly;
         _quiet = quiet;
+        _allowRunCommand = allowRunCommand;
     }
 
     public string Root => _root;
@@ -125,8 +131,11 @@ public sealed class WorkspaceTools : IOllamaToolExecutor
                     """{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"},"replace_all":{"type":"boolean"}},"required":["path","old_text","new_text"]}"""));
                 definitions.Add(new("write_file", "Create or replace one workspace text file after human confirmation. Prefer replace_in_file for focused edits.",
                     """{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}"""));
-                definitions.Add(new("run_command", "Run an allowlisted build, test, or read-only inspection command in the workspace after human confirmation. No shell command strings or destructive git operations.",
-                    """{"type":"object","properties":{"program":{"type":"string","description":"Executable name such as dotnet, git, npm, rg, or bash"},"arguments":{"type":"array","items":{"type":"string"}},"working_directory":{"type":"string","description":"Relative directory; default ."},"timeout_seconds":{"type":"integer","minimum":1,"maximum":900}},"required":["program"]}"""));
+                if (_allowRunCommand)
+                {
+                    definitions.Add(new("run_command", "Run an allowlisted build, test, or read-only inspection command in the workspace after human confirmation. No shell command strings or destructive git operations.",
+                        """{"type":"object","properties":{"program":{"type":"string","description":"Executable name such as dotnet, git, npm, rg, or bash"},"arguments":{"type":"array","items":{"type":"string"}},"working_directory":{"type":"string","description":"Relative directory; default ."},"timeout_seconds":{"type":"integer","minimum":1,"maximum":900}},"required":["program"]}"""));
+                }
             }
             return definitions;
         }
@@ -146,7 +155,7 @@ public sealed class WorkspaceTools : IOllamaToolExecutor
                 "search_text" => SearchText(arguments),
                 "replace_in_file" when !EffectiveReadOnly => await ReplaceInFileAsync(arguments, cancellationToken),
                 "write_file" when !EffectiveReadOnly => await WriteFileAsync(arguments, cancellationToken),
-                "run_command" when !EffectiveReadOnly => await RunCommandAsync(arguments, cancellationToken),
+                "run_command" when !EffectiveReadOnly && _allowRunCommand => await RunCommandAsync(arguments, cancellationToken),
                 _ => JsonSerializer.Serialize(new { error = $"Unknown or disabled tool: {call.Name}" })
             };
             return Limit(result);
@@ -166,7 +175,13 @@ public sealed class WorkspaceTools : IOllamaToolExecutor
         return $"Workspace root: {_root}\n" +
                $"Repository roots: {(repositories.Count == 0 ? "none detected" : string.Join(", ", repositories))}\n" +
                $"Top-level instruction files: {(instructionFiles.Length == 0 ? "none detected" : string.Join(", ", instructionFiles))}\n" +
-               $"Mode: {(_readOnly ? "read-only analysis" : "reviewable edits and allowlisted commands")}.";
+               $"Mode: {DescribeMode()}.";
+
+        string DescribeMode()
+        {
+            if (_readOnly) return "read-only analysis";
+            return _allowRunCommand ? "reviewable edits and allowlisted commands" : "reviewable file edits only (no command execution in this environment)";
+        }
     }
 
     private string ListFiles(JsonElement arguments)

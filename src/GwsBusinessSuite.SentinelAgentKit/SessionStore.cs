@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using GwsBusinessSuite.OllamaKit;
 
@@ -57,14 +55,6 @@ public sealed class SessionStore(string sessionsDirectory)
             await File.ReadAllTextAsync(path, cancellationToken), SerializerOptions);
     }
 
-    public static string ComputeWorkspaceSlug(string workspaceRoot)
-    {
-        var normalized = Path.GetFullPath(workspaceRoot).TrimEnd(Path.DirectorySeparatorChar);
-        var name = Path.GetFileName(normalized);
-        var safeName = string.IsNullOrEmpty(name)
-            ? "root"
-            : new string(name.Select(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '-').ToArray());
-        var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(normalized)))[..8];
-        return $"{safeName}-{hash}";
-    }
+    public static string ComputeWorkspaceSlug(string workspaceRoot) =>
+        ConversationSessionStore.ComputeWorkspaceSlug(workspaceRoot);
 }

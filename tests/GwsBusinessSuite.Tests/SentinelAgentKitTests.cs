@@ -86,6 +86,24 @@ public sealed class SentinelAgentKitTests : IDisposable
     }
 
     [Fact]
+    public async Task AllowRunCommandFalse_HidesTheToolButStillExposesFileEdits()
+    {
+        // The native Mac app's App Sandbox denies Process.Start outright (confirmed empirically),
+        // so it constructs WorkspaceTools with allowRunCommand: false. Everything else - read,
+        // search, and approval-gated edits - must keep working.
+        var approval = new FakeApproval(true);
+        var tools = new WorkspaceTools(_root, approval, readOnly: false, allowRunCommand: false);
+
+        Assert.DoesNotContain(tools.Definitions, definition => definition.Name == "run_command");
+        var result = await tools.ExecuteAsync(
+            Call("run_command", new { program = "git", arguments = new[] { "status" } }), default);
+        Assert.Contains("Unknown or disabled tool", result);
+        Assert.Empty(approval.Requests);
+
+        Assert.Contains(tools.Definitions, definition => definition.Name == "replace_in_file");
+    }
+
+    [Fact]
     public async Task RunCommand_RejectsMutatingGitCommands()
     {
         var approval = new FakeApproval(true);
