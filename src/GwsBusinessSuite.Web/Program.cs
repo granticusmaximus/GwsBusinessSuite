@@ -2917,7 +2917,7 @@ app.MapGet("/admin/api/antiforgery-token", (HttpContext httpContext, IAntiforger
 {
     var tokens = antiforgery.GetAndStoreTokens(httpContext);
     return Results.Ok(new { token = tokens.RequestToken });
-}).RequireAuthorization();
+}).RequireAuthorization().RequireRateLimiting("public-read");
 
 // Admin: list all articles (any status)
 app.MapGet("/admin/api/articles", async (IDbContextFactory<ApplicationDbContext> dbFactory) =>
@@ -2933,7 +2933,7 @@ app.MapGet("/admin/api/articles", async (IDbContextFactory<ApplicationDbContext>
         })
         .ToList();
     return Results.Ok(articles);
-}).RequireAuthorization();
+}).RequireAuthorization().RequireRateLimiting("public-read");
 
 // Admin: get a single article for editing
 app.MapGet("/admin/api/articles/{id:guid}", async (Guid id, IDbContextFactory<ApplicationDbContext> dbFactory) =>
@@ -2941,7 +2941,7 @@ app.MapGet("/admin/api/articles/{id:guid}", async (Guid id, IDbContextFactory<Ap
     await using var db = await dbFactory.CreateDbContextAsync();
     var article = await db.Articles.FindAsync(id);
     return article is null ? Results.NotFound() : Results.Ok(article);
-}).RequireAuthorization();
+}).RequireAuthorization().RequireRateLimiting("public-read");
 
 // Admin: create a new manual article draft
 app.MapPost("/admin/api/articles", async (
