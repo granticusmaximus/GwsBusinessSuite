@@ -1,3 +1,4 @@
+using System.Text.Json;
 using GwsBusinessSuite.OllamaKit;
 using GwsBusinessSuite.SentinelAgentKit;
 
@@ -62,6 +63,22 @@ public sealed class SentinelCodingAgent
             var toolCalls = response.ToolCalls.Count > 0
                 ? response.ToolCalls
                 : TryParseContentToolCall(response.Content, _tools.Definitions);
+
+            if (toolCalls.Count == 0 && OllamaToolCallParsing.LooksLikeFailedToolCallAttempt(response.Content))
+            {
+                // Same fix as OllamaToolCallingAgent (the native app's loop): a failed tool-call
+                // attempt (wrong field name, invalid JSON tokens, etc.) gets one corrective round
+                // instead of being shown to the terminal user as if it were a real answer.
+                _messages.Add(new OllamaChatMessage("tool", JsonSerializer.Serialize(new
+                {
+                    error = "That wasn't a valid tool call. Tool calls must be a JSON object with exactly " +
+                            "\"name\" and \"arguments\" (not \"parameters\"), and \"arguments\" must be " +
+                            "well-formed JSON (no tokens like undefined - omit a field instead). Retry the " +
+                            "tool call correctly, or answer in plain text if no tool is actually needed."
+                })) { ToolName = "invalid_tool_call" });
+                continue;
+            }
+
             if (toolCalls.Count == 0)
             {
                 var final = response.Content.Trim();
@@ -158,6 +175,9 @@ public sealed class SentinelCodingAgent
             - Use read_file before editing an existing file. Prefer replace_in_file for focused edits. Use write_file for a
               new file or a deliberate full rewrite only. Every edit requires the terminal user's confirmation unless the
               user explicitly launched the CLI with --yes.
+            - When old_text/new_text/content need a line break, put an actual newline character in the JSON string
+              value, not the literal two characters backslash-n. A literal backslash-n is written to the file as-is
+              and does not become a line break.
             - Use run_command to validate relevant builds/tests after edits. It accepts an executable and argument array,
               not a shell command string, and still requires confirmation. Never claim a command, test, edit, or deployment
               succeeded unless its tool result confirms success.

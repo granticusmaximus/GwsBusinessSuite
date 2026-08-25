@@ -128,6 +128,9 @@ public partial class SentinelGptPage : ContentPage
             - Never request, read, print, or modify credentials, tokens, private keys, .env files, or user-level configuration.
             - Use read_file before editing an existing file. Prefer replace_in_file for focused edits. Use write_file for a
               new file or a deliberate full rewrite only. Every edit requires the user's approval in this chat.
+            - When old_text/new_text/content need a line break, put an actual newline character in the JSON string
+              value, not the literal two characters backslash-n. A literal backslash-n is written to the file as-is
+              and does not become a line break.
 
             """;
         prompt += canRunCommands

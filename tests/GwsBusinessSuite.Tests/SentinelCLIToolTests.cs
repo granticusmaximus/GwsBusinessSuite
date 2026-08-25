@@ -81,6 +81,34 @@ public sealed class SentinelCLIToolTests : IDisposable
     }
 
     [Fact]
+    public async Task RunTurnAsync_WithAMalformedToolCallAttempt_GivesOneCorrectiveRoundInsteadOfReturningRawJson()
+    {
+        var round = 0;
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            round++;
+            // Round 1: wrong field name ("parameters" not "arguments") - the real failure mode
+            // observed from a local model attempting a tool call outside native tool_calls.
+            var body = round == 1
+                ? """{"message":{"role":"assistant","content":"{\"name\":\"read_file\",\"parameters\":{\"path\":\"a.cs\"}}"},"done":true}"""
+                : """{"message":{"role":"assistant","content":"Here you go."},"done":true}""";
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            });
+        });
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://127.0.0.1:11434/") };
+        using var client = new OllamaClient(http.BaseAddress, http);
+        var tools = new WorkspaceTools(_root, new FakeApproval(true), readOnly: true);
+        var agent = new SentinelCodingAgent(client, tools, "qwen2.5-coder", maxRounds: 3);
+
+        var result = await agent.RunTurnAsync("Read a.cs", default);
+
+        Assert.Equal("Here you go.", result);
+        Assert.Contains(agent.Messages, m => m.Role == "tool" && m.ToolName == "invalid_tool_call");
+    }
+
+    [Fact]
     public void ModelCatalog_MatchesTheGwsRuntimeSet()
     {
         Assert.Equal(["llama3.2", "qwen2.5-coder", "deepseek-r1", "embeddinggemma"], ModelCatalog.RequiredModels);
