@@ -229,16 +229,26 @@ public partial class SentinelGptPage : ContentPage
 
     private async void OnSaveApiKeyClicked(object? sender, EventArgs e)
     {
-        var key = ApiKeyEntry.Text?.Trim();
-        if (string.IsNullOrEmpty(key))
+        // A prior Keychain-backed version of this store could fail here with no visible error at
+        // all (async void has no caller to observe the exception) - that silent failure is what
+        // this try/catch exists to prevent, independent of whatever the store's own mechanism is.
+        try
         {
-            _apiKeyStore.Remove();
-            StatusLabel.Text = "Grounding key removed - SentinelGPT will answer from local knowledge only.";
+            var key = ApiKeyEntry.Text?.Trim();
+            if (string.IsNullOrEmpty(key))
+            {
+                _apiKeyStore.Remove();
+                StatusLabel.Text = "Grounding key removed - SentinelGPT will answer from local knowledge only.";
+            }
+            else
+            {
+                await _apiKeyStore.SetAsync(key);
+                StatusLabel.Text = "Grounding key saved.";
+            }
         }
-        else
+        catch (Exception ex)
         {
-            await _apiKeyStore.SetAsync(key);
-            StatusLabel.Text = "Grounding key saved.";
+            StatusLabel.Text = $"Couldn't save the grounding key: {ex.Message}";
         }
     }
 

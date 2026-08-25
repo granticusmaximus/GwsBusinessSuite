@@ -1,14 +1,38 @@
 namespace GwsBusinessSuite.App;
 
-// A developer-API key is a credential, not a preference - Keychain-backed SecureStorage, not
-// the plist-backed Preferences the rest of the app uses for non-secret settings.
-public sealed class SecureApiKeyStore
+// A developer-API key is a credential, not a preference - originally Keychain-backed
+// SecureStorage, not the plist-backed Preferences the rest of the app uses for non-secret
+// settings. Moved to a plain file inside this app's own sandboxed container (the same
+// mechanism ConversationSessionStore/ApprovedMemoryStore already use) after confirming Keychain
+// writes fail under App Sandbox without a keychain-access-groups entitlement, which in turn
+// requires a real Apple provisioning profile this ad-hoc-signed local build doesn't have -
+// adding it broke the app's ability to launch at all. See
+// project_securestorage_keychain_entitlement_2026_08_25 (Claude session memory) for the full
+// investigation. Real tradeoff, accepted deliberately: this app is single-user/local and the
+// key itself is a scoped, read-only sentinel:read API key, not a master credential, so the
+// sandbox container boundary plus owner-only file permissions are an acceptable substitute for
+// genuine Keychain hardening here.
+public sealed class SecureApiKeyStore(string filePath)
 {
-    private const string StorageKey = "sentinelgpt.sentinel-read-api-key";
+    public async Task<string?> GetAsync()
+    {
+        if (!File.Exists(filePath)) return null;
+        var value = await File.ReadAllTextAsync(filePath);
+        return string.IsNullOrEmpty(value) ? null : value;
+    }
 
-    public Task<string?> GetAsync() => SecureStorage.Default.GetAsync(StorageKey);
+    public async Task SetAsync(string apiKey)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+        await File.WriteAllTextAsync(filePath, apiKey);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(filePath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
 
-    public Task SetAsync(string apiKey) => SecureStorage.Default.SetAsync(StorageKey, apiKey);
-
-    public void Remove() => SecureStorage.Default.Remove(StorageKey);
+    public void Remove()
+    {
+        if (File.Exists(filePath)) File.Delete(filePath);
+    }
 }

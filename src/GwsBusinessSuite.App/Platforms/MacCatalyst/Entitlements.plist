@@ -19,6 +19,17 @@
              paths on disk. -->
         <key>com.apple.security.files.user-selected.read-write</key>
         <true/>
+        <!-- SecureApiKeyStore's grounding-key save fails with errSecMissingEntitlement under App
+             Sandbox (confirmed empirically via a DEBUG-only spike) - Keychain writes need a
+             keychain-access-groups entitlement. Tried adding it (both with and without
+             $(AppIdentifierPrefix)) and both broke the app outright: "Launchd job spawn failed"
+             at launch, plus build warning MT7139 ("no provisioning profile has been specified")
+             even for the prefix-free form. This ad-hoc-signed local build has no provisioning
+             profile at all, and this specific entitlement appears to require real Apple
+             provisioning to pass sandbox validation, not just correct plist syntax. Deliberately
+             NOT re-adding it without a provisioning profile in place first - see
+             project_securestorage_keychain_entitlement_2026_08_25 (Claude session memory) for
+             the real fix options. -->
     </dict>
 </plist>
 

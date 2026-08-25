@@ -20,15 +20,19 @@ public static class MauiProgram
 			});
 
 		// SentinelGPT (local): inference always stays on this Mac's own Ollama over loopback.
-		// ConversationSessionStore/ApprovedMemoryStore write inside the sandboxed app container
-		// (FileSystem.Current.AppDataDirectory), not an arbitrary path the way the unsandboxed
-		// SentinelCLI console tool can.
+		// ConversationSessionStore/ApprovedMemoryStore/SecureApiKeyStore all write inside the
+		// sandboxed app container (FileSystem.Current.AppDataDirectory), not an arbitrary path
+		// the way the unsandboxed SentinelCLI console tool can. SecureApiKeyStore specifically
+		// used Keychain-backed SecureStorage until 2026-08-25 - moved off it after confirming the
+		// required keychain-access-groups entitlement needs real Apple provisioning this
+		// ad-hoc-signed build doesn't have (it broke the app's ability to launch at all).
 		builder.Services.AddSingleton(_ => new OllamaClient(new Uri("http://127.0.0.1:11434/")));
 		builder.Services.AddSingleton(_ =>
 			new ConversationSessionStore(Path.Combine(FileSystem.Current.AppDataDirectory, "sentinelgpt-sessions")));
 		builder.Services.AddSingleton(_ =>
 			new ApprovedMemoryStore(Path.Combine(FileSystem.Current.AppDataDirectory, "sentinelgpt-approved-memory.json")));
-		builder.Services.AddSingleton<SecureApiKeyStore>();
+		builder.Services.AddSingleton(_ =>
+			new SecureApiKeyStore(Path.Combine(FileSystem.Current.AppDataDirectory, "sentinelgpt-grounding-key.txt")));
 		builder.Services.AddSingleton<SentinelGroundingClient>();
 		builder.Services.AddSingleton<NativeToolExecutor>();
 		builder.Services.AddSingleton<SentinelVoiceService>();
