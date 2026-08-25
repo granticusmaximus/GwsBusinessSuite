@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GwsBusinessSuite.Tests;
@@ -84,6 +85,64 @@ public sealed class OsintProxyServiceTests
     }
 
     [Fact]
+    public async Task ForwardAsync_ShouldCacheASuccessfulApiGetAndServeTheSecondRequestFromCache()
+    {
+        var handler = new CapturingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{\"nodes\":[]}", System.Text.Encoding.UTF8, "application/json")
+        });
+        var service = BuildService(handler);
+
+        await service.ForwardAsync(
+            BuildContext(HttpMethods.Get), "api/resolve", rewriteDocumentPaths: false, CancellationToken.None);
+        var second = BuildContext(HttpMethods.Get);
+        await service.ForwardAsync(second, "api/resolve", rewriteDocumentPaths: false, CancellationToken.None);
+
+        handler.RequestCount.Should().Be(1, "the second identical GET should be served from cache, not the sidecar");
+        second.Response.StatusCode.Should().Be(StatusCodes.Status200OK);
+        second.Response.ContentType.Should().Contain("application/json");
+        (await ReadResponseBodyAsync(second)).Should().Be("{\"nodes\":[]}");
+    }
+
+    [Fact]
+    public async Task ForwardAsync_ShouldNotCacheANonSuccessApiResponse()
+    {
+        var handler = new CapturingHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        {
+            Content = new StringContent("{\"error\":\"not found\"}")
+        });
+        var service = BuildService(handler);
+
+        await service.ForwardAsync(
+            BuildContext(HttpMethods.Get), "api/resolve", rewriteDocumentPaths: false, CancellationToken.None);
+        await service.ForwardAsync(
+            BuildContext(HttpMethods.Get), "api/resolve", rewriteDocumentPaths: false, CancellationToken.None);
+
+        handler.RequestCount.Should().Be(2, "a 404 must never be cached and reused for a later, possibly-different lookup");
+    }
+
+    [Fact]
+    public async Task ForwardAsync_ShouldNotCacheNonGetRequestsOrNonApiRoutes()
+    {
+        var handler = new CapturingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{\"ok\":true}", System.Text.Encoding.UTF8, "application/json")
+        });
+        var service = BuildService(handler);
+
+        await service.ForwardAsync(
+            BuildContext(HttpMethods.Post, "{}"), "api/resolve", rewriteDocumentPaths: false, CancellationToken.None);
+        await service.ForwardAsync(
+            BuildContext(HttpMethods.Post, "{}"), "api/resolve", rewriteDocumentPaths: false, CancellationToken.None);
+        await service.ForwardAsync(
+            BuildContext(HttpMethods.Get), "_next/static/app.js", rewriteDocumentPaths: false, CancellationToken.None);
+        await service.ForwardAsync(
+            BuildContext(HttpMethods.Get), "_next/static/app.js", rewriteDocumentPaths: false, CancellationToken.None);
+
+        handler.RequestCount.Should().Be(4, "only GET requests to api/ routes are cacheable");
+    }
+
+    [Fact]
     public void RewriteDocumentPaths_ShouldKeepSharedApiAndAssetRoutesAtTheOrigin()
     {
         const string html = """
@@ -146,7 +205,7 @@ public sealed class OsintProxyServiceTests
             .Any(metadata => metadata.PolicyName == "public-read"));
     }
 
-    private static OsintProxyService BuildService(HttpMessageHandler handler)
+    private static OsintProxyService BuildService(HttpMessageHandler handler, IMemoryCache? cache = null)
     {
         var client = new HttpClient(handler)
         {
@@ -155,6 +214,7 @@ public sealed class OsintProxyServiceTests
         };
         return new OsintProxyService(
             new StubHttpClientFactory(client),
+            cache ?? new MemoryCache(new MemoryCacheOptions()),
             NullLogger<OsintProxyService>.Instance);
     }
 

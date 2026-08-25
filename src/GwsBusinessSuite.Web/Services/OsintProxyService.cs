@@ -1,15 +1,26 @@
 using System.Net;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace GwsBusinessSuite.Web.Services;
 
 public sealed class OsintProxyService(
     IHttpClientFactory httpClientFactory,
+    IMemoryCache cache,
     ILogger<OsintProxyService> logger)
 {
     public const string ShellPrefix = "/admin/osint-root";
 
     private const int GatewayTimeoutStatusCode = StatusCodes.Status504GatewayTimeout;
+
+    // Entity-resolution lookups (aircraft/vessel/company/... -> Wikidata/OpenSanctions inside the
+    // osiris-intel sidecar) are the slow part of OSINT Watch, and they're all served through this
+    // Next.js API route. The upstream response never varies by which gwssuite user is asking -
+    // ForwardedRequestHeaders below strips auth/cookies/client IP before forwarding - so a shared
+    // cache here helps every viewer, not just whoever happened to trigger the first lookup.
+    private static readonly TimeSpan ApiResponseCacheDuration = TimeSpan.FromMinutes(10);
+    private const long MaxCacheableApiResponseBytes = 2 * 1024 * 1024;
+
     private static readonly HashSet<string> ForwardedRequestHeaders = new(StringComparer.OrdinalIgnoreCase)
     {
         "Accept",
@@ -54,6 +65,24 @@ public sealed class OsintProxyService(
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             await context.Response.WriteAsync("Invalid OSINT Watch path.", cancellationToken);
+            return;
+        }
+
+        var isCacheableApiGet = HttpMethods.IsGet(context.Request.Method)
+            && targetPath.StartsWith("api/", StringComparison.Ordinal);
+        var cacheKey = isCacheableApiGet ? $"osint-proxy:api-get:{relativeTarget}" : null;
+
+        if (cacheKey is not null
+            && cache.TryGetValue(cacheKey, out CachedApiResponse? cached)
+            && cached is not null)
+        {
+            context.Response.StatusCode = cached.StatusCode;
+            if (cached.ContentType is not null)
+            {
+                context.Response.ContentType = cached.ContentType;
+            }
+
+            await context.Response.Body.WriteAsync(cached.Body, cancellationToken);
             return;
         }
 
@@ -110,6 +139,25 @@ public sealed class OsintProxyService(
             {
                 var html = await upstreamResponse.Content.ReadAsStringAsync(cancellationToken);
                 await context.Response.WriteAsync(RewriteDocumentPaths(html), cancellationToken);
+                return;
+            }
+
+            if (cacheKey is not null)
+            {
+                var body = await upstreamResponse.Content.ReadAsByteArrayAsync(cancellationToken);
+                if (upstreamResponse.StatusCode == HttpStatusCode.OK
+                    && body.LongLength <= MaxCacheableApiResponseBytes)
+                {
+                    cache.Set(
+                        cacheKey,
+                        new CachedApiResponse(
+                            (int)upstreamResponse.StatusCode,
+                            upstreamResponse.Content.Headers.ContentType?.ToString(),
+                            body),
+                        ApiResponseCacheDuration);
+                }
+
+                await context.Response.Body.WriteAsync(body, cancellationToken);
                 return;
             }
 
@@ -215,4 +263,6 @@ public sealed class OsintProxyService(
         context.Response.ContentType = "text/plain; charset=utf-8";
         await context.Response.WriteAsync(message, context.RequestAborted);
     }
+
+    private sealed record CachedApiResponse(int StatusCode, string? ContentType, byte[] Body);
 }

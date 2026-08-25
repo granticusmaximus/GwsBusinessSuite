@@ -37,6 +37,11 @@ as supply-chain drift control, not as a claim that every upstream data parser is
   the same origin and the proxied document sends no referrer.
 - Only GET, HEAD, and POST are forwarded. Active RECON scanning stays disabled because
   `SCANNER_URL` and `SCANNER_KEY` are not configured.
+- Successful (200) GET responses to `/api/...` are cached server-side in gwssuite for 10 minutes,
+  keyed by the full path and query string, capped at 2 MB per response. This is safe to share
+  across every admin viewer specifically because the credential-stripping above means the upstream
+  response never varies by who's asking. Non-GET requests, non-`/api` routes, and any non-200
+  response are never cached.
 
 ## Residual risk and operating rules
 
