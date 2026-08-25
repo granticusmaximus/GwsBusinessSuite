@@ -1,0 +1,148 @@
+@page "/admin/mind-maps"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using GwsBusinessSuite.Application.MindMaps
+@inject IMindMapService MindMapService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject NavigationManager Navigation
+@inject ILogger<MindMaps> Logger
+
+<PageTitle>Mind Maps</PageTitle>
+
+<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-diagram-2-fill me-2 text-primary"></i>Mind Maps</h1>
+        <p>Structured, visual outlines saved as their own documents.</p>
+    </div>
+    <button type="button" class="btn btn-primary" @onclick="OpenCreate" disabled="@_busy">
+        <i class="bi bi-plus-lg me-1"></i>New mind map
+    </button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (_loading)
+{
+    <div class="text-secondary py-5 text-center"><span class="spinner-border spinner-border-sm me-2"></span>Loading mind maps…</div>
+}
+else if (_mindMaps.Count == 0)
+{
+    <div class="card border-0 shadow-sm"><div class="card-body text-center py-5">
+        <i class="bi bi-diagram-2 fs-1 text-secondary"></i>
+        <h2 class="h5 mt-3">No mind maps yet</h2>
+        <p class="text-secondary">Create one to start outlining visually.</p>
+        <button class="btn btn-primary" @onclick="OpenCreate">Create mind map</button>
+    </div></div>
+}
+else
+{
+    <div class="row g-3">
+        @foreach (var mindMap in _mindMaps)
+        {
+            <div class="col-xl-4 col-md-6">
+                <div class="card border-0 shadow-sm h-100 mindmap-card">
+                    <button type="button" class="card-body text-start w-100 border-0 bg-transparent p-3" @onclick="() => OpenMindMap(mindMap.Id)">
+                        <div class="mindmap-icon mb-3"><i class="bi bi-diagram-2-fill"></i></div>
+                        <h2 class="h5">@mindMap.Title</h2>
+                        <div class="small text-secondary"><i class="bi bi-clock me-1"></i>Edited @FormatLastEdited(mindMap.LastEditedAt)</div>
+                    </button>
+                    <div class="card-footer bg-transparent border-0 pt-0 px-3 pb-3 d-flex justify-content-end">
+                        <button type="button" class="btn btn-sm btn-link text-danger" disabled="@_busy" @onclick="() => RequestDelete(mindMap)">
+                            <i class="bi bi-trash me-1"></i>Delete
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@if (_showCreate)
+{
+    <div class="modal-backdrop fade show"></div>
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true">
+        <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+            <div class="modal-header"><h2 class="modal-title h5">New mind map</h2><button class="btn-close" @onclick="CloseCreate" aria-label="Close"></button></div>
+            <div class="modal-body">
+                <label class="form-label fw-semibold" for="newMindMapTitle">Title</label>
+                <input id="newMindMapTitle" class="form-control" @bind="_newTitle" placeholder="Product roadmap" />
+            </div>
+            <div class="modal-footer"><button class="btn btn-outline-secondary" @onclick="CloseCreate">Cancel</button><button class="btn btn-primary" @onclick="CreateMindMapAsync" disabled="@_busy">Create and open</button></div>
+        </div></div>
+    </div>
+}
+
+<ConfirmModal Show="_showDeleteConfirm"
+              Title="Delete mind map"
+              Message="@($"Permanently delete \"{_pendingDelete?.Title}\"? This can't be undone.")"
+              ConfirmText="Delete" ConfirmButtonClass="btn-danger" Busy="_busy"
+              OnConfirm="ConfirmDeleteAsync" OnCancel="CancelDelete" />
+
+@code {
+    private List<MindMapSummary> _mindMaps = [];
+    private bool _loading = true, _busy, _showCreate, _showDeleteConfirm;
+    private string _newTitle = "", _error = "";
+    private MindMapSummary? _pendingDelete;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            _mindMaps = (await MindMapService.ListForOwnerAsync(username)).ToList();
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Unable to load mind maps."); _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private void OpenCreate() { _newTitle = ""; _showCreate = true; }
+    private void CloseCreate() => _showCreate = false;
+    private void OpenMindMap(Guid id) => Navigation.NavigateTo($"/admin/mind-maps/{id}");
+
+    private async Task CreateMindMapAsync()
+    {
+        _busy = true; _error = "";
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var id = await MindMapService.CreateAsync(username, _newTitle);
+            Navigation.NavigateTo($"/admin/mind-maps/{id}");
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Unable to create mind map."); _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private void RequestDelete(MindMapSummary mindMap)
+    {
+        _pendingDelete = mindMap;
+        _showDeleteConfirm = true;
+    }
+
+    private void CancelDelete()
+    {
+        _showDeleteConfirm = false;
+        _pendingDelete = null;
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (_pendingDelete is not { } mindMap) return;
+
+        _busy = true; _error = "";
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await MindMapService.DeleteAsync(username, mindMap.Id);
+            _mindMaps.RemoveAll(item => item.Id == mindMap.Id);
+            _showDeleteConfirm = false;
+            _pendingDelete = null;
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Unable to delete mind map {MindMapId}.", mindMap.Id); _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private static string FormatLastEdited(DateTimeOffset value) => value.ToLocalTime().ToString("MMM d, h:mm tt");
+}

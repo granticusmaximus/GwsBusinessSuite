@@ -19,6 +19,7 @@ using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.GovernmentIntelligence;
 using GwsBusinessSuite.Application.Growth;
 using GwsBusinessSuite.Application.LiveShow;
+using GwsBusinessSuite.Application.MindMaps;
 using GwsBusinessSuite.Application.NewsIntelligence;
 using GwsBusinessSuite.Application.Podcasts;
 using GwsBusinessSuite.Application.Privacy;
@@ -231,6 +232,7 @@ public static class DependencyInjection
         services.AddScoped<IAffiliateSuggestionService, AffiliateSuggestionService>();
         services.AddScoped<IAffiliateAnalyticsService, AffiliateAnalyticsService>();
         services.AddScoped<IBusinessIntelligenceService, BusinessIntelligenceService>();
+        services.AddScoped<IMindMapService, MindMapService>();
         services.AddScoped<IDeveloperApiKeyService, DeveloperApiKeyService>();
         services.AddScoped<IDeveloperApiResourceService, DeveloperApiResourceService>();
         services.AddScoped<IDeveloperApiSentinelReadService, DeveloperApiSentinelReadService>();

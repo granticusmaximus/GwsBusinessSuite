@@ -11,6 +11,7 @@ using GwsBusinessSuite.Application.LiveShow;
 using GwsBusinessSuite.Application.Localization;
 using GwsBusinessSuite.Application.DeveloperApi;
 using GwsBusinessSuite.Application.Mobile;
+using GwsBusinessSuite.Application.MindMaps;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure;
 using GwsBusinessSuite.Application.ContentStudio;
@@ -496,6 +497,7 @@ using (var scope = app.Services.CreateScope())
     await TrySeedStepAsync(nameof(EnsureWikiPagesHaveBlocksAsync), () => EnsureWikiPagesHaveBlocksAsync(dbContext, app.Logger));
     await TrySeedStepAsync(nameof(EnsureSentinelLearningWorkflowAsync), () => EnsureSentinelLearningWorkflowAsync(scope.ServiceProvider, app.Logger));
     await TrySeedStepAsync(nameof(EnsureUserGuidesInSentinelAsync), () => EnsureUserGuidesInSentinelAsync(scope.ServiceProvider, app.Environment, app.Logger));
+    await TrySeedStepAsync(nameof(EnsureAspNetCoreRoadmapMindMapAsync), () => EnsureAspNetCoreRoadmapMindMapAsync(scope.ServiceProvider, app.Configuration, app.Logger));
 
     await TrySeedStepAsync("SeedAdminAccount", async () =>
     {
@@ -3885,6 +3887,64 @@ static async Task EnsureUserGuidesInSentinelAsync(IServiceProvider services, IHo
 
     logger.LogInformation("Synced {Count} user guide(s) into Sentinel under the User Guides folder.", guides.Length);
 }
+
+// Seeds a real example Mind Maps document (github.com/MoienTajik/AspNetCore-Developer-Roadmap's
+// 21 top-level topics, hand-transcribed with a curated subset of each topic's real resources -
+// not the full nested resource tree, since a mind map is meant to stay a condensed overview
+// rather than a link dump). Owned by the real configured admin username, not "system" -
+// MindMapService.NormalizeOwner scopes every list/get call by owner, so a "system"-owned map
+// would be permanently invisible to the one real admin account that can log in.
+static async Task EnsureAspNetCoreRoadmapMindMapAsync(IServiceProvider services, IConfiguration configuration, ILogger logger)
+{
+    var seedUsername = configuration["AdminAuth:Username"]?.Trim();
+    if (string.IsNullOrWhiteSpace(seedUsername))
+    {
+        logger.LogInformation("Skipping ASP.NET Core roadmap mind map seed: AdminAuth:Username is not configured.");
+        return;
+    }
+
+    var mindMapService = services.GetRequiredService<IMindMapService>();
+    const string title = "ASP.NET Core Developer Roadmap";
+    var existing = await mindMapService.ListForOwnerAsync(seedUsername);
+    if (existing.Any(item => item.Title == title))
+    {
+        return;
+    }
+
+    var id = await mindMapService.CreateAsync(seedUsername, title);
+    var detail = await mindMapService.GetByIdAsync(seedUsername, id)
+        ?? throw new InvalidOperationException("Mind map was not found immediately after being created.");
+    await mindMapService.SaveTreeAsync(seedUsername, id, detail.Root with { Children = RoadmapTopics() });
+    logger.LogInformation("Seeded the ASP.NET Core Developer Roadmap mind map for {Owner}.", seedUsername);
+}
+
+static List<MindMapNode> RoadmapTopics() =>
+[
+    RoadmapTopic("General Development Skills", "Git", "HTTP(S) protocol", "TLS / SSL", "AI / LLMs (ChatGPT, Claude, Copilot)"),
+    RoadmapTopic("C#", "C# language", ".NET 10", ".NET CLI", "StyleCop rules"),
+    RoadmapTopic("SQL Fundamentals", "Querying data with T-SQL"),
+    RoadmapTopic("ASP.NET Core Basics", "MVC", "Minimal APIs", "Middlewares", "Authentication", "Authorization", "Razor Components"),
+    RoadmapTopic("SOLID", "Single Responsibility", "Open-Closed", "Liskov Substitution", "Interface Segregation", "Dependency Inversion"),
+    RoadmapTopic("ORM", "Entity Framework Core", "Dapper"),
+    RoadmapTopic("Dependency Injection", "Microsoft.Extensions.DependencyInjection", "AutoFac", "Scrutor"),
+    RoadmapTopic("Databases", "SQL Server / PostgreSQL / MySQL", "Elasticsearch", "Redis / MongoDB", "CosmosDB / DynamoDB"),
+    RoadmapTopic("Caching", "Memory cache", "Distributed cache (Redis)", "Output caching"),
+    RoadmapTopic("Log Frameworks", "Serilog", "NLog"),
+    RoadmapTopic("API Clients & Communications", "REST", "gRPC", "GraphQL"),
+    RoadmapTopic("Real-Time Communication", "SignalR", "WebSockets"),
+    RoadmapTopic("Object Mapping", "Manual mapping", "Mapperly", "AutoMapper"),
+    RoadmapTopic("Background Task Scheduler", "Native BackgroundService", "Hangfire", "Quartz", "Coravel"),
+    RoadmapTopic("Testing", "Unit testing (xUnit)", "Integration testing", "E2E testing", "Performance testing"),
+    RoadmapTopic("Microservices", "Message brokers (RabbitMQ, Kafka)", "API gateway (YARP)", "Containerization (Docker)", "Orchestration (Kubernetes)"),
+    RoadmapTopic("Continuous Integration & Delivery", "GitHub Actions", "Azure Pipelines", "GitLab CI/CD"),
+    RoadmapTopic("Design Patterns", "Creational", "Structural", "Behavioral"),
+    RoadmapTopic("Monitoring / Logging / Tracing / Alerting", "Prometheus / Grafana", "OpenTelemetry", "Seq"),
+    RoadmapTopic("Client-Side .NET", "Blazor", ".NET MAUI", "Razor"),
+    RoadmapTopic("Good to Know", "MediatR", "FluentValidation", "Polly", "Scalar")
+];
+
+static MindMapNode RoadmapTopic(string title, params string[] children) =>
+    new(Guid.NewGuid(), title, children.Select(child => new MindMapNode(Guid.NewGuid(), child, [])).ToList());
 
 // Rewrites a relative link to another guide file (e.g. "[Support](SUPPORT_USER_GUIDE.md)")
 // into a real Sentinel wikilink once that guide's page id is known, so cross-guide navigation

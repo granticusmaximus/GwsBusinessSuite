@@ -79,6 +79,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<CjCommissionRecord> CjCommissionRecords { get; }
     DbSet<WebAnalyticsEvent> WebAnalyticsEvents { get; }
     DbSet<BusinessIntelligenceWidget> BusinessIntelligenceWidgets { get; }
+    DbSet<MindMap> MindMaps { get; }
     DbSet<AnalyticsGoal> AnalyticsGoals { get; }
     DbSet<AnalyticsFunnel> AnalyticsFunnels { get; }
     DbSet<AnalyticsFunnelStep> AnalyticsFunnelSteps { get; }

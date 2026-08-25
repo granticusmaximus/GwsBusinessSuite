@@ -1,0 +1,277 @@
+@page "/admin/mind-maps/{MindMapId:guid}"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using GwsBusinessSuite.Application.MindMaps
+@using JsMind.Blazor.Components
+@using JsMind.Blazor.Constants
+@using JsMind.Blazor.Events
+@using JsMind.Blazor.Models
+@inject IMindMapService MindMapService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject NavigationManager Navigation
+@inject ILogger<MindMapEditor> Logger
+
+<PageTitle>@(_title.Length > 0 ? _title : "Mind Map")</PageTitle>
+
+@if (_loading)
+{
+    <div class="text-secondary py-5 text-center"><span class="spinner-border spinner-border-sm me-2"></span>Opening mind map…</div>
+}
+else if (_notFound)
+{
+    <div class="alert alert-danger">Mind map not found.</div>
+}
+else
+{
+    <div class="mindmap-shell">
+        <header class="mindmap-toolbar">
+            <div class="d-flex align-items-center gap-2 min-w-0">
+                <button class="btn btn-sm btn-light" title="Back to mind maps" @onclick="Back"><i class="bi bi-arrow-left"></i></button>
+                <input class="mindmap-title" value="@_title" @onchange="OnTitleChangedAsync" disabled="@_busy" aria-label="Mind map title" />
+            </div>
+            <div class="d-flex flex-wrap align-items-center justify-content-end gap-2">
+                <button class="btn btn-sm btn-outline-secondary" disabled="@(!CanAddChild)" @onclick="BeginAddChild">
+                    <i class="bi bi-plus-lg me-1"></i>Add child
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" disabled="@(!CanRename)" @onclick="BeginRename">
+                    <i class="bi bi-pencil me-1"></i>Rename
+                </button>
+                <button class="btn btn-sm btn-outline-danger" disabled="@(!CanDelete)" @onclick="RequestDeleteNode">
+                    <i class="bi bi-trash me-1"></i>Delete
+                </button>
+            </div>
+        </header>
+
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <div class="mindmap-notice alert alert-danger mb-0 rounded-0">@_error</div>
+        }
+
+        @if (_showAddChildInput)
+        {
+            <div class="mindmap-context-bar">
+                <span class="small text-secondary">New child of "@_selectedNode?.Topic":</span>
+                <input class="form-control form-control-sm" @bind="_addChildText" @bind:event="oninput"
+                       @onkeydown="OnAddChildKeyDown" placeholder="Topic" autofocus />
+                <button class="btn btn-sm btn-primary" disabled="@_busy" @onclick="CommitAddChildAsync">Add</button>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="CancelInlineInputs">Cancel</button>
+            </div>
+        }
+        else if (_showRenameInput)
+        {
+            <div class="mindmap-context-bar">
+                <span class="small text-secondary">Rename node:</span>
+                <input class="form-control form-control-sm" @bind="_renameText" @bind:event="oninput"
+                       @onkeydown="OnRenameKeyDown" placeholder="Topic" autofocus />
+                <button class="btn btn-sm btn-primary" disabled="@_busy" @onclick="CommitRenameAsync">Save</button>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="CancelInlineInputs">Cancel</button>
+            </div>
+        }
+
+        <div class="mindmap-canvas-viewport">
+            @if (_treeData is not null)
+            {
+                <MindMapTreeContainer @ref="_mindMap"
+                                      Options="_options"
+                                      Data="_treeData"
+                                      OnSelectNode="OnSelectNode"
+                                      OnClearSelect="OnClearSelect"
+                                      class="mindmap-canvas" />
+            }
+        </div>
+    </div>
+}
+
+<ConfirmModal Show="_showDeleteConfirm"
+              Title="Delete node"
+              Message="@DeleteNodeMessage"
+              ConfirmText="Delete" ConfirmButtonClass="btn-danger" Busy="_busy"
+              OnConfirm="ConfirmDeleteNodeAsync" OnCancel="CancelDeleteNode" />
+
+@code {
+    [Parameter] public Guid MindMapId { get; set; }
+
+    private readonly MindMapOptions _options = new() { Editable = false, MultiSelect = false, Theme = MindMapThemes.Primary };
+
+    private bool _loading = true, _notFound, _busy;
+    private string _title = "", _error = "", _username = "";
+    private MindMapTreeContainer? _mindMap;
+    private MindMapTreeData? _treeData;
+    private MindMapTreeNode? _selectedNode;
+
+    private bool _showAddChildInput, _showRenameInput, _showDeleteConfirm;
+    private string _addChildText = "", _renameText = "";
+    private MindMapTreeNode? _pendingDeleteNode;
+
+    private bool CanAddChild => _selectedNode is not null && !_busy;
+    private bool CanRename => _selectedNode is not null && !_busy;
+    private bool CanDelete => _selectedNode is not null && _treeData is not null && _selectedNode.Id != _treeData.RootNode.Id && !_busy;
+
+    private string DeleteNodeMessage => _pendingDeleteNode is null
+        ? ""
+        : CountDescendants(_pendingDeleteNode) is var count && count > 0
+            ? $"Delete \"{_pendingDeleteNode.Topic}\" and its {count} descendant node(s)? This can't be undone."
+            : $"Delete \"{_pendingDeleteNode.Topic}\"? This can't be undone.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var detail = await MindMapService.GetByIdAsync(_username, MindMapId);
+            if (detail is null) { _notFound = true; return; }
+
+            _title = detail.Title;
+            _treeData = new MindMapTreeData { RootNode = ToWidgetNode(detail.Root) };
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Unable to load mind map {MindMapId}.", MindMapId); _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private void Back() => Navigation.NavigateTo("/admin/mind-maps");
+
+    private async Task OnTitleChangedAsync(ChangeEventArgs args)
+    {
+        var newTitle = args.Value?.ToString()?.Trim();
+        if (string.IsNullOrWhiteSpace(newTitle)) return;
+
+        _title = newTitle;
+        _busy = true; _error = "";
+        try { await MindMapService.RenameAsync(_username, MindMapId, _title); }
+        catch (Exception ex) { Logger.LogError(ex, "Unable to rename mind map {MindMapId}.", MindMapId); _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private void OnSelectNode(MindMapSingleSelectEventArgs<MindMapTreeNode> args)
+    {
+        _selectedNode = args.Node;
+        CancelInlineInputs();
+    }
+
+    private void OnClearSelect(ValueEventArgs<string> args)
+    {
+        _selectedNode = null;
+        CancelInlineInputs();
+    }
+
+    private void BeginAddChild()
+    {
+        _addChildText = "";
+        _showAddChildInput = true;
+        _showRenameInput = false;
+    }
+
+    private void BeginRename()
+    {
+        _renameText = _selectedNode?.Topic ?? "";
+        _showRenameInput = true;
+        _showAddChildInput = false;
+    }
+
+    private void CancelInlineInputs()
+    {
+        _showAddChildInput = false;
+        _showRenameInput = false;
+    }
+
+    private async Task OnAddChildKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await CommitAddChildAsync();
+    }
+
+    private async Task OnRenameKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await CommitRenameAsync();
+    }
+
+    private async Task CommitAddChildAsync()
+    {
+        if (_selectedNode is not { } parent || _mindMap is null || string.IsNullOrWhiteSpace(_addChildText)) return;
+
+        _busy = true; _error = "";
+        try
+        {
+            var newNode = new MindMapTreeNode { Id = Guid.NewGuid().ToString(), Topic = _addChildText.Trim() };
+            await _mindMap.SetEditable(true);
+            await _mindMap.AddNode(parent, newNode);
+            await _mindMap.SetEditable(false);
+            _showAddChildInput = false;
+            await PersistTreeAsync();
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Unable to add a mind map node."); _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task CommitRenameAsync()
+    {
+        if (_selectedNode is not { } node || _mindMap is null || string.IsNullOrWhiteSpace(_renameText)) return;
+
+        _busy = true; _error = "";
+        try
+        {
+            var newTopic = _renameText.Trim();
+            await _mindMap.SetEditable(true);
+            await _mindMap.UpdateNodeTopic(node, newTopic);
+            await _mindMap.SetEditable(false);
+            // UpdateNodeTopic only calls the JS side - the widget's own object graph (which
+            // ToPersistedNode reads back from at save time) needs the same edit applied here.
+            node.Topic = newTopic;
+            _showRenameInput = false;
+            await PersistTreeAsync();
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Unable to rename the mind map node."); _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private void RequestDeleteNode()
+    {
+        if (_selectedNode is null) return;
+        _pendingDeleteNode = _selectedNode;
+        _showDeleteConfirm = true;
+    }
+
+    private void CancelDeleteNode()
+    {
+        _showDeleteConfirm = false;
+        _pendingDeleteNode = null;
+    }
+
+    private async Task ConfirmDeleteNodeAsync()
+    {
+        if (_pendingDeleteNode is not { } node || _mindMap is null) return;
+
+        _busy = true; _error = "";
+        try
+        {
+            await _mindMap.SetEditable(true);
+            await _mindMap.RemoveNode(node);
+            await _mindMap.SetEditable(false);
+            _selectedNode = null;
+            _showDeleteConfirm = false;
+            _pendingDeleteNode = null;
+            await PersistTreeAsync();
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Unable to delete the mind map node."); _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task PersistTreeAsync()
+    {
+        if (_treeData is null) return;
+        await MindMapService.SaveTreeAsync(_username, MindMapId, ToPersistedNode(_treeData.RootNode));
+    }
+
+    private static MindMapTreeNode ToWidgetNode(MindMapNode node) => new()
+    {
+        Id = node.Id.ToString(),
+        Topic = node.Topic,
+        Children = node.Children.Select(ToWidgetNode).ToList()
+    };
+
+    private static MindMapNode ToPersistedNode(MindMapTreeNode node) => new(
+        Guid.Parse(node.Id),
+        node.Topic,
+        node.Children.Select(ToPersistedNode).ToList());
+
+    private static int CountDescendants(MindMapTreeNode node) => node.Children.Count + node.Children.Sum(CountDescendants);
+}

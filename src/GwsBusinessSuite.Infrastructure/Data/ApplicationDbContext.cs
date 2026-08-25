@@ -98,6 +98,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<CjCommissionRecord> CjCommissionRecords => Set<CjCommissionRecord>();
     public DbSet<WebAnalyticsEvent> WebAnalyticsEvents => Set<WebAnalyticsEvent>();
     public DbSet<BusinessIntelligenceWidget> BusinessIntelligenceWidgets => Set<BusinessIntelligenceWidget>();
+    public DbSet<MindMap> MindMaps => Set<MindMap>();
     public DbSet<AnalyticsGoal> AnalyticsGoals => Set<AnalyticsGoal>();
     public DbSet<AnalyticsFunnel> AnalyticsFunnels => Set<AnalyticsFunnel>();
     public DbSet<AnalyticsFunnelStep> AnalyticsFunnelSteps => Set<AnalyticsFunnelStep>();
@@ -561,6 +562,10 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<BusinessIntelligenceWidget>().Property(x => x.Metric).HasMaxLength(40);
         modelBuilder.Entity<BusinessIntelligenceWidget>().Property(x => x.Dimension).HasMaxLength(40);
         modelBuilder.Entity<BusinessIntelligenceWidget>().Property(x => x.Visualization).HasMaxLength(20);
+        modelBuilder.Entity<MindMap>()
+            .HasIndex(x => new { x.OwnerUsername, x.SortOrder });
+        modelBuilder.Entity<MindMap>().Property(x => x.OwnerUsername).HasMaxLength(256);
+        modelBuilder.Entity<MindMap>().Property(x => x.Title).HasMaxLength(120);
         modelBuilder.Entity<AnalyticsGoal>().HasIndex(x => x.Name).IsUnique();
         modelBuilder.Entity<AnalyticsGoal>().HasIndex(x => new { x.IsActive, x.MatchType });
         modelBuilder.Entity<AnalyticsGoal>().Property(x => x.Name).HasMaxLength(120);

@@ -1617,6 +1617,23 @@ public sealed class BusinessIntelligenceWidget : AuditableEntity
     public int SortOrder { get; set; }
 }
 
+// A saved mind-map document: one JSON-serialized node tree per row (Application-layer
+// MindMapTreeJson owns the format - this entity stays a dumb "{}" default since Domain can't
+// reference Application for a real fresh-root helper), the same "single blob for a tree within
+// one document" shape WikiPage.BlocksJson uses, not a ParentId adjacency list - a mind map's
+// nodes belong to one document, not to each other across separate rows. MindMapService.CreateAsync
+// always overwrites TreeJson with a real fresh-root tree immediately, the same way
+// BusinessIntelligenceService.SaveWidgetAsync never relies on entity-level defaults either.
+// OwnerUsername is a real filter key (see MindMapService), not just an audit field - every
+// list/get/save/delete call is scoped by it.
+public sealed class MindMap : AuditableEntity
+{
+    public required string OwnerUsername { get; set; }
+    public required string Title { get; set; }
+    public string TreeJson { get; set; } = "{}";
+    public int SortOrder { get; set; }
+}
+
 public static class AnalyticsGoalMatchTypes
 {
     public const string Event = "Event";
