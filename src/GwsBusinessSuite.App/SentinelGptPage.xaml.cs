@@ -55,7 +55,66 @@ public partial class SentinelGptPage : ContentPage
         if (_models.Count == 0)
             await LoadModelsAsync();
         RefreshHistory();
+#if DEBUG
+        await RunSandboxSpikeAsync();
+#endif
     }
+
+#if DEBUG
+    // Temporary, DEBUG-only diagnostic for Developer Mode Phase 1b: does Process.Start work at
+    // all from inside this sandboxed, codesigned Mac Catalyst app, and is Homebrew/`~/.dotnet`
+    // on its PATH? Tests both independently - git/find live under /usr/bin (sandbox permission
+    // in isolation), dotnet/rg are typically Homebrew/`~/.dotnet`-installed (PATH visibility, a
+    // separate concern). Remove this block once answered - diagnostic only, never shipped
+    // (guarded by #if DEBUG so a Release build can never include it).
+    private async Task RunSandboxSpikeAsync()
+    {
+        var report = new System.Text.StringBuilder();
+        report.AppendLine($"[spike] git: {await ProbeAsync("git", "--version")}");
+        report.AppendLine($"[spike] dotnet: {await ProbeAsync("dotnet", "--version")}");
+        report.AppendLine($"[spike] rg: {await ProbeAsync("rg", "--version")}");
+        report.Append($"[spike] PATH={Environment.GetEnvironmentVariable("PATH")}");
+        var text = report.ToString();
+        StatusLabel.Text += "\n" + text;
+        // Written to a plain file (not just the on-screen label) so this can be verified without
+        // needing to relay on-screen text - readable directly from Terminal once this runs.
+        try
+        {
+            await File.WriteAllTextAsync(
+                Path.Combine(FileSystem.Current.AppDataDirectory, "sandbox-spike-result.txt"), text);
+        }
+        catch
+        {
+            // Diagnostic-only; the on-screen StatusLabel text above is the fallback.
+        }
+    }
+
+    private static async Task<string> ProbeAsync(string program, string arguments)
+    {
+        try
+        {
+            var startInfo = new System.Diagnostics.ProcessStartInfo(program, arguments)
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            using var process = System.Diagnostics.Process.Start(startInfo);
+            if (process is null) return "Process.Start returned null";
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var stdout = await process.StandardOutput.ReadToEndAsync(timeout.Token);
+            var stderr = await process.StandardError.ReadToEndAsync(timeout.Token);
+            await process.WaitForExitAsync(timeout.Token);
+            var output = (stdout + stderr).Trim();
+            return $"exit={process.ExitCode} \"{(output.Length > 120 ? output[..120] + "..." : output)}\"";
+        }
+        catch (Exception ex)
+        {
+            return $"THREW {ex.GetType().Name}: {ex.Message}";
+        }
+    }
+#endif
 
     protected override void OnDisappearing()
     {
