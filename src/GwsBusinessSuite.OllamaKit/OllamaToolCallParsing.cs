@@ -36,6 +36,20 @@ public static class OllamaToolCallParsing
         return calls;
     }
 
+    // A lenient companion to TryParseContentToolCall: recognizes content that was clearly an
+    // *attempted* tool call even though it failed to parse as one (wrong field name, invalid
+    // JSON tokens, unregistered tool name, etc.). Callers use this to give the model one
+    // corrective retry instead of showing the raw, malformed attempt to the user as if it were a
+    // real answer. Deliberately narrower than "any JSON-looking text" - a genuine final answer is
+    // never a bare JSON object whose properties are "name" alongside "arguments"/"parameters".
+    public static bool LooksLikeFailedToolCallAttempt(string content)
+    {
+        var candidate = content.Trim();
+        if (!candidate.StartsWith('{') || !candidate.Contains("\"name\""))
+            return false;
+        return candidate.Contains("\"arguments\"") || candidate.Contains("\"parameters\"");
+    }
+
     private static bool TryParseOneContentToolCall(
         string candidate,
         IReadOnlyList<OllamaToolDefinition> definitions,

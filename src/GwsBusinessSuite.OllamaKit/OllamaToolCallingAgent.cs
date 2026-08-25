@@ -82,6 +82,30 @@ public sealed class OllamaToolCallingAgent
             // emit native tool_calls.
             toolCalls ??= OllamaToolCallParsing.TryParseContentToolCall(content.ToString(), _tools.Definitions);
 
+            if (toolCalls.Count == 0 && OllamaToolCallParsing.LooksLikeFailedToolCallAttempt(content.ToString()))
+            {
+                // The model clearly attempted a tool call (JSON-shaped, has "name") but it didn't
+                // parse - wrong field name, invalid JSON tokens, etc. Threading this back as a
+                // "tool" result (the same shape a real tool's own validation error uses) gives the
+                // model one corrective round instead of the raw, malformed attempt being shown to
+                // the user as if it were a real answer. Counts against _maxRounds like any other
+                // round, so this can't loop forever. The malformed JSON already streamed out as
+                // Content events above (streaming can't know it's malformed until it's complete) -
+                // yielding a Tool event here tells UI callers to treat that streamed-so-far text as
+                // transient activity to be replaced, the same as a real tool call's activity
+                // indicator, instead of leaving it on screen concatenated with what follows.
+                yield return OllamaAgentEvent.Tool("retrying");
+                _messages.Add(new OllamaChatMessage("assistant", content.ToString()));
+                _messages.Add(new OllamaChatMessage("tool", JsonSerializer.Serialize(new
+                {
+                    error = "That wasn't a valid tool call. Tool calls must be a JSON object with exactly " +
+                            "\"name\" and \"arguments\" (not \"parameters\"), and \"arguments\" must be " +
+                            "well-formed JSON (no tokens like undefined - omit a field instead). Retry the " +
+                            "tool call correctly, or answer in plain text if no tool is actually needed."
+                })) { ToolName = "invalid_tool_call" });
+                continue;
+            }
+
             _messages.Add(new OllamaChatMessage("assistant", content.ToString())
             {
                 ToolCalls = toolCalls.Count > 0 ? toolCalls.Select(ToApiToolCall).ToArray() : null

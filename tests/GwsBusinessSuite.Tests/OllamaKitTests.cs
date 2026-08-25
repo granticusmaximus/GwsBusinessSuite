@@ -87,6 +87,53 @@ public sealed class OllamaKitTests : IDisposable
     }
 
     [Fact]
+    public async Task ToolCallingAgent_WithAMalformedToolCallAttempt_GivesOneCorrectiveRoundInsteadOfShowingRawJson()
+    {
+        var round = 0;
+        using var client = CreateClient(_ =>
+        {
+            round++;
+            return round == 1
+                // Wrong field name ("parameters" not "arguments") - the exact real failure mode
+                // observed from a local model attempting a tool call outside native tool_calls.
+                ? NdjsonResponse(string.Join('\n',
+                    """{"message":{"content":"{\"name\":\"search_wiki\",\"parameters\":{\"query\":\"deploy\"}}"},"done":false}""",
+                    """{"message":{"content":""},"done":true}"""))
+                : NdjsonResponse(string.Join('\n',
+                    """{"message":{"content":"Here you go."},"done":false}""",
+                    """{"message":{"content":""},"done":true}"""));
+        });
+        var executor = new FakeToolExecutor([new OllamaToolDefinition("search_wiki", "Search", """{"type":"object"}""")]);
+        var agent = new OllamaToolCallingAgent(client, executor, "qwen2.5-coder", "system prompt", maxRounds: 3);
+
+        var events = new List<OllamaAgentEvent>();
+        await foreach (var e in agent.RunTurnStreamingAsync("How do I deploy?", default))
+            events.Add(e);
+
+        executor.Calls.Should().BeEmpty("the malformed attempt never named a real, parseable tool call");
+        events.Should().Contain(e => e.ToolActivity == "retrying");
+        // The malformed JSON streamed as real Content events before it could be classified (that
+        // can't be known until the round finishes) - what matters is that a ToolActivity event
+        // came after it, which is the same "treat this as replaceable" signal a real tool call
+        // uses, so a UI consumer resets its display rather than appending. Mirror that here:
+        // only the events after the last ToolActivity should make up the real, final answer.
+        var lastToolActivityIndex = events.FindLastIndex(e => e.ToolActivity is not null);
+        lastToolActivityIndex.Should().BeGreaterThanOrEqualTo(0);
+        string.Concat(events.Skip(lastToolActivityIndex + 1).Select(e => e.ContentDelta)).Should().Be("Here you go.");
+        agent.Messages.Should().Contain(m => m.Role == "tool" && m.ToolName == "invalid_tool_call");
+        agent.Messages[^1].Content.Should().Be("Here you go.");
+    }
+
+    [Theory]
+    [InlineData("""{"name":"search_wiki","parameters":{"query":"x"}}""", true)]
+    [InlineData("""{"name":"read_file","arguments":{"path":"x","bad":undefined}}""", true)]
+    [InlineData("""The deploy process pushes to main and the pipeline handles it.""", false)]
+    [InlineData("""{"ok":true}""", false)]
+    [InlineData("", false)]
+    public void LooksLikeFailedToolCallAttempt_RecognizesJsonShapedAttemptsOnly(string content, bool expected) =>
+        OllamaToolCallParsing.LooksLikeFailedToolCallAttempt(content).Should().Be(expected);
+
+    [Fact]
     public async Task ConversationSessionStore_RoundTripsMessagesIncludingToolCalls()
     {
         var store = new ConversationSessionStore(Path.Combine(_root, "sessions"));
