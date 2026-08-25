@@ -133,6 +133,57 @@ public sealed class OllamaKitTests : IDisposable
     }
 
     [Fact]
+    public async Task ConversationSessionStore_RoundTripsAWorkspaceScopedConversationsWorkspaceRoot()
+    {
+        var store = new ConversationSessionStore(Path.Combine(_root, "sessions"));
+        var workspace = Path.Combine(_root, "repo-a");
+        Directory.CreateDirectory(workspace);
+
+        var path = await store.SaveAsync(
+            null, "qwen2.5-coder", [new OllamaChatMessage("system", "s")], default, workspaceRoot: workspace);
+        var loaded = await store.LoadAsync(path, default);
+
+        loaded.Should().NotBeNull();
+        loaded!.WorkspaceRoot.Should().Be(Path.GetFullPath(workspace));
+    }
+
+    [Fact]
+    public async Task ConversationSessionStore_List_ExcludesWorkspaceScopedConversations()
+    {
+        var store = new ConversationSessionStore(Path.Combine(_root, "sessions"));
+        var workspace = Path.Combine(_root, "repo-a");
+        Directory.CreateDirectory(workspace);
+        await store.SaveAsync(null, "llama3.2", [new OllamaChatMessage("user", "ordinary chat")], default);
+        await store.SaveAsync(
+            null, "qwen2.5-coder", [new OllamaChatMessage("user", "dev chat")], default, workspaceRoot: workspace);
+
+        var ordinary = store.List();
+
+        ordinary.Should().ContainSingle();
+        ordinary[0].Conversation.Messages[0].Content.Should().Be("ordinary chat");
+    }
+
+    [Fact]
+    public async Task ConversationSessionStore_ListForWorkspace_ReturnsOnlyThatWorkspacesConversationsAndNotOrdinaryChats()
+    {
+        var store = new ConversationSessionStore(Path.Combine(_root, "sessions"));
+        var workspaceA = Path.Combine(_root, "repo-a");
+        var workspaceB = Path.Combine(_root, "repo-b");
+        Directory.CreateDirectory(workspaceA);
+        Directory.CreateDirectory(workspaceB);
+        await store.SaveAsync(null, "llama3.2", [new OllamaChatMessage("user", "ordinary chat")], default);
+        var pathA = await store.SaveAsync(
+            null, "qwen2.5-coder", [new OllamaChatMessage("user", "repo a chat")], default, workspaceRoot: workspaceA);
+        await store.SaveAsync(
+            null, "qwen2.5-coder", [new OllamaChatMessage("user", "repo b chat")], default, workspaceRoot: workspaceB);
+
+        var forWorkspaceA = store.ListForWorkspace(workspaceA);
+
+        forWorkspaceA.Should().ContainSingle(item => item.Path == pathA);
+        forWorkspaceA[0].Conversation.Messages[0].Content.Should().Be("repo a chat");
+    }
+
+    [Fact]
     public async Task ApprovedMemoryStore_SurfacesAPreviouslyApprovedAnswerForARelatedQuestion()
     {
         var store = new ApprovedMemoryStore(Path.Combine(_root, "approved-memory.json"));

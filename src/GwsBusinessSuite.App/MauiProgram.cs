@@ -1,4 +1,5 @@
-﻿using GwsBusinessSuite.OllamaKit;
+﻿using CommunityToolkit.Maui;
+using GwsBusinessSuite.OllamaKit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -11,6 +12,7 @@ public static class MauiProgram
 		var builder = MauiApp.CreateBuilder();
 		builder
 			.UseMauiApp<App>()
+			.UseMauiCommunityToolkit()
 			.ConfigureFonts(fonts =>
 			{
 				fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");

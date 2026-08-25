@@ -13,6 +13,12 @@
         <true/>
         <key>com.apple.security.device.audio-input</key>
         <true/>
+        <!-- Developer Mode's folder picker (CommunityToolkit.Maui) and the resulting file reads/
+             writes inside a user-chosen workspace folder need this - the sandbox only grants
+             access to a path a human explicitly picked via the system picker, not arbitrary
+             paths on disk. -->
+        <key>com.apple.security.files.user-selected.read-write</key>
+        <true/>
     </dict>
 </plist>
 
