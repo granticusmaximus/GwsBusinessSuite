@@ -1,0 +1,120 @@
+@using GwsBusinessSuite.Application.DevTools
+@inject IJSRuntime JS
+
+@switch (SelectedTool)
+{
+    case "hash":
+        <div class="devtools-tool">
+            <h2 class="h5">Hash Generator</h2>
+            <label class="form-label small fw-semibold">Input</label>
+            <textarea class="form-control devtools-textarea" @bind="_hashInput" @bind:event="oninput"></textarea>
+            <div class="devtools-hash-grid">
+                <label class="small fw-semibold">MD5</label>
+                <div class="devtools-output-row"><input class="form-control form-control-sm font-monospace" readonly value="@DevToolsGenerators.HashMd5(_hashInput)" /><button class="btn btn-sm btn-outline-secondary" title="Copy" @onclick="() => CopyAsync(DevToolsGenerators.HashMd5(_hashInput))"><i class="bi bi-clipboard"></i></button></div>
+                <label class="small fw-semibold">SHA-1</label>
+                <div class="devtools-output-row"><input class="form-control form-control-sm font-monospace" readonly value="@DevToolsGenerators.HashSha1(_hashInput)" /><button class="btn btn-sm btn-outline-secondary" title="Copy" @onclick="() => CopyAsync(DevToolsGenerators.HashSha1(_hashInput))"><i class="bi bi-clipboard"></i></button></div>
+                <label class="small fw-semibold">SHA-256</label>
+                <div class="devtools-output-row"><input class="form-control form-control-sm font-monospace" readonly value="@DevToolsGenerators.HashSha256(_hashInput)" /><button class="btn btn-sm btn-outline-secondary" title="Copy" @onclick="() => CopyAsync(DevToolsGenerators.HashSha256(_hashInput))"><i class="bi bi-clipboard"></i></button></div>
+                <label class="small fw-semibold">SHA-512</label>
+                <div class="devtools-output-row"><input class="form-control form-control-sm font-monospace" readonly value="@DevToolsGenerators.HashSha512(_hashInput)" /><button class="btn btn-sm btn-outline-secondary" title="Copy" @onclick="() => CopyAsync(DevToolsGenerators.HashSha512(_hashInput))"><i class="bi bi-clipboard"></i></button></div>
+            </div>
+        </div>
+        break;
+
+    case "uuid":
+        <div class="devtools-tool">
+            <h2 class="h5">UUID Generator</h2>
+            <div class="d-flex gap-3 my-2">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="uuidUpper" @bind="_uuidUppercase" />
+                    <label class="form-check-label small" for="uuidUpper">Uppercase</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="uuidHyphens" @bind="_uuidHyphens" />
+                    <label class="form-check-label small" for="uuidHyphens">Include hyphens</label>
+                </div>
+            </div>
+            <button class="btn btn-sm btn-primary mb-2" @onclick="RunGenerateUuid">Generate</button>
+            <div class="devtools-output-row">
+                <input class="form-control font-monospace" readonly value="@_uuidOutput" />
+                <button class="btn btn-sm btn-outline-secondary" title="Copy" @onclick="() => CopyAsync(_uuidOutput)"><i class="bi bi-clipboard"></i></button>
+            </div>
+        </div>
+        break;
+
+    case "password":
+        <div class="devtools-tool">
+            <h2 class="h5">Password Generator</h2>
+            <label class="form-label small fw-semibold">Length</label>
+            <input class="form-control" type="number" min="4" max="256" @bind="_passwordLength" style="max-width: 8rem;" />
+            <div class="d-flex gap-3 my-2">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="pwUpper" @bind="_passwordUpper" />
+                    <label class="form-check-label small" for="pwUpper">Uppercase</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="pwDigits" @bind="_passwordDigits" />
+                    <label class="form-check-label small" for="pwDigits">Digits</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="pwSymbols" @bind="_passwordSymbols" />
+                    <label class="form-check-label small" for="pwSymbols">Symbols</label>
+                </div>
+            </div>
+            <button class="btn btn-sm btn-primary mb-2" @onclick="RunGeneratePassword">Generate</button>
+            @if (!string.IsNullOrEmpty(_passwordError)) { <div class="alert alert-danger py-1 px-2 small">@_passwordError</div> }
+            <div class="devtools-output-row">
+                <input class="form-control font-monospace" readonly value="@_passwordOutput" />
+                <button class="btn btn-sm btn-outline-secondary" title="Copy" @onclick="() => CopyAsync(_passwordOutput)"><i class="bi bi-clipboard"></i></button>
+            </div>
+        </div>
+        break;
+
+    case "lorem":
+        <div class="devtools-tool">
+            <h2 class="h5">Lorem Ipsum Generator</h2>
+            <div class="d-flex gap-3 my-2 align-items-end">
+                <div>
+                    <label class="form-label small fw-semibold">Paragraphs</label>
+                    <input class="form-control" type="number" min="1" max="20" @bind="_loremParagraphs" style="max-width: 6rem;" />
+                </div>
+                <div>
+                    <label class="form-label small fw-semibold">Sentences per paragraph</label>
+                    <input class="form-control" type="number" min="1" max="20" @bind="_loremSentences" style="max-width: 6rem;" />
+                </div>
+                <button class="btn btn-sm btn-primary" @onclick="RunGenerateLorem">Generate</button>
+            </div>
+            <div class="devtools-output-row">
+                <textarea class="form-control devtools-textarea devtools-textarea-tall" readonly value="@_loremOutput"></textarea>
+                <button class="btn btn-sm btn-outline-secondary" title="Copy" @onclick="() => CopyAsync(_loremOutput)"><i class="bi bi-clipboard"></i></button>
+            </div>
+        </div>
+        break;
+}
+
+@code {
+    [Parameter, EditorRequired] public string SelectedTool { get; set; } = string.Empty;
+
+    private async Task CopyAsync(string value) => await JS.InvokeVoidAsync("navigator.clipboard.writeText", value);
+
+    private string _hashInput = string.Empty;
+
+    private bool _uuidUppercase;
+    private bool _uuidHyphens = true;
+    private string _uuidOutput = string.Empty;
+    private void RunGenerateUuid() => _uuidOutput = DevToolsGenerators.NewGuid(_uuidUppercase, _uuidHyphens);
+
+    private int _passwordLength = 16;
+    private bool _passwordUpper = true, _passwordDigits = true, _passwordSymbols = true;
+    private string _passwordOutput = string.Empty, _passwordError = string.Empty;
+    private void RunGeneratePassword()
+    {
+        var result = DevToolsGenerators.GeneratePassword(_passwordLength, _passwordUpper, _passwordDigits, _passwordSymbols);
+        _passwordOutput = result.Success ? result.Output : string.Empty;
+        _passwordError = result.Success ? string.Empty : result.Error ?? string.Empty;
+    }
+
+    private int _loremParagraphs = 3, _loremSentences = 4;
+    private string _loremOutput = string.Empty;
+    private void RunGenerateLorem() => _loremOutput = DevToolsGenerators.GenerateLoremIpsum(_loremParagraphs, _loremSentences);
+}

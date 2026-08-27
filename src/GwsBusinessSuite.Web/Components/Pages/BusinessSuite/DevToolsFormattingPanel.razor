@@ -1,0 +1,75 @@
+@using GwsBusinessSuite.Application.DevTools
+@inject IJSRuntime JS
+
+@switch (SelectedTool)
+{
+    case "json":
+        <div class="devtools-tool">
+            <h2 class="h5">JSON Formatter</h2>
+            <label class="form-label small fw-semibold">Input</label>
+            <textarea class="form-control devtools-textarea" @bind="_jsonInput" @bind:event="oninput"></textarea>
+            <button class="btn btn-sm btn-primary my-2" @onclick="RunFormatJson">Format</button>
+            @if (!string.IsNullOrEmpty(_jsonError)) { <div class="alert alert-danger py-1 px-2 small">@_jsonError</div> }
+            <label class="form-label small fw-semibold">Output</label>
+            <div class="devtools-output-row">
+                <textarea class="form-control devtools-textarea devtools-textarea-tall" readonly value="@_jsonOutput"></textarea>
+                <button class="btn btn-sm btn-outline-secondary" title="Copy" @onclick="() => CopyAsync(_jsonOutput)"><i class="bi bi-clipboard"></i></button>
+            </div>
+        </div>
+        break;
+
+    case "xml":
+        <div class="devtools-tool">
+            <h2 class="h5">XML Formatter</h2>
+            <label class="form-label small fw-semibold">Input</label>
+            <textarea class="form-control devtools-textarea" @bind="_xmlInput" @bind:event="oninput"></textarea>
+            <button class="btn btn-sm btn-primary my-2" @onclick="RunFormatXml">Format</button>
+            @if (!string.IsNullOrEmpty(_xmlError)) { <div class="alert alert-danger py-1 px-2 small">@_xmlError</div> }
+            <label class="form-label small fw-semibold">Output</label>
+            <div class="devtools-output-row">
+                <textarea class="form-control devtools-textarea devtools-textarea-tall" readonly value="@_xmlOutput"></textarea>
+                <button class="btn btn-sm btn-outline-secondary" title="Copy" @onclick="() => CopyAsync(_xmlOutput)"><i class="bi bi-clipboard"></i></button>
+            </div>
+        </div>
+        break;
+
+    case "markdown":
+        <div class="devtools-tool">
+            <h2 class="h5">Markdown Preview</h2>
+            <div class="devtools-split">
+                <div>
+                    <label class="form-label small fw-semibold">Markdown</label>
+                    <textarea class="form-control devtools-textarea devtools-textarea-tall" @bind="_markdownInput" @bind:event="oninput"></textarea>
+                </div>
+                <div>
+                    <label class="form-label small fw-semibold">Preview</label>
+                    <div class="devtools-markdown-preview">@((MarkupString)DevToolsFormatters.RenderMarkdownToHtml(_markdownInput))</div>
+                </div>
+            </div>
+        </div>
+        break;
+}
+
+@code {
+    [Parameter, EditorRequired] public string SelectedTool { get; set; } = string.Empty;
+
+    private async Task CopyAsync(string value) => await JS.InvokeVoidAsync("navigator.clipboard.writeText", value);
+
+    private string _jsonInput = string.Empty, _jsonOutput = string.Empty, _jsonError = string.Empty;
+    private void RunFormatJson()
+    {
+        var result = DevToolsFormatters.FormatJson(_jsonInput);
+        _jsonOutput = result.Success ? result.Output : string.Empty;
+        _jsonError = result.Success ? string.Empty : result.Error ?? string.Empty;
+    }
+
+    private string _xmlInput = string.Empty, _xmlOutput = string.Empty, _xmlError = string.Empty;
+    private void RunFormatXml()
+    {
+        var result = DevToolsFormatters.FormatXml(_xmlInput);
+        _xmlOutput = result.Success ? result.Output : string.Empty;
+        _xmlError = result.Success ? string.Empty : result.Error ?? string.Empty;
+    }
+
+    private string _markdownInput = string.Empty;
+}

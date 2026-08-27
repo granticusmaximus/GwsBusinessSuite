@@ -1,0 +1,104 @@
+@using GwsBusinessSuite.Application.ContentStudio
+@using GwsBusinessSuite.Application.DevTools
+
+@switch (SelectedTool)
+{
+    case "regex":
+        <div class="devtools-tool">
+            <h2 class="h5">RegEx Tester</h2>
+            <label class="form-label small fw-semibold">Pattern</label>
+            <input class="form-control font-monospace" @bind="_regexPattern" @bind:event="oninput" @bind:after="RunTestRegex" placeholder="e.g. (\w+)@@(\w+)\.com" />
+            <div class="d-flex gap-3 my-2">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="regexIgnoreCase" @bind="_regexIgnoreCase" @bind:after="RunTestRegex" />
+                    <label class="form-check-label small" for="regexIgnoreCase">Ignore case</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="regexMultiline" @bind="_regexMultiline" @bind:after="RunTestRegex" />
+                    <label class="form-check-label small" for="regexMultiline">Multiline</label>
+                </div>
+            </div>
+            <label class="form-label small fw-semibold">Test string</label>
+            <textarea class="form-control devtools-textarea" @bind="_regexInput" @bind:event="oninput" @bind:after="RunTestRegex"></textarea>
+            @if (!string.IsNullOrEmpty(_regexError)) { <div class="alert alert-danger py-1 px-2 small mt-2">@_regexError</div> }
+            <label class="form-label small fw-semibold mt-2">Matches</label>
+            <textarea class="form-control devtools-textarea devtools-textarea-tall" readonly value="@_regexOutput"></textarea>
+        </div>
+        break;
+
+    case "diff":
+        <div class="devtools-tool">
+            <h2 class="h5">Text Diff</h2>
+            <div class="devtools-split">
+                <div>
+                    <label class="form-label small fw-semibold">Before</label>
+                    <textarea class="form-control devtools-textarea devtools-textarea-tall" @bind="_diffBefore" @bind:event="oninput"></textarea>
+                </div>
+                <div>
+                    <label class="form-label small fw-semibold">After</label>
+                    <textarea class="form-control devtools-textarea devtools-textarea-tall" @bind="_diffAfter" @bind:event="oninput"></textarea>
+                </div>
+            </div>
+            <button class="btn btn-sm btn-primary my-2" @onclick="RunDiffText">Compare</button>
+            @if (!string.IsNullOrEmpty(_diffError)) { <div class="alert alert-danger py-1 px-2 small">@_diffError</div> }
+            @if (_diffLines.Count > 0)
+            {
+                <div class="devtools-diff-output">
+                    @foreach (var line in _diffLines)
+                    {
+                        <div class="@GetDiffLineClass(line.Kind)">@(GetDiffPrefix(line.Kind) + line.Text)</div>
+                    }
+                </div>
+            }
+        </div>
+        break;
+
+    case "analyze":
+        <div class="devtools-tool">
+            <h2 class="h5">Text Analyzer</h2>
+            <label class="form-label small fw-semibold">Input</label>
+            <textarea class="form-control devtools-textarea devtools-textarea-tall" @bind="_analyzeInput" @bind:event="oninput"></textarea>
+            <label class="form-label small fw-semibold mt-2">Summary</label>
+            <pre class="devtools-color-output">@DevToolsTesters.AnalyzeText(_analyzeInput)</pre>
+        </div>
+        break;
+}
+
+@code {
+    [Parameter, EditorRequired] public string SelectedTool { get; set; } = string.Empty;
+
+    private string _regexPattern = string.Empty, _regexInput = string.Empty, _regexOutput = string.Empty, _regexError = string.Empty;
+    private bool _regexIgnoreCase, _regexMultiline;
+    private void RunTestRegex()
+    {
+        if (string.IsNullOrEmpty(_regexPattern)) { _regexOutput = string.Empty; _regexError = string.Empty; return; }
+        var result = DevToolsTesters.TestRegex(_regexPattern, _regexInput, _regexIgnoreCase, _regexMultiline);
+        _regexOutput = result.Success ? result.Output : string.Empty;
+        _regexError = result.Success ? string.Empty : result.Error ?? string.Empty;
+    }
+
+    private string _diffBefore = string.Empty, _diffAfter = string.Empty, _diffError = string.Empty;
+    private IReadOnlyList<ContentStudioDiffLine> _diffLines = [];
+    private void RunDiffText()
+    {
+        var result = DevToolsTesters.DiffText(_diffBefore, _diffAfter);
+        _diffLines = result.Success ? result.Lines : [];
+        _diffError = result.Success ? string.Empty : result.Error ?? string.Empty;
+    }
+
+    private static string GetDiffLineClass(string kind) => kind switch
+    {
+        "added" => "bg-success-subtle text-success-emphasis",
+        "removed" => "bg-danger-subtle text-danger-emphasis",
+        _ => string.Empty
+    };
+
+    private static string GetDiffPrefix(string kind) => kind switch
+    {
+        "added" => "+ ",
+        "removed" => "- ",
+        _ => "  "
+    };
+
+    private string _analyzeInput = string.Empty;
+}

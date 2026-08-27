@@ -1,0 +1,74 @@
+@page "/admin/dev-tools"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContentAccess")]
+
+<PageTitle>Developer Tools</PageTitle>
+
+<div class="devtools-shell">
+    <aside class="devtools-sidebar">
+        <input class="form-control form-control-sm mb-3" @bind="_search" @bind:event="oninput" placeholder="Search tools" aria-label="Search tools" />
+        @foreach (var group in FilteredTools.GroupBy(tool => tool.Group))
+        {
+            <div class="devtools-group-heading">@group.Key</div>
+            @foreach (var tool in group)
+            {
+                <button type="button" class="devtools-tool-button @(tool.Key == _selectedTool ? "is-active" : "")" @onclick="() => _selectedTool = tool.Key">
+                    @tool.Label
+                </button>
+            }
+        }
+    </aside>
+    <main class="devtools-content">
+        @switch (SelectedGroup)
+        {
+            case "Encoding":
+                <DevToolsEncodingPanel SelectedTool="_selectedTool" />
+                break;
+            case "Formatting":
+                <DevToolsFormattingPanel SelectedTool="_selectedTool" />
+                break;
+            case "Generators":
+                <DevToolsGeneratorsPanel SelectedTool="_selectedTool" />
+                break;
+            case "Converters":
+                <DevToolsConvertersPanel SelectedTool="_selectedTool" />
+                break;
+            case "Testers":
+                <DevToolsTestersPanel SelectedTool="_selectedTool" />
+                break;
+        }
+    </main>
+</div>
+
+@code {
+    private static readonly (string Key, string Label, string Group)[] Tools =
+    [
+        ("base64", "Base64 Encode/Decode", "Encoding"),
+        ("url", "URL Encode/Decode", "Encoding"),
+        ("html", "HTML Entity Encode/Decode", "Encoding"),
+        ("gzip", "GZip Compress/Decompress", "Encoding"),
+        ("jwt", "JWT Decoder", "Encoding"),
+        ("qr", "QR Code Generator", "Encoding"),
+        ("json", "JSON Formatter", "Formatting"),
+        ("xml", "XML Formatter", "Formatting"),
+        ("markdown", "Markdown Preview", "Formatting"),
+        ("hash", "Hash Generator", "Generators"),
+        ("uuid", "UUID Generator", "Generators"),
+        ("password", "Password Generator", "Generators"),
+        ("lorem", "Lorem Ipsum Generator", "Generators"),
+        ("numberbase", "Number Base Converter", "Converters"),
+        ("timestamp", "Timestamp Converter", "Converters"),
+        ("color", "Color Converter", "Converters"),
+        ("regex", "RegEx Tester", "Testers"),
+        ("diff", "Text Diff", "Testers"),
+        ("analyze", "Text Analyzer", "Testers")
+    ];
+
+    private string _selectedTool = "base64";
+    private string _search = string.Empty;
+
+    private IEnumerable<(string Key, string Label, string Group)> FilteredTools => Tools.Where(tool =>
+        string.IsNullOrWhiteSpace(_search) || tool.Label.Contains(_search, StringComparison.OrdinalIgnoreCase));
+
+    private string SelectedGroup => Tools.First(tool => tool.Key == _selectedTool).Group;
+}

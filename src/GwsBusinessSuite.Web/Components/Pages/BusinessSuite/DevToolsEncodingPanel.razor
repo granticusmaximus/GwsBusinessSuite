@@ -1,0 +1,163 @@
+@using GwsBusinessSuite.Application.DevTools
+@inject IJSRuntime JS
+
+@switch (SelectedTool)
+{
+    case "base64":
+        <div class="devtools-tool">
+            <h2 class="h5">Base64 Encode/Decode</h2>
+            <label class="form-label small fw-semibold">Input</label>
+            <textarea class="form-control devtools-textarea" @bind="_base64Input" @bind:event="oninput"></textarea>
+            <div class="d-flex gap-2 my-2">
+                <button class="btn btn-sm btn-primary" @onclick="RunBase64Encode">Encode</button>
+                <button class="btn btn-sm btn-outline-primary" @onclick="RunBase64Decode">Decode</button>
+            </div>
+            @if (!string.IsNullOrEmpty(_base64Error)) { <div class="alert alert-danger py-1 px-2 small">@_base64Error</div> }
+            <label class="form-label small fw-semibold">Output</label>
+            <div class="devtools-output-row">
+                <textarea class="form-control devtools-textarea" readonly value="@_base64Output"></textarea>
+                <button class="btn btn-sm btn-outline-secondary" title="Copy" @onclick="() => CopyAsync(_base64Output)"><i class="bi bi-clipboard"></i></button>
+            </div>
+        </div>
+        break;
+
+    case "url":
+        <div class="devtools-tool">
+            <h2 class="h5">URL Encode/Decode</h2>
+            <label class="form-label small fw-semibold">Input</label>
+            <textarea class="form-control devtools-textarea" @bind="_urlInput" @bind:event="oninput"></textarea>
+            <div class="d-flex gap-2 my-2">
+                <button class="btn btn-sm btn-primary" @onclick="RunUrlEncode">Encode</button>
+                <button class="btn btn-sm btn-outline-primary" @onclick="RunUrlDecode">Decode</button>
+            </div>
+            @if (!string.IsNullOrEmpty(_urlError)) { <div class="alert alert-danger py-1 px-2 small">@_urlError</div> }
+            <label class="form-label small fw-semibold">Output</label>
+            <div class="devtools-output-row">
+                <textarea class="form-control devtools-textarea" readonly value="@_urlOutput"></textarea>
+                <button class="btn btn-sm btn-outline-secondary" title="Copy" @onclick="() => CopyAsync(_urlOutput)"><i class="bi bi-clipboard"></i></button>
+            </div>
+        </div>
+        break;
+
+    case "html":
+        <div class="devtools-tool">
+            <h2 class="h5">HTML Entity Encode/Decode</h2>
+            <label class="form-label small fw-semibold">Input</label>
+            <textarea class="form-control devtools-textarea" @bind="_htmlInput" @bind:event="oninput"></textarea>
+            <div class="d-flex gap-2 my-2">
+                <button class="btn btn-sm btn-primary" @onclick="() => _htmlOutput = DevToolsEncoding.HtmlEncode(_htmlInput).Output">Encode</button>
+                <button class="btn btn-sm btn-outline-primary" @onclick="() => _htmlOutput = DevToolsEncoding.HtmlDecode(_htmlInput).Output">Decode</button>
+            </div>
+            <label class="form-label small fw-semibold">Output</label>
+            <div class="devtools-output-row">
+                <textarea class="form-control devtools-textarea" readonly value="@_htmlOutput"></textarea>
+                <button class="btn btn-sm btn-outline-secondary" title="Copy" @onclick="() => CopyAsync(_htmlOutput)"><i class="bi bi-clipboard"></i></button>
+            </div>
+        </div>
+        break;
+
+    case "gzip":
+        <div class="devtools-tool">
+            <h2 class="h5">GZip Compress/Decompress</h2>
+            <p class="small text-secondary">Compress turns plain text into base64-encoded GZip data; decompress reverses it.</p>
+            <label class="form-label small fw-semibold">Input</label>
+            <textarea class="form-control devtools-textarea" @bind="_gzipInput" @bind:event="oninput"></textarea>
+            <div class="d-flex gap-2 my-2">
+                <button class="btn btn-sm btn-primary" @onclick="() => _gzipOutput = DevToolsEncoding.GZipCompress(_gzipInput).Output">Compress</button>
+                <button class="btn btn-sm btn-outline-primary" @onclick="RunGZipDecompress">Decompress</button>
+            </div>
+            @if (!string.IsNullOrEmpty(_gzipError)) { <div class="alert alert-danger py-1 px-2 small">@_gzipError</div> }
+            <label class="form-label small fw-semibold">Output</label>
+            <div class="devtools-output-row">
+                <textarea class="form-control devtools-textarea" readonly value="@_gzipOutput"></textarea>
+                <button class="btn btn-sm btn-outline-secondary" title="Copy" @onclick="() => CopyAsync(_gzipOutput)"><i class="bi bi-clipboard"></i></button>
+            </div>
+        </div>
+        break;
+
+    case "jwt":
+        <div class="devtools-tool">
+            <h2 class="h5">JWT Decoder</h2>
+            <p class="small text-secondary">Decodes the header and payload only. The signature is never checked.</p>
+            <label class="form-label small fw-semibold">Token</label>
+            <textarea class="form-control devtools-textarea" @bind="_jwtInput" @bind:event="oninput" @bind:after="RunJwtDecode"></textarea>
+            @if (!string.IsNullOrEmpty(_jwtError)) { <div class="alert alert-danger py-1 px-2 small">@_jwtError</div> }
+            <label class="form-label small fw-semibold">Decoded</label>
+            <textarea class="form-control devtools-textarea devtools-textarea-tall" readonly value="@_jwtOutput"></textarea>
+        </div>
+        break;
+
+    case "qr":
+        <div class="devtools-tool">
+            <h2 class="h5">QR Code Generator</h2>
+            <label class="form-label small fw-semibold">Text or URL</label>
+            <input class="form-control" @bind="_qrInput" @bind:event="oninput" />
+            <button class="btn btn-sm btn-primary my-2" @onclick="RunGenerateQr">Generate</button>
+            @if (!string.IsNullOrEmpty(_qrError)) { <div class="alert alert-danger py-1 px-2 small">@_qrError</div> }
+            @if (_qrImageDataUrl is not null)
+            {
+                <div><img src="@_qrImageDataUrl" alt="Generated QR code" class="devtools-qr-image" /></div>
+            }
+        </div>
+        break;
+}
+
+@code {
+    [Parameter, EditorRequired] public string SelectedTool { get; set; } = string.Empty;
+
+    private async Task CopyAsync(string value) => await JS.InvokeVoidAsync("navigator.clipboard.writeText", value);
+
+    private string _base64Input = string.Empty, _base64Output = string.Empty, _base64Error = string.Empty;
+    private void RunBase64Encode() { _base64Output = DevToolsEncoding.Base64Encode(_base64Input).Output; _base64Error = string.Empty; }
+    private void RunBase64Decode()
+    {
+        var result = DevToolsEncoding.Base64Decode(_base64Input);
+        _base64Output = result.Success ? result.Output : string.Empty;
+        _base64Error = result.Success ? string.Empty : result.Error ?? string.Empty;
+    }
+
+    private string _urlInput = string.Empty, _urlOutput = string.Empty, _urlError = string.Empty;
+    private void RunUrlEncode() { _urlOutput = DevToolsEncoding.UrlEncode(_urlInput).Output; _urlError = string.Empty; }
+    private void RunUrlDecode()
+    {
+        var result = DevToolsEncoding.UrlDecode(_urlInput);
+        _urlOutput = result.Success ? result.Output : string.Empty;
+        _urlError = result.Success ? string.Empty : result.Error ?? string.Empty;
+    }
+
+    private string _htmlInput = string.Empty, _htmlOutput = string.Empty;
+
+    private string _gzipInput = string.Empty, _gzipOutput = string.Empty, _gzipError = string.Empty;
+    private void RunGZipDecompress()
+    {
+        var result = DevToolsEncoding.GZipDecompress(_gzipInput);
+        _gzipOutput = result.Success ? result.Output : string.Empty;
+        _gzipError = result.Success ? string.Empty : result.Error ?? string.Empty;
+    }
+
+    private string _jwtInput = string.Empty, _jwtOutput = string.Empty, _jwtError = string.Empty;
+    private void RunJwtDecode()
+    {
+        if (string.IsNullOrWhiteSpace(_jwtInput)) { _jwtOutput = string.Empty; _jwtError = string.Empty; return; }
+        var result = DevToolsEncoding.JwtDecode(_jwtInput);
+        _jwtOutput = result.Success ? result.Output : string.Empty;
+        _jwtError = result.Success ? string.Empty : result.Error ?? string.Empty;
+    }
+
+    private string _qrInput = string.Empty, _qrError = string.Empty;
+    private string? _qrImageDataUrl;
+    private void RunGenerateQr()
+    {
+        var result = DevToolsEncoding.GenerateQrCodePng(_qrInput);
+        if (result.Success)
+        {
+            _qrImageDataUrl = $"data:image/png;base64,{Convert.ToBase64String(result.Bytes!)}";
+            _qrError = string.Empty;
+        }
+        else
+        {
+            _qrImageDataUrl = null;
+            _qrError = result.Error ?? string.Empty;
+        }
+    }
+}

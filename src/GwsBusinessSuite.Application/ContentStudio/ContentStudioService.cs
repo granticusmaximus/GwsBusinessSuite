@@ -1300,7 +1300,7 @@ public sealed class ContentStudioService(
         return 1;
     }
 
-    internal static IReadOnlyList<ContentStudioDiffLine> BuildLineDiff(string before, string after)
+    public static IReadOnlyList<ContentStudioDiffLine> BuildLineDiff(string before, string after)
     {
         var beforeLines = before.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
         var afterLines = after.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');

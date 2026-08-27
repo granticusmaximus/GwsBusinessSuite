@@ -1,0 +1,112 @@
+@using GwsBusinessSuite.Application.DevTools
+@inject IJSRuntime JS
+
+@switch (SelectedTool)
+{
+    case "numberbase":
+        <div class="devtools-tool">
+            <h2 class="h5">Number Base Converter</h2>
+            <div class="d-flex gap-3 align-items-end flex-wrap">
+                <div>
+                    <label class="form-label small fw-semibold">Value</label>
+                    <input class="form-control font-monospace" @bind="_numberInput" @bind:event="oninput" @bind:after="RunConvertNumberBase" />
+                </div>
+                <div>
+                    <label class="form-label small fw-semibold">From base</label>
+                    <select class="form-select" @bind="_numberFromBase" @bind:after="RunConvertNumberBase">
+                        <option value="2">Binary (2)</option>
+                        <option value="8">Octal (8)</option>
+                        <option value="10">Decimal (10)</option>
+                        <option value="16">Hexadecimal (16)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label small fw-semibold">To base</label>
+                    <select class="form-select" @bind="_numberToBase" @bind:after="RunConvertNumberBase">
+                        <option value="2">Binary (2)</option>
+                        <option value="8">Octal (8)</option>
+                        <option value="10">Decimal (10)</option>
+                        <option value="16">Hexadecimal (16)</option>
+                    </select>
+                </div>
+            </div>
+            @if (!string.IsNullOrEmpty(_numberError)) { <div class="alert alert-danger py-1 px-2 small mt-2">@_numberError</div> }
+            <label class="form-label small fw-semibold mt-2">Result</label>
+            <input class="form-control font-monospace" readonly value="@_numberOutput" />
+        </div>
+        break;
+
+    case "timestamp":
+        <div class="devtools-tool">
+            <h2 class="h5">Unix Timestamp Converter</h2>
+            <div class="devtools-split">
+                <div>
+                    <label class="form-label small fw-semibold">Unix seconds &rarr; date/time (UTC)</label>
+                    <input class="form-control" @bind="_timestampInput" @bind:event="oninput" @bind:after="RunTimestampToDate" placeholder="e.g. 1735689600" />
+                    @if (!string.IsNullOrEmpty(_timestampError)) { <div class="alert alert-danger py-1 px-2 small mt-2">@_timestampError</div> }
+                    <input class="form-control mt-2" readonly value="@_timestampOutput" />
+                </div>
+                <div>
+                    <label class="form-label small fw-semibold">Date/time (UTC) &rarr; Unix seconds</label>
+                    <input class="form-control" type="datetime-local" @bind="_dateInput" @bind:after="RunDateToTimestamp" />
+                    <input class="form-control mt-2" readonly value="@_dateOutput" />
+                </div>
+            </div>
+        </div>
+        break;
+
+    case "color":
+        <div class="devtools-tool">
+            <h2 class="h5">Color Converter</h2>
+            <label class="form-label small fw-semibold">Hex color</label>
+            <div class="d-flex gap-2 align-items-center" style="max-width: 20rem;">
+                <input class="form-control font-monospace" @bind="_colorInput" @bind:event="oninput" @bind:after="RunConvertColor" placeholder="3366FF" />
+                @if (!string.IsNullOrEmpty(_colorOutput)) { <span class="devtools-color-swatch" style="background-color:#@_colorInput.TrimStart('#');"></span> }
+            </div>
+            @if (!string.IsNullOrEmpty(_colorError)) { <div class="alert alert-danger py-1 px-2 small mt-2">@_colorError</div> }
+            <pre class="devtools-color-output mt-2">@_colorOutput</pre>
+        </div>
+        break;
+}
+
+@code {
+    [Parameter, EditorRequired] public string SelectedTool { get; set; } = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        RunConvertNumberBase();
+        RunConvertColor();
+    }
+
+    private string _numberInput = "255";
+    private int _numberFromBase = 10, _numberToBase = 16;
+    private string _numberOutput = string.Empty, _numberError = string.Empty;
+    private void RunConvertNumberBase()
+    {
+        if (string.IsNullOrWhiteSpace(_numberInput)) { _numberOutput = string.Empty; _numberError = string.Empty; return; }
+        var result = DevToolsConverters.ConvertNumberBase(_numberInput, _numberFromBase, _numberToBase);
+        _numberOutput = result.Success ? result.Output : string.Empty;
+        _numberError = result.Success ? string.Empty : result.Error ?? string.Empty;
+    }
+
+    private string _timestampInput = string.Empty, _timestampOutput = string.Empty, _timestampError = string.Empty;
+    private void RunTimestampToDate()
+    {
+        if (!long.TryParse(_timestampInput, out var seconds)) { _timestampOutput = string.Empty; _timestampError = string.IsNullOrWhiteSpace(_timestampInput) ? string.Empty : "Enter a whole number of seconds."; return; }
+        var result = DevToolsConverters.UnixTimestampToDateTime(seconds);
+        _timestampOutput = result.Success ? result.Output : string.Empty;
+        _timestampError = result.Success ? string.Empty : result.Error ?? string.Empty;
+    }
+
+    private DateTime _dateInput = DateTime.UtcNow;
+    private string _dateOutput = string.Empty;
+    private void RunDateToTimestamp() => _dateOutput = DevToolsConverters.DateTimeToUnixTimestamp(new DateTimeOffset(_dateInput, TimeSpan.Zero));
+
+    private string _colorInput = "3366FF", _colorOutput = string.Empty, _colorError = string.Empty;
+    private void RunConvertColor()
+    {
+        var result = DevToolsConverters.HexToRgb(_colorInput);
+        _colorOutput = result.Success ? result.Output : string.Empty;
+        _colorError = result.Success ? string.Empty : result.Error ?? string.Empty;
+    }
+}

@@ -1,0 +1,28 @@
+.devtools-shell { display:grid; grid-template-columns:250px minmax(420px,1fr); min-height:calc(100vh - 7.5rem); margin:-1rem; background:var(--gws-body-bg); }
+.devtools-sidebar { border-right:1px solid var(--gws-panel-border); background:var(--gws-panel-bg); padding:1rem .75rem; overflow:auto; }
+.devtools-content { padding:1.5rem; overflow:auto; }
+
+.devtools-group-heading { margin:1rem .35rem .4rem; font-size:.68rem; font-weight:750; color:var(--gws-text-soft); text-transform:uppercase; letter-spacing:.08em; }
+.devtools-group-heading:first-of-type { margin-top:.25rem; }
+.devtools-tool-button { display:block; width:100%; border:0; background:transparent; border-radius:.6rem; padding:.5rem .6rem; text-align:left; font-size:.82rem; color:var(--gws-text-strong); }
+.devtools-tool-button:hover { background:var(--gws-sidebar-hover-bg); }
+.devtools-tool-button.is-active { background:var(--gws-sidebar-hover-bg); font-weight:650; }
+
+::deep .devtools-tool { max-width:52rem; }
+::deep .devtools-textarea { min-height:9rem; font-family:var(--bs-font-monospace, monospace); font-size:.82rem; }
+::deep .devtools-textarea-tall { min-height:16rem; }
+::deep .devtools-output-row { display:flex; gap:.5rem; align-items:flex-start; }
+::deep .devtools-output-row textarea, ::deep .devtools-output-row input { flex:1 1 auto; }
+::deep .devtools-split { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+::deep .devtools-hash-grid { display:grid; grid-template-columns:6rem 1fr; gap:.5rem 1rem; align-items:center; margin-top:.75rem; }
+::deep .devtools-qr-image { max-width:220px; border-radius:.5rem; background:#fff; padding:.5rem; }
+::deep .devtools-markdown-preview { border:1px solid var(--gws-panel-border); border-radius:.5rem; padding:1rem; min-height:16rem; background:var(--gws-panel-bg-2); overflow:auto; }
+::deep .devtools-color-swatch { display:inline-block; width:2.2rem; height:2.2rem; border-radius:.4rem; border:1px solid var(--gws-panel-border); flex:none; }
+::deep .devtools-color-output { background:var(--gws-panel-bg-2); border:1px solid var(--gws-panel-border); border-radius:.5rem; padding:.75rem 1rem; font-size:.85rem; white-space:pre-wrap; }
+::deep .devtools-diff-output { font-family:var(--bs-font-monospace, monospace); font-size:.8rem; white-space:pre-wrap; border:1px solid var(--gws-panel-border); border-radius:.5rem; padding:.5rem; max-height:24rem; overflow:auto; }
+
+@media (max-width:900px) {
+    .devtools-shell { grid-template-columns:1fr; margin:-.5rem; }
+    .devtools-sidebar { border-right:0; border-bottom:1px solid var(--gws-panel-border); }
+    ::deep .devtools-split { grid-template-columns:1fr; }
+}
