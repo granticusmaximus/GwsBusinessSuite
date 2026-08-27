@@ -59,7 +59,7 @@ too, not that the update should be skipped.
 - [SentinelCLI](SENTINELCLI_USER_GUIDE.md) — the macOS terminal coding agent for
   analyzing and making reviewable changes in one local repository or a directory of repositories.
 - [Intelligence & BI](INTELLIGENCE_USER_GUIDE.md) — Media Watch, Civic Watch, Podcast Directory,
-  Business Intelligence dashboards, and the OSINT Watch public-source map.
+  Business Intelligence dashboards, the OSINT Watch public-source map, and Mind Maps.
 
 ### Operations
 

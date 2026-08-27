@@ -2,10 +2,12 @@
 
 This is the complete guide to GWS Business Suite's Intelligence cluster: **Media Watch**
 (`/admin/news-intelligence`), **Civic Watch** (`/admin/government-intelligence`), the **Podcast
-Directory** (`/admin/podcasts`), **Business Intelligence** (`/admin/business-intelligence`), and
-**OSINT Watch** (`/admin/osint`). These five pages don't share a database schema, but they share a
-shape: each one pulls in outside signal (news, government sources, podcast catalogs, public OSINT)
-or your own suite data, and turns it into something you can scan in a few seconds.
+Directory** (`/admin/podcasts`), **Business Intelligence** (`/admin/business-intelligence`),
+**OSINT Watch** (`/admin/osint`), and **Mind Maps** (`/admin/mind-maps`). The first five pages
+don't share a database schema, but they share a shape: each one pulls in outside signal (news,
+government sources, podcast catalogs, public OSINT) or your own suite data, and turns it into
+something you can scan in a few seconds. Mind Maps is the one exception — it doesn't ingest
+anything; it's a plain authoring tool for outlines and roadmaps you build yourself.
 
 This guide is text-only (no screenshots) — see the note at the end of [`docs/USER_GUIDES.md`](USER_GUIDES.md)
 for why, and how that may change later.
@@ -23,8 +25,9 @@ for why, and how that may change later.
 9. [Podcast Directory: episodes, playback, and progress](#podcast-directory-episodes-playback-and-progress)
 10. [Business Intelligence: building and pinning a chart](#business-intelligence-building-and-pinning-a-chart)
 11. [OSINT Watch: map and public-source tools](#osint-watch-map-and-public-source-tools)
-12. [Who can see what](#who-can-see-what)
-13. [Known limitations](#known-limitations)
+12. [Mind Maps: building an outline](#mind-maps-building-an-outline)
+13. [Who can see what](#who-can-see-what)
+14. [Known limitations](#known-limitations)
 
 ---
 
@@ -34,9 +37,10 @@ Each page has its own vocabulary, but two ideas repeat everywhere in this cluste
 
 - **Shared vs. private.** Media Watch's watched topics, Civic Watch's snapshot, and the Podcast
   Directory's saved library are all *shared* across every admin — there's one set of watched
-  topics, not one per staff member. The two exceptions are Business Intelligence dashboards
-  (each admin's pinned charts belong only to them) and podcast listen progress (whether *you*
-  finished an episode is tracked per staff account, even though the saved show itself is shared).
+  topics, not one per staff member. The exceptions are Business Intelligence dashboards (each
+  admin's pinned charts belong only to them), Mind Maps (each admin's saved mind maps are private
+  to them too), and podcast listen progress (whether *you* finished an episode is tracked per
+  staff account, even though the saved show itself is shared).
   OSINT Watch reads live public sources and can keep browser-local map preferences, but it does
   not save OSINT results into GWS or expose them to another staff account.
 - **Background refresh vs. on-demand refresh.** The four native suite pages either refresh their
@@ -263,11 +267,35 @@ unavailable in this deployment, and the dashboard must not be used to enter clie
 passwords, or other private material. For the reviewed build and integration boundary, see
 [`OSINT_WATCH_SECURITY.md`](OSINT_WATCH_SECURITY.md).
 
+## Mind Maps: building an outline
+
+Mind Maps (`/admin/mind-maps`) is a plain visual outlining tool, separate from Wiki/Sentinel and
+Automation — each mind map is its own saved document. Like Business Intelligence dashboards, your
+mind maps are private to your own account; nobody else's admin login sees them.
+
+From the list page, **New mind map** creates a document with a single root node (named after the
+title you give it) and opens its editor. Inside the editor:
+
+- Click a node to select it, then use **Add child**, **Rename**, or **Delete** in the toolbar —
+  editing is toolbar-driven rather than double-click-in-place, so every change is explicit.
+- **Delete** is disabled for the root node (a map always needs one root) and, for any other node,
+  removes that node and all of its descendants after a confirmation prompt.
+- The map title itself is editable from the header next to the back button and saves as soon as
+  you click away from the field.
+- Every add/rename/delete saves immediately — there's no separate "Save" step, and reloading the
+  page always shows the tree exactly as you left it.
+
+A real example ships out of the box: an **ASP.NET Core Developer Roadmap** mind map, seeded once
+for the admin account and transcribed from the community-maintained
+[AspNetCore-Developer-Roadmap](https://github.com/MoienTajik/AspNetCore-Developer-Roadmap) project
+(21 topics from general development skills through production concerns like CI/CD and monitoring,
+each with a few representative resources) — open it to see a populated map before building your own.
+
 ## Who can see what
 
-All five pages require a staff sign-in. Four of them (Media Watch, Civic Watch, Business
-Intelligence, and OSINT Watch) are restricted to the **AdminOnly** policy specifically; the
-Podcast Directory uses the slightly broader **ContributorAccess** policy, so a Contributor-level
+All six pages require a staff sign-in. Five of them (Media Watch, Civic Watch, Business
+Intelligence, OSINT Watch, and Mind Maps) are restricted to the **AdminOnly** policy specifically;
+the Podcast Directory uses the slightly broader **ContributorAccess** policy, so a Contributor-level
 teammate who isn't a full admin can still browse and manage the shared podcast library.
 
 ## Known limitations
@@ -301,3 +329,9 @@ teammate who isn't a full admin can still browse and manage the shared podcast l
   stale, incomplete, misidentified, rate-limited, or temporarily unavailable, and the embedded
   dashboard requires both the `osiris` and `osiris-intel` services to be healthy. Active RECON
   scanning is not configured in GWS.
+- **Mind Maps editing is toolbar-driven, not free-form.** You can't double-click a node to rename
+  it in place or drag one node onto another to reparent it — every structural change goes through
+  the Add child / Rename / Delete buttons. This is a deliberate limitation of the underlying
+  widget's edit-event wiring, not a v1 shortcut awaiting a fix.
+- **Mind Maps has no import from XMind or other formats.** The seeded roadmap example was
+  hand-transcribed, not parsed from a file; building your own map means adding nodes one at a time.
