@@ -22,19 +22,19 @@
         @switch (SelectedGroup)
         {
             case "Encoding":
-                <DevToolsEncodingPanel SelectedTool="_selectedTool" />
+                <DevToolsEncodingPanel SelectedTool="@_selectedTool" />
                 break;
             case "Formatting":
-                <DevToolsFormattingPanel SelectedTool="_selectedTool" />
+                <DevToolsFormattingPanel SelectedTool="@_selectedTool" />
                 break;
             case "Generators":
-                <DevToolsGeneratorsPanel SelectedTool="_selectedTool" />
+                <DevToolsGeneratorsPanel SelectedTool="@_selectedTool" />
                 break;
             case "Converters":
-                <DevToolsConvertersPanel SelectedTool="_selectedTool" />
+                <DevToolsConvertersPanel SelectedTool="@_selectedTool" />
                 break;
             case "Testers":
-                <DevToolsTestersPanel SelectedTool="_selectedTool" />
+                <DevToolsTestersPanel SelectedTool="@_selectedTool" />
                 break;
         }
     </main>
