@@ -68,7 +68,7 @@ too, not that the update should be skipped.
 - [Affiliate Operations](AFFILIATE_OPERATIONS_USER_GUIDE.md) — CJ Ads, Affiliate Suggestions,
   Affiliate Analytics.
 - [Platform Operations](PLATFORM_OPERATIONS_USER_GUIDE.md) — Builder Reference, Live Show, Docker
-  Management, Security Audit, Privacy Operations, Settings.
+  Management, Security Audit, Privacy Operations, Settings, Developer Tools.
 
 ### Client Portal & Public Site
 

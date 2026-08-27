@@ -4,10 +4,10 @@ This is the complete guide to the "Platform Operations" cluster of GWS Business 
 Home dashboard (`/admin`), Mission Control (`/admin/mission-control`), the Builder Reference
 Library (`/admin/cms-knowledge`), Live Show (`/admin/live-show` and `/admin/live-show-recordings`,
 plus the anonymous viewer at `/watch/{token}`), Docker Management (`/admin/docker-health`),
-Security Audit (`/admin/security-audit`), Privacy Operations (`/admin/privacy-operations`), and
-Settings (`/admin/settings`). These are the pages that run the suite itself — day-to-day
-awareness, infrastructure, broadcast, and compliance — rather than any one line of business like
-CRM or the CMS.
+Security Audit (`/admin/security-audit`), Privacy Operations (`/admin/privacy-operations`),
+Settings (`/admin/settings`), and Developer Tools (`/admin/dev-tools`). These are the pages that
+run the suite itself — day-to-day awareness, infrastructure, broadcast, compliance, and generic
+utility tooling — rather than any one line of business like CRM or the CMS.
 
 This guide is text-only (no screenshots) — this environment currently cannot capture new
 screenshots because every login now requires MFA, which blocks scripted browser capture. Every
@@ -25,7 +25,8 @@ section below is prose and tables only.
 8. [The Security Audit trail](#the-security-audit-trail)
 9. [Privacy Operations](#privacy-operations)
 10. [Settings](#settings)
-11. [Known limitations](#known-limitations)
+11. [Developer Tools](#developer-tools)
+12. [Known limitations](#known-limitations)
 
 ---
 
@@ -37,8 +38,10 @@ This cluster spans two access levels:
   What it shows is role-scoped: everyone sees publishing-related tiles, Contributor and above see
   site design and podcasts, and only Admin sees the operational tiles (CRM follow-ups, system
   alerts, Relationships, Intelligence, Affiliate revenue, Sentinel, Operations).
-- Every other page in this guide — Mission Control, the Builder Reference Library, Live Show,
-  Docker Management, Security Audit, Privacy Operations, and Settings — is **Admin-only**.
+- Every other page in this guide except Developer Tools — Mission Control, the Builder Reference
+  Library, Live Show, Docker Management, Security Audit, Privacy Operations, and Settings — is
+  **Admin-only**. Developer Tools uses the broader **ContentAccess** policy (the same one Workflow
+  Automation uses) since none of its tools touch suite data.
 
 Two of these pages are deliberately **not their own source of truth**: Mission Control and the
 Home dashboard's "Needs attention" cards both read live from the same services that back their
@@ -341,6 +344,42 @@ downloaded — is written into the Security Audit ledger under the `SecurityOper
   An API reference panel documents Bearer-token auth and the three resources currently exposed —
   Contacts, Deals, and CMS pages — with example `curl` usage.
 
+## Developer Tools
+
+`/admin/dev-tools` — nav label **Dev Tools** — is a bundle of small, self-contained utilities in
+the spirit of DevToys, for quick day-to-day tasks (decode a token, format some JSON, generate a
+password) without leaving the suite or reaching for an untrusted website. Everything here is
+stateless: nothing you type or generate is saved anywhere, and closing or reloading the page loses
+whatever is on screen.
+
+A search box and a grouped list on the left switch between 19 tools across 5 categories:
+
+- **Encoding** — Base64, URL, and HTML entity encode/decode; GZip compress/decompress (as
+  base64-encoded GZip data); a JWT decoder (header and payload only — **it never checks the
+  signature**, so a decoded token is not proof it's genuine); a QR code generator for text or URLs.
+- **Formatting** — JSON and XML formatters/validators (paste, click Format, get either a
+  pretty-printed result or a plain-language error); a live Markdown preview using the same
+  rendering pipeline the rest of the suite uses for freely-typed content.
+- **Generators** — a hash generator showing MD5/SHA-1/SHA-256/SHA-512 of whatever you type,
+  updated live; a UUID generator with case and hyphen options; a password generator
+  (cryptographically random, 4–256 characters, with toggleable uppercase/digit/symbol character
+  sets); a Lorem Ipsum generator (choose paragraph count and sentences per paragraph).
+- **Converters** — a number base converter (binary/octal/decimal/hex, either direction); a Unix
+  timestamp converter (seconds-since-epoch to UTC date/time and back); a hex color converter
+  (shows the equivalent RGB and HSL values plus a swatch preview).
+- **Testers** — a regex tester (pattern, flags, and a test string, showing every match with its
+  capture groups); a text diff tool (paste a "before" and "after," click Compare, see added/
+  removed/unchanged lines highlighted — reuses the same diff engine Content Studio's own revision
+  history uses); a text analyzer (live character/word/line/sentence counts).
+
+A few tools are worth knowing the limits of. The **regex tester** stops evaluating and shows an
+error after 2 seconds — this is a deliberate safeguard against patterns that can pathologically
+"catastrophically backtrack" against certain input (a real risk once a pattern is running
+server-side against arbitrary text), not a bug if a complex pattern seems to cut off. The **text
+diff** tool is limited to 5,000 lines per side for the same kind of reason — its comparison
+algorithm's cost grows with both sides' line counts multiplied together, so very large pastes are
+rejected with a clear message rather than silently consuming excessive memory.
+
 ## Known limitations
 
 These are gaps actually observed in the current code, not hypothetical ones:
@@ -374,3 +413,7 @@ These are gaps actually observed in the current code, not hypothetical ones:
   has a retention policy or purge path at all yet.
 - **Settings manages exactly one CMS site** — whichever one matches this deployment's configured
   site slug. There's no multi-site switcher or management list here.
+- **Developer Tools has no persistence.** Nothing you generate or convert is ever saved — there's
+  no history, no favorites, and no way to recover what was on screen after a reload. It also
+  doesn't cover every DevToys-style tool: there's no image compressor, color-blindness simulator,
+  YAML converter, SQL formatter, or JSONPath tester today.
