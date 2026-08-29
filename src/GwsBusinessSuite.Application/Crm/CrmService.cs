@@ -121,6 +121,30 @@ public sealed class CrmService(
         return contact;
     }
 
+    public async Task<Contact> FindOrCreateContactAsync(
+        string email, string? fullNameFallback, string? company, string source, CancellationToken cancellationToken = default)
+    {
+        var trimmedEmail = email.Trim();
+        var existing = await dbContext.Contacts
+            .Where(contact => contact.TrashedAt == null && contact.Email != null)
+            .FirstOrDefaultAsync(contact => contact.Email!.ToLower() == trimmedEmail.ToLower(), cancellationToken);
+        if (existing is not null) return existing;
+
+        var now = DateTimeOffset.UtcNow;
+        var contact = new Contact
+        {
+            FullName = string.IsNullOrWhiteSpace(fullNameFallback) ? trimmedEmail : fullNameFallback.Trim(),
+            Email = trimmedEmail,
+            Company = string.IsNullOrWhiteSpace(company) ? null : company.Trim(),
+            CreatedAt = now,
+            CreatedBy = source
+        };
+        await dbContext.Contacts.AddAsync(contact, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        _cache.Remove(DashboardCacheKey);
+        return contact;
+    }
+
     public async Task TrashContactAsync(Guid contactId, CancellationToken cancellationToken = default)
     {
         var contact = await dbContext.Contacts.FirstOrDefaultAsync(item => item.Id == contactId, cancellationToken);

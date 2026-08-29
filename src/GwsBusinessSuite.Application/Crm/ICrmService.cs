@@ -16,6 +16,14 @@ public interface ICrmService
 
     Task<Contact> SaveContactAsync(ContactEditorModel editor, CancellationToken cancellationToken = default);
 
+    // Matches an existing, non-trashed Contact by email (case-insensitive), or creates one -
+    // same semantics as BookingService's private FindOrCreateContactAsync, exposed here so
+    // other features (form-submission auto-link, the manual "Create Contact" button) can share
+    // one implementation instead of duplicating the match logic. fullNameFallback/company only
+    // apply when creating a new Contact; an existing match is never overwritten by this call.
+    Task<Contact> FindOrCreateContactAsync(
+        string email, string? fullNameFallback, string? company, string source, CancellationToken cancellationToken = default);
+
     // Soft-deletes (sets TrashedAt) so a contact can be recovered from Trash instead of
     // being lost outright - see RestoreContactAsync/DeleteContactPermanentlyAsync.
     Task TrashContactAsync(Guid contactId, CancellationToken cancellationToken = default);

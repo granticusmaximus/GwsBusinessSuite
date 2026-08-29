@@ -207,6 +207,32 @@ public sealed class AutomationTriggerService(
         return triggered;
     }
 
+    public async Task<int> TriggerCmsFormSubmittedAsync(Guid siteId, string inputJson, CancellationToken cancellationToken = default)
+    {
+        var subscribers = await db.AutomationWorkflows.AsNoTracking().Where(item =>
+            item.Status == AutomationWorkflowStatuses.Active && item.TriggerCmsFormSubmitted)
+            .Select(item => item.Id).ToListAsync(cancellationToken);
+
+        var triggered = 0;
+        foreach (var workflowId in subscribers)
+        {
+            try
+            {
+                var snapshot = await workflowService.GetPublishedSnapshotAsync(workflowId, cancellationToken);
+                var triggerNode = snapshot?.Nodes.FirstOrDefault(node => node.TypeKey == "cms.formSubmittedTrigger" && !node.IsDisabled);
+                if (triggerNode is null) continue;
+
+                await executionService.ExecuteAsync(workflowId, inputJson, AutomationExecutionModes.CmsFormSubmitted, cancellationToken: cancellationToken);
+                triggered++;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "CMS form-submitted trigger failed for automation workflow {WorkflowId}.", workflowId);
+            }
+        }
+        return triggered;
+    }
+
     public async Task<int> TriggerSentinelChatPromptSubmittedAsync(
         string prompt, Guid? conversationId, CancellationToken cancellationToken = default)
     {

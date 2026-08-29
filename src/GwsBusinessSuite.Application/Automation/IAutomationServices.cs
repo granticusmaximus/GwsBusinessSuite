@@ -249,4 +249,10 @@ public interface IAutomationTriggerService
     Task<int> TriggerSupportTicketSlaBreachedAsync(
         Guid ticketId, string subject, string contactName, string priority, string breachType,
         DateTimeOffset dueAt, CancellationToken cancellationToken = default);
+
+    // Fires every active workflow with an enabled "cms.formSubmittedTrigger" node, immediately
+    // after a public form widget submission is saved. Same non-blocking contract as every other
+    // trigger method here - the caller wraps this in a try/catch so a misconfigured subscriber
+    // workflow can never prevent the submission itself from saving.
+    Task<int> TriggerCmsFormSubmittedAsync(Guid siteId, string inputJson, CancellationToken cancellationToken = default);
 }

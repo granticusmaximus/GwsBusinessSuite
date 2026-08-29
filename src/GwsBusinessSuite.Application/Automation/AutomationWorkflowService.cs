@@ -440,6 +440,7 @@ public sealed class AutomationWorkflowService(
         workflow.TriggerSupportTicketCreated = workflow.Nodes.Any(node => node.TypeKey == "support.ticketCreatedTrigger" && !node.IsDisabled);
         workflow.TriggerSupportTicketReplied = workflow.Nodes.Any(node => node.TypeKey == "support.ticketRepliedTrigger" && !node.IsDisabled);
         workflow.TriggerSupportTicketSlaBreached = workflow.Nodes.Any(node => node.TypeKey == "support.ticketSlaBreachedTrigger" && !node.IsDisabled);
+        workflow.TriggerCmsFormSubmitted = workflow.Nodes.Any(node => node.TypeKey == "cms.formSubmittedTrigger" && !node.IsDisabled);
         if (workflow.Status == AutomationWorkflowStatuses.Draft) workflow.Status = AutomationWorkflowStatuses.Inactive;
         Touch(workflow);
         await db.SaveChangesAsync(cancellationToken);

@@ -190,10 +190,16 @@ visitor experiences when browsing the finished result, not how staff builds a pa
 - **Forms**: any CMS page can include a "form" widget (e.g. a contact page, a booking-request
   page) with admin-defined fields. Submitting one is a plain POST with an invisible honeypot field
   and its own tighter rate limit; on success the visitor is redirected back to the same page with
-  `?submitted=1`. There's no visitor-facing confirmation email or ticket auto-created by this
-  alone — what happens with a submission (an admin notification, a CRM contact, anything else)
-  depends entirely on how staff wired it up (an Automation trigger, manual review in the admin
-  Forms area, etc.), not on anything the form widget itself guarantees.
+  `?submitted=1`. Each field can optionally be mapped to an identity role (Email/Full Name/
+  Company/Phone) in the page builder, which lets a submission feed a real CRM Contact instead of
+  staying an opaque JSON blob: the widget has its own "Create CRM contacts from this form's
+  submissions" opt-in (off by default, matches by email so a repeat submitter updates the same
+  Contact rather than creating duplicates), staff can create/link a Contact manually from the raw
+  submission view, and a `cms.formSubmittedTrigger` Automation node fires on every submission for
+  building a workflow on top. **Turning on auto-create effectively also grants Client Portal
+  access** — any Contact with a matching email can request a magic-link login (see below), so a
+  form that auto-creates Contacts makes every submitter a potential portal user, not just a CRM
+  record.
 - **Blog comments**: each article can show a comment form. A submitted comment is *not* shown
   immediately — the article page only ever displays comments that have already been approved
   (`ListApprovedForArticleAsync`); after submitting, the visitor is redirected back to the article
@@ -224,9 +230,12 @@ Client Portal contacts, who never have a password to get wrong in the first plac
 - **No password option for contacts.** The Client Portal is magic-link-only; there's no
   fallback login method if a contact's email is unreachable or wrong, other than a staff member
   fixing the email on the Contact record.
-- **No self-service contact registration.** A Contact record — and therefore Client Portal access
-  — can only come from staff creating one, a CRM import, or a workflow acting on a public form
-  submission. A visitor can't sign themselves up for portal access from the public site.
+- **No explicit self-service contact registration.** There's still no dedicated "sign up for
+  portal access" flow — a Contact record comes from staff creating one, a CRM import, an
+  Automation workflow, or (now) a public form widget with its "Create CRM contacts" opt-in
+  enabled. That last path means a visitor filling out such a form becomes a real Contact — and
+  therefore gains Client Portal access — as a side effect, without a dedicated registration step
+  or any portal-specific confirmation.
 - **Client Portal dashboard is read-only and narrow.** It shows deals and open invoices only —
   there's no self-service invoice history, document library, or profile/contact-info editing for
   the client themselves.

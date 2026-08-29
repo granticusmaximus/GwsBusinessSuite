@@ -1196,12 +1196,29 @@ public sealed class FormSubmission : AuditableEntity
     // JSON object of { fieldLabel: submittedValue }, since the "form" widget lets an admin
     // define arbitrary fields per page — there's no fixed set of columns that covers every
     // form. Keyed by the field's configured display Label (resolved from the page's live
-    // widget config at submit time - see Program.cs's ResolveFormFieldLabels), falling back
+    // widget config at submit time - see Program.cs's ResolveFormFieldMetadata), falling back
     // to the raw posted field key for any field the resolver can't find (e.g. the page's
     // form widget was edited/removed after this submission arrived).
     public string FieldsJson { get; set; } = "{}";
 
     public bool IsRead { get; set; }
+
+    // Structured identity fields, resolved at submit time from whichever form fields the page
+    // builder admin marked with a role (email/name/company/phone) - see the "form" widget's
+    // FormFieldDef.Role. Null when the widget has no field mapped to that role, or for
+    // submissions that predate this feature. Separate from FieldsJson (the full raw record,
+    // unchanged) so other features (CRM auto-link, the manual "Create Contact" button) can read
+    // a reliable value instead of guessing at admin-chosen JSON labels.
+    public string? Email { get; set; }
+    public string? FullName { get; set; }
+    public string? Company { get; set; }
+    public string? Phone { get; set; }
+
+    // Loosely linked (no FK) once a Contact has been created/matched for this submission -
+    // either automatically (the widget's "Create CRM contacts" opt-in) or manually (the
+    // FormSubmissionDetail "Create Contact" button). Same loose-reference convention as
+    // Booking.ContactId/ClientPortalLoginToken.ContactId.
+    public Guid? ContactId { get; set; }
 }
 
 public static class CommentStatuses
@@ -2095,6 +2112,7 @@ public static class AutomationExecutionModes
     public const string SupportTicketCreated = "SupportTicketCreated";
     public const string SupportTicketReplied = "SupportTicketReplied";
     public const string SupportTicketSlaBreached = "SupportTicketSlaBreached";
+    public const string CmsFormSubmitted = "CmsFormSubmitted";
     // A sandboxed dry run of a past execution's recorded input against the current published
     // graph - see AutomationExecutionService.ReplayAsync. Never performs real side effects.
     public const string Replay = "Replay";
@@ -2146,6 +2164,8 @@ public sealed class AutomationWorkflow : AuditableEntity
     public bool TriggerSupportTicketCreated { get; set; }
     public bool TriggerSupportTicketReplied { get; set; }
     public bool TriggerSupportTicketSlaBreached { get; set; }
+    // Same cached-subscriber-lookup pattern, synced from an enabled "cms.formSubmittedTrigger" node.
+    public bool TriggerCmsFormSubmitted { get; set; }
     public ICollection<AutomationNode> Nodes { get; set; } = new List<AutomationNode>();
     public ICollection<AutomationConnection> Connections { get; set; } = new List<AutomationConnection>();
     public ICollection<AutomationWorkflowVersion> Versions { get; set; } = new List<AutomationWorkflowVersion>();

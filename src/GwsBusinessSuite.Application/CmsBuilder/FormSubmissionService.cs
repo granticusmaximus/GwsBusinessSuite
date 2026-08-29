@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.Json;
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.Automation;
+using GwsBusinessSuite.Application.Crm;
 using GwsBusinessSuite.Application.Growth;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -23,7 +25,13 @@ public sealed class FormSubmissionService(
     IAppDbContext dbContext,
     IGrowthReportEmailSender emailSender,
     IOptions<FormNotificationOptions> notificationOptions,
-    ILogger<FormSubmissionService> logger) : IFormSubmissionService
+    ILogger<FormSubmissionService> logger,
+    // Both optional, resolved by DI in production - same fire-and-forget/no-op-in-tests pattern
+    // as CrmService's own automationTriggerService dependency. crmService powers the opt-in
+    // auto-create-Contact behavior; automationTriggerService fires cms.formSubmittedTrigger
+    // subscribers. Neither failure can prevent the submission itself from saving.
+    ICrmService? crmService = null,
+    IAutomationTriggerService? automationTriggerService = null) : IFormSubmissionService
 {
     private const int MaxFieldCount = 50;
     private const int MaxFieldValueLength = 5000;
@@ -31,6 +39,8 @@ public sealed class FormSubmissionService(
     public async Task<FormSubmission> SubmitAsync(
         Guid pageId,
         IReadOnlyDictionary<string, string> fields,
+        IReadOnlyDictionary<string, string>? identityFields = null,
+        bool autoCreateContact = false,
         CancellationToken cancellationToken = default)
     {
         var trimmed = fields
@@ -50,10 +60,19 @@ public sealed class FormSubmissionService(
             throw new InvalidOperationException("The page this form belongs to no longer exists.");
         }
 
+        var email = identityFields?.GetValueOrDefault("email");
+        var fullName = identityFields?.GetValueOrDefault("name");
+        var company = identityFields?.GetValueOrDefault("company");
+        var phone = identityFields?.GetValueOrDefault("phone");
+
         var submission = new FormSubmission
         {
             PageId = pageId,
             FieldsJson = JsonSerializer.Serialize(trimmed),
+            Email = string.IsNullOrWhiteSpace(email) ? null : email.Trim(),
+            FullName = string.IsNullOrWhiteSpace(fullName) ? null : fullName.Trim(),
+            Company = string.IsNullOrWhiteSpace(company) ? null : company.Trim(),
+            Phone = string.IsNullOrWhiteSpace(phone) ? null : phone.Trim(),
             CreatedBy = "public-form"
         };
 
@@ -69,6 +88,46 @@ public sealed class FormSubmissionService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to send form submission notification email for submission {SubmissionId}.", submission.Id);
+        }
+
+        if (autoCreateContact && crmService is not null && !string.IsNullOrWhiteSpace(submission.Email))
+        {
+            try
+            {
+                var contact = await crmService.FindOrCreateContactAsync(
+                    submission.Email, submission.FullName, submission.Company, "form-submission", cancellationToken);
+                submission.ContactId = contact.Id;
+                await dbContext.SaveChangesAsync(cancellationToken);
+                await crmService.AddActivityAsync(contact.Id, $"Submitted the \"{page.Title}\" form.", cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to auto-create/link a Contact for form submission {SubmissionId}.", submission.Id);
+            }
+        }
+
+        if (automationTriggerService is not null)
+        {
+            try
+            {
+                var payload = JsonSerializer.Serialize(new
+                {
+                    submissionId = submission.Id.ToString(),
+                    pageId = page.Id.ToString(),
+                    siteId = page.SiteId.ToString(),
+                    slug = page.Slug,
+                    email = submission.Email,
+                    fullName = submission.FullName,
+                    company = submission.Company,
+                    phone = submission.Phone,
+                    fields = trimmed
+                });
+                await automationTriggerService.TriggerCmsFormSubmittedAsync(page.SiteId, payload, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "CMS form-submitted automation trigger failed for submission {SubmissionId}.", submission.Id);
+            }
         }
 
         return submission;
@@ -134,6 +193,30 @@ public sealed class FormSubmissionService(
 
     public async Task<FormSubmission?> GetAsync(Guid submissionId, CancellationToken cancellationToken = default) =>
         await dbContext.FormSubmissions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == submissionId, cancellationToken);
+
+    public async Task<IReadOnlyList<FormSubmission>> ListForContactAsync(Guid contactId, CancellationToken cancellationToken = default)
+    {
+        var submissions = await dbContext.FormSubmissions
+            .AsNoTracking()
+            .Where(submission => submission.ContactId == contactId)
+            .ToListAsync(cancellationToken);
+
+        return submissions
+            .OrderByDescending(submission => submission.CreatedAt)
+            .ToList();
+    }
+
+    public async Task LinkToContactAsync(Guid submissionId, Guid contactId, CancellationToken cancellationToken = default)
+    {
+        var submission = await dbContext.FormSubmissions.FirstOrDefaultAsync(s => s.Id == submissionId, cancellationToken);
+        if (submission is null)
+        {
+            return;
+        }
+
+        submission.ContactId = contactId;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
 
     public async Task MarkReadAsync(Guid submissionId, CancellationToken cancellationToken = default)
     {

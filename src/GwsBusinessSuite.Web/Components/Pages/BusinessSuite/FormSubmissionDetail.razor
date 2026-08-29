@@ -2,11 +2,14 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "ContributorAccess")]
 @using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
 @using GwsBusinessSuite.Application.CmsBuilder
+@using GwsBusinessSuite.Application.Crm
 @using GwsBusinessSuite.Domain.Entities
 @using System.Text.Json
 @inject IFormSubmissionService FormSubmissionService
 @inject ICmsBuilderService CmsBuilderService
+@inject ICrmService CrmService
 @inject NavigationManager Navigation
 @inject ILogger<FormSubmissionDetail> Logger
 
@@ -51,6 +54,48 @@ else
                     <dd class="col-9">@field.Value</dd>
                 }
             </dl>
+
+            @if (Submission.ContactId is { } linkedContactId)
+            {
+                <p class="mb-0 mt-3"><a href="/admin/crm/contacts/@linkedContactId"><i class="bi bi-person-check me-1"></i>View linked CRM contact</a></p>
+            }
+            else if (_isAdmin)
+            {
+                @if (!_showCreateContact)
+                {
+                    <button class="btn btn-sm btn-outline-primary mt-3" @onclick="() => _showCreateContact = true">
+                        <i class="bi bi-person-plus me-1"></i>Create Contact
+                    </button>
+                }
+                else
+                {
+                    <div class="card border-0 bg-light mt-3">
+                        <div class="card-body">
+                            <div class="row g-2">
+                                <div class="col-md-4">
+                                    <input class="form-control form-control-sm" placeholder="Full name" @bind="_newContactName" />
+                                </div>
+                                <div class="col-md-4">
+                                    <input class="form-control form-control-sm" placeholder="Email" @bind="_newContactEmail" />
+                                </div>
+                                <div class="col-md-4">
+                                    <input class="form-control form-control-sm" placeholder="Company (optional)" @bind="_newContactCompany" />
+                                </div>
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(_createContactError))
+                            {
+                                <p class="text-danger small mb-0 mt-2">@_createContactError</p>
+                            }
+                            <div class="mt-2 d-flex gap-2">
+                                <button class="btn btn-sm btn-primary" @onclick="CreateContactAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_newContactEmail))">
+                                    Save contact
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => _showCreateContact = false" disabled="@_busy">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                }
+            }
         </div>
         <div class="card-footer bg-white border-top d-flex gap-2">
             <button class="btn btn-sm btn-outline-danger" @onclick="DeleteAsync">
@@ -68,12 +113,24 @@ else
 
 @code {
     [Parameter] public Guid SubmissionId { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private FormSubmission? Submission { get; set; }
     private CmsPage? SourcePage { get; set; }
     private Dictionary<string, string> Fields { get; set; } = new();
     private bool IsLoading { get; set; } = true;
     private string ErrorMessage { get; set; } = string.Empty;
+
+    // Contact data is CRM/customer PII - this page's own route policy (ContributorAccess) is
+    // one level below CRM's AdminOnly, so "Create Contact" specifically needs its own in-page
+    // Admin check rather than a page-wide policy change.
+    private bool _isAdmin;
+    private bool _showCreateContact;
+    private bool _busy;
+    private string _newContactName = string.Empty;
+    private string _newContactEmail = string.Empty;
+    private string _newContactCompany = string.Empty;
+    private string _createContactError = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -87,6 +144,14 @@ else
 
             Fields = ParseSubmissionFields(Submission.FieldsJson);
             SourcePage = await CmsBuilderService.GetPageAsync(Submission.PageId);
+            _isAdmin = AuthState is not null && (await AuthState).User.IsInRole(AppRoles.Admin);
+
+            // Prefill from the structured identity columns (populated at submit time from any
+            // field the page builder mapped to a role) when present, falling back to a loose
+            // keyword match against the raw fields for submissions that predate that feature.
+            _newContactName = Submission.FullName ?? HeuristicMatch(Fields, "name") ?? string.Empty;
+            _newContactEmail = Submission.Email ?? HeuristicMatch(Fields, "email") ?? string.Empty;
+            _newContactCompany = Submission.Company ?? HeuristicMatch(Fields, "company", "business", "organization") ?? string.Empty;
 
             // Viewing this page IS the read action - no separate "mark read" click needed,
             // since arriving here (from the notification email's link, or a manual visit) is
@@ -111,6 +176,45 @@ else
     {
         await FormSubmissionService.DeleteAsync(SubmissionId);
         Navigation.NavigateTo(SourcePage is not null ? $"/admin/pages/edit/{SourcePage.Id}" : "/admin/pages");
+    }
+
+    private async Task CreateContactAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newContactEmail))
+        {
+            return;
+        }
+
+        _busy = true;
+        _createContactError = string.Empty;
+        try
+        {
+            var contact = await CrmService.FindOrCreateContactAsync(
+                _newContactEmail, _newContactName, _newContactCompany, "form-submission-manual");
+            await FormSubmissionService.LinkToContactAsync(SubmissionId, contact.Id);
+            Navigation.NavigateTo($"/admin/crm/contacts/{contact.Id}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to create/link a Contact for form submission {SubmissionId}.", SubmissionId);
+            _createContactError = "Unable to create the contact.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string? HeuristicMatch(Dictionary<string, string> fields, params string[] keywords)
+    {
+        foreach (var (label, value) in fields)
+        {
+            if (keywords.Any(keyword => label.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+            {
+                return value;
+            }
+        }
+        return null;
     }
 
     private static Dictionary<string, string> ParseSubmissionFields(string fieldsJson)

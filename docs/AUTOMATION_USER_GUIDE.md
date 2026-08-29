@@ -116,6 +116,7 @@ draft).
 | **Support Ticket Created** | A contact or staff member opens a support ticket. Input includes ticket id, subject, contact name, priority, and creation time. |
 | **Support Ticket Replied** | A contact or staff member adds a reply. Input includes ticket id, author type/name, body, and reply time. |
 | **Support Ticket SLA Breached** | The five-minute support sweep first detects a missed first-response or resolution target. Each breach type fires once per ticket; input includes ticket/contact/priority, `breachType`, due time, and detection time. |
+| **CMS Form Submitted** | A visitor submits a public "form" widget (e.g. a contact page). Fires on every submission, regardless of whether the widget's own "Create CRM contacts" opt-in is on. Input includes `submissionId`, `pageId`, `siteId`, `slug`, any identity fields the page builder mapped (`email`/`fullName`/`company`/`phone` — null if not mapped or not filled in), and the full raw `fields` object. |
 
 A published workflow can have at most one enabled Webhook Trigger and one enabled Schedule
 Trigger, but any number of Database Row Changed / CRM / CMS / Support triggers, and any mix of

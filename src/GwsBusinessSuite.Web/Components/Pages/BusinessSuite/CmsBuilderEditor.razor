@@ -778,6 +778,19 @@ else
                                 <input class="form-control" value='@GetProp(selWidget, "submitLabel", "Submit")'
                                        @oninput='(e) => SetProp(selWidget, "submitLabel", e.Value?.ToString() ?? "Submit")' />
                             </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="@($"auto-create-contact-{selWidget.Id}")"
+                                       checked='@(GetProp(selWidget, "autoCreateContact") == "true")'
+                                       @onchange='(e) => SetProp(selWidget, "autoCreateContact", (bool)(e.Value ?? false) ? "true" : "false")' />
+                                <label class="form-check-label small" for="@($"auto-create-contact-{selWidget.Id}")">
+                                    Create CRM contacts from this form's submissions
+                                </label>
+                                <p class="small text-secondary mb-0">
+                                    Requires a field below mapped to "Email" - off by default. Note: any Client Portal
+                                    login request from a matching email succeeds once a Contact exists, so this also
+                                    grants Client Portal access to anyone who submits this form.
+                                </p>
+                            </div>
                             <div>
                                 <label class="form-label small fw-semibold d-flex align-items-center justify-content-between">
                                     Fields
@@ -817,6 +830,16 @@ else
                                                        value="@string.Join(", ", field.Options)"
                                                        @oninput="(e) => UpdateFormField(selWidget, index, f => f with { Options = (e.Value?.ToString() ?? string.Empty).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList() })" />
                                             }
+                                            <div class="mb-2">
+                                                <label class="form-label small mb-1" for="@($"field-role-{selWidget.Id}-{index}")">Maps to</label>
+                                                <select class="form-select form-select-sm" id="@($"field-role-{selWidget.Id}-{index}")"
+                                                        @onchange='(e) => UpdateFormField(selWidget, index, f => f with { Role = e.Value?.ToString() ?? "none" })'>
+                                                    @foreach (var (value, label) in FormFieldRoles)
+                                                    {
+                                                        <option value="@value" selected="@(field.Role == value)">@label</option>
+                                                    }
+                                                </select>
+                                            </div>
                                             <div class="form-check">
                                                 <input class="form-check-input" type="checkbox" id="@($"field-required-{selWidget.Id}-{index}")"
                                                        checked="@field.Required"
@@ -2882,7 +2905,15 @@ else
     // ── Form widget field editor ─────────────────────────────────────────
     private static readonly string[] FormFieldTypes = ["text", "email", "tel", "textarea", "select", "checkbox"];
 
-    private sealed record FormFieldDef(string Key, string Label, string Type, bool Required, List<string> Options);
+    // "none" is the default - most fields (a message/comment textarea, etc.) don't identify the
+    // submitter. Only fields explicitly mapped feed FormSubmission's structured Email/FullName/
+    // Company/Phone columns (see Program.cs's ResolveFormFieldMetadata / FormSubmissionService).
+    private static readonly (string Value, string Label)[] FormFieldRoles =
+    [
+        ("none", "(none)"), ("email", "Email"), ("name", "Full Name"), ("company", "Company"), ("phone", "Phone")
+    ];
+
+    private sealed record FormFieldDef(string Key, string Label, string Type, bool Required, List<string> Options, string Role);
 
     private static List<FormFieldDef> GetFormFields(LayoutWidget widget)
     {
@@ -2901,7 +2932,8 @@ else
                 f.TryGetValue("required", out var r) && r.ValueKind == JsonValueKind.True,
                 f.TryGetValue("optionsJson", out var o) && o.ValueKind == JsonValueKind.String
                     ? JsonSerializer.Deserialize<List<string>>(o.GetString() ?? "[]") ?? []
-                    : []
+                    : [],
+                f.TryGetValue("role", out var role) ? role.GetString() ?? "none" : "none"
             )).ToList();
         }
         catch
@@ -2918,7 +2950,8 @@ else
             label = f.Label,
             type = f.Type,
             required = f.Required,
-            optionsJson = f.Options.Count > 0 ? JsonSerializer.Serialize(f.Options) : null
+            optionsJson = f.Options.Count > 0 ? JsonSerializer.Serialize(f.Options) : null,
+            role = f.Role
         }));
         SetProp(widget, "fieldsJson", json, forceNewUndoStep);
     }
@@ -2927,7 +2960,7 @@ else
     {
         var fields = GetFormFields(widget);
         var n = fields.Count + 1;
-        fields.Add(new FormFieldDef($"field{n}", $"Field {n}", "text", false, []));
+        fields.Add(new FormFieldDef($"field{n}", $"Field {n}", "text", false, [], "none"));
         SaveFormFields(widget, fields, forceNewUndoStep: true);
     }
 

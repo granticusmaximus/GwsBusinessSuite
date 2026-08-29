@@ -1,6 +1,9 @@
 using FluentAssertions;
+using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.CmsBuilder;
+using GwsBusinessSuite.Application.Crm;
 using GwsBusinessSuite.Application.Growth;
+using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -216,11 +219,179 @@ public sealed class FormSubmissionServiceTests
         (await service.GetAsync(Guid.NewGuid())).Should().BeNull();
     }
 
-    private static FormSubmissionService CreateService(ApplicationDbContext db, IGrowthReportEmailSender? sender = null) => new(
+    [Fact]
+    public async Task SubmitAsync_ShouldPopulateStructuredIdentityColumns_FromIdentityFields()
+    {
+        await using var db = await CreateDbAsync();
+        var cmsBuilder = new CmsBuilderService(db);
+        var service = CreateService(db);
+        var page = await CreatePageAsync(db, cmsBuilder);
+
+        var submission = await service.SubmitAsync(page.Id, AdaFields(), new Dictionary<string, string>
+        {
+            ["email"] = "ada@example.com",
+            ["name"] = "Ada Lovelace",
+            ["company"] = "Analytical Engines Ltd"
+        });
+
+        submission.Email.Should().Be("ada@example.com");
+        submission.FullName.Should().Be("Ada Lovelace");
+        submission.Company.Should().Be("Analytical Engines Ltd");
+        submission.ContactId.Should().BeNull("auto-create was not requested");
+    }
+
+    [Fact]
+    public async Task SubmitAsync_ShouldAutoCreateAndLinkAContact_WhenOptedInWithAnEmail()
+    {
+        await using var db = await CreateDbAsync();
+        var cmsBuilder = new CmsBuilderService(db);
+        var page = await CreatePageAsync(db, cmsBuilder);
+        var service = CreateService(db, crmService: new CrmService(db));
+
+        var submission = await service.SubmitAsync(page.Id, AdaFields(),
+            new Dictionary<string, string> { ["email"] = "ada@example.com", ["name"] = "Ada Lovelace" },
+            autoCreateContact: true);
+
+        submission.ContactId.Should().NotBeNull();
+        var contact = await db.Contacts.SingleAsync(c => c.Id == submission.ContactId);
+        contact.Email.Should().Be("ada@example.com");
+        contact.FullName.Should().Be("Ada Lovelace");
+        (await db.ContactActivities.CountAsync(a => a.ContactId == contact.Id)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_ShouldMatchAnExistingContactByEmail_RatherThanCreatingADuplicate()
+    {
+        await using var db = await CreateDbAsync();
+        var cmsBuilder = new CmsBuilderService(db);
+        var page = await CreatePageAsync(db, cmsBuilder);
+        db.Contacts.Add(new Contact { FullName = "Existing Ada", Email = "ada@example.com" });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, crmService: new CrmService(db));
+
+        await service.SubmitAsync(page.Id, AdaFields(),
+            new Dictionary<string, string> { ["email"] = "ada@example.com" }, autoCreateContact: true);
+
+        (await db.Contacts.CountAsync()).Should().Be(1, "should match the existing contact, not create a duplicate");
+    }
+
+    [Fact]
+    public async Task SubmitAsync_ShouldNotCreateAContact_WhenAutoCreateIsOff()
+    {
+        await using var db = await CreateDbAsync();
+        var cmsBuilder = new CmsBuilderService(db);
+        var page = await CreatePageAsync(db, cmsBuilder);
+        var service = CreateService(db, crmService: new CrmService(db));
+
+        var submission = await service.SubmitAsync(page.Id, AdaFields(),
+            new Dictionary<string, string> { ["email"] = "ada@example.com" }, autoCreateContact: false);
+
+        submission.ContactId.Should().BeNull();
+        (await db.Contacts.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_ShouldFireTheCmsFormSubmittedTrigger()
+    {
+        await using var db = await CreateDbAsync();
+        var cmsBuilder = new CmsBuilderService(db);
+        var page = await CreatePageAsync(db, cmsBuilder);
+        var trigger = new RecordingAutomationTriggerService();
+        var service = CreateService(db, automationTriggerService: trigger);
+
+        await service.SubmitAsync(page.Id, AdaFields());
+
+        trigger.Calls.Should().ContainSingle();
+        trigger.Calls[0].SiteId.Should().Be(page.SiteId);
+        trigger.Calls[0].InputJson.Should().Contain("ada@example.com");
+    }
+
+    [Fact]
+    public async Task ListForContactAsync_ShouldReturnOnlySubmissionsLinkedToThatContact()
+    {
+        await using var db = await CreateDbAsync();
+        var cmsBuilder = new CmsBuilderService(db);
+        var page = await CreatePageAsync(db, cmsBuilder);
+        var service = CreateService(db);
+        var linked = await service.SubmitAsync(page.Id, AdaFields());
+        var unlinked = await service.SubmitAsync(page.Id, new Dictionary<string, string> { ["name"] = "Someone Else" });
+        var contactId = Guid.NewGuid();
+        await service.LinkToContactAsync(linked.Id, contactId);
+
+        var result = await service.ListForContactAsync(contactId);
+
+        result.Should().ContainSingle(s => s.Id == linked.Id);
+        result.Should().NotContain(s => s.Id == unlinked.Id);
+    }
+
+    [Fact]
+    public async Task LinkToContactAsync_ShouldSetTheContactId()
+    {
+        await using var db = await CreateDbAsync();
+        var cmsBuilder = new CmsBuilderService(db);
+        var page = await CreatePageAsync(db, cmsBuilder);
+        var service = CreateService(db);
+        var submission = await service.SubmitAsync(page.Id, AdaFields());
+        var contactId = Guid.NewGuid();
+
+        await service.LinkToContactAsync(submission.Id, contactId);
+
+        (await service.GetAsync(submission.Id))!.ContactId.Should().Be(contactId);
+    }
+
+    private sealed class RecordingAutomationTriggerService : IAutomationTriggerService
+    {
+        public List<(Guid SiteId, string InputJson)> Calls { get; } = [];
+
+        public Task<int> TriggerCmsFormSubmittedAsync(Guid siteId, string inputJson, CancellationToken cancellationToken = default)
+        {
+            Calls.Add((siteId, inputJson));
+            return Task.FromResult(1);
+        }
+
+        public Task<AutomationExecutionView?> TriggerWebhookAsync(
+            string path, string inputJson, string? providedSecret, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<int> RunDueSchedulesAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<int> ResumeDueWaitsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<AutomationExecutionView?> ResumeViaWebhookAsync(
+            string token, string bodyJson, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<int> TriggerDatabaseRowChangedAsync(
+            Guid wikiDatabaseId, string inputJson, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<int> TriggerCrmDealStageChangedAsync(
+            string stage, string inputJson, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<int> TriggerCmsPagePublishedAsync(
+            Guid siteId, string inputJson, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<int> TriggerSentinelChatPromptSubmittedAsync(
+            string prompt, Guid? conversationId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<int> TriggerSupportTicketCreatedAsync(
+            Guid ticketId, string subject, string contactName, string priority, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<int> TriggerSupportTicketRepliedAsync(
+            Guid ticketId, string authorType, string authorName, string body, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<int> TriggerSupportTicketSlaBreachedAsync(
+            Guid ticketId, string subject, string contactName, string priority, string breachType,
+            DateTimeOffset dueAt, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private static FormSubmissionService CreateService(
+        ApplicationDbContext db,
+        IGrowthReportEmailSender? sender = null,
+        ICrmService? crmService = null,
+        IAutomationTriggerService? automationTriggerService = null) => new(
         db,
         sender ?? new CapturingSender(),
         Options.Create(new FormNotificationOptions { AdminBaseUrl = "https://admin.example.test" }),
-        NullLogger<FormSubmissionService>.Instance);
+        NullLogger<FormSubmissionService>.Instance,
+        crmService,
+        automationTriggerService);
 
     // CmsSiteEditorModel/SaveSiteAsync deliberately doesn't expose FormNotificationEmail (a
     // full-replace editor model with ~9 call sites across the admin UI - adding a new field

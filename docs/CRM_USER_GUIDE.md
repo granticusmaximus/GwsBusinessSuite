@@ -60,30 +60,35 @@ are a related but separate feature with their own full guide:
 
 ## Managing a contact
 
-`/admin/crm` opens on the **Contacts** tab: a searchable/filterable list on the left, an
-editor and activity log on the right.
+`/admin/crm` opens on the **Contacts** tab: a searchable/filterable list. Opening a contact
+navigates to its own page at `/admin/crm/contacts/{id}` — a full editor plus every other feature's
+footprint for that person in one place, not just an inline panel on the list.
 
-- **Create one**: click **New Contact**, fill in Full Name (required), Status, Email, Company,
-  and an optional Follow-up Date, then **Save Contact**.
+- **Create one**: click **New Contact** on the list for a quick Full Name + Email form, **Save** —
+  you land straight on the new contact's detail page to fill in the rest (Status, Company,
+  Follow-up Date).
 - **Search and filter**: the search box matches name, email, or company (case-insensitive,
   substring match); the status dropdown narrows the list to one `ContactStatuses` value or "All
   statuses."
-- **Edit one**: click a contact in the list to load it into the editor, change fields, **Save
-  Contact** again. You can't edit a contact that's been trashed since another tab or teammate
-  moved it there — you'll get an error telling you to restore it first.
-- **Trash / Restore / Delete Permanently**: **Move to Trash** soft-deletes the currently-open
-  contact (with a confirmation prompt). The **Trash** button switches the whole left panel into a
-  trash view, from which you can **Restore** a contact back to the main list or **Delete
-  Permanently** (both are separately confirmed — permanent delete really does remove the row, and
-  every invoice/deal/booking that still points at it keeps the dangling reference rather than
-  cascading).
+- **Edit one**: click a contact in the list to open its detail page, change fields, **Save**. You
+  can't edit a contact that's been trashed since another tab or teammate moved it there — you'll
+  get an error telling you to restore it first.
+- **Trash**: **Move to Trash** on the detail page soft-deletes that contact (with a confirmation
+  prompt) and returns you to the list. The list's **Trash** button switches into a trash view, from
+  which you can **Restore** a contact back to the main list or **Delete Permanently** (both are
+  separately confirmed — permanent delete really does remove the row, and every invoice/deal/
+  booking that still points at it keeps the dangling reference rather than cascading).
 - **Follow-ups**: if any non-trashed contact has a Follow-up Date that's today or earlier, a
   warning banner lists them all at the top of the page (across both tabs) with a one-click link
-  back into that contact.
-- **Notes & Activity**: once a contact is open, the "Notes & Activity" panel underneath the editor
-  lets you log a free-text note (type it and press **Log** or hit Enter) — a simple, append-only,
-  timestamped audit trail of calls/emails/notes for that contact. Entries are never edited or
-  deleted, only added, newest first.
+  into that contact's detail page.
+- **Notes & Activity**: on a contact's detail page, the "Notes & Activity" card lets you log a
+  free-text note (type it and press **Log** or hit Enter) — a simple, append-only, timestamped
+  audit trail of calls/emails/notes for that contact. Entries are never edited or deleted, only
+  added, newest first.
+- **Everything else about this person, in one place**: the detail page also lists this Contact's
+  Deals, Support Tickets, Invoices, Bookings, and (if linked — see the Content Creation and
+  Automation guides for how a public form submission becomes linked) Form Submissions, each
+  linking out to that feature's own admin page.
 
 The Contacts list and follow-up banner are cached for 30 seconds server-side for performance, so
 a change you just made elsewhere may take up to that long to show on a page you already had open;
@@ -333,6 +338,10 @@ These are real gaps observed directly in the current code, not a general disclai
 - **Campaign unsubscribe and resubscribe are global, not per-campaign.** An unsubscribe suppresses
   the contact from every campaign; the admin Resubscribe action restores eligibility for every
   campaign after consent, rather than for one campaign at a time.
+- **Form-to-Contact matching is exact-email-only**, with no fuzzy dedup — a submitter who uses a
+  different email than their existing Contact record becomes a second Contact rather than being
+  merged. If a page has more than one "form" widget, their field-mapping/auto-create settings are
+  merged flatly rather than tracked per widget.
 - **Comment moderation has no spam-pattern filtering beyond the honeypot field** — every non-bot
   submission lands in `Pending` for a human to review; there's no keyword blocklist or third-party
   spam-scoring integration.

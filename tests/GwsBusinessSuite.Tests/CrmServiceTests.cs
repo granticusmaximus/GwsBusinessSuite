@@ -53,6 +53,49 @@ public sealed class CrmServiceTests
     }
 
     [Fact]
+    public async Task FindOrCreateContactAsync_ShouldCreateANewContact_WhenNoneMatchesTheEmail()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CrmService(db, new FixedCurrentUserAccessor("grantwatson"));
+
+        var contact = await service.FindOrCreateContactAsync("ada@example.com", "Ada Lovelace", "Analytical Engines", "form-submission");
+
+        contact.Email.Should().Be("ada@example.com");
+        contact.FullName.Should().Be("Ada Lovelace");
+        contact.Company.Should().Be("Analytical Engines");
+        contact.CreatedBy.Should().Be("form-submission");
+        (await service.ListContactsAsync()).Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task FindOrCreateContactAsync_ShouldMatchAnExistingContactByEmail_CaseInsensitively()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CrmService(db, new FixedCurrentUserAccessor("grantwatson"));
+        var existing = await service.SaveContactAsync(new ContactEditorModel { FullName = "Ada Lovelace", Email = "ADA@example.com" });
+
+        var matched = await service.FindOrCreateContactAsync("ada@example.com", "Someone Else", null, "form-submission");
+
+        matched.Id.Should().Be(existing.Id);
+        matched.FullName.Should().Be("Ada Lovelace", "an existing match is never overwritten by this call");
+        (await service.ListContactsAsync()).Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task FindOrCreateContactAsync_ShouldNotMatchATrashedContact()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CrmService(db, new FixedCurrentUserAccessor("grantwatson"));
+        var existing = await service.SaveContactAsync(new ContactEditorModel { FullName = "Ada Lovelace", Email = "ada@example.com" });
+        await service.TrashContactAsync(existing.Id);
+
+        var created = await service.FindOrCreateContactAsync("ada@example.com", "Ada Lovelace", null, "form-submission");
+
+        created.Id.Should().NotBe(existing.Id);
+        (await service.ListContactsAsync(includeTrashed: true)).Should().HaveCount(2);
+    }
+
+    [Fact]
     public async Task TrashContactAsync_ShouldRemoveFromDefaultList_ButKeepInTrash()
     {
         await using var db = await CreateDbAsync();

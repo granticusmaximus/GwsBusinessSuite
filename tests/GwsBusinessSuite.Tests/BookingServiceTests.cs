@@ -95,6 +95,43 @@ public sealed class BookingServiceTests
     }
 
     [Fact]
+    public async Task CreateBookingAsync_ShouldSetContactIdOnTheView()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var type = await fixture.Service.SaveBookingTypeAsync(new BookingTypeEditorModel
+        {
+            Title = "Intro Call",
+            DurationMinutes = 30,
+            Availability = [new BookingAvailabilityWindow(DayOfWeek.Monday, new TimeOnly(9, 0), new TimeOnly(10, 0))]
+        }, "owner");
+        var slotStart = MondayMidnight.AddHours(9);
+
+        var booking = await fixture.Service.CreateBookingAsync(type.Id, slotStart, "Jamie Rivera", "jamie@example.test", "");
+
+        var contact = await fixture.Db.Contacts.SingleAsync();
+        booking!.ContactId.Should().Be(contact.Id);
+    }
+
+    [Fact]
+    public async Task ListBookingsForContactAsync_ShouldReturnOnlyThatContactsBookings()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var type = await fixture.Service.SaveBookingTypeAsync(new BookingTypeEditorModel
+        {
+            Title = "Intro Call",
+            DurationMinutes = 30,
+            Availability = [new BookingAvailabilityWindow(DayOfWeek.Monday, new TimeOnly(9, 0), new TimeOnly(11, 0))]
+        }, "owner");
+        var jamie = await fixture.Service.CreateBookingAsync(type.Id, MondayMidnight.AddHours(9), "Jamie Rivera", "jamie@example.test", "");
+        var alex = await fixture.Service.CreateBookingAsync(type.Id, MondayMidnight.AddHours(10), "Alex Chen", "alex@example.test", "");
+
+        var jamieBookings = await fixture.Service.ListBookingsForContactAsync(jamie!.ContactId!.Value);
+
+        jamieBookings.Should().ContainSingle(b => b.Id == jamie.Id);
+        jamieBookings.Should().NotContain(b => b.Id == alex!.Id);
+    }
+
+    [Fact]
     public async Task CreateBookingAsync_ShouldReturnNull_WhenTheSlotIsAlreadyTaken()
     {
         await using var fixture = await Fixture.CreateAsync();

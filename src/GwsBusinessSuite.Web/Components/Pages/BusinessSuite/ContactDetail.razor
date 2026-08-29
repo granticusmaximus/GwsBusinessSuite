@@ -1,0 +1,367 @@
+@page "/admin/crm/contacts/{ContactId:guid}"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using GwsBusinessSuite.Application.Billing
+@using GwsBusinessSuite.Application.CmsBuilder
+@using GwsBusinessSuite.Application.Crm
+@using GwsBusinessSuite.Application.Scheduling
+@using GwsBusinessSuite.Application.Support
+@using GwsBusinessSuite.Domain.Entities
+@inject ICrmService CrmService
+@inject ISupportTicketService SupportTicketService
+@inject IBillingService BillingService
+@inject IBookingService BookingService
+@inject IFormSubmissionService FormSubmissionService
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+@inject ILogger<ContactDetail> Logger
+
+<PageTitle>@(Contact?.FullName ?? "Contact") · CRM</PageTitle>
+
+<div class="page-header">
+    <p class="mb-1"><a href="/admin/crm"><i class="bi bi-arrow-left me-1"></i>Back to CRM</a></p>
+    <h1><i class="bi bi-person-vcard me-2 text-primary"></i>@(Contact?.FullName ?? "Contact")</h1>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+}
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-info" role="alert">@StatusMessage</div>
+}
+
+@if (IsLoading)
+{
+    <p class="text-secondary">Loading…</p>
+}
+else if (Contact is null)
+{
+    <div class="alert alert-warning" role="alert">This contact no longer exists — it may have been deleted or trashed.</div>
+}
+else
+{
+    <div class="row g-4">
+        <div class="col-lg-6">
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white border-bottom py-3"><span class="fw-semibold">Details</span></div>
+                <div class="card-body">
+                    <EditForm Model="Editor" OnValidSubmit="SaveAsync">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary />
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold small">Full Name</label>
+                                <InputText class="form-control" @bind-Value="Editor.FullName" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold small">Status</label>
+                                <InputSelect class="form-select" @bind-Value="Editor.Status">
+                                    @foreach (var option in ContactStatuses.All)
+                                    {
+                                        <option value="@option">@option</option>
+                                    }
+                                </InputSelect>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold small">Email</label>
+                                <InputText class="form-control" @bind-Value="Editor.Email" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold small">Company</label>
+                                <InputText class="form-control" @bind-Value="Editor.Company" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold small">Follow-up Date <span class="text-muted">(optional)</span></label>
+                                <InputDate class="form-control" @bind-Value="Editor.FollowUpDate" />
+                            </div>
+                        </div>
+                        <div class="mt-3 d-flex flex-wrap gap-2">
+                            <button type="submit" class="btn btn-primary" disabled="@IsBusy">
+                                <i class="bi bi-floppy-fill me-1"></i>Save
+                            </button>
+                            <button type="button" class="btn btn-outline-danger" @onclick="TrashAsync" disabled="@IsBusy">
+                                Move to Trash
+                            </button>
+                        </div>
+                    </EditForm>
+                </div>
+            </div>
+
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white border-bottom py-3"><span class="fw-semibold">Notes &amp; Activity</span></div>
+                <div class="card-body">
+                    <div class="d-flex gap-2 mb-3">
+                        <input class="form-control" placeholder="Log a call, email, or note..."
+                               value="@NewActivityNote" @oninput="e => NewActivityNote = e.Value?.ToString() ?? string.Empty"
+                               @onkeydown="OnActivityNoteKeyDown" />
+                        <button class="btn btn-outline-primary flex-shrink-0" @onclick="AddActivityAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewActivityNote))">
+                            <i class="bi bi-plus-lg me-1"></i>Log
+                        </button>
+                    </div>
+                    @if (Activities.Count == 0)
+                    {
+                        <p class="text-secondary mb-0">No activity logged yet.</p>
+                    }
+                    else
+                    {
+                        <ul class="list-unstyled mb-0">
+                            @foreach (var activity in Activities)
+                            {
+                                <li class="mb-2 pb-2 border-bottom">
+                                    <div>@activity.Note</div>
+                                    <div class="small text-secondary">@activity.CreatedBy &middot; @activity.CreatedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</div>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-6">
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold">Deals</span>
+                    <a class="small" href="/admin/crm">Manage in Pipeline</a>
+                </div>
+                <div class="list-group list-group-flush">
+                    @if (Deals.Count == 0)
+                    {
+                        <div class="p-3 text-secondary small">No deals yet.</div>
+                    }
+                    else
+                    {
+                        @foreach (var deal in Deals)
+                        {
+                            <div class="list-group-item d-flex justify-content-between align-items-center gap-2">
+                                <div>
+                                    <div class="fw-semibold small">@deal.Title</div>
+                                    <div class="small text-secondary">@deal.Stage</div>
+                                </div>
+                                <span class="small">@deal.ValueUsd.ToString("C0")</span>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold">Support Tickets</span>
+                    <a class="small" href="/admin/support">Open Support</a>
+                </div>
+                <div class="list-group list-group-flush">
+                    @if (Tickets.Count == 0)
+                    {
+                        <div class="p-3 text-secondary small">No support tickets.</div>
+                    }
+                    else
+                    {
+                        @foreach (var ticket in Tickets)
+                        {
+                            <div class="list-group-item d-flex justify-content-between align-items-center gap-2">
+                                <div class="fw-semibold small">@ticket.Subject</div>
+                                <span class="badge text-bg-secondary">@ticket.Status</span>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold">Invoices</span>
+                    <a class="small" href="/admin/billing">Open Billing</a>
+                </div>
+                <div class="list-group list-group-flush">
+                    @if (Invoices.Count == 0)
+                    {
+                        <div class="p-3 text-secondary small">No invoices.</div>
+                    }
+                    else
+                    {
+                        @foreach (var invoice in Invoices)
+                        {
+                            <div class="list-group-item d-flex justify-content-between align-items-center gap-2">
+                                <div class="fw-semibold small">@invoice.Title</div>
+                                <span class="small">@invoice.TotalUsd.ToString("C0") &middot; @invoice.Status</span>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold">Bookings</span>
+                    <a class="small" href="/admin/scheduling">Open Scheduling</a>
+                </div>
+                <div class="list-group list-group-flush">
+                    @if (Bookings.Count == 0)
+                    {
+                        <div class="p-3 text-secondary small">No bookings.</div>
+                    }
+                    else
+                    {
+                        @foreach (var booking in Bookings)
+                        {
+                            <div class="list-group-item d-flex justify-content-between align-items-center gap-2">
+                                <div class="fw-semibold small">@booking.BookingTypeTitle</div>
+                                <span class="small">@booking.StartsAt.ToLocalTime().ToString("MMM d, yyyy") &middot; @booking.Status</span>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white border-bottom py-3"><span class="fw-semibold">Form Submissions</span></div>
+                <div class="list-group list-group-flush">
+                    @if (FormSubmissions.Count == 0)
+                    {
+                        <div class="p-3 text-secondary small">No linked form submissions.</div>
+                    }
+                    else
+                    {
+                        @foreach (var submission in FormSubmissions)
+                        {
+                            <a class="list-group-item list-group-item-action" href="/admin/form-submissions/@submission.Id">
+                                <div class="small">@submission.CreatedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</div>
+                            </a>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid ContactId { get; set; }
+
+    private Contact? Contact { get; set; }
+    private ContactEditorModel Editor { get; set; } = new();
+    private List<ContactActivityView> Activities { get; set; } = new();
+    private List<DealView> Deals { get; set; } = new();
+    private List<SupportTicketView> Tickets { get; set; } = new();
+    private List<InvoiceView> Invoices { get; set; } = new();
+    private List<BookingView> Bookings { get; set; } = new();
+    private List<FormSubmission> FormSubmissions { get; set; } = new();
+    private string NewActivityNote { get; set; } = string.Empty;
+    private bool IsLoading { get; set; } = true;
+    private bool IsBusy { get; set; }
+    private string StatusMessage { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        IsLoading = true;
+        try
+        {
+            Contact = await CrmService.GetContactAsync(ContactId);
+            if (Contact is null) return;
+
+            Editor = new ContactEditorModel
+            {
+                ContactId = Contact.Id,
+                FullName = Contact.FullName,
+                Email = Contact.Email,
+                Company = Contact.Company,
+                Status = Contact.Status,
+                FollowUpDate = Contact.FollowUpDate
+            };
+
+            Activities = (await CrmService.ListActivitiesAsync(ContactId)).ToList();
+            Deals = (await CrmService.ListDealsForContactAsync(ContactId)).ToList();
+            Tickets = (await SupportTicketService.ListTicketsForContactAsync(ContactId)).ToList();
+            Invoices = (await BillingService.ListInvoicesForContactAsync(ContactId)).ToList();
+            Bookings = (await BookingService.ListBookingsForContactAsync(ContactId)).ToList();
+            FormSubmissions = (await FormSubmissionService.ListForContactAsync(ContactId)).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load CRM contact {ContactId}.", ContactId);
+            ErrorMessage = "Unable to load this contact.";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (IsBusy) return;
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        try
+        {
+            Contact = await CrmService.SaveContactAsync(Editor);
+            StatusMessage = "Saved.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to save CRM contact {ContactId}.", ContactId);
+            ErrorMessage = $"Unable to save contact. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task TrashAsync()
+    {
+        if (IsBusy) return;
+        var confirmed = await JS.InvokeAsync<bool>("confirm", "Move this contact to Trash?");
+        if (!confirmed) return;
+
+        IsBusy = true;
+        try
+        {
+            await CrmService.TrashContactAsync(ContactId);
+            Navigation.NavigateTo("/admin/crm");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to trash CRM contact {ContactId}.", ContactId);
+            ErrorMessage = $"Unable to move contact to Trash. {ex.Message}";
+            IsBusy = false;
+        }
+    }
+
+    private async Task AddActivityAsync()
+    {
+        if (IsBusy || string.IsNullOrWhiteSpace(NewActivityNote)) return;
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            var activity = await CrmService.AddActivityAsync(ContactId, NewActivityNote);
+            Activities.Insert(0, activity);
+            NewActivityNote = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to log CRM activity for contact {ContactId}.", ContactId);
+            ErrorMessage = $"Unable to log activity. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task OnActivityNoteKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await AddActivityAsync();
+        }
+    }
+}

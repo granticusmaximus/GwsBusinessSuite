@@ -12,6 +12,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -1469,6 +1470,44 @@ public sealed class AutomationWorkflowTests
     }
 
     [Fact]
+    public async Task CmsFormSubmittedTrigger_ShouldFireForEverySubmission()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+        var cmsBuilderService = new CmsBuilderService(db);
+        var formSubmissionService = new FormSubmissionService(
+            db, new FakeGrowthReportEmailSender(), Options.Create(new FormNotificationOptions()),
+            NullLogger<FormSubmissionService>.Instance, automationTriggerService: triggerService);
+
+        var site = new CmsSite { Name = "Site", Slug = "site" };
+        db.CmsSites.Add(site);
+        await db.SaveChangesAsync();
+        var page = await cmsBuilderService.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id, Title = "Contact", Slug = "contact", BlocksJson = "{\"sections\":[]}"
+        });
+
+        var watcher = await workflowService.CreateAsync("Form watcher");
+        await workflowService.SaveNodeAsync(watcher.Id, new AutomationNodeEditor
+        {
+            Id = watcher.Nodes.Single().Id, Name = "Submitted", TypeKey = "cms.formSubmittedTrigger",
+            PositionX = 100, PositionY = 100, ParametersJson = "{}"
+        });
+        await workflowService.PublishAsync(watcher.Id, "v1");
+        await workflowService.SetActiveAsync(watcher.Id, true);
+
+        await formSubmissionService.SubmitAsync(page.Id, new Dictionary<string, string> { ["name"] = "Ada" });
+        (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == watcher.Id)).Should().Be(1);
+
+        await formSubmissionService.SubmitAsync(page.Id, new Dictionary<string, string> { ["name"] = "Grace" });
+        (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == watcher.Id)).Should().Be(2);
+    }
+
+    [Fact]
     public async Task CmsPagePublishedTrigger_ShouldDeferUntilTheScheduledPublishTimeArrives()
     {
         await using var db = await CreateDbAsync();
@@ -2469,6 +2508,7 @@ public sealed class AutomationWorkflowTests
         public Task<IReadOnlyList<DealView>> ListDealsForContactAsync(Guid contactId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<DealView> SaveDealAsync(DealEditorModel editor, string? actor = null, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task DeleteDealAsync(Guid dealId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Contact> FindOrCreateContactAsync(string email, string? fullNameFallback, string? company, string source, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
 
     private sealed class FakeCmsBuilderService : ICmsBuilderService

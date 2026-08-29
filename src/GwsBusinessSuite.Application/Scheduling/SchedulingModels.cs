@@ -39,7 +39,8 @@ public sealed record BookingView(
     string AttendeeEmail,
     string Notes,
     string Status,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    Guid? ContactId);
 
 public interface IBookingService
 {
@@ -61,6 +62,10 @@ public interface IBookingService
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<BookingView>> ListBookingsAsync(Guid? bookingTypeId = null, CancellationToken cancellationToken = default);
+
+    // For the per-Contact detail page's Bookings section - every booking linked to this Contact
+    // (ContactId is set on booking, a loose reference - see Booking.ContactId), newest first.
+    Task<IReadOnlyList<BookingView>> ListBookingsForContactAsync(Guid contactId, CancellationToken cancellationToken = default);
     Task<BookingView?> GetBookingByManageTokenAsync(string token, CancellationToken cancellationToken = default);
     Task<bool> CancelBookingAsync(Guid bookingId, string performedBy, CancellationToken cancellationToken = default);
     Task<bool> CancelBookingByManageTokenAsync(string token, CancellationToken cancellationToken = default);

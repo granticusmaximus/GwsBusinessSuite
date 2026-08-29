@@ -226,6 +226,23 @@ public sealed class BookingService(
             .ToList();
     }
 
+    public async Task<IReadOnlyList<BookingView>> ListBookingsForContactAsync(Guid contactId, CancellationToken cancellationToken = default)
+    {
+        var bookings = await db.Bookings.AsNoTracking()
+            .Where(booking => booking.ContactId == contactId)
+            .ToListAsync(cancellationToken);
+
+        var typeIds = bookings.Select(booking => booking.BookingTypeId).Distinct().ToList();
+        var typeTitles = await db.BookingTypes.AsNoTracking()
+            .Where(type => typeIds.Contains(type.Id))
+            .ToDictionaryAsync(type => type.Id, type => type.Title, cancellationToken);
+
+        return bookings
+            .OrderByDescending(booking => booking.StartsAt)
+            .Select(booking => ToView(booking, typeTitles.GetValueOrDefault(booking.BookingTypeId, "Unknown")))
+            .ToList();
+    }
+
     public async Task<BookingView?> GetBookingByManageTokenAsync(string token, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(token)) return null;
@@ -338,5 +355,6 @@ public sealed class BookingService(
 
     private static BookingView ToView(Booking booking, string bookingTypeTitle) => new(
         booking.Id, booking.BookingTypeId, bookingTypeTitle, booking.StartsAt, booking.EndsAt,
-        booking.AttendeeName, booking.AttendeeEmail, booking.Notes, booking.Status, booking.CreatedAt);
+        booking.AttendeeName, booking.AttendeeEmail, booking.Notes, booking.Status, booking.CreatedAt,
+        booking.ContactId);
 }

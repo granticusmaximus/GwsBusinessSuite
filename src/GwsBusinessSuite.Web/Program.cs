@@ -1848,14 +1848,27 @@ app.MapPost("/cms/{siteSlug}/submit", async (
     // submission reads as "Full Name: Ada" instead of "fullName: Ada" wherever it's later
     // shown (admin detail page, notification email). Falls back to the raw key for a field
     // the resolver can't find (e.g. the widget was edited/removed after this submission).
-    var fieldLabelsByKey = ResolveFormFieldLabels(page.BlocksJson);
+    var metadata = ResolveFormFieldMetadata(page.BlocksJson);
     var fields = form
         .Where(kvp => kvp.Key != "company" && kvp.Key != "_path")
-        .ToDictionary(kvp => fieldLabelsByKey.GetValueOrDefault(kvp.Key, kvp.Key), kvp => kvp.Value.ToString());
+        .ToDictionary(kvp => metadata.LabelsByKey.GetValueOrDefault(kvp.Key, kvp.Key), kvp => kvp.Value.ToString());
+
+    // Roles are keyed by the field's raw posted key/name (same as labels), not its display
+    // label - resolve role -> submitted value directly from the posted form, not from `fields`
+    // above (which is already relabeled and would need a second lookup either way).
+    var identityFields = new Dictionary<string, string>();
+    foreach (var (key, role) in metadata.RoleByKey)
+    {
+        var value = form[key].ToString();
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            identityFields[role] = value;
+        }
+    }
 
     try
     {
-        await formSubmissionService.SubmitAsync(page.Id, fields);
+        await formSubmissionService.SubmitAsync(page.Id, fields, identityFields, metadata.AutoCreateContact);
     }
     catch (ArgumentException ex)
     {
@@ -1865,23 +1878,31 @@ app.MapPost("/cms/{siteSlug}/submit", async (
     return Results.Redirect(thanksUrl);
 }).AllowAnonymous().RequireRateLimiting("public-write");
 
-// Maps each "form" widget field's posted key (its HTML input "name") to its configured
-// display Label, across every form widget on the page - a small, single-purpose duplicate of
-// CmsBlockHtmlRenderer's private ParseFormFields rather than exposing that method publicly for
-// this one caller. Malformed/missing fieldsJson on any widget is simply skipped (falls through
-// to the caller's own key fallback), matching this app's established "parse failure -> empty,
-// never throw" convention for admin-authored JSON blobs.
-static Dictionary<string, string> ResolveFormFieldLabels(string blocksJson)
+// Maps each "form" widget field's posted key (its HTML input "name") to its configured display
+// Label and identity role, across every form widget on the page - a small, single-purpose
+// duplicate of CmsBlockHtmlRenderer's private ParseFormFields rather than exposing that method
+// publicly for this one caller. Malformed/missing fieldsJson on any widget is simply skipped
+// (falls through to the caller's own key fallback), matching this app's established "parse
+// failure -> empty, never throw" convention for admin-authored JSON blobs.
+static FormFieldMetadata ResolveFormFieldMetadata(string blocksJson)
 {
     var labelsByKey = new Dictionary<string, string>();
+    var roleByKey = new Dictionary<string, string>();
+    var autoCreateContact = false;
     var layout = CmsBuilderJson.ParseLayout(blocksJson);
-    if (layout is null) return labelsByKey;
+    if (layout is null) return new(labelsByKey, roleByKey, autoCreateContact);
 
     foreach (var widget in layout.Sections.SelectMany(s => s.Columns).SelectMany(c => c.Widgets))
     {
         if (widget.WidgetType != "form" || !widget.Props.TryGetValue("fieldsJson", out var fieldsJson))
         {
             continue;
+        }
+
+        if (widget.Props.TryGetValue("autoCreateContact", out var autoCreateRaw)
+            && bool.TryParse(autoCreateRaw, out var widgetAutoCreate) && widgetAutoCreate)
+        {
+            autoCreateContact = true;
         }
 
         try
@@ -1894,9 +1915,14 @@ static Dictionary<string, string> ResolveFormFieldLabels(string blocksJson)
             {
                 var key = item["key"]?.GetValue<string>();
                 var label = item["label"]?.GetValue<string>();
+                var role = item["role"]?.GetValue<string>();
                 if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(label))
                 {
                     labelsByKey[key] = label;
+                }
+                if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(role) && role != "none")
+                {
+                    roleByKey[key] = role;
                 }
             }
         }
@@ -1906,7 +1932,7 @@ static Dictionary<string, string> ResolveFormFieldLabels(string blocksJson)
         }
     }
 
-    return labelsByKey;
+    return new(labelsByKey, roleByKey, autoCreateContact);
 }
 
 // ── grantwatson.dev — the real public site ──────────────────────────────────────────
@@ -4171,6 +4197,13 @@ static string NormalizePathBase(string? pathBase)
         ? normalized.TrimEnd('/')
         : normalized;
 }
+
+// Everything ResolveFormFieldLabels used to return, plus the two new field-mapping-driven
+// values: RoleByKey (which posted key maps to which identity role - "email"/"name"/"company"/
+// "phone") and AutoCreateContact (the widget's own opt-in checkbox). One combined parse instead
+// of three separate ones over the same BlocksJson.
+sealed record FormFieldMetadata(
+    Dictionary<string, string> LabelsByKey, Dictionary<string, string> RoleByKey, bool AutoCreateContact);
 
 record ArticleUpsertRequest(
     string Title,
