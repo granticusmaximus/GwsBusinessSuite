@@ -1428,7 +1428,7 @@ public sealed class SentinelAiService(
         "about", "after", "again", "also", "and", "are", "can", "could", "does", "for",
         "from", "have", "into", "just", "latest", "more", "much", "please", "show", "that",
         "the", "their", "then", "there", "these", "this", "what", "when", "where", "which",
-        "with", "would", "your"
+        "with", "would", "you", "your"
     };
 
     private async Task<(string Context, List<SentinelAiCitation> Citations)> BuildSuiteContextAsync(

@@ -313,6 +313,55 @@ public sealed class SentinelAiServiceTests
     }
 
     [Fact]
+    public async Task StreamAgentConversationAsync_ShouldNotInjectAnApprovedAnswerIntoAnUnrelatedQuestion()
+    {
+        // Regression test: SearchStopWords was missing "you" (only "your" was listed), so any
+        // instruction containing "you" - which is nearly all of them in natural phrasing - would
+        // term-overlap-match ANY approved answer whose own instruction/output also happened to
+        // contain "you", regardless of actual topic. Confirmed live 2026-08-27: a native-app chat
+        // asking "Are you faster now?" got a completely unrelated prior "Can you find my ... page?"
+        // answer silently injected into every subsequent turn's prompt. Approved-memory injection
+        // only happens on the includeSuiteContext:true path (StreamAgentConversationAsync), not
+        // plain StreamAsync/StreamConversationAsync - confirmed by reading StreamGroundedConversationAsync's
+        // two call sites before writing this, since an earlier draft of this test exercised the
+        // wrong method and passed even with the bug still present.
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+
+        db.SentinelAiRuns.Add(new SentinelAiRun
+        {
+            ConversationId = Guid.NewGuid(),
+            Action = SentinelAiActions.Ask,
+            Instruction = "Can you find my Q3 sales report?",
+            Output = "Q3 sales totaled $42,000 across all regions.",
+            Status = SentinelAiRunStatuses.Approved,
+            Model = "sentinelgpt",
+            ReviewedAt = DateTimeOffset.UtcNow,
+            ReviewedBy = "grant",
+            CreatedBy = "grant"
+        });
+        await db.SaveChangesAsync();
+
+        var ollama = new FakeStreamingOllamaService(["Sure, here you go."]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache());
+
+        await foreach (var _ in service.StreamAgentConversationAsync(
+            Guid.NewGuid(), null, "Are you feeling faster today?", "grant",
+            includeInternet: false, useDeepAnalysis: false))
+        {
+        }
+
+        ollama.LastUserPrompt.Should().NotContain("Q3 sales")
+            .And.NotContain("APPROVED")
+            .And.NotContain("Can you find my Q3 sales report");
+    }
+
+    [Fact]
     public async Task StreamAgentConversationAsync_ShouldGroundOnSuiteDataAndOptionalWebResearch()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

@@ -243,6 +243,22 @@ public sealed class OllamaKitTests : IDisposable
         unrelated.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task ApprovedMemoryStore_ShouldNotMatchSolelyOnTheWordYou()
+    {
+        // Regression test: "you" was missing from StopWords (only "your" was listed), so any
+        // question containing "you" - true of nearly all natural phrasing - term-overlap-matched
+        // any prior approved exchange whose own question/answer also happened to contain "you",
+        // regardless of actual topic. Confirmed live 2026-08-27 in the native Mac app: "Are you
+        // faster now?" pulled in a completely unrelated prior "Can you find my ... page?" answer.
+        var store = new ApprovedMemoryStore(Path.Combine(_root, "approved-memory2.json"));
+        await store.AppendAsync("Can you find my Q3 sales report?", "Q3 sales totaled $42,000 across all regions.", default);
+
+        var unrelated = await store.BuildContextAsync("Are you feeling faster today?", default);
+
+        unrelated.Should().BeEmpty();
+    }
+
     private static OllamaClient CreateClient(Func<HttpRequestMessage, HttpResponseMessage> respond)
     {
         var handler = new StubHttpMessageHandler(request => Task.FromResult(respond(request)));
