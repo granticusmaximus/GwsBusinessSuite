@@ -286,9 +286,18 @@ Working a request follows a fixed gate:
    events where they're the actor or the target.
 3. **Review** — moves the request to `InReview`.
 4. **Fulfill** — for every request type except Erasure, this is a direct action. For **Erasure**
-   specifically, a "Data deleted" checkbox must be ticked first; its tooltip states plainly that
-   this app has no automated data-deletion action — deletion happens manually, off-platform — and
-   this checkbox is only your attestation that it's actually been done everywhere.
+   specifically, Fulfill is disabled until the app has actually deleted the subject's data itself
+   — there's no manual attestation checkbox anymore. The flow is: **Preview** (a live, read-only
+   count of every table that would be affected — Contact and its CRM/support/booking/campaign
+   footprint, comments, SentinelGPT run history, podcast listening progress, plus any AppUser
+   account resolved from the same identifier — with a few sample names/subjects shown per table),
+   then **Run erasure** (a confirmation dialog, then a real deletion: a fresh backup is taken
+   first and the whole operation runs in one transaction, so a mid-run failure leaves nothing
+   partially erased). Once that succeeds, **Fulfill** becomes available and a green "Erased …"
+   badge replaces the Preview button. Invoices/InvoiceLineItems are never deleted automatically —
+   the preview flags how many exist and says manual review is needed; if any exist, the Contact
+   record itself is also kept (an Invoice has a real database link to it), even though everything
+   else about that subject is gone. The last active admin account can never be deleted this way.
 5. **Deny** — requires a reason already present in the request's notes field; the button is
    disabled until one exists.
 
@@ -405,12 +414,17 @@ These are gaps actually observed in the current code, not hypothetical ones:
   either, and CSV export always exports the full ledger rather than the current filtered view.
 - **Privacy Operations' request due dates are a flat one month for every request type** — there's
   no per-type SLA tiering (an Access request and an Erasure request get the same clock). **Erasure
-  fulfillment is an honor-system attestation**, not a real action — this app has no automated
-  cross-system data-deletion capability anywhere, so "Fulfilled" only records that a human
-  confirmed deletion happened manually elsewhere. **Retention automation covers only three data
-  categories** (Web analytics, Form submissions, Comments); Security audit is intentionally
-  excluded from automated purge, and no other data category (CRM contacts, Sentinel content, etc.)
-  has a retention policy or purge path at all yet.
+  deletion has a defined, conservative scope, not full schema-wide coverage** — it covers the
+  Contact record and its CRM/support-ticket/booking/campaign-enrollment footprint, Comments,
+  SentinelGPT run history, podcast listening progress, and an AppUser account if the identifier
+  resolves to one. It does **not** touch Invoices/InvoiceLineItems (flagged for manual review
+  instead), FormSubmission entries (an opaque admin-defined JSON blob with no reliable per-person
+  structure), or the wide internal-staff `CreatedBy`/`UpdatedBy` convention used across unrelated
+  collaboration records (Sentinel workspace items, Mind Maps, BI widgets, etc.) — those still need
+  a human to handle off-platform. **Retention automation covers only three data categories**
+  (Web analytics, Form submissions, Comments); Security audit is intentionally excluded from
+  automated purge, and no other data category (CRM contacts, Sentinel content, etc.) has a
+  retention policy or purge path at all yet.
 - **Settings manages exactly one CMS site** — whichever one matches this deployment's configured
   site slug. There's no multi-site switcher or management list here.
 - **Developer Tools has no persistence.** Nothing you generate or convert is ever saved — there's
