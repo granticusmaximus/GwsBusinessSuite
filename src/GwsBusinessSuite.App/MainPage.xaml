@@ -11,6 +11,28 @@
                  Navigating="OnWorkspaceNavigating"
                  Navigated="OnWorkspaceNavigated" />
 
+        <!-- Small, always-available reload affordance - a stuck Blazor Server SignalR circuit or
+             a stale render otherwise has no in-app recovery short of force-quitting. Sized to its
+             content and corner-anchored (not InputTransparent="False" like the full-screen
+             overlays below) so it only captures taps in that corner, leaving the rest of the page
+             interactive underneath. -->
+        <Button x:Name="ReloadButton"
+                Text="&#8635;"
+                FontSize="18"
+                WidthRequest="36"
+                HeightRequest="36"
+                Padding="0"
+                CornerRadius="18"
+                Margin="0,8,8,0"
+                HorizontalOptions="End"
+                VerticalOptions="Start"
+                BackgroundColor="#231F1D"
+                TextColor="#F59E0B"
+                BorderColor="#44403C"
+                BorderWidth="1"
+                Clicked="OnReloadClicked"
+                ToolTipProperties.Text="Reload" />
+
         <Grid x:Name="LoadingOverlay"
               BackgroundColor="#141210"
               InputTransparent="False">

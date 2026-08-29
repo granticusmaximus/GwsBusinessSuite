@@ -144,6 +144,18 @@ public partial class MainPage : ContentPage
 
     private void OnRefreshClicked(object? sender, EventArgs e) => ReloadWorkspace();
 
+    // Reloads whatever page is currently showing (like a browser refresh) rather than
+    // ReloadWorkspace()'s "go back to the start URL" - for a stuck SignalR circuit or a stale
+    // render on a page the user has already navigated into, jumping back to the start page would
+    // lose their place for no reason.
+    private void OnReloadClicked(object? sender, EventArgs e)
+    {
+        StopNavigationTimeout();
+        StatusOverlay.IsVisible = false;
+        LoadingOverlay.IsVisible = true;
+        WorkspaceView.Reload();
+    }
+
     private void ReloadWorkspace()
     {
         StatusOverlay.IsVisible = false;
