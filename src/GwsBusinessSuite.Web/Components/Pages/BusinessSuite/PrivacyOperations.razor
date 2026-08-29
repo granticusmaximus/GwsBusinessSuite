@@ -4,6 +4,7 @@
 @using GwsBusinessSuite.Application.Privacy
 @inject IPrivacyOperationsService PrivacyService
 @inject ILogger<PrivacyOperations> Logger
+@inject IJSRuntime JS
 
 <PageTitle>Privacy Operations · GWS Business Suite</PageTitle>
 
@@ -52,16 +53,46 @@ else
                                 <button class="btn btn-sm btn-outline-secondary ms-1" @onclick="() => ReviewAsync(request.Id)" disabled="@_busy">Review</button>
                                 @if (request.RequestType == PrivacyRequestTypes.Erasure)
                                 {
-                                    <label class="check erasure-confirm" title="This app has no automated data-deletion action - deletion happens manually, off-platform. Only check this once the subject's data has actually been removed.">
-                                        <input type="checkbox" checked="@_erasureConfirmations.GetValueOrDefault(request.Id)" @onchange="e => _erasureConfirmations[request.Id] = (bool)e.Value!" />
-                                        Data deleted
-                                    </label>
+                                    @if (request.DeletionExecutedAt is null)
+                                    {
+                                        <button class="btn btn-sm btn-outline-warning ms-1" @onclick="() => PreviewErasureAsync(request.Id)" disabled="@_busy">Preview</button>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge text-bg-success ms-1">Erased @request.DeletionExecutedAt.Value.ToLocalTime().ToString("MMM d, h:mm tt")</span>
+                                    }
                                 }
-                                <button class="btn btn-sm btn-success ms-1" @onclick="() => CompleteAsync(request)" disabled="@(_busy || (request.RequestType == PrivacyRequestTypes.Erasure && !_erasureConfirmations.GetValueOrDefault(request.Id)))">Fulfill</button>
+                                <button class="btn btn-sm btn-success ms-1" @onclick="() => CompleteAsync(request)" disabled="@(_busy || (request.RequestType == PrivacyRequestTypes.Erasure && request.DeletionExecutedAt is null))" title="@(request.RequestType == PrivacyRequestTypes.Erasure && request.DeletionExecutedAt is null ? "Run erasure first - this app requires real deletion evidence, not a manual attestation" : null)">Fulfill</button>
                                 <button class="btn btn-sm btn-outline-danger ms-1" @onclick="() => DenyAsync(request)" disabled="@(_busy || string.IsNullOrWhiteSpace(request.DecisionNotes))" title="Initial notes are required as the denial reason">Deny</button>
                             }
                         </td>
                     </tr>
+                    @if (request.RequestType == PrivacyRequestTypes.Erasure && request.DeletionExecutedAt is null && _previews.TryGetValue(request.Id, out var preview))
+                    {
+                        <tr class="erasure-preview-row">
+                            <td colspan="5">
+                                @if (!preview.SubjectResolved)
+                                {
+                                    <em>No matching AppUser or Contact found for "@request.SubjectIdentifier" - nothing would be deleted.</em>
+                                }
+                                else
+                                {
+                                    <ul class="erasure-preview-list">
+                                    @foreach (var table in preview.Tables)
+                                    {
+                                        <li><strong>@table.TableName</strong>: @table.RowCount@(table.SampleIdentifiers.Count > 0 ? $" ({string.Join(", ", table.SampleIdentifiers)})" : "")</li>
+                                    }
+                                    </ul>
+                                    @if (preview.ExcludedInvoiceCount > 0)
+                                    {
+                                        <p class="text-warning small mb-1">@preview.ExcludedInvoiceCount invoice(s) found for this subject - not deleted automatically, needs manual review.</p>
+                                    }
+                                    <p class="text-secondary small">@preview.ExcludedNotScannedNote</p>
+                                    <button class="btn btn-sm btn-danger" @onclick="() => RunErasureAsync(request.Id)" disabled="@_busy">Run erasure (irreversible)</button>
+                                }
+                            </td>
+                        </tr>
+                    }
                 }
                 </tbody></table>
             </div>
@@ -128,17 +159,30 @@ else
     private readonly Dictionary<Guid, int> _retentionDays = [];
     private readonly Dictionary<Guid, string> _retentionBasis = [];
     private readonly Dictionary<Guid, bool> _retentionEnabled = [], _retentionAutomation = [];
-    private readonly Dictionary<Guid, bool> _erasureConfirmations = [];
+    private readonly Dictionary<Guid, SubjectDeletionPreview> _previews = [];
 
     protected override Task OnInitializedAsync() => LoadAsync();
     private async Task LoadAsync() { try { Dashboard = await PrivacyService.GetDashboardAsync(); _error = false; } catch (Exception ex) { Fail(ex, "Privacy operations could not be loaded."); } }
     private async Task CreateRequestAsync() => await RunAsync(async () => { await PrivacyService.CreateRequestAsync(new(_requestType, _subjectIdentifier, _requestNotes)); _subjectIdentifier = _requestNotes = ""; }, "Privacy request recorded.");
     private async Task VerifyAsync(Guid id) => await RunAsync(() => PrivacyService.VerifyIdentityAsync(id), "Identity verification recorded.");
     private async Task CompleteAsync(PrivacyRequestView request) => await RunAsync(() => PrivacyService.CompleteRequestAsync(
-        request.Id, PrivacyRequestStatuses.Fulfilled, "Request fulfilled through Privacy Operations.",
-        request.RequestType == PrivacyRequestTypes.Erasure && _erasureConfirmations.GetValueOrDefault(request.Id)), "Request fulfilled.");
+        request.Id, PrivacyRequestStatuses.Fulfilled, "Request fulfilled through Privacy Operations."), "Request fulfilled.");
     private async Task ReviewAsync(Guid id) => await RunAsync(() => PrivacyService.CompleteRequestAsync(id, PrivacyRequestStatuses.InReview, "Request is under review."), "Request moved to review.");
     private async Task DenyAsync(PrivacyRequestView request) => await RunAsync(() => PrivacyService.CompleteRequestAsync(request.Id, PrivacyRequestStatuses.Denied, request.DecisionNotes), "Request denied with the recorded reason.");
+    private async Task PreviewErasureAsync(Guid id)
+    {
+        _busy = true; _message = "";
+        try { _previews[id] = await PrivacyService.PreviewErasureAsync(id); _error = false; }
+        catch (Exception ex) { Fail(ex, ex is ArgumentException or InvalidOperationException ? ex.Message : "The preview could not be generated."); }
+        finally { _busy = false; }
+    }
+    private async Task RunErasureAsync(Guid id)
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            "This will permanently delete the subject's data across every table shown in the preview. This cannot be undone. Continue?");
+        if (!confirmed) return;
+        await RunAsync(async () => { await PrivacyService.DeleteSubjectDataAsync(id); _previews.Remove(id); }, "Subject data deleted.");
+    }
     private async Task CreateIncidentAsync() => await RunAsync(async () => { await PrivacyService.CreateIncidentAsync(new(_incidentTitle, _incidentSummary, _incidentSeverity, DateTimeOffset.UtcNow, _personalData, _ephi, _personalData ? DateTimeOffset.UtcNow : null, _incidentOwner)); _incidentTitle = _incidentSummary = ""; _personalData = _ephi = false; }, "Security incident opened.");
     private void SetRisk(Guid id, string? value) => _risks[id] = value ?? "Pending";
     private void SetIncidentStatus(Guid id, string? value) => _statuses[id] = value ?? IncidentStatuses.Open;
@@ -166,5 +210,7 @@ else
     .privacy-metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:.8rem; } .privacy-metrics>div { padding:1rem; background:var(--gws-surface); border:1px solid var(--gws-border); border-radius:12px; display:flex; justify-content:space-between; } .privacy-metrics strong { font-size:1.5rem; } .privacy-metrics .danger { border-color:#a33; } .privacy-metrics .warning { border-color:#a76b00; }
     .privacy-grid { display:grid; grid-template-columns:1fr 1fr; gap:1rem; align-items:start; } .privacy-form { display:grid; grid-template-columns:repeat(3,1fr); gap:.75rem; } .privacy-form label { font-size:.78rem; font-weight:700; } .privacy-form .wide { grid-column:span 2; } .check { display:flex; gap:.45rem; align-items:center; } .privacy-incident { display:grid; gap:.65rem; } .incident-controls { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; } .incident-controls .form-select { width:auto; min-width:7rem; }
     .retention-days { width:6rem; display:inline-block; }
+    .erasure-preview-row td { background:var(--gws-surface); border-top:none; }
+    .erasure-preview-list { margin:0 0 .5rem; padding-left:1.1rem; font-size:.85rem; }
     @@media(max-width:1100px){.privacy-grid{grid-template-columns:1fr}.privacy-metrics{grid-template-columns:repeat(2,1fr)}} @@media(max-width:650px){.privacy-form{grid-template-columns:1fr}.privacy-form .wide{grid-column:auto}.privacy-metrics{grid-template-columns:1fr}}
 </style>

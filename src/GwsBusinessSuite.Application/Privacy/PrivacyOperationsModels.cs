@@ -40,7 +40,8 @@ public sealed record RetentionPolicyView(Guid Id, string DataCategory, string De
 
 public sealed record PrivacyRequestView(Guid Id, string RequestNumber, string RequestType,
     string SubjectIdentifier, string Status, DateTimeOffset ReceivedAt, DateTimeOffset DueAt,
-    DateTimeOffset? IdentityVerifiedAt, DateTimeOffset? CompletedAt, string DecisionNotes);
+    DateTimeOffset? IdentityVerifiedAt, DateTimeOffset? CompletedAt, string DecisionNotes,
+    DateTimeOffset? DeletionExecutedAt);
 
 public sealed record SecurityIncidentView(Guid Id, string IncidentNumber, string Title,
     string Summary, string Severity, string Status, DateTimeOffset DetectedAt,
@@ -56,4 +57,24 @@ public sealed record CreateSecurityIncident(string Title, string Summary, string
     DateTimeOffset DetectedAt, bool PersonalDataInvolved, bool EphiInvolved,
     DateTimeOffset? BreachAwarenessAt, string Owner);
 public sealed record SubjectDataExport(string FileName, byte[] Content);
+
+public sealed record TableDeletionPreview(string TableName, int RowCount, IReadOnlyList<string> SampleIdentifiers);
+public sealed record TableDeletionResult(string TableName, int DeletedCount);
+
+// "as of right now" (a live, read-only query) - not a point-in-time backup snapshot. See
+// SubjectResolver's doc comment for why matching can find rows under either an AppUser or a
+// Contact anchor. ExcludedInvoiceCount/ExcludedNotScannedNote surface known gaps rather than
+// silently omitting them - Invoices need a manual retention decision this app can't make, and
+// FormSubmission/the wide CreatedBy convention aren't reliably scannable at all (see the erasure
+// plan's scope notes for the full reasoning).
+public sealed record SubjectDeletionPreview(
+    bool SubjectResolved,
+    IReadOnlyList<TableDeletionPreview> Tables,
+    int ExcludedInvoiceCount,
+    string ExcludedNotScannedNote);
+
+public sealed record SubjectDeletionSummary(
+    DateTimeOffset ExecutedAt,
+    string BackupPath,
+    IReadOnlyList<TableDeletionResult> Tables);
 

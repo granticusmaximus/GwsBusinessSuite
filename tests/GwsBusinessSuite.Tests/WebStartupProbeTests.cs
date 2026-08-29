@@ -1,7 +1,9 @@
 using FluentAssertions;
+using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure;
 using GwsBusinessSuite.Infrastructure.Data;
+using GwsBusinessSuite.Web.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components;
@@ -38,6 +40,13 @@ public sealed class WebStartupProbeTests
             });
 
             builder.Services.AddInfrastructure(builder.Configuration);
+            // Mirrors Program.cs's registration - PrivacyOperationsService (Infrastructure) needs
+            // this Web-owned implementation to trigger a real backup before erasure deletion (see
+            // IBackupOperations for why it can't be registered inside AddInfrastructure itself).
+            builder.Services.AddOptions<DatabaseBackupOptions>()
+                .Bind(builder.Configuration.GetSection(DatabaseBackupOptions.SectionName));
+            builder.Services.AddScoped<DatabaseBackupService>();
+            builder.Services.AddScoped<IBackupOperations, BackupOperations>();
             builder.Services.AddRazorComponents()
                 .AddInteractiveServerComponents();
             builder.Services.AddCascadingAuthenticationState();
@@ -106,6 +115,13 @@ public sealed class WebStartupProbeTests
             });
 
             builder.Services.AddInfrastructure(builder.Configuration);
+            // Mirrors Program.cs's registration - PrivacyOperationsService (Infrastructure) needs
+            // this Web-owned implementation to trigger a real backup before erasure deletion (see
+            // IBackupOperations for why it can't be registered inside AddInfrastructure itself).
+            builder.Services.AddOptions<DatabaseBackupOptions>()
+                .Bind(builder.Configuration.GetSection(DatabaseBackupOptions.SectionName));
+            builder.Services.AddScoped<DatabaseBackupService>();
+            builder.Services.AddScoped<IBackupOperations, BackupOperations>();
             builder.Services.AddRazorComponents()
                 .AddInteractiveServerComponents();
             builder.Services.AddCascadingAuthenticationState();

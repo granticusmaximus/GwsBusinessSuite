@@ -79,6 +79,7 @@ builder.Services.AddDataProtection()
     .SetApplicationName("GwsBusinessSuite")
     .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath));
 builder.Services.AddScoped<DatabaseBackupService>();
+builder.Services.AddScoped<IBackupOperations, BackupOperations>();
 builder.Services.AddHostedService<DatabaseBackupBackgroundService>();
 
 builder.Services.AddRazorComponents()

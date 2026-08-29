@@ -46,6 +46,12 @@ public sealed class PrivacyRequest : AuditableEntity
     public string? IdentityVerifiedBy { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public string DecisionNotes { get; set; } = string.Empty;
+
+    // Populated only by a successful PrivacyOperationsService.DeleteSubjectDataAsync run - this
+    // is the real evidence CompleteRequestAsync checks before allowing Erasure->Fulfilled, not a
+    // human-checked box (see feedback_privacy_erasure_scope memory for why this replaced that).
+    public DateTimeOffset? DeletionExecutedAt { get; set; }
+    public string? DeletionSummaryJson { get; set; }
 }
 
 public sealed class SecurityIncident : AuditableEntity

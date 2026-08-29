@@ -11,6 +11,7 @@ public sealed class PrivacyOperationsService(
     IAppDbContext db,
     ICurrentUserAccessor currentUser,
     ISecurityAuditService securityAudit,
+    IBackupOperations backupOperations,
     TimeProvider timeProvider) : IPrivacyOperationsService
 {
     private DateTimeOffset UtcNow => timeProvider.GetUtcNow();
@@ -66,7 +67,7 @@ public sealed class PrivacyOperationsService(
     }
 
     public async Task CompleteRequestAsync(Guid requestId, string status, string decisionNotes,
-        bool erasureDataDeletionConfirmed = false, CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
     {
         if (status is not (PrivacyRequestStatuses.Fulfilled or PrivacyRequestStatuses.Denied or PrivacyRequestStatuses.InReview))
             throw new ArgumentException("Unsupported completion status.");
@@ -74,23 +75,20 @@ public sealed class PrivacyOperationsService(
         if (entity.IdentityVerifiedAt is null) throw new InvalidOperationException("Identity must be verified before a request can be decided.");
         if (status == PrivacyRequestStatuses.Denied && string.IsNullOrWhiteSpace(decisionNotes))
             throw new ArgumentException("A denial reason is required.");
-        // Erasure has no real cascading-deletion implementation anywhere in this app - deletion
-        // happens manually, off-platform. Without this gate, "Fulfilled" was assertable from the
-        // same generic status dropdown used for Access/Correction/Restriction, so the compliance
-        // record could claim data was erased when nothing had actually been deleted.
-        if (entity.RequestType == PrivacyRequestTypes.Erasure && status == PrivacyRequestStatuses.Fulfilled && !erasureDataDeletionConfirmed)
+        // Real evidence, not a human attestation: DeletionExecutedAt is only ever set by a
+        // successful DeleteSubjectDataAsync run (see below), so this cannot be faked from the UI
+        // the way the old erasureDataDeletionConfirmed checkbox could.
+        if (entity.RequestType == PrivacyRequestTypes.Erasure && status == PrivacyRequestStatuses.Fulfilled && entity.DeletionExecutedAt is null)
         {
             throw new InvalidOperationException(
-                "Erasure requests can only be marked Fulfilled after confirming the subject's data has actually been deleted across all systems.");
+                "Erasure requests can only be marked Fulfilled after DeleteSubjectDataAsync has actually deleted the subject's data.");
         }
         entity.Status = status; entity.DecisionNotes = decisionNotes.Trim();
         entity.CompletedAt = status is PrivacyRequestStatuses.Fulfilled or PrivacyRequestStatuses.Denied ? UtcNow : null;
         entity.UpdatedAt = UtcNow; entity.UpdatedBy = await currentUser.GetCurrentUsernameAsync(cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
-        var auditDetails = new Dictionary<string, string?> { ["status"] = status };
-        if (entity.RequestType == PrivacyRequestTypes.Erasure)
-            auditDetails["erasureDataDeletionConfirmed"] = erasureDataDeletionConfirmed.ToString();
-        await AuditAsync("PrivacyRequestStatusChanged", entity.Id, auditDetails, cancellationToken);
+        await AuditAsync("PrivacyRequestStatusChanged", entity.Id,
+            new Dictionary<string, string?> { ["status"] = status }, cancellationToken);
     }
 
     public async Task<SubjectDataExport> ExportSubjectDataAsync(Guid requestId, CancellationToken cancellationToken = default)
@@ -98,24 +96,250 @@ public sealed class PrivacyOperationsService(
         var request = await FindRequestAsync(requestId, cancellationToken);
         if (request.RequestType != PrivacyRequestTypes.Access || request.IdentityVerifiedAt is null)
             throw new InvalidOperationException("Only identity-verified access requests can be exported.");
-        var subject = request.SubjectIdentifier;
-        var users = await db.AppUsers.AsNoTracking().Where(x => x.Username == subject)
-            .Select(x => new { x.Id, x.Username, x.Role, x.IsActive, x.MfaEnabled, x.MfaEnrolledAt, x.CreatedAt, x.UpdatedAt }).ToListAsync(cancellationToken);
-        var contacts = await db.Contacts.AsNoTracking().Where(x => x.Email == subject)
-            .Select(x => new { x.Id, x.FullName, x.Email, x.Company, x.Status, x.CreatedAt, x.UpdatedAt }).ToListAsync(cancellationToken);
-        var comments = await db.Comments.AsNoTracking().Where(x => x.AuthorEmail == subject)
+        var resolution = await SubjectResolver.ResolveAsync(db, request.SubjectIdentifier, cancellationToken);
+        var matches = resolution.MatchValues;
+        var users = resolution.User is { } resolvedUser
+            ? new[] { new { resolvedUser.Id, resolvedUser.Username, resolvedUser.Role, resolvedUser.IsActive, resolvedUser.MfaEnabled, resolvedUser.MfaEnrolledAt, resolvedUser.CreatedAt, resolvedUser.UpdatedAt } }
+            : [];
+        var contacts = resolution.Contact is { } resolvedContact
+            ? new[] { new { resolvedContact.Id, resolvedContact.FullName, resolvedContact.Email, resolvedContact.Company, resolvedContact.Status, resolvedContact.CreatedAt, resolvedContact.UpdatedAt } }
+            : [];
+        var comments = await db.Comments.AsNoTracking().Where(x => matches.Contains(x.AuthorEmail))
             .Select(x => new { x.Id, x.ArticleId, x.AuthorName, x.AuthorEmail, x.Body, x.Status, x.CreatedAt }).ToListAsync(cancellationToken);
-        var aiRuns = await db.SentinelAiRuns.AsNoTracking().Where(x => x.CreatedBy == subject)
+        var aiRuns = await db.SentinelAiRuns.AsNoTracking().Where(x => matches.Contains(x.CreatedBy))
             .Select(x => new { x.Id, x.ConversationId, x.Action, x.Instruction, x.Output, x.Status, x.Model, x.CreatedAt }).ToListAsync(cancellationToken);
-        var listening = await db.PodcastListenProgresses.AsNoTracking().Where(x => x.Username == subject)
+        var listening = await db.PodcastListenProgresses.AsNoTracking().Where(x => matches.Contains(x.Username))
             .Select(x => new { x.Id, x.EpisodeId, x.PositionSeconds, x.IsCompleted, x.LastPlayedAt }).ToListAsync(cancellationToken);
-        var auditEvents = await db.SecurityAuditEvents.AsNoTracking().Where(x => x.ActorUsername == subject || x.TargetId == subject)
+        var auditEvents = await db.SecurityAuditEvents.AsNoTracking()
+            .Where(x => matches.Contains(x.ActorUsername) || (x.TargetId != null && matches.Contains(x.TargetId)))
             .Select(x => new { x.Id, x.OccurredAtUnixSeconds, x.Category, x.Action, x.Outcome, x.TargetType, x.TargetId }).ToListAsync(cancellationToken);
-        var payload = new { generatedAt = UtcNow, request = request.RequestNumber, subject, users, contacts, comments, sentinelGpt = aiRuns, podcastProgress = listening, securityEvents = auditEvents };
+        var payload = new { generatedAt = UtcNow, request = request.RequestNumber, subject = request.SubjectIdentifier, users, contacts, comments, sentinelGpt = aiRuns, podcastProgress = listening, securityEvents = auditEvents };
         var content = JsonSerializer.SerializeToUtf8Bytes(payload, new JsonSerializerOptions { WriteIndented = true });
         await AuditAsync("SubjectDataExported", request.Id,
             new Dictionary<string, string?> { ["requestNumber"] = request.RequestNumber }, cancellationToken);
         return new($"gws-subject-export-{request.RequestNumber}.json", content);
+    }
+
+    // Invoice/InvoiceLineItem and FormSubmission.FieldsJson/the wide internal-staff CreatedBy
+    // convention are deliberately out of scope for automated erasure - see the erasure plan's
+    // scope notes. This note is surfaced in the preview so staff know they weren't silently
+    // skipped, and stays fixed text rather than something callers can suppress.
+    private const string ErasureNotScannedNote =
+        "Invoices are counted separately below and require manual review (financial/tax retention " +
+        "rules vary and this app cannot determine which apply) - if any exist, the Contact record " +
+        "itself is also kept (Invoices have a real database link to it) even though everything " +
+        "else about the subject is deleted. FormSubmission entries and internal staff activity " +
+        "metadata (CreatedBy/UpdatedBy on unrelated collaboration records) are not scanned by this " +
+        "tool at all.";
+
+    public async Task<SubjectDeletionPreview> PreviewErasureAsync(Guid requestId, CancellationToken cancellationToken = default)
+    {
+        var request = await FindRequestAsync(requestId, cancellationToken);
+        if (request.RequestType != PrivacyRequestTypes.Erasure)
+            throw new InvalidOperationException("Only Erasure requests can be previewed for deletion.");
+
+        var resolution = await SubjectResolver.ResolveAsync(db, request.SubjectIdentifier, cancellationToken);
+        if (resolution.IsEmpty)
+            return new SubjectDeletionPreview(false, [], 0, ErasureNotScannedNote);
+
+        var matches = resolution.MatchValues;
+        var contactId = resolution.Contact?.Id;
+        var tables = new List<TableDeletionPreview>();
+
+        if (resolution.Contact is { } contact)
+        {
+            tables.Add(new("Contacts", 1, [contact.FullName]));
+            var activityCount = await db.ContactActivities.AsNoTracking().CountAsync(x => x.ContactId == contact.Id, cancellationToken);
+            if (activityCount > 0) tables.Add(new("ContactActivities", activityCount, []));
+            var dealCount = await db.Deals.AsNoTracking().CountAsync(x => x.ContactId == contact.Id, cancellationToken);
+            if (dealCount > 0) tables.Add(new("Deals", dealCount, []));
+            var ticketSubjects = await db.SupportTickets.AsNoTracking().Where(x => x.ContactId == contact.Id)
+                .Select(x => x.Subject).ToListAsync(cancellationToken);
+            if (ticketSubjects.Count > 0) tables.Add(new("SupportTickets", ticketSubjects.Count, ticketSubjects.Take(5).ToList()));
+            var tokenCount = await db.ClientPortalLoginTokens.AsNoTracking().CountAsync(x => x.ContactId == contact.Id, cancellationToken);
+            if (tokenCount > 0) tables.Add(new("ClientPortalLoginTokens", tokenCount, []));
+            var enrollmentCount = await db.EmailCampaignEnrollments.AsNoTracking().CountAsync(x => x.ContactId == contact.Id, cancellationToken);
+            if (enrollmentCount > 0) tables.Add(new("EmailCampaignEnrollments", enrollmentCount, []));
+        }
+
+        var bookingNames = await db.Bookings.AsNoTracking()
+            .Where(x => (contactId.HasValue && x.ContactId == contactId) || matches.Contains(x.AttendeeEmail))
+            .Select(x => x.AttendeeName).ToListAsync(cancellationToken);
+        if (bookingNames.Count > 0) tables.Add(new("Bookings", bookingNames.Count, bookingNames.Take(5).ToList()));
+
+        var commentAuthors = await db.Comments.AsNoTracking().Where(x => matches.Contains(x.AuthorEmail))
+            .Select(x => x.AuthorName).ToListAsync(cancellationToken);
+        if (commentAuthors.Count > 0) tables.Add(new("Comments", commentAuthors.Count, commentAuthors.Take(5).ToList()));
+
+        var aiRunCount = await db.SentinelAiRuns.AsNoTracking().CountAsync(x => matches.Contains(x.CreatedBy), cancellationToken);
+        if (aiRunCount > 0) tables.Add(new("SentinelAiRuns", aiRunCount, []));
+
+        var listenCount = await db.PodcastListenProgresses.AsNoTracking().CountAsync(x => matches.Contains(x.Username), cancellationToken);
+        if (listenCount > 0) tables.Add(new("PodcastListenProgresses", listenCount, []));
+
+        if (resolution.User is { } user)
+            tables.Add(new("AppUsers", 1, [user.Username]));
+
+        var invoiceCount = contactId.HasValue
+            ? await db.Invoices.AsNoTracking().CountAsync(x => x.ContactId == contactId, cancellationToken)
+            : 0;
+
+        return new SubjectDeletionPreview(true, tables, invoiceCount, ErasureNotScannedNote);
+    }
+
+    public async Task<SubjectDeletionSummary> DeleteSubjectDataAsync(Guid requestId, CancellationToken cancellationToken = default)
+    {
+        var request = await FindRequestAsync(requestId, cancellationToken);
+        if (request.RequestType != PrivacyRequestTypes.Erasure)
+            throw new InvalidOperationException("Only Erasure requests can be run through automated deletion.");
+        if (request.IdentityVerifiedAt is null)
+            throw new InvalidOperationException("Identity must be verified before deletion can run.");
+
+        var resolution = await SubjectResolver.ResolveAsync(db, request.SubjectIdentifier, cancellationToken);
+        if (resolution.IsEmpty)
+            throw new InvalidOperationException(
+                "The subject identifier did not resolve to any AppUser or Contact - nothing to delete. Investigate before retrying.");
+
+        if (resolution.User is { Role: AppRoles.Admin, IsActive: true })
+        {
+            var activeAdminCount = await db.AppUsers.CountAsync(u => u.Role == AppRoles.Admin && u.IsActive, cancellationToken);
+            if (activeAdminCount <= 1)
+                throw new InvalidOperationException("Cannot delete the last active admin account through an erasure request.");
+        }
+
+        string backupPath;
+        try
+        {
+            backupPath = await backupOperations.CreateBackupAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                "A fresh backup could not be created; erasure was aborted before any data was deleted.", ex);
+        }
+
+        var matches = resolution.MatchValues;
+        var contactId = resolution.Contact?.Id;
+        var results = new List<TableDeletionResult>();
+
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            if (resolution.Contact is { } contact)
+            {
+                var ticketIds = await db.SupportTickets.Where(x => x.ContactId == contact.Id)
+                    .Select(x => x.Id).ToListAsync(cancellationToken);
+                if (ticketIds.Count > 0)
+                {
+                    var messageIds = await db.SupportTicketMessages.Where(x => ticketIds.Contains(x.TicketId))
+                        .Select(x => x.Id).ToListAsync(cancellationToken);
+                    if (messageIds.Count > 0)
+                    {
+                        var attachments = await db.SupportTicketAttachments.Where(x => messageIds.Contains(x.MessageId)).ToListAsync(cancellationToken);
+                        if (attachments.Count > 0) { db.SupportTicketAttachments.RemoveRange(attachments); results.Add(new("SupportTicketAttachments", attachments.Count)); }
+                        var messages = await db.SupportTicketMessages.Where(x => messageIds.Contains(x.Id)).ToListAsync(cancellationToken);
+                        db.SupportTicketMessages.RemoveRange(messages);
+                        results.Add(new("SupportTicketMessages", messages.Count));
+                    }
+                    var tickets = await db.SupportTickets.Where(x => ticketIds.Contains(x.Id)).ToListAsync(cancellationToken);
+                    db.SupportTickets.RemoveRange(tickets);
+                    results.Add(new("SupportTickets", tickets.Count));
+                }
+
+                var deals = await db.Deals.Where(x => x.ContactId == contact.Id).ToListAsync(cancellationToken);
+                if (deals.Count > 0) { db.Deals.RemoveRange(deals); results.Add(new("Deals", deals.Count)); }
+
+                var activities = await db.ContactActivities.Where(x => x.ContactId == contact.Id).ToListAsync(cancellationToken);
+                if (activities.Count > 0) { db.ContactActivities.RemoveRange(activities); results.Add(new("ContactActivities", activities.Count)); }
+
+                var tokens = await db.ClientPortalLoginTokens.Where(x => x.ContactId == contact.Id).ToListAsync(cancellationToken);
+                if (tokens.Count > 0) { db.ClientPortalLoginTokens.RemoveRange(tokens); results.Add(new("ClientPortalLoginTokens", tokens.Count)); }
+
+                var enrollmentIds = await db.EmailCampaignEnrollments.Where(x => x.ContactId == contact.Id)
+                    .Select(x => x.Id).ToListAsync(cancellationToken);
+                if (enrollmentIds.Count > 0)
+                {
+                    var sendLogs = await db.EmailCampaignSendLogs.Where(x => enrollmentIds.Contains(x.EnrollmentId)).ToListAsync(cancellationToken);
+                    if (sendLogs.Count > 0) { db.EmailCampaignSendLogs.RemoveRange(sendLogs); results.Add(new("EmailCampaignSendLogs", sendLogs.Count)); }
+                    var enrollments = await db.EmailCampaignEnrollments.Where(x => enrollmentIds.Contains(x.Id)).ToListAsync(cancellationToken);
+                    db.EmailCampaignEnrollments.RemoveRange(enrollments);
+                    results.Add(new("EmailCampaignEnrollments", enrollments.Count));
+                }
+            }
+
+            var bookings = await db.Bookings
+                .Where(x => (contactId.HasValue && x.ContactId == contactId) || matches.Contains(x.AttendeeEmail))
+                .ToListAsync(cancellationToken);
+            if (bookings.Count > 0) { db.Bookings.RemoveRange(bookings); results.Add(new("Bookings", bookings.Count)); }
+
+            var comments = await db.Comments.Where(x => matches.Contains(x.AuthorEmail)).ToListAsync(cancellationToken);
+            if (comments.Count > 0) { db.Comments.RemoveRange(comments); results.Add(new("Comments", comments.Count)); }
+
+            var aiRuns = await db.SentinelAiRuns.Where(x => matches.Contains(x.CreatedBy)).ToListAsync(cancellationToken);
+            if (aiRuns.Count > 0) { db.SentinelAiRuns.RemoveRange(aiRuns); results.Add(new("SentinelAiRuns", aiRuns.Count)); }
+
+            var listens = await db.PodcastListenProgresses.Where(x => matches.Contains(x.Username)).ToListAsync(cancellationToken);
+            if (listens.Count > 0) { db.PodcastListenProgresses.RemoveRange(listens); results.Add(new("PodcastListenProgresses", listens.Count)); }
+
+            if (resolution.User is { } user)
+            {
+                db.AppUsers.Remove(user);
+                results.Add(new("AppUsers", 1));
+            }
+
+            if (resolution.Contact is { } contactToRemove)
+            {
+                // Invoice/InvoiceLineItem have a real OnDelete(Cascade) FK to Contact - removing
+                // the Contact row would silently cascade-delete them at the database level even
+                // though nothing here ever loaded or touched them, contradicting the decision to
+                // exclude Invoices from automated deletion. Leave the Contact row (and its
+                // Invoices) in place when any exist; everything else about the subject is still
+                // erased above.
+                var hasInvoices = await db.Invoices.AnyAsync(x => x.ContactId == contactToRemove.Id, cancellationToken);
+                if (!hasInvoices)
+                {
+                    db.Contacts.Remove(contactToRemove);
+                    results.Add(new("Contacts", 1));
+                }
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            // Mirrors WikiService's DuplicatePageAsync rollback handling - a Blazor circuit can
+            // retain this scoped DbContext after the failed action, and EF's entity states are
+            // not rewound by a database rollback on their own.
+            if (db is DbContext efContext) efContext.ChangeTracker.Clear();
+            throw;
+        }
+
+        var executedAt = UtcNow;
+        var summary = new SubjectDeletionSummary(executedAt, backupPath, results);
+        request.DeletionExecutedAt = executedAt;
+        request.DeletionSummaryJson = JsonSerializer.Serialize(summary);
+        request.UpdatedAt = executedAt;
+        request.UpdatedBy = await currentUser.GetCurrentUsernameAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+
+        foreach (var result in results)
+        {
+            await AuditAsync("ErasureTableDeleted", request.Id, new Dictionary<string, string?>
+            {
+                ["table"] = result.TableName,
+                ["deletedCount"] = result.DeletedCount.ToString()
+            }, cancellationToken);
+        }
+        await AuditAsync("ErasureExecuted", request.Id, new Dictionary<string, string?>
+        {
+            ["requestNumber"] = request.RequestNumber,
+            ["totalDeleted"] = results.Sum(x => x.DeletedCount).ToString(),
+            ["tablesTouched"] = results.Count.ToString()
+        }, cancellationToken);
+
+        return summary;
     }
 
     public async Task<SecurityIncidentView> CreateIncidentAsync(CreateSecurityIncident input, CancellationToken cancellationToken = default)
@@ -292,6 +516,6 @@ public sealed class PrivacyOperationsService(
         securityAudit.RecordAsync(new(SecurityAuditCategories.SecurityOperations, action, SecurityAuditOutcomes.Succeeded,
             SecurityAuditSeverities.High, "PrivacyOperations", id.ToString(), details), cancellationToken);
 
-    private static PrivacyRequestView Map(PrivacyRequest x) => new(x.Id, x.RequestNumber, x.RequestType, x.SubjectIdentifier, x.Status, x.ReceivedAt, x.DueAt, x.IdentityVerifiedAt, x.CompletedAt, x.DecisionNotes);
+    private static PrivacyRequestView Map(PrivacyRequest x) => new(x.Id, x.RequestNumber, x.RequestType, x.SubjectIdentifier, x.Status, x.ReceivedAt, x.DueAt, x.IdentityVerifiedAt, x.CompletedAt, x.DecisionNotes, x.DeletionExecutedAt);
     private static SecurityIncidentView Map(SecurityIncident x, IEnumerable<SecurityIncidentUpdate> updates) => new(x.Id, x.IncidentNumber, x.Title, x.Summary, x.Severity, x.Status, x.DetectedAt, x.BreachAwarenessAt, x.PersonalDataInvolved, x.EphiInvolved, x.RiskAssessment, x.RegulatorNotificationRequired, x.RegulatorNotificationDueAt, x.RegulatorNotifiedAt, x.ContainedAt, x.ResolvedAt, x.Owner, updates.Select(u => new IncidentUpdateView(u.CreatedAt, u.UpdateType, u.Notes, u.CreatedBy)).ToList());
 }
