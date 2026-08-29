@@ -16,6 +16,7 @@ public partial class SentinelGptPage : ContentPage
     private readonly ConversationSessionStore _sessions;
     private readonly ApprovedMemoryStore _approvedMemory;
     private readonly SecureApiKeyStore _apiKeyStore;
+    private readonly WorkspaceBookmarkStore _workspaceBookmarks;
     private readonly SentinelVoiceService _voice;
     private readonly DeepAnalysisAdvisor _deepAnalysis;
 
@@ -31,8 +32,8 @@ public partial class SentinelGptPage : ContentPage
 
     // Developer Mode: WorkspaceTools has no run_command support here (allowRunCommand: false) -
     // the App Sandbox denies process execution outright even with a fully-resolved PATH, confirmed
-    // empirically. Workspace choice does not persist across relaunches (no security-scoped
-    // bookmark support yet); the folder must be re-picked each time this page is created.
+    // empirically. On MacCatalyst, the chosen folder survives relaunches via a security-scoped
+    // bookmark (WorkspaceBookmarkStore); other platforms still require re-picking each time.
     private WorkspaceTools? _devTools;
     private string? _workspaceRoot;
     private bool _developerModeActive;
@@ -44,6 +45,7 @@ public partial class SentinelGptPage : ContentPage
         ConversationSessionStore sessions,
         ApprovedMemoryStore approvedMemory,
         SecureApiKeyStore apiKeyStore,
+        WorkspaceBookmarkStore workspaceBookmarks,
         SentinelVoiceService voice,
         DeepAnalysisAdvisor deepAnalysis)
     {
@@ -52,6 +54,7 @@ public partial class SentinelGptPage : ContentPage
         _sessions = sessions;
         _approvedMemory = approvedMemory;
         _apiKeyStore = apiKeyStore;
+        _workspaceBookmarks = workspaceBookmarks;
         _voice = voice;
         _deepAnalysis = deepAnalysis;
 
@@ -172,7 +175,7 @@ public partial class SentinelGptPage : ContentPage
 
     private void OnDeepAnalysisToggled(object? sender, ToggledEventArgs e) => _useDeepAnalysis = e.Value;
 
-    private void OnDeveloperModeToggled(object? sender, ToggledEventArgs e)
+    private async void OnDeveloperModeToggled(object? sender, ToggledEventArgs e)
     {
         // Also fires when OnHistorySelectionChanged sets IsToggled programmatically to reflect a
         // loaded conversation's own mode - that path already does its own state setup and calling
@@ -180,6 +183,17 @@ public partial class SentinelGptPage : ContentPage
         if (_syncingDeveloperModeSwitch) return;
         _developerModeActive = e.Value;
         DeveloperRow.IsVisible = _developerModeActive;
+
+        if (_developerModeActive && _workspaceRoot is null)
+        {
+            var remembered = await _workspaceBookmarks.TryResolveAsync();
+            if (remembered is not null && Directory.Exists(remembered))
+            {
+                _workspaceRoot = remembered;
+                _devTools = CreateDeveloperTools(_workspaceRoot);
+            }
+        }
+
         WorkspacePathLabel.Text = _workspaceRoot ?? "No folder chosen yet.";
         ResetConversationState();
     }
@@ -208,6 +222,7 @@ public partial class SentinelGptPage : ContentPage
         _workspaceRoot = result.Folder.Path;
         _devTools = CreateDeveloperTools(_workspaceRoot);
         WorkspacePathLabel.Text = _workspaceRoot;
+        await _workspaceBookmarks.PersistAsync(_workspaceRoot);
         ResetConversationState();
     }
 

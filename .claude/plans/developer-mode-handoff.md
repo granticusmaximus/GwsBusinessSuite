@@ -18,8 +18,19 @@ correct, fully-resolved `PATH`). `WorkspaceTools` therefore has a new `allowRunC
 `allowRunCommand: false`, so `run_command` is unavailable from this tab specifically. Don't
 re-investigate this if it comes up again - it's a hard sandbox limitation, not a bug to fix.
 
-**Descoped for v1, not bugs**: the chosen workspace folder does not persist across app relaunches
-(no security-scoped bookmark support yet - must re-pick each launch).
+**Descoped for v1, not bugs**: ~~the chosen workspace folder does not persist across app relaunches
+(no security-scoped bookmark support yet - must re-pick each launch).~~ **Fixed 2026-08-29**: added
+`WorkspaceBookmarkStore` (`src/GwsBusinessSuite.App/WorkspaceBookmarkStore.cs`), which persists a
+macOS security-scoped bookmark (`NSUrl.CreateBookmarkData`/`FromBookmarkData`, both gated behind
+`#if MACCATALYST` - other platforms keep today's pick-every-time behavior, not a regression there)
+to a file in `FileSystem.Current.AppDataDirectory`. `SentinelGptPage` persists a bookmark whenever
+a folder is picked and auto-resolves it (`StartAccessingSecurityScopedResource`) when Developer
+Mode is toggled on with no workspace chosen yet this session. Could not compile-check the
+MacCatalyst-specific branch locally - this dotnet install's MacCatalyst SDK requires Xcode 26.6
+and only Xcode-beta 27.0 is installed here (pre-existing environment gap, not caused by this
+change); the Android build of the same file compiles clean, and the Apple API shapes were verified
+against Microsoft Learn docs. Real verification is CI's "Native Clients" Apple leg, matching how
+this feature's original MacCatalyst work was verified above.
 
 **Verified**: `./scripts/verify-release.sh` passed locally. CI: "Deploy to DigitalOcean" and the
 Apple/Android legs of "Native Clients" passed. The Windows leg of "Native Clients" failed, but on

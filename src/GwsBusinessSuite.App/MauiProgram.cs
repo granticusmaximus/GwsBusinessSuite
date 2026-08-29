@@ -33,6 +33,8 @@ public static class MauiProgram
 			new ApprovedMemoryStore(Path.Combine(FileSystem.Current.AppDataDirectory, "sentinelgpt-approved-memory.json")));
 		builder.Services.AddSingleton(_ =>
 			new SecureApiKeyStore(Path.Combine(FileSystem.Current.AppDataDirectory, "sentinelgpt-grounding-key.txt")));
+		builder.Services.AddSingleton(_ =>
+			new WorkspaceBookmarkStore(Path.Combine(FileSystem.Current.AppDataDirectory, "sentinelgpt-workspace-bookmark.dat")));
 		builder.Services.AddSingleton<SentinelGroundingClient>();
 		builder.Services.AddSingleton<NativeToolExecutor>();
 		builder.Services.AddSingleton<SentinelVoiceService>();
