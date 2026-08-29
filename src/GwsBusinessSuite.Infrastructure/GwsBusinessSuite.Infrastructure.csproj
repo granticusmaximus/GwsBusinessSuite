@@ -8,16 +8,16 @@
   <ItemGroup>
     <PackageReference Include="CodeHollow.FeedReader" Version="1.2.6" />
     <PackageReference Include="Docker.DotNet" Version="3.125.15" />
-    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="10.0.10" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="10.0.11" />
     <!-- IPasswordHasher<T>/PasswordHasher<T> only - not the full ASP.NET Core Identity
          stack - needed by UserManagementService without pulling in the web SDK's shared
          framework into this class library. -->
-    <PackageReference Include="Microsoft.Extensions.Identity.Core" Version="10.0.10" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10">
+    <PackageReference Include="Microsoft.Extensions.Identity.Core" Version="10.0.11" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.11">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
     <PackageReference Include="MaxMind.GeoIP2" Version="6.1.0" />
     <PackageReference Include="MailKit" Version="4.17.0" />
     <!-- Pin above the version Microsoft.Data.Sqlite.Core pulls in transitively (2.1.11),
@@ -28,18 +28,18 @@
          only uses SshClient/SftpClient (see SshTerminalService.cs, DatabaseBackupService.cs),
          never ScpClient, but the NuGet audit flags the package regardless of which APIs are used. -->
     <PackageReference Include="SSH.NET" Version="2026.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.10" />
-    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.8.0" />
-    <PackageReference Include="SkiaSharp" Version="3.119.4" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.4" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.9.0" />
+    <PackageReference Include="SkiaSharp" Version="4.151.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.151.1" />
     <!-- Community license (free for individuals/small companies) - accepted at
          startup via QuestPDF.Settings.License in ResumePdfService. -->
-    <PackageReference Include="QuestPDF" Version="2025.7.0" />
+    <PackageReference Include="QuestPDF" Version="2026.8.0" />
     <!-- Headless-browser scraping for LocalEventsScraperService - the only sources this
          needs (Perry, GA's FullCalendar widget and Robins Region Chamber's GrowthZone
          cards) render their event data client-side, so plain HttpClient + regex (this
          file's usual pattern for GovernmentIntelligenceService) can't see it at all. -->
-    <PackageReference Include="Microsoft.Playwright" Version="1.61.0" />
+    <PackageReference Include="Microsoft.Playwright" Version="1.62.0" />
     <PackageReference Include="Stripe.net" Version="52.3.0" />
   </ItemGroup>
 
