@@ -142,6 +142,16 @@ jobs:
             git checkout main
             git reset --hard origin/main
 
+            # Defensive disk cleanup before building, not just after a successful one below - a
+            # deploy that fails mid-build (e.g. "no space left on device" while extracting a
+            # layer, observed 2026-08-29) exits under `set -e` before ever reaching the
+            # post-deploy prune, so the next attempt can start already close to full. Also prunes
+            # build cache, which `docker image prune` alone never touches and which is the
+            # biggest disk consumer for this repeated multi-stage .NET+Playwright image - without
+            # `-a`/`--volumes`, this only removes dangling images/stopped containers/unused
+            # networks/build cache, never the running container's image or any data volume.
+            docker system prune -f || true
+
             ROLLBACK_COMMIT="$PREVIOUS_COMMIT"
             if [ "$REHEARSE_ROLLBACK" = "true" ]; then
               # A normal push deployment may already have installed the workflow-dispatch SHA
