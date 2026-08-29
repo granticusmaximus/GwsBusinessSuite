@@ -29,13 +29,14 @@
 
                 <div class="mb-3">
                     <label class="form-label fw-semibold small">Username</label>
-                    <input class="form-control" name="username" autocomplete="username" required />
+                    <input class="form-control" id="gws-login-username" name="username" autocomplete="username"
+                           required />
                 </div>
 
                 <div class="mb-3">
                     <label class="form-label fw-semibold small">Password</label>
-                    <input class="form-control" type="password" name="password" autocomplete="current-password"
-                           required />
+                    <input class="form-control" id="gws-login-password" type="password" name="password"
+                           autocomplete="current-password" required />
                 </div>
 
                 <button type="submit" class="btn btn-primary w-100">Sign In</button>
@@ -47,6 +48,23 @@
         </div>
     </div>
 </div>
+
+<script>
+    // Some WKWebView-hosted clients (e.g. the native macOS app) don't move focus on Tab
+    // between plain form fields the way a full browser does, so wire it explicitly here.
+    (function () {
+        var usernameInput = document.getElementById('gws-login-username');
+        var passwordInput = document.getElementById('gws-login-password');
+        if (usernameInput && passwordInput) {
+            usernameInput.addEventListener('keydown', function (e) {
+                if (e.key === 'Tab' && !e.shiftKey) {
+                    e.preventDefault();
+                    passwordInput.focus();
+                }
+            });
+        }
+    })();
+</script>
 
 @code {
     [SupplyParameterFromQuery(Name = "error")]
