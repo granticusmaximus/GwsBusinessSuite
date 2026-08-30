@@ -26,7 +26,7 @@
                     <option value="@SentinelAccessLevels.Edit">Can edit</option>
                     <option value="@SentinelAccessLevels.FullAccess">Full access</option>
                 </select>
-                <button type="button" class="btn btn-primary" @onclick="SavePermissionAsync" disabled="@string.IsNullOrWhiteSpace(_username)">Invite</button>
+                <button type="button" class="btn btn-warning" @onclick="SavePermissionAsync" disabled="@string.IsNullOrWhiteSpace(_username)">Invite</button>
             </div>
             @foreach (var permission in _snapshot.Permissions)
             {

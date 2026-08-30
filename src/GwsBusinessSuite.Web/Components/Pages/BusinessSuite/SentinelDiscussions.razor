@@ -93,7 +93,7 @@
                     <option value="@block.Id">Block: @block.Preview</option>
                 }
             </select>
-            <button type="button" class="btn btn-sm btn-primary" @onclick="CreateDiscussionAsync"
+            <button type="button" class="btn btn-sm btn-warning" @onclick="CreateDiscussionAsync"
                     disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewDiscussionBody))">
                 Add discussion
             </button>
@@ -164,7 +164,7 @@
                                 @foreach (var emoji in ReactionChoices)
                                 {
                                     var reaction = comment.Reactions.FirstOrDefault(item => item.Emoji == emoji);
-                                    <button type="button" class="btn btn-xs @(reaction?.ReactedByCurrentUser == true ? "btn-primary" : "btn-outline-secondary")"
+                                    <button type="button" class="btn btn-xs @(reaction?.ReactedByCurrentUser == true ? "btn-warning" : "btn-outline-secondary")"
                                             @onclick="() => ToggleReactionAsync(comment.Id, emoji)" title="React @emoji">
                                         @emoji
                                         @if (reaction is not null)
@@ -188,7 +188,7 @@
                             <ProfessionalWysiwygEditor @bind-Value="ReplyBody" Compact="true" MinHeight="90px"
                                                        Placeholder="Write a reply…" AriaLabel="Discussion reply" />
                             <div class="d-flex gap-2 mt-2">
-                                <button type="button" class="btn btn-sm btn-primary" @onclick="SubmitReplyAsync"
+                                <button type="button" class="btn btn-sm btn-warning" @onclick="SubmitReplyAsync"
                                         disabled="@(IsBusy || string.IsNullOrWhiteSpace(ReplyBody))">Reply</button>
                                 <button type="button" class="btn btn-sm btn-link" @onclick="CancelReply">Cancel</button>
                             </div>

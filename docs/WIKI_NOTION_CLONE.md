@@ -215,6 +215,8 @@ descendant override further down the file - safe today because every usage site 
 `.sentinel-workspace`, but silently wrong if either component is ever reused outside it (a share
 surface, an embed). Neither blocks functionality; both are visual-polish debt.
 
+A 2026-08-30 UI/UX audit against Notion re-verified this section live and found `SentinelDiscussions`'s and `SentinelSharePanel`'s dark theming itself now reads reasonably close to the rest of Sentinel (better than "generic admin chrome" suggests) - but their `Add discussion`, reaction-toggle, `Reply`, and share-panel `Invite` buttons were still raw Bootstrap `btn-primary`, rendering bright blue against Sentinel's all-amber accent palette everywhere else; fixed to `btn-warning` (the same class every other Sentinel accent button in `Wiki.razor` already uses). `SentinelTemplates.razor`'s generic-admin-chrome gap (paragraph-heavy settings-page layout vs. Notion's visual template gallery) was not addressed - it's a bigger, more opinionated rework than a color-class fix.
+
 ## Remaining delivery plan
 
 Sentinel's remaining Notion-class work is delivered in the following dependency order. Each
@@ -312,8 +314,13 @@ screens.
    saves at block granularity, Blazor Server's own circuit-resume already recovers a brief
    disconnect with no data loss (the in-memory editor state was never lost), and a longer
    disconnect that forces a full reload now loses at most the last ~1.5s of unsaved edits
-   thanks to Phase 2's row autosave - the equivalent for the main page editor (autosave, not
-   just revert-safe reload) remains open.
+   thanks to Phase 2's row autosave - `Wiki.razor`'s main page editor now has the same 1.5s
+   debounced autosave (`ScheduleAutosave`/`PerformAutosaveAsync`, serialized against the explicit
+   "Save changes" button via `_saveLock` so the two paths can't race and silently drop content),
+   passing `createRevisionCheckpoint=false` so only an explicit save or revert still mints a
+   version-history entry - the same content/history split the row pages already use. This also
+   fixed a brand-new, never-saved page being lost entirely if the user navigated away before ever
+   clicking Save, since the first autosave tick now creates the real `WikiPage` row.
 6. **Knowledge navigation** ✅ (saved searches, database-row mentions) — **saved searches**: a
    new `SentinelSavedSearch` entity (Username, Query) lets a user bookmark the current search
    from a new button next to the search box; a "Saved searches" section in the sidebar

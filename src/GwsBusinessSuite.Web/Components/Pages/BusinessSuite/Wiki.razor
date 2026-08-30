@@ -2961,9 +2961,12 @@
         {
             await _paletteInputRef.FocusAsync();
         }
-        catch (JSException)
+        catch (Exception ex) when (ex is JSException or InvalidOperationException)
         {
-            // The input may not have finished rendering yet on a very fast repeat keypress.
+            // The input may not have finished rendering yet on a very fast repeat keypress -
+            // FocusAsync throws InvalidOperationException (not JSException) when the
+            // ElementReference hasn't been captured by a completed render yet, which crashed the
+            // whole circuit here before this catch also handled that exception type.
         }
     }
 

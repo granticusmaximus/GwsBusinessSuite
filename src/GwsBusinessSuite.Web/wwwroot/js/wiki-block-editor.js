@@ -638,6 +638,13 @@ function createBlockBody(block, state) {
             checkbox.closest('.wiki-block').dataset.checked = checkbox.checked ? 'true' : 'false';
             notifyChanged(state);
         });
+        // Belt-and-suspenders: this checkbox lives inside the page's <EditForm>, so if focus
+        // ever lands here (a stray Tab, or a future bug like the one primaryFocusTarget() above
+        // fixes), Enter must not be allowed to trigger the browser's native implicit form
+        // submission - Notion's own to-do checkbox has no such trap since Enter never reaches it.
+        checkbox.addEventListener('keydown', event => {
+            if (event.key === 'Enter') event.preventDefault();
+        });
         body.appendChild(checkbox);
     }
 
@@ -2601,7 +2608,7 @@ function convertToNewSyncedBlock(state, blockEl) {
         const newEl = createBlockElement(block, state);
         blockEl.replaceWith(newEl);
         refreshBlockPresentation(state.container);
-        const focusable = newEl.querySelector('.wiki-block-content, input');
+        const focusable = primaryFocusTarget(newEl);
         if (focusable) focusable.focus();
         notifyChanged(state);
     }).catch(() => { /* circuit may be gone */ });
@@ -2615,7 +2622,7 @@ function convertBlockType(state, blockEl, newType) {
     const newEl = createBlockElement(block, state);
     blockEl.replaceWith(newEl);
     refreshBlockPresentation(state.container);
-    const focusable = newEl.querySelector('.wiki-block-content, input');
+    const focusable = primaryFocusTarget(newEl);
     if (focusable) focusable.focus();
     notifyChanged(state);
     return newEl;
@@ -4021,8 +4028,20 @@ function placeCaretAtTextOffset(content, offset) {
     content.focus();
 }
 
+// A to-do block has both a checkbox <input> and a .wiki-block-content div; querySelector on a
+// combined selector list returns whichever matches first in DOM order, which is the checkbox
+// (it's appended before the content div in createBlockBody). That silently sent typed text
+// nowhere - and, worse, left focus on a checkbox inside the page's <EditForm>, where pressing
+// Enter triggers the browser's native implicit form submission instead of splitting the block.
+// Every block type that has no .wiki-block-content at all (divider, table, columns, ...) also
+// has no <input> to fall back to, so preferring content and only falling back to input when
+// content is genuinely absent is correct for every block type, not just to-do.
+function primaryFocusTarget(blockEl) {
+    return blockEl.querySelector('.wiki-block-content') || blockEl.querySelector('input');
+}
+
 function focusBlock(blockEl) {
-    const target = blockEl.querySelector('.wiki-block-content, input');
+    const target = primaryFocusTarget(blockEl);
     if (target) target.focus();
 }
 
