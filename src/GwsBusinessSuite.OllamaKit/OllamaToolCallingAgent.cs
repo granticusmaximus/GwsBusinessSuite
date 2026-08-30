@@ -98,10 +98,13 @@ public sealed class OllamaToolCallingAgent
                 _messages.Add(new OllamaChatMessage("assistant", content.ToString()));
                 _messages.Add(new OllamaChatMessage("tool", JsonSerializer.Serialize(new
                 {
-                    error = "That wasn't a valid tool call. Tool calls must be a JSON object with exactly " +
-                            "\"name\" and \"arguments\" (not \"parameters\"), and \"arguments\" must be " +
-                            "well-formed JSON (no tokens like undefined - omit a field instead). Retry the " +
-                            "tool call correctly, or answer in plain text if no tool is actually needed."
+                    error = "That wasn't a real tool call - either it was narrated in prose instead of issued " +
+                            "through the tool-calling mechanism, or it used a placeholder/example value instead " +
+                            "of a real one, or the JSON was malformed (wrong field name, invalid tokens like " +
+                            "undefined). Never describe what a tool call would look like and never invent a " +
+                            "placeholder id/argument - either issue the tool call for real with a real argument " +
+                            "value you actually have (e.g. an id from a prior tool result), or, if you don't have " +
+                            "what a tool call needs, say so directly in plain text instead of showing an example."
                 })) { ToolName = "invalid_tool_call" });
                 continue;
             }

@@ -42,12 +42,36 @@ public static class OllamaToolCallParsing
     // corrective retry instead of showing the raw, malformed attempt to the user as if it were a
     // real answer. Deliberately narrower than "any JSON-looking text" - a genuine final answer is
     // never a bare JSON object whose properties are "name" alongside "arguments"/"parameters".
-    public static bool LooksLikeFailedToolCallAttempt(string content)
+    //
+    // Scans every top-level balanced-brace object in the content, not just a whole-content match -
+    // a model that isn't confident enough to emit a clean tool call will sometimes narrate around
+    // it instead ("I don't have direct access, so I'll use the get_page function: {"name":...}"),
+    // which used to slip past this check entirely (it didn't start with '{') and get shown to the
+    // user as a normal final answer instead of being corrected. That narrated-example shape is just
+    // as much a failed attempt as a bare malformed object - the model needs the same "call it for
+    // real, or say you can't" correction either way.
+    public static bool LooksLikeFailedToolCallAttempt(string content) =>
+        ExtractTopLevelJsonObjectSpans(content).Any(candidate =>
+            candidate.Contains("\"name\"") && (candidate.Contains("\"arguments\"") || candidate.Contains("\"parameters\"")));
+
+    private static IEnumerable<string> ExtractTopLevelJsonObjectSpans(string content)
     {
-        var candidate = content.Trim();
-        if (!candidate.StartsWith('{') || !candidate.Contains("\"name\""))
-            return false;
-        return candidate.Contains("\"arguments\"") || candidate.Contains("\"parameters\"");
+        var depth = 0;
+        var start = -1;
+        for (var i = 0; i < content.Length; i++)
+        {
+            if (content[i] == '{')
+            {
+                if (depth == 0) start = i;
+                depth++;
+            }
+            else if (content[i] == '}' && depth > 0)
+            {
+                depth--;
+                if (depth == 0 && start >= 0)
+                    yield return content[start..(i + 1)];
+            }
+        }
     }
 
     private static bool TryParseOneContentToolCall(

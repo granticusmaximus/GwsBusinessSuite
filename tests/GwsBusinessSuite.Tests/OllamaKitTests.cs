@@ -130,6 +130,14 @@ public sealed class OllamaKitTests : IDisposable
     [InlineData("""The deploy process pushes to main and the pipeline handles it.""", false)]
     [InlineData("""{"ok":true}""", false)]
     [InlineData("", false)]
+    // A model unsure enough to narrate around a call instead of just issuing it - "I don't have
+    // direct access, so I'll use get_page: {json}" - used to slip past this check entirely
+    // because the content didn't *start* with '{'. It's just as much a failed attempt as a bare
+    // malformed object and needs the same corrective retry, not a pass-through as a real answer.
+    [InlineData("""I don't have direct access, so I will use the "get_page" function: {"name":"get_page","parameters":{"pageId":"<your_page_id>"}}""", true)]
+    // An unrelated JSON example in a genuine answer (no tool-call shape: no "arguments"/
+    // "parameters" alongside "name") must not false-positive into an unnecessary retry.
+    [InlineData("""Sure, here's an example config: {"name":"my-app","version":"1.0"} - nothing to do with tools.""", false)]
     public void LooksLikeFailedToolCallAttempt_RecognizesJsonShapedAttemptsOnly(string content, bool expected) =>
         OllamaToolCallParsing.LooksLikeFailedToolCallAttempt(content).Should().Be(expected);
 
