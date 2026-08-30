@@ -85,6 +85,8 @@
                             </Border>
 
                             <VerticalStackLayout IsVisible="{Binding IsAssistant}" Spacing="4">
+                                <Label Text="via server (local Ollama unavailable)" IsVisible="{Binding IsFromServerFallback}"
+                                       TextColor="#F59E0B" FontSize="11" FontAttributes="Bold" Margin="4,0,0,0" />
                                 <Border Padding="12,8" HorizontalOptions="Start" MaximumWidthRequest="560"
                                         BackgroundColor="{Binding BubbleColor}"
                                         Stroke="#292524" StrokeShape="RoundRectangle 10">

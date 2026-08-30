@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.NativeApp;
 using GwsBusinessSuite.Application.Users;
 using GwsBusinessSuite.Application.SecurityAudit;
 using GwsBusinessSuite.Domain.Entities;
@@ -225,10 +226,7 @@ public sealed class UserManagementService(
         string providedSecret, string configuredSecret, string username, string password,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(configuredSecret) || string.IsNullOrEmpty(providedSecret)
-            || providedSecret.Length != configuredSecret.Length
-            || !CryptographicOperations.FixedTimeEquals(
-                Encoding.UTF8.GetBytes(providedSecret), Encoding.UTF8.GetBytes(configuredSecret)))
+        if (!NativeAppSecretGate.IsValid(providedSecret, configuredSecret))
         {
             return null;
         }

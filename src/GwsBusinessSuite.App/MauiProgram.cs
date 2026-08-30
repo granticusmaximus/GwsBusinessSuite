@@ -48,6 +48,7 @@ public static class MauiProgram
 			new DeviceSecretStore(Path.Combine(FileSystem.Current.AppDataDirectory, "sentinelgpt-device-secret.txt")));
 		builder.Services.AddSingleton(_ => new HttpClient(new HttpClientHandler { UseCookies = false }));
 		builder.Services.AddSingleton<NativeAppAuthService>();
+		builder.Services.AddSingleton<NativeFallbackChatService>();
 		builder.Services.AddTransient<MainPage>();
 
 #if ANDROID

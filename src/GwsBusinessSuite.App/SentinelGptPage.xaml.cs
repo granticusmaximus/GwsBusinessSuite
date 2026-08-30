@@ -19,6 +19,16 @@ public partial class SentinelGptPage : ContentPage
     private readonly WorkspaceBookmarkStore _workspaceBookmarks;
     private readonly SentinelVoiceService _voice;
     private readonly DeepAnalysisAdvisor _deepAnalysis;
+    private readonly NativeFallbackChatService _fallbackChat;
+    private readonly DeviceSecretStore _deviceSecretStore;
+
+    // A few minutes, not DeepAnalysisAdvisor's 2-minute sub-advisor bound - this is the primary
+    // chat turn, and CPU-bound local inference can legitimately take longer on slower hardware
+    // (the server's own SentinelGptDefaults.DefaultTimeoutMinutes is 15, tuned for the same CPU
+    // prefill reality). Long enough that a healthy-but-slow local answer isn't cut off and
+    // needlessly routed to the server; short enough that a genuinely stuck/unreachable local
+    // Ollama doesn't leave the user waiting indefinitely before the fallback kicks in.
+    private static readonly TimeSpan LocalTurnTimeout = TimeSpan.FromMinutes(5);
 
     private readonly ObservableCollection<ChatMessageViewModel> _messages = [];
     private readonly ObservableCollection<ConversationSummary> _history = [];
@@ -47,7 +57,9 @@ public partial class SentinelGptPage : ContentPage
         SecureApiKeyStore apiKeyStore,
         WorkspaceBookmarkStore workspaceBookmarks,
         SentinelVoiceService voice,
-        DeepAnalysisAdvisor deepAnalysis)
+        DeepAnalysisAdvisor deepAnalysis,
+        NativeFallbackChatService fallbackChat,
+        DeviceSecretStore deviceSecretStore)
     {
         _ollama = ollama;
         _toolExecutor = toolExecutor;
@@ -57,6 +69,8 @@ public partial class SentinelGptPage : ContentPage
         _workspaceBookmarks = workspaceBookmarks;
         _voice = voice;
         _deepAnalysis = deepAnalysis;
+        _fallbackChat = fallbackChat;
+        _deviceSecretStore = deviceSecretStore;
 
         InitializeComponent();
         Transcript.ItemsSource = _messages;
@@ -275,18 +289,28 @@ public partial class SentinelGptPage : ContentPage
         if (_sending) return;
         var prompt = PromptEditor.Text?.Trim();
         if (string.IsNullOrWhiteSpace(prompt)) return;
-        if (ModelPicker.SelectedItem is not string model)
-        {
-            StatusLabel.Text = "No local model selected. Run 'sentinelcli models sync' in Terminal, then reopen this tab.";
-            return;
-        }
         if (_developerModeActive && _devTools is null)
         {
             StatusLabel.Text = "Choose a folder above before sending in Developer mode.";
             return;
         }
 
-        _agent ??= CreateAgent(model);
+        if (ModelPicker.SelectedItem is string model)
+        {
+            _agent ??= CreateAgent(model);
+        }
+        else if (_developerModeActive)
+        {
+            // Developer Mode's local file tools have no server equivalent - falling back would
+            // silently drop write-tool access while still claiming to be in Developer Mode,
+            // which is worse than just asking for local Ollama to be running.
+            StatusLabel.Text = "No local model selected. Run 'sentinelcli models sync' in Terminal, then reopen this tab.";
+            return;
+        }
+        // else: no local model at all (Ollama unreachable or nothing installed) - RunTurnAsync
+        // sees _agent is null and goes straight to the server fallback, if one is configured,
+        // rather than blocking the user from sending at all.
+
         PromptEditor.Text = string.Empty;
         await RunTurnAsync(prompt);
     }
@@ -301,8 +325,6 @@ public partial class SentinelGptPage : ContentPage
 
     private async Task RunTurnAsync(string prompt)
     {
-        if (_agent is null) return;
-
         _sending = true;
         SendButton.IsEnabled = false;
         _turnCts?.Dispose();
@@ -315,19 +337,56 @@ public partial class SentinelGptPage : ContentPage
         var answer = new ChatMessageViewModel(isUser: false);
         _messages.Add(answer);
 
+        try
+        {
+            var localSucceeded = _agent is not null && await TryRunLocalTurnAsync(prompt, answer, _turnCts.Token);
+            if (!localSucceeded)
+                await RunFallbackTurnAsync(prompt, answer, _turnCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Page navigated away mid-turn - nothing left to show a result to.
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException)
+        {
+            answer.Text = $"Request failed: {ex.Message}";
+            answer.IsError = true;
+            answer.IsComplete = true;
+            answer.RetryPrompt = prompt;
+        }
+        finally
+        {
+            _sending = false;
+            SendButton.IsEnabled = true;
+        }
+    }
+
+    // Returns true once the local model has answered successfully (the message is already
+    // finalized and the session saved). Returns false - rather than throwing - when local Ollama
+    // couldn't handle this turn (unreachable, model error, or LocalTurnTimeout firing), so the
+    // caller falls back to the server. A genuine navigate-away (turnToken itself cancelled, not
+    // just this attempt's own linked timeout) still propagates as OperationCanceledException -
+    // there's nothing to fall back to once the page is gone.
+    private async Task<bool> TryRunLocalTurnAsync(string prompt, ChatMessageViewModel answer, CancellationToken turnToken)
+    {
+        if (_agent is null) return false;
+
+        using var localCts = CancellationTokenSource.CreateLinkedTokenSource(turnToken);
+        localCts.CancelAfter(LocalTurnTimeout);
+
         var effectivePrompt = prompt;
         try
         {
             if (_useDeepAnalysis)
             {
                 answer.Text = "Consulting specialist advisers...";
-                var advisory = await _deepAnalysis.BuildAdvisoryContextAsync(prompt, _turnCts.Token);
+                var advisory = await _deepAnalysis.BuildAdvisoryContextAsync(prompt, localCts.Token);
                 if (!string.IsNullOrWhiteSpace(advisory))
                     effectivePrompt = $"{prompt}\n\n{advisory}";
                 answer.Text = string.Empty;
             }
 
-            var approvedContext = await _approvedMemory.BuildContextAsync(prompt, _turnCts.Token);
+            var approvedContext = await _approvedMemory.BuildContextAsync(prompt, localCts.Token);
             if (!string.IsNullOrWhiteSpace(approvedContext))
                 effectivePrompt = $"{effectivePrompt}\n\n{approvedContext}";
 
@@ -336,7 +395,7 @@ public partial class SentinelGptPage : ContentPage
             // string, never reads or writes the flag itself, so there's no race between the
             // enumerator advancing and a previous UI update still being queued.
             var showingActivity = false;
-            await foreach (var turnEvent in _agent.RunTurnStreamingAsync(effectivePrompt, _turnCts.Token))
+            await foreach (var turnEvent in _agent.RunTurnStreamingAsync(effectivePrompt, localCts.Token))
             {
                 if (turnEvent.ToolActivity is { } activity)
                 {
@@ -358,23 +417,53 @@ public partial class SentinelGptPage : ContentPage
                 _currentSessionPath, PickerModel(), _agent.Messages, CancellationToken.None,
                 workspaceRoot: _developerModeActive ? _workspaceRoot : null);
             RefreshHistory();
+            return true;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (turnToken.IsCancellationRequested)
         {
-            // Page navigated away mid-turn - nothing left to show a result to.
+            throw;
         }
-        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException)
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException or OperationCanceledException)
         {
-            answer.Text = $"Request failed: {ex.Message}";
+            // Ollama unreachable, the model errored, or LocalTurnTimeout fired (a bare
+            // OperationCanceledException here, since turnToken itself wasn't cancelled) - fall
+            // back to the server instead of leaving this as a dead end.
+            return false;
+        }
+    }
+
+    // The fallback deliberately never touches _agent/_sessions - it bypasses the local agent
+    // entirely (no tool-calling, no conversation continuity with it), so folding its answer into
+    // local session state would misrepresent what the local model actually said if this
+    // conversation is ever resumed locally. It's a one-off answer for this turn only.
+    private async Task RunFallbackTurnAsync(string prompt, ChatMessageViewModel answer, CancellationToken turnToken)
+    {
+        var deviceSecret = await _deviceSecretStore.GetAsync();
+        if (string.IsNullOrWhiteSpace(deviceSecret))
+        {
+            answer.Text = "Local Ollama couldn't answer this one, and no device secret is configured for the " +
+                "server fallback. Start Ollama on this Mac (or install the model), or set one up via the lock " +
+                "icon in the toolbar.";
             answer.IsError = true;
             answer.IsComplete = true;
             answer.RetryPrompt = prompt;
+            return;
         }
-        finally
+
+        answer.Text = "Local Ollama couldn't answer this one - trying the server instead...";
+        var result = await _fallbackChat.CompleteAsync(deviceSecret, prompt, turnToken);
+        if (!result.Succeeded || string.IsNullOrWhiteSpace(result.Completion))
         {
-            _sending = false;
-            SendButton.IsEnabled = true;
+            answer.Text = $"Local Ollama failed, and the server fallback also failed: {result.ErrorMessage ?? "no response"}";
+            answer.IsError = true;
+            answer.IsComplete = true;
+            answer.RetryPrompt = prompt;
+            return;
         }
+
+        answer.Text = result.Completion;
+        answer.IsFromServerFallback = true;
+        answer.IsComplete = true;
     }
 
     private string PickerModel() => ModelPicker.SelectedItem as string ?? PreferredModel;

@@ -88,6 +88,25 @@ dotnet restore src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -p:GwsClient
 dotnet build src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-windows10.0.19041.0 -c Release --no-restore -r win-x64 -p:GwsClientTargetFramework=net10.0-windows10.0.19041.0 -p:WindowsAppSDKSelfContained=true
 ```
 
+## Device login and the native SentinelGPT tab (macOS)
+
+The native Mac app's toolbar has a lock-icon "Configure device login" button that saves a shared
+secret (matching the server's `NATIVE_APP_DEVICE_SECRET`) via a `POST /auth/device-login` call -
+this lets the app sign in without the browser's mandatory MFA challenge, since it authenticates
+with a device secret the user provisions once instead. It is optional; without a secret
+configured, the app's WebView falls back to the normal browser login (with MFA) exactly as before.
+
+Separately, the Mac app has its own native SentinelGPT tab - not the WebView-rendered admin
+Sentinel page - which by design runs inference against Ollama models installed locally on that
+Mac (`127.0.0.1:11434`), not this server's own Ollama container. This keeps that conversation
+entirely on-device. If the local model can't handle a turn (Ollama isn't running, the model isn't
+installed, or it times out), and a device secret is already configured, the tab automatically
+falls back to a plain, non-tool-calling completion from the server's own Ollama via
+`POST /native/fallback-chat` - the same device-secret trust boundary as device-login, not a user
+login. Any answer that came from this fallback is visibly labeled "via server" in the transcript,
+since the whole point of the local-first design is that the exception stays visible rather than
+silently blending in.
+
 ## Sentinel menu-bar companion (macOS)
 
 `src/GwsBusinessSuite.SentinelMenuBar` is a small, separate `net10.0-macos` app (not part of the

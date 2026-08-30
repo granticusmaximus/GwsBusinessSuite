@@ -10,6 +10,7 @@ public sealed class ChatMessageViewModel(bool isUser) : INotifyPropertyChanged
     private bool _isApproved;
     private bool _isComplete;
     private string? _retryPrompt;
+    private bool _isFromServerFallback;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -70,6 +71,15 @@ public sealed class ChatMessageViewModel(bool isUser) : INotifyPropertyChanged
     }
 
     public bool HasRetryPrompt => RetryPrompt is not null;
+
+    // Set when this answer came from the server fallback (see NativeFallbackChatService) instead
+    // of the user's own local Ollama - the whole point of the local-first business rule is that
+    // this exception stays visible rather than silently blending in with local answers.
+    public bool IsFromServerFallback
+    {
+        get => _isFromServerFallback;
+        set { _isFromServerFallback = value; OnPropertyChanged(); }
+    }
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
