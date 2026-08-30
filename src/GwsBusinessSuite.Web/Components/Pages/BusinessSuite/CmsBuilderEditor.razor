@@ -52,7 +52,7 @@
             </button>
         </div>
         <button class="btn btn-outline-secondary" @onclick="BackToList">Back</button>
-        <button class="btn btn-primary" @onclick="() => SaveAsync()" disabled="@(_isBusy || _page is null)">
+        <button class="btn btn-primary" @onclick="() => SaveAsync()" disabled="@(_isBusy || _page is null || _layoutParseFailed)">
             <i class="bi bi-cloud-check me-1"></i>@(_isBusy ? "Saving…" : "Save")
         </button>
     </div>
@@ -86,6 +86,14 @@ else if (_page is null)
         <div class="canvas-empty-icon"><i class="bi bi-exclamation-triangle"></i></div>
         <h3>Page not found</h3>
         <p>This page may have been deleted. <a href="/admin/pages">Back to Pages</a>.</p>
+    </div>
+}
+else if (_layoutParseFailed)
+{
+    <div class="canvas-empty-state">
+        <div class="canvas-empty-icon"><i class="bi bi-exclamation-triangle"></i></div>
+        <h3>Content could not be loaded</h3>
+        <p>See the message above. <a href="/admin/pages">Back to Pages</a>.</p>
     </div>
 }
 else
@@ -1376,6 +1384,10 @@ else
     private bool _isAdmin;
     private bool _isLoading = true;
     private bool _isBusy;
+    // Set when the loaded page's BlocksJson didn't parse as a valid layout (corrupted/wrong-shaped
+    // data, not merely empty - see CmsBuilderJson.TryParseLayout). Blocks Save/autosave so the
+    // editor can never silently persist an empty canvas over content it failed to understand.
+    private bool _layoutParseFailed;
     private string _statusMessage = string.Empty;
     private string _errorMessage = string.Empty;
     private CancellationTokenSource? _autosaveCts;
@@ -1700,10 +1712,17 @@ else
                 return;
             }
 
+            if (!CmsBuilderJson.TryParseLayout(_page.BlocksJson, out var parsedLayout))
+            {
+                _layoutParseFailed = true;
+                _errorMessage = "This page's saved content could not be read - it may be corrupted or in an unrecognized format. Editing has been disabled here to avoid overwriting it; check the page's revision history or contact support before making changes.";
+                return;
+            }
+            _layout = parsedLayout;
+
             _site = await CmsBuilderService.GetSiteAsync(_page.SiteId);
             _allPagesInSite = (await CmsBuilderService.ListPagesAsync(_page.SiteId)).ToList();
             _globalBlocks = (await GlobalBlockService.ListAsync(_page.SiteId)).ToList();
-            _layout = CmsBuilderJson.ParseLayoutOrEmpty(_page.BlocksJson);
             await GlobalBlockResolver.ResolveAsync(_page.SiteId, _layout);
 
             _preservedTags = _page.Tags;
@@ -1741,7 +1760,7 @@ else
     // ── Save ──────────────────────────────────────────────────────────────
     private async Task SaveAsync(bool reloadPreview = true, bool isAutosave = false)
     {
-        if (_page is null) return;
+        if (_page is null || _layoutParseFailed) return;
         if (!isAutosave)
         {
             _autosaveCts?.Cancel();

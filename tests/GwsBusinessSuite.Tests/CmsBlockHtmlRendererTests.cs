@@ -153,6 +153,23 @@ public sealed class CmsBlockHtmlRendererTests
     }
 
     [Fact]
+    public void Render_ShouldNotCollideTheHoneypotFieldName_WithARealFieldKeyedCompany()
+    {
+        // Regression test: the honeypot used to be name="company", which is exactly the HTML
+        // name a real field labeled "Company" (the documented Company FormFieldRole) derives.
+        // Two same-named inputs merge into one posted value, so a genuine visitor's own company
+        // name made the honeypot check look tripped, silently discarding every real submission
+        // through a form that used this field - see CmsBlockHtmlRenderer.cs's comment on the
+        // honeypot input for the incident this test locks in place.
+        var html = CmsBlockHtmlRenderer.Render(
+            Layout("""{"id":"w1","widgetType":"form","props":{"fieldsJson":"[{\"key\":\"company\",\"label\":\"Company\",\"type\":\"text\",\"role\":\"company\"}]"}}"""));
+
+        Assert.Contains("name=\"company\"", html);
+        Assert.DoesNotContain("name=\"company\" class=\"gws-form-honeypot\"", html);
+        Assert.Contains("gws-form-honeypot", html);
+    }
+
+    [Fact]
     public void Render_ShouldRenderFormWidget_WithNoFields_WithoutThrowing()
     {
         var html = CmsBlockHtmlRenderer.Render(Layout(

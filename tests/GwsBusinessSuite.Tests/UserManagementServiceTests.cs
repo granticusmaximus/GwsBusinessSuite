@@ -520,6 +520,29 @@ public sealed class UserManagementServiceTests
         serialized.Should().NotContain("correct-horse-battery").And.NotContain("different-correct-horse-2026");
     }
 
+    [Fact]
+    public async Task ChangeRoleAsync_ShouldStillReportSuccess_WhenTheSecurityAuditWriteFails()
+    {
+        // Regression test: RecordAsync used to run inside the same try/catch as the role-change
+        // commit, so an audit-write failure (this fake simulates the SQLite/audit-service
+        // failure mode a transient error or the audit service's own write-gate timeout could
+        // cause) turned an already-successful role change into a reported Failure, with the
+        // caller told nothing happened even though the account was actually promoted.
+        using var connection = await OpenConnectionAsync();
+        var audit = new ThrowingSecurityAuditService();
+        var service = CreateService(connection, securityAuditService: audit);
+        await service.CreateUserAsync(new CreateUserInput
+        {
+            Username = "jsmith", Password = "correct-horse-battery", Role = AppRoles.Author
+        });
+        var userId = (await service.ListUsersAsync()).Single().Id;
+
+        var result = await service.ChangeRoleAsync(userId, AppRoles.Admin);
+
+        result.Succeeded.Should().BeTrue("the role change itself committed even though the audit write failed");
+        (await service.ListUsersAsync()).Single().Role.Should().Be(AppRoles.Admin);
+    }
+
     private static UserManagementService CreateService(
         SqliteConnection connection,
         ISecretProtector? secretProtector = null,
@@ -583,6 +606,14 @@ public sealed class UserManagementServiceTests
             Events.Add(input);
             return Task.FromResult(Guid.NewGuid());
         }
+        public Task<GwsBusinessSuite.Application.SecurityAudit.SecurityAuditPage> QueryAsync(GwsBusinessSuite.Application.SecurityAudit.SecurityAuditQuery query, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<GwsBusinessSuite.Application.SecurityAudit.SecurityAuditIntegrityResult> VerifyIntegrityAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class ThrowingSecurityAuditService : GwsBusinessSuite.Application.SecurityAudit.ISecurityAuditService
+    {
+        public Task<Guid> RecordAsync(GwsBusinessSuite.Application.SecurityAudit.SecurityAuditInput input, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Simulated audit write failure.");
         public Task<GwsBusinessSuite.Application.SecurityAudit.SecurityAuditPage> QueryAsync(GwsBusinessSuite.Application.SecurityAudit.SecurityAuditQuery query, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<GwsBusinessSuite.Application.SecurityAudit.SecurityAuditIntegrityResult> VerifyIntegrityAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }

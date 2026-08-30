@@ -62,6 +62,62 @@ public sealed class SupportTicketServiceTests
     }
 
     [Fact]
+    public async Task AddReplyAsync_ShouldResetTheSlaClock_WhenReopeningATerminalTicket()
+    {
+        // Regression test: reopening used to only clear Status/ResolvedAt, leaving
+        // FirstResponseDueAt/ResolutionDueAt anchored to the ticket's original creation time
+        // and both *BreachNotifiedAt flags untouched. A ticket resolved well within SLA and
+        // reopened later would then look immediately breached on the next sweep (stale due
+        // date already in the past), and a ticket that had ever breached once could never fire
+        // a breach notification again after being reopened.
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+        var created = await fixture.Service.CreateTicketAsync(
+            contact.Id, "Question", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+        await fixture.Service.SetStatusAsync(created.Id, SupportTicketStatuses.Resolved, "staff");
+
+        var ticket = await fixture.Db.SupportTickets.SingleAsync(item => item.Id == created.Id);
+        ticket.FirstResponseDueAt = DateTimeOffset.UtcNow.AddDays(-30);
+        ticket.ResolutionDueAt = DateTimeOffset.UtcNow.AddDays(-30);
+        ticket.FirstResponseBreachNotifiedAt = DateTimeOffset.UtcNow.AddDays(-30);
+        ticket.ResolutionBreachNotifiedAt = DateTimeOffset.UtcNow.AddDays(-30);
+        await fixture.Db.SaveChangesAsync();
+
+        var reopened = await fixture.Service.AddReplyAsync(
+            created.Id, SupportTicketAuthorTypes.Contact, "Jamie Rivera", "Actually, still broken");
+
+        reopened.Status.Should().Be(SupportTicketStatuses.Open);
+        reopened.FirstResponseDueAt.Should().NotBeNull().And.BeAfter(DateTimeOffset.UtcNow);
+        reopened.ResolutionDueAt.Should().NotBeNull().And.BeAfter(DateTimeOffset.UtcNow);
+        var refreshed = await fixture.Db.SupportTickets.SingleAsync(item => item.Id == created.Id);
+        refreshed.FirstResponseBreachNotifiedAt.Should().BeNull();
+        refreshed.ResolutionBreachNotifiedAt.Should().BeNull();
+
+        (await fixture.Service.ProcessSlaBreachesAsync()).Should().Be(0, "the reopened ticket's SLA clock was just reset and isn't due yet");
+    }
+
+    [Fact]
+    public async Task SetStatusAsync_ShouldResetTheSlaClock_WhenStaffReopensATerminalTicket()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+        var created = await fixture.Service.CreateTicketAsync(
+            contact.Id, "Question", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+        await fixture.Service.SetStatusAsync(created.Id, SupportTicketStatuses.Closed, "staff");
+
+        var ticket = await fixture.Db.SupportTickets.SingleAsync(item => item.Id == created.Id);
+        ticket.ResolutionDueAt = DateTimeOffset.UtcNow.AddDays(-30);
+        ticket.ResolutionBreachNotifiedAt = DateTimeOffset.UtcNow.AddDays(-30);
+        await fixture.Db.SaveChangesAsync();
+
+        var reopened = await fixture.Service.SetStatusAsync(created.Id, SupportTicketStatuses.Open, "staff");
+
+        reopened.ResolutionDueAt.Should().NotBeNull().And.BeAfter(DateTimeOffset.UtcNow);
+        var refreshed = await fixture.Db.SupportTickets.SingleAsync(item => item.Id == created.Id);
+        refreshed.ResolutionBreachNotifiedAt.Should().BeNull();
+    }
+
+    [Fact]
     public async Task SetStatusAsync_ShouldStampResolvedAt_OnlyWhileResolved()
     {
         await using var fixture = await Fixture.CreateAsync();

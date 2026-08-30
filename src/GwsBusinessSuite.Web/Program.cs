@@ -1914,7 +1914,9 @@ app.MapPost("/cms/{siteSlug}/submit", async (
 
     // Honeypot: a hidden field real visitors never see or fill. A non-empty value means a
     // bot filled every field it found — accept silently so the bot doesn't learn it failed.
-    if (!string.IsNullOrWhiteSpace(form["company"]))
+    // "_hp", not a plain word, so it can never collide with an admin-labeled field's own
+    // derived key (see CmsBlockHtmlRenderer's comment on this input for why that happened).
+    if (!string.IsNullOrWhiteSpace(form["_hp"]))
     {
         return Results.Redirect(thanksUrl);
     }
@@ -1928,7 +1930,7 @@ app.MapPost("/cms/{siteSlug}/submit", async (
     // the resolver can't find (e.g. the widget was edited/removed after this submission).
     var metadata = ResolveFormFieldMetadata(page.BlocksJson);
     var fields = form
-        .Where(kvp => kvp.Key != "company" && kvp.Key != "_path")
+        .Where(kvp => kvp.Key != "_hp" && kvp.Key != "_path")
         .ToDictionary(kvp => metadata.LabelsByKey.GetValueOrDefault(kvp.Key, kvp.Key), kvp => kvp.Value.ToString());
 
     // Roles are keyed by the field's raw posted key/name (same as labels), not its display

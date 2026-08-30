@@ -80,13 +80,10 @@ public sealed class UserManagementService(
             db.AppUsers.Add(user);
             await db.SaveChangesAsync(cancellationToken);
 
-            if (securityAuditService is not null)
-            {
-                await securityAuditService.RecordAsync(new SecurityAuditInput(
-                    SecurityAuditCategories.AccountAdministration, "UserCreated", SecurityAuditOutcomes.Succeeded,
-                    SecurityAuditSeverities.High, "AppUser", user.Id.ToString(),
-                    new Dictionary<string, string?> { ["role"] = user.Role, ["username"] = user.Username }), cancellationToken);
-            }
+            await RecordAuditBestEffortAsync(new SecurityAuditInput(
+                SecurityAuditCategories.AccountAdministration, "UserCreated", SecurityAuditOutcomes.Succeeded,
+                SecurityAuditSeverities.High, "AppUser", user.Id.ToString(),
+                new Dictionary<string, string?> { ["role"] = user.Role, ["username"] = user.Username }), cancellationToken);
 
             return UserManagementResult.Success();
         }
@@ -126,13 +123,10 @@ public sealed class UserManagementService(
             user.UpdatedBy = performedBy;
             await db.SaveChangesAsync(cancellationToken);
 
-            if (securityAuditService is not null)
-            {
-                await securityAuditService.RecordAsync(new SecurityAuditInput(
-                    SecurityAuditCategories.AccountAdministration, "UserRoleChanged", SecurityAuditOutcomes.Succeeded,
-                    SecurityAuditSeverities.High, "AppUser", user.Id.ToString(),
-                    new Dictionary<string, string?> { ["fromRole"] = priorRole, ["toRole"] = newRole, ["username"] = user.Username }), cancellationToken);
-            }
+            await RecordAuditBestEffortAsync(new SecurityAuditInput(
+                SecurityAuditCategories.AccountAdministration, "UserRoleChanged", SecurityAuditOutcomes.Succeeded,
+                SecurityAuditSeverities.High, "AppUser", user.Id.ToString(),
+                new Dictionary<string, string?> { ["fromRole"] = priorRole, ["toRole"] = newRole, ["username"] = user.Username }), cancellationToken);
 
             return UserManagementResult.Success();
         }
@@ -170,13 +164,10 @@ public sealed class UserManagementService(
             user.UpdatedBy = performedBy;
             await db.SaveChangesAsync(cancellationToken);
 
-            if (securityAuditService is not null)
-            {
-                await securityAuditService.RecordAsync(new SecurityAuditInput(
-                    SecurityAuditCategories.AccountAdministration, "PasswordReset", SecurityAuditOutcomes.Succeeded,
-                    SecurityAuditSeverities.High, "AppUser", user.Id.ToString(),
-                    new Dictionary<string, string?> { ["username"] = user.Username }), cancellationToken);
-            }
+            await RecordAuditBestEffortAsync(new SecurityAuditInput(
+                SecurityAuditCategories.AccountAdministration, "PasswordReset", SecurityAuditOutcomes.Succeeded,
+                SecurityAuditSeverities.High, "AppUser", user.Id.ToString(),
+                new Dictionary<string, string?> { ["username"] = user.Username }), cancellationToken);
 
             return UserManagementResult.Success();
         }
@@ -362,13 +353,10 @@ public sealed class UserManagementService(
             user.UpdatedBy = performedBy;
             await db.SaveChangesAsync(cancellationToken);
 
-            if (securityAuditService is not null)
-            {
-                await securityAuditService.RecordAsync(new SecurityAuditInput(
-                    SecurityAuditCategories.AccountAdministration, "AccountUnlocked", SecurityAuditOutcomes.Succeeded,
-                    SecurityAuditSeverities.High, "AppUser", user.Id.ToString(),
-                    new Dictionary<string, string?> { ["username"] = user.Username }), cancellationToken);
-            }
+            await RecordAuditBestEffortAsync(new SecurityAuditInput(
+                SecurityAuditCategories.AccountAdministration, "AccountUnlocked", SecurityAuditOutcomes.Succeeded,
+                SecurityAuditSeverities.High, "AppUser", user.Id.ToString(),
+                new Dictionary<string, string?> { ["username"] = user.Username }), cancellationToken);
 
             return UserManagementResult.Success();
         }
@@ -401,15 +389,12 @@ public sealed class UserManagementService(
             user.UpdatedBy = performedBy;
             await db.SaveChangesAsync(cancellationToken);
 
-            if (securityAuditService is not null)
-            {
-                await securityAuditService.RecordAsync(new SecurityAuditInput(
-                    SecurityAuditCategories.AccountAdministration,
-                    user.IsActive ? "UserActivated" : "UserDeactivated",
-                    SecurityAuditOutcomes.Succeeded, SecurityAuditSeverities.High,
-                    "AppUser", user.Id.ToString(),
-                    new Dictionary<string, string?> { ["username"] = user.Username }), cancellationToken);
-            }
+            await RecordAuditBestEffortAsync(new SecurityAuditInput(
+                SecurityAuditCategories.AccountAdministration,
+                user.IsActive ? "UserActivated" : "UserDeactivated",
+                SecurityAuditOutcomes.Succeeded, SecurityAuditSeverities.High,
+                "AppUser", user.Id.ToString(),
+                new Dictionary<string, string?> { ["username"] = user.Username }), cancellationToken);
 
             return UserManagementResult.Success();
         }
@@ -417,6 +402,29 @@ public sealed class UserManagementService(
         {
             logger.LogError(ex, "Failed to toggle active state for user {Id}.", userId);
             return UserManagementResult.Failure($"Unable to update user. {ex.Message}");
+        }
+    }
+
+    // A DB write that already committed must never be reported to the caller as "failed" just
+    // because the follow-up audit record couldn't be written - every call site above used to
+    // run RecordAsync inside the same try/catch as the SaveChangesAsync it followed, so an audit
+    // write failure (transient SQLite contention, the audit service's own write-gate timing out,
+    // etc.) turned an already-successful account change - including a promotion to Admin - into
+    // a reported failure with zero audit trail for what actually happened. Logged at Critical
+    // since a missing audit record for a High-severity account action needs real eyes on it, but
+    // never allowed to bubble up and mask the action's real outcome.
+    private async Task RecordAuditBestEffortAsync(SecurityAuditInput input, CancellationToken cancellationToken)
+    {
+        if (securityAuditService is null) return;
+        try
+        {
+            await securityAuditService.RecordAsync(input, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogCritical(ex,
+                "Security audit event {Category}/{Action} for {TargetType} {TargetId} failed to record after the underlying action already succeeded.",
+                input.Category, input.Action, input.TargetType, input.TargetId);
         }
     }
 

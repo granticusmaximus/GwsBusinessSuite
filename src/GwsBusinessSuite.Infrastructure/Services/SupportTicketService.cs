@@ -224,7 +224,7 @@ public sealed class SupportTicketService(
         if (authorType == SupportTicketAuthorTypes.Contact && SupportTicketStatuses.Terminal.Contains(ticket.Status))
         {
             ticket.Status = SupportTicketStatuses.Open;
-            ticket.ResolvedAt = null;
+            ReopenSlaClock(ticket, now);
         }
         ticket.UpdatedAt = now;
         ticket.UpdatedBy = authorName;
@@ -323,8 +323,13 @@ public sealed class SupportTicketService(
             ?? throw new InvalidOperationException($"Ticket {ticketId} was not found.");
 
         var now = timeProvider.GetUtcNow();
+        var wasTerminal = SupportTicketStatuses.Terminal.Contains(ticket.Status);
         ticket.Status = status;
         ticket.ResolvedAt = status == SupportTicketStatuses.Resolved ? now : null;
+        if (wasTerminal && !SupportTicketStatuses.Terminal.Contains(status))
+        {
+            ReopenSlaClock(ticket, now);
+        }
         ticket.UpdatedAt = now;
         ticket.UpdatedBy = performedBy;
         await db.SaveChangesAsync(cancellationToken);
@@ -442,6 +447,25 @@ public sealed class SupportTicketService(
             .OrderByDescending(ticket => ticket.LastRepliedAt ?? ticket.CreatedAt)
             .Select(ticket => ToView(ticket, contactNames.GetValueOrDefault(ticket.ContactId, "Unknown contact")))
             .ToList();
+    }
+
+    // Reopening a terminal ticket used to only clear Status/ResolvedAt, leaving
+    // FirstResponseDueAt/ResolutionDueAt anchored to the ticket's original creation time and
+    // both *BreachNotifiedAt flags untouched. That produced two real bugs: a ticket resolved
+    // well within SLA and reopened days later immediately looked breached (stale due date
+    // already in the past) on the very next sweep, and a ticket that had ever legitimately
+    // breached once could never trigger a breach notification again after being reopened,
+    // since ProcessSlaBreachesAsync's `is null` guard on *BreachNotifiedAt would stay
+    // permanently set. Recomputing both due dates from "now" and clearing both flags gives a
+    // reopened ticket a fresh SLA clock, same as if it were a new ticket at this priority.
+    private static void ReopenSlaClock(SupportTicket ticket, DateTimeOffset now)
+    {
+        ticket.ResolvedAt = null;
+        var slaTargets = SupportTicketSlaTargets.For(ticket.Priority);
+        ticket.FirstResponseDueAt = now + slaTargets.FirstResponse;
+        ticket.ResolutionDueAt = now + slaTargets.Resolution;
+        ticket.FirstResponseBreachNotifiedAt = null;
+        ticket.ResolutionBreachNotifiedAt = null;
     }
 
     public async Task<int> ProcessSlaBreachesAsync(CancellationToken cancellationToken = default)

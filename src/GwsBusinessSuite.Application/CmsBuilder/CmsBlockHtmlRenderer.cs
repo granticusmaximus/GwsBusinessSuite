@@ -969,7 +969,12 @@ public static class CmsBlockHtmlRenderer
             sb.Append("</label>");
         }
 
-        sb.Append("""<input type="text" name="company" class="gws-form-honeypot" tabindex="-1" autocomplete="off" />""");
+        // Leading underscore, matching "_path" above - UpdateFormField (CmsBuilderEditor.razor)
+        // maps every non-alphanumeric character in an admin-typed label to '-', so a derived
+        // field key can never contain '_' and can never collide with this name. It previously
+        // used "company", which collided with the "Company" FormFieldRole's own derived key and
+        // silently dropped every real submission through a field with that exact label.
+        sb.Append("""<input type="text" name="_hp" class="gws-form-honeypot" tabindex="-1" autocomplete="off" />""");
         sb.Append($"""<button type="submit" class="btn btn-primary gws-form-submit">{Html(Get(p, "submitLabel", "Submit"))}</button>""");
         sb.Append("</form>");
         return sb.ToString();
