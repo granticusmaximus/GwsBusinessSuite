@@ -230,6 +230,21 @@ public sealed class UserManagementService(
         return new LoginAttemptResult(true, ToView(user), false, null);
     }
 
+    public async Task<LoginAttemptResult?> AttemptDeviceLoginAsync(
+        string providedSecret, string configuredSecret, string username, string password,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(configuredSecret) || string.IsNullOrEmpty(providedSecret)
+            || providedSecret.Length != configuredSecret.Length
+            || !CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(providedSecret), Encoding.UTF8.GetBytes(configuredSecret)))
+        {
+            return null;
+        }
+
+        return await AttemptLoginAsync(username, password, cancellationToken);
+    }
+
     public async Task<MfaEnrollment?> PrepareMfaEnrollmentAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);

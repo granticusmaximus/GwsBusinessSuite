@@ -17,6 +17,10 @@ services:
       # Optional live internet research for SentinelGPT. Keep the actual key in the
       # gitignored .env file as OLLAMA_WEB_API_KEY, never in this Compose file.
       OllamaWeb__ApiKey: ${OLLAMA_WEB_API_KEY:-}
+      # Optional: lets the native macOS app skip the browser's mandatory MFA challenge via
+      # /auth/device-login. Absent/empty disables that endpoint entirely (fails closed). Keep the
+      # actual secret in the gitignored .env file as NATIVE_APP_DEVICE_SECRET, never here.
+      NativeApp__DeviceSecret: ${NATIVE_APP_DEVICE_SECRET:-}
       # Optional local-only country/region enrichment. The request IP is discarded
       # after lookup; only coarse geography is persisted.
       AnalyticsGeoIp__DatabasePath: ${ANALYTICS_GEOIP_DATABASE_PATH:-/app/data/GeoLite2-City.mmdb}

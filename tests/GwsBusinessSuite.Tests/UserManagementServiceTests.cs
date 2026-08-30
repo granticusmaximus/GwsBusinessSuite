@@ -301,6 +301,79 @@ public sealed class UserManagementServiceTests
     }
 
     [Fact]
+    public async Task AttemptDeviceLoginAsync_ShouldSucceed_WhenTheSecretAndCredentialsAreBothCorrect()
+    {
+        using var connection = await OpenConnectionAsync();
+        var service = CreateService(connection);
+        await service.CreateUserAsync(new CreateUserInput { Username = "jsmith", Password = "correct-horse-battery", Role = AppRoles.Author });
+
+        var result = await service.AttemptDeviceLoginAsync("real-secret", "real-secret", "jsmith", "correct-horse-battery");
+
+        result.Should().NotBeNull();
+        result!.Succeeded.Should().BeTrue();
+        result.User!.Username.Should().Be("jsmith");
+    }
+
+    [Fact]
+    public async Task AttemptDeviceLoginAsync_ShouldReturnNull_ForAWrongSecret_RegardlessOfCredentials()
+    {
+        using var connection = await OpenConnectionAsync();
+        var service = CreateService(connection);
+        await service.CreateUserAsync(new CreateUserInput { Username = "jsmith", Password = "correct-horse-battery", Role = AppRoles.Author });
+
+        var result = await service.AttemptDeviceLoginAsync("wrong-secret", "real-secret", "jsmith", "correct-horse-battery");
+
+        result.Should().BeNull();
+        // A wrong secret must never even attempt the password check - no failed-attempt/lockout
+        // side effect from a request that never had the right secret in the first place.
+        await using var db = CreateReadDbContext(connection);
+        (await db.AppUsers.SingleAsync()).FailedLoginAttempts.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AttemptDeviceLoginAsync_ShouldReturnNull_WhenNoSecretIsConfigured()
+    {
+        using var connection = await OpenConnectionAsync();
+        var service = CreateService(connection);
+        await service.CreateUserAsync(new CreateUserInput { Username = "jsmith", Password = "correct-horse-battery", Role = AppRoles.Author });
+
+        var result = await service.AttemptDeviceLoginAsync("anything", "", "jsmith", "correct-horse-battery");
+
+        result.Should().BeNull("an unset/empty configured secret must always fail closed");
+    }
+
+    [Fact]
+    public async Task AttemptDeviceLoginAsync_ShouldReturnAFailedResult_ForTheRightSecretButWrongPassword()
+    {
+        using var connection = await OpenConnectionAsync();
+        var service = CreateService(connection);
+        await service.CreateUserAsync(new CreateUserInput { Username = "jsmith", Password = "correct-horse-battery", Role = AppRoles.Author });
+
+        var result = await service.AttemptDeviceLoginAsync("real-secret", "real-secret", "jsmith", "wrong-password");
+
+        result.Should().NotBeNull("the secret was correct, so the normal credential-check result should flow through");
+        result!.Succeeded.Should().BeFalse();
+        result.User.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task AttemptDeviceLoginAsync_ShouldStillRespectAccountLockout_WhenTheSecretIsCorrect()
+    {
+        using var connection = await OpenConnectionAsync();
+        var service = CreateService(connection);
+        await service.CreateUserAsync(new CreateUserInput { Username = "jsmith", Password = "correct-horse-battery", Role = AppRoles.Author });
+        for (var i = 0; i < LoginLockoutPolicy.MaxFailedAttempts; i++)
+        {
+            await service.AttemptLoginAsync("jsmith", "wrong-password");
+        }
+
+        var result = await service.AttemptDeviceLoginAsync("real-secret", "real-secret", "jsmith", "correct-horse-battery");
+
+        result.Should().NotBeNull();
+        result!.IsLockedOut.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task AttemptLoginAsync_ShouldIncrementFailedAttempts_OnWrongPassword_WithoutLockingOutBeforeTheThreshold()
     {
         using var connection = await OpenConnectionAsync();

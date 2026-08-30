@@ -4,17 +4,21 @@ public partial class MainPage : ContentPage
 {
     private static readonly TimeSpan NavigationTimeout = TimeSpan.FromSeconds(20);
 
+    private readonly DeviceSecretStore _deviceSecretStore;
+    private readonly NativeAppAuthService _nativeAppAuthService;
     private bool _connectivitySubscribed;
     private bool _wasOffline;
+    private bool _startedLoading;
     private CancellationTokenSource? _navigationTimeoutCts;
 
-    public MainPage()
+    public MainPage(DeviceSecretStore deviceSecretStore, NativeAppAuthService nativeAppAuthService)
     {
         InitializeComponent();
-        WorkspaceView.Source = AppEndpoints.StartUrl;
+        _deviceSecretStore = deviceSecretStore;
+        _nativeAppAuthService = nativeAppAuthService;
     }
 
-    protected override void OnAppearing()
+    protected override async void OnAppearing()
     {
         base.OnAppearing();
         if (!_connectivitySubscribed)
@@ -24,6 +28,74 @@ public partial class MainPage : ContentPage
         }
 
         UpdateConnectivity(Connectivity.Current.NetworkAccess);
+
+        // Only attempt device login once per launch - re-appearing (e.g. returning from another
+        // Shell tab) must never re-show the sign-in prompt over an already-loading/loaded WebView.
+        if (!_startedLoading)
+        {
+            _startedLoading = true;
+            await StartWorkspaceAsync();
+        }
+    }
+
+    private async Task StartWorkspaceAsync()
+    {
+#if MACCATALYST
+        var deviceSecret = await _deviceSecretStore.GetAsync();
+        if (!string.IsNullOrWhiteSpace(deviceSecret) && await TryDeviceLoginAsync(deviceSecret))
+        {
+            WorkspaceView.Source = AppEndpoints.StartUrl;
+            return;
+        }
+#endif
+        // No device secret configured, device login failed/was cancelled, or a non-MacCatalyst
+        // platform - fall back to today's behavior exactly: load the WebView and let the user
+        // sign in (with MFA) inside it.
+        WorkspaceView.Source = AppEndpoints.StartUrl;
+    }
+
+#if MACCATALYST
+    // Native prompts, not custom XAML - kept intentionally minimal since this is opt-in,
+    // single-device tooling, not a polished multi-user login screen. Note DisplayPromptAsync has
+    // no masked/secure-entry mode, so the password is briefly visible in the OS alert - an
+    // accepted tradeoff for a local, physically-trusted machine, not something to build a custom
+    // masked-entry page to avoid.
+    private async Task<bool> TryDeviceLoginAsync(string deviceSecret)
+    {
+        var username = await DisplayPromptAsync("Sign In", "Username", accept: "Next", cancel: "Use browser login instead");
+        if (string.IsNullOrWhiteSpace(username)) return false;
+
+        var password = await DisplayPromptAsync("Sign In", $"Password for {username}", accept: "Sign In", cancel: "Cancel");
+        if (string.IsNullOrWhiteSpace(password)) return false;
+
+        var result = await _nativeAppAuthService.LoginAsync(deviceSecret, username, password);
+        if (!result.Succeeded)
+        {
+            await DisplayAlertAsync("Sign In Failed", result.ErrorMessage ?? "Could not sign in.", "OK");
+            return false;
+        }
+
+        await NativeCookieInjector.InjectCookiesAsync(result.SetCookieHeaders, AppEndpoints.BaseUrl);
+        return true;
+    }
+#endif
+
+    private async void OnConfigureDeviceLoginClicked(object? sender, EventArgs e)
+    {
+        var secret = await DisplayPromptAsync(
+            "Device Login",
+            "Enter the device secret configured on the server (NATIVE_APP_DEVICE_SECRET). Leave blank and confirm to remove a previously saved secret.");
+        if (secret is null) return;
+
+        if (string.IsNullOrWhiteSpace(secret))
+        {
+            _deviceSecretStore.Remove();
+            await DisplayAlertAsync("Device Login", "Device login disabled for this app. It will use the normal browser login next launch.", "OK");
+            return;
+        }
+
+        await _deviceSecretStore.SetAsync(secret.Trim());
+        await DisplayAlertAsync("Device Login", "Saved. Relaunch the app to sign in without the browser MFA challenge.", "OK");
     }
 
     protected override void OnDisappearing()

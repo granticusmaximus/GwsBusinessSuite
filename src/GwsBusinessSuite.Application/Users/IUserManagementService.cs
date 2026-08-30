@@ -17,6 +17,18 @@ public interface IUserManagementService
     // AppUser/PasswordHash directly.
     Task<LoginAttemptResult> AttemptLoginAsync(string username, string password, CancellationToken cancellationToken = default);
 
+    // For the native app's device-secret login (/auth/device-login) - lets it skip the
+    // interactive MFA challenge against the real server via a pre-provisioned shared secret,
+    // never a client-supplied/spoofable signal. Returns null (never even attempting the
+    // username/password check, so a bad secret never touches lockout state) when providedSecret
+    // doesn't match configuredSecret via a fixed-time comparison, or when either is
+    // empty/whitespace (an unconfigured secret always fails closed). A non-null result is
+    // AttemptLoginAsync's own result verbatim - same lockout/success semantics, just gated
+    // behind the extra secret check.
+    Task<LoginAttemptResult?> AttemptDeviceLoginAsync(
+        string providedSecret, string configuredSecret, string username, string password,
+        CancellationToken cancellationToken = default);
+
     Task<MfaEnrollment?> PrepareMfaEnrollmentAsync(Guid userId, CancellationToken cancellationToken = default);
 
     Task<MfaEnrollmentResult> CompleteMfaEnrollmentAsync(Guid userId, string code, CancellationToken cancellationToken = default);

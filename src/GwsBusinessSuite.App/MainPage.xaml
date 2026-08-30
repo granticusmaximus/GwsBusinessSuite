@@ -33,6 +33,31 @@
                 Clicked="OnReloadClicked"
                 ToolTipProperties.Text="Reload" />
 
+        <!-- MacCatalyst-only: lets this device sign in via a pre-provisioned shared secret
+             instead of the browser-facing MFA challenge (see DeviceSecretStore/
+             NativeAppAuthService). Hidden everywhere else - other platforms keep today's
+             WebView-rendered login+MFA flow unchanged. -->
+        <Button x:Name="DeviceLoginButton"
+                Text="&#128272;"
+                FontSize="16"
+                WidthRequest="36"
+                HeightRequest="36"
+                Padding="0"
+                CornerRadius="18"
+                Margin="0,8,52,0"
+                HorizontalOptions="End"
+                VerticalOptions="Start"
+                BackgroundColor="#231F1D"
+                TextColor="#F59E0B"
+                BorderColor="#44403C"
+                BorderWidth="1"
+                Clicked="OnConfigureDeviceLoginClicked"
+                ToolTipProperties.Text="Configure device login">
+            <Button.IsVisible>
+                <OnPlatform x:TypeArguments="x:Boolean" Default="False" MacCatalyst="True" />
+            </Button.IsVisible>
+        </Button>
+
         <Grid x:Name="LoadingOverlay"
               BackgroundColor="#141210"
               InputTransparent="False">

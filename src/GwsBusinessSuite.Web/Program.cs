@@ -1174,6 +1174,23 @@ app.MapPost("/auth/login", async (
     }
 
     var user = attempt.User;
+
+    // Local dev/testing only - mandatory MFA is otherwise a hard requirement with no exceptions
+    // (see the class of comments throughout this file and AddMandatoryPortalMfa's migration
+    // name). Driven purely by IHostEnvironment.IsDevelopment() (ASPNETCORE_ENVIRONMENT), a
+    // server-side startup setting no client request can influence - production's Docker Compose
+    // config never sets this to Development, so this can never activate in production.
+    if (app.Environment.IsDevelopment())
+    {
+        await SignInPortalAsync(httpContext, user, amr: "dev-bypass");
+        await securityAudit.RecordAsync(new SecurityAuditInput(
+            SecurityAuditCategories.Authentication, "PasswordLogin", SecurityAuditOutcomes.Succeeded,
+            TargetType: "AppUser", TargetId: user.Id.ToString(),
+            Details: new Dictionary<string, string?> { ["nextFactor"] = "DevBypass" },
+            NetworkAddress: httpContext.Connection.RemoteIpAddress?.ToString(), ActorUsername: user.Username));
+        return Results.LocalRedirect(safeReturn);
+    }
+
     var pendingClaims = new List<Claim>
     {
         new(ClaimTypes.Name, user.Username),
@@ -1193,6 +1210,67 @@ app.MapPost("/auth/login", async (
         NetworkAddress: httpContext.Connection.RemoteIpAddress?.ToString(), ActorUsername: user.Username));
 
     return Results.LocalRedirect(user.MfaEnabled ? "/admin/login/mfa" : "/admin/login/mfa/setup");
+}).AllowAnonymous().RequireRateLimiting("login");
+
+// Lets the native macOS app skip the interactive MFA challenge against the real production
+// server, via a pre-provisioned shared secret (NativeApp:DeviceSecret / NATIVE_APP_DEVICE_SECRET
+// env var) the app must already hold - a real, separate credential the shared browser login page
+// never exposes, not a spoofable signal like User-Agent. Deliberately weaker than true MFA
+// (anyone who obtains both this secret and the account password bypasses the second factor
+// entirely) - a proportionate tradeoff for a single-user, self-hosted app with one trusted
+// device, not a multi-tenant fleet. Disabled by default: an unset/empty configured secret always
+// fails closed. Every successful use is logged at High severity under its own distinct action
+// ("DeviceSecretLogin", not "PasswordLogin"/"MfaChallenge") so an MFA-bypassed login is always
+// individually visible in Security Audit.
+app.MapPost("/auth/device-login", async (
+    HttpContext httpContext,
+    IConfiguration configuration,
+    IUserManagementService userManagementService,
+    ISecurityAuditService securityAudit) =>
+{
+    var form = await httpContext.Request.ReadFormAsync();
+    var username = form["username"].ToString().Trim();
+    var configuredSecret = configuration["NativeApp:DeviceSecret"] ?? string.Empty;
+
+    var attempt = await userManagementService.AttemptDeviceLoginAsync(
+        form["deviceSecret"].ToString(), configuredSecret, username, form["password"].ToString());
+
+    if (attempt is null)
+    {
+        await securityAudit.RecordAsync(new SecurityAuditInput(
+            SecurityAuditCategories.Authentication, "DeviceSecretLogin", SecurityAuditOutcomes.Denied,
+            SecurityAuditSeverities.High, "AppUser", username,
+            new Dictionary<string, string?> { ["reason"] = "InvalidDeviceSecret" },
+            httpContext.Connection.RemoteIpAddress?.ToString(), username));
+        return Results.Json(new { error = "invalid_credentials" }, statusCode: StatusCodes.Status401Unauthorized);
+    }
+
+    if (attempt.IsLockedOut)
+    {
+        await securityAudit.RecordAsync(new SecurityAuditInput(
+            SecurityAuditCategories.Authentication, "DeviceSecretLogin", SecurityAuditOutcomes.Denied,
+            SecurityAuditSeverities.High, "AppUser", username,
+            new Dictionary<string, string?> { ["reason"] = "AccountLocked" },
+            httpContext.Connection.RemoteIpAddress?.ToString(), username));
+        return Results.Json(new { error = "locked" }, statusCode: StatusCodes.Status423Locked);
+    }
+
+    if (!attempt.Succeeded || attempt.User is null)
+    {
+        await securityAudit.RecordAsync(new SecurityAuditInput(
+            SecurityAuditCategories.Authentication, "DeviceSecretLogin", SecurityAuditOutcomes.Failed,
+            SecurityAuditSeverities.High, "AppUser", username,
+            new Dictionary<string, string?> { ["reason"] = "InvalidCredentials" },
+            httpContext.Connection.RemoteIpAddress?.ToString(), username));
+        return Results.Json(new { error = "invalid_credentials" }, statusCode: StatusCodes.Status401Unauthorized);
+    }
+
+    await SignInPortalAsync(httpContext, attempt.User, amr: "device-secret");
+    await securityAudit.RecordAsync(new SecurityAuditInput(
+        SecurityAuditCategories.Authentication, "DeviceSecretLogin", SecurityAuditOutcomes.Succeeded,
+        Severity: SecurityAuditSeverities.High, TargetType: "AppUser", TargetId: attempt.User.Id.ToString(),
+        NetworkAddress: httpContext.Connection.RemoteIpAddress?.ToString(), ActorUsername: attempt.User.Username));
+    return Results.Ok();
 }).AllowAnonymous().RequireRateLimiting("login");
 
 app.MapPost("/auth/mfa/verify", async (
@@ -4112,14 +4190,14 @@ static string GetPendingReturnUrl(AuthenticateResult result)
         result.Principal?.FindFirstValue(MfaAuthenticationDefaults.ReturnUrlClaim));
 }
 
-static async Task SignInPortalAsync(HttpContext httpContext, UserView user)
+static async Task SignInPortalAsync(HttpContext httpContext, UserView user, string amr = "mfa")
 {
     var claims = new List<Claim>
     {
         new(ClaimTypes.Name, user.Username),
         new(ClaimTypes.Role, user.Role),
         new("UserId", user.Id.ToString()),
-        new("amr", "mfa")
+        new("amr", amr)
     };
     var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
     await httpContext.SignInAsync(
