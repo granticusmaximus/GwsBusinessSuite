@@ -1805,7 +1805,8 @@ else
                 CategoryName = _preservedCategoryName,
                 Tags = _preservedTags,
                 CanonicalUrl = _preservedCanonicalUrl,
-                PropertyValues = _preservedPropertyValues
+                PropertyValues = _preservedPropertyValues,
+                ExpectedVersion = _page.ConcurrencyVersion
             };
             _page = await CmsBuilderService.SavePageAsync(editor);
             _globalBlocks = (await GlobalBlockService.ListAsync(_page.SiteId)).ToList();

@@ -177,6 +177,43 @@ public sealed class CrmServiceTests
     }
 
     [Fact]
+    public async Task DeleteContactPermanentlyAsync_ShouldRefuse_WhenTheContactHasInvoices()
+    {
+        // Regression test: Invoice has a real cascade FK to Contact, so permanently deleting a
+        // contact with real, Stripe-linked billing history used to silently erase those Invoice
+        // rows too - an irreversible local/Stripe data gap the confirmation dialog never
+        // disclosed. Mirrors the same policy PrivacyOperationsService's erasure flow already
+        // enforces for this exact FK.
+        await using var db = await CreateDbAsync();
+        var service = new CrmService(db, new FixedCurrentUserAccessor("grantwatson"));
+        var contact = await service.SaveContactAsync(new ContactEditorModel { FullName = "Has An Invoice" });
+        db.Invoices.Add(new Invoice { ContactId = contact.Id, Title = "Consulting" });
+        await db.SaveChangesAsync();
+        await service.TrashContactAsync(contact.Id);
+
+        var act = () => service.DeleteContactPermanentlyAsync(contact.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*invoices on file*");
+        (await service.ListContactsAsync(includeTrashed: true)).Should().ContainSingle(c => c.Id == contact.Id);
+    }
+
+    [Fact]
+    public async Task FindOrCreateContactAsync_ShouldEnforceCaseInsensitiveUniqueness_AtTheDatabaseLevel()
+    {
+        // Proves the actual protection this fix adds: two active Contact rows with the same
+        // email (any case) can no longer coexist, regardless of what any calling code checks in
+        // C# first - this is what closes the race, not the C# check-then-insert alone.
+        await using var db = await CreateDbAsync();
+        db.Contacts.Add(new Contact { FullName = "First", Email = "duplicate@example.com" });
+        await db.SaveChangesAsync();
+        db.Contacts.Add(new Contact { FullName = "Second", Email = "DUPLICATE@example.com" });
+
+        var act = () => db.SaveChangesAsync();
+
+        await act.Should().ThrowAsync<DbUpdateException>();
+    }
+
+    [Fact]
     public async Task AddActivityAsync_ShouldPersistNote_AndListActivitiesShouldReturnNewestFirst()
     {
         await using var db = await CreateDbAsync();

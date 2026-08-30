@@ -72,6 +72,13 @@ public sealed class CmsPageEditorModel
     // on this editor model (e.g. CategoryName/Tags): a save that omits this clears existing
     // values, matching the pre-existing Canvas-Studio-vs-EditPage editor split's own behavior.
     public Dictionary<Guid, string> PropertyValues { get; set; } = [];
+
+    // Optimistic-concurrency check against CmsPage.ConcurrencyVersion, same opt-in-by-nonzero
+    // convention as WikiPageEditorModel.ExpectedContentVersion. Left at the default 0 (skip the
+    // check) by every non-interactive caller (site import/duplicate, translation-draft publish,
+    // the Developer API, automation nodes) - only CmsBuilderEditor.razor and EditPage.razor, the
+    // two interactive page editors that could realistically collide on the same page, set this.
+    public long ExpectedVersion { get; set; }
 }
 
 public sealed record CmsPagePropertyView(Guid Id, Guid SiteId, string Name, string Type, int SortOrder, IReadOnlyList<string> SelectOptions);

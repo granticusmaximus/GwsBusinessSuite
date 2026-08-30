@@ -1132,7 +1132,21 @@ public sealed class WikiDatabaseService(
         var contentChanged = editor.BlocksJson is not null;
         if (contentChanged)
         {
+            // Optimistic concurrency, opt-in only (ExpectedVersion default 0 skips this) - see
+            // WikiDatabaseRowEditor.ExpectedVersion's own comment on why only the interactive
+            // page-body editor supplies a nonzero value here. Two admins opening the same row as
+            // a page could otherwise silently overwrite each other's edits with no warning, the
+            // same risk WikiPage.ContentVersion already closes for wiki pages.
+            if (!isNew && editor.ExpectedVersion > 0 && row.ConcurrencyVersion != editor.ExpectedVersion)
+            {
+                throw new InvalidOperationException(
+                    "This row's content was changed by someone else since you loaded it. Reload the page and reapply your changes.");
+            }
             row.BlocksJson = string.IsNullOrWhiteSpace(editor.BlocksJson) ? "[]" : editor.BlocksJson;
+            if (!isNew)
+            {
+                row.ConcurrencyVersion++;
+            }
         }
         if (editor.Icon is not null)
         {

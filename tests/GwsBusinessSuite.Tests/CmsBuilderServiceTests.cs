@@ -10,6 +10,58 @@ namespace GwsBusinessSuite.Tests;
 public sealed class CmsBuilderServiceTests
 {
     [Fact]
+    public async Task SavePageAsync_ShouldRejectAStaleSave_WhenExpectedVersionIsProvidedAndDoesNotMatch()
+    {
+        // Regression test: two admins (or two tabs) editing the same page had no conflict
+        // detection at all - a full-replace save with no other signal that someone else's
+        // changes had already landed. ExpectedVersion is opt-in (0 skips the check, used by
+        // every non-interactive caller), so this only bites callers that actually loaded a
+        // version and should know about a conflict.
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        var page = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, Title = "Page", Slug = "page" });
+        page.ConcurrencyVersion.Should().Be(1, "a freshly-created page starts at version 1");
+        // Captured before the next save - db is a single DbContext shared by every call in this
+        // test, so its identity map would otherwise hand back this same tracked `page` instance
+        // already mutated by the "someone else" save below, making a re-read look falsely fresh.
+        var staleVersion = page.ConcurrencyVersion;
+
+        // Someone else's save lands first, bumping the version.
+        await service.SavePageAsync(new CmsPageEditorModel
+        {
+            PageId = page.Id, SiteId = site.Id, Title = "Page (edited by someone else)", Slug = "page",
+            ExpectedVersion = staleVersion
+        });
+
+        // This caller still has the stale version 1 it loaded before the other save.
+        var act = () => service.SavePageAsync(new CmsPageEditorModel
+        {
+            PageId = page.Id, SiteId = site.Id, Title = "Page (my stale edit)", Slug = "page",
+            ExpectedVersion = staleVersion
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*changed by someone else*");
+    }
+
+    [Fact]
+    public async Task SavePageAsync_ShouldNotCheckConcurrency_WhenExpectedVersionIsNotProvided()
+    {
+        // Every non-interactive caller (site import, translation-draft publish, the Developer
+        // API, automation nodes) leaves ExpectedVersion at its 0 default and must keep working
+        // exactly as before.
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        var page = await service.SavePageAsync(new CmsPageEditorModel { SiteId = site.Id, Title = "Page", Slug = "page" });
+        await service.SavePageAsync(new CmsPageEditorModel { PageId = page.Id, SiteId = site.Id, Title = "Edited elsewhere", Slug = "page" });
+
+        var act = () => service.SavePageAsync(new CmsPageEditorModel { PageId = page.Id, SiteId = site.Id, Title = "No version supplied", Slug = "page" });
+
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
     public async Task SavePageAsync_ShouldDefaultNewPagesToDraft()
     {
         await using var db = await CreateDbAsync();

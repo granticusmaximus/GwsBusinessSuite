@@ -252,6 +252,12 @@
     private string _coverImageUrl = string.Empty;
     private string _saveStatus = string.Empty;
     private CancellationTokenSource? _autosaveCts;
+    // Tracked locally rather than read from Row.ConcurrencyVersion at save time - Row is a
+    // parent-owned parameter never reassigned here after the initial load (see OnParametersSet's
+    // own comment on why), so it would go stale after this component's own first successful save
+    // and falsely flag that save's own follow-up as a conflict. Updated from each save's return
+    // value instead.
+    private long _currentVersion;
 
     private bool _showCoverPicker;
     private bool _isUploadingCover;
@@ -298,6 +304,7 @@
         _blocksJson = Row.BlocksJson;
         _icon = Row.Icon ?? string.Empty;
         _coverImageUrl = Row.CoverImageUrl ?? string.Empty;
+        _currentVersion = Row.ConcurrencyVersion;
         _saveStatus = string.Empty;
     }
 
@@ -368,7 +375,7 @@
         try
         {
             var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
-            await WikiDatabaseService.SaveRowAsync(Database.Id, new WikiDatabaseRowEditor
+            var saved = await WikiDatabaseService.SaveRowAsync(Database.Id, new WikiDatabaseRowEditor
             {
                 Id = Row.Id,
                 ParentRowId = Row.ParentRowId,
@@ -376,10 +383,12 @@
                 Icon = _icon,
                 CoverImageUrl = _coverImageUrl,
                 Values = Values.ToDictionary(pair => pair.Key, pair => pair.Value),
-                CreateRevisionCheckpoint = false
+                CreateRevisionCheckpoint = false,
+                ExpectedVersion = _currentVersion
             }, user, cancellationToken);
 
             if (cancellationToken.IsCancellationRequested) return;
+            _currentVersion = saved.ConcurrencyVersion;
             _saveStatus = "Saved";
             await InvokeAsync(StateHasChanged);
         }
@@ -572,15 +581,17 @@
         try
         {
             var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
-            await WikiDatabaseService.SaveRowAsync(Database.Id, new WikiDatabaseRowEditor
+            var saved = await WikiDatabaseService.SaveRowAsync(Database.Id, new WikiDatabaseRowEditor
             {
                 Id = Row.Id,
                 ParentRowId = Row.ParentRowId,
                 BlocksJson = _blocksJson,
                 Icon = _icon,
                 CoverImageUrl = _coverImageUrl,
-                Values = Values.ToDictionary(pair => pair.Key, pair => pair.Value)
+                Values = Values.ToDictionary(pair => pair.Key, pair => pair.Value),
+                ExpectedVersion = _currentVersion
             }, user);
+            _currentVersion = saved.ConcurrencyVersion;
             _saveStatus = "Saved";
             await LoadHistoryAsync();
             await OnSaved.InvokeAsync();

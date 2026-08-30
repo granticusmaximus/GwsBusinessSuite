@@ -111,6 +111,32 @@ public sealed class ContentLocalizationServiceTests
     }
 
     [Fact]
+    public async Task GenerateTranslationAsync_ShouldThrow_RatherThanSilentlyTranslatingCorruptedContentAsEmpty()
+    {
+        // Regression test: ParseLayoutOrEmpty can't distinguish "genuinely empty" from
+        // "malformed" BlocksJson - both return an empty PageLayout. This used to let a corrupted
+        // page "succeed" at translation with an AI draft that has no content at all, with
+        // nothing indicating the source page wasn't actually empty.
+        await using var fixture = await Fixture.CreateAsync();
+        var site = new CmsSite { Name = "Site", Slug = $"site-{Guid.NewGuid():N}" };
+        fixture.Db.CmsSites.Add(site);
+        var page = new CmsPage
+        {
+            SiteId = site.Id,
+            Title = "Corrupted page",
+            Slug = $"page-{Guid.NewGuid():N}",
+            BlocksJson = "[1,2,3]"
+        };
+        fixture.Db.CmsPages.Add(page);
+        await fixture.Db.SaveChangesAsync();
+
+        var act = () => fixture.Service.GenerateTranslationAsync(
+            ContentLocalizationContentTypes.CmsPage, page.Id, "es", "llama3.1", "author");
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*could not be read*");
+    }
+
+    [Fact]
     public async Task GenerateTranslationAsync_ShouldThrowWhenOllamaIsUnavailable()
     {
         await using var fixture = await Fixture.CreateAsync(withOllama: false);

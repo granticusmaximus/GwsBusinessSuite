@@ -556,7 +556,9 @@
     {
         if (IsBusy) return;
 
-        var confirmed = await JS.InvokeAsync<bool>("confirm", "Permanently delete this contact? This cannot be undone.");
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            "Permanently delete this contact? This also deletes its deals and activity history and cannot be undone. " +
+            "(Contacts with invoices on file can't be permanently deleted - trash them instead.)");
         if (!confirmed) return;
 
         IsBusy = true;

@@ -264,6 +264,14 @@ public sealed class WikiDatabaseRowEditor
     // should. Defaults true so every other caller (property-only edits, tests, the explicit
     // save button) keeps today's "content save = new version" behavior unchanged.
     public bool CreateRevisionCheckpoint { get; set; } = true;
+    // Optimistic-concurrency check against WikiDatabaseRow.ConcurrencyVersion, same
+    // opt-in-by-nonzero-value convention as WikiPageEditorModel.ExpectedContentVersion. Left at
+    // the default 0 (skip the check) by every caller except SentinelDatabaseRowPage's own
+    // BlocksJson body editor - property-only/inline-cell edits and internal/automated callers
+    // (rollup propagation, automation tool actions) never set this, so their existing behavior
+    // is unchanged. Only checked when BlocksJson is actually being saved (non-null) - that's the
+    // one editing surface two admins could realistically collide on for the same row.
+    public long ExpectedVersion { get; set; }
 }
 
 // Reads/writes a WikiDatabaseRow.PropertyValuesJson object, one typed accessor pair per

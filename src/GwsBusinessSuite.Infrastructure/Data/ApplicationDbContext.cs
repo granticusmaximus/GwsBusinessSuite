@@ -150,6 +150,18 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         // (SQLite/EF Core can't translate a DateTimeOffset range comparison), but it still
         // speeds up TrashedAt == null lookups the query planner can combine it with.
         modelBuilder.Entity<Contact>().HasIndex(x => x.FollowUpDate);
+        // NOCASE matches the case-insensitive comparison CrmService.FindOrCreateContactAsync and
+        // BookingService already do in C# (Email.ToLower() == ...) - without it, this index would
+        // only catch exact-case duplicates and the two services' own case-insensitive intent
+        // would be unenforced at the one layer that can actually prevent a race: two
+        // near-simultaneous requests with the same email both passing the check-then-insert
+        // lookup before either commits. Filtered to active, non-null emails so a trashed
+        // contact's email doesn't block reusing it, and multiple contacts with no email at all
+        // remain unaffected (already excluded by "Email IS NOT NULL").
+        modelBuilder.Entity<Contact>().Property(x => x.Email).UseCollation("NOCASE");
+        modelBuilder.Entity<Contact>().HasIndex(x => x.Email)
+            .IsUnique()
+            .HasFilter("TrashedAt IS NULL AND Email IS NOT NULL");
         modelBuilder.Entity<ContactActivity>()
             .HasOne<Contact>()
             .WithMany()

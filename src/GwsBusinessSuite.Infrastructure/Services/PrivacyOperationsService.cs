@@ -4,6 +4,7 @@ using GwsBusinessSuite.Application.Privacy;
 using GwsBusinessSuite.Application.SecurityAudit;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
@@ -12,7 +13,8 @@ public sealed class PrivacyOperationsService(
     ICurrentUserAccessor currentUser,
     ISecurityAuditService securityAudit,
     IBackupOperations backupOperations,
-    TimeProvider timeProvider) : IPrivacyOperationsService
+    TimeProvider timeProvider,
+    ILogger<PrivacyOperationsService> logger) : IPrivacyOperationsService
 {
     private DateTimeOffset UtcNow => timeProvider.GetUtcNow();
 
@@ -324,20 +326,36 @@ public sealed class PrivacyOperationsService(
         request.UpdatedBy = await currentUser.GetCurrentUsernameAsync(cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
-        foreach (var result in results)
+        // The deletion itself already committed above (and is irreversible) - an audit-write
+        // failure past this point must never surface as "the operation could not be completed"
+        // (PrivacyOperations.razor's RunAsync shows exactly that generic message on any
+        // exception), which would tell the admin the erasure failed when the subject's data is
+        // already gone, and a retry would then just fail again with "nothing to delete". Logged
+        // at Critical instead - a missing audit trail for an erasure needs real eyes on it, but
+        // must never mask that the erasure itself succeeded.
+        try
         {
-            await AuditAsync("ErasureTableDeleted", request.Id, new Dictionary<string, string?>
+            foreach (var result in results)
             {
-                ["table"] = result.TableName,
-                ["deletedCount"] = result.DeletedCount.ToString()
+                await AuditAsync("ErasureTableDeleted", request.Id, new Dictionary<string, string?>
+                {
+                    ["table"] = result.TableName,
+                    ["deletedCount"] = result.DeletedCount.ToString()
+                }, cancellationToken);
+            }
+            await AuditAsync("ErasureExecuted", request.Id, new Dictionary<string, string?>
+            {
+                ["requestNumber"] = request.RequestNumber,
+                ["totalDeleted"] = results.Sum(x => x.DeletedCount).ToString(),
+                ["tablesTouched"] = results.Count.ToString()
             }, cancellationToken);
         }
-        await AuditAsync("ErasureExecuted", request.Id, new Dictionary<string, string?>
+        catch (Exception ex)
         {
-            ["requestNumber"] = request.RequestNumber,
-            ["totalDeleted"] = results.Sum(x => x.DeletedCount).ToString(),
-            ["tablesTouched"] = results.Count.ToString()
-        }, cancellationToken);
+            logger.LogCritical(ex,
+                "Security audit event(s) for erasure of PrivacyRequest {RequestId} failed to record after the deletion already succeeded.",
+                request.Id);
+        }
 
         return summary;
     }

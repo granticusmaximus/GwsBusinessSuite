@@ -140,7 +140,26 @@ public sealed class CrmService(
             CreatedBy = source
         };
         await dbContext.Contacts.AddAsync(contact, cancellationToken);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException) when (dbContext is DbContext efContext)
+        {
+            // Two near-simultaneous callers with the same email (a double-submitted form, two
+            // browser tabs) can both pass the "no existing contact" check above before either
+            // commits - the unique index on Contacts.Email (case-insensitive, active contacts
+            // only - see ApplicationDbContext.OnModelCreating) is what actually prevents the
+            // duplicate row; this just means the loser of that race returns the winner's contact
+            // instead of throwing. efContext.Entry(contact).State reset avoids leaving this
+            // failed insert tracked as Added on a long-lived context.
+            efContext.Entry(contact).State = EntityState.Detached;
+            var winner = await dbContext.Contacts
+                .Where(existingContact => existingContact.TrashedAt == null && existingContact.Email != null)
+                .FirstOrDefaultAsync(existingContact => existingContact.Email!.ToLower() == trimmedEmail.ToLower(), cancellationToken);
+            if (winner is null) throw;
+            return winner;
+        }
         _cache.Remove(DashboardCacheKey);
         return contact;
     }
@@ -181,6 +200,20 @@ public sealed class CrmService(
         if (contact is null)
         {
             return;
+        }
+
+        // Invoice has a real OnDelete(Cascade) FK to Contact (ApplicationDbContext.cs), so
+        // deleting a contact with real, Stripe-linked billing history would silently erase those
+        // Invoice rows too - an irreversible local/Stripe data gap the admin UI's generic "cannot
+        // be undone" confirmation never disclosed. Same policy PrivacyOperationsService's
+        // DeleteSubjectDataAsync already enforces for the erasure flow (see its own comment on
+        // this exact FK): refuse rather than silently cascade. Deals have no such external
+        // system of record, so they're allowed to cascade away with the contact as before.
+        var hasInvoices = await dbContext.Invoices.AnyAsync(invoice => invoice.ContactId == contactId, cancellationToken);
+        if (hasInvoices)
+        {
+            throw new InvalidOperationException(
+                "This contact has invoices on file and can't be permanently deleted - remove or reassign its invoices first, or use Trash instead.");
         }
 
         dbContext.Contacts.Remove(contact);

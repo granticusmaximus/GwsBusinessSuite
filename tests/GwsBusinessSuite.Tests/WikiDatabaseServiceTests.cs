@@ -13,6 +13,59 @@ namespace GwsBusinessSuite.Tests;
 public sealed class WikiDatabaseServiceTests
 {
     [Fact]
+    public async Task SaveRowAsync_ShouldRejectAStaleBlocksJsonSave_WhenExpectedVersionDoesNotMatch()
+    {
+        // Regression test: opening a row "as a page" (SentinelDatabaseRowPage) and saving its
+        // BlocksJson body had no conflict detection - a full-replace save with no other signal
+        // that someone else had already saved the row's body. ExpectedVersion is opt-in (0 skips
+        // the check - every property-only/inline-cell/automated caller leaves it unset), so this
+        // only bites the one editing surface two admins could realistically collide on.
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Projects", null, "u");
+        var row = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor { BlocksJson = "[]" }, "u");
+        row.ConcurrencyVersion.Should().Be(1);
+        // Captured before the next save - db is a single DbContext shared by every call in this
+        // test, so its identity map would otherwise hand back this same tracked `row` instance
+        // already mutated by the "someone else" save below, making a re-read look falsely fresh.
+        var staleVersion = row.ConcurrencyVersion;
+
+        // Someone else's page-body save lands first, bumping the version.
+        await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            Id = row.Id, BlocksJson = "[{\"type\":\"paragraph\"}]", ExpectedVersion = staleVersion
+        }, "u");
+
+        // This caller still has the stale version 1 it loaded before the other save.
+        var act = () => service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            Id = row.Id, BlocksJson = "[{\"type\":\"heading\"}]", ExpectedVersion = staleVersion
+        }, "u");
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*changed by someone else*");
+    }
+
+    [Fact]
+    public async Task SaveRowAsync_ShouldNotCheckConcurrency_ForPropertyOnlySaves_RegardlessOfExpectedVersion()
+    {
+        // Inline cell edits (SaveInlineCellAsync) never set BlocksJson, so they must never be
+        // blocked by a stale version even if one happened to be supplied - only an actual
+        // BlocksJson body save is gated by this check.
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Projects", null, "u");
+        var row = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor { BlocksJson = "[]" }, "u");
+        await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor { Id = row.Id, BlocksJson = "[{\"type\":\"paragraph\"}]" }, "u");
+
+        var act = () => service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor
+        {
+            Id = row.Id, ExpectedVersion = 1 // stale on purpose - BlocksJson is null, so this must be ignored
+        }, "u");
+
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
     public async Task CreateDatabaseAsync_ShouldSeedATitlePropertyAndADefaultTableView()
     {
         await using var db = await CreateDbAsync();

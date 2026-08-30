@@ -538,7 +538,8 @@
                     Status = page.Status,
                     PublishedAt = page.PublishedAt,
                     EditPermission = page.EditPermission,
-                    PropertyValues = LoadPropertyValues(page.PropertyValuesJson)
+                    PropertyValues = LoadPropertyValues(page.PropertyValuesJson),
+                    ExpectedVersion = page.ConcurrencyVersion
                 };
 
                 await LoadFormSubmissionsAsync();

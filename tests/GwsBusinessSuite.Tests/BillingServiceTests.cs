@@ -146,6 +146,33 @@ public sealed class BillingServiceTests
     }
 
     [Fact]
+    public async Task MarkInvoicePaidByStripeIdAsync_ShouldNotReviveAVoidedInvoice_OnADelayedWebhook()
+    {
+        // Regression test: Stripe doesn't guarantee ordered/immediate webhook delivery, so a
+        // delayed or redelivered invoice.paid event can arrive after an admin has already voided
+        // the invoice. The idempotency guard only checked for Paid, not Void, so this used to
+        // silently flip a deliberately-voided invoice back to Paid.
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+        fixture.Stripe.IsConfigured = true;
+        var draft = await fixture.Service.SaveDraftAsync(new InvoiceEditorModel
+        {
+            ContactId = contact.Id,
+            Title = "Invoice",
+            LineItems = [new InvoiceLineItemEditorModel { Description = "Work", Quantity = 1, UnitPriceUsd = 100m }]
+        });
+        var sent = await fixture.Service.SendInvoiceAsync(draft.Id);
+        var stripeInvoiceId = fixture.Stripe.LastCreatedStripeInvoiceId!;
+        await fixture.Service.VoidInvoiceAsync(sent.Id);
+
+        await fixture.Service.MarkInvoicePaidByStripeIdAsync(stripeInvoiceId);
+
+        var afterDelayedWebhook = await fixture.Service.GetInvoiceAsync(sent.Id);
+        afterDelayedWebhook!.Status.Should().Be(InvoiceStatuses.Void);
+        afterDelayedWebhook.PaidAt.Should().BeNull();
+    }
+
+    [Fact]
     public async Task DeleteDraftAsync_ShouldOnlyBeAllowed_ForADraft()
     {
         await using var fixture = await Fixture.CreateAsync();

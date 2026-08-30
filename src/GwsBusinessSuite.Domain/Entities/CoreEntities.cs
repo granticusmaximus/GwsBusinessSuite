@@ -943,6 +943,11 @@ public sealed class WikiDatabaseRow : AuditableEntity
     public string? NotionId { get; set; }
     public DateTimeOffset? NotionArchivedAt { get; set; }
     public DateTimeOffset? NotionLastEditedAt { get; set; }
+    // App-managed optimistic concurrency for the row's BlocksJson body, same idea as
+    // WikiPage.ContentVersion - "a row is a page too" (see BlocksJson's own comment above), so it
+    // gets the same full-replace-save-with-no-conflict-detection risk WikiPage already solves.
+    // Incremented by WikiDatabaseService.SaveRowAsync on every successful body save.
+    public long ConcurrencyVersion { get; set; } = 1;
     public string? NotionExportId { get; set; }
     // Local, user-initiated soft-delete - see WikiPage.TrashedAt's own comment. Independent of
     // the parent WikiDatabase's own TrashedAt, for trashing a single row without trashing the
@@ -1094,6 +1099,11 @@ public sealed class CmsPage : AuditableEntity
     // the trigger once PublishedAt actually arrives, so automations react at the real publish
     // moment instead of the moment someone scheduled it.
     public bool ScheduledPublishTriggerPending { get; set; }
+    // App-managed optimistic concurrency, same idea as WikiPage.ContentVersion - a full-replace
+    // save with no version check lets two admins editing the same page (Canvas Studio and/or
+    // EditPage.razor, in one tab or two) silently overwrite each other with no warning.
+    // Incremented by CmsBuilderService.SavePageAsync on every successful update.
+    public long ConcurrencyVersion { get; set; } = 1;
     // Client-safe structural locking (Phase 2) - the page-level default a section/widget falls
     // back to when its own EditPermission is "Inherit". One of "Open"/"ContentOnly"/"Locked"
     // (see GwsBusinessSuite.Application.CmsBuilder.CmsEditPermissions - not referenced directly

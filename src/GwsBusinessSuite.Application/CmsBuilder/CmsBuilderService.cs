@@ -463,6 +463,21 @@ public sealed class CmsBuilderService(
 
         var requestedStatus = editor.Status == CmsPageStatuses.Published ? CmsPageStatuses.Published : CmsPageStatuses.Draft;
 
+        // Optimistic concurrency, opt-in only (ExpectedVersion default 0 skips this) - see
+        // CmsPageEditorModel.ExpectedVersion's own comment on why only the two interactive page
+        // editors supply a nonzero value. Two admins editing the same page (Canvas Studio and/or
+        // EditPage.razor, in one tab or two) could otherwise silently overwrite each other's
+        // changes with no warning - this is a full-replace save with no other conflict signal.
+        if (!isNew && editor.ExpectedVersion > 0 && page.ConcurrencyVersion != editor.ExpectedVersion)
+        {
+            throw new InvalidOperationException(
+                "This page was changed by someone else since you loaded it. Reload the page and reapply your changes.");
+        }
+        if (!isNew)
+        {
+            page.ConcurrencyVersion++;
+        }
+
         page.SiteId = siteId;
         page.ParentPageId = editor.ParentPageId;
         page.Title = editor.Title.Trim();

@@ -2,12 +2,14 @@ using System.Text;
 using FluentAssertions;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Privacy;
+using GwsBusinessSuite.Application.SecurityAudit;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -224,6 +226,42 @@ public sealed class PrivacyOperationsServiceTests
     }
 
     [Fact]
+    public async Task DeleteSubjectDataAsync_ShouldStillReturnASummary_WhenTheErasureAuditWriteFails()
+    {
+        // Regression test: the post-delete audit calls used to run unguarded after the deletion
+        // transaction already committed. An audit-write failure there used to propagate out of
+        // DeleteSubjectDataAsync entirely, which the UI (PrivacyOperations.razor) shows as a
+        // generic "operation could not be completed" - misreporting an already-irreversible,
+        // already-successful erasure as a failure, and leaving a retry to fail again with
+        // "nothing to delete".
+        await using var fixture = await Fixture.CreateAsync(auditOverride: new ThrowingSecurityAuditService());
+        fixture.Db.Contacts.Add(new Contact { FullName = "Grant Example", Email = "grant@example.com" });
+        await fixture.Db.SaveChangesAsync();
+        var request = await fixture.Service.CreateRequestAsync(new(PrivacyRequestTypes.Erasure, "grant@example.com"));
+        await fixture.Service.VerifyIdentityAsync(request.Id);
+
+        var summary = await fixture.Service.DeleteSubjectDataAsync(request.Id);
+
+        summary.Should().NotBeNull();
+        (await fixture.Db.Contacts.CountAsync(x => x.Email == "grant@example.com")).Should().Be(0);
+        var dashboard = await fixture.Service.GetDashboardAsync();
+        dashboard.Requests.Single(x => x.Id == request.Id).DeletionExecutedAt.Should().NotBeNull();
+    }
+
+    // Only the erasure-completion audit events fail - CreateRequestAsync/VerifyIdentityAsync
+    // have their own, earlier audit calls that must keep succeeding so the test can actually
+    // reach DeleteSubjectDataAsync; this isolates the one failure this test is about.
+    private sealed class ThrowingSecurityAuditService : ISecurityAuditService
+    {
+        public Task<Guid> RecordAsync(SecurityAuditInput input, CancellationToken cancellationToken = default) =>
+            input.Action.StartsWith("Erasure", StringComparison.Ordinal)
+                ? throw new InvalidOperationException("Simulated audit write failure.")
+                : Task.FromResult(Guid.NewGuid());
+        public Task<SecurityAuditPage> QueryAsync(SecurityAuditQuery query, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<SecurityAuditIntegrityResult> VerifyIntegrityAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    [Fact]
     public async Task DeleteSubjectDataAsync_ShouldThrowWhenSubjectDoesNotResolveToAnyRow()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -418,14 +456,14 @@ public sealed class PrivacyOperationsServiceTests
         public PrivacyOperationsService Service { get; }
         public FakeBackupOperations Backups { get; }
 
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(ISecurityAuditService? auditOverride = null)
         {
             var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
             var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
             var db = new ApplicationDbContext(options); await db.Database.EnsureCreatedAsync();
-            var audit = new SecurityAuditService(new TestDbContextFactory(connection), new FixedCurrentUserAccessor("grant"), new PassthroughProtector(), TimeProvider.System);
+            var audit = auditOverride ?? new SecurityAuditService(new TestDbContextFactory(connection), new FixedCurrentUserAccessor("grant"), new PassthroughProtector(), TimeProvider.System);
             var backups = new FakeBackupOperations();
-            return new(connection, db, new PrivacyOperationsService(db, new FixedCurrentUserAccessor("grant"), audit, backups, TimeProvider.System), backups);
+            return new(connection, db, new PrivacyOperationsService(db, new FixedCurrentUserAccessor("grant"), audit, backups, TimeProvider.System, NullLogger<PrivacyOperationsService>.Instance), backups);
         }
         public async ValueTask DisposeAsync() { await Db.DisposeAsync(); await _connection.DisposeAsync(); }
     }

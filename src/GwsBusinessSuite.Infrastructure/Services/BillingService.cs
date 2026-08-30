@@ -259,8 +259,11 @@ public sealed class BillingService(
     {
         var invoice = await db.Invoices.FirstOrDefaultAsync(item => item.StripeInvoiceId == stripeInvoiceId, cancellationToken);
         // Unknown invoice id or already-processed webhook redelivery - both are silent no-ops,
-        // since Stripe retries webhook delivery and this must stay idempotent.
-        if (invoice is null || invoice.Status == InvoiceStatuses.Paid) return;
+        // since Stripe retries webhook delivery and this must stay idempotent. Void is included
+        // deliberately, not just Paid: Stripe doesn't guarantee ordered/immediate delivery, so a
+        // delayed or redelivered invoice.paid event arriving after an admin voids the invoice
+        // must never flip a deliberately-voided invoice back to Paid.
+        if (invoice is null || invoice.Status is InvoiceStatuses.Paid or InvoiceStatuses.Void) return;
 
         invoice.Status = InvoiceStatuses.Paid;
         invoice.PaidAt = timeProvider.GetUtcNow();

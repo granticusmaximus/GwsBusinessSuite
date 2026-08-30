@@ -300,7 +300,23 @@ public sealed class BookingService(
 
         var contact = new Contact { FullName = name, Email = email, CreatedBy = "booking-page" };
         db.Contacts.Add(contact);
-        await db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException) when (db is DbContext efContext)
+        {
+            // Same check-then-insert race as CrmService.FindOrCreateContactAsync (two
+            // near-simultaneous bookings with the same email) - the unique index on
+            // Contacts.Email is what actually prevents the duplicate row; this just means the
+            // loser of the race returns the winner's contact instead of throwing.
+            efContext.Entry(contact).State = EntityState.Detached;
+            var winner = await db.Contacts
+                .Where(existingContact => existingContact.TrashedAt == null && existingContact.Email != null)
+                .FirstOrDefaultAsync(existingContact => existingContact.Email!.ToLower() == email.ToLower(), cancellationToken);
+            if (winner is null) throw;
+            return winner.Id;
+        }
         return contact.Id;
     }
 

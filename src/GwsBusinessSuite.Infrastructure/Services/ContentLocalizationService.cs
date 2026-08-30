@@ -183,7 +183,17 @@ public sealed class ContentLocalizationService(
             var page = await db.CmsPages.AsNoTracking()
                 .FirstOrDefaultAsync(item => item.Id == contentId && item.TrashedAt == null, cancellationToken)
                 ?? throw new InvalidOperationException($"CMS page {contentId} was not found.");
-            var layout = CmsBuilderJson.ParseLayoutOrEmpty(page.BlocksJson);
+            // ParseLayoutOrEmpty can't tell "genuinely empty" apart from "malformed" - both
+            // return an empty PageLayout, which would make this method "succeed" by producing a
+            // translated draft with no content at all, with nothing to indicate the source page
+            // wasn't actually empty. Surface a parse failure instead of silently swallowing it,
+            // same reasoning as CmsBuilderService.RemapGlobalBlockReferences's own comment on
+            // this exact class of bug.
+            if (!CmsBuilderJson.TryParseLayout(page.BlocksJson, out var layout))
+            {
+                throw new InvalidOperationException(
+                    $"CMS page {contentId}'s content could not be read - it may be corrupted or in an unrecognized format. Fix the page before translating it.");
+            }
             var fields = new List<(LayoutWidget Widget, string FieldKey)>();
             foreach (var widget in layout.Sections.SelectMany(section => section.Columns).SelectMany(column => column.Widgets))
             {
