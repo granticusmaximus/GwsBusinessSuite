@@ -4050,11 +4050,17 @@ function placeCaretAtTextOffset(content, offset) {
 // (it's appended before the content div in createBlockBody). That silently sent typed text
 // nowhere - and, worse, left focus on a checkbox inside the page's <EditForm>, where pressing
 // Enter triggers the browser's native implicit form submission instead of splitting the block.
-// Every block type that has no .wiki-block-content at all (divider, table, columns, ...) also
-// has no <input> to fall back to, so preferring content and only falling back to input when
-// content is genuinely absent is correct for every block type, not just to-do.
+// A table block has neither: its cells are plain <td>/<th> elements, not .wiki-block-content -
+// so inserting a table via the slash menu previously left focus on nothing at all
+// (document.activeElement fell back to <body>), and a user's very next "/" keystroke had no
+// contenteditable to land in and silently did nothing - this was mistaken for "chaining another
+// slash-menu insert after a table is unreliable" but is really "focus never moved into the table
+// in the first place". Falling back to the first cell fixes both the divider/columns/etc. case
+// (already handled by the input fallback) and this one.
 function primaryFocusTarget(blockEl) {
-    return blockEl.querySelector('.wiki-block-content') || blockEl.querySelector('input');
+    return blockEl.querySelector('.wiki-block-content')
+        || blockEl.querySelector('input')
+        || blockEl.querySelector('td, th');
 }
 
 function focusBlock(blockEl) {

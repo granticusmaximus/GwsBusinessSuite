@@ -416,6 +416,79 @@ screens.
    too, not just this new project, so it's an environment/toolchain gap rather than a defect in
    either. Build and exercise this once a compatible Xcode is available. Remaining native scope
    (mobile-specific affordances beyond the existing MAUI shell) stays open.
+10. **Notion-parity UI pass** ✅ (2026-08-30) - closes out every item from that day's live Notion
+    UI/UX audit:
+    - **Light theme**: Sentinel and the shared admin chrome were dark-only (no light mode existed
+      at all) - `app.css`'s design tokens now have a `:root[data-theme="light"]` counterpart set
+      for every `--gws-*`/`--bs-*` token plus `.sentinel-workspace`'s own custom properties
+      (`--sentinel-canvas`, `-sidebar`, `-hover`, `-border`, `-muted`, `-faint`, `-link`, and two
+      new `-tint`/`-canvas-translucent`/`-sidebar-translucent` tokens for overlay/blur surfaces).
+      Dark stays the unconditional default (zero risk for anyone who never opts in); light is an
+      explicit per-browser choice via a new sun/moon toggle in `MainLayout.razor`'s admin bar
+      (`app.js`'s `toggleTheme()`, persisted to `localStorage.gwsTheme`, read pre-paint by an
+      inline script in `App.razor`'s `<head>` so there's no flash of the wrong theme). Since
+      Bootstrap 5's own component defaults are already a coherent light theme, most of the ~30
+      admin pages re-theme for free through the token layer; ~90 Sentinel-section hardcoded
+      near-white text colors were mechanically converted to the token references so they flip
+      correctly too. **Verified, not assumed**: live-screenshotted in both themes, including a
+      real bug this caught and fixed - two sticky/blurred header bars used hardcoded
+      near-opaque dark rgba() literals instead of a token, so they stayed black in light mode
+      until moved onto the new translucent tokens. **Known residual scope**: the 11 database
+      view types, tag/label swatch colors, and presence/remote-cursor colors were not
+      individually re-verified in light mode.
+    - **Underline**: `WikiRichTextSpan` gained an `Underline` field (alongside Bold/Italic/
+      Strikethrough/Code) - it existed as a gap in the Notion *import* mapping already
+      (`NotionMapping.cs` had a `// Underline is not currently part of Sentinel's editor
+      vocabulary` comment and a hardcoded `underline = false` on the *push* side) before this
+      pass. Now wired end-to-end: the block editor's toolbar/`Ctrl`+`U`, the read-only HTML
+      renderer, the Markdown exporter (raw `<u>` passthrough, matching Notion's own Markdown
+      export), and both directions of Notion sync (import annotations, push annotations, and a
+      new `++text++` synthetic delimiter in `NotionMarkdownBlockParser`'s HTML-to-Markdown step,
+      since CommonMark has no native underline syntax).
+    - **Inline color menu**: merged from two separate "Text color"/"Background color" buttons
+      into one "A" dropdown with two labeled sections (Color/Background), matching Notion's own
+      single-button menu.
+    - **Page icon**: `.sentinel-icon-input` grew from `3.3rem` to `4.6rem` (closer to Notion's
+      ~78px), and - matching the existing "Add cover" hover-reveal pattern - a page with no icon
+      set no longer shows a static document-glyph button at all; it shows an "Add icon" ghost
+      link next to "Add cover" instead, exactly like Notion.
+    - **Word/character count**: computed live from `Editor.BlocksJson` (not persisted, not
+      cached - cheap enough to recompute per render) and shown under the "Page context" sidebar
+      heading.
+    - **Keyboard shortcut reference**: a new "?" button opens a modal listing every real shortcut
+      the block editor and workspace chrome already implement (cross-checked against
+      `wiki-block-editor.js` and `sentinel-workspace.js` directly rather than guessed).
+    - **"Ask SentinelGPT" banner**: was a permanently docked, bordered, gradient-backed row on
+      every page even collapsed. Now a small low-chrome text trigger by default (Notion's own AI
+      entry is invocational, never a standing banner) that only grows into the full card once
+      opened.
+    - **Page width/font**: new `WikiPage.IsFullWidth`/`FontStyle` columns (migration
+      `AddWikiPagePresentationSettings`) plus a Notion-style "•••" **Style** menu (Full width
+      toggle; Default/Serif/Monospace font) next to Share/favorite/download. Content-neutral -
+      preserved across `DuplicatePageAsync`/`RevertToRevisionAsync` the same way Icon/
+      CoverImageUrl already were, and persisted through the existing silent autosave path rather
+      than minting a version-history checkpoint.
+    - **Templates panel**: `SentinelTemplates.razor` rebuilt from a paragraph-heavy stacked list
+      into a visual card gallery (`.sentinel-template-gallery`) - closing the exact gap the
+      2026-08-30 audit flagged and the entry above deferred. All three template kinds (page,
+      block, database) render as uniform cards in one grid; the Notion import/restore flows moved
+      into a collapsed `<details>` section below the gallery instead of occupying permanent
+      vertical space. No `@code` logic changed, only presentation.
+    - **Table-block focus bug** (investigated and fixed as a same-day follow-up, after initially
+      being deferred as unreproduced): confirmed live via Playwright that inserting a Table
+      through the slash menu left `document.activeElement` on `<body>` - a table's cells are
+      plain `<td>`/`<th>`, not `.wiki-block-content` or `<input>`, so the shared
+      `primaryFocusTarget` helper (already reused by every slash-menu insertion, block
+      conversion, and Arrow-key/undo focus restore - see the to-do-checkbox fix above, same
+      helper) found nothing and silently focused nothing. A user's next `/` keystroke then had
+      no contenteditable to reach and did nothing, which is what the original audit's screenshot
+      agent saw as "chaining a block insert after a table is unreliable". Fixed by falling back
+      to the table's first cell (`td, th`), matching Notion's own behavior of landing you in the
+      first cell right after inserting a table. Confirmed the *actual* supported way to continue
+      past a table - its own hover "+" gutter button - already worked correctly and still does;
+      typing `/` *inside* a cell correctly does nothing in both this app and real Notion (a cell
+      holds plain text, not nested blocks), so that was never the bug. New regression test:
+      `InsertingTableViaSlashMenu_ShouldFocusFirstCellAndAllowContinuingAfterIt`.
 
 ## Safety rules
 

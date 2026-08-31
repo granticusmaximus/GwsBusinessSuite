@@ -431,6 +431,75 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
     }
 
     [Fact]
+    public async Task InsertingTableViaSlashMenu_ShouldFocusFirstCellAndAllowContinuingAfterIt()
+    {
+        // Regression guard: a table block has no .wiki-block-content and no <input> (its cells
+        // are plain <td>/<th>), so the shared focus helper used after every slash-menu insertion
+        // found nothing to focus and silently left focus on <body>. A user's very next "/"
+        // keystroke then had no contenteditable to land in and did nothing at all - reported as
+        // "chaining another block insert right after a table is unreliable". Fixed by falling
+        // back to the first cell. Continuing past the table is still the table block's own
+        // hover "+" (matching Notion: you exit a table via its own controls, not by typing "/"
+        // inside a cell - cells are plain text, not nested blocks, in both products).
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "text/html",
+            Body = """<main class="sentinel-workspace"><div id="editor" class="wiki-block-editor"></div></main>"""
+        }));
+        await page.GotoAsync("http://localhost/editor");
+
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+
+        var blocksJson = WikiBlockJson.Serialize(
+        [
+            new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0, [], new Dictionary<string, string>())
+        ]);
+        await page.EvaluateAsync(
+            """
+            json => window.sentinelBlockEditor.initialize(
+                document.querySelector('#editor'),
+                { invokeMethodAsync: () => Promise.resolve([]) },
+                json)
+            """,
+            blocksJson);
+
+        await page.Locator(".wiki-block-content").First.ClickAsync();
+        await page.Keyboard.TypeAsync("/");
+        await page.Locator(".wiki-editor-menu-item:has(.wiki-editor-menu-label:text-is(\"Table\"))")
+            .ClickAsync(new LocatorClickOptions { Force = true });
+
+        // Focus must land in the table's first cell, not <body> - and typing must go straight
+        // into it, matching Notion's own "table insert lands you in the first cell" behavior.
+        var activeTag = await page.EvaluateAsync<string>("() => document.activeElement.tagName");
+        activeTag.Should().BeOneOf("TD", "TH");
+        await page.Keyboard.TypeAsync("Header A");
+        await Expect(page.Locator(".wiki-native-table th, .wiki-native-table td").First).ToHaveTextAsync("Header A");
+
+        // Continuing past the table via its own gutter "+" must still work, and must open the
+        // same picker menu a fresh "/" would - this is the actual, supported way to chain
+        // another block insert right after a table.
+        await page.Locator(".wiki-block[data-block-type=table] .wiki-block-add")
+            .ClickAsync(new LocatorClickOptions { Force = true });
+        await Expect(page.Locator(".wiki-editor-suggestion-menu")).ToBeVisibleAsync();
+        await page.Locator(".wiki-editor-menu-item:has(.wiki-editor-menu-label:text-is(\"Heading 1\"))")
+            .ClickAsync(new LocatorClickOptions { Force = true });
+        await page.Keyboard.TypeAsync("After the table");
+
+        var blocks = await EditorBlocksAsync(page);
+        blocks.Select(block => block.Type).Should().Equal(WikiBlockTypes.Table, WikiBlockTypes.Heading1);
+        blocks[1].RichText.Single().Text.Should().Be("After the table");
+    }
+
+    [Fact]
     public async Task FormattingColorsAndUndo_ShouldRoundTripAndSurviveEditorReinitialization()
     {
         await using var page = await fixture.Browser.NewPageAsync();
