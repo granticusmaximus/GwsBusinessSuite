@@ -223,6 +223,9 @@ public static class WikiMarkdownExporter
             if (span.Bold) text = $"**{text}**";
             if (span.Italic) text = $"_{text}_";
             if (span.Strikethrough) text = $"~~{text}~~";
+            // No CommonMark syntax for underline - raw inline HTML passthrough is the standard
+            // Markdown convention for it (Notion's own Markdown export does the same).
+            if (span.Underline) text = $"<u>{text}</u>";
             if (WikiBlockHtmlRenderer.GetSafeLink(span.Link) is { } link) text = $"[{text}]({link})";
             return text;
         }));

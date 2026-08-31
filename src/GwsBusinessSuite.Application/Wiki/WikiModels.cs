@@ -26,6 +26,10 @@ public sealed class WikiPageEditorModel
     public string? CoverImageUrl { get; set; }
 
     public Guid? ParentWikiPageId { get; set; }
+
+    public bool IsFullWidth { get; set; }
+
+    public string? FontStyle { get; set; }
 }
 
 public sealed record WikiPageConflictSnapshot(

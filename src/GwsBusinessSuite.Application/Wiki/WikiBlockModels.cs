@@ -65,6 +65,7 @@ public sealed record WikiRichTextSpan(
     bool Bold = false,
     bool Italic = false,
     bool Strikethrough = false,
+    bool Underline = false,
     bool Code = false,
     string? Link = null,
     string? TextColor = null,

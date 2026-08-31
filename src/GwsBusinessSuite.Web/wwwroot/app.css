@@ -71,6 +71,72 @@
     --bs-light-rgb: 42, 37, 34;
 }
 
+/* ── Light theme ─────────────────────────────────────────────
+   Dark (the two unconditional :root blocks above) remains the default look with zero risk of
+   changing for anyone who never opts in - this block only takes effect once app.js's
+   toggleTheme()/App.razor's pre-paint script sets data-theme="light" on <html>. Same token
+   *names*, light values: Bootstrap's own component defaults (tables/modals/dropdowns/badges/
+   etc.) are already a coherent light theme, so redefining these tokens re-themes the ~30 admin
+   pages built from standard Bootstrap classes without touching them individually - only the
+   handful of hardcoded (non-token) exceptions below need their own explicit light rules. The
+   brand accent (amber) is deliberately unchanged between themes; only surface/text/border
+   tokens flip. */
+:root[data-theme="light"] {
+    --gws-sidebar-bg: #fbfbfa;
+    --gws-sidebar-hover-bg: #efeeec;
+    --gws-sidebar-text: #44403c;
+    --gws-sidebar-text-soft: #857f79;
+    --gws-admin-bar-bg: #ffffff;
+    --gws-body-bg: #ffffff;
+    --gws-panel-bg: #ffffff;
+    --gws-panel-bg-2: #f5f4f2;
+    --gws-panel-border: #e7e4e1;
+    --gws-shadow-sm: 0 1px 2px rgba(28, 25, 23, 0.08);
+    --gws-shadow-md: 0 4px 16px rgba(28, 25, 23, 0.12);
+    --gws-text-strong: #1c1917;
+    --gws-text-soft: #6b6560;
+}
+
+:root[data-theme="light"] {
+    --bs-primary-bg-subtle: #fef3c7;
+    --bs-primary-border-subtle: #fde68a;
+    --bs-body-color: #1c1917;
+    --bs-body-color-rgb: 28, 25, 23;
+    --bs-body-bg: #ffffff;
+    --bs-body-bg-rgb: 255, 255, 255;
+    --bs-emphasis-color: #1c1917;
+    --bs-secondary-color: #6b6560;
+    --bs-secondary-bg: #f5f4f2;
+    --bs-tertiary-bg: #faf9f7;
+    --bs-border-color: #e7e4e1;
+    --bs-border-color-translucent: rgba(28, 25, 23, 0.1);
+    /* Amber body text fails contrast on white (fine on the dark theme's near-black canvas) -
+       a deeper amber keeps the brand hue while staying readable. Buttons/accents keep the
+       brighter amber via --gws-sidebar-accent, which is unchanged. */
+    --bs-link-color: #b45309;
+    --bs-link-color-rgb: 180, 83, 9;
+    --bs-link-hover-color: #92400e;
+    --bs-link-hover-color-rgb: 146, 64, 14;
+    --bs-heading-color: #1c1917;
+    /* No remap trick needed here (unlike dark's --bs-white/--bs-light above) - a literal light
+       gray/white is exactly what .bg-white/.bg-light/.text-bg-light should be on a light canvas. */
+    --bs-white: #ffffff;
+    --bs-white-rgb: 255, 255, 255;
+    --bs-light: #f5f4f2;
+    --bs-light-rgb: 245, 244, 242;
+}
+
+/* The four alert variants and .btn-close use hardcoded (non-token) values tuned for the dark
+   canvas - bright pastel text for contrast against near-black, and an inverted (white) close
+   icon. Both need a light-appropriate counterpart; everything else in the "Bootstrap component
+   dark-mode overrides" section below is already token-driven and re-themes for free. */
+:root[data-theme="light"] .alert-primary,
+:root[data-theme="light"] .alert-info { color: #92400e; }
+:root[data-theme="light"] .alert-success { color: #166534; }
+:root[data-theme="light"] .alert-danger { color: #991b1b; }
+:root[data-theme="light"] .alert-warning { color: #92400e; }
+:root[data-theme="light"] .btn-close { filter: none; }
+
 /* Bootstrap hardcodes the paired text color for text-bg-light/.text-dark (color:#000
    !important) rather than deriving it from a variable, so redirecting --bs-light above
    isn't enough on its own - these need their own !important overrides to win the
@@ -187,6 +253,25 @@ h1:focus { outline: none; }
     align-items: center;
     gap: .65rem;
 }
+
+.gws-theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.35rem;
+    height: 2.35rem;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-sm);
+    background: var(--gws-panel-bg);
+    color: var(--gws-text-soft);
+    cursor: pointer;
+}
+.gws-theme-toggle:hover { color: var(--gws-text-strong); border-color: #44403c; }
+/* Dark is the default (no [data-theme] attribute) - show the moon (an affordance to switch to
+   light) and hide the sun; the light override below flips which icon is visible. */
+.gws-theme-icon-light { display: none; }
+:root[data-theme="light"] .gws-theme-icon-dark { display: none; }
+:root[data-theme="light"] .gws-theme-icon-light { display: inline; }
 
 .gws-command-trigger {
     min-height: 2.35rem;
@@ -668,6 +753,36 @@ h1:focus { outline: none; }
 .modal-footer { border-color: var(--gws-panel-border); }
 
 .modal-backdrop.show { opacity: .65; }
+
+.sentinel-shortcuts-group + .sentinel-shortcuts-group { margin-top: 1.25rem; }
+.sentinel-shortcuts-group h6 {
+    margin-bottom: .5rem;
+    color: var(--gws-text-soft);
+    font-size: .68rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+}
+.sentinel-shortcut-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    padding: .4rem 0;
+    border-bottom: 1px solid var(--gws-panel-border);
+}
+.sentinel-shortcut-row:last-child { border-bottom: 0; }
+.sentinel-shortcut-row span:first-child { color: var(--gws-text-strong); font-size: .85rem; }
+.sentinel-shortcut-row kbd {
+    margin-left: .3rem;
+    padding: .15rem .45rem;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: 5px;
+    background: var(--gws-panel-bg-2);
+    color: var(--gws-text-soft);
+    font: 600 .72rem var(--gws-font-sans);
+    box-shadow: none;
+}
 
 /* Every modal in the admin portal is draggable by its header - see app.js's
    pointerdown/pointermove delegation, which needs no per-modal wiring since it listens on
@@ -1250,8 +1365,15 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 }
 .sentinel-public-automation-runs th { color: #78716c; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
 .sentinel-public-share-error { display: grid; place-content: center; min-height: 100vh; text-align: center; }
-.sentinel-ai-panel { margin: .5rem 0 1rem; border: 1px solid rgba(245,158,11,.18); border-radius: .65rem; background: linear-gradient(135deg,rgba(245,158,11,.05),rgba(124,58,237,.04)); overflow: hidden; }
-.sentinel-ai-toggle { display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: .55rem; width: 100%; padding: .65rem .8rem; border: 0; background: transparent; color: inherit; text-align: left; }
+/* Collapsed (the default, and how a page spends nearly all of its time) is a small, low-chrome
+   invocation point - Notion's own AI entry point is a text trigger (Cmd+J / a slash command),
+   never a permanently docked, bordered banner - not a card claiming a full-width row on every
+   page whether or not anyone ever uses it. It only grows into an actual panel once opened. */
+.sentinel-ai-panel { margin: .35rem 0 1rem; border-radius: .65rem; overflow: hidden; }
+.sentinel-ai-panel.is-open { border: 1px solid rgba(245,158,11,.18); background: linear-gradient(135deg,rgba(245,158,11,.05),rgba(124,58,237,.04)); }
+.sentinel-ai-toggle { display: inline-grid; grid-template-columns: auto auto auto; align-items: center; gap: .4rem; padding: .3rem .5rem; border: 0; border-radius: .5rem; background: transparent; color: var(--sentinel-faint, var(--gws-text-soft)); text-align: left; font-size: .82rem; }
+.sentinel-ai-panel.is-open .sentinel-ai-toggle { display: grid; grid-template-columns: auto auto 1fr auto; width: 100%; padding: .65rem .8rem; font-size: 1rem; color: inherit; }
+.sentinel-ai-toggle:hover { background: var(--sentinel-hover, var(--gws-panel-bg-2)); color: var(--gws-text-strong); }
 .sentinel-ai-toggle > span { color: #fbbf24; font-size: 1.1rem; }
 .sentinel-ai-toggle small { color: #78716c; }
 .sentinel-ai-body { display: grid; gap: .75rem; padding: .8rem; border-top: 1px solid rgba(245,158,11,.12); }
@@ -1614,7 +1736,7 @@ audio.wiki-embed-media { max-width: 100%; }
     padding: .28rem;
     border: 1px solid rgba(214, 211, 209, .16);
     border-radius: 7px;
-    background: #1c1917;
+    background: var(--gws-panel-bg);
     box-shadow: 0 10px 28px rgba(0, 0, 0, .42);
 }
 
@@ -1627,7 +1749,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border: 0;
     border-radius: 4px;
     background: transparent;
-    color: #d6d3d1;
+    color: var(--gws-sidebar-text);
     font-size: .72rem;
 }
 
@@ -1636,9 +1758,9 @@ audio.wiki-embed-media { max-width: 100%; }
 .wiki-inline-toolbar .is-bold { font-weight: 800; }
 .wiki-inline-toolbar .is-italic { font-style: italic; }
 .wiki-inline-toolbar .is-strike { text-decoration: line-through; }
+.wiki-inline-toolbar .is-underline { text-decoration: underline; }
 .wiki-inline-toolbar .is-code { font-family: var(--bs-font-monospace, monospace); }
 .wiki-inline-toolbar .wiki-color-menu-toggle { font-weight: 800; text-decoration: underline; text-decoration-color: #f59e0b; text-underline-offset: 3px; }
-.wiki-inline-toolbar .wiki-background-menu-toggle { font-size: .92rem; }
 
 .wiki-color-menu {
     position: absolute;
@@ -1649,12 +1771,25 @@ audio.wiki-embed-media { max-width: 100%; }
     grid-template-columns: repeat(2, minmax(7.5rem, 1fr));
     gap: 2px;
     width: 16rem;
+    max-height: 22rem;
+    overflow-y: auto;
     padding: .35rem;
     border: 1px solid rgba(214, 211, 209, .16);
     border-radius: 7px;
-    background: #1c1917;
+    background: var(--gws-panel-bg);
     box-shadow: 0 12px 32px rgba(0, 0, 0, .46);
 }
+
+.wiki-color-menu-heading {
+    grid-column: 1 / -1;
+    padding: .4rem .45rem .2rem;
+    color: var(--sentinel-faint, var(--gws-text-soft));
+    font-size: .65rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+.wiki-color-menu-heading:not(:first-child) { margin-top: .3rem; border-top: 1px solid var(--gws-panel-border); }
 
 .wiki-inline-toolbar .wiki-color-menu button {
     display: flex;
@@ -1663,7 +1798,7 @@ audio.wiki-embed-media { max-width: 100%; }
     width: 100%;
     min-width: 0;
     padding: .35rem .45rem;
-    color: #d6d3d1;
+    color: var(--gws-sidebar-text);
     text-align: left;
 }
 
@@ -1675,7 +1810,7 @@ audio.wiki-embed-media { max-width: 100%; }
     height: 1.35rem;
     border: 1px solid rgba(214, 211, 209, .16);
     border-radius: 4px;
-    color: #d6d3d1;
+    color: var(--gws-sidebar-text);
     font-size: .66rem;
     font-weight: 750;
 }
@@ -2148,9 +2283,33 @@ audio.wiki-embed-media { max-width: 100%; }
     --sentinel-border-strong: rgba(245, 158, 11, .35);
     --sentinel-muted: #a8a29e;
     --sentinel-faint: #78716c;
+    /* Amber inline-link text (block content links, brand mark) - bright enough to read on the
+       dark canvas but too low-contrast on white; the light override below deepens it. */
+    --sentinel-link: #fbbf24;
+    --sentinel-tint: rgba(255, 255, 255, .025);
+    --sentinel-canvas-translucent: rgba(32, 29, 27, .93);
+    --sentinel-sidebar-translucent: rgba(26, 24, 22, .96);
     width: min(100%, 1840px);
     margin: 0 auto;
     container-type: inline-size;
+}
+
+/* Every one of these is a straight light-appropriate counterpart of the dark value above -
+   everything under .sentinel-workspace that reads these custom properties (block editor canvas/
+   sidebar/hover/borders, muted/faint text, inline links) re-themes automatically. */
+:root[data-theme="light"] .sentinel-workspace {
+    --sentinel-canvas: #ffffff;
+    --sentinel-canvas-raised: #f5f4f2;
+    --sentinel-sidebar: #fbfbfa;
+    --sentinel-hover: #efeeec;
+    --sentinel-border: rgba(28, 25, 23, .1);
+    --sentinel-border-strong: rgba(245, 158, 11, .4);
+    --sentinel-muted: #6b6560;
+    --sentinel-faint: #8a8480;
+    --sentinel-link: #b45309;
+    --sentinel-tint: rgba(28, 25, 23, .025);
+    --sentinel-canvas-translucent: rgba(255, 255, 255, .93);
+    --sentinel-sidebar-translucent: rgba(255, 255, 255, .96);
 }
 
 .sentinel-workspace-header {
@@ -2190,7 +2349,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-sidebar-shortcut:focus-visible {
     outline: 0;
     background: var(--sentinel-hover);
-    color: #fafaf9;
+    color: var(--gws-text-strong);
 }
 
 .sentinel-brand-mark {
@@ -2201,7 +2360,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border: 1px solid rgba(245, 158, 11, .42);
     border-radius: 6px;
     background: linear-gradient(145deg, rgba(245, 158, 11, .22), rgba(245, 158, 11, .06));
-    color: #fbbf24;
+    color: var(--sentinel-link);
     font: 800 .82rem var(--gws-font-serif);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05);
 }
@@ -2445,7 +2604,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-tree-expand-all:focus-visible {
     outline: 0;
     background: var(--sentinel-hover);
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
 }
 
 .sentinel-workspace .wiki-tree-row {
@@ -2454,12 +2613,12 @@ audio.wiki-embed-media { max-width: 100%; }
     padding-top: .24rem;
     padding-bottom: .24rem;
     border-radius: 6px;
-    color: #d6d3d1;
+    color: var(--gws-sidebar-text);
 }
 
 .sentinel-workspace .wiki-tree-row.is-top-level {
     min-height: 2.1rem;
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
 }
 
 .sentinel-workspace .wiki-tree-row.is-top-level .wiki-tree-title {
@@ -2483,19 +2642,19 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .wiki-tree-bulk-bar {
     background: rgba(234, 179, 8, .08);
     border-color: rgba(234, 179, 8, .35);
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
 }
 .sentinel-workspace .wiki-move-target-option:hover {
     background: var(--sentinel-hover);
 }
 .sentinel-workspace .wiki-move-target-option.is-selected {
     background: rgba(245, 158, 11, .12);
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
 }
 .sentinel-workspace .wiki-tree-row-dropdown {
     background: var(--sentinel-sidebar);
     border: 1px solid var(--sentinel-border);
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
 }
 .sentinel-workspace .wiki-tree-row-dropdown .dropdown-item {
     color: inherit;
@@ -2518,7 +2677,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .wiki-tree-toggle:focus-visible {
     outline: 0;
     background: rgba(255, 255, 255, .07);
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
 }
 .sentinel-workspace .wiki-tree-actions .btn { min-height: 1.35rem; color: var(--sentinel-muted); }
 
@@ -2543,7 +2702,7 @@ audio.wiki-embed-media { max-width: 100%; }
     min-height: 1.9rem;
     padding: .3rem .55rem;
     border-radius: 6px;
-    color: #d6d3d1;
+    color: var(--gws-sidebar-text);
     font-size: .74rem;
 }
 
@@ -2574,33 +2733,90 @@ audio.wiki-embed-media { max-width: 100%; }
     height: 1.25rem;
     border: 1px solid var(--sentinel-border);
     border-radius: 4px;
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
     font-size: .63rem;
     font-weight: 800;
 }
 
+/* A purpose-built sentinel-* layout (a visual card gallery, closer to Notion's own Templates
+   browsing surface) rather than the raw Bootstrap card/list-group markup with reactive
+   !important overrides this used to be - see docs/WIKI_NOTION_CLONE.md's "Known UI/CSS gaps". */
 .sentinel-template-panel {
     flex: 0 0 auto;
-    margin: 0 !important;
-    border: 0 !important;
-    border-top: 1px solid var(--sentinel-border) !important;
-    border-radius: 0 !important;
-    background: transparent !important;
-    box-shadow: none !important;
+    padding: .75rem .8rem 1rem;
+    border-top: 1px solid var(--sentinel-border);
 }
 
-.sentinel-template-panel .card-header,
-.sentinel-template-panel .card-body,
-.sentinel-template-panel .list-group-item {
-    border-color: var(--sentinel-border) !important;
-    background: transparent !important;
+.sentinel-template-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: .6rem;
+    color: var(--gws-text-strong);
+    font-size: .78rem;
+    font-weight: 700;
 }
 
-.sentinel-template-panel .card-header { padding: .65rem .8rem !important; }
-.sentinel-template-panel .card-body { padding: .55rem .7rem !important; }
-.sentinel-template-panel .list-group-item { color: #d6d3d1; }
-.sentinel-template-panel .form-control { min-height: 2rem; font-size: .72rem; }
-.sentinel-template-panel .input-group .btn { min-height: 2rem; }
+.sentinel-template-count {
+    padding: .1rem .45rem;
+    border-radius: 999px;
+    background: var(--sentinel-hover, var(--gws-panel-bg-2));
+    color: var(--sentinel-muted, var(--gws-text-soft));
+    font-size: .68rem;
+    font-weight: 700;
+}
+
+.sentinel-template-error { margin-bottom: .5rem; color: #f87171; font-size: .78rem; }
+
+.sentinel-template-save-row { display: flex; gap: .4rem; margin-bottom: .5rem; }
+.sentinel-template-save-row .form-control { min-height: 2rem; font-size: .78rem; }
+
+.sentinel-template-empty {
+    padding: 1rem .5rem;
+    color: var(--sentinel-faint, var(--gws-text-soft));
+    font-size: .78rem;
+    text-align: center;
+}
+
+.sentinel-template-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr));
+    gap: .55rem;
+    margin-top: .35rem;
+}
+
+.sentinel-template-card {
+    display: flex;
+    flex-direction: column;
+    gap: .45rem;
+    padding: .65rem .7rem;
+    border: 1px solid var(--sentinel-border);
+    border-radius: 8px;
+    background: var(--sentinel-canvas-raised, var(--gws-panel-bg-2));
+    transition: border-color .12s ease, transform .12s ease;
+}
+.sentinel-template-card:hover { border-color: rgba(245, 158, 11, .42); transform: translateY(-1px); }
+
+.sentinel-template-card-icon { font-size: 1.4rem; line-height: 1; }
+.sentinel-template-card-name { color: var(--gws-text-strong); font-size: .8rem; font-weight: 650; }
+.sentinel-template-card-meta { color: var(--sentinel-faint, var(--gws-text-soft)); font-size: .68rem; }
+.sentinel-template-card-actions { display: flex; align-items: center; gap: .35rem; }
+
+.sentinel-notion-import-details { margin-top: .9rem; padding-top: .75rem; border-top: 1px solid var(--sentinel-border); }
+.sentinel-notion-import-details > summary {
+    margin-bottom: .5rem;
+    color: var(--sentinel-muted, var(--gws-text-soft));
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    cursor: pointer;
+    list-style: none;
+}
+.sentinel-notion-import-details > summary::-webkit-details-marker { display: none; }
+.sentinel-notion-workspace-import,
+.sentinel-notion-template-import { padding: .6rem 0; }
+.sentinel-notion-workspace-import + .sentinel-notion-template-import { border-top: 1px solid var(--sentinel-border); }
 
 .sentinel-main {
     min-width: 0;
@@ -2626,7 +2842,7 @@ audio.wiki-embed-media { max-width: 100%; }
     min-height: 3.65rem;
     padding: .55rem 1.15rem;
     border-bottom: 1px solid var(--sentinel-border);
-    background: rgba(32, 29, 27, .93);
+    background: var(--sentinel-canvas-translucent);
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
 }
@@ -2660,14 +2876,14 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-document-context button:focus-visible {
     outline: 0;
     background: var(--sentinel-hover);
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
 }
 .sentinel-document-context .sentinel-breadcrumb-up {
     max-width: 15rem;
     padding: .3rem .5rem;
     border: 1px solid var(--sentinel-border);
     background: rgba(255,255,255,.025);
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
 }
 .sentinel-document-context .sentinel-breadcrumb-up i {
     color: #f59e0b;
@@ -2683,7 +2899,7 @@ audio.wiki-embed-media { max-width: 100%; }
     height: 1.2rem;
     background: var(--sentinel-border);
 }
-.sentinel-breadcrumb-current { max-width: 15rem; color: #e7e5e4; }
+.sentinel-breadcrumb-current { max-width: 15rem; color: var(--gws-text-strong); }
 
 .sentinel-context-sidebar {
     position: sticky;
@@ -2708,14 +2924,15 @@ audio.wiki-embed-media { max-width: 100%; }
     min-height: 3.65rem;
     padding: .65rem .75rem;
     border-bottom: 1px solid var(--sentinel-border);
-    background: rgba(26, 24, 22, .96);
+    background: var(--sentinel-sidebar-translucent);
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
 }
 
 .sentinel-context-heading > div { display: flex; flex-direction: column; min-width: 0; }
-.sentinel-context-heading strong { color: #e7e5e4; font-size: .75rem; }
+.sentinel-context-heading strong { color: var(--gws-text-strong); font-size: .75rem; }
 .sentinel-context-heading span { color: var(--sentinel-faint); font-size: .6rem; }
+.sentinel-context-heading .sentinel-word-count { margin-top: .15rem; }
 .sentinel-context-heading button,
 .sentinel-context-rail-button {
     display: grid;
@@ -2729,7 +2946,7 @@ audio.wiki-embed-media { max-width: 100%; }
     color: var(--sentinel-muted);
 }
 .sentinel-context-heading button:hover,
-.sentinel-context-rail-button:hover { background: var(--sentinel-hover); color: #fafaf9; }
+.sentinel-context-rail-button:hover { background: var(--sentinel-hover); color: var(--gws-text-strong); }
 .sentinel-context-sidebar .sentinel-support-panel {
     width: 100%;
     margin: 0 !important;
@@ -2833,6 +3050,24 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 
 .sentinel-document-canvas.has-cover { padding-top: 0; }
+.sentinel-document-canvas.is-full-width { width: min(100%, 2400px); }
+.sentinel-document-canvas.sentinel-font-serif,
+.sentinel-document-canvas.sentinel-font-serif .wiki-block-content,
+.sentinel-document-canvas.sentinel-font-serif .sentinel-title-input { font-family: var(--gws-font-serif); }
+.sentinel-document-canvas.sentinel-font-mono,
+.sentinel-document-canvas.sentinel-font-mono .wiki-block-content,
+.sentinel-document-canvas.sentinel-font-mono .sentinel-title-input { font-family: var(--bs-font-monospace, monospace); }
+
+.sentinel-style-menu { min-width: 12rem; }
+.sentinel-style-menu-heading {
+    padding: .4rem .9rem .2rem;
+    color: var(--gws-text-soft);
+    font-size: .65rem;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+}
+.sentinel-style-menu-heading:not(:first-child) { margin-top: .3rem; border-top: 1px solid var(--gws-panel-border); padding-top: .5rem; }
 
 .sentinel-page-affordances {
     display: flex;
@@ -2859,7 +3094,7 @@ audio.wiki-embed-media { max-width: 100%; }
     font-size: .68rem;
 }
 
-.sentinel-page-affordances button:hover { background: var(--sentinel-hover); color: #d6d3d1; }
+.sentinel-page-affordances button:hover { background: var(--sentinel-hover); color: var(--gws-sidebar-text); }
 
 .sentinel-page-heading {
     display: flex;
@@ -2881,12 +3116,12 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 
 .sentinel-icon-input {
-    width: 3.3rem;
-    height: 3.3rem;
+    width: 4.6rem;
+    height: 4.6rem;
     padding: 0;
-    border-radius: 8px;
+    border-radius: 10px;
     background: var(--sentinel-canvas);
-    font-size: 2rem;
+    font-size: 2.6rem;
     text-align: center;
     line-height: 1;
     cursor: pointer;
@@ -2978,7 +3213,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border-radius: 5px;
     outline: 0;
     background: transparent;
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
     font-size: .75rem;
 }
 
@@ -3002,7 +3237,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-editor-hint:focus-within { opacity: 1; }
 
 .sentinel-editor-hint code {
-    color: #d6d3d1;
+    color: var(--gws-sidebar-text);
     font-size: .68rem;
 }
 
@@ -3012,7 +3247,7 @@ audio.wiki-embed-media { max-width: 100%; }
     padding: .35rem 0 .75rem;
     border: 0;
     border-radius: 0;
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
 }
 
 .sentinel-workspace .wiki-block {
@@ -3032,12 +3267,12 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .wiki-block-content { min-height: 1.55rem; line-height: 1.55; caret-color: #f59e0b; }
 .sentinel-workspace .wiki-block-content:focus { border-radius: 3px; background: rgba(255, 255, 255, .018); }
 .sentinel-workspace .wiki-block-content:empty::before { color: #57534e; }
-.sentinel-workspace .wiki-block-content a { color: #fbbf24; text-decoration-color: rgba(251, 191, 36, .45); text-underline-offset: 2px; }
+.sentinel-workspace .wiki-block-content a { color: var(--sentinel-link); text-decoration-color: rgba(251, 191, 36, .45); text-underline-offset: 2px; }
 .sentinel-workspace .wiki-block-content a[href^="wikilink:"] { cursor: pointer; }
 .sentinel-workspace .wiki-page-link-card {
     border-color: var(--sentinel-border);
-    background: rgba(255, 255, 255, .025);
-    color: #e7e5e4;
+    background: var(--sentinel-tint);
+    color: var(--gws-text-strong);
     transition: border-color .12s ease, background .12s ease, transform .12s ease;
 }
 .sentinel-workspace .wiki-page-link-card:hover {
@@ -3045,7 +3280,7 @@ audio.wiki-embed-media { max-width: 100%; }
     background: rgba(245, 158, 11, .055);
     transform: translateY(-1px);
 }
-.sentinel-workspace .wiki-page-link-card a { color: #f5f5f4; }
+.sentinel-workspace .wiki-page-link-card a { color: var(--gws-text-strong); }
 .sentinel-workspace .wiki-block-editor.wiki-page-drop-active {
     border-radius: .65rem;
     outline: 2px dashed rgba(245, 158, 11, .68);
@@ -3152,16 +3387,16 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .wiki-block-add:hover,
 .sentinel-workspace .wiki-block-discussion:hover,
 .sentinel-workspace .wiki-block-menu-toggle:hover,
-.sentinel-workspace .wiki-block-handle:hover { background: var(--sentinel-hover); color: #e7e5e4; }
+.sentinel-workspace .wiki-block-handle:hover { background: var(--sentinel-hover); color: var(--gws-text-strong); }
 
 .sentinel-workspace .wiki-block-discussion.has-discussions {
     background: rgba(245, 158, 11, .13);
-    color: #fbbf24;
+    color: var(--sentinel-link);
 }
 
 .sentinel-workspace .wiki-block[data-block-type="quote"] .wiki-block-content {
     border-color: #78716c;
-    color: #d6d3d1;
+    color: var(--gws-sidebar-text);
 }
 
 .sentinel-workspace .wiki-block[data-block-type="callout"] .wiki-block-body,
@@ -3191,15 +3426,15 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .wiki-native-table-editor { width: 100%; overflow-x: auto; padding: .2rem 0 .35rem; }
 .sentinel-workspace .wiki-native-table { min-width: 100%; width: max-content; border-collapse: collapse; }
 .sentinel-workspace .wiki-native-table th,
-.sentinel-workspace .wiki-native-table td { min-width: 8rem; max-width: 22rem; padding: .45rem .65rem; border: 1px solid rgba(214,211,209,.16); outline: 0; color: #e7e5e4; font-size: .78rem; font-weight: 400; vertical-align: top; }
-.sentinel-workspace .wiki-native-table th { background: rgba(255,255,255,.035); color: #fafaf9; font-weight: 650; }
+.sentinel-workspace .wiki-native-table td { min-width: 8rem; max-width: 22rem; padding: .45rem .65rem; border: 1px solid rgba(214,211,209,.16); outline: 0; color: var(--gws-text-strong); font-size: .78rem; font-weight: 400; vertical-align: top; }
+.sentinel-workspace .wiki-native-table th { background: rgba(255,255,255,.035); color: var(--gws-text-strong); font-weight: 650; }
 .sentinel-workspace .wiki-native-table td:focus,
 .sentinel-workspace .wiki-native-table th:focus { background: rgba(245,158,11,.06); box-shadow: inset 0 0 0 1px rgba(245,158,11,.55); }
 .sentinel-workspace .wiki-native-table-actions { display: flex; gap: .25rem; padding-top: .3rem; opacity: 0; transition: opacity .12s ease; }
 .sentinel-workspace .wiki-native-table-editor:hover .wiki-native-table-actions,
 .sentinel-workspace .wiki-native-table-editor:focus-within .wiki-native-table-actions { opacity: 1; }
 .sentinel-workspace .wiki-native-table-actions button { min-height: 1.65rem; padding: .15rem .4rem; border: 0; border-radius: 4px; background: transparent; color: var(--sentinel-muted); font-size: .65rem; }
-.sentinel-workspace .wiki-native-table-actions button:hover { background: var(--sentinel-hover); color: #e7e5e4; }
+.sentinel-workspace .wiki-native-table-actions button:hover { background: var(--sentinel-hover); color: var(--gws-text-strong); }
 .sentinel-workspace .wiki-block[data-block-type="button"] .wiki-block-content { display: inline-block; min-width: 7rem; width: auto; padding: .5rem .85rem; border-radius: .45rem; background: #f59e0b; color: #1c1917; font-weight: 700; text-align: center; }
 .sentinel-workspace .wiki-block[data-block-type="synced_block"] .wiki-block-body { padding: .7rem .85rem; border: 1px solid rgba(245,158,11,.36); border-left-width: 3px; background: rgba(245,158,11,.055); }
 .sentinel-workspace .wiki-notion-child-page-link .wiki-block-content {
@@ -3208,13 +3443,13 @@ audio.wiki-embed-media { max-width: 100%; }
     font-weight: 600;
 }
 .sentinel-workspace .wiki-notion-child-page-link .wiki-block-content a {
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
     text-decoration: underline;
     text-decoration-color: rgba(231,229,228,.28);
     text-underline-offset: .18rem;
 }
 .sentinel-workspace .wiki-notion-child-page-link .wiki-block-content a:hover {
-    color: #fafaf9;
+    color: var(--gws-text-strong);
     text-decoration-color: rgba(250,250,249,.8);
 }
 .sentinel-workspace .wiki-block[data-block-type="columns"] .wiki-block-content { min-height: 4rem; padding: .75rem; white-space: pre-wrap; column-count: 2; column-gap: 2rem; border: 1px dashed var(--sentinel-border); border-radius: .4rem; }
@@ -3256,7 +3491,7 @@ audio.wiki-embed-media { max-width: 100%; }
     min-height: 1.75rem;
     padding: 0 .22rem;
     border-radius: 4px;
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
     font-weight: 600;
     text-decoration: underline;
     text-decoration-color: rgba(231,229,228,.3);
@@ -3264,7 +3499,7 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 .sentinel-workspace .wiki-notion-page-link-columns .wiki-column-content a[href^="wikilink:"]:hover {
     background: var(--sentinel-hover);
-    color: #fafaf9;
+    color: var(--gws-text-strong);
     text-decoration-color: rgba(250,250,249,.82);
 }
 .sentinel-workspace .wiki-notion-page-link-columns .wiki-column-content br { display: none; }
@@ -3322,7 +3557,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .wiki-tab-trigger:hover,
 .sentinel-workspace .wiki-tab-add:hover:not(:disabled) { background: var(--sentinel-hover); color: var(--sentinel-text); }
 .sentinel-workspace .wiki-tab-trigger.is-active {
-    color: #fbbf24;
+    color: var(--sentinel-link);
     box-shadow: inset 0 -2px #f59e0b;
 }
 .sentinel-workspace .wiki-tab-trigger:focus-visible,
@@ -3415,12 +3650,12 @@ audio.wiki-embed-media { max-width: 100%; }
 .wiki-tab-toggle:checked + .wiki-tab-label + .wiki-tab-panel { display: block; }
 .sentinel-workspace .wiki-list-marker { color: var(--sentinel-muted); }
 .sentinel-workspace .wiki-toggle-button { flex: 0 0 auto; width: 1.35rem; height: 1.35rem; margin-top: .18rem; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--sentinel-muted); line-height: 1; }
-.sentinel-workspace .wiki-toggle-button:hover { background: var(--sentinel-hover); color: #e7e5e4; }
+.sentinel-workspace .wiki-toggle-button:hover { background: var(--sentinel-hover); color: var(--gws-text-strong); }
 .sentinel-workspace .wiki-block[data-block-type="toggle"] > .wiki-block-body::before { content: none; }
 .sentinel-workspace .wiki-block.is-toggle-hidden { display: none; }
 
 .sentinel-workspace .wiki-media-block { position: relative; width: 100%; padding: .25rem 0; }
-.sentinel-workspace .wiki-media-block > .form-control { border-color: var(--sentinel-border); background: var(--sentinel-canvas-raised); color: #e7e5e4; }
+.sentinel-workspace .wiki-media-block > .form-control { border-color: var(--sentinel-border); background: var(--sentinel-canvas-raised); color: var(--gws-text-strong); }
 .sentinel-workspace .wiki-media-block.has-source > .form-control {
     position: absolute;
     top: .75rem;
@@ -3443,22 +3678,22 @@ audio.wiki-embed-media { max-width: 100%; }
     border: 1px solid var(--sentinel-border);
     border-radius: 7px;
     background: var(--sentinel-canvas-raised);
-    color: #d6d3d1;
+    color: var(--gws-sidebar-text);
     font-size: .76rem;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 .sentinel-workspace .wiki-embed-link::before { margin-right: .55rem; color: #f59e0b; content: "↗"; }
-.sentinel-workspace .wiki-embed-link:hover { border-color: var(--sentinel-border-strong); color: #fafaf9; }
+.sentinel-workspace .wiki-embed-link:hover { border-color: var(--sentinel-border-strong); color: var(--gws-text-strong); }
 .sentinel-workspace .wiki-pdf-block a,
 .sentinel-workspace .wiki-file-block {
     border-color: var(--sentinel-border);
     background: var(--sentinel-canvas-raised);
-    color: #d6d3d1;
+    color: var(--gws-sidebar-text);
     font-size: .76rem;
 }
 .sentinel-workspace .wiki-file-block:hover,
-.sentinel-workspace .wiki-pdf-block a:hover { border-color: var(--sentinel-border-strong); color: #fafaf9; }
+.sentinel-workspace .wiki-pdf-block a:hover { border-color: var(--sentinel-border-strong); color: var(--gws-text-strong); }
 .sentinel-workspace .wiki-pdf-block a { display: inline-flex; align-items: center; gap: .4rem; padding: .5rem .85rem; border: 1px solid; border-radius: 7px; text-decoration: none; }
 
 .sentinel-workspace .wiki-linked-database-editor {
@@ -3478,7 +3713,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border: 1px solid var(--sentinel-border);
     border-radius: 7px;
     background: var(--sentinel-canvas-raised);
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
     text-align: left;
     transition: border-color .12s ease, background .12s ease, transform .12s ease;
 }
@@ -3498,7 +3733,7 @@ audio.wiki-embed-media { max-width: 100%; }
     height: 2rem;
     border-radius: 5px;
     background: rgba(245, 158, 11, .1);
-    color: #fbbf24;
+    color: var(--sentinel-link);
     font-size: 1rem;
 }
 
@@ -3521,7 +3756,7 @@ audio.wiki-embed-media { max-width: 100%; }
     padding: .2rem .45rem;
     border: 1px solid var(--sentinel-border);
     border-radius: 4px;
-    background: #1c1917;
+    background: var(--gws-panel-bg);
     color: var(--sentinel-muted);
     font-size: .65rem;
     opacity: 0;
@@ -3544,7 +3779,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border-bottom: 1px solid var(--sentinel-border);
     border-radius: 0;
     background: transparent;
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
     font-size: .75rem;
 }
 
@@ -3560,7 +3795,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border: 0;
     border-radius: 5px;
     background: transparent;
-    color: #d6d3d1;
+    color: var(--gws-sidebar-text);
     font-size: .74rem;
     text-align: left;
 }
@@ -3583,7 +3818,7 @@ audio.wiki-embed-media { max-width: 100%; }
     min-height: 2.7rem;
     padding: .5rem .65rem;
     border-bottom: 1px solid var(--sentinel-border);
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
     font-size: .75rem;
 }
 .sentinel-workspace .wiki-linked-view-chooser-heading .wiki-linked-database-change {
@@ -3601,7 +3836,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border: 0;
     border-radius: 5px;
     background: transparent;
-    color: #d6d3d1;
+    color: var(--gws-sidebar-text);
     font-size: .74rem;
     text-align: left;
 }
@@ -3633,7 +3868,7 @@ audio.wiki-embed-media { max-width: 100%; }
     min-width: 0;
     border: 0;
     background: transparent;
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
     font-size: .8rem;
     text-align: left;
 }
@@ -3669,7 +3904,7 @@ audio.wiki-embed-media { max-width: 100%; }
     font-size: .66rem;
 }
 .sentinel-workspace .wiki-inline-database-actions button:hover,
-.sentinel-workspace .wiki-inline-database-footer button:hover { background: var(--sentinel-hover); color: #f5f5f4; }
+.sentinel-workspace .wiki-inline-database-footer button:hover { background: var(--sentinel-hover); color: var(--gws-text-strong); }
 
 .sentinel-workspace .wiki-inline-database-views {
     display: flex;
@@ -3687,7 +3922,7 @@ audio.wiki-embed-media { max-width: 100%; }
     font-size: .7rem;
 }
 .sentinel-workspace .wiki-inline-database-view:hover,
-.sentinel-workspace .wiki-inline-database-view.is-active { background: var(--sentinel-hover); color: #f5f5f4; }
+.sentinel-workspace .wiki-inline-database-view.is-active { background: var(--sentinel-hover); color: var(--gws-text-strong); }
 .sentinel-workspace .wiki-inline-database-scroller { overflow-x: auto; }
 .sentinel-workspace .wiki-inline-database-board {
     display: grid;
@@ -3718,7 +3953,7 @@ audio.wiki-embed-media { max-width: 100%; }
     justify-content: space-between;
     gap: .5rem;
     padding: .2rem .25rem .55rem;
-    color: #d6d3d1;
+    color: var(--gws-sidebar-text);
     font-size: .7rem;
     font-weight: 650;
 }
@@ -3745,7 +3980,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border: 1px solid var(--sentinel-border);
     border-radius: 6px;
     background: var(--sentinel-canvas-raised);
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
     font-size: .72rem;
     font-weight: 600;
     line-height: 1.4;
@@ -3755,7 +3990,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .wiki-inline-board-card:active { cursor: grabbing; }
 .sentinel-workspace .wiki-inline-board-card[draggable="false"] { cursor: pointer; }
 .sentinel-workspace .wiki-inline-board-card.is-dragging { opacity: .35; }
-.sentinel-workspace .wiki-inline-board-card strong { display: block; color: #f5f5f4; font: inherit; }
+.sentinel-workspace .wiki-inline-board-card strong { display: block; color: var(--gws-text-strong); font: inherit; }
 .sentinel-workspace .wiki-inline-board-card-detail {
     display: block;
     margin-top: .4rem;
@@ -3778,7 +4013,7 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 .sentinel-workspace .wiki-inline-board-new-task:hover {
     background: var(--sentinel-hover);
-    color: #f5f5f4;
+    color: var(--gws-text-strong);
 }
 .sentinel-workspace .wiki-inline-board-composer {
     display: grid;
@@ -3792,7 +4027,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border: 1px solid var(--sentinel-border-strong);
     border-radius: 5px;
     background: var(--sentinel-canvas-raised);
-    color: #f5f5f4;
+    color: var(--gws-text-strong);
     font-size: .72rem;
     outline: none;
 }
@@ -3848,7 +4083,7 @@ audio.wiki-embed-media { max-width: 100%; }
     color: var(--sentinel-faint);
     font-size: .72rem;
 }
-.sentinel-workspace .wiki-inline-database-open-row:hover { background: var(--sentinel-hover); color: #f5f5f4; }
+.sentinel-workspace .wiki-inline-database-open-row:hover { background: var(--sentinel-hover); color: var(--gws-text-strong); }
 
 .sentinel-workspace .wiki-inline-cell-control {
     width: 100%;
@@ -3857,7 +4092,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border: 0;
     outline: 0;
     background: transparent;
-    color: #d6d3d1;
+    color: var(--gws-sidebar-text);
     font-size: .72rem;
 }
 .sentinel-workspace .wiki-inline-cell-control:hover,
@@ -3924,11 +4159,11 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .list-group-item {
     border-color: var(--sentinel-border);
     background: transparent;
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
 }
 
 .sentinel-workspace .list-group-item-action:hover,
-.sentinel-workspace .list-group-item-action:focus { background: var(--sentinel-hover); color: #fafaf9; }
+.sentinel-workspace .list-group-item-action:focus { background: var(--sentinel-hover); color: var(--gws-text-strong); }
 
 .sentinel-workspace .sentinel-discussion-thread.is-focused {
     background: rgba(245, 158, 11, .08);
@@ -3992,7 +4227,7 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 .sentinel-db-calendar-day:hover .sentinel-db-calendar-day-header button,
 .sentinel-db-calendar-day-header button:focus-visible { opacity: 1; }
-.sentinel-db-calendar-day-header button:hover { background: var(--sentinel-hover); color: #fbbf24; }
+.sentinel-db-calendar-day-header button:hover { background: var(--sentinel-hover); color: var(--sentinel-link); }
 .sentinel-db-calendar-items { display: flex; flex-direction: column; gap: 3px; margin-top: .2rem; }
 .sentinel-db-calendar-item {
     overflow: hidden;
@@ -4002,29 +4237,29 @@ audio.wiki-embed-media { max-width: 100%; }
     border-left: 2px solid #f59e0b;
     border-radius: 3px;
     background: rgba(245, 158, 11, .08);
-    color: #d6d3d1;
+    color: var(--gws-sidebar-text);
     font-size: .65rem;
     text-align: left;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.sentinel-db-calendar-item:hover { background: rgba(245, 158, 11, .15); color: #fafaf9; }
+.sentinel-db-calendar-item:hover { background: rgba(245, 158, 11, .15); color: var(--gws-text-strong); }
 .sentinel-db-calendar-undated { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-top: .75rem; }
 .sentinel-db-calendar-undated button { padding: .28rem .48rem; border: 1px solid var(--sentinel-border); border-radius: 5px; background: transparent; color: var(--sentinel-muted); font-size: .67rem; }
-.sentinel-db-calendar-undated button:hover { background: var(--sentinel-hover); color: #e7e5e4; }
+.sentinel-db-calendar-undated button:hover { background: var(--sentinel-hover); color: var(--gws-text-strong); }
 .sentinel-workspace .sentinel-search-highlight { background: rgba(245, 158, 11, .3); color: #fef3c7; }
-.sentinel-workspace .wiki-mention { background: rgba(245, 158, 11, .12); color: #fbbf24; }
+.sentinel-workspace .wiki-mention { background: rgba(245, 158, 11, .12); color: var(--sentinel-link); }
 
 /* Command palette (Phase 5.2) - Ctrl/Cmd+K and Ctrl/Cmd+Shift+F both open this. */
 .sentinel-command-palette-backdrop { position: fixed; inset: 0; z-index: 1080; display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; background: rgba(8,7,6,.55); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
-.sentinel-command-palette { width: min(38rem, 92vw); max-height: 70vh; display: flex; flex-direction: column; background: #1c1917; border: 1px solid rgba(214,211,209,.16); border-radius: .85rem; box-shadow: 0 1.5rem 3.5rem rgba(0,0,0,.5); overflow: hidden; }
+.sentinel-command-palette { width: min(38rem, 92vw); max-height: 70vh; display: flex; flex-direction: column; background: var(--gws-panel-bg); border: 1px solid rgba(214,211,209,.16); border-radius: .85rem; box-shadow: 0 1.5rem 3.5rem rgba(0,0,0,.5); overflow: hidden; }
 .sentinel-command-palette-input { display: flex; align-items: center; gap: .6rem; padding: .9rem 1.1rem; border-bottom: 1px solid rgba(214,211,209,.12); color: #a8a29e; }
-.sentinel-command-palette-input input { flex: 1; border: 0; background: transparent; color: #fafaf9; font-size: 1rem; outline: none; }
+.sentinel-command-palette-input input { flex: 1; border: 0; background: transparent; color: var(--gws-text-strong); font-size: 1rem; outline: none; }
 .sentinel-command-palette-input input::placeholder { color: #78716c; }
 .sentinel-command-palette-input kbd { padding: .1rem .4rem; border: 1px solid rgba(214,211,209,.25); border-radius: .3rem; color: #a8a29e; font-size: .72rem; }
 .sentinel-command-palette-results { overflow-y: auto; padding: .4rem; }
 .sentinel-command-palette-empty { padding: 1.5rem 1rem; text-align: center; color: #78716c; font-size: .85rem; }
-.sentinel-command-palette-item { display: flex; align-items: center; gap: .7rem; width: 100%; padding: .55rem .65rem; border: 0; border-radius: .55rem; background: transparent; color: #e7e5e4; text-align: left; }
+.sentinel-command-palette-item { display: flex; align-items: center; gap: .7rem; width: 100%; padding: .55rem .65rem; border: 0; border-radius: .55rem; background: transparent; color: var(--gws-text-strong); text-align: left; }
 .sentinel-command-palette-item i { flex: 0 0 auto; color: #78716c; }
 .sentinel-command-palette-item span:not(.badge) { flex: 1; min-width: 0; display: grid; gap: .05rem; }
 .sentinel-command-palette-item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
@@ -4032,7 +4267,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-command-palette-item.is-selected, .sentinel-command-palette-item:hover { background: rgba(245,158,11,.14); }
 .sentinel-command-palette-item .badge { flex: 0 0 auto; }
 .sentinel-command-palette-filters { display: flex; gap: .5rem; padding: .55rem .9rem; border-bottom: 1px solid rgba(214,211,209,.1); }
-.sentinel-command-palette-filters select { flex: 1; background: #111827; color: #d6d3d1; border-color: rgba(214,211,209,.2); font-size: .78rem; }
+.sentinel-command-palette-filters select { flex: 1; background: #111827; color: var(--gws-sidebar-text); border-color: rgba(214,211,209,.2); font-size: .78rem; }
 
 .notion-connection-choice {
     padding: 1rem;
@@ -4054,7 +4289,7 @@ audio.wiki-embed-media { max-width: 100%; }
     height: 2.35rem;
     border-radius: .65rem;
     background: rgba(245, 158, 11, .16);
-    color: #fbbf24;
+    color: var(--sentinel-link);
 }
 
 .notion-connection-steps {
@@ -4303,11 +4538,11 @@ audio.wiki-embed-media { max-width: 100%; }
 
 .sentinel-gpt-workspace-nav a { padding: .55rem .65rem; }
 .sentinel-gpt-workspace-nav a:hover,
-.sentinel-gpt-page-section a:hover { background: #25211f; color: #fff; }
+.sentinel-gpt-page-section a:hover { background: var(--sentinel-canvas-raised); color: var(--gws-text-strong); }
 
 .sentinel-gpt-workspace-nav a.active {
     background: linear-gradient(90deg, rgba(245, 158, 11, .2), rgba(245, 158, 11, .07));
-    color: #fbbf24;
+    color: var(--sentinel-link);
     box-shadow: inset 2px 0 #f59e0b;
 }
 
@@ -4355,7 +4590,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border: 1px solid rgba(245, 158, 11, .7);
     border-radius: 9px;
     background: transparent;
-    color: #fbbf24;
+    color: var(--sentinel-link);
     font-size: .78rem;
     font-weight: 700;
 }
@@ -4434,7 +4669,7 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 
 .sentinel-gpt-chat-header > div:first-child { display: flex; align-items: baseline; gap: .7rem; min-width: 0; }
-.sentinel-gpt-chat-header h1 { margin: 0; color: #fafaf9; font-size: 1rem; font-weight: 750; }
+.sentinel-gpt-chat-header h1 { margin: 0; color: var(--gws-text-strong); font-size: 1rem; font-weight: 750; }
 .sentinel-gpt-chat-header > div:first-child > span { display: inline-flex; align-items: center; gap: .35rem; color: #85807b; font-size: .68rem; }
 .sentinel-gpt-chat-header > div:first-child > span i { width: .42rem; height: .42rem; border-radius: 50%; background: #78716c; }
 .sentinel-gpt-chat-header > div:first-child > span.is-connected { color: #65b96d; }
@@ -4487,7 +4722,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-model-install { display: flex; min-width: 0; }
 .sentinel-gpt-model-install input { flex: 1; min-width: 0; padding: 0 .6rem; border-radius: 7px 0 0 7px; }
 .sentinel-gpt-model-install button,
-.sentinel-gpt-recheck { min-height: 2.2rem; border: 1px solid #4a3a22; background: rgba(245, 158, 11, .1); color: #fbbf24; font-size: .7rem; }
+.sentinel-gpt-recheck { min-height: 2.2rem; border: 1px solid #4a3a22; background: rgba(245, 158, 11, .1); color: var(--sentinel-link); font-size: .7rem; }
 .sentinel-gpt-model-install button { border-radius: 0 7px 7px 0; }
 .sentinel-gpt-recheck { border-radius: 7px; }
 
@@ -4520,11 +4755,11 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 
 .sentinel-gpt-avatar { width: 2.15rem; height: 2.15rem; border-radius: 50%; font-size: .82rem; }
-.sentinel-gpt-welcome h2 { margin: .1rem 0 .4rem; color: #f5f5f4; font-size: 1.3rem; }
+.sentinel-gpt-welcome h2 { margin: .1rem 0 .4rem; color: var(--gws-text-strong); font-size: 1.3rem; }
 .sentinel-gpt-welcome p { max-width: 32rem; color: #96908b; font-size: .82rem; line-height: 1.6; }
 .sentinel-gpt-starters { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .9rem; }
 .sentinel-gpt-starters button { padding: .45rem .65rem; border: 1px solid #38332f; border-radius: 999px; background: #1d1a18; color: #aaa49f; font-size: .68rem; }
-.sentinel-gpt-starters button:hover { border-color: rgba(245, 158, 11, .5); color: #fbbf24; }
+.sentinel-gpt-starters button:hover { border-color: rgba(245, 158, 11, .5); color: var(--sentinel-link); }
 
 .sentinel-gpt-exchange {
     display: flex;
@@ -4578,7 +4813,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border: 1px solid #36312e;
     border-radius: 4px 16px 16px 16px;
     background: #24211f;
-    color: #e7e5e4;
+    color: var(--gws-text-strong);
     font-size: .82rem;
     box-shadow: 0 5px 18px rgba(0, 0, 0, .18);
 }
@@ -4645,15 +4880,15 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-sources summary::-webkit-details-marker { display: none; }
 .sentinel-gpt-sources > div { display: flex; flex-wrap: wrap; gap: .35rem; padding: 0 .6rem .55rem; }
 .sentinel-gpt-sources a { display: inline-flex; align-items: center; gap: .3rem; padding: .3rem .45rem; border-radius: 6px; background: #24211f; color: #d3cfcb; text-decoration: none; }
-.sentinel-gpt-sources a:hover { color: #fbbf24; }
+.sentinel-gpt-sources a:hover { color: var(--sentinel-link); }
 .sentinel-gpt-error { display: flex; align-items: flex-start; gap: .45rem; width: min(100%, 58rem); margin: 0 auto 1rem; padding: .65rem .8rem; border: 1px solid rgba(239, 68, 68, .25); border-radius: 8px; background: rgba(127, 29, 29, .12); color: #fca5a5; font-size: .72rem; }
 .sentinel-gpt-notice { display: flex; align-items: center; gap: .45rem; width: min(100%, 58rem); margin: 0 auto 1rem; padding: .65rem .8rem; border: 1px solid #48413c; border-radius: 8px; background: #211e1b; color: #c8c3be; font-size: .72rem; }
-.sentinel-gpt-confirmation { width: min(100%, 58rem); margin: 0 auto 1rem; padding: .8rem; border: 1px solid rgba(245, 158, 11, .35); border-radius: 10px; background: rgba(120, 53, 15, .14); color: #d6d3d1; font-size: .72rem; }
+.sentinel-gpt-confirmation { width: min(100%, 58rem); margin: 0 auto 1rem; padding: .8rem; border: 1px solid rgba(245, 158, 11, .35); border-radius: 10px; background: rgba(120, 53, 15, .14); color: var(--gws-sidebar-text); font-size: .72rem; }
 .sentinel-gpt-confirmation > div:first-child { display: flex; align-items: flex-start; gap: .55rem; }
 .sentinel-gpt-confirmation > div:first-child > i { color: #f59e0b; }
 .sentinel-gpt-confirmation span { display: flex; flex-direction: column; gap: .18rem; }
 .sentinel-gpt-confirmation > div:last-child { display: flex; gap: .45rem; margin-top: .65rem; padding-left: 1.4rem; }
-.sentinel-gpt-confirmation button { padding: .38rem .7rem; border: 1px solid #4a433d; border-radius: 7px; background: #24211f; color: #d6d3d1; font-size: .68rem; }
+.sentinel-gpt-confirmation button { padding: .38rem .7rem; border: 1px solid #4a433d; border-radius: 7px; background: #24211f; color: var(--gws-sidebar-text); font-size: .68rem; }
 .sentinel-gpt-confirmation button.sentinel-gpt-confirm { border-color: #b56a08; background: #d98208; color: #211305; font-weight: 700; }
 
 .sentinel-gpt-composer-wrap {
@@ -4675,7 +4910,7 @@ audio.wiki-embed-media { max-width: 100%; }
     padding: .55rem .65rem;
     border: 1px solid #48423e;
     border-radius: 22px;
-    background: #201d1b;
+    background: var(--sentinel-canvas);
     box-shadow: 0 12px 30px rgba(0, 0, 0, .36);
 }
 
@@ -4686,7 +4921,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border: 0;
     outline: 0;
     background: transparent;
-    color: #f5f5f4;
+    color: var(--gws-text-strong);
     font: .84rem/1.45 var(--gws-font-sans);
     resize: none;
 }
@@ -4695,7 +4930,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-composer > button { width: 2.2rem; height: 2.2rem; border-radius: 50%; }
 .sentinel-gpt-composer > button.sentinel-gpt-context-pill { width: auto; height: auto; display: inline-flex; align-items: center; gap: .35rem; padding: .38rem .55rem; border: 1px solid #3b3632; border-radius: 999px; background: transparent; color: #aaa49f; font-size: .62rem; white-space: nowrap; }
 .sentinel-gpt-composer > button.sentinel-gpt-context-pill:hover,
-.sentinel-gpt-composer > button.sentinel-gpt-context-pill.is-enabled { border-color: rgba(245, 158, 11, .5); background: rgba(245, 158, 11, .08); color: #fbbf24; }
+.sentinel-gpt-composer > button.sentinel-gpt-context-pill.is-enabled { border-color: rgba(245, 158, 11, .5); background: rgba(245, 158, 11, .08); color: var(--sentinel-link); }
 .sentinel-gpt-composer > button.sentinel-gpt-context-pill:disabled { cursor: default; opacity: .65; }
 .sentinel-gpt-context-pill .bi-toggle-on { color: #f59e0b; font-size: 1rem; }
 .sentinel-gpt-composer > button.sentinel-gpt-send { background: #f59e0b; color: #231506; }

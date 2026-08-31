@@ -47,6 +47,7 @@ public static class NotionMapping
             var bold = false;
             var italic = false;
             var strikethrough = false;
+            var underline = false;
             var code = false;
             string? textColor = null;
             string? backgroundColor = null;
@@ -55,6 +56,7 @@ public static class NotionMapping
                 bold = annotations.TryGetProperty("bold", out var b) && b.ValueKind == JsonValueKind.True;
                 italic = annotations.TryGetProperty("italic", out var i) && i.ValueKind == JsonValueKind.True;
                 strikethrough = annotations.TryGetProperty("strikethrough", out var s) && s.ValueKind == JsonValueKind.True;
+                underline = annotations.TryGetProperty("underline", out var u) && u.ValueKind == JsonValueKind.True;
                 code = annotations.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.True;
                 if (annotations.TryGetProperty("color", out var colorElement)
                     && colorElement.ValueKind == JsonValueKind.String)
@@ -73,14 +75,13 @@ public static class NotionMapping
                         }
                     }
                 }
-                // Underline is not currently part of Sentinel's editor vocabulary.
             }
 
             var link = span.TryGetProperty("href", out var hrefElement) && hrefElement.ValueKind == JsonValueKind.String
                 ? hrefElement.GetString()
                 : null;
 
-            spans.Add(new WikiRichTextSpan(text, bold, italic, strikethrough, code, link, textColor, backgroundColor));
+            spans.Add(new WikiRichTextSpan(text, bold, italic, strikethrough, underline, code, link, textColor, backgroundColor));
         }
 
         return spans;
@@ -319,7 +320,7 @@ public static class NotionMapping
                 bold = span.Bold,
                 italic = span.Italic,
                 strikethrough = span.Strikethrough,
-                underline = false,
+                underline = span.Underline,
                 code = span.Code,
                 color = NotionColor(span)
             }

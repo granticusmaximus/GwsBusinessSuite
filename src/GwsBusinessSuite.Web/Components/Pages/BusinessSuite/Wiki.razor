@@ -124,8 +124,56 @@
         <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="OpenNotionModalAsync" disabled="@IsBusy">
             <i class="bi bi-arrow-repeat me-1"></i>Notion sync
         </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ToggleShortcutsModal"
+                title="Keyboard shortcuts" aria-label="Keyboard shortcuts">
+            <i class="bi bi-question-lg"></i>
+        </button>
     </div>
 </div>
+
+@if (_showShortcutsModal)
+{
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="sentinelShortcutsTitle">
+        <div class="modal-dialog modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="sentinelShortcutsTitle">Keyboard shortcuts</h5>
+                    <button type="button" class="btn-close" @onclick="ToggleShortcutsModal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="sentinel-shortcuts-group">
+                        <h6>Navigation</h6>
+                        <div class="sentinel-shortcut-row"><span>Quick find</span><kbd>⌘K</kbd><kbd>⌘⇧F</kbd></div>
+                        <div class="sentinel-shortcut-row"><span>Toggle the sidebar</span><kbd>⌘\</kbd></div>
+                        <div class="sentinel-shortcut-row"><span>Move between blocks</span><kbd>↑</kbd><kbd>↓</kbd></div>
+                        <div class="sentinel-shortcut-row"><span>Close a menu or dialog</span><kbd>Esc</kbd></div>
+                    </div>
+                    <div class="sentinel-shortcuts-group">
+                        <h6>Text formatting</h6>
+                        <div class="sentinel-shortcut-row"><span>Bold</span><kbd>⌘B</kbd></div>
+                        <div class="sentinel-shortcut-row"><span>Italic</span><kbd>⌘I</kbd></div>
+                        <div class="sentinel-shortcut-row"><span>Underline</span><kbd>⌘U</kbd></div>
+                        <div class="sentinel-shortcut-row"><span>Link</span><kbd>⌘K</kbd></div>
+                    </div>
+                    <div class="sentinel-shortcuts-group">
+                        <h6>Blocks</h6>
+                        <div class="sentinel-shortcut-row"><span>Insert a block</span><kbd>/</kbd></div>
+                        <div class="sentinel-shortcut-row"><span>Link to a page</span><kbd>[[</kbd></div>
+                        <div class="sentinel-shortcut-row"><span>Mention a person or date</span><kbd>@@</kbd></div>
+                        <div class="sentinel-shortcut-row"><span>Split a block</span><kbd>Enter</kbd></div>
+                        <div class="sentinel-shortcut-row"><span>Merge into the block above</span><kbd>Backspace</kbd></div>
+                        <div class="sentinel-shortcut-row"><span>Indent / outdent</span><kbd>Tab</kbd><kbd>⇧Tab</kbd></div>
+                        <div class="sentinel-shortcut-row"><span>Move a block up / down</span><kbd>⌥↑</kbd><kbd>⌥↓</kbd></div>
+                        <div class="sentinel-shortcut-row"><span>Duplicate a block</span><kbd>⌥⇧D</kbd></div>
+                        <div class="sentinel-shortcut-row"><span>Delete a block</span><kbd>⌥⇧Backspace</kbd></div>
+                        <div class="sentinel-shortcut-row"><span>Undo / redo</span><kbd>⌘Z</kbd><kbd>⌘⇧Z</kbd></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop show" style="z-index:-1"></div>
+}
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
@@ -541,6 +589,35 @@
                            title="Export this page as Markdown" download>
                             <i class="bi bi-download"></i>
                         </a>
+                        <div class="dropdown">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="dropdown"
+                                    aria-expanded="false" title="Page style">
+                                <i class="bi bi-three-dots"></i>
+                            </button>
+                            <div class="dropdown-menu dropdown-menu-end sentinel-style-menu">
+                                <div class="sentinel-style-menu-heading">Style</div>
+                                <button type="button" class="dropdown-item d-flex justify-content-between align-items-center"
+                                        @onclick="ToggleFullWidthAsync">
+                                    Full width
+                                    @if (Editor.IsFullWidth)
+                                    {
+                                        <i class="bi bi-check-lg"></i>
+                                    }
+                                </button>
+                                <div class="sentinel-style-menu-heading">Font</div>
+                                @foreach (var font in new (string? Value, string Label)[] { (null, "Default"), ("serif", "Serif"), ("mono", "Monospace") })
+                                {
+                                    <button type="button" class="dropdown-item d-flex justify-content-between align-items-center"
+                                            @onclick="() => SetFontStyleAsync(font.Value)">
+                                        @font.Label
+                                        @if (Editor.FontStyle == font.Value)
+                                        {
+                                            <i class="bi bi-check-lg"></i>
+                                        }
+                                    </button>
+                                }
+                            </div>
+                        </div>
                     }
                     <span class="sentinel-editing-state">
                         @(!string.IsNullOrEmpty(_autosaveStatus) ? _autosaveStatus : SelectedPageId.HasValue ? "Saved" : "New page")
@@ -563,24 +640,36 @@
                     </div>
                 }
 
-                <div class="sentinel-document-canvas @(!string.IsNullOrWhiteSpace(Editor.CoverImageUrl) ? "has-cover" : string.Empty)">
+                <div class="sentinel-document-canvas @(!string.IsNullOrWhiteSpace(Editor.CoverImageUrl) ? "has-cover" : string.Empty) @(Editor.IsFullWidth ? "is-full-width" : string.Empty) @(Editor.FontStyle is "serif" or "mono" ? $"sentinel-font-{Editor.FontStyle}" : string.Empty)">
                     <DataAnnotationsValidator />
                     <ValidationSummary />
 
-                    @if (string.IsNullOrWhiteSpace(Editor.CoverImageUrl))
+                    @if (string.IsNullOrWhiteSpace(Editor.CoverImageUrl) || string.IsNullOrWhiteSpace(Editor.Icon))
                     {
                         <div class="sentinel-page-affordances">
-                            <button type="button" @onclick="ToggleCoverPickerAsync">
-                                <i class="bi bi-image"></i>Add cover
-                            </button>
+                            @if (string.IsNullOrWhiteSpace(Editor.Icon))
+                            {
+                                <button type="button" @onclick="ToggleIconPicker">
+                                    <i class="bi bi-emoji-smile"></i>Add icon
+                                </button>
+                            }
+                            @if (string.IsNullOrWhiteSpace(Editor.CoverImageUrl))
+                            {
+                                <button type="button" @onclick="ToggleCoverPickerAsync">
+                                    <i class="bi bi-image"></i>Add cover
+                                </button>
+                            }
                         </div>
                     }
 
                     <div class="sentinel-page-heading">
-                        <button type="button" class="sentinel-icon-input" @onclick="ToggleIconPicker"
-                                aria-label="Change page icon" title="Change page icon">
-                            @(string.IsNullOrWhiteSpace(Editor.Icon) ? "📄" : Editor.Icon)
-                        </button>
+                        @if (!string.IsNullOrWhiteSpace(Editor.Icon))
+                        {
+                            <button type="button" class="sentinel-icon-input" @onclick="ToggleIconPicker"
+                                    aria-label="Change page icon" title="Change page icon">
+                                @Editor.Icon
+                            </button>
+                        }
                         <InputTextArea class="sentinel-title-input" @bind-Value="Editor.Title" @bind-Value:after="ScheduleAutosave"
                                        rows="1" placeholder="Untitled" aria-label="Page title" />
                     </div>
@@ -699,6 +788,8 @@
                 <div>
                     <strong>Page context</strong>
                     <span>Discussions, links, and history</span>
+                    @{ var (words, characters) = PageWordAndCharacterCount(); }
+                    <span class="sentinel-word-count">@words @(words == 1 ? "word" : "words") · @characters @(characters == 1 ? "character" : "characters")</span>
                 </div>
                 <button type="button" @onclick="ToggleContextSidebar" title="Close page context" aria-label="Close page context">
                     <i class="bi bi-layout-sidebar-reverse"></i>
@@ -1499,6 +1590,8 @@
     private bool IsBusy { get; set; }
     private bool _mobileWorkspaceNavOpen;
     private bool _workspaceBrowserCollapsed;
+    private bool _showShortcutsModal;
+    private void ToggleShortcutsModal() => _showShortcutsModal = !_showShortcutsModal;
     // Keep the document canvas primary by default. The context rail remains one click away
     // and opening it is comfortable on wide workspaces; forcing it open alongside both the
     // portal and workspace navigation made common laptop widths unusably narrow.
@@ -1526,6 +1619,19 @@
     private List<SentinelSavedSearchView> SavedSearches { get; set; } = new();
     private bool IsCurrentSearchSaved => SavedSearches.Any(saved =>
         string.Equals(saved.Query, SearchQuery.Trim(), StringComparison.Ordinal));
+
+    // Recomputed from the in-memory Editor state on every render rather than cached - cheap
+    // (a handful of blocks, not a database round trip) and guarantees it never shows a stale
+    // count after a block edit, unlike a value that would need its own invalidation tracking.
+    private (int Words, int Characters) PageWordAndCharacterCount()
+    {
+        var text = string.Join(' ', WikiBlockJson.ParseBlocks(Editor.BlocksJson)
+            .SelectMany(block => block.RichText)
+            .Select(span => span.Text));
+        var words = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+        var characters = text.Count(c => !char.IsWhiteSpace(c));
+        return (words, characters);
+    }
     private string CurrentUsername { get; set; } = "unknown";
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
@@ -3387,7 +3493,9 @@
                 BaseBlocksJson = page.BlocksJson,
                 Icon = page.Icon,
                 CoverImageUrl = page.CoverImageUrl,
-                ParentWikiPageId = page.ParentWikiPageId
+                ParentWikiPageId = page.ParentWikiPageId,
+                IsFullWidth = page.IsFullWidth,
+                FontStyle = page.FontStyle
             };
             _editorGeneration++;
             PageConflict = null;
@@ -3505,7 +3613,9 @@
                 BaseBlocksJson = saved.BlocksJson,
                 Icon = saved.Icon,
                 CoverImageUrl = saved.CoverImageUrl,
-                ParentWikiPageId = saved.ParentWikiPageId
+                ParentWikiPageId = saved.ParentWikiPageId,
+                IsFullWidth = saved.IsFullWidth,
+                FontStyle = saved.FontStyle
             };
             // Deliberately not bumping _editorGeneration here - the block editor's DOM already
             // reflects exactly what was just saved (that's where BlocksJson came from), so
@@ -3973,7 +4083,9 @@
                 BaseBlocksJson = reverted.BlocksJson,
                 Icon = reverted.Icon,
                 CoverImageUrl = reverted.CoverImageUrl,
-                ParentWikiPageId = reverted.ParentWikiPageId
+                ParentWikiPageId = reverted.ParentWikiPageId,
+                IsFullWidth = reverted.IsFullWidth,
+                FontStyle = reverted.FontStyle
             };
             _editorGeneration++;
             DiffRevisionKey = null;
@@ -4154,6 +4266,21 @@
 
     private bool IsFavorite(Guid targetId, bool isDatabase) =>
         Navigation.Favorites.Any(item => item.Id == targetId && item.IsDatabase == isDatabase);
+
+    // Presentation-only, content-neutral settings (Notion's own page "•••" style menu) -
+    // ScheduleAutosave persists them the same silent way as every other Editor field, without
+    // minting a version-history checkpoint.
+    private void ToggleFullWidthAsync()
+    {
+        Editor.IsFullWidth = !Editor.IsFullWidth;
+        ScheduleAutosave();
+    }
+
+    private void SetFontStyleAsync(string? fontStyle)
+    {
+        Editor.FontStyle = fontStyle;
+        ScheduleAutosave();
+    }
 
     private async Task ToggleFavoriteAsync(Guid targetId, bool isDatabase)
     {

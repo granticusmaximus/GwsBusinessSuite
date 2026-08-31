@@ -224,6 +224,8 @@ public sealed class WikiService(
         page.BlocksJson = string.IsNullOrWhiteSpace(editor.BlocksJson) ? "[]" : editor.BlocksJson;
         page.Icon = string.IsNullOrWhiteSpace(editor.Icon) ? null : editor.Icon.Trim();
         page.CoverImageUrl = string.IsNullOrWhiteSpace(editor.CoverImageUrl) ? null : editor.CoverImageUrl.Trim();
+        page.IsFullWidth = editor.IsFullWidth;
+        page.FontStyle = string.IsNullOrWhiteSpace(editor.FontStyle) ? null : editor.FontStyle.Trim();
         page.UpdatedAt = now;
         page.UpdatedBy = performedBy;
 
@@ -605,7 +607,9 @@ public sealed class WikiService(
             Icon = page.Icon,
             CoverImageUrl = page.CoverImageUrl,
             ParentWikiPageId = page.ParentWikiPageId,
-            ExpectedContentVersion = page.ContentVersion
+            ExpectedContentVersion = page.ContentVersion,
+            IsFullWidth = page.IsFullWidth,
+            FontStyle = page.FontStyle
         }, performedBy, cancellationToken: cancellationToken);
     }
 
@@ -642,7 +646,9 @@ public sealed class WikiService(
             BlocksJson = WikiBlockJson.Serialize(clonedBlocks),
             Icon = source.Icon,
             CoverImageUrl = source.CoverImageUrl,
-            ParentWikiPageId = newParentWikiPageId
+            ParentWikiPageId = newParentWikiPageId,
+            IsFullWidth = source.IsFullWidth,
+            FontStyle = source.FontStyle
         }, performedBy, cancellationToken: cancellationToken);
 
         if (childrenByParent.TryGetValue(source.Id, out var children))

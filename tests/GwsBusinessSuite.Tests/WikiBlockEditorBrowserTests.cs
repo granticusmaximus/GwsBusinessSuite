@@ -469,14 +469,17 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
             """,
             initialJson);
 
+        // Text/background color share one "A" dropdown with two labeled sections (Color/
+        // Background) - matching Notion's own single-button color menu - rather than two
+        // separate buttons each opening their own menu.
         await SelectWordAsync(page, "Alpha");
-        await page.GetByRole(AriaRole.Button, new() { Name = "Text color" }).ClickAsync();
-        await page.GetByRole(AriaRole.Menuitem, new() { Name = "Text color red" }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Color" }).ClickAsync();
+        await page.GetByRole(AriaRole.Menuitem, new() { Name = "Color red" }).ClickAsync();
         await page.WaitForTimeoutAsync(350);
 
         await SelectWordAsync(page, "Beta");
-        await page.GetByRole(AriaRole.Button, new() { Name = "Background color" }).ClickAsync();
-        await page.GetByRole(AriaRole.Menuitem, new() { Name = "Background color yellow" }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Color" }).ClickAsync();
+        await page.GetByRole(AriaRole.Menuitem, new() { Name = "Background yellow" }).ClickAsync();
         await page.WaitForTimeoutAsync(350);
 
         var formattedJson = await page.EvaluateAsync<string>(

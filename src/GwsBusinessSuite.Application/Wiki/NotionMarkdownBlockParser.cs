@@ -315,6 +315,16 @@ public static partial class NotionMarkdownBlockParser
                 continue;
             }
 
+            // CommonMark has no native underline delimiter - "++" is HtmlToMarkdown's own
+            // synthetic stand-in for a <u> tag, unused by any other syntax this parser recognizes.
+            if (TryDelimited(value, index, "++", out var underlineContent, out var underlineEnd))
+            {
+                FlushPlain();
+                ParseInline(underlineContent, marks with { Underline = true }, spans);
+                index = underlineEnd;
+                continue;
+            }
+
             if (TryDelimited(value, index, "`", out var codeContent, out var codeEnd))
             {
                 FlushPlain();
@@ -391,6 +401,7 @@ public static partial class NotionMarkdownBlockParser
             && previous.Bold == marks.Bold
             && previous.Italic == marks.Italic
             && previous.Strikethrough == marks.Strikethrough
+            && previous.Underline == marks.Underline
             && previous.Code == marks.Code
             && string.Equals(previous.Link, marks.Link, StringComparison.Ordinal))
         {
@@ -404,6 +415,7 @@ public static partial class NotionMarkdownBlockParser
             marks.Bold,
             marks.Italic,
             marks.Strikethrough,
+            marks.Underline,
             marks.Code,
             marks.Link));
     }
@@ -468,6 +480,8 @@ public static partial class NotionMarkdownBlockParser
         value = Regex.Replace(value, @"</(em|i)>", "*", RegexOptions.IgnoreCase);
         value = Regex.Replace(value, @"<(s|strike|del)\b[^>]*>", "~~", RegexOptions.IgnoreCase);
         value = Regex.Replace(value, @"</(s|strike|del)>", "~~", RegexOptions.IgnoreCase);
+        value = Regex.Replace(value, @"<u\b[^>]*>", "++", RegexOptions.IgnoreCase);
+        value = Regex.Replace(value, @"</u>", "++", RegexOptions.IgnoreCase);
         value = Regex.Replace(value, @"<code\b[^>]*>", "`", RegexOptions.IgnoreCase);
         value = Regex.Replace(value, @"</code>", "`", RegexOptions.IgnoreCase);
         value = Regex.Replace(value, @"<br\s*/?>", "\n", RegexOptions.IgnoreCase);
@@ -575,6 +589,7 @@ public static partial class NotionMarkdownBlockParser
         bool Bold = false,
         bool Italic = false,
         bool Strikethrough = false,
+        bool Underline = false,
         bool Code = false,
         string? Link = null);
 

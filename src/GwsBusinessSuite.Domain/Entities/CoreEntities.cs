@@ -554,6 +554,11 @@ public sealed class WikiPage : AuditableEntity
     // system feature would pick its own distinct key; this is not an enum because the set of
     // system-managed pages is expected to grow one feature at a time, not be fixed up front.
     public string? SystemKey { get; set; }
+    // Per-page presentation preferences (Notion's own page "•••" style menu equivalent) -
+    // content-neutral, so they deliberately don't touch ContentVersion/BlocksJson or mint a
+    // revision snapshot when changed. Null FontStyle means "use the default sans font".
+    public bool IsFullWidth { get; set; }
+    public string? FontStyle { get; set; }
     public ICollection<WikiPageRevision> Revisions { get; set; } = new List<WikiPageRevision>();
 }
 

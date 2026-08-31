@@ -7,9 +7,14 @@
 @inject SentinelGptGenerationCoordinator GenerationCoordinator
 @inject ICurrentUserAccessor CurrentUserAccessor
 
-<div class="sentinel-ai-panel">
+<div class="sentinel-ai-panel @(_open ? "is-open" : string.Empty)">
     <button type="button" class="sentinel-ai-toggle" @onclick="ToggleAsync">
-        <span>✦</span><strong>Ask SentinelGPT</strong><small>Grounded in this workspace</small><i class="bi bi-chevron-down"></i>
+        <span>✦</span><strong>Ask SentinelGPT</strong>
+        @if (_open)
+        {
+            <small>Grounded in this workspace</small>
+        }
+        <i class="bi bi-chevron-down"></i>
     </button>
     @if (_open)
     {

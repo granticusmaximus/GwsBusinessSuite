@@ -5,221 +5,181 @@
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject ILogger<SentinelTemplates> Logger
 
-<div class="card border-0 shadow-sm mt-3 sentinel-template-panel">
-    <div class="card-header bg-white border-bottom py-2 d-flex align-items-center justify-content-between">
-        <span class="fw-semibold small"><i class="bi bi-copy me-1"></i>Templates</span>
-        <span class="badge text-bg-secondary">@(Templates.Count + BlockTemplates.Count + DatabaseTemplates.Count)</span>
-    </div>
-
-    <div class="card-body p-2 border-bottom sentinel-notion-workspace-import">
-        <div class="small fw-semibold mb-1">
-            <i class="bi bi-cloud-arrow-up me-1"></i>Restore a Notion workspace
-        </div>
-        <div class="small text-secondary mb-2">
-            Upload a Notion <strong>Markdown &amp; CSV</strong> or HTML workspace ZIP. Sentinel will create or update
-            real editable pages, databases, rows, files, and their exported hierarchy.
-        </div>
-        <label class="btn btn-sm btn-primary mb-0 @(IsBusy ? "disabled" : string.Empty)">
-            <i class="bi bi-file-earmark-zip me-1"></i>Restore workspace ZIP
-            <InputFile class="visually-hidden"
-                       accept=".zip,application/zip"
-                       disabled="@IsBusy"
-                       OnChange="ImportNotionWorkspaceAsync" />
-        </label>
-        <div class="small text-secondary mt-1">
-            Reimporting the same export updates matching documents. Maximum ZIP size: 250 MB.
-        </div>
-        @if (!string.IsNullOrWhiteSpace(WorkspaceImportMessage))
-        {
-            <div class="small @(WorkspaceImportSucceeded ? "text-success" : "text-danger") mt-2">
-                @WorkspaceImportMessage
-            </div>
-        }
-    </div>
-
-    <div class="card-body p-2 border-bottom sentinel-notion-template-import">
-        <div class="small fw-semibold mb-1"><i class="bi bi-box-arrow-in-down me-1"></i>Import a free Notion template</div>
-        <div class="small text-secondary mb-2">
-            Duplicate the free template into your connected Notion workspace, share it with the Sentinel integration,
-            and run <strong>Notion sync</strong>. You can then save the imported page or database as a template here.
-        </div>
-        <label class="btn btn-sm btn-outline-primary mb-0 @(IsBusy ? "disabled" : string.Empty)">
-            <i class="bi bi-file-earmark-zip me-1"></i>Import Notion ZIP
-            <InputFile class="visually-hidden"
-                       accept=".zip,application/zip"
-                       disabled="@IsBusy"
-                       OnChange="ImportNotionZipAsync" />
-        </label>
-        <div class="small text-secondary mt-1">Supports Notion Markdown &amp; CSV or HTML exports up to 25 MB.</div>
-        @if (!string.IsNullOrWhiteSpace(ImportMessage))
-        {
-            <div class="small @(ImportSucceeded ? "text-success" : "text-danger") mt-2">@ImportMessage</div>
-        }
-    </div>
-
-    <div class="card-body p-2 border-bottom">
-        <div class="small fw-semibold mb-2"><i class="bi bi-blockquote-left me-1"></i>Block templates</div>
-        @if (IsPageEditorActive)
-        {
-            <div class="input-group input-group-sm">
-                <input class="form-control" @bind="NewBlockTemplateName" placeholder="Template name" maxlength="120" />
-                <button type="button" class="btn btn-outline-primary" @onclick="SaveBlockTemplateAsync"
-                        disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewBlockTemplateName))" title="Save the current page blocks as a template">
-                    <i class="bi bi-bookmark-plus"></i>
-                </button>
-            </div>
-            <div class="small text-secondary mt-1">Saves the blocks currently in the editor, including unsaved changes.</div>
-        }
-        else
-        {
-            <div class="small text-secondary">Open a page to save or insert reusable blocks.</div>
-        }
-    </div>
-
-    <div class="card-body p-2 border-bottom">
-        <div class="small fw-semibold mb-2"><i class="bi bi-grid-3x3-gap me-1"></i>Database templates</div>
-        @if (CurrentDatabaseId.HasValue)
-        {
-            <div class="input-group input-group-sm">
-                <input class="form-control" @bind="NewDatabaseTemplateName" placeholder="Template name" maxlength="120" />
-                <button type="button" class="btn btn-outline-primary" @onclick="SaveDatabaseTemplateAsync"
-                        disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewDatabaseTemplateName))" title="Save this database as a template">
-                    <i class="bi bi-bookmark-plus"></i>
-                </button>
-            </div>
-        }
-        else
-        {
-            <div class="small text-secondary">Open a database to turn it into a reusable template.</div>
-        }
-    </div>
-    <div class="card-body p-2 border-bottom">
-        <div class="small fw-semibold mb-2"><i class="bi bi-file-earmark-text me-1"></i>Page templates</div>
-        @if (CurrentPageId.HasValue)
-        {
-            <div class="input-group input-group-sm">
-                <input class="form-control" @bind="NewTemplateName" placeholder="Template name" maxlength="120" />
-                <button type="button" class="btn btn-outline-primary" @onclick="SaveTemplateAsync"
-                        disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewTemplateName))" title="Save this page as a template">
-                    <i class="bi bi-bookmark-plus"></i>
-                </button>
-            </div>
-        }
-        else
-        {
-            <div class="small text-secondary">Open and save a page to turn it into a template.</div>
-        }
+<div class="sentinel-template-panel">
+    <div class="sentinel-template-panel-header">
+        <span><i class="bi bi-copy me-1"></i>Templates</span>
+        <span class="sentinel-template-count">@(Templates.Count + BlockTemplates.Count + DatabaseTemplates.Count)</span>
     </div>
 
     @if (!string.IsNullOrWhiteSpace(ErrorMessage))
     {
-        <div class="small text-danger p-2 border-bottom">@ErrorMessage</div>
+        <div class="sentinel-template-error">@ErrorMessage</div>
     }
 
-    @if (BlockTemplates.Count == 0)
+    @* A save-as-template row per open surface, only shown when there is actually something to
+       save from (an open page/database) - matches Notion's own "New template" affordance
+       living next to the thing it captures rather than as an always-visible empty form. *@
+    @if (IsPageEditorActive)
     {
-        <div class="small text-secondary p-3">No block templates yet.</div>
+        <div class="sentinel-template-save-row">
+            <input class="form-control form-control-sm" @bind="NewBlockTemplateName" placeholder="Block template name" maxlength="120" />
+            <button type="button" class="btn btn-sm btn-warning" @onclick="SaveBlockTemplateAsync"
+                    disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewBlockTemplateName))" title="Save the current page's blocks as a reusable template">
+                <i class="bi bi-bookmark-plus me-1"></i>Save blocks
+            </button>
+        </div>
     }
-    else
+    @if (CurrentPageId.HasValue)
     {
-        <div class="list-group list-group-flush">
-            @foreach (var template in BlockTemplates)
-            {
-                <div class="list-group-item p-2">
-                    <div class="d-flex align-items-center gap-2">
-                        <span>▦</span>
-                        <div class="min-w-0 flex-grow-1">
-                            <div class="small fw-semibold text-truncate">@template.Name</div>
-                            <div class="small text-secondary text-truncate">@template.BlockCount blocks · @template.Preview</div>
-                        </div>
-                        @if (PendingBlockDeleteId == template.Id)
-                        {
-                            <button type="button" class="btn btn-xs btn-danger" @onclick="() => DeleteBlockTemplateAsync(template.Id)" disabled="@IsBusy">Confirm</button>
-                            <button type="button" class="btn btn-xs btn-link" @onclick="CancelBlockDelete" disabled="@IsBusy">Cancel</button>
-                        }
-                        else
-                        {
-                            <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => UseBlockTemplateAsync(template.Id)" disabled="@(IsBusy || !IsPageEditorActive)">Insert</button>
-                            <button type="button" class="btn btn-xs btn-link text-danger" @onclick="() => PendingBlockDeleteId = template.Id" disabled="@IsBusy" title="Delete block template">
-                                <i class="bi bi-trash"></i>
-                            </button>
-                        }
-                    </div>
-                </div>
-            }
+        <div class="sentinel-template-save-row">
+            <input class="form-control form-control-sm" @bind="NewTemplateName" placeholder="Page template name" maxlength="120" />
+            <button type="button" class="btn btn-sm btn-warning" @onclick="SaveTemplateAsync"
+                    disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewTemplateName))" title="Save this page as a template">
+                <i class="bi bi-bookmark-plus me-1"></i>Save page
+            </button>
+        </div>
+    }
+    @if (CurrentDatabaseId.HasValue)
+    {
+        <div class="sentinel-template-save-row">
+            <input class="form-control form-control-sm" @bind="NewDatabaseTemplateName" placeholder="Database template name" maxlength="120" />
+            <button type="button" class="btn btn-sm btn-warning" @onclick="SaveDatabaseTemplateAsync"
+                    disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewDatabaseTemplateName))" title="Save this database as a template">
+                <i class="bi bi-bookmark-plus me-1"></i>Save database
+            </button>
         </div>
     }
 
-    @if (Templates.Count == 0)
+    @{ var hasAnyTemplate = Templates.Count > 0 || BlockTemplates.Count > 0 || DatabaseTemplates.Count > 0; }
+    @if (!hasAnyTemplate)
     {
-        <div class="small text-secondary p-3">No page templates yet.</div>
+        <div class="sentinel-template-empty">No templates yet - save a page, its blocks, or a database above to start a gallery here.</div>
     }
     else
     {
-        <div class="list-group list-group-flush">
+        <div class="sentinel-template-gallery">
             @foreach (var template in Templates)
             {
-                <div class="list-group-item p-2">
-                    <div class="d-flex align-items-center gap-2">
-                        <span>@(string.IsNullOrWhiteSpace(template.Icon) ? "📄" : template.Icon)</span>
-                        <div class="min-w-0 flex-grow-1">
-                            <div class="small fw-semibold text-truncate">@template.Name</div>
-                            <div class="small text-secondary text-truncate">@template.PageTitle · @template.BlockCount blocks</div>
-                        </div>
-                        @if (PendingDeleteId == template.Id)
-                        {
+                <div class="sentinel-template-card">
+                    <div class="sentinel-template-card-icon">@(string.IsNullOrWhiteSpace(template.Icon) ? "📄" : template.Icon)</div>
+                    <div class="sentinel-template-card-body">
+                        <div class="sentinel-template-card-name text-truncate">@template.Name</div>
+                        <div class="sentinel-template-card-meta text-truncate">Page · @template.BlockCount blocks</div>
+                    </div>
+                    @if (PendingDeleteId == template.Id)
+                    {
+                        <div class="sentinel-template-card-actions">
                             <button type="button" class="btn btn-xs btn-danger" @onclick="() => DeleteAsync(template.Id)" disabled="@IsBusy">Confirm</button>
                             <button type="button" class="btn btn-xs btn-link" @onclick="CancelDelete" disabled="@IsBusy">Cancel</button>
-                        }
-                        else
-                        {
-                            <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => UseAsync(template.Id)" disabled="@IsBusy">Use</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="sentinel-template-card-actions">
+                            <button type="button" class="btn btn-xs btn-warning" @onclick="() => UseAsync(template.Id)" disabled="@IsBusy">Use</button>
                             <button type="button" class="btn btn-xs btn-link text-danger" @onclick="() => PendingDeleteId = template.Id" disabled="@IsBusy" title="Delete template">
                                 <i class="bi bi-trash"></i>
                             </button>
-                        }
+                        </div>
+                    }
+                </div>
+            }
+            @foreach (var template in BlockTemplates)
+            {
+                <div class="sentinel-template-card">
+                    <div class="sentinel-template-card-icon">▦</div>
+                    <div class="sentinel-template-card-body">
+                        <div class="sentinel-template-card-name text-truncate">@template.Name</div>
+                        <div class="sentinel-template-card-meta text-truncate">Blocks · @template.BlockCount blocks</div>
                     </div>
+                    @if (PendingBlockDeleteId == template.Id)
+                    {
+                        <div class="sentinel-template-card-actions">
+                            <button type="button" class="btn btn-xs btn-danger" @onclick="() => DeleteBlockTemplateAsync(template.Id)" disabled="@IsBusy">Confirm</button>
+                            <button type="button" class="btn btn-xs btn-link" @onclick="CancelBlockDelete" disabled="@IsBusy">Cancel</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="sentinel-template-card-actions">
+                            <button type="button" class="btn btn-xs btn-warning" @onclick="() => UseBlockTemplateAsync(template.Id)" disabled="@(IsBusy || !IsPageEditorActive)">Insert</button>
+                            <button type="button" class="btn btn-xs btn-link text-danger" @onclick="() => PendingBlockDeleteId = template.Id" disabled="@IsBusy" title="Delete block template">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    }
+                </div>
+            }
+            @foreach (var template in DatabaseTemplates)
+            {
+                <div class="sentinel-template-card">
+                    <div class="sentinel-template-card-icon">@(string.IsNullOrWhiteSpace(template.Icon) ? "🗄️" : template.Icon)</div>
+                    <div class="sentinel-template-card-body">
+                        <div class="sentinel-template-card-name text-truncate">@template.Name</div>
+                        <div class="sentinel-template-card-meta text-truncate">Database · @template.RowCount rows · @template.ViewCount views</div>
+                    </div>
+                    @if (PendingDatabaseDeleteId == template.Id)
+                    {
+                        <div class="sentinel-template-card-actions">
+                            <button type="button" class="btn btn-xs btn-danger" @onclick="() => DeleteDatabaseTemplateAsync(template.Id)" disabled="@IsBusy">Confirm</button>
+                            <button type="button" class="btn btn-xs btn-link" @onclick="CancelDatabaseDelete" disabled="@IsBusy">Cancel</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="sentinel-template-card-actions">
+                            <button type="button" class="btn btn-xs btn-warning" @onclick="() => UseDatabaseTemplateAsync(template.Id)" disabled="@IsBusy">Use</button>
+                            <button type="button" class="btn btn-xs btn-link text-danger" @onclick="() => PendingDatabaseDeleteId = template.Id" disabled="@IsBusy" title="Delete database template">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    }
                 </div>
             }
         </div>
     }
 
-    @if (DatabaseTemplates.Count == 0)
-    {
-        <div class="small text-secondary p-3 border-top">No database templates yet.</div>
-    }
-    else
-    {
-        <div class="small fw-semibold px-2 pt-3 pb-1 border-top">Database templates</div>
-        <div class="list-group list-group-flush">
-            @foreach (var template in DatabaseTemplates)
+    <details class="sentinel-notion-import-details">
+        <summary>Notion import &amp; restore</summary>
+        <div class="sentinel-notion-workspace-import">
+            <div class="fw-semibold small mb-1"><i class="bi bi-cloud-arrow-up me-1"></i>Restore a Notion workspace</div>
+            <div class="small text-secondary mb-2">
+                Upload a Notion Markdown &amp; CSV or HTML workspace ZIP to create or update real editable pages,
+                databases, rows, and files from the export's own hierarchy. Reimporting the same export updates
+                matching documents. Maximum ZIP size: 250 MB.
+            </div>
+            <label class="btn btn-sm btn-warning mb-0 @(IsBusy ? "disabled" : string.Empty)">
+                <i class="bi bi-file-earmark-zip me-1"></i>Restore workspace ZIP
+                <InputFile class="visually-hidden"
+                           accept=".zip,application/zip"
+                           disabled="@IsBusy"
+                           OnChange="ImportNotionWorkspaceAsync" />
+            </label>
+            @if (!string.IsNullOrWhiteSpace(WorkspaceImportMessage))
             {
-                <div class="list-group-item p-2">
-                    <div class="d-flex align-items-center gap-2">
-                        <span>@(string.IsNullOrWhiteSpace(template.Icon) ? "🗄️" : template.Icon)</span>
-                        <div class="min-w-0 flex-grow-1">
-                            <div class="small fw-semibold text-truncate">@template.Name</div>
-                            <div class="small text-secondary text-truncate">
-                                @template.DatabaseTitle · @template.PropertyCount properties · @template.RowCount rows · @template.ViewCount views
-                            </div>
-                        </div>
-                        @if (PendingDatabaseDeleteId == template.Id)
-                        {
-                            <button type="button" class="btn btn-xs btn-danger" @onclick="() => DeleteDatabaseTemplateAsync(template.Id)" disabled="@IsBusy">Confirm</button>
-                            <button type="button" class="btn btn-xs btn-link" @onclick="CancelDatabaseDelete" disabled="@IsBusy">Cancel</button>
-                        }
-                        else
-                        {
-                            <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => UseDatabaseTemplateAsync(template.Id)" disabled="@IsBusy">Use</button>
-                            <button type="button" class="btn btn-xs btn-link text-danger" @onclick="() => PendingDatabaseDeleteId = template.Id" disabled="@IsBusy" title="Delete database template">
-                                <i class="bi bi-trash"></i>
-                            </button>
-                        }
-                    </div>
-                </div>
+                <div class="small @(WorkspaceImportSucceeded ? "text-success" : "text-danger") mt-2">@WorkspaceImportMessage</div>
             }
         </div>
-    }
+        <div class="sentinel-notion-template-import">
+            <div class="fw-semibold small mb-1"><i class="bi bi-box-arrow-in-down me-1"></i>Import a free Notion template</div>
+            <div class="small text-secondary mb-2">
+                Duplicate the free template into your connected Notion workspace, share it with the Sentinel
+                integration, run Notion sync, then save the imported page or database as a template above.
+                Supports Notion Markdown &amp; CSV or HTML exports up to 25 MB.
+            </div>
+            <label class="btn btn-sm btn-outline-secondary mb-0 @(IsBusy ? "disabled" : string.Empty)">
+                <i class="bi bi-file-earmark-zip me-1"></i>Import Notion ZIP
+                <InputFile class="visually-hidden"
+                           accept=".zip,application/zip"
+                           disabled="@IsBusy"
+                           OnChange="ImportNotionZipAsync" />
+            </label>
+            @if (!string.IsNullOrWhiteSpace(ImportMessage))
+            {
+                <div class="small @(ImportSucceeded ? "text-success" : "text-danger") mt-2">@ImportMessage</div>
+            }
+        </div>
+    </details>
 </div>
 
 @code {

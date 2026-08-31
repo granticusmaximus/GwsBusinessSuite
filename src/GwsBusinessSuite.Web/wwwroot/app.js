@@ -72,6 +72,16 @@
 		toggle.setAttribute('aria-label', toggle.title);
 	}
 
+	// Dark stays the app's default (unset attribute) - only an explicit light choice ever writes
+	// the attribute/storage key, so anyone who never touches this toggle sees exactly the look
+	// this app always had. See App.razor's inline head script for the matching pre-paint read.
+	function toggleTheme() {
+		var current = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+		var next = current === 'light' ? 'dark' : 'light';
+		document.documentElement.setAttribute('data-theme', next);
+		try { localStorage.setItem('gwsTheme', next); } catch (e) { /* storage unavailable */ }
+	}
+
 	function toggleNavigation() {
 		var layout = shell();
 		if (!layout) return;
@@ -250,6 +260,7 @@
 			if (event.target.closest('.gws-sidebar .gws-nav-link') && isMobile()) closeMobileNavigation();
 			if (event.target.closest('[data-gws-command-open]')) openCommand();
 			if (event.target.closest('[data-gws-command-close]')) closeCommand();
+			if (event.target.closest('[data-gws-theme-toggle]')) toggleTheme();
 		});
 
 		document.addEventListener('input', function (event) {

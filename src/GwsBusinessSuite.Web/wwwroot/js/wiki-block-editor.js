@@ -2318,6 +2318,12 @@ function onContentKeyDown(state, content, event) {
         scheduleNotify(state);
         return;
     }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'u') {
+        event.preventDefault();
+        toggleInlineTag('u');
+        scheduleNotify(state);
+        return;
+    }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         const url = window.prompt('Link URL');
@@ -3660,6 +3666,7 @@ function walkRichText(node, marks, spans) {
         if (tag === 'b' || tag === 'strong') nextMarks.bold = true;
         else if (tag === 'i' || tag === 'em') nextMarks.italic = true;
         else if (tag === 's' || tag === 'strike' || tag === 'del') nextMarks.strikethrough = true;
+        else if (tag === 'u') nextMarks.underline = true;
         else if (tag === 'code') nextMarks.code = true;
         else if (tag === 'a') nextMarks.link = child.getAttribute('href') || '';
         if (tag === 'span') {
@@ -3674,7 +3681,8 @@ function walkRichText(node, marks, spans) {
 
 function marksEqual(a, b) {
     return !!a.bold === !!b.bold && !!a.italic === !!b.italic
-        && !!a.strikethrough === !!b.strikethrough && !!a.code === !!b.code
+        && !!a.strikethrough === !!b.strikethrough && !!a.underline === !!b.underline
+        && !!a.code === !!b.code
         && (a.link || '') === (b.link || '')
         && (a.textColor || '') === (b.textColor || '')
         && (a.backgroundColor || '') === (b.backgroundColor || '');
@@ -3697,6 +3705,7 @@ function htmlFromRichText(spans) {
         if (span.bold) html = `<b>${html}</b>`;
         if (span.italic) html = `<i>${html}</i>`;
         if (span.strikethrough) html = `<s>${html}</s>`;
+        if (span.underline) html = `<u>${html}</u>`;
         const textColor = normalizeRichTextColor(span.textColor);
         const backgroundColor = normalizeRichTextColor(span.backgroundColor);
         if (textColor) html = `<span class="wiki-rich-text-color-${textColor}" data-wiki-text-color="${textColor}">${html}</span>`;
@@ -3772,6 +3781,7 @@ function showInlineToolbar(state) {
         { label: 'B', title: 'Bold', tag: 'b', className: 'is-bold' },
         { label: 'I', title: 'Italic', tag: 'i', className: 'is-italic' },
         { label: 'S', title: 'Strikethrough', tag: 's', className: 'is-strike' },
+        { label: 'U', title: 'Underline', tag: 'u', className: 'is-underline' },
         { label: '<>', title: 'Inline code', tag: 'code', className: 'is-code' }
     ];
 
@@ -3831,8 +3841,7 @@ function showInlineToolbar(state) {
         closeInlineToolbar(state);
     });
     toolbar.appendChild(commentButton);
-    appendColorMenuButton(toolbar, state, range, 'text');
-    appendColorMenuButton(toolbar, state, range, 'background');
+    appendColorMenuButton(toolbar, state, range);
 
     document.body.appendChild(toolbar);
     const rect = range.getBoundingClientRect();
@@ -3842,12 +3851,14 @@ function showInlineToolbar(state) {
     state.inlineToolbar = toolbar;
 }
 
-function appendColorMenuButton(toolbar, state, selectionRange, kind) {
+// One "A" dropdown with two labeled sections (Color / Background) - matching Notion's own
+// single-button color menu - rather than two separate buttons each opening their own menu.
+function appendColorMenuButton(toolbar, state, selectionRange) {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = kind === 'text' ? 'wiki-color-menu-toggle' : 'wiki-background-menu-toggle';
-    button.textContent = kind === 'text' ? 'A' : '▧';
-    button.title = kind === 'text' ? 'Text color' : 'Background color';
+    button.className = 'wiki-color-menu-toggle';
+    button.textContent = 'A';
+    button.title = 'Color';
     button.setAttribute('aria-label', button.title);
     button.setAttribute('aria-haspopup', 'menu');
     button.addEventListener('mousedown', event => event.preventDefault());
@@ -3863,25 +3874,31 @@ function appendColorMenuButton(toolbar, state, selectionRange, kind) {
             value,
             label: `${value[0].toUpperCase()}${value.slice(1)}`
         }))];
-        for (const choice of choices) {
-            const option = document.createElement('button');
-            option.type = 'button';
-            option.setAttribute('role', 'menuitem');
-            option.setAttribute('aria-label', `${button.title} ${choice.label.toLowerCase()}`);
-            const swatch = document.createElement('span');
-            swatch.className = `wiki-color-swatch${choice.value ? ` wiki-rich-text-${kind === 'text' ? 'color' : 'bg'}-${choice.value}` : ''}`;
-            swatch.textContent = choice.value ? 'A' : '×';
-            const label = document.createElement('span');
-            label.textContent = choice.label;
-            option.append(swatch, label);
-            option.addEventListener('mousedown', mouseEvent => mouseEvent.preventDefault());
-            option.addEventListener('click', optionEvent => {
-                optionEvent.stopPropagation();
-                applyInlineColor(selectionRange, kind, choice.value);
-                scheduleNotify(state);
-                closeInlineToolbar(state);
-            });
-            menu.appendChild(option);
+        for (const kind of ['text', 'background']) {
+            const heading = document.createElement('div');
+            heading.className = 'wiki-color-menu-heading';
+            heading.textContent = kind === 'text' ? 'Color' : 'Background';
+            menu.appendChild(heading);
+            for (const choice of choices) {
+                const option = document.createElement('button');
+                option.type = 'button';
+                option.setAttribute('role', 'menuitem');
+                option.setAttribute('aria-label', `${heading.textContent} ${choice.label.toLowerCase()}`);
+                const swatch = document.createElement('span');
+                swatch.className = `wiki-color-swatch${choice.value ? ` wiki-rich-text-${kind === 'text' ? 'color' : 'bg'}-${choice.value}` : ''}`;
+                swatch.textContent = choice.value ? 'A' : '×';
+                const label = document.createElement('span');
+                label.textContent = choice.label;
+                option.append(swatch, label);
+                option.addEventListener('mousedown', mouseEvent => mouseEvent.preventDefault());
+                option.addEventListener('click', optionEvent => {
+                    optionEvent.stopPropagation();
+                    applyInlineColor(selectionRange, kind, choice.value);
+                    scheduleNotify(state);
+                    closeInlineToolbar(state);
+                });
+                menu.appendChild(option);
+            }
         }
         button.appendChild(menu);
     });

@@ -29,6 +29,7 @@ public static class WikiBlockHtmlRenderer
             if (span.Bold) text = $"<b>{text}</b>";
             if (span.Italic) text = $"<i>{text}</i>";
             if (span.Strikethrough) text = $"<s>{text}</s>";
+            if (span.Underline) text = $"<u>{text}</u>";
             if (WikiRichTextColors.TryNormalize(span.TextColor, out var textColor))
             {
                 text = $"<span class=\"wiki-rich-text-color-{textColor}\">{text}</span>";
