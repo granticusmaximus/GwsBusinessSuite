@@ -1,0 +1,18 @@
+@* Shared "nothing here yet" treatment - replaces each page's own plain <p>/<div> empty-state
+   copy so an empty list looks the same everywhere instead of varying page to page. *@
+
+<div class="gws-empty-state @CssClass">
+    <i class="bi @Icon" aria-hidden="true"></i>
+    <span>@Message</span>
+    @if (ChildContent is not null)
+    {
+        @ChildContent
+    }
+</div>
+
+@code {
+    [Parameter] public string Icon { get; set; } = "bi-inbox";
+    [Parameter, EditorRequired] public string Message { get; set; } = string.Empty;
+    [Parameter] public string CssClass { get; set; } = "p-4 text-secondary";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

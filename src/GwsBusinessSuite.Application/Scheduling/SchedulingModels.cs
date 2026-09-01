@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using GwsBusinessSuite.Domain.Entities;
 
 namespace GwsBusinessSuite.Application.Scheduling;
@@ -16,6 +17,7 @@ public sealed record BookingTypeView(
 public sealed class BookingTypeEditorModel
 {
     public Guid? Id { get; set; }
+    [Required]
     public string Title { get; set; } = string.Empty;
     public string Slug { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;

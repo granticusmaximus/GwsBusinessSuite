@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace GwsBusinessSuite.Application.Campaigns;
 
 public sealed record EmailCampaignStepView(Guid Id, int StepOrder, string Subject, string Body, int DelayDays);
@@ -22,6 +24,7 @@ public sealed class EmailCampaignStepEditorModel
 public sealed class EmailCampaignEditorModel
 {
     public Guid? Id { get; set; }
+    [Required]
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public List<EmailCampaignStepEditorModel> Steps { get; set; } = [];
@@ -37,6 +40,17 @@ public sealed record EmailCampaignEnrollmentView(
     DateTimeOffset? CompletedAt,
     DateTimeOffset EnrolledAt);
 
+public sealed record EmailCampaignEnrollmentForContactView(
+    Guid EnrollmentId,
+    Guid CampaignId,
+    string CampaignName,
+    string Status,
+    int NextStepIndex,
+    int TotalSteps,
+    DateTimeOffset? NextSendAt,
+    DateTimeOffset? CompletedAt,
+    DateTimeOffset EnrolledAt);
+
 public interface IEmailCampaignService
 {
     Task<IReadOnlyList<EmailCampaignView>> ListCampaignsAsync(CancellationToken cancellationToken = default);
@@ -46,6 +60,7 @@ public interface IEmailCampaignService
     Task<EmailCampaignView> SetCampaignStatusAsync(Guid campaignId, string status, string performedBy, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<EmailCampaignEnrollmentView>> ListEnrollmentsAsync(Guid campaignId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<EmailCampaignEnrollmentForContactView>> ListEnrollmentsForContactAsync(Guid contactId, CancellationToken cancellationToken = default);
 
     // False (a no-op, not an error) if the contact is already enrolled, has globally
     // unsubscribed, or the campaign isn't Active - true only when a new enrollment was

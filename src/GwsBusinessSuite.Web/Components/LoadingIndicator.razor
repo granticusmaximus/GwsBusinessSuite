@@ -1,0 +1,12 @@
+@* Shared "data is loading" treatment - replaces the mix of bare spinners, ad hoc "Loading X…"
+   text, or nothing at all that pages showed while their OnInitializedAsync was still running. *@
+
+<div class="gws-loading-indicator @CssClass" role="status">
+    <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+    <span>@Message</span>
+</div>
+
+@code {
+    [Parameter] public string Message { get; set; } = "Loading…";
+    [Parameter] public string CssClass { get; set; } = "p-4 text-secondary";
+}

@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace GwsBusinessSuite.Application.Billing;
 
 public sealed record InvoiceLineItemView(Guid Id, string Description, int Quantity, decimal UnitPriceUsd)
@@ -37,6 +39,7 @@ public sealed class InvoiceEditorModel
     public Guid? Id { get; set; }
     public Guid ContactId { get; set; }
     public Guid? DealId { get; set; }
+    [Required]
     public string Title { get; set; } = string.Empty;
     public DateTimeOffset? DueDate { get; set; }
     public string Notes { get; set; } = string.Empty;

@@ -8,10 +8,10 @@ namespace GwsBusinessSuite.Web.Services;
 public static class NavMenuGroups
 {
     public static readonly IReadOnlyList<string> ContentPublishingPrefixes =
-        ["admin/article", "admin/content-studio", "admin/seo-audit", "admin/localization", "admin/growth", "admin/app-generation", "admin/media", "admin/pages", "admin/appearance", "admin/podcasts", "admin/live-show"];
+        ["admin/article", "admin/content-studio", "admin/seo-audit", "admin/localization", "admin/comments", "admin/growth", "admin/app-generation", "admin/media", "admin/pages", "admin/appearance", "admin/podcasts", "admin/live-show"];
 
     public static readonly IReadOnlyList<string> RelationshipPrefixes =
-        ["admin/comments", "admin/crm", "admin/deal-scoring", "admin/billing", "admin/support", "admin/scheduling", "admin/email-campaigns", "admin/users"];
+        ["admin/crm", "admin/deal-scoring", "admin/billing", "admin/support", "admin/scheduling", "admin/email-campaigns", "admin/users"];
 
     public static readonly IReadOnlyList<string> KnowledgePrefixes =
         ["admin/sentinel", "admin/wiki", "admin/mind-maps", "admin/cms-knowledge"];

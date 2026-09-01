@@ -39,6 +39,11 @@
                 <i class="bi bi-translate" aria-hidden="true"></i>
                 <span class="gws-nav-link-copy"><span>Localization</span><small>AI-assisted translations</small></span>
             </NavLink>
+            <NavLink class="gws-nav-link" href="admin/comments" title="Comments">
+                <i class="bi bi-chat-left-text" aria-hidden="true"></i>
+                <span class="gws-nav-link-copy"><span>Comments</span><small>Moderate visitor replies</small></span>
+                @if (_pendingCommentCount > 0) { <span class="gws-nav-count">@_pendingCommentCount</span> }
+            </NavLink>
             @if (IsAdmin)
             {
                 <NavLink class="gws-nav-link" href="admin/growth" title="Growth Studio">
@@ -91,16 +96,11 @@
         </div>
     </details>
 
-    <details class="gws-nav-group" open="@IsGroupOpen(RelationshipPrefixes)">
-        <summary><span>Relationships</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
-        <div class="gws-nav-group-items">
-            <NavLink class="gws-nav-link" href="admin/comments" title="Comments">
-                <i class="bi bi-chat-left-text" aria-hidden="true"></i>
-                <span class="gws-nav-link-copy"><span>Comments</span><small>Moderate visitor replies</small></span>
-                @if (_pendingCommentCount > 0) { <span class="gws-nav-count">@_pendingCommentCount</span> }
-            </NavLink>
-            @if (IsAdmin)
-            {
+    @if (IsAdmin)
+    {
+        <details class="gws-nav-group" open="@IsGroupOpen(RelationshipPrefixes)">
+            <summary><span>Relationships</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
+            <div class="gws-nav-group-items">
                 <NavLink class="gws-nav-link" href="admin/crm" title="CRM">
                     <i class="bi bi-people-fill" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>CRM</span><small>Contacts and activity</small></span>
@@ -130,9 +130,9 @@
                     <i class="bi bi-person-gear" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Users</span><small>Accounts and roles</small></span>
                 </NavLink>
-            }
-        </div>
-    </details>
+            </div>
+        </details>
+    }
 
     @if (IsAdmin)
     {

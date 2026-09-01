@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "AdminOnly")]
 @using GwsBusinessSuite.Application.Billing
+@using GwsBusinessSuite.Application.Campaigns
 @using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Application.Crm
 @using GwsBusinessSuite.Application.Scheduling
@@ -12,7 +13,7 @@
 @inject IBillingService BillingService
 @inject IBookingService BookingService
 @inject IFormSubmissionService FormSubmissionService
-@inject IJSRuntime JS
+@inject IEmailCampaignService EmailCampaignService
 @inject NavigationManager Navigation
 @inject ILogger<ContactDetail> Logger
 
@@ -25,16 +26,22 @@
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
-    <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+    <div class="alert alert-danger d-flex align-items-start gap-2" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@ErrorMessage</div>
+    </div>
 }
 @if (!string.IsNullOrWhiteSpace(StatusMessage))
 {
-    <div class="alert alert-info" role="alert">@StatusMessage</div>
+    <div class="alert alert-success d-flex align-items-center gap-2" role="alert">
+        <i class="bi bi-check-circle-fill flex-shrink-0"></i>
+        <div>@StatusMessage</div>
+    </div>
 }
 
 @if (IsLoading)
 {
-    <p class="text-secondary">Loading…</p>
+    <LoadingIndicator Message="Loading contact…" CssClass="text-secondary" />
 }
 else if (Contact is null)
 {
@@ -129,7 +136,7 @@ else
                 <div class="list-group list-group-flush">
                     @if (Deals.Count == 0)
                     {
-                        <div class="p-3 text-secondary small">No deals yet.</div>
+                        <EmptyState Icon="bi-kanban" Message="No deals yet." CssClass="p-3 text-secondary small" />
                     }
                     else
                     {
@@ -155,7 +162,7 @@ else
                 <div class="list-group list-group-flush">
                     @if (Tickets.Count == 0)
                     {
-                        <div class="p-3 text-secondary small">No support tickets.</div>
+                        <EmptyState Icon="bi-life-preserver" Message="No support tickets." CssClass="p-3 text-secondary small" />
                     }
                     else
                     {
@@ -178,7 +185,7 @@ else
                 <div class="list-group list-group-flush">
                     @if (Invoices.Count == 0)
                     {
-                        <div class="p-3 text-secondary small">No invoices.</div>
+                        <EmptyState Icon="bi-receipt" Message="No invoices." CssClass="p-3 text-secondary small" />
                     }
                     else
                     {
@@ -201,7 +208,7 @@ else
                 <div class="list-group list-group-flush">
                     @if (Bookings.Count == 0)
                     {
-                        <div class="p-3 text-secondary small">No bookings.</div>
+                        <EmptyState Icon="bi-calendar2-check" Message="No bookings." CssClass="p-3 text-secondary small" />
                     }
                     else
                     {
@@ -216,12 +223,51 @@ else
                 </div>
             </div>
 
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold">Email Campaigns</span>
+                    <a class="small" href="/admin/email-campaigns">Open Email Campaigns</a>
+                </div>
+                <div class="list-group list-group-flush">
+                    @if (Enrollments.Count == 0)
+                    {
+                        <EmptyState Icon="bi-envelope-paper" Message="No campaign enrollments." CssClass="p-3 text-secondary small" />
+                    }
+                    else
+                    {
+                        @foreach (var enrollment in Enrollments)
+                        {
+                            <div class="list-group-item d-flex justify-content-between align-items-center gap-2">
+                                <div>
+                                    <div class="fw-semibold small">@enrollment.CampaignName</div>
+                                    <div class="small text-secondary">
+                                        @if (enrollment.NextSendAt is { } nextSendAt)
+                                        {
+                                            @($"Next send {nextSendAt.ToLocalTime():MMM d, yyyy}")
+                                        }
+                                        else if (enrollment.CompletedAt is { } completedAt)
+                                        {
+                                            @($"Completed {completedAt.ToLocalTime():MMM d, yyyy}")
+                                        }
+                                        else
+                                        {
+                                            @($"Step {enrollment.NextStepIndex + 1} of {enrollment.TotalSteps}")
+                                        }
+                                    </div>
+                                </div>
+                                <span class="badge text-bg-secondary">@enrollment.Status</span>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+
             <div class="card border-0 shadow-sm">
                 <div class="card-header bg-white border-bottom py-3"><span class="fw-semibold">Form Submissions</span></div>
                 <div class="list-group list-group-flush">
                     @if (FormSubmissions.Count == 0)
                     {
-                        <div class="p-3 text-secondary small">No linked form submissions.</div>
+                        <EmptyState Icon="bi-clipboard-data" Message="No linked form submissions." CssClass="p-3 text-secondary small" />
                     }
                     else
                     {
@@ -238,6 +284,9 @@ else
     </div>
 }
 
+<ConfirmModal Show="ShowTrashConfirm" Title="Move to Trash" Message="Move this contact to Trash?"
+              ConfirmText="Move to Trash" Busy="IsBusy" OnConfirm="ConfirmTrashAsync" OnCancel="CancelTrash" />
+
 @code {
     [Parameter] public Guid ContactId { get; set; }
 
@@ -248,12 +297,14 @@ else
     private List<SupportTicketView> Tickets { get; set; } = new();
     private List<InvoiceView> Invoices { get; set; } = new();
     private List<BookingView> Bookings { get; set; } = new();
+    private List<EmailCampaignEnrollmentForContactView> Enrollments { get; set; } = new();
     private List<FormSubmission> FormSubmissions { get; set; } = new();
     private string NewActivityNote { get; set; } = string.Empty;
     private bool IsLoading { get; set; } = true;
     private bool IsBusy { get; set; }
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
+    private bool ShowTrashConfirm { get; set; }
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
@@ -280,6 +331,7 @@ else
             Tickets = (await SupportTicketService.ListTicketsForContactAsync(ContactId)).ToList();
             Invoices = (await BillingService.ListInvoicesForContactAsync(ContactId)).ToList();
             Bookings = (await BookingService.ListBookingsForContactAsync(ContactId)).ToList();
+            Enrollments = (await EmailCampaignService.ListEnrollmentsForContactAsync(ContactId)).ToList();
             FormSubmissions = (await FormSubmissionService.ListForContactAsync(ContactId)).ToList();
         }
         catch (Exception ex)
@@ -315,12 +367,15 @@ else
         }
     }
 
-    private async Task TrashAsync()
+    private void TrashAsync()
     {
         if (IsBusy) return;
-        var confirmed = await JS.InvokeAsync<bool>("confirm", "Move this contact to Trash?");
-        if (!confirmed) return;
+        ShowTrashConfirm = true;
+    }
 
+    private async Task ConfirmTrashAsync()
+    {
+        ShowTrashConfirm = false;
         IsBusy = true;
         try
         {
@@ -334,6 +389,8 @@ else
             IsBusy = false;
         }
     }
+
+    private void CancelTrash() => ShowTrashConfirm = false;
 
     private async Task AddActivityAsync()
     {

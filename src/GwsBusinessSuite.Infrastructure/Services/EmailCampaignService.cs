@@ -167,6 +167,31 @@ public sealed class EmailCampaignService(
             .ToList();
     }
 
+    public async Task<IReadOnlyList<EmailCampaignEnrollmentForContactView>> ListEnrollmentsForContactAsync(Guid contactId, CancellationToken cancellationToken = default)
+    {
+        var enrollments = await db.EmailCampaignEnrollments.AsNoTracking()
+            .Where(enrollment => enrollment.ContactId == contactId)
+            .ToListAsync(cancellationToken);
+
+        var campaignIds = enrollments.Select(enrollment => enrollment.CampaignId).Distinct().ToList();
+        var campaigns = await db.EmailCampaigns.AsNoTracking()
+            .Include(campaign => campaign.Steps)
+            .Where(campaign => campaignIds.Contains(campaign.Id))
+            .ToDictionaryAsync(campaign => campaign.Id, cancellationToken);
+
+        return enrollments
+            .OrderByDescending(enrollment => enrollment.CreatedAt)
+            .Select(enrollment =>
+            {
+                var campaign = campaigns.GetValueOrDefault(enrollment.CampaignId);
+                return new EmailCampaignEnrollmentForContactView(
+                    enrollment.Id, enrollment.CampaignId, campaign?.Name ?? "Unknown campaign",
+                    enrollment.Status, enrollment.NextStepIndex, campaign?.Steps.Count ?? 0,
+                    enrollment.NextSendAt, enrollment.CompletedAt, enrollment.CreatedAt);
+            })
+            .ToList();
+    }
+
     public async Task<bool> EnrollContactAsync(Guid campaignId, Guid contactId, CancellationToken cancellationToken = default)
     {
         var campaign = await db.EmailCampaigns.AsNoTracking().FirstOrDefaultAsync(item => item.Id == campaignId, cancellationToken);

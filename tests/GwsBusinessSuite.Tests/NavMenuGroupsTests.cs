@@ -22,9 +22,9 @@ public class NavMenuGroupsTests
         ["admin/podcasts", nameof(NavMenuGroups.ContentPublishingPrefixes)],
         ["admin/live-show", nameof(NavMenuGroups.ContentPublishingPrefixes)],
         ["admin/live-show-recordings", nameof(NavMenuGroups.ContentPublishingPrefixes)],
+        ["admin/comments", nameof(NavMenuGroups.ContentPublishingPrefixes)],
 
         // Relationships
-        ["admin/comments", nameof(NavMenuGroups.RelationshipPrefixes)],
         ["admin/crm", nameof(NavMenuGroups.RelationshipPrefixes)],
         ["admin/deal-scoring", nameof(NavMenuGroups.RelationshipPrefixes)],
         ["admin/billing", nameof(NavMenuGroups.RelationshipPrefixes)],

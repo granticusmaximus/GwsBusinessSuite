@@ -148,6 +148,41 @@ public sealed class EmailCampaignServiceTests
     }
 
     [Fact]
+    public async Task ListEnrollmentsForContactAsync_ShouldReturnEmpty_ForAContactWithNoEnrollments()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera", "jamie@example.test");
+
+        var enrollments = await fixture.Service.ListEnrollmentsForContactAsync(contact.Id);
+
+        enrollments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ListEnrollmentsForContactAsync_ShouldReturnEveryCampaignTheContactIsEnrolledIn_NewestFirst()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera", "jamie@example.test");
+        var welcome = await fixture.CreateCampaignAsync("Welcome series", activate: true, steps: [("Step 1", "Body", 0), ("Step 2", "Body", 3)]);
+        var reengage = await fixture.CreateCampaignAsync("Re-engagement", activate: true, steps: [("Only step", "Body", 0)]);
+        await fixture.Service.EnrollContactAsync(welcome.Id, contact.Id);
+        await fixture.Service.EnrollContactAsync(reengage.Id, contact.Id);
+        await fixture.Service.ProcessDueSendsAsync();
+
+        var enrollments = await fixture.Service.ListEnrollmentsForContactAsync(contact.Id);
+
+        enrollments.Should().HaveCount(2);
+        enrollments.Select(item => item.CampaignName).Should().Contain(["Welcome series", "Re-engagement"]);
+        var welcomeEnrollment = enrollments.Single(item => item.CampaignId == welcome.Id);
+        welcomeEnrollment.TotalSteps.Should().Be(2);
+        welcomeEnrollment.NextStepIndex.Should().Be(1, "the first step was sent immediately");
+        welcomeEnrollment.Status.Should().Be(EmailCampaignEnrollmentStatuses.Active);
+        var reengageEnrollment = enrollments.Single(item => item.CampaignId == reengage.Id);
+        reengageEnrollment.TotalSteps.Should().Be(1);
+        reengageEnrollment.Status.Should().Be(EmailCampaignEnrollmentStatuses.Completed, "its only step already sent");
+    }
+
+    [Fact]
     public async Task ProcessDueSendsAsync_ShouldSkipAPausedCampaign()
     {
         await using var fixture = await Fixture.CreateAsync();
