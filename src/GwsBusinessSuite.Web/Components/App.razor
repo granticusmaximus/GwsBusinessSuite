@@ -5,19 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
-    <script>
-        // Runs before any stylesheet so the correct theme attribute is already on <html> for the
-        // very first paint - setting it any later (e.g. from app.js after DOMContentLoaded) would
-        // flash the default dark theme first for anyone who chose light. Absence of the attribute
-        // (never chosen, or storage unavailable) keeps today's unconditional dark look exactly as
-        // it was before this feature existed - dark stays the default, light is opt-in.
-        (function () {
-            try {
-                var stored = localStorage.getItem('gwsTheme');
-                if (stored === 'light' || stored === 'dark') document.documentElement.setAttribute('data-theme', stored);
-            } catch (e) { /* storage unavailable (private mode, etc.) - fall back to default dark */ }
-        })();
-    </script>
+    <script src="js/theme-init.js"></script>
     <ResourcePreloader />
     <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />

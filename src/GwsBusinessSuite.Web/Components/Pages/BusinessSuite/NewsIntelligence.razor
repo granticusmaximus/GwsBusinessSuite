@@ -6,11 +6,10 @@
 @using GwsBusinessSuite.Infrastructure.Services
 @inject INewsIntelligenceService NewsService
 @inject ILogger<NewsIntelligence> Logger
-@inject IJSRuntime JS
 
 <PageTitle>Media Watch</PageTitle>
 
-<main class="media-watch" data-theme="@(_darkMode ? "dark" : "light")">
+<main class="media-watch">
 <header class="civic-masthead">
     <div class="masthead-copy">
         <span class="civic-eyebrow"><i class="bi bi-newspaper"></i> Media Watch</span>
@@ -24,7 +23,6 @@
         </p>
     </div>
     <div class="masthead-actions">
-        <CivicWatchThemeToggle IsDark="_darkMode" IsDarkChanged="SetDarkModeAsync" />
         <button class="civic-refresh" disabled="@(_refreshing || _refreshingTopNews)" @onclick="RefreshTopNewsOnlyAsync" title="Refresh the shared general news pool behind All News and Breaking News (auto-refreshes every 20 minutes)">
             <i class="bi bi-lightning-charge @(_refreshingTopNews ? "gws-spin" : "")"></i>
             <span>@(_refreshingTopNews ? "Refreshing…" : "Refresh All News")</span>
@@ -286,30 +284,10 @@
     private bool _formIsActive = true;
     private string _formError = string.Empty;
 
-    private const string ThemeStorageKey = "civic-watch-theme";
-    private bool _darkMode;
-
     protected override async Task OnInitializedAsync()
     {
         _refreshStatus = NewsService.GetRefreshStatus();
         await ReloadAsync();
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (!firstRender) return;
-        var stored = await JS.InvokeAsync<string?>("localStorage.getItem", ThemeStorageKey);
-        if (stored == "dark")
-        {
-            _darkMode = true;
-            StateHasChanged();
-        }
-    }
-
-    private async Task SetDarkModeAsync(bool isDark)
-    {
-        _darkMode = isDark;
-        await JS.InvokeVoidAsync("localStorage.setItem", ThemeStorageKey, isDark ? "dark" : "light");
     }
 
     // ── Data loading ─────────────────────────────────────────

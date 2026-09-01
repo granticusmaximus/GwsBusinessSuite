@@ -26,7 +26,12 @@
         linear-gradient(180deg, #f7f5f0 0, var(--civic-bg) 22rem);
 }
 
-.media-watch[data-theme="dark"] {
+/* Was gated on this page's own [data-theme] attribute, toggled by a private
+   CivicWatchThemeToggle control with its own localStorage key - a second, undiscovered theme
+   system living alongside the app-wide one. Now reads the same data-theme the global toggle
+   already sets on <html> (see app.js's toggleTheme()), so this page follows it automatically -
+   no local state, no separate control, no duplicate mechanism to keep in sync. */
+:root:not([data-theme="light"]) .media-watch {
     --civic-bg: #141210;
     --civic-surface: #1c1917;
     --civic-surface-raised: #231f1d;
@@ -41,12 +46,12 @@
         radial-gradient(circle at 95% 0, rgba(245,158,11,.08), transparent 24rem),
         linear-gradient(180deg, #17140f 0, var(--civic-bg) 22rem);
 }
-.media-watch[data-theme="dark"] .alert-danger { background: #2a1412; border-color: rgba(248,113,113,.3); color: #fca5a5; }
+:root:not([data-theme="light"]) .media-watch .alert-danger { background: #2a1412; border-color: rgba(248,113,113,.3); color: #fca5a5; }
 /* Light mode's --civic-accent-strong is a dark green, so white text (the base rule below)
    has good contrast; dark mode's is amber (#f59e0b), where white text reads poorly - matches
    this app's own .btn-primary convention (app.css) of dark text on the amber accent. */
-.media-watch[data-theme="dark"] .civic-refresh-primary,
-.media-watch[data-theme="dark"] .civic-refresh-primary:hover:not(:disabled) { color: #1c1917; }
+:root:not([data-theme="light"]) .media-watch .civic-refresh-primary,
+:root:not([data-theme="light"]) .media-watch .civic-refresh-primary:hover:not(:disabled) { color: #1c1917; }
 
 .civic-masthead { display: flex; align-items: flex-end; justify-content: space-between; gap: 2rem; max-width: 1380px; margin: 0 auto 1.5rem; }
 .masthead-copy { max-width: 850px; }

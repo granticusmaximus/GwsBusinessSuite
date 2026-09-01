@@ -1,2 +1,0 @@
-.theme-toggle { display: inline-flex; align-items: center; justify-content: center; width: 2.6rem; height: 2.6rem; border: 1px solid var(--civic-line); border-radius: .65rem; background: var(--civic-surface); color: var(--civic-accent-strong); font-size: 1rem; box-shadow: 0 .5rem 1.5rem rgba(24,37,43,.06); }
-.theme-toggle:hover { border-color: var(--civic-accent-strong); }

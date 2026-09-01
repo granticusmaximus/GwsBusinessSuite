@@ -6,11 +6,10 @@
 @using GwsBusinessSuite.Infrastructure.Services
 @inject IGovernmentIntelligenceService GovernmentService
 @inject ILogger<GovernmentIntelligence> Logger
-@inject IJSRuntime JS
 
 <PageTitle>Civic Watch</PageTitle>
 
-<main class="civic-watch" data-theme="@(_darkMode ? "dark" : "light")">
+<main class="civic-watch">
     <header class="civic-masthead">
         <div class="masthead-copy">
             <span class="civic-eyebrow"><i class="bi bi-broadcast-pin"></i> Public life, made legible</span>
@@ -18,7 +17,6 @@
             <p>One calm briefing for local meetings, Georgia government, and the votes moving through Congress.</p>
         </div>
         <div class="masthead-actions">
-            <CivicWatchThemeToggle IsDark="_darkMode" IsDarkChanged="SetDarkModeAsync" />
             <button class="civic-refresh" @onclick="RefreshAsync" disabled="@_loading">
                 <i class="bi bi-arrow-clockwise @(_loading ? "gws-spin" : string.Empty)"></i>
                 <span>@(_loading ? "Refreshing sources…" : "Refresh sources")</span>
@@ -298,10 +296,8 @@
 </main>
 
 @code {
-    private const string ThemeStorageKey = "civic-watch-theme";
     private GovernmentIntelligenceSnapshot? _snapshot;
     private bool _loading;
-    private bool _darkMode;
     private string _activeSection = "community";
     private string _errorMessage = string.Empty;
 
@@ -314,23 +310,6 @@
         _snapshot.Federal.HouseVotes.Count + _snapshot.Federal.SenateVotes.Count;
 
     protected override async Task OnInitializedAsync() => await LoadSnapshotAsync(forceRefresh: false);
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (!firstRender) return;
-        var stored = await JS.InvokeAsync<string?>("localStorage.getItem", ThemeStorageKey);
-        if (stored == "dark")
-        {
-            _darkMode = true;
-            StateHasChanged();
-        }
-    }
-
-    private async Task SetDarkModeAsync(bool isDark)
-    {
-        _darkMode = isDark;
-        await JS.InvokeVoidAsync("localStorage.setItem", ThemeStorageKey, isDark ? "dark" : "light");
-    }
 
     private async Task RefreshAsync()
     {

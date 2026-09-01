@@ -156,14 +156,22 @@
 }
 
 <style>
-    .audit-integrity { display:flex; justify-content:space-between; gap:1rem; align-items:center; padding:1rem; margin-bottom:1rem; border:1px solid #275c42; background:#163327; border-radius:12px; }
+    /* Rewritten from hardcoded dark-only literals to the app's alert/severity color pattern
+       (same rgba-tint-on-token-background approach as app.css's .alert-success/.alert-danger),
+       so this page - unlike its original version - actually adapts to the light theme instead
+       of always rendering dark green/red boxes regardless of the active theme. */
+    .audit-integrity { display:flex; justify-content:space-between; gap:1rem; align-items:center; padding:1rem; margin-bottom:1rem; border-radius:12px; border:1px solid rgba(34, 197, 94, .35); background:rgba(34, 197, 94, .12); color:#86efac; }
     .audit-integrity div { display:flex; gap:.8rem; flex-wrap:wrap; }
-    .audit-integrity.invalid { border-color:#8c3434; background:#421d1d; }
+    .audit-integrity.invalid { border-color:rgba(239, 68, 68, .35); background:rgba(239, 68, 68, .12); color:#fca5a5; }
+    :root[data-theme="light"] .audit-integrity { color:#166534; }
+    :root[data-theme="light"] .audit-integrity.invalid { color:#991b1b; }
     .audit-filters { display:grid; grid-template-columns:minmax(14rem,2fr) 1fr 1fr auto; gap:.8rem; }
     .audit-filters label { display:block; font-size:.78rem; font-weight:700; margin-bottom:.3rem; color:var(--gws-text-soft); }
     .audit-correlation { display:block; max-width:18rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--gws-text-soft); }
-    .audit-outcome { display:inline-block; padding:.2rem .5rem; border-radius:999px; font-weight:700; font-size:.75rem; background:#555; }
-    .audit-outcome.succeeded { background:#245a3f; color:#bcebd2; }
-    .audit-outcome.failed,.audit-outcome.denied { background:#692d2d; color:#ffd0d0; }
+    .audit-outcome { display:inline-block; padding:.2rem .5rem; border-radius:999px; font-weight:700; font-size:.75rem; background:var(--gws-panel-bg-2); color:var(--gws-text-soft); }
+    .audit-outcome.succeeded { background:rgba(34, 197, 94, .16); color:#4ade80; }
+    .audit-outcome.failed,.audit-outcome.denied { background:rgba(239, 68, 68, .16); color:#f87171; }
+    :root[data-theme="light"] .audit-outcome.succeeded { color:#166534; }
+    :root[data-theme="light"] .audit-outcome.failed,:root[data-theme="light"] .audit-outcome.denied { color:#991b1b; }
     @@media (max-width: 800px) { .audit-filters { grid-template-columns:1fr; } .audit-integrity { align-items:flex-start; flex-direction:column; } }
 </style>

@@ -8,63 +8,60 @@
 <PageTitle>Admin Login</PageTitle>
 
 <div class="gws-login-shell">
-    <div class="page-header">
-        <h1><i class="bi bi-shield-lock-fill me-2 text-primary"></i>Admin Login</h1>
-        <p>Sign in to access the GWS Business Suite administration workspace.</p>
+    <div class="gws-login-brand">
+        <div class="gws-login-brand-mark">
+            <img src="favicon.svg" alt="" />
+            <span>GWS Business Suite</span>
+        </div>
+        <div class="gws-login-brand-copy">
+            <span class="gws-login-rule"></span>
+            <h1>Everything one operator needs, in one place.</h1>
+            <p>Content, relationships, growth, and a private knowledge workspace — run from a single admin,
+                without the sprawl of a dozen disconnected tools.</p>
+        </div>
+        <div class="gws-login-stats">
+            <div><strong>Sentinel</strong><span>Knowledge workspace</span></div>
+            <div><strong>CRM</strong><span>Contacts &amp; pipeline</span></div>
+            <div><strong>Automation</strong><span>Workflows that run</span></div>
+        </div>
     </div>
 
-    <div class="card border-0 shadow-sm gws-login-card">
-        <div class="card-header border-bottom py-3">
-            <h2 class="h6 mb-0 fw-semibold">GWS Admin Access</h2>
-        </div>
-        <div class="card-body p-4">
-            @if (!string.IsNullOrWhiteSpace(ErrorMessage))
-            {
-                <div class="alert alert-danger" role="alert">@ErrorMessage</div>
-            }
+    <div class="gws-login-form-panel">
+        <span class="gws-login-eyebrow">Admin access</span>
+        <h2>Welcome back</h2>
+        <p class="gws-login-sub">Sign in to continue to your workspace.</p>
 
-            <form method="post" action="auth/login">
-                <AntiforgeryToken />
-                <input type="hidden" name="returnUrl" value="@ResolvedReturnUrl" />
+        @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+        {
+            <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+        }
 
-                <div class="mb-3">
-                    <label class="form-label fw-semibold small">Username</label>
-                    <input class="form-control" id="gws-login-username" name="username" autocomplete="username"
-                           required />
-                </div>
+        <form method="post" action="auth/login">
+            <AntiforgeryToken />
+            <input type="hidden" name="returnUrl" value="@ResolvedReturnUrl" />
 
-                <div class="mb-3">
-                    <label class="form-label fw-semibold small">Password</label>
-                    <input class="form-control" id="gws-login-password" type="password" name="password"
-                           autocomplete="current-password" required />
-                </div>
+            <div class="mb-3">
+                <label class="form-label fw-semibold small">Username</label>
+                <input class="form-control" id="gws-login-username" name="username" autocomplete="username"
+                       required />
+            </div>
 
-                <button type="submit" class="btn btn-primary w-100">Sign In</button>
-            </form>
+            <div class="mb-3">
+                <label class="form-label fw-semibold small">Password</label>
+                <input class="form-control" id="gws-login-password" type="password" name="password"
+                       autocomplete="current-password" required />
+            </div>
 
-            <p class="text-secondary small mt-3 mb-0 gws-login-note">
-                This area is restricted to administrators.
-            </p>
-        </div>
+            <button type="submit" class="btn btn-primary w-100 gws-login-submit">Sign In</button>
+        </form>
+
+        <p class="text-secondary small mt-3 mb-0 gws-login-note">
+            <i class="bi bi-shield-lock"></i> This area is restricted to administrators.
+        </p>
     </div>
 </div>
 
-<script>
-    // Some WKWebView-hosted clients (e.g. the native macOS app) don't move focus on Tab
-    // between plain form fields the way a full browser does, so wire it explicitly here.
-    (function () {
-        var usernameInput = document.getElementById('gws-login-username');
-        var passwordInput = document.getElementById('gws-login-password');
-        if (usernameInput && passwordInput) {
-            usernameInput.addEventListener('keydown', function (e) {
-                if (e.key === 'Tab' && !e.shiftKey) {
-                    e.preventDefault();
-                    passwordInput.focus();
-                }
-            });
-        }
-    })();
-</script>
+<script src="js/login-tab-focus.js"></script>
 
 @code {
     [SupplyParameterFromQuery(Name = "error")]
@@ -152,21 +149,87 @@
 }
 
 <style>
+    /* The brand panel is a deliberate fixed-dark design (like most split-screen login brand
+       panels, regardless of app theme) - it's the product's first impression, not a themed
+       admin surface, so it doesn't need to (and shouldn't) flip with the light/dark toggle. The
+       form panel on the right uses the real --gws-* tokens and does adapt. */
     .gws-login-shell {
-        max-width: 42rem;
+        display: flex;
+        width: min(100%, 64rem);
         margin: 0 auto;
-        padding: 1rem 0 2rem;
+        border: 1px solid var(--gws-panel-border);
+        border-radius: 18px;
+        overflow: hidden;
+        box-shadow: var(--gws-shadow-md);
     }
 
-    .gws-login-card {
-        border: 1px solid var(--gws-panel-border);
-        border-radius: 14px;
-        overflow: hidden;
+    .gws-login-brand {
+        flex: 1.1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 2.5rem;
+        padding: clamp(2rem, 4vw, 3.25rem);
+        background:
+            radial-gradient(circle at 18% 12%, rgba(245, 158, 11, .12), transparent 46%),
+            radial-gradient(circle at 82% 88%, rgba(245, 158, 11, .07), transparent 50%),
+            #100e0c;
+        color: #fafaf9;
     }
+
+    .gws-login-brand-mark { display: flex; align-items: center; gap: .65rem; font-weight: 700; font-size: .92rem; }
+    .gws-login-brand-mark img { width: 1.5rem; height: 1.5rem; }
+
+    .gws-login-rule { display: block; width: 2.75rem; height: 2px; margin-bottom: 1.35rem; background: #f59e0b; }
+    .gws-login-brand-copy h1 {
+        margin: 0;
+        font: 800 clamp(1.7rem, 2.7vw, 2.5rem)/1.14 var(--gws-font-serif);
+        letter-spacing: -.015em;
+        max-width: 22ch;
+    }
+    .gws-login-brand-copy p { max-width: 32ch; margin: 1.1rem 0 0; color: #a8a29e; font-size: .9rem; line-height: 1.6; }
+
+    .gws-login-stats { display: flex; gap: 1.75rem; }
+    .gws-login-stats strong { display: block; font: 800 1rem var(--gws-font-serif); color: #fafaf9; }
+    .gws-login-stats span { display: block; margin-top: .2rem; color: #78716c; font-size: .72rem; }
+
+    .gws-login-form-panel {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: clamp(2rem, 4vw, 3.25rem);
+        background: var(--gws-panel-bg);
+    }
+
+    .gws-login-eyebrow {
+        display: inline-block;
+        margin-bottom: .6rem;
+        color: var(--gws-sidebar-accent);
+        font-size: .68rem;
+        font-weight: 800;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+    }
+    .gws-login-form-panel h2 { margin: 0 0 .4rem; font: 800 1.6rem var(--gws-font-serif); color: var(--gws-text-strong); }
+    .gws-login-sub { margin: 0 0 1.6rem; color: var(--gws-text-soft); font-size: .85rem; }
+
+    .gws-login-submit { font-weight: 700; }
 
     .gws-login-note {
+        display: flex;
+        align-items: center;
+        gap: .5rem;
         border-top: 1px solid var(--gws-panel-border);
         padding-top: .85rem;
         color: var(--gws-text-soft);
+    }
+
+    @@media (max-width: 820px) {
+        .gws-login-shell { flex-direction: column; width: min(100%, 28rem); }
+        .gws-login-brand { gap: 1.5rem; }
+        .gws-login-stats { display: none; }
     }
 </style>
