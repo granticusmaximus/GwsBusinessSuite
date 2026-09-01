@@ -993,6 +993,33 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     color: inherit;
 }
 
+.gws-hint-banner {
+    display: flex;
+    align-items: center;
+    gap: .65rem;
+    padding: .65rem 1rem;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-md);
+    background: var(--gws-panel-bg-2);
+    color: var(--gws-text-soft);
+    font-size: .85rem;
+}
+.gws-hint-banner i { color: var(--gws-sidebar-accent); }
+.gws-hint-banner kbd {
+    padding: .05rem .35rem;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: 4px;
+    background: var(--gws-panel-bg);
+    color: var(--gws-text-strong);
+    font-size: .78rem;
+}
+
+.gws-kpi-card { color: inherit; border: 1px solid var(--gws-panel-border); transition: border-color .14s ease, transform .14s ease, box-shadow .14s ease; }
+.gws-kpi-card:hover { color: inherit; border-color: var(--gws-sidebar-accent); transform: translateY(-2px); box-shadow: var(--gws-shadow-md); }
+.gws-kpi-value { margin-top: .35rem; color: var(--gws-text-strong); font-size: 1.75rem; font-weight: 750; line-height: 1; letter-spacing: -.03em; }
+.gws-kpi-card-danger .gws-kpi-value { color: #ef4444; }
+.gws-kpi-card-warning .gws-kpi-value { color: #f59e0b; }
+
 .gws-module-chevron { align-self: center; color: var(--gws-text-soft); font-size: .75rem; }
 .gws-module-card:hover .gws-module-chevron { color: var(--gws-sidebar-accent); transform: translateX(2px); }
 

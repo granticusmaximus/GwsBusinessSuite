@@ -124,7 +124,7 @@
                     <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
                         <div>
                             <div class="fw-semibold">@SelectedTicket.Subject</div>
-                            <div class="text-secondary small">@SelectedTicket.ContactName</div>
+                            <div class="mt-1"><RelationshipChip ContactId="SelectedTicket.ContactId" ContactName="SelectedTicket.ContactName" /></div>
                             @if (SelectedTicket.Status is SupportTicketStatuses.Open or SupportTicketStatuses.Pending)
                             {
                                 @if (SelectedTicket.FirstResponseDueAt is { } firstResponseDue && SelectedTicket.Messages.All(m => m.AuthorType != SupportTicketAuthorTypes.Staff))

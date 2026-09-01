@@ -1,0 +1,66 @@
+@using GwsBusinessSuite.Web.Services
+@* A small pill linking to a CRM contact's detail page - the shared way a contact reference
+   surfaces across CRM deal cards, Billing invoices, Support tickets, Scheduling bookings, and
+   Email Campaign enrollments, so a user can jump straight to the contact instead of hunting for
+   them separately in CRM. *@
+
+<a class="gws-relationship-chip" href="@Href" title="Open @ContactName in CRM">
+    <span class="gws-relationship-chip-avatar" aria-hidden="true">@Initial</span>
+    <span class="gws-relationship-chip-name">@ContactName</span>
+</a>
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid ContactId { get; set; }
+
+    [Parameter, EditorRequired]
+    public string ContactName { get; set; } = string.Empty;
+
+    private string Href => RelationshipChipFormatting.ContactDetailUrl(ContactId);
+
+    private string Initial => RelationshipChipFormatting.Initial(ContactName);
+}
+
+<style>
+    .gws-relationship-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: .35rem;
+        max-width: 100%;
+        padding: .1rem .5rem .1rem .1rem;
+        border-radius: 999px;
+        background: var(--gws-panel-bg-2);
+        border: 1px solid var(--gws-panel-border);
+        color: var(--gws-text-strong);
+        font-size: .78rem;
+        line-height: 1.5rem;
+        text-decoration: none;
+        transition: border-color .12s ease, background .12s ease;
+    }
+
+    .gws-relationship-chip:hover {
+        border-color: var(--gws-sidebar-accent);
+        background: var(--gws-panel-bg);
+        color: var(--gws-text-strong);
+    }
+
+    .gws-relationship-chip-avatar {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.25rem;
+        height: 1.25rem;
+        flex-shrink: 0;
+        border-radius: 50%;
+        background: var(--gws-sidebar-accent);
+        color: #1c1917;
+        font-weight: 700;
+        font-size: .66rem;
+    }
+
+    .gws-relationship-chip-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+</style>

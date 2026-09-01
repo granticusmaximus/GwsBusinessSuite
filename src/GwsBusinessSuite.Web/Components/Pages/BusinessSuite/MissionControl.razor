@@ -1,104 +1,10 @@
 @page "/admin/mission-control"
-@rendermode InteractiveServer
 @attribute [Authorize(Policy = "AdminOnly")]
-@using GwsBusinessSuite.Application.Automation
-@using GwsBusinessSuite.Application.MissionControl
-@inject IMissionControlService MissionControlService
 @inject NavigationManager Navigation
-@inject ILogger<MissionControl> Logger
 
-<PageTitle>Mission Control</PageTitle>
-
-<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-speedometer2 me-2 text-primary"></i>Mission Control</h1>
-        <p>A single-glance view across automation, CRM, affiliate, and container health - everything below reads live from the page that owns it.</p>
-    </div>
-    <button type="button" class="btn btn-outline-secondary" @onclick="LoadAsync" disabled="@_loading"><i class="bi bi-arrow-clockwise me-1"></i>Refresh</button>
-</div>
-
-@if (!string.IsNullOrWhiteSpace(_error))
-{
-    <div class="alert alert-danger">@_error</div>
-}
-
-@if (_loading)
-{
-    <div class="text-secondary py-5 text-center"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</div>
-}
-else if (_snapshot is { } snapshot)
-{
-    <div class="row g-3 mb-4">
-        <div class="col-md-3 col-6">
-            <button type="button" class="card border-0 shadow-sm w-100 text-start h-100 @(snapshot.AutomationRecentFailureCount > 0 ? "border-start border-danger border-3" : "")" @onclick="@(() => Navigation.NavigateTo("/admin/automation"))">
-                <div class="card-body">
-                    <div class="small text-secondary">Automation failures</div>
-                    <div class="h3 mb-0 @(snapshot.AutomationRecentFailureCount > 0 ? "text-danger" : "")">@snapshot.AutomationRecentFailureCount</div>
-                </div>
-            </button>
-        </div>
-        <div class="col-md-3 col-6">
-            <button type="button" class="card border-0 shadow-sm w-100 text-start h-100" @onclick="@(() => Navigation.NavigateTo("/admin/crm"))">
-                <div class="card-body">
-                    <div class="small text-secondary">Open CRM deals</div>
-                    <div class="h3 mb-0">@snapshot.CrmOpenDealCount</div>
-                    <div class="small text-secondary">$@snapshot.CrmOpenDealValueUsd.ToString("N0") pipeline &middot; @snapshot.CrmDueFollowUpCount follow-up(s) due</div>
-                </div>
-            </button>
-        </div>
-        <div class="col-md-3 col-6">
-            <button type="button" class="card border-0 shadow-sm w-100 text-start h-100" @onclick="@(() => Navigation.NavigateTo("/admin/affiliate-analytics"))">
-                <div class="card-body">
-                    <div class="small text-secondary">Affiliate clicks</div>
-                    <div class="h3 mb-0">@snapshot.AffiliateTotalClicks</div>
-                    <div class="small text-secondary">$@snapshot.AffiliateTotalCommissionAmount.ToString("N2") commission</div>
-                </div>
-            </button>
-        </div>
-        <div class="col-md-3 col-6">
-            <button type="button" class="card border-0 shadow-sm w-100 text-start h-100 @(snapshot.DockerUnreadAlertCount > 0 ? "border-start border-warning border-3" : "")" @onclick="@(() => Navigation.NavigateTo("/admin/docker-health"))">
-                <div class="card-body">
-                    <div class="small text-secondary">Container health alerts</div>
-                    <div class="h3 mb-0 @(snapshot.DockerUnreadAlertCount > 0 ? "text-warning-emphasis" : "")">@snapshot.DockerUnreadAlertCount</div>
-                </div>
-            </button>
-        </div>
-    </div>
-
-    @if (snapshot.AutomationRecentFailures.Count > 0)
-    {
-        <div class="card border-0 shadow-sm mb-4">
-            <div class="card-header bg-white border-bottom py-2 fw-semibold"><i class="bi bi-exclamation-triangle-fill text-danger me-1"></i>Recent automation failures</div>
-            <div class="list-group list-group-flush">
-                @foreach (var failure in snapshot.AutomationRecentFailures)
-                {
-                    <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-start gap-2" @onclick="@(() => Navigation.NavigateTo($"/admin/automation/{failure.WorkflowId}"))">
-                        <div>
-                            <div class="fw-semibold">@failure.WorkflowName <span class="text-secondary fw-normal">&middot; @failure.Mode</span></div>
-                            <div class="small text-secondary text-truncate" style="max-width: 40rem;">@failure.ErrorMessage</div>
-                        </div>
-                        <span class="small text-secondary flex-shrink-0">@(failure.FinishedAt?.ToLocalTime().ToString("MMM d, h:mm tt") ?? "")</span>
-                    </button>
-                }
-            </div>
-        </div>
-    }
-
-    <div class="small text-secondary">Generated @snapshot.GeneratedAt.ToLocalTime().ToString("MMM d, h:mm:ss tt")</div>
-}
+@* Mission Control's KPI strip merged into the main dashboard at /admin (the 2026-09 design-plan
+   nav regroup) - this route stays only so old bookmarks/links redirect instead of 404ing. *@
 
 @code {
-    private MissionControlSnapshot? _snapshot;
-    private bool _loading = true;
-    private string _error = "";
-
-    protected override async Task OnInitializedAsync() => await LoadAsync();
-
-    private async Task LoadAsync()
-    {
-        _loading = true; _error = "";
-        try { _snapshot = await MissionControlService.GetSnapshotAsync(); }
-        catch (Exception ex) { Logger.LogError(ex, "Unable to load Mission Control snapshot."); _error = ex.Message; }
-        finally { _loading = false; }
-    }
+    protected override void OnInitialized() => Navigation.NavigateTo("/admin", forceLoad: false);
 }

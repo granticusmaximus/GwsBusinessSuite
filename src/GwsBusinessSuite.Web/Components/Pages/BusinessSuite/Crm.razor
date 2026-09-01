@@ -248,7 +248,7 @@
                         {
                             <div class="border rounded p-2">
                                 <div class="fw-semibold small">@deal.Title</div>
-                                <div class="small text-secondary">@deal.ContactName</div>
+                                <div class="small mt-1"><RelationshipChip ContactId="deal.ContactId" ContactName="deal.ContactName" /></div>
                                 <div class="small">@deal.ValueUsd.ToString("C0")</div>
                                 <div class="d-flex align-items-center gap-1 mt-2">
                                     <select class="form-select form-select-sm" value="@deal.Stage" @onchange="e => MoveDealStageAsync(deal.Id, e.Value?.ToString() ?? deal.Stage)" disabled="@IsBusy">
@@ -284,9 +284,10 @@
                 @foreach (var deal in ClosedDeals)
                 {
                     <div class="list-group-item d-flex justify-content-between align-items-center gap-2">
-                        <div>
+                        <div class="d-flex align-items-center gap-2 flex-wrap">
                             <span class="fw-semibold">@deal.Title</span>
-                            <span class="text-secondary"> &mdash; @deal.ContactName &mdash; @deal.ValueUsd.ToString("C0")</span>
+                            <RelationshipChip ContactId="deal.ContactId" ContactName="deal.ContactName" />
+                            <span class="text-secondary">@deal.ValueUsd.ToString("C0")</span>
                         </div>
                         <span class="badge @(deal.Stage == DealStages.Won ? "text-bg-success" : "text-bg-secondary")">@deal.Stage</span>
                     </div>

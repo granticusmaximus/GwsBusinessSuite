@@ -157,12 +157,15 @@
                                             @invoice.Title
                                             <span class="badge @StatusBadgeClass(invoice.Status) ms-1">@invoice.Status</span>
                                         </div>
-                                        <div class="text-secondary small">
-                                            @invoice.ContactName &middot; @invoice.TotalUsd.ToString("C2")
-                                            @if (invoice.DueDate is not null)
-                                            {
-                                                <span> &middot; due @invoice.DueDate.Value.ToLocalTime().ToString("MMM d, yyyy")</span>
-                                            }
+                                        <div class="d-flex align-items-center gap-2 flex-wrap mt-1">
+                                            <RelationshipChip ContactId="invoice.ContactId" ContactName="invoice.ContactName" />
+                                            <span class="text-secondary small">
+                                                @invoice.TotalUsd.ToString("C2")
+                                                @if (invoice.DueDate is not null)
+                                                {
+                                                    <span> &middot; due @invoice.DueDate.Value.ToLocalTime().ToString("MMM d, yyyy")</span>
+                                                }
+                                            </span>
                                         </div>
                                     </div>
                                     <div class="d-flex gap-2 flex-shrink-0">

@@ -145,7 +145,17 @@
                             <div class="list-group-item">
                                 <div class="d-flex justify-content-between align-items-start gap-2">
                                     <div>
-                                        <div class="fw-semibold">@booking.BookingTypeTitle &middot; @booking.AttendeeName</div>
+                                        <div class="fw-semibold">@booking.BookingTypeTitle</div>
+                                        <div class="mt-1">
+                                            @if (booking.ContactId is { } contactId)
+                                            {
+                                                <RelationshipChip ContactId="contactId" ContactName="booking.AttendeeName" />
+                                            }
+                                            else
+                                            {
+                                                <span class="small text-secondary">@booking.AttendeeName</span>
+                                            }
+                                        </div>
                                         <div class="text-secondary small">
                                             @booking.StartsAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt") &middot; @booking.AttendeeEmail
                                         </div>

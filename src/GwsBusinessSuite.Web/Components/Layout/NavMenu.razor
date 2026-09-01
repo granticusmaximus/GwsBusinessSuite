@@ -1,5 +1,6 @@
 @using GwsBusinessSuite.Application.AdminPortal
 @using GwsBusinessSuite.Domain.Entities
+@using GwsBusinessSuite.Web.Services
 @using Microsoft.AspNetCore.Components.Authorization
 @using System.Security.Claims
 @inject AuthenticationStateProvider AuthProvider
@@ -11,16 +12,15 @@
         <i class="bi bi-grid-1x2-fill" aria-hidden="true"></i>
         <span class="gws-nav-link-copy"><span>Home</span><small>Your work at a glance</small></span>
     </NavLink>
-    @if (IsAdmin)
-    {
-        <NavLink class="gws-nav-link" href="admin/mission-control" title="Mission Control">
-            <i class="bi bi-speedometer2" aria-hidden="true"></i>
-            <span class="gws-nav-link-copy"><span>Mission Control</span><small>Automation, CRM, affiliate, health</small></span>
-        </NavLink>
-    }
 
-    <details class="gws-nav-group" open="@IsGroupOpen(PublishingPrefixes)">
-        <summary><span>Publishing</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
+    <!-- Content & Publishing: everything about making and shipping content, one place - the
+         original Publishing group plus three items that used to live under the admin-only
+         Intelligence/Operations groups (Podcasts, Live Show, the SentinelGPT Approval Queue).
+         The group itself stays ungated like the original Publishing did; the three newcomers
+         keep their original admin-only visibility individually, since moving group DOESN'T mean
+         moving access level - see docs/... the nav regroup from the 2026-09 design plan. -->
+    <details class="gws-nav-group" open="@IsGroupOpen(ContentPublishingPrefixes)">
+        <summary><span>Content &amp; Publishing</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
         <div class="gws-nav-group-items">
             <NavLink class="gws-nav-link" href="admin/article-editor" title="All Posts">
                 <i class="bi bi-pencil-square" aria-hidden="true"></i>
@@ -50,6 +50,14 @@
                 <i class="bi bi-stars" aria-hidden="true"></i>
                 <span class="gws-nav-link-copy"><span>SentinelGPT Builder</span><small>Draft new site pages</small></span>
             </NavLink>
+            @if (IsAdmin)
+            {
+                <NavLink class="gws-nav-link" href="admin/app-generation-queue" title="SentinelGPT Page Queue">
+                    <i class="bi bi-inbox-fill" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Approval Queue</span><small>Review generated plans</small></span>
+                    @if (_pendingAppGenerationCount > 0) { <span class="gws-nav-count">@_pendingAppGenerationCount</span> }
+                </NavLink>
+            }
             @if (IsContributorOrAbove)
             {
                 <NavLink class="gws-nav-link" href="admin/media" title="Media Library">
@@ -67,6 +75,17 @@
                 <NavLink class="gws-nav-link" href="admin/appearance/customize" title="Appearance">
                     <i class="bi bi-palette" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Appearance</span><small>Brand, fonts and CSS</small></span>
+                </NavLink>
+            }
+            @if (IsAdmin)
+            {
+                <NavLink class="gws-nav-link" href="admin/podcasts" title="Podcast Directory">
+                    <i class="bi bi-mic-fill" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Podcasts</span><small>Saved shows and episodes</small></span>
+                </NavLink>
+                <NavLink class="gws-nav-link" href="admin/live-show" title="Live Show">
+                    <i class="bi bi-camera-video-fill" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Live Show</span><small>Broadcast studio</small></span>
                 </NavLink>
             }
         </div>
@@ -117,6 +136,24 @@
 
     @if (IsAdmin)
     {
+        <details class="gws-nav-group" open="@IsGroupOpen(KnowledgePrefixes)">
+            <summary><span>Knowledge</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
+            <div class="gws-nav-group-items">
+                <NavLink class="gws-nav-link" href="admin/sentinel" title="Sentinel">
+                    <i class="bi bi-journal-bookmark-fill" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Sentinel</span><small>Knowledge workspace</small></span>
+                </NavLink>
+                <NavLink class="gws-nav-link" href="admin/mind-maps" title="Mind Maps">
+                    <i class="bi bi-diagram-2-fill" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Mind Maps</span><small>Visual outlines and roadmaps</small></span>
+                </NavLink>
+                <NavLink class="gws-nav-link" href="admin/cms-knowledge" title="Builder Reference">
+                    <i class="bi bi-journal-richtext" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Builder Reference</span><small>CMS workflow notes</small></span>
+                </NavLink>
+            </div>
+        </details>
+
         <details class="gws-nav-group" open="@IsGroupOpen(IntelligencePrefixes)">
             <summary><span>Intelligence</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
             <div class="gws-nav-group-items">
@@ -128,10 +165,6 @@
                     <i class="bi bi-building" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Civic Watch</span><small>Community and government</small></span>
                 </NavLink>
-                <NavLink class="gws-nav-link" href="admin/podcasts" title="Podcast Directory">
-                    <i class="bi bi-mic-fill" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Podcasts</span><small>Saved shows and episodes</small></span>
-                </NavLink>
                 <NavLink class="gws-nav-link" href="admin/business-intelligence" title="Business Intelligence">
                     <i class="bi bi-bar-chart-line-fill" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>BI Dashboards</span><small>Build and pin custom reports</small></span>
@@ -140,24 +173,12 @@
                     <i class="bi bi-globe2" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>OSINT Watch</span><small>Live public-source intelligence</small></span>
                 </NavLink>
-                <NavLink class="gws-nav-link" href="admin/sentinel" title="Sentinel">
-                    <i class="bi bi-journal-bookmark-fill" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Sentinel</span><small>Knowledge workspace</small></span>
-                </NavLink>
-                <NavLink class="gws-nav-link" href="admin/mind-maps" title="Mind Maps">
-                    <i class="bi bi-diagram-2-fill" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Mind Maps</span><small>Visual outlines and roadmaps</small></span>
-                </NavLink>
             </div>
         </details>
 
-        <details class="gws-nav-group" open="@IsGroupOpen(OperationsPrefixes)">
-            <summary><span>Operations</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
+        <details class="gws-nav-group" open="@IsGroupOpen(GrowthMonetizationPrefixes)">
+            <summary><span>Growth &amp; Monetization</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
             <div class="gws-nav-group-items">
-                <NavLink class="gws-nav-link" href="admin/automation" title="Workflow Automation">
-                    <i class="bi bi-diagram-3-fill" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Automation</span><small>Build and run workflows</small></span>
-                </NavLink>
                 <NavLink class="gws-nav-link" href="admin/cj-ads" title="CJ Ads">
                     <i class="bi bi-tags-fill" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>CJ Ads</span><small>Affiliate campaigns</small></span>
@@ -170,23 +191,24 @@
                     <i class="bi bi-graph-up-arrow" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Analytics</span><small>Clicks and commission</small></span>
                 </NavLink>
-                <NavLink class="gws-nav-link" href="admin/app-generation-queue" title="SentinelGPT Page Queue">
-                    <i class="bi bi-inbox-fill" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Approval Queue</span><small>Review generated plans</small></span>
-                    @if (_pendingAppGenerationCount > 0) { <span class="gws-nav-count">@_pendingAppGenerationCount</span> }
-                </NavLink>
-                <NavLink class="gws-nav-link" href="admin/cms-knowledge" title="Builder Reference">
-                    <i class="bi bi-journal-richtext" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Builder Reference</span><small>CMS workflow notes</small></span>
-                </NavLink>
-                <NavLink class="gws-nav-link" href="admin/live-show" title="Live Show">
-                    <i class="bi bi-camera-video-fill" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Live Show</span><small>Broadcast studio</small></span>
+            </div>
+        </details>
+
+        <details class="gws-nav-group" open="@IsGroupOpen(PlatformPrefixes)">
+            <summary><span>Platform</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
+            <div class="gws-nav-group-items">
+                <NavLink class="gws-nav-link" href="admin/automation" title="Workflow Automation">
+                    <i class="bi bi-diagram-3-fill" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Automation</span><small>Build and run workflows</small></span>
                 </NavLink>
                 <NavLink class="gws-nav-link" href="admin/docker-health" title="Docker Management">
                     <i class="bi bi-box-seam" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Docker</span><small>Containers and deployment</small></span>
                     @if (_unreadDockerAlertCount > 0) { <span class="gws-nav-count gws-nav-count-danger">@_unreadDockerAlertCount</span> }
+                </NavLink>
+                <NavLink class="gws-nav-link" href="admin/dev-tools" title="Developer Tools">
+                    <i class="bi bi-tools" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Dev Tools</span><small>Encoders, generators, and testers</small></span>
                 </NavLink>
                 <NavLink class="gws-nav-link" href="admin/security-audit" title="Security Audit">
                     <i class="bi bi-shield-check" aria-hidden="true"></i>
@@ -195,10 +217,6 @@
                 <NavLink class="gws-nav-link" href="admin/privacy-operations" title="Privacy Operations">
                     <i class="bi bi-person-lock" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Privacy Operations</span><small>Requests, retention, and incidents</small></span>
-                </NavLink>
-                <NavLink class="gws-nav-link" href="admin/dev-tools" title="Developer Tools">
-                    <i class="bi bi-tools" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Dev Tools</span><small>Encoders, generators, and testers</small></span>
                 </NavLink>
             </div>
         </details>
@@ -213,10 +231,12 @@
 </nav>
 
 @code {
-    private static readonly string[] PublishingPrefixes = ["admin/article", "admin/content-studio", "admin/seo-audit", "admin/localization", "admin/growth", "admin/app-generation", "admin/media", "admin/pages", "admin/appearance"];
-    private static readonly string[] RelationshipPrefixes = ["admin/comments", "admin/crm", "admin/deal-scoring", "admin/billing", "admin/support", "admin/scheduling", "admin/email-campaigns", "admin/users"];
-    private static readonly string[] IntelligencePrefixes = ["admin/news-intelligence", "admin/government-intelligence", "admin/podcasts", "admin/business-intelligence", "admin/osint", "admin/sentinel", "admin/wiki", "admin/mind-maps"];
-    private static readonly string[] OperationsPrefixes = ["admin/automation", "admin/cj-ads", "admin/affiliate", "admin/app-generation-queue", "admin/cms-knowledge", "admin/live-show", "admin/docker", "admin/security-audit", "admin/privacy-operations", "admin/dev-tools"];
+    private static readonly IReadOnlyList<string> ContentPublishingPrefixes = NavMenuGroups.ContentPublishingPrefixes;
+    private static readonly IReadOnlyList<string> RelationshipPrefixes = NavMenuGroups.RelationshipPrefixes;
+    private static readonly IReadOnlyList<string> KnowledgePrefixes = NavMenuGroups.KnowledgePrefixes;
+    private static readonly IReadOnlyList<string> IntelligencePrefixes = NavMenuGroups.IntelligencePrefixes;
+    private static readonly IReadOnlyList<string> GrowthMonetizationPrefixes = NavMenuGroups.GrowthMonetizationPrefixes;
+    private static readonly IReadOnlyList<string> PlatformPrefixes = NavMenuGroups.PlatformPrefixes;
 
     private string _role = string.Empty;
     private int _pendingCommentCount;
@@ -239,11 +259,8 @@
         _pendingAppGenerationCount = summary.PendingAppApprovals;
     }
 
-    private bool IsGroupOpen(IEnumerable<string> prefixes)
-    {
-        var path = Navigation.ToBaseRelativePath(Navigation.Uri);
-        return prefixes.Any(prefix => path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-    }
+    private bool IsGroupOpen(IReadOnlyList<string> prefixes) =>
+        NavMenuGroups.IsGroupOpen(Navigation.ToBaseRelativePath(Navigation.Uri), prefixes);
 
     private bool IsAdmin => _role == AppRoles.Admin;
     private bool IsContributorOrAbove => _role is AppRoles.Admin or AppRoles.Contributor;
