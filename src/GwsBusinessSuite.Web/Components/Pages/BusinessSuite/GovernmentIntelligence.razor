@@ -10,25 +10,25 @@
 <PageTitle>Civic Watch</PageTitle>
 
 <main class="civic-watch">
-    <header class="civic-masthead">
-        <div class="masthead-copy">
-            <span class="civic-eyebrow"><i class="bi bi-broadcast-pin"></i> Public life, made legible</span>
+    <div class="page-header page-header-rich d-flex flex-wrap justify-content-between gap-3 align-items-end">
+        <div>
+            <span class="page-header-eyebrow"><i class="bi bi-broadcast-pin"></i> Public life, made legible</span>
             <h1>Civic Watch</h1>
             <p>One calm briefing for local meetings, Georgia government, and the votes moving through Congress.</p>
         </div>
         <div class="masthead-actions">
-            <button class="civic-refresh" @onclick="RefreshAsync" disabled="@_loading">
+            <button type="button" class="btn btn-outline-secondary" @onclick="RefreshAsync" disabled="@_loading">
                 <i class="bi bi-arrow-clockwise @(_loading ? "gws-spin" : string.Empty)"></i>
                 <span>@(_loading ? "Refreshing sources…" : "Refresh sources")</span>
             </button>
         </div>
-    </header>
+    </div>
 
     @if (!string.IsNullOrWhiteSpace(_errorMessage))
     {
-        <div class="civic-alert" role="alert">
-            <i class="bi bi-exclamation-triangle"></i>
-            <span>@_errorMessage</span>
+        <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+            <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+            <div>@_errorMessage</div>
         </div>
     }
 

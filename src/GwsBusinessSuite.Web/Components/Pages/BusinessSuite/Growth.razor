@@ -11,31 +11,41 @@
 <PageTitle>Growth Studio</PageTitle>
 
 <main class="growth-shell">
-    <header class="growth-header">
+    <div class="page-header page-header-rich d-flex flex-wrap justify-content-between gap-3 align-items-end">
         <div>
-            <span class="growth-eyebrow">GWS Growth Studio</span>
+            <span class="page-header-eyebrow">GWS Growth Studio</span>
             <h1>Understand what works. Publish what matters.</h1>
             <p>First-party audience intelligence and considered social publishing in one workspace.</p>
         </div>
         <div class="growth-live"><span></span><strong>@Dashboard.VisitorsNow</strong> active now</div>
-    </header>
+    </div>
 
-    <nav class="growth-tabs" aria-label="Growth Studio sections">
-        <button class="@TabClass("analytics")" @onclick="@(() => ActiveTab = "analytics")">
-            <i class="bi bi-graph-up"></i> Analytics
-        </button>
-        <button class="@TabClass("publish")" @onclick="@(() => ActiveTab = "publish")">
-            <i class="bi bi-send"></i> Social publisher
-        </button>
-    </nav>
+    <ul class="nav nav-pills mb-4" aria-label="Growth Studio sections">
+        <li class="nav-item">
+            <button type="button" class="nav-link @TabClass("analytics")" @onclick="@(() => ActiveTab = "analytics")">
+                <i class="bi bi-graph-up"></i> Analytics
+            </button>
+        </li>
+        <li class="nav-item">
+            <button type="button" class="nav-link @TabClass("publish")" @onclick="@(() => ActiveTab = "publish")">
+                <i class="bi bi-send"></i> Social publisher
+            </button>
+        </li>
+    </ul>
 
     @if (!string.IsNullOrWhiteSpace(ErrorMessage))
     {
-        <div class="growth-alert growth-alert-error" role="alert">@ErrorMessage</div>
+        <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+            <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+            <div>@ErrorMessage</div>
+        </div>
     }
     @if (!string.IsNullOrWhiteSpace(StatusMessage))
     {
-        <div class="growth-alert" role="status">@StatusMessage</div>
+        <div class="alert alert-success d-flex align-items-center gap-2 mb-4" role="alert">
+            <i class="bi bi-check-circle-fill flex-shrink-0"></i>
+            <div>@StatusMessage</div>
+        </div>
     }
 
     @if (ActiveTab == "analytics")
@@ -48,7 +58,7 @@
                 </div>
                 <div class="analytics-actions">
                     <GrowthReportScheduleManager />
-                    <button class="quiet-button" @onclick="ToggleGoalSetup">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="ToggleGoalSetup">
                         <i class="bi bi-bullseye"></i> Manage goals
                     </button>
                     <div class="range-picker" aria-label="Analytics date range">
@@ -68,7 +78,7 @@
 
             @if (!_analyticsLoaded)
             {
-                <div class="growth-loading">Loading audience data…</div>
+                <LoadingIndicator Message="Loading audience data…" />
             }
             else
             {
@@ -113,11 +123,10 @@
                     </div>
                     @if (Dashboard.Goals.Count == 0)
                     {
-                        <div class="goal-empty">
-                            <i class="bi bi-bullseye"></i>
-                            <div><strong>Define the action that matters.</strong><small>Track a signup, purchase, lead, or destination page without adding another analytics vendor.</small></div>
-                            <button class="quiet-button" @onclick="ToggleGoalSetup">Create first goal</button>
-                        </div>
+                        <EmptyState Icon="bi-bullseye" Message="Define the action that matters.">
+                            <small class="d-block mb-2">Track a signup, purchase, lead, or destination page without adding another analytics vendor.</small>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="ToggleGoalSetup">Create first goal</button>
+                        </EmptyState>
                     }
                     else
                     {
@@ -238,7 +247,7 @@
                             <input type="checkbox" @bind="GoalIsActive" />
                             Include this goal in conversion reporting
                         </label>
-                        <button type="submit" class="primary-button w-100" disabled="@IsBusy">
+                        <button type="submit" class="btn btn-primary w-100" disabled="@IsBusy">
                             @(GoalId.HasValue ? "Save changes" : "Create goal")
                         </button>
                     </form>
@@ -255,19 +264,17 @@
                         <h2>Compose once. Respect every channel.</h2>
                         <p>SentinelGPT drafts distinct variants; you remain the editor and publisher.</p>
                     </div>
-                    <button class="quiet-button" @onclick="ToggleAccountSetup">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="ToggleAccountSetup">
                         <i class="bi bi-sliders"></i> Manage channels
                     </button>
                 </div>
 
                 @if (Accounts.Count == 0)
                 {
-                    <div class="growth-empty">
-                        <i class="bi bi-broadcast"></i>
-                        <h3>Connect a publishing channel</h3>
-                        <p>Add a Facebook Page, X account, or LinkedIn identity before drafting.</p>
-                        <button class="primary-button" @onclick="ToggleAccountSetup">Connect first channel</button>
-                    </div>
+                    <EmptyState Icon="bi-broadcast" Message="Connect a publishing channel">
+                        <p class="mb-2">Add a Facebook Page, X account, or LinkedIn identity before drafting.</p>
+                        <button type="button" class="btn btn-primary" @onclick="ToggleAccountSetup">Connect first channel</button>
+                    </EmptyState>
                 }
                 else
                 {
@@ -294,7 +301,7 @@
                         </fieldset>
 
                         <div class="composer-actions">
-                            <button class="primary-button" @onclick="GenerateAsync" disabled="@IsBusy">
+                            <button type="button" class="btn btn-primary" @onclick="GenerateAsync" disabled="@IsBusy">
                                 <i class="bi bi-stars"></i> @(IsBusy ? "Working…" : "Generate channel drafts")
                             </button>
                             <span>SentinelGPT uses only the facts you provide here.</span>
@@ -323,8 +330,8 @@
                                 <label>Schedule (optional)
                                     <input type="datetime-local" @bind="ScheduledLocal" />
                                 </label>
-                                <button class="quiet-button" @onclick="SaveDraftAsync" disabled="@IsBusy">Save draft</button>
-                                <button class="primary-button" @onclick="PublishNowAsync" disabled="@IsBusy">
+                                <button type="button" class="btn btn-outline-secondary" @onclick="SaveDraftAsync" disabled="@IsBusy">Save draft</button>
+                                <button type="button" class="btn btn-primary" @onclick="PublishNowAsync" disabled="@IsBusy">
                                     <i class="bi bi-send-fill"></i> Publish now
                                 </button>
                             </div>
@@ -356,7 +363,7 @@
                                 <span class="status-pill @post.Status.ToLowerInvariant()">@post.Status</span>
                                 @if (post.Status is SocialPostStatuses.Draft or SocialPostStatuses.Failed or SocialPostStatuses.PartiallyPublished)
                                 {
-                                    <button class="icon-button" title="Publish" @onclick="() => PublishExistingAsync(post.Id)">
+                                    <button type="button" class="btn btn-sm btn-link text-secondary p-1" title="Publish" @onclick="() => PublishExistingAsync(post.Id)">
                                         <i class="bi bi-send"></i>
                                     </button>
                                 }
@@ -391,7 +398,7 @@
                             <input @bind="AccountAccessToken" type="password" autocomplete="off" placeholder="Stored encrypted; never shown again" />
                         </label>
                         <p class="credential-note">@CredentialHelp</p>
-                        <button type="submit" class="primary-button w-100" disabled="@IsBusy">Save channel</button>
+                        <button type="submit" class="btn btn-primary w-100" disabled="@IsBusy">Save channel</button>
                     </form>
                 </aside>
             }

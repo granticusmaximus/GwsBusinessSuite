@@ -10,9 +10,9 @@
 <PageTitle>Media Watch</PageTitle>
 
 <main class="media-watch">
-<header class="civic-masthead">
-    <div class="masthead-copy">
-        <span class="civic-eyebrow"><i class="bi bi-newspaper"></i> Media Watch</span>
+<div class="page-header page-header-rich d-flex flex-wrap justify-content-between gap-3 align-items-end">
+    <div>
+        <span class="page-header-eyebrow"><i class="bi bi-newspaper"></i> Media Watch</span>
         <h1>@FeedHeading()</h1>
         <p>
             Watched topics, breaking signals, and the wider news pool in one calm feed.
@@ -23,16 +23,16 @@
         </p>
     </div>
     <div class="masthead-actions">
-        <button class="civic-refresh" disabled="@(_refreshing || _refreshingTopNews)" @onclick="RefreshTopNewsOnlyAsync" title="Refresh the shared general news pool behind All News and Breaking News (auto-refreshes every 20 minutes)">
+        <button type="button" class="btn btn-outline-secondary" disabled="@(_refreshing || _refreshingTopNews)" @onclick="RefreshTopNewsOnlyAsync" title="Refresh the shared general news pool behind All News and Breaking News (auto-refreshes every 20 minutes)">
             <i class="bi bi-lightning-charge @(_refreshingTopNews ? "gws-spin" : "")"></i>
             <span>@(_refreshingTopNews ? "Refreshing…" : "Refresh All News")</span>
         </button>
-        <button class="civic-refresh civic-refresh-primary" disabled="@(_refreshing || _refreshingTopNews)" @onclick="RefreshAllAsync">
+        <button type="button" class="btn btn-primary" disabled="@(_refreshing || _refreshingTopNews)" @onclick="RefreshAllAsync">
             <i class="bi bi-arrow-clockwise @(_refreshing ? "gws-spin" : "")"></i>
             <span>@(_refreshing ? "Refreshing…" : "Refresh All")</span>
         </button>
     </div>
-</header>
+</div>
 
 <div class="row g-4">
     <div class="col-lg-3">

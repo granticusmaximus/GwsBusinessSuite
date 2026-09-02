@@ -4,7 +4,7 @@
 @inject ILogger<GrowthReportScheduleManager> Logger
 
 <div class="report-manager">
-    <button class="quiet-button report-manage" @onclick="Open" title="Manage scheduled analytics reports">
+    <button type="button" class="btn btn-outline-secondary report-manage" @onclick="Open" title="Manage scheduled analytics reports">
         <i class="bi bi-envelope-paper"></i> Email reports
         @if (Schedules.Any(item => item.IsActive))
         {

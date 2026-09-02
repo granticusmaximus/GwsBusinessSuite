@@ -625,6 +625,26 @@ h1:focus { outline: none; }
     color: var(--gws-text-soft);
 }
 
+/* ── Rich page header (eyebrow + serif title) ───────────────
+   Structural only - no color here. Pages that opt in (page-header-rich)
+   supply their own .page-header-eyebrow / .page-header-rich h1 color rules
+   in their own scoped CSS, since some page shells (e.g. Growth) never
+   follow the global data-theme toggle. */
+.page-header-eyebrow {
+    display: inline-block;
+    font-size: .7rem;
+    font-weight: 800;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    margin-bottom: .35rem;
+}
+
+.page-header-rich h1 {
+    font: 650 clamp(1.9rem, 3.2vw, 3.1rem)/1.05 var(--gws-font-serif);
+    letter-spacing: -.03em;
+    margin: .3rem 0 .5rem;
+}
+
 .card {
     border-radius: var(--gws-radius-md) !important;
     background: var(--gws-panel-bg);

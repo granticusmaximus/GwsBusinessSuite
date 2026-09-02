@@ -15,7 +15,7 @@
         var(--growth-canvas);
 }
 
-.growth-header, .section-toolbar, .panel-heading, .publish-bar, .queue-item,
+.section-toolbar, .panel-heading, .publish-bar, .queue-item,
 .composer-actions, .variant-card header, .account-drawer header {
     display: flex;
     align-items: center;
@@ -23,21 +23,22 @@
     gap: 1rem;
 }
 
-.growth-header { align-items: flex-end; margin-bottom: 1.75rem; }
-.growth-eyebrow { color: var(--growth-accent); font-size: .7rem; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
-.growth-header h1 { font: 650 clamp(1.8rem, 3.5vw, 3.25rem)/1.04 Georgia, serif; letter-spacing: -.035em; max-width: 780px; margin: .45rem 0 .65rem; }
-.growth-header p, .section-toolbar p { color: var(--growth-muted); margin: 0; }
+/* Page header text must stay pinned to Growth's own palette, not the global
+   theme-aware --gws-* tokens - .growth-shell never follows data-theme (it's
+   always dark), so a global light-theme override would go dark-on-dark here. */
+.page-header-eyebrow { color: var(--growth-accent); }
+.page-header-rich h1 { color: var(--growth-ink); max-width: 780px; }
+.page-header p { color: var(--growth-muted); margin: 0; }
+.section-toolbar p { color: var(--growth-muted); margin: 0; }
+.alert-success { color: #86efac; }
+.alert-danger { color: #fca5a5; }
 .growth-live { border: 1px solid var(--growth-line); border-radius: 999px; padding: .6rem .85rem; color: var(--growth-muted); white-space: nowrap; }
 .growth-live span { display: inline-block; width: .5rem; height: .5rem; border-radius: 50%; background: #37c776; box-shadow: 0 0 0 .25rem rgba(55,199,118,.12); margin-right: .45rem; }
 .growth-live strong { color: var(--growth-ink); }
 
-.growth-tabs { display: flex; border-bottom: 1px solid var(--growth-line); margin-bottom: 1.75rem; }
-.growth-tabs button { border: 0; border-bottom: 2px solid transparent; background: none; color: var(--growth-muted); padding: .8rem 1rem; font-weight: 700; }
-.growth-tabs button.active { border-bottom-color: var(--growth-accent); color: var(--growth-ink); }
-.growth-tabs i { margin-right: .4rem; }
+::deep .nav-pills .nav-link { color: var(--growth-muted); font-weight: 700; }
+::deep .nav-pills .nav-link.active { background: var(--growth-accent); color: #1c1507; }
 
-.growth-alert { border: 1px solid rgba(245,158,11,.3); border-radius: .7rem; background: rgba(245,158,11,.08); padding: .8rem 1rem; margin-bottom: 1rem; }
-.growth-alert-error { border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.08); }
 .section-toolbar { align-items: flex-start; margin-bottom: 1.25rem; }
 .section-toolbar h2 { font-size: 1.2rem; margin: 0 0 .25rem; }
 .section-toolbar p { font-size: .85rem; }
@@ -63,11 +64,7 @@
 .conversion-totals span { display: block; }
 .conversion-totals strong { display: block; font: 650 1.25rem/1.1 Georgia, serif; }
 .conversion-totals small { color: var(--growth-muted); font-size: .62rem; }
-.goal-empty { display: flex; align-items: center; gap: .8rem; padding: 1rem; }
-.goal-empty > i, .goal-icon { color: var(--growth-accent); }
-.goal-empty div { flex: 1; }
-.goal-empty strong, .goal-empty small { display: block; }
-.goal-empty small { color: var(--growth-muted); font-size: .7rem; margin-top: .15rem; }
+.goal-icon { color: var(--growth-accent); }
 .goal-list { display: grid; }
 .goal-row { display: grid; grid-template-columns: auto minmax(160px, 1.4fr) repeat(3, minmax(80px, 1fr)) auto; align-items: center; gap: .8rem; width: 100%; padding: .8rem 1rem; color: var(--growth-ink); text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--growth-line); }
 .goal-row:last-child { border-bottom: 0; }
@@ -109,11 +106,11 @@
 
 .publisher-workspace { position: relative; }
 .publisher-main { max-width: 980px; margin: 0 auto; }
-.quiet-button, .primary-button, .icon-button, .account-drawer button { border-radius: .55rem; padding: .6rem .8rem; font-weight: 750; }
-.quiet-button { color: var(--growth-ink); border: 1px solid var(--growth-line); background: var(--growth-panel); }
-.primary-button { color: #1c1507; border: 1px solid #fbbf24; background: var(--growth-accent); }
-.primary-button:disabled, .quiet-button:disabled { opacity: .55; }
-.composer-card, .variant-card, .queue-section, .growth-empty { background: var(--growth-panel); border: 1px solid var(--growth-line); border-radius: 1rem; padding: 1.1rem; }
+.account-drawer button { border-radius: .55rem; padding: .6rem .8rem; font-weight: 750; }
+::deep .gws-empty-state, ::deep .gws-empty-state i, ::deep .gws-loading-indicator {
+    color: var(--growth-muted);
+}
+.composer-card, .variant-card, .queue-section { background: var(--growth-panel); border: 1px solid var(--growth-line); border-radius: 1rem; padding: 1.1rem; }
 .composer-card label, .account-drawer label, .publish-bar label { display: block; color: var(--growth-muted); font-size: .72rem; font-weight: 700; }
 .composer-card input, .composer-card textarea, .variant-card textarea, .account-drawer input, .account-drawer select, .publish-bar input {
     width: 100%; color: var(--growth-ink); background: #11100e; border: 1px solid var(--growth-line); border-radius: .6rem; padding: .7rem .75rem; margin: .35rem 0 .85rem; outline: none;
@@ -153,12 +150,7 @@
 .status-pill.published { color: #86efac; background: rgba(34,197,94,.08); }
 .status-pill.failed { color: #fca5a5; background: rgba(239,68,68,.08); }
 .status-pill.scheduled { color: #93c5fd; background: rgba(59,130,246,.08); }
-.icon-button { border: 0; color: var(--growth-ink); background: transparent; }
 .queue-empty { padding: 1rem; margin: 0; }
-.growth-empty { text-align: center; padding: 3rem 1rem; }
-.growth-empty > i { font-size: 2rem; color: var(--growth-accent); }
-.growth-empty h3 { margin: .8rem 0 .35rem; }
-.growth-empty p { color: var(--growth-muted); }
 
 .account-drawer { position: fixed; z-index: 20; top: 4.6rem; right: 1rem; bottom: 1rem; width: min(380px, calc(100vw - 2rem)); overflow: auto; background: #191714; border: 1px solid var(--growth-line); box-shadow: 0 1.5rem 5rem rgba(0,0,0,.55); border-radius: 1rem; padding: 1rem; }
 .account-drawer header { align-items: flex-start; margin-bottom: 1rem; }
@@ -180,7 +172,6 @@
 .account-drawer .active-toggle { display: flex; align-items: center; gap: .55rem; color: var(--growth-ink); margin: .15rem 0 1rem; }
 .account-drawer .active-toggle input { width: auto; margin: 0; accent-color: var(--growth-accent); }
 .credential-note { color: var(--growth-muted); font-size: .68rem; line-height: 1.45; }
-.growth-loading { color: var(--growth-muted); padding: 4rem; text-align: center; }
 
 @media (max-width: 900px) {
     .metric-grid { grid-template-columns: repeat(2, 1fr); }
@@ -192,7 +183,7 @@
 
 @media (max-width: 620px) {
     .growth-shell { margin: -1rem; padding: 1rem; }
-    .growth-header, .section-toolbar { align-items: flex-start; flex-direction: column; }
+    .section-toolbar { align-items: flex-start; flex-direction: column; }
     .analytics-actions { width: 100%; justify-content: space-between; }
     .growth-live { align-self: flex-start; }
     .metric-grid { grid-template-columns: 1fr 1fr; }
@@ -201,7 +192,7 @@
     .publish-bar { align-items: stretch; flex-direction: column; }
     .publish-bar label { width: 100%; }
     .queue-item { align-items: flex-start; flex-wrap: wrap; }
-    .conversion-heading, .goal-empty { align-items: flex-start; flex-direction: column; }
+    .conversion-heading { align-items: flex-start; flex-direction: column; }
     .conversion-totals { width: 100%; justify-content: flex-start; text-align: left; }
     .goal-row { grid-template-columns: auto 1fr auto; }
     .goal-row > span:not(.goal-icon):not(.goal-name) { display: none; }

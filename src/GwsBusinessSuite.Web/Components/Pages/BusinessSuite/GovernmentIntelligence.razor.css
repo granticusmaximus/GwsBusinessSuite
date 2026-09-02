@@ -19,19 +19,19 @@
         linear-gradient(180deg, #f7f5f0 0, var(--civic-bg) 22rem);
 }
 
-.civic-masthead { display: flex; align-items: flex-end; justify-content: space-between; gap: 2rem; max-width: 1380px; margin: 0 auto 1.25rem; }
-.masthead-copy { max-width: 850px; }
-.civic-eyebrow { display: inline-flex; align-items: center; gap: .4rem; color: var(--civic-accent-strong); font-size: .68rem; font-weight: 850; letter-spacing: .13em; text-transform: uppercase; }
-.civic-masthead h1 { margin: .35rem 0 .3rem; color: var(--civic-ink); font: 750 clamp(2.2rem, 4vw, 4.1rem)/.98 Georgia, serif; letter-spacing: -.045em; }
-.civic-masthead p { max-width: 720px; margin: 0; color: var(--civic-muted); font-size: clamp(.88rem, 1.2vw, 1.05rem); line-height: 1.5; }
+/* This page's own header/eyebrow tokens are theme-aware (see the dark-mode block below), unlike
+   Growth's permanently-dark shell, so no defensive color-pinning is needed here - the shared
+   .page-header-eyebrow/.page-header-rich h1 structural rules just need color + this page's own
+   sizing preserved. */
+.page-header { max-width: 1380px; margin-left: auto; margin-right: auto; }
+.page-header-eyebrow { display: inline-flex; align-items: center; gap: .4rem; color: var(--civic-accent-strong); }
+.page-header-rich h1 { color: var(--civic-ink); }
+.page-header p { max-width: 720px; color: var(--civic-muted); font-size: clamp(.88rem, 1.2vw, 1.05rem); line-height: 1.5; margin: 0; }
 .masthead-actions { display: flex; align-items: center; gap: .6rem; }
-.civic-refresh { display: inline-flex; align-items: center; gap: .5rem; padding: .65rem .85rem; border: 1px solid var(--civic-line); border-radius: .65rem; background: var(--civic-surface); color: var(--civic-ink); font-size: .72rem; font-weight: 800; white-space: nowrap; box-shadow: 0 .5rem 1.5rem rgba(24,37,43,.06); }
-.civic-refresh:hover:not(:disabled) { border-color: var(--civic-accent-strong); color: var(--civic-accent-strong); }
-.civic-refresh:disabled { opacity: .6; }
 
-.civic-alert, .source-note { display: flex; align-items: flex-start; gap: .65rem; max-width: 1380px; margin: 0 auto 1rem; padding: .8rem 1rem; border-radius: .75rem; font-size: .75rem; }
-.civic-alert { border: 1px solid rgba(185,28,28,.2); background: #fff1f0; color: #8f2525; }
-.source-note { border: 1px solid rgba(194,107,58,.22); background: #fff8ee; color: #815033; }
+.source-note { display: flex; align-items: flex-start; gap: .65rem; max-width: 1380px; margin: 0 auto 1rem; padding: .8rem 1rem; border-radius: .75rem; font-size: .75rem; border: 1px solid rgba(194,107,58,.22); background: #fff8ee; color: #815033; }
+
+.alert-danger, .alert-success { max-width: 1380px; margin-left: auto; margin-right: auto; }
 .civic-loading { display: flex; align-items: center; gap: .8rem; max-width: 1380px; margin: 2rem auto; padding: 1.25rem; border: 1px solid var(--civic-line); border-radius: var(--civic-radius); background: var(--civic-surface); }
 .civic-loading strong, .civic-loading small { display: block; }
 .civic-loading small { margin-top: .15rem; color: var(--civic-muted); }
@@ -131,7 +131,6 @@
 :root:not([data-theme="light"]) .civic-watch .civic-briefing { background: #26150c; }
 :root:not([data-theme="light"]) .civic-watch ::deep .floor-video { background: #000; }
 :root:not([data-theme="light"]) .civic-watch .scope-nav button { background: rgba(250, 250, 249, .04); }
-:root:not([data-theme="light"]) .civic-watch .civic-alert { background: #2a1412; border-color: rgba(248, 113, 113, .3); color: #fca5a5; }
 :root:not([data-theme="light"]) .civic-watch .source-note { background: var(--civic-accent-soft); border-color: var(--civic-line); color: var(--civic-ink); }
 
 @media (max-width: 1100px) {
@@ -143,9 +142,8 @@
 
 @media (max-width: 760px) {
     .civic-watch { margin: -1rem; padding: 1rem; }
-    .civic-masthead { align-items: flex-start; flex-direction: column; gap: 1rem; }
     .masthead-actions { width: 100%; }
-    .civic-refresh { flex: 1; justify-content: center; }
+    .masthead-actions .btn { flex: 1; }
     .briefing-signals { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .signal-card { align-items: flex-start; flex-direction: column; gap: .35rem; min-height: 5.2rem; padding: .65rem; }
     .signal-card small { white-space: normal; }

@@ -5,7 +5,7 @@
         <div><span><i class="bi @Icon"></i> @Title</span></div>
         @if (!string.IsNullOrWhiteSpace(ExportUrl))
         {
-            <a class="quiet-button breakdown-export" href="@ExportUrl" title="Export @Title as CSV" aria-label="Export @Title as CSV" data-enhance-nav="false">
+            <a class="breakdown-export" href="@ExportUrl" title="Export @Title as CSV" aria-label="Export @Title as CSV" data-enhance-nav="false">
                 <i class="bi bi-download"></i>
             </a>
         }
