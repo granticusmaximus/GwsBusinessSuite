@@ -174,7 +174,7 @@ else
                                             <span class="badge @StatusBadgeClass(invoice.Status) ms-1">@invoice.Status</span>
                                         </div>
                                         <div class="d-flex align-items-center gap-2 flex-wrap mt-1">
-                                            <RelationshipChip ContactId="invoice.ContactId" ContactName="invoice.ContactName" />
+                                            <RelationshipChip ContactId="invoice.ContactId" ContactName="@invoice.ContactName" />
                                             <span class="text-secondary small">
                                                 @invoice.TotalUsd.ToString("C2")
                                                 @if (invoice.DueDate is not null)

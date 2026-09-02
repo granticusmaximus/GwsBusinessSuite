@@ -9,7 +9,6 @@
 @inject IEmailCampaignService CampaignService
 @inject ICrmService CrmService
 @inject ICurrentUserAccessor CurrentUserAccessor
-@inject IJSRuntime JS
 
 <PageTitle>Email Campaigns</PageTitle>
 
@@ -20,12 +19,25 @@
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
-    <div class="alert alert-danger py-2 px-3 small">@ErrorMessage</div>
+    <div class="alert alert-danger d-flex align-items-start gap-2 py-2 px-3 small mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@ErrorMessage</div>
+    </div>
 }
 @if (!string.IsNullOrWhiteSpace(StatusMessage))
 {
-    <div class="alert alert-info py-2 px-3 small">@StatusMessage</div>
+    <div class="alert alert-success d-flex align-items-center gap-2 py-2 px-3 small mb-4" role="alert">
+        <i class="bi bi-check-circle-fill flex-shrink-0"></i>
+        <div>@StatusMessage</div>
+    </div>
 }
+
+@if (IsLoading)
+{
+    <LoadingIndicator Message="Loading campaigns…" />
+}
+else
+{
 
 <div class="row g-4">
     <div class="col-lg-5">
@@ -38,6 +50,9 @@
                 }
             </div>
             <div class="card-body">
+                <EditForm Model="Editor" OnValidSubmit="SaveAsync">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
                 <div class="mb-2">
                     <input class="form-control form-control-sm" placeholder="Campaign name" @bind="Editor.Name" />
                 </div>
@@ -71,9 +86,10 @@
                     </div>
                 }
 
-                <button class="btn btn-sm btn-primary w-100 mt-2" disabled="@_isBusy" @onclick="SaveAsync">
+                <button type="submit" class="btn btn-sm btn-primary w-100 mt-2" disabled="@_isBusy">
                     <i class="bi bi-save me-1"></i>Save
                 </button>
+                </EditForm>
             </div>
         </div>
 
@@ -82,7 +98,7 @@
             <div class="card-body p-0">
                 @if (Campaigns.Count == 0)
                 {
-                    <div class="p-4 text-secondary">No campaigns yet.</div>
+                    <EmptyState Icon="bi-envelope-paper" Message="No campaigns yet." />
                 }
                 else
                 {
@@ -148,7 +164,7 @@
 
                     @if (Enrollments.Count == 0)
                     {
-                        <p class="text-secondary small mb-0">No enrollments yet.</p>
+                        <EmptyState Icon="bi-people" Message="No enrollments yet." CssClass="text-secondary small" />
                     }
                     else
                     {
@@ -159,7 +175,7 @@
                                     @foreach (var enrollment in Enrollments)
                                     {
                                         <tr>
-                                            <td><RelationshipChip ContactId="enrollment.ContactId" ContactName="enrollment.ContactName" /></td>
+                                            <td><RelationshipChip ContactId="enrollment.ContactId" ContactName="@enrollment.ContactName" /></td>
                                             <td><span class="badge @EnrollmentBadgeClass(enrollment.Status)">@enrollment.Status</span></td>
                                             <td>@(enrollment.NextStepIndex + 1) / @SelectedCampaign.Steps.Count</td>
                                             <td>@(enrollment.NextSendAt?.ToLocalTime().ToString("MMM d, h:mm tt") ?? "—")</td>
@@ -175,6 +191,14 @@
     </div>
 </div>
 
+}
+
+<ConfirmModal Show="ShowDeleteConfirm" Title="Delete campaign" Message="Permanently delete this campaign? This cannot be undone."
+              ConfirmText="Delete" Busy="_isBusy" OnConfirm="ConfirmDeleteAsync" OnCancel="() => ShowDeleteConfirm = false" />
+<ConfirmModal Show="PendingResubscribeContact is not null" Title="Resubscribe contact"
+              Message="@($"Confirm that {PendingResubscribeContact?.FullName} has asked to receive campaign email again. This restores eligibility for every campaign.")"
+              ConfirmText="Resubscribe" ConfirmButtonClass="btn-outline-dark" Busy="_isBusy" OnConfirm="ConfirmResubscribeAsync" OnCancel="() => PendingResubscribeContact = null" />
+
 @code {
     private List<EmailCampaignView> Campaigns { get; set; } = [];
     private List<Contact> Contacts { get; set; } = [];
@@ -184,14 +208,25 @@
     private EmailCampaignEditorModel Editor { get; set; } = new();
     private string ErrorMessage { get; set; } = string.Empty;
     private string StatusMessage { get; set; } = string.Empty;
+    private bool IsLoading { get; set; } = true;
     private bool _isBusy;
     private Guid _enrollContactId;
+    private bool ShowDeleteConfirm { get; set; }
+    private Contact? PendingResubscribeContact { get; set; }
     private Contact? SelectedEnrollmentContact => Contacts.FirstOrDefault(contact => contact.Id == _enrollContactId);
 
     protected override async Task OnInitializedAsync()
     {
-        Contacts = (await CrmService.ListContactsAsync()).ToList();
-        await RefreshCampaignsAsync();
+        IsLoading = true;
+        try
+        {
+            Contacts = (await CrmService.ListContactsAsync()).ToList();
+            await RefreshCampaignsAsync();
+        }
+        finally
+        {
+            IsLoading = false;
+        }
     }
 
     private async Task RefreshCampaignsAsync()
@@ -252,11 +287,16 @@
         await SelectCampaignAsync(id);
     }
 
-    private async Task DeleteAsync()
+    private void DeleteAsync()
     {
+        if (SelectedCampaignId is not { }) return;
+        ShowDeleteConfirm = true;
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        ShowDeleteConfirm = false;
         if (SelectedCampaignId is not { } id) return;
-        var confirmed = await JS.InvokeAsync<bool>("confirm", "Permanently delete this campaign? This cannot be undone.");
-        if (!confirmed) return;
 
         await CampaignService.DeleteCampaignAsync(id);
         SelectedCampaignId = null;
@@ -282,12 +322,12 @@
         }
     }
 
-    private async Task ResubscribeAsync(Contact contact)
+    private void ResubscribeAsync(Contact contact) => PendingResubscribeContact = contact;
+
+    private async Task ConfirmResubscribeAsync()
     {
-        var confirmed = await JS.InvokeAsync<bool>(
-            "confirm",
-            $"Confirm that {contact.FullName} has asked to receive campaign email again. This restores eligibility for every campaign.");
-        if (!confirmed) return;
+        if (PendingResubscribeContact is not { } contact) return;
+        PendingResubscribeContact = null;
 
         _isBusy = true;
         try

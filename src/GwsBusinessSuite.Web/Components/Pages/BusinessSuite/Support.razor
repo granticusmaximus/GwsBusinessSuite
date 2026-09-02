@@ -24,6 +24,13 @@
     }
 </div>
 
+@if (IsLoading)
+{
+    <LoadingIndicator Message="Loading support…" />
+}
+else
+{
+
 <div class="row g-4">
     <div class="col-lg-4">
         <div class="card border-0 shadow-sm mb-4">
@@ -31,7 +38,17 @@
             <div class="card-body">
                 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
                 {
-                    <div class="alert alert-danger py-2 px-3 small">@ErrorMessage</div>
+                    <div class="alert alert-danger d-flex align-items-start gap-2 py-2 px-3 small" role="alert">
+                        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+                        <div>@ErrorMessage</div>
+                    </div>
+                }
+                @if (!string.IsNullOrWhiteSpace(StatusMessage))
+                {
+                    <div class="alert alert-success d-flex align-items-center gap-2 py-2 px-3 small" role="alert">
+                        <i class="bi bi-check-circle-fill flex-shrink-0"></i>
+                        <div>@StatusMessage</div>
+                    </div>
                 }
                 <div class="mb-2">
                     <select class="form-select form-select-sm" @bind="_newContactId">
@@ -75,7 +92,7 @@
             <div class="card-body p-0">
                 @if (Tickets.Count == 0)
                 {
-                    <div class="p-4 text-secondary">No tickets.</div>
+                    <EmptyState Icon="bi-life-preserver" Message="No tickets." />
                 }
                 else
                 {
@@ -124,7 +141,7 @@
                     <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
                         <div>
                             <div class="fw-semibold">@SelectedTicket.Subject</div>
-                            <div class="mt-1"><RelationshipChip ContactId="SelectedTicket.ContactId" ContactName="SelectedTicket.ContactName" /></div>
+                            <div class="mt-1"><RelationshipChip ContactId="SelectedTicket.ContactId" ContactName="@SelectedTicket.ContactName" /></div>
                             @if (SelectedTicket.Status is SupportTicketStatuses.Open or SupportTicketStatuses.Pending)
                             {
                                 @if (SelectedTicket.FirstResponseDueAt is { } firstResponseDue && SelectedTicket.Messages.All(m => m.AuthorType != SupportTicketAuthorTypes.Staff))
@@ -234,7 +251,7 @@
                 }
                 @if (CannedResponses.Count == 0 && !_editingCannedResponseId.HasValue)
                 {
-                    <div class="text-secondary small">No canned responses yet.</div>
+                    <EmptyState Icon="bi-chat-square-text" Message="No canned responses yet." CssClass="text-secondary small" />
                 }
                 else
                 {
@@ -256,6 +273,11 @@
     </div>
 </div>
 
+}
+
+<ConfirmModal Show="PendingDeleteCannedResponseId.HasValue" Title="Delete canned response" Message="Delete this canned response? This cannot be undone."
+              ConfirmText="Delete" Busy="_isBusy" OnConfirm="ConfirmDeleteCannedResponseAsync" OnCancel="() => PendingDeleteCannedResponseId = null" />
+
 @code {
     private List<Contact> Contacts { get; set; } = [];
     private IReadOnlyList<SupportTicketView> Tickets { get; set; } = [];
@@ -263,7 +285,10 @@
     private Guid? SelectedTicketId { get; set; }
     private string StatusFilter { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
+    private string StatusMessage { get; set; } = string.Empty;
+    private bool IsLoading { get; set; } = true;
     private bool _isBusy;
+    private Guid? PendingDeleteCannedResponseId { get; set; }
 
     // Reflects whatever the current status filter shows, same "stats for what you're looking
     // at" scope as the ticket list itself - not a separate all-time query.
@@ -308,9 +333,17 @@
 
     protected override async Task OnInitializedAsync()
     {
-        Contacts = (await CrmService.ListContactsAsync()).ToList();
-        await RefreshTicketsAsync();
-        await RefreshCannedResponsesAsync();
+        IsLoading = true;
+        try
+        {
+            Contacts = (await CrmService.ListContactsAsync()).ToList();
+            await RefreshTicketsAsync();
+            await RefreshCannedResponsesAsync();
+        }
+        finally
+        {
+            IsLoading = false;
+        }
     }
 
     private async Task RefreshCannedResponsesAsync()
@@ -349,6 +382,7 @@
     private async Task SaveCannedResponseAsync()
     {
         ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
         _isBusy = true;
         try
         {
@@ -362,6 +396,7 @@
                 await CannedResponseService.CreateAsync(_cannedResponseTitle, _cannedResponseBody, performedBy);
             }
             _editingCannedResponseId = null;
+            StatusMessage = "Canned response saved.";
             await RefreshCannedResponsesAsync();
         }
         catch (ArgumentException ex)
@@ -374,9 +409,15 @@
         }
     }
 
-    private async Task DeleteCannedResponseAsync(Guid id)
+    private void DeleteCannedResponseAsync(Guid id) => PendingDeleteCannedResponseId = id;
+
+    private async Task ConfirmDeleteCannedResponseAsync()
     {
+        if (PendingDeleteCannedResponseId is not Guid id) return;
+        PendingDeleteCannedResponseId = null;
+
         await CannedResponseService.DeleteAsync(id);
+        StatusMessage = "Canned response deleted.";
         await RefreshCannedResponsesAsync();
     }
 
@@ -408,6 +449,7 @@
     private async Task CreateTicketAsync()
     {
         ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
         if (_newContactId == Guid.Empty)
         {
             ErrorMessage = "Select a contact first.";
@@ -424,6 +466,7 @@
             _newSubject = string.Empty;
             _newMessage = string.Empty;
             _newAttachments.Clear();
+            StatusMessage = "Ticket opened.";
             await RefreshTicketsAsync();
             await SelectTicketAsync(created.Id);
         }
@@ -441,6 +484,8 @@
     {
         if (SelectedTicketId is not { } ticketId || string.IsNullOrWhiteSpace(_replyBody)) return;
 
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
         _isBusy = true;
         try
         {
@@ -448,6 +493,7 @@
             await TicketService.AddReplyAsync(ticketId, SupportTicketAuthorTypes.Staff, performedBy, _replyBody, _replyAttachments);
             _replyBody = string.Empty;
             _replyAttachments.Clear();
+            StatusMessage = "Reply sent.";
             await RefreshTicketsAsync();
             await SelectTicketAsync(ticketId);
         }
